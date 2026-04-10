@@ -23,13 +23,13 @@
 #ifndef SRC_CORE_AQL_PROFILE_H_
 #define SRC_CORE_AQL_PROFILE_H_
 
-#include "hsa_includes.h"
+#include "lib/aqlprofile/hsa_includes.h"
 
 #include <iostream>
 #include <string>
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
 
-#include "core/aql_profile_exception.h"
+#include "lib/aqlprofile/core/aql_profile_exception.h"
 
 #ifdef _WIN32
 #    define PUBLIC_API

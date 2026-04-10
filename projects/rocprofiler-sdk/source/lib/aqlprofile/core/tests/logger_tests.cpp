@@ -16,7 +16,7 @@
 #    include <unistd.h>
 #endif
 
-#include "../logger.h"
+#include "lib/aqlprofile/core/logger.h"
 
 #ifdef _WIN32
 static inline int

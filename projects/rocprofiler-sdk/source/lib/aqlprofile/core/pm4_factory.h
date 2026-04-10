@@ -24,7 +24,7 @@
 #define SRC_CORE_PM4_FACTORY_H_
 
 #include <assert.h>
-#include "hsa_includes.h"
+#include "lib/aqlprofile/hsa_includes.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -34,15 +34,15 @@
 #include <sstream>
 #include <string>
 
-#include "aqlprofile-sdk/aql_profile_v2.h"
-#include "core/aql_profile.hpp"
-#include "core/aql_profile_exception.h"
-#include "def/gpu_block_info.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/spm_builder.h"
-#include "pm4/sqtt_builder.h"
-#include "util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/core/aql_profile_exception.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 namespace aql_profile
 {

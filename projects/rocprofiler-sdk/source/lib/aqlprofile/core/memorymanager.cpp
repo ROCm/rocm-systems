@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "memorymanager.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
 #include <algorithm>
 
 std::atomic<size_t>                                        MemoryManager::HANDLE_COUNTER{1};

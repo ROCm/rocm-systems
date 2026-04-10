@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <vector>
-#include "../trace_config.h"
+#include "lib/aqlprofile/pm4/trace_config.h"
 
 namespace pm4_builder
 {

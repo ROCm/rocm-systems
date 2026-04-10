@@ -20,13 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "hsa_includes.h"
+#include "lib/aqlprofile/hsa_includes.h"
 
 #include <thread>
 #include <condition_variable>
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 // C++11's solution for std::format()
 template <typename... Args>

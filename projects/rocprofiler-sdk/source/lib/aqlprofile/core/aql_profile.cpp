@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/aql_profile.hpp"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/aql_profile_v2.h"
 
 #include <cstdint>
 #include <future>
@@ -30,16 +30,16 @@
 #include <vector>
 #include <mutex>
 
-#include "core/counter_dimensions.hpp"
+#include "lib/aqlprofile/core/counter_dimensions.hpp"
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/spm_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
 
-#include "core/commandbuffermgr.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
 
 #ifdef _WIN32
 #    define CONSTRUCTOR_API

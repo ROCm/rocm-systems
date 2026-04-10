@@ -7,9 +7,9 @@
 #include <vector>
 #include <memory>
 
-#include "aqlprofile-sdk/aql_profile_v2.h"
-#include "../logger.h"
-#include "../pm4_factory.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 // Define static members
 bool aql_profile::Pm4Factory::concurrent_create_mode_ = false;
 bool aql_profile::Pm4Factory::spm_kfd_mode_           = false;

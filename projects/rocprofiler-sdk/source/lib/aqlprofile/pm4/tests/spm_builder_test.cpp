@@ -7,11 +7,11 @@
 #include <vector>
 #include <memory>
 
-#include "pm4/spm_builder.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/cmd_config.h"
-#include "pm4/trace_config.h"
-#include "def/gpu_block_info.h"
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/cmd_config.h"
+#include "lib/aqlprofile/pm4/trace_config.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
 
 using namespace pm4_builder;
 // using namespace aql_profile;

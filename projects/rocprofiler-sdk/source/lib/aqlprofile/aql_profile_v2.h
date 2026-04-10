@@ -30,7 +30,7 @@
 #    include <hsa/hsa_ven_amd_aqlprofile.h>
 #endif
 
-#include "aqlprofile-sdk/version.h"
+#include "lib/aqlprofile/version.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -27,10 +27,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <shared_mutex>
-#include "ip_discovery.h"
+#include "lib/aqlprofile/core/ip_discovery.h"
 
-#include "linux/registers/sienna_cichlid_ip_offset.h"
-#include "util/reg_offsets.h"
+#include "lib/aqlprofile/linux/registers/sienna_cichlid_ip_offset.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
 
 #define LOG_VERBOSE 0
 

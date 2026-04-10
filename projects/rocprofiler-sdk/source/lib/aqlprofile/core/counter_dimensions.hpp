@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "hsa_includes.h"
-#include "def/gpu_block_info.h"
-#include "core/aql_profile.hpp"
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/hsa_includes.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <cstdint>
 #include <string>

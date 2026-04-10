@@ -1,14 +1,14 @@
-#include "hsa_includes.h"
-#include "include/aqlprofile-sdk/aql_profile_v2.h"
-#include "include/spm_common.hpp"
-#include "memorymanager.hpp"
-#include "core/commandbuffermgr.hpp"
+#include "lib/aqlprofile/hsa_includes.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/aqlprofile/core/spm_common.hpp"
+#include "lib/aqlprofile/core/memorymanager.hpp"
+#include "lib/aqlprofile/core/commandbuffermgr.hpp"
 
 #include <thread>
 #include <condition_variable>
 
-#include "core/logger.h"
-#include "core/pm4_factory.h"
+#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <map>
 #include <array>

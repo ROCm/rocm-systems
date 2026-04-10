@@ -33,9 +33,9 @@
 #include <mutex>
 #include <unordered_map>
 #include <memory>
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
 #include <stdexcept>
-#include "pm4/trace_config.h"
+#include "lib/aqlprofile/pm4/trace_config.h"
 
 struct EventRequest : public aqlprofile_pmc_event_t
 {

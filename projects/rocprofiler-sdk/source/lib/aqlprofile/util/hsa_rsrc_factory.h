@@ -23,7 +23,7 @@
 #ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
-#include "hsa_includes.h"
+#include "lib/aqlprofile/hsa_includes.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

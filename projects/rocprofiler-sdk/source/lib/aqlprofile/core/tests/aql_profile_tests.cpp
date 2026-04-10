@@ -23,15 +23,15 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-#include "core/aql_profile.hpp"
-#include "core/pm4_factory.h"
-#include "aqlprofile-sdk/version.h"
-#include "aqlprofile-sdk/aql_profile_v2.h"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/core/pm4_factory.h"
+#include "lib/aqlprofile/version.h"
+#include "lib/aqlprofile/aql_profile_v2.h"
 // header for memcpy
 #include <cstring>
 
-//#include "core/counter_dimensions.hpp"
-//#include "core/include/aql_profile_v2.h"
+//#include "lib/aqlprofile/core/counter_dimensions.hpp"
+//#include "lib/aqlprofile/core/include/aql_profile_v2.h"
 
 using namespace aql_profile;
 using namespace testing;
