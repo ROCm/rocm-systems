@@ -13,6 +13,13 @@ import signal
 
 DEFAULT_TIMEOUT = 60
 
+def test_func(name):
+    """Decorator to annotate a test function with a descriptive name."""
+    def decorator(func):
+        func.testname = name
+        return func
+    return decorator
+
 
 def run_and_communicate(
     test_name,
@@ -64,10 +71,10 @@ def run_and_communicate(
 
 def check_errors(check_list, out_str, err_str):
     all_strings_found = True
-    for check_str in check_list:
+    for i, check_str in enumerate(check_list, start=1):
         if not (check_str.search(err_str)):
             all_strings_found = False
-            print('"', check_str, '" Not Found in dump.')
+            print(f"Pattern {i}/{len(check_list)} NOT found: {check_str.pattern}")
 
     if not all_strings_found:
         print("rocm-debug-agent test print out.")
@@ -101,7 +108,6 @@ if len(sys.argv) != 2:
     )
 else:
     test_binary_directory = sys.argv[1]
-    print("Test binary directory: ", os.path.abspath(test_binary_directory))
     agent_library_directory = os.path.abspath(test_binary_directory) + "/.."
     if not "LD_LIBRARY_PATH" in os.environ:
         os.environ["LD_LIBRARY_PATH"] = agent_library_directory
@@ -124,9 +130,8 @@ else:
 
 
 # test 0
+@test_func("Default (no faults)")
 def check_test_0():
-    print("Starting rocm-debug-agent-test 0")
-
     out_str, err_str, success = run_and_communicate(
         test_name="0: default", args="0"
     )
@@ -143,9 +148,8 @@ def check_test_0():
 
 
 # test 1
+@test_func("Assert trap (debug trap)")
 def check_test_1():
-    print("Starting rocm-debug-agent test 1")
-
     check_list = [
         re.compile(s)
         for s in [
@@ -176,9 +180,8 @@ def check_test_1():
 
 
 # test 2
+@test_func("Memory violation")
 def check_test_2():
-    print("Starting rocm-debug-agent test 2")
-
     check_list = [
         re.compile(s)
         for s in [
@@ -208,9 +211,8 @@ def check_test_2():
 
 
 # test 3: snapshot code object on load
+@test_func("Snapshot code object on load")
 def check_test_3():
-    print("Starting rocm-debug-agent test 3")
-
     out_str, err_str, success = run_and_communicate(
         test_name="3: snapshot code object on load", args="3"
     )
@@ -263,6 +265,7 @@ def _has_symbol_with_readelf(path: str, symbol: str) -> bool:
 
 
 # test 4: save code object on disk
+@test_func("Save code objects to disk")
 def check_test_4():
     if not shutil.which("readelf"):
         print(
@@ -271,8 +274,6 @@ def check_test_4():
         )
         unsupported_tests.append(check_test_4)
         return True
-
-    print("Starting rocm-debug-agent test 4")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         run_and_communicate(
@@ -336,9 +337,8 @@ def check_test_4():
 
 
 # test 5
+@test_func("Output redirection (-o)")
 def check_test_5():
-    print("Starting rocm-debug-agent test 5")
-
     check_list = [
         re.compile(s)
         for s in [
@@ -380,9 +380,8 @@ def check_test_5():
 
 
 # test 6
+@test_func("Help (-h)")
 def check_test_6():
-    print("Starting rocm-debug-agent test 6")
-
     check_list = [
         re.compile(s)
         for s in [
@@ -401,9 +400,8 @@ def check_test_6():
 
 
 # test 7
+@test_func("Log level (-l info)")
 def check_test_7():
-    print("Starting rocm-debug-agent test 7")
-
     check_list = [
         re.compile(s)
         for s in [
@@ -422,9 +420,8 @@ def check_test_7():
 
 
 # test 8
+@test_func("All waves (--all)")
 def check_test_8():
-    print("Starting rocm-debug-agent test 8")
-
     check_list = [
         re.compile(s)
         for s in [
@@ -450,9 +447,8 @@ def check_test_8():
 
 
 # test 9 SIGQUIT
+@test_func("SIGQUIT signal handling")
 def check_test_9():
-    print("Starting rocm-debug-agent test 9")
-
     check_list = [
         re.compile(s)
         for s in [
@@ -571,9 +567,8 @@ def check_test_9():
 
 # test 10 check for difference in outputs for same program compiled with and
 # without -ggdb flag
+@test_func("Debug info comparison")
 def check_test_10():
-    print("Starting rocm-debug-agent test 10")
-
     check_list = [
         re.compile(re.escape(s))
         for s in ["c[gid] = a[gid] + b[gid] + (lds_check[0] >> 32);", "if (gid == 0)"]
@@ -602,8 +597,8 @@ def check_test_10():
     return found_in_debug and not found_in_no_debug
 
 
+@test_func("Eager vs lazy code object save")
 def check_eager_code_object_save():
-    print('Starting rocm-gdb-agent test "Check default lazy code object"')
     with tempfile.TemporaryDirectory() as tmpdir:
         run_and_communicate(
             test_name="eager code object save: no event, no code object",
@@ -627,8 +622,8 @@ def check_eager_code_object_save():
     return True
 
 
+@test_func("Lazy/load-all incompatibility")
 def check_lazy_loading_and_eager_incompatible():
-    print('Starting rocm-gdb-agent test "Check -c -z incompatible"')
     out, err, success = run_and_communicate(
         test_name="eager code object save: no event, no code object",
         args="4",
@@ -653,46 +648,75 @@ def check_lazy_loading_and_eager_incompatible():
     return True
 
 
-test_success = True
 unsupported_tests = []
+
+test_list = [
+    check_test_0,
+    check_test_1,
+    check_test_2,
+    check_test_3,
+    check_test_4,
+    check_test_5,
+    check_test_6,
+    check_test_7,
+    check_test_8,
+    check_test_9,
+    check_test_10,
+    check_eager_code_object_save,
+    check_lazy_loading_and_eager_incompatible,
+]
+
+test_success = True
+failed_tests = []
+total_pass = 0
+total_fail = 0
+total_unsupported = 0
 
 for deferred_loading in (None, "1", "0"):
     with unittest.mock.patch.dict("os.environ"):
         if deferred_loading is None:
-            print(f"### Testing without HIP_ENABLE_DEFERRED_LOADING")
+            mode_label = "HIP_ENABLE_DEFERRED_LOADING unset"
             if "HIP_ENABLE_DEFERRED_LOADING" in os.environ:
                 del os.environ["HIP_ENABLE_DEFERRED_LOADING"]
         else:
-            print(f"### Testing with HIP_ENABLE_DEFERRED_LOADING={deferred_loading}")
+            mode_label = f"HIP_ENABLE_DEFERRED_LOADING={deferred_loading}"
             os.environ["HIP_ENABLE_DEFERRED_LOADING"] = deferred_loading
 
-        test_list = [
-            check_test_0,
-            check_test_1,
-            check_test_2,
-            check_test_3,
-            check_test_4,
-            check_test_5,
-            check_test_6,
-            check_test_7,
-            check_test_8,
-            check_test_9,
-            check_test_10,
-            check_eager_code_object_save,
-            check_lazy_loading_and_eager_incompatible,
-        ]
-
         for i, test in enumerate(test_list, start=0):
+            name = test.testname
             result = test()
             test_success &= result
             if test in unsupported_tests:
-                print(f"Test {i} UNSUPPORTED")
+                print(f"UNSUPPORTED: Test {i}: {mode_label} : {name}")
+                total_unsupported += 1
             elif result:
-                print(f"Test {i} PASS")
+                print(f"PASS: Test {i}: {mode_label} : {name}")
+                total_pass += 1
             else:
-                print(f"Test {i} FAIL")
+                print(f"FAIL: Test {i}: {mode_label} : {name}")
+                total_fail += 1
+                failed_tests.append(f"FAIL: Test {i}: {mode_label} : {name}")
+
+total = total_pass + total_fail + total_unsupported
+print()
+print("=" * 60)
+print()
+print(f"Total:       {total}")
+print(f"PASS:        {total_pass}")
+print(f"FAIL:        {total_fail}")
+print(f"UNSUPPORTED: {total_unsupported}")
+
+if failed_tests:
+    print()
+    print("Failed:")
+    for entry in failed_tests:
+        print(f"  - {entry}")
+
+print()
+print("=" * 60)
 
 if test_success:
-    print("rocm-debug-agent test Pass!")
+    print("\nOVERALL: PASS")
 else:
-    raise Exception("rocm-debug-agent test fail!")
+    print("\nOVERALL: FAIL")
+    sys.exit(1)

@@ -43,7 +43,7 @@ using storage_parser_t =
                    memory_allocate_sample, region_sample, in_time_sample,
                    pmc_event_with_sample, pmc::collectors::gpu::sample,
                    pmc::collectors::nic::sample, cpu_freq_sample, backtrace_region_sample,
-                   scratch_memory_sample>;
+                   scratch_memory_sample, kfd_sample>;
 
 using buffer_storage_t = buffer_storage<flush_worker_factory_t, type_identifier_t>;
 

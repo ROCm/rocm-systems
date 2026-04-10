@@ -656,16 +656,11 @@ __host__ int rocshmem_team_split_strided(
   int my_pe_in_new_team = pe_in_active_set(pe_start_in_world, stride_in_world,
                                            size, my_pe_in_world);
 
-  /* Create team infos */
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  new (team_info_wrt_parent) TeamInfo(parent_team_obj, start, stride, size);
-
+  /* Create team infos on the stack; Team constructor will handle device alloc */
   auto *team_world{backend->team_tracker.get_team_world()};
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-  new (team_info_wrt_world)
-      TeamInfo(team_world, pe_start_in_world, stride_in_world, size);
+  TeamInfo team_info_wrt_parent(parent_team_obj, start, stride, size);
+  TeamInfo team_info_wrt_world(team_world, pe_start_in_world,
+                               stride_in_world, size);
 
   MPI_Comm team_comm{MPI_COMM_NULL};
   if (parent_team_obj->mpi_comm != MPI_COMM_NULL &&
@@ -679,7 +674,7 @@ __host__ int rocshmem_team_split_strided(
     }
 
     mpilib_ftable_.Comm_split(parent_team_obj->mpi_comm, color, my_pe_in_world, &team_comm);
-}
+  }
   /**
    * Allocate new team for GPU-inittiated communication with backend-specific
    * objects

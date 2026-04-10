@@ -62,7 +62,7 @@ If you have ROCm version 6.3 or higher installed, you can use the package manage
 Building ROCm Systems Profiler from source
 ==========================================
 
-ROCm Systems Profiler needs a GCC compiler with full support for C++17 and CMake v3.21 or higher.
+ROCm Systems Profiler needs a GCC compiler with full support for C++17 and CMake v3.25 or higher.
 The Clang compiler may be used instead of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
 is already installed.
 
@@ -74,7 +74,7 @@ Build requirements
   * Older GCC compilers may be supported but are not tested
   * Clang compilers are generally supported for ROCm Systems Profiler but not Dyninst
 
-* `CMake <https://cmake.org/>`_ v3.21 or later
+* `CMake <https://cmake.org/>`_ v3.25 or later
 
   .. note::
      If the ``CMake`` installed on the system is too old, you can install a new
@@ -82,7 +82,7 @@ Build requirements
 
      .. code-block:: shell
 
-        pip install --user 'cmake==3.21.0'
+        pip install --user 'cmake==3.25.0'
         export PATH=${HOME}/.local/bin:${PATH}
 
 Required third-party packages

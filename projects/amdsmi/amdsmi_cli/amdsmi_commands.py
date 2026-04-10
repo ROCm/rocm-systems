@@ -124,7 +124,8 @@ class AMDSMICommands:
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
-                self.cpu_handles = amdsmi_interface.amdsmi_get_cpusocket_handles()
+                ret = amdsmi_interface.amdsmi_get_cpu_handles()
+                self.cpu_handles = ret["processor_handles"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
@@ -234,7 +235,8 @@ class AMDSMICommands:
             self.logger.output["amdgpu_version"] = gpu_version_str
         if args.cpu_version:
             try:
-                cpus = amdsmi_interface.amdsmi_get_cpusocket_handles()
+                ret = amdsmi_interface.amdsmi_get_cpu_handles()
+                cpus = ret["processor_handles"]
                 if isinstance(cpus, list) and len(cpus) > 0:
                     cpu_version_info = amdsmi_interface.amdsmi_get_cpu_hsmp_driver_version(cpus[0])
                     cpu_version_str = (

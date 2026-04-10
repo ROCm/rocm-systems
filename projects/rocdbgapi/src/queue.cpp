@@ -214,10 +214,13 @@ aql_queue_t::aql_dispatch_t::aql_dispatch_t (
 uint32_t
 aql_queue_t::aql_dispatch_t::grid_dimensions () const
 {
-  return static_cast<uint32_t> (utils::bit_extract (
-    m_packet.setup, HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS,
-    HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS
-      + HSA_KERNEL_DISPATCH_PACKET_SETUP_WIDTH_DIMENSIONS - 1));
+  /* Arithmetic between different enumeration types.  */
+  auto first = HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+  auto last
+    = (utils::narrow<int> (HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS)
+       + utils::narrow<int> (HSA_KERNEL_DISPATCH_PACKET_SETUP_WIDTH_DIMENSIONS)
+       - 1);
+  return utils::bit_extract<uint32_t> (m_packet.setup, first, last);
 }
 
 std::array<uint32_t, 3>
@@ -283,8 +286,9 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
         value_size, value,
         static_cast<amd_dbgapi_dispatch_fence_scope_t> (utils::bit_extract (
           m_packet.header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-          HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE
-            + HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE - 1)));
+          (utils::narrow<int> (HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE)
+           + utils::narrow<int> (HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE)
+           - 1))));
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_RELEASE_FENCE:
@@ -292,8 +296,9 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
         value_size, value,
         static_cast<amd_dbgapi_dispatch_fence_scope_t> (utils::bit_extract (
           m_packet.header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-          HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE
-            + HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE - 1)));
+          (utils::narrow<int> (HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
+           + utils::narrow<int> (HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE)
+           - 1))));
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_GRID_DIMENSIONS:
@@ -424,11 +429,7 @@ aql_queue_t::allocate_displaced_instruction (const instruction_t &instruction)
 
       /* Ensure that the number of chunks does not overflow the 16 bit index.
        */
-      if (chunk_count > std::numeric_limits<
-            decltype (m_debugger_memory_chunk_count)>::max ())
-        fatal_error ("Increase the width of m_debugger_memory_chunk_count");
-
-      m_debugger_memory_chunk_count = chunk_count;
+      utils::narrow_assign (m_debugger_memory_chunk_count, chunk_count);
 
       m_debugger_memory_free_chunks.reserve (m_debugger_memory_chunk_count);
     }
