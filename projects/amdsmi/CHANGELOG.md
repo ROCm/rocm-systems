@@ -8,6 +8,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added GPU power management set command**.
+  - New `amd-smi set --power-management ENABLED|DISABLED` to enable or disable GPU power management.
+  - When power management is in 'auto' mode (default on some GPUs like gfx1151), the kernel driver may not mark the current clock level in sysfs files, causing `amd-smi static -C` to show N/A. Enabling power management forces clock levels to be fully reported.
+  - New API: `amdsmi_set_gpu_power_management_enabled()`.
+
 - **Added VRAM and GTT tuning interface**.  
   - New `amd-smi static --mem-carveout` to view VRAM carveout options.
   - New `amd-smi set --mem-carveout` to change the VRAM carveout (APU).
@@ -26,6 +31,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     Added note that the sum of per-process memory usage is not expected to equal total usage.
 
 ### Resolved Issues
+
+- **Fixed `amd-smi static -C` showing N/A for MEM/DF/SOC/DCEF clocks on gfx1151 when idle**.
+  - Root cause: `get_frequencies()` in the rocm_smi layer discards valid frequency data when the kernel driver does not mark a current clock level with `*` in pp_dpm sysfs files (common in auto power management mode). Added a fallback in `amdsmi_get_clk_freq()` to read sysfs directly when the rocm_smi layer returns `AMDSMI_STATUS_UNEXPECTED_DATA`, preserving frequency level data.
 
 - **Fixed `amdsmi_get_gpu_accelerator_partition_profile()` returning incorrect `num_partitions` when `num_partition` is unavailable from GPU metrics**.  
   - GPU metrics no longer always provides `num_partition`. The function now derives the partition count from the active partition type when `num_partition` is not available:

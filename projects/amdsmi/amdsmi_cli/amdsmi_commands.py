@@ -1873,6 +1873,9 @@ class AMDSMICommands:
                             continue
                         freq_dict = {}
                         current_level = frequencies["current"]
+                        # UINT32_MAX indicates no current level is known (e.g., auto PM mode)
+                        if current_level == 0xFFFFFFFF:
+                            current_level = "N/A"
                         # Add current_level first for proper output ordering
                         freq_dict.update({"current_level": current_level})
                         # Add frequency_levels second
@@ -1899,6 +1902,18 @@ class AMDSMICommands:
                             "Failed to get clock info for gpu %s | %s", gpu_id, e.get_error_info()
                         )
                     clk_dict[clk] = freq_dict
+
+                # Check if any clocks have unknown current level (auto PM mode)
+                has_unknown_current = any(
+                    isinstance(clk_dict[k], dict) and clk_dict[k].get("current_level") == "N/A"
+                    for k in clk_dict
+                )
+                if has_unknown_current:
+                    logging.debug(
+                        "Some clock current levels are unavailable for gpu %s. "
+                        "This can occur when power management is in 'auto' mode.",
+                        gpu_id,
+                    )
 
                 static_dict["clock"] = clk_dict
             else:
@@ -3381,18 +3396,21 @@ class AMDSMICommands:
                 except Exception as e:
                     logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
 
-                # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
+                # Populate FCLK clock value; fclk not in gpu_metrics
                 try:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
                         args.gpu, amdsmi_interface.AmdSmiClkType.DF
                     )
-                    current_fclk_clock = frequency_dict["frequency"][frequency_dict["current"]]
-                    current_fclk_clock = self.helpers.convert_SI_unit(
-                        current_fclk_clock, self.helpers.SI_Unit.MICRO
-                    )
-                    clocks["fclk_0"]["clk"] = self.helpers.unit_format(
-                        self.logger, current_fclk_clock, clock_unit
-                    )
+                    current_idx = frequency_dict["current"]
+                    freq_list = frequency_dict["frequency"]
+                    if isinstance(current_idx, int) and 0 <= current_idx < len(freq_list):
+                        current_fclk_clock = frequency_dict["frequency"][current_idx]
+                        current_fclk_clock = self.helpers.convert_SI_unit(
+                            current_fclk_clock, self.helpers.SI_Unit.MICRO
+                        )
+                        clocks["fclk_0"]["clk"] = self.helpers.unit_format(
+                            self.logger, current_fclk_clock, clock_unit
+                        )
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                     logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
 
@@ -8186,6 +8204,7 @@ class AMDSMICommands:
         ptl_status=None,
         ptl_format=None,
         mem_carveout=None,
+        power_management=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -8245,6 +8264,8 @@ class AMDSMICommands:
             args.ptl_format = ptl_format
         if mem_carveout is not None:
             args.mem_carveout = mem_carveout
+        if power_management:
+            args.power_management = power_management
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -8436,6 +8457,32 @@ class AMDSMICommands:
 
                 self.logger.store_output(
                     args.gpu, "perflevel", f"Successfully set performance level {args.perf_level}"
+                )
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+            if getattr(args, "power_management", None):
+                enabled = args.power_management == "ENABLED"
+                try:
+                    amdsmi_interface.amdsmi_set_gpu_power_management_enabled(args.gpu, enabled)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError("Command requires elevation") from e
+                    err_info = e.get_error_info(detailed=False)
+                    pm_state = args.power_management
+                    self.logger.store_output(
+                        args.gpu,
+                        "power_management",
+                        f"[{err_info}] Unable to set power management to {pm_state}",
+                    )
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+
+                self.logger.store_output(
+                    args.gpu,
+                    "power_management",
+                    f"Successfully set power management to {args.power_management}",
                 )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
@@ -9223,6 +9270,7 @@ class AMDSMICommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
+        power_management=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -9237,6 +9285,7 @@ class AMDSMICommands:
             compute_partition (amdsmi_interface.AmdSmiComputePartitionType, optional): Value override for args.compute_partition. Defaults to None.
             memory_partition (amdsmi_interface.AmdSmiMemoryPartitionType, optional): Value override for args.memory_partition. Defaults to None.
             power_cap (int, optional): Value override for args.power_cap. Defaults to None.
+            power_management (str, optional): Value override for args.power_management. Defaults to None.
 
             cpu (cpu_handle, optional): device_handle for target device. Defaults to None.
             cpu_pwr_limit (int, optional): Value override for args.cpu_pwr_limit. Defaults to None.
@@ -9328,6 +9377,7 @@ class AMDSMICommands:
             "ptl_status",
             "ptl_format",
             "mem_carveout",
+            "power_management",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -9396,6 +9446,7 @@ class AMDSMICommands:
                         args.ptl_format is not None,
                         args.process_isolation is not None,
                         args.mem_carveout is not None,
+                        getattr(args, "power_management", None) is not None,
                     ]
                 )
             except AttributeError:
@@ -9543,6 +9594,7 @@ class AMDSMICommands:
                     ptl_status,
                     ptl_format,
                     mem_carveout,
+                    power_management,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
             if args.cpu == None and args.core == None:
@@ -9606,6 +9658,7 @@ class AMDSMICommands:
                 ptl_status,
                 ptl_format,
                 mem_carveout,
+                power_management,
             )
 
     def reset(

@@ -2602,6 +2602,21 @@ class AMDSMIParser(argparse.ArgumentParser):
                     help=set_ptl_format_help,
                     metavar=("FRMT1,FRMT2"),
                 )
+                set_power_management_help = (
+                    "Enable or disable GPU power management.\n"
+                    "\tENABLED forces sysfs clock files to be available.\n"
+                    "\tDISABLED returns to auto mode."
+                )
+                set_value_exclusive_group.add_argument(
+                    "-E",
+                    "--power-management",
+                    action="store",
+                    choices=["ENABLED", "DISABLED"],
+                    type=str.upper,
+                    required=False,
+                    help=set_power_management_help,
+                    metavar="STATE",
+                )
 
             set_value_exclusive_group.add_argument(
                 "-L",
