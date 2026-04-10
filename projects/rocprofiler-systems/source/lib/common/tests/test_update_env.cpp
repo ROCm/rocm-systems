@@ -45,9 +45,9 @@ protected:
         }
     }
 
-    std::vector<char*>                   m_env_vars;
-    std::unordered_set<std::string_view> m_updated_envs;
-    std::unordered_set<std::string>      m_original_envs;
+    std::vector<char*>              m_env_vars;
+    std::unordered_set<std::string> m_updated_envs;
+    std::unordered_set<std::string> m_original_envs;
 };
 
 TEST_F(UpdateEnvTest, ReplaceMode_NewVariable)

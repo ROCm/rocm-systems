@@ -357,7 +357,7 @@ template <typename Tp>
 inline void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            update_mode _mode, std::string_view _join_delim,
-           std::unordered_set<std::string_view>&  _updated_envs,
+           std::unordered_set<std::string>&       _updated_envs,
            const std::unordered_set<std::string>& _original_envs)
 {
     _updated_envs.emplace(_env_var);

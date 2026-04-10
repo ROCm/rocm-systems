@@ -37,22 +37,22 @@ default_grouping_filter(std::string_view, const parser_data&);
 
 struct parser_data
 {
-    bool                                 monochrome         = false;
-    bool                                 debug              = false;
-    int                                  verbose            = 0;
-    std::string                          dl_libpath         = {};
-    std::string                          omni_libpath       = {};
-    std::string                          launcher           = {};
-    vsettings_set_t                      processed_settings = {};
-    std::unordered_set<std::string>      processed_environs = {};
-    std::unordered_set<std::string>      processed_groups   = {};
-    std::vector<char*>                   current            = {};
-    std::vector<char*>                   command            = {};
-    std::unordered_set<std::string_view> updated            = {};
-    std::unordered_set<std::string>      initial            = {};
-    grouping_filter_t                    grouping_filter    = default_grouping_filter;
-    setting_filter_t                     setting_filter     = default_setting_filter;
-    environ_filter_t                     environ_filter     = default_environ_filter;
+    bool                            monochrome         = false;
+    bool                            debug              = false;
+    int                             verbose            = 0;
+    std::string                     dl_libpath         = {};
+    std::string                     omni_libpath       = {};
+    std::string                     launcher           = {};
+    vsettings_set_t                 processed_settings = {};
+    std::unordered_set<std::string> processed_environs = {};
+    std::unordered_set<std::string> processed_groups   = {};
+    std::vector<char*>              current            = {};
+    std::vector<char*>              command            = {};
+    std::unordered_set<std::string> updated            = {};
+    std::unordered_set<std::string> initial            = {};
+    grouping_filter_t               grouping_filter    = default_grouping_filter;
+    setting_filter_t                setting_filter     = default_setting_filter;
+    environ_filter_t                environ_filter     = default_environ_filter;
 };
 
 parser_data&
