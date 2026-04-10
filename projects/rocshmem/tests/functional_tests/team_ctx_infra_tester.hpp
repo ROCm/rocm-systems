@@ -62,6 +62,7 @@ class TeamCtxInfraTester : public Tester {
    */
   int num_teams = 40;
   rocshmem::rocshmem_team_t *team_world_dup = nullptr;
+  bool _skip_shared = false;
 };
 
 #endif

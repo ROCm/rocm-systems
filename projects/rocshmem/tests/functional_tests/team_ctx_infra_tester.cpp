@@ -140,10 +140,7 @@ TeamCtxInfraTester::TeamCtxInfraTester(TesterArguments args) : Tester(args) {
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
     num_teams = atoi(value);
-    printf("ROCSHMEM_MAX_NUM_TEAMS==%d\n", num_teams);
   }
-
-  printf("num_teams==%d\n", num_teams);
 
   CHECK_HIP(hipMalloc(&team_world_dup,
                       sizeof(rocshmem_team_t) * num_teams));
@@ -245,12 +242,23 @@ void TeamCtxInfraTester::preLaunchKernel() {
       printf("ROCSHMEM_TEST_TEAM_ODDEVEN: my_pe %d expected: %d\n", _expected_pe, new_pe);
       abort();
     }
+  } else if (_splitType == ROCSHMEM_TEST_TEAM_SHARED) {
+    if (ROCSHMEM_TEAM_SHARED == ROCSHMEM_TEAM_INVALID) {
+      printf("ROCSHMEM_TEAM_SHARED is TEAM_INVALID (IPC disabled), skipping\n");
+      _skip_shared = true;
+      return;
+    }
+    team_world_dup[0] = ROCSHMEM_TEAM_SHARED;
+    _expected_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_SHARED);
+    _expected_n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_SHARED);
   }
 }
 
 void TeamCtxInfraTester::launchKernel(dim3 gridSize, dim3 blockSize, [[maybe_unused]] int loop,
                                       [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
+
+  if (_skip_shared) return;
 
   if (_splitType == ROCSHMEM_TEST_TEAM_DUP) {
     shared_bytes = sizeof(rocshmem_ctx_t) * num_teams;
@@ -259,13 +267,16 @@ void TeamCtxInfraTester::launchKernel(dim3 gridSize, dim3 blockSize, [[maybe_unu
                        stream, _shmem_context, team_world_dup, num_teams);
   } else if (_splitType == ROCSHMEM_TEST_TEAM_SINGLE ||
              _splitType == ROCSHMEM_TEST_TEAM_BLOCK  ||
-             _splitType == ROCSHMEM_TEST_TEAM_ODDEVEN ) {
+             _splitType == ROCSHMEM_TEST_TEAM_ODDEVEN ||
+             _splitType == ROCSHMEM_TEST_TEAM_SHARED ) {
     hipLaunchKernelGGL(TeamCtxInfraSimpleTest, gridSize, blockSize, shared_bytes,
                        stream, _shmem_context, team_world_dup[0], _expected_pe, _expected_n_pes);
   }
 }
 
 void TeamCtxInfraTester::postLaunchKernel() {
+  if (_splitType == ROCSHMEM_TEST_TEAM_SHARED || _skip_shared) return;
+
   int teams_to_destroy = _splitType == ROCSHMEM_TEST_TEAM_DUP ? num_teams : 1;
   for (int team_i = 0; team_i < teams_to_destroy; team_i++) {
     rocshmem_team_destroy(team_world_dup[team_i]);
