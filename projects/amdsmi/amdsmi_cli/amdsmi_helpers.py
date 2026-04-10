@@ -3112,8 +3112,9 @@ class AMDSMIHelpers:
                 # Raise so the caller exits with a non-zero return code
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                     sys.argv[1] if len(sys.argv) > 1 else "unknown",
-                    f"{requested_power_cap}W (must be between {min_cap_display}W and {max_power_cap}W)",
+                    f"{requested_power_cap}W",
                     self.get_output_format(),
+                    hint=f"Power cap must be between {min_cap_display}W and {max_power_cap}W",
                 )
             # Set the power cap
             new_power_cap = self.convert_SI_unit(

@@ -117,6 +117,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amd-smi set --power-cap <OUT_OF_RANGE>` now returns a non-zero exit code.
   - `amd-smi set --fan <INVALID>%` no longer prompts the out-of-spec warning before validating the percentage range; invalid values are rejected immediately.
 
+- **Fixed `amd-smi set --profile` help text omitting `BOOTUP_DEFAULT`**.  
+  - `BOOTUP_DEFAULT` was always accepted at runtime but was missing from the `--help` profile list. Auditing invalid-input handling exposed this gap. `amd-smi reset --profile` can also be used to return to the bootup default power profile.
+
 - **Fixed `amd-smi monitor --brcm_nic` and `--brcm_switch` flags being registered on non-BRCM systems**.  
   - These flags are now only registered when BRCM hardware is present, preventing spurious failures on AMD GPU-only systems.
 
