@@ -79,6 +79,34 @@ print(f"Parsed {len(field_order)} field assignments from {TRACE_CPP}")
 #   Returns list of bare parameter names (stripping types).
 #   Handles void, pointers, arrays, const, etc.
 # ---------------------------------------------------------------------------
+def find_stream_param(params_str):
+    """Return the name of the first hipStream_t (non-pointer) parameter, or None."""
+    if not params_str or params_str.strip() in ('', 'void'):
+        return None
+    parts = []
+    depth = 0
+    current = []
+    for ch in params_str:
+        if ch in '(<':
+            depth += 1; current.append(ch)
+        elif ch in ')>':
+            depth -= 1; current.append(ch)
+        elif ch == ',' and depth == 0:
+            parts.append(''.join(current).strip()); current = []
+        else:
+            current.append(ch)
+    if current:
+        parts.append(''.join(current).strip())
+    for p in parts:
+        toks = p.split()
+        for j, tok in enumerate(toks):
+            if tok == 'hipStream_t':
+                # Skip if next token starts with '*' (pointer-to-stream, not a stream)
+                if j + 1 < len(toks) and toks[j + 1].startswith('*'):
+                    continue
+                return toks[-1].lstrip('*').strip()
+    return None
+
 def parse_param_names(params_str):
     if not params_str or params_str.strip() in ('', 'void'):
         return []
@@ -130,18 +158,18 @@ HEADER = """\
  *
  * Dispatch table wrappers for the HIP CLR built-in profiling layer.
  * Pattern mirrors the reference hip_tracer.cpp:
- *   auto* record = HipClrGetActiveRecord(api_id);  // allocs slot, sets correlation_id TLS
+ *   auto* record = HipGetActiveRecordExt(api_id);  // allocs slot, sets correlation_id TLS
  *   [call real function]
- *   if (record) record->end_ = Clock::now();
+ *   if (record) record->end_ns = NowNs();
  */
 
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "hip_clr_profiler.hpp"
+#include "rocclr/os/os.hpp"
 
 #include <atomic>
-#include <chrono>
 
-using Clock = std::chrono::high_resolution_clock;
+static inline uint64_t NowNs() { return amd::Os::timeNanos(); }
 
 // Saved original dispatch table (the "next layer").
 static HipDispatchTable g_next{};
@@ -174,14 +202,18 @@ for api_id, (field_name, impl_name) in enumerate(field_order):
 
     layer_name = f'{field_name}Layer'
 
+    stream_param = find_stream_param(params_str)
+
     lines.append(f'// api_id = {api_id}')
     lines.append(f'static {ret} {layer_name}({sig_params}) {{')
-    lines.append(f'  auto* _rec = HipClrGetActiveRecord({api_id}u);')
+    lines.append(f'  auto* _rec = HipGetActiveRecordExt({api_id}u);')
+    if stream_param:
+        lines.append(f'  _rec->stream = {stream_param};')
     if is_void:
         lines.append(f'  g_next.{field_name}_fn({call_args});')
     else:
         lines.append(f'  auto _r = g_next.{field_name}_fn({call_args});')
-    lines.append(f'  if (_rec) _rec->end_ = Clock::now();')
+    lines.append(f'  _rec->end_ns = NowNs();')
     if not is_void:
         lines.append(f'  return _r;')
     lines.append('}')
@@ -192,11 +224,11 @@ if missing:
 
 # API name table — indexed by api_id, same order as field_order
 lines.append('// API name table — indexed by api_id (same order as UpdateDispatchTable).')
-lines.append('const char* const kHipClrApiNames[] = {')
+lines.append('const char* const kHipApiNamesExt[] = {')
 for field_name, _ in field_order:
     lines.append(f'  "{field_name}",')
 lines.append('};')
-lines.append(f'const size_t kHipClrApiNamesCount = {len(field_order)};')
+lines.append(f'const size_t kHipApiNamesCountExt = {len(field_order)};')
 lines.append('')
 
 # Install / Remove — build full replacement table first, then memcpy in one shot.
@@ -205,7 +237,7 @@ lines.append('')
 # prevents the compiler from reordering the stores relative to g_wrapped.
 lines.append('#include <cstring>')
 lines.append('')
-lines.append('void HipClrProfilerInstallWrappers(HipDispatchTable* tbl) {')
+lines.append('void HipProfilerInstallWrappersExt(HipDispatchTable* tbl) {')
 lines.append('  if (g_wrapped.exchange(true)) return;')
 lines.append('  g_next = *tbl;')
 lines.append('  HipDispatchTable wrapper_tbl = g_next;  // start from a full valid copy')
@@ -216,7 +248,7 @@ lines.append('  std::atomic_thread_fence(std::memory_order_release);')
 lines.append('  std::memcpy(tbl, &wrapper_tbl, sizeof(HipDispatchTable));')
 lines.append('}')
 lines.append('')
-lines.append('void HipClrProfilerRemoveWrappers(HipDispatchTable* tbl) {')
+lines.append('void HipProfilerRemoveWrappersExt(HipDispatchTable* tbl) {')
 lines.append('  if (!g_wrapped.exchange(false)) return;')
 lines.append('  std::atomic_thread_fence(std::memory_order_release);')
 lines.append('  std::memcpy(tbl, &g_next, sizeof(HipDispatchTable));')

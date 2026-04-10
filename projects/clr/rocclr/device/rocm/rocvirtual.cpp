@@ -239,9 +239,13 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     end = std::max(sig_end, end);
   }
 
-  // Handle AccumulateCommand timestamps
+  // Handle AccumulateCommand timestamps.
+  // sig_start/sig_end are raw GPU ticks; convert to nanoseconds with ticksToTime_
+  // before storing, matching the same conversion applied to start_/end_ on line 203.
   if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
-    static_cast<amd::AccumulateCommand&>(command()).addTimestamps(sig_start, sig_end);
+    static_cast<amd::AccumulateCommand&>(command()).addTimestamps(
+        static_cast<uint64_t>(sig_start * ticksToTime_),
+        static_cast<uint64_t>(sig_end * ticksToTime_));
   }
 
   signal->flags_.done_ = true;

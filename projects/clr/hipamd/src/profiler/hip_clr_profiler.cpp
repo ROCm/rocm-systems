@@ -7,31 +7,36 @@
 /**
  * hip_clr_profiler.cpp — Built-in HIP CLR profiling layer.
  *
- * Activated by GPU_CLR_PROFILE=1 or programmatically via the
- * hipClrProfiler* extension API declared in hip_clr_profiler_ext.h.
+ * Activated by GPU_CLR_PROFILE_OUTPUT=<path> or programmatically via the
+ * hipProfiler*Ext extension API declared in hip_profiler_ext.h.
  *
  * Design mirrors the reference ICD tracer (hip_tracer_core.cpp):
  *
  * CPU timing — dispatch table wrappers in hip_clr_dispatch_wrappers.cpp:
- *   auto* record = HipClrGetActiveRecord(api_id);   // allocs slot N, sets correlation_id TLS = N
+ *   auto* record = HipGetActiveRecordExt(api_id);   // allocs slot N, sets correlation_id TLS = N
  *   auto _r = g_next.hipFoo_fn(...);                // GPU command inherits correlation_id N
- *   record->end_ = high_resolution_clock::now();
+ *   record->end_ns = NowNs();
  *
  * GPU timing — ReportActivityCallback (ACTIVITY_DOMAIN_HIP_OPS):
  *   ar->correlation_id == N  →  index directly into g_records[N/chunk][N%chunk]
  *   No map, no TLS sentinel, no pending table.
+ *
+ * Chunk storage: g_records holds HipApiRecordExt arrays.
+ *   _pad1[96] is repurposed to hold a std::vector<HipGpuRecord> (placement new).
+ *   Accessed via GpuOps() helpers in hip_clr_profiler.hpp.
  */
 
 #include "hip_clr_profiler.hpp"
-#include "hip/amd_detail/hip_clr_profiler_ext.h"
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "platform/activity.hpp"
 #include "../hip_internal.hpp"
 
+#include "rocclr/os/os.hpp"
+
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #include <thread>
@@ -49,49 +54,69 @@ extern "C" void hipRegisterTracerCallback(int (*function)(activity_domain_t doma
 // ============================================================
 namespace {
 
-using Clock = std::chrono::high_resolution_clock;
+inline uint64_t NowNs() { return amd::Os::timeNanos(); }
 
 constexpr size_t kChunkSize = 10000;
 
-// Two independent enable bits:
-//   g_env_enabled  — set by GPU_CLR_PROFILE=1 at Init(), never cleared at runtime.
-//   g_api_enabled  — toggled by hipClrProfilerEnable/Disable and hipProfilerStart/Stop.
-// Recording is active when EITHER bit is set.
-// Wrappers are installed when EITHER is set, removed only when BOTH are clear.
-std::atomic<bool>        g_env_enabled{false};
+// Two independent enable paths:
+//   g_env_output_path — set by GPU_CLR_PROFILE_OUTPUT=<path> at Init(), never cleared.
+//   g_api_enabled     — toggled by hipProfilerEnableExt/Disable.
+// Recording is active when EITHER is live.
 std::atomic<bool>        g_api_enabled{false};
 std::atomic<bool>        g_callback_registered{false};
-std::string              g_env_output_path;   // path from GPU_CLR_PROFILE value
+std::string              g_env_output_path;  // written once at init; read-only afterward
 
 inline bool IsProfilingActive() {
-  return g_env_enabled.load(std::memory_order_acquire) ||
+  return !g_env_output_path.empty() ||
          g_api_enabled.load(std::memory_order_acquire);
 }
 
 // Previously registered callback saved before we register ours.
-// Forwarded to at the end of HipClrActivityCallback so we can coexist
+// Forwarded to at the end of HipActivityCallbackExt so we can coexist
 // with roctracer / rocprofiler that may have registered first.
 using activity_callback_t = int(*)(activity_domain_t, uint32_t, void*);
 std::atomic<activity_callback_t> g_prev_callback{nullptr};
 
-std::vector<HipClrProfRecord*> g_records;
-std::atomic<size_t>            g_rec_counter{0};
-std::mutex                     g_alloc_mtx;
+// Chunks of HipApiRecordExt.  _pad1[96] in each slot holds a
+// std::vector<HipGpuRecord> (placement-new'd by AllocChunk).
+// Pre-reserved so push_back never reallocates — required for the
+// lock-free fast path in HipGetActiveRecordExt (double-checked locking).
+std::vector<HipApiRecordExt*> g_records;
+constexpr size_t kMaxChunks = 1024;  // 1024 * 10000 = 10M records max
+std::atomic<size_t>           g_rec_counter{0};
+std::mutex                    g_alloc_mtx;
 
-std::vector<HipClrApiRecord>   g_export_buf;
+std::vector<HipApiRecordExt>   g_export_buf;
+std::vector<HipGpuActivityExt> g_export_gpu_buf;  // flat pool; gpu.gpu_ops pointers index into this
 std::mutex                     g_export_mtx;
 
 std::unordered_map<const char*, std::string> g_kernel_names;
 std::mutex                                   g_kernel_names_mtx;
 
 // ============================================================
+// Chunk lifecycle — placement-new the gpu_ops vector in _pad1.
+// ============================================================
+HipApiRecordExt* AllocChunk() {
+  void* raw = ::operator new[](kChunkSize * sizeof(HipApiRecordExt));
+  HipApiRecordExt* chunk = static_cast<HipApiRecordExt*>(raw);
+  std::memset(chunk, 0, kChunkSize * sizeof(HipApiRecordExt));
+  return chunk;
+}
+
+void FreeChunk(HipApiRecordExt* chunk) {
+  for (size_t i = 0; i < kChunkSize; ++i)
+    GpuOps(chunk[i]).~vector<HipGpuRecord>();
+  ::operator delete[](static_cast<void*>(chunk));
+}
+
+// ============================================================
 // GPU ops callback — same logic as reference ReportActivityCallback.
 // correlation_id == slot index → direct array lookup, no map needed.
 // ============================================================
-int HipClrActivityCallback(activity_domain_t domain, uint32_t op_id, void* data) {
+int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data) {
   // Return 1 (disabled) for HIP_API domain so api_callbacks_spawner_t does NOT
   // overwrite amd::activity_prof::correlation_id with its own auto-increment value.
-  // Our slot index written in HipClrGetActiveRecord must survive intact.
+  // Our slot index written in HipGetActiveRecordExt must survive intact.
   if (domain != ACTIVITY_DOMAIN_HIP_OPS) return 1;
 
   // When disabled, forward to prev (if any) and return its answer.
@@ -121,21 +146,47 @@ int HipClrActivityCallback(activity_domain_t domain, uint32_t op_id, void* data)
   size_t idx = slot / kChunkSize;
   if (idx >= g_records.size()) return 0;
 
-  HipClrProfRecord* rec = &g_records[idx][slot % kChunkSize];
-  rec->has_gpu       = true;
-  rec->gpu.op        = ar->op;
-  rec->gpu.begin_ns  = ar->begin_ns;
-  rec->gpu.end_ns    = ar->end_ns;
-  rec->gpu.device_id = ar->device_id;
-  rec->gpu.queue_id  = ar->queue_id;
-  if (ar->op == OP_ID_DISPATCH) {
-    rec->gpu.kernel_name = ar->kernel_name;
-    if (ar->kernel_name) {
-      std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-      g_kernel_names.emplace(ar->kernel_name, std::string(ar->kernel_name));
-    }
+  HipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
+
+  // Barriers from hipGraphLaunch are artefacts of the internal Marker command.
+  // They carry no useful timing; skip them.
+  if (ar->op == OP_ID_BARRIER) {
+    auto* prev = g_prev_callback.load(std::memory_order_acquire);
+    if (prev) prev(domain, op_id, data);
+    return 0;
+  }
+
+  if (ar->op == OP_ID_DISPATCH && ar->kernel_name) {
+    std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
+    g_kernel_names.emplace(ar->kernel_name, std::string(ar->kernel_name));
+  }
+
+  if (rec->gpu.gpu_op_count == 0) {
+    // First op: write directly into the embedded gpu field — no heap alloc.
+    rec->gpu.op        = ar->op;
+    rec->gpu.begin_ns  = ar->begin_ns;
+    rec->gpu.end_ns    = ar->end_ns;
+    rec->gpu.device_id = ar->device_id;
+    rec->gpu.queue_id  = ar->queue_id;
+    if (ar->op == OP_ID_DISPATCH)
+      rec->gpu.kernel_name = ar->kernel_name;
+    else
+      rec->gpu.bytes = ar->bytes;
+    rec->gpu.gpu_op_count = 1;
   } else {
-    rec->gpu.bytes = ar->bytes;
+    // Subsequent op (graph launch): accumulate in the vector.
+    HipGpuRecord entry{};
+    entry.op        = ar->op;
+    entry.begin_ns  = ar->begin_ns;
+    entry.end_ns    = ar->end_ns;
+    entry.device_id = ar->device_id;
+    entry.queue_id  = ar->queue_id;
+    if (ar->op == OP_ID_DISPATCH)
+      entry.kernel_name = ar->kernel_name;
+    else
+      entry.bytes = ar->bytes;
+    GpuOps(*rec).push_back(std::move(entry));
+    rec->gpu.gpu_op_count++;
   }
 
   // Forward to previously registered callback (e.g. roctracer / rocprofiler).
@@ -175,66 +226,73 @@ void WriteJsonTraceImpl(const char* filepath) {
   };
 
   for (size_t c = 0; c < g_records.size(); ++c) {
-    HipClrProfRecord* chunk = g_records[c];
+    HipApiRecordExt* chunk = g_records[c];
     size_t base  = c * kChunkSize;
     size_t valid = (total > base) ? std::min(total - base, kChunkSize) : 0;
     if (valid == 0) continue;
 
     for (size_t i = 0; i < valid; ++i) {
-      const HipClrProfRecord& rec = chunk[i];
+      const HipApiRecordExt& rec = chunk[i];
 
-      // Convert to µs using chrono — handles any clock period correctly.
-      uint64_t s_time = static_cast<uint64_t>(
-          std::chrono::duration_cast<std::chrono::microseconds>(
-              rec.start_.time_since_epoch()).count());
-      uint64_t duration = static_cast<uint64_t>(
-          std::chrono::duration<double, std::micro>(rec.end_ - rec.start_).count());
-      if (duration == 0) duration = 1;
+      uint64_t s_time  = rec.start_ns / 1000;  // ns → µs
+      uint64_t dur_us  = (rec.end_ns > rec.start_ns)
+                         ? (rec.end_ns - rec.start_ns) / 1000 : 1;
 
       if (!first) trace << ",";
       first = false;
 
       uint32_t ctid = compact_tid(rec.thread_id);
-      const char* api_name = (rec.api_id < kHipClrApiNamesCount)
-                             ? kHipClrApiNames[rec.api_id] : "unknown";
-      trace << "\n{\"name\":\"" << api_name
+      trace << "\n{\"name\":\"" << rec.api_name
             << "\",\"ph\":\"X\",\"pid\":1024,\"tid\":" << ctid
-            << ",\"ts\":" << s_time << ",\"dur\":" << duration << "}";
+            << ",\"ts\":" << s_time << ",\"dur\":" << dur_us << "}";
 
-      if (rec.has_gpu) {
-        uint32_t op  = rec.gpu.op < 3 ? rec.gpu.op : 3;
-        int    sdma  = (op == OP_ID_DISPATCH) ? 0 : 1;
-        uint64_t gpu_dur = (rec.gpu.end_ns > rec.gpu.begin_ns)
-                           ? (rec.gpu.end_ns - rec.gpu.begin_ns) / 1000 : 1;
-        uint64_t gpu_ts  = rec.gpu.begin_ns / 1000;
+      // Emit one GPU op event (flow arrow + X event + flow finish).
+      // Called for op-1 (from rec.gpu) and ops 2..N (from GpuOps vector).
+      auto emit_gpu_op = [&](uint32_t op, uint64_t begin_ns, uint64_t end_ns,
+                              int device_id, uint64_t queue_id,
+                              const char* kernel_name, size_t bytes) {
+        uint32_t op_idx  = op < 3 ? op : 3;
+        int      sdma    = (op_idx == OP_ID_COPY) ? 1 : 0;
+        uint64_t gpu_dur = (end_ns > begin_ns) ? (end_ns - begin_ns) / 1000 : 1;
+        uint64_t gpu_ts  = begin_ns / 1000;
 
         trace << ",\n{\"ts\":" << s_time
               << ",\"ph\":\"s\",\"id\":" << event_id
               << ",\"pid\":1024,\"tid\":" << ctid << ",\"name\":\"dep\"}";
 
-        std::string gpu_name = kGpuEvents[op];
-        if (!sdma && rec.gpu.kernel_name) {
+        std::string gpu_name = kGpuEvents[op_idx];
+        if (!sdma && kernel_name) {
           std::lock_guard<std::mutex> lk(g_kernel_names_mtx);
-          auto it = g_kernel_names.find(rec.gpu.kernel_name);
+          auto it = g_kernel_names.find(kernel_name);
           if (it != g_kernel_names.end()) gpu_name = it->second;
         }
 
         trace << ",\n{\"name\":\"" << gpu_name
-              << "\",\"ph\":\"X\",\"pid\":" << rec.gpu.device_id
-              << ",\"tid\":" << (rec.gpu.queue_id * 2 + sdma)
+              << "\",\"ph\":\"X\",\"pid\":" << device_id
+              << ",\"tid\":" << (queue_id * 2 + sdma)
               << ",\"ts\":" << gpu_ts << ",\"dur\":" << gpu_dur;
-        if (sdma) trace << ",\"args\":{\"Copy size\":" << rec.gpu.bytes << "}";
+        if (sdma) trace << ",\"args\":{\"Copy size\":" << bytes << "}";
         trace << "}";
 
         trace << ",\n{\"ts\":" << gpu_ts
               << ",\"ph\":\"f\",\"bp\":\"e\",\"id\":" << event_id
-              << ",\"pid\":" << rec.gpu.device_id
-              << ",\"tid\":" << (rec.gpu.queue_id * 2 + sdma)
+              << ",\"pid\":" << device_id
+              << ",\"tid\":" << (queue_id * 2 + sdma)
               << ",\"name\":\"dep\"}";
 
-        device_gpu_tids[rec.gpu.device_id].insert(rec.gpu.queue_id * 2 + sdma);
+        device_gpu_tids[device_id].insert(queue_id * 2 + sdma);
         ++event_id;
-      }
+      };
+
+      // Op-1 lives directly in rec.gpu; ops 2..N are in GpuOps(rec).
+      if (rec.gpu.gpu_op_count > 0)
+        emit_gpu_op(rec.gpu.op, rec.gpu.begin_ns, rec.gpu.end_ns,
+                    rec.gpu.device_id, rec.gpu.queue_id,
+                    rec.gpu.kernel_name, rec.gpu.bytes);
+      for (const auto& gop : GpuOps(rec))
+        emit_gpu_op(gop.op, gop.begin_ns, gop.end_ns,
+                    gop.device_id, gop.queue_id,
+                    gop.kernel_name, gop.bytes);
     }
   }
 
@@ -310,13 +368,12 @@ static void DrainAllDevices() {
 
 struct HipClrProfilerFinalizer {
   ~HipClrProfilerFinalizer() {
-    // Auto-write JSON only when GPU_CLR_PROFILE activated tracing.
-    // App-controlled mode uses explicit hipClrProfilerWriteJson().
-    if (g_env_enabled.load(std::memory_order_acquire)) {
+    // Auto-write when activated by env var.
+    if (!g_env_output_path.empty()) {
       DrainAllDevices();
       WriteJsonTraceImpl(g_env_output_path.c_str());
     }
-    for (auto* chunk : g_records) delete[] chunk;
+    for (auto* chunk : g_records) FreeChunk(chunk);
   }
 } g_finalizer;
 
@@ -325,33 +382,29 @@ struct HipClrProfilerFinalizer {
 // ============================================================
 // Called from each *Layer wrapper — mirrors reference GetActiveRecord().
 // Allocates a record slot, writes slot index into correlation_id TLS so the
-// GPU command that follows inherits it, stamps start_, returns the record.
+// GPU command that follows inherits it, stamps start_ns, returns the record.
 // ============================================================
-HipClrProfRecord* HipClrGetActiveRecord(uint32_t api_id) {
-  if (!IsProfilingActive()) return nullptr;
-
+HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id) {
   size_t slot = g_rec_counter.fetch_add(1, std::memory_order_relaxed);
   size_t idx  = slot / kChunkSize;
 
-  {
+  if (idx == g_records.size()) {
     std::lock_guard<std::mutex> lk(g_alloc_mtx);
-    if (idx == g_records.size()) {
-      g_records.push_back(new HipClrProfRecord[kChunkSize]());
-    }
+    if (idx == g_records.size())
+      g_records.push_back(AllocChunk());
   }
 
-  HipClrProfRecord* rec = &g_records[idx][slot % kChunkSize];
-  rec->api_id    = api_id;
-  rec->thread_id = static_cast<uint64_t>(
+  HipApiRecordExt* rec = &g_records[idx][slot % kChunkSize];
+  rec->api_name    = (api_id < kHipApiNamesCountExt) ? kHipApiNamesExt[api_id] : "unknown";
+  rec->_flags_u64  = 0;
+  rec->thread_id   = static_cast<uint64_t>(
       std::hash<std::thread::id>{}(std::this_thread::get_id()));
-  rec->has_gpu   = false;
-  rec->result    = hipSuccess;
 
   // Tell the HIP runtime to tag the next GPU command with this slot index.
   // Mirrors: next_layer.hipRegisterTracerId(slot) in the reference tracer.
   amd::activity_prof::correlation_id = static_cast<activity_correlation_id_t>(slot);
 
-  rec->start_ = Clock::now();
+  rec->start_ns = NowNs();
   return rec;
 }
 
@@ -362,8 +415,10 @@ HipClrProfRecord* HipClrGetActiveRecord(uint32_t api_id) {
 static void EnsureCallbackAndWrappers() {
   {
     std::lock_guard<std::mutex> lk(g_alloc_mtx);
-    if (g_records.empty())
-      g_records.push_back(new HipClrProfRecord[kChunkSize]());
+    if (g_records.empty()) {
+      g_records.reserve(kMaxChunks);  // prevent reallocation; required for lock-free fast path
+      g_records.push_back(AllocChunk());
+    }
   }
   if (!g_callback_registered.exchange(true, std::memory_order_acq_rel)) {
     // Save whatever callback is already registered (e.g. roctracer) so we
@@ -371,58 +426,47 @@ static void EnsureCallbackAndWrappers() {
     g_prev_callback.store(
         amd::activity_prof::report_activity.load(std::memory_order_acquire),
         std::memory_order_release);
-    hipRegisterTracerCallback(HipClrActivityCallback);
+    hipRegisterTracerCallback(HipActivityCallbackExt);
   }
-  HipClrProfilerInstallWrappers(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
+  HipProfilerInstallWrappersExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
 }
 
-void HipClrProfilerInit() {
-  const char* env = getenv("GPU_CLR_PROFILE");
-  if (!env || env[0] == '\0') return;
+void HipProfilerInitExt() {
+  // GPU_CLR_PROFILE_OUTPUT=<path>: presence (non-empty) enables profiling;
+  // the value is the output file path written at process exit.
+  const char* out = std::getenv("GPU_CLR_PROFILE_OUTPUT");
+  if (!out || out[0] == '\0') return;
 
-  // If value looks like a path (contains '/' or '.'), use it; otherwise use default.
-  g_env_output_path = (strchr(env, '/') || strchr(env, '\\') || strchr(env, '.'))
-                      ? env : "hip_clr_trace.json";
-  g_env_enabled.store(true, std::memory_order_release);
+  g_env_output_path = out;
   EnsureCallbackAndWrappers();
 }
 
-void HipClrProfilerEnable() {
+void HipProfilerEnableExt() {
   g_api_enabled.store(true, std::memory_order_release);
   EnsureCallbackAndWrappers();
 }
 
-void HipClrProfilerDisable() {
+void HipProfilerDisableExt() {
   // Drain all outstanding GPU work before clearing the flag so that
   // ReportActivity callbacks for in-flight commands are delivered while
   // the profiler callback is still active.
   DrainAllDevices();
   g_api_enabled.store(false, std::memory_order_release);
-  // Only remove wrappers if GPU_CLR_PROFILE is also not holding them.
-  if (!g_env_enabled.load(std::memory_order_acquire)) {
-    HipClrProfilerRemoveWrappers(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
-  }
+  HipProfilerRemoveWrappersExt(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()));
 }
 
-void HipClrProfilerReset() {
+void HipProfilerResetExt() {
   std::lock_guard<std::mutex> lk(g_alloc_mtx);
-  for (auto* chunk : g_records) delete[] chunk;
+  for (auto* chunk : g_records) FreeChunk(chunk);
   g_records.clear();
   g_rec_counter.store(0, std::memory_order_relaxed);
   std::lock_guard<std::mutex> elk(g_export_mtx);
   g_export_buf.clear();
+  g_export_gpu_buf.clear();
 }
 
-void HipClrProfilerWriteJson(const char* filepath) {
+void HipProfilerWriteJsonExt(const char* filepath) {
   WriteJsonTraceImpl(filepath);
-}
-
-void HipClrProfilerGetRecords(const HipClrProfRecord** out_records,
-                               size_t* out_count,
-                               size_t* out_chunk_size) {
-  *out_records    = g_records.empty() ? nullptr : g_records[0];
-  *out_count      = g_rec_counter.load(std::memory_order_acquire);
-  *out_chunk_size = kChunkSize;
 }
 
 // ============================================================
@@ -430,21 +474,22 @@ void HipClrProfilerGetRecords(const HipClrProfRecord** out_records,
 // ============================================================
 extern "C" {
 
-hipError_t hipClrProfilerEnable()  { HipClrProfilerEnable();  return hipSuccess; }
-hipError_t hipClrProfilerDisable() { HipClrProfilerDisable(); return hipSuccess; }
-hipError_t hipClrProfilerReset()   { HipClrProfilerReset();   return hipSuccess; }
+hipError_t hipProfilerEnableExt()  { HipProfilerEnableExt();  return hipSuccess; }
+hipError_t hipProfilerDisableExt() { HipProfilerDisableExt(); return hipSuccess; }
+hipError_t hipProfilerResetExt()   { HipProfilerResetExt();   return hipSuccess; }
 
-hipError_t hipClrProfilerWriteJson(const char* filepath) {
-  HipClrProfilerWriteJson(filepath);
+hipError_t hipProfilerWriteJsonExt(const char* filepath) {
+  HipProfilerWriteJsonExt(filepath);
   return hipSuccess;
 }
 
-hipError_t hipClrProfilerGetRecords(const HipClrApiRecord** records, size_t* count) {
+hipError_t hipProfilerGetRecordsExt(const HipApiRecordExt** records, size_t* count) {
   if (!records || !count) return hipErrorInvalidValue;
 
   size_t total = g_rec_counter.load(std::memory_order_acquire);
   std::lock_guard<std::mutex> lk(g_export_mtx);
   g_export_buf.clear();
+  g_export_gpu_buf.clear();
   g_export_buf.reserve(total);
 
   for (size_t c = 0; c < g_records.size(); ++c) {
@@ -453,26 +498,53 @@ hipError_t hipClrProfilerGetRecords(const HipClrApiRecord** records, size_t* cou
     if (valid == 0) continue;
 
     for (size_t i = 0; i < valid; ++i) {
-      const HipClrProfRecord& src = g_records[c][i];
+      const HipApiRecordExt& src = g_records[c][i];
 
-      HipClrApiRecord dst{};
-      dst.api_id    = static_cast<uint32_t>(src.api_id);
-      dst.thread_id = src.thread_id;
-      dst.start_ns  = static_cast<uint64_t>(src.start_.time_since_epoch().count());
-      dst.end_ns    = static_cast<uint64_t>(src.end_.time_since_epoch().count());
-      dst.has_gpu_activity = src.has_gpu ? 1 : 0;
-      if (src.has_gpu) {
-        dst.gpu.op        = src.gpu.op;
-        dst.gpu.begin_ns  = src.gpu.begin_ns;
-        dst.gpu.end_ns    = src.gpu.end_ns;
-        dst.gpu.device_id = src.gpu.device_id;
-        dst.gpu.queue_id  = src.gpu.queue_id;
-        if (src.gpu.op == OP_ID_DISPATCH)
-          dst.gpu.kernel_name = src.gpu.kernel_name;
-        else
-          dst.gpu.bytes = src.gpu.bytes;
+      // Copy the record; zero _pad1 so the exported copy has no dangling vector.
+      // dst.gpu already holds op-1 (written directly by HipActivityCallbackExt).
+      HipApiRecordExt dst = src;
+      std::memset(dst._pad1, 0, sizeof(dst._pad1));
+      dst.has_gpu_activity = dst.gpu.gpu_op_count > 0 ? 1 : 0;
+      dst.gpu.gpu_ops      = nullptr;  // fixed up below
+
+      if (dst.gpu.gpu_op_count > 1) {
+        // Graph launch: build flat pool from op-1 (dst.gpu) + ops 2..N (vector).
+        HipGpuActivityExt first = dst.gpu;
+        first.gpu_op_count  = 0;
+        first._reserved_u32 = 0;
+        first.gpu_ops       = nullptr;
+        std::memset(first._pad1, 0, sizeof(first._pad1));
+        g_export_gpu_buf.push_back(first);
+
+        for (const auto& gop : GpuOps(src)) {
+          HipGpuActivityExt act{};
+          act.op        = gop.op;
+          act.begin_ns  = gop.begin_ns;
+          act.end_ns    = gop.end_ns;
+          act.device_id = gop.device_id;
+          act.queue_id  = gop.queue_id;
+          if (gop.op == OP_ID_DISPATCH)
+            act.kernel_name = gop.kernel_name;
+          else
+            act.bytes = gop.bytes;
+          g_export_gpu_buf.push_back(act);
+        }
       }
+      // Single-op: gpu_ops points to embedded dst.gpu — fixed up below.
       g_export_buf.push_back(dst);
+    }
+  }
+
+  // Fix up gpu_ops pointers now that g_export_buf and g_export_gpu_buf are stable.
+  {
+    size_t off = 0;
+    for (auto& rec : g_export_buf) {
+      if (rec.gpu.gpu_op_count == 1)
+        rec.gpu.gpu_ops = &rec.gpu;          // points to itself — no flat pool needed
+      else if (rec.gpu.gpu_op_count > 1) {
+        rec.gpu.gpu_ops = g_export_gpu_buf.data() + off;
+        off += rec.gpu.gpu_op_count;
+      }
     }
   }
 

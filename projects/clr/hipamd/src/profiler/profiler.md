@@ -104,5 +104,64 @@ if (_rec) _rec->end_ = Clock::now();
 - `hipClrProfilerReset()`
 - `hipClrProfilerWriteJson(filepath)`
 
+## Known-good trace (4 stream threads + 1 graph thread)
+
+Test: `vectoradd.cpp` with `NUM_THREADS=4`, `KERNEL_ITERS=8`, `GRAPH_ITERS=8`.
+Command: `GPU_CLR_PROFILE=1 GPU_ENABLE_PAL=0 ./vectoradd.exe`
+Output: `C:/profiler/test/hip_clr_trace.json`
+
+### Expected event counts
+- **40 GPU dispatch events** — `_Z9vectorAddPKfS0_Pfi`:
+  - 32 from stream threads (4 threads × 8 iterations)
+  - 8 from graph thread (`hipGraphLaunch` × 8 replays)
+- **15 GPU copy events** — H2D + D2H across all threads (SDMA)
+- **116 CPU events** — hipMalloc, hipMemcpy, hipLaunchKernelGGL, hipStreamSynchronize, hipFree, etc.
+- **0 GPU barrier events** — barriers are suppressed when they would overwrite a dispatch in the same slot
+
+### Expected process/thread layout
+| Process | pid  | Description            |
+|---------|------|------------------------|
+| CPU     | 1024 | HIP host API calls     |
+| GPU     | 1    | Device "gfx1100"       |
+
+| Lane             | tid | Condition                        |
+|------------------|-----|----------------------------------|
+| HIP Thread 0     | 0   | CPU thread 0 (compact id)        |
+| HIP Thread 1     | 1   | CPU thread 1                     |
+| HIP Thread 2     | 2   | CPU thread 2                     |
+| HIP Thread 3     | 3   | CPU thread 3                     |
+| HIP Thread 4     | 4   | CPU graph thread                 |
+| Default Stream   | 0   | GPU queue_id=0 compute           |
+| Compute 1        | 2   | GPU queue_id=1 compute           |
+| Compute 2        | 4   | GPU queue_id=2 compute           |
+| Compute 3        | 6   | GPU queue_id=3 compute           |
+| Compute 4        | 10  | GPU queue_id=5 compute (graph)   |
+| SDMA             | 9   | GPU SDMA queue (copies)          |
+
+- Only lanes with actual events appear (no spurious empty rows).
+- Flow arrows (dep events) connect CPU `hipMemcpy` records to corresponding GPU copy events.
+- Graph thread uses a separate `execStream` for graph capture/replay and `copyStream` for H2D/D2H.
+
+### Graph activity reporting — slot collision fix
+`hipGraphLaunch` internally creates both:
+1. `AccumulateCommand` (OP_ID_DISPATCH) — carries kernel timing from `tsList_`
+2. `CallbackCommand` Marker (OP_ID_BARRIER) — fires after the batch completes
+
+Both share the same `correlation_id` slot. `HipClrActivityCallback` guards against the barrier
+overwriting an already-recorded dispatch in the same slot.
+
+### Graph AQL packet correlation
+In `dispatchGenericAqlPacketBatch` (`rocvirtual.cpp`): runtime header check replaces the
+`std::is_same` template check to correctly set `isPacketDispatch_` on the profiling signal.
+In `hip_graph_internal.cpp` `GraphExec::Run`: `reserved2` field of pre-captured dispatch
+AQL packets is patched with the current `correlation_id` before `dispatchAqlPacketBatch`.
+
+### Verification checklist
+1. 40 GPU dispatch events, 0 GPU barrier events.
+2. All dispatch events on Compute lanes (not SDMA).
+3. Graph dispatches appear on their own compute lane (tid=10), 8 events.
+4. GPU timestamps are plausible (microsecond-range durations, aligned with CPU wall clock).
+5. `vectoradd.exe` exits with `Overall: PASS`.
+
 ## Reference tracer
 `C:/Work/hipicd/Tracer/hip_tracer_core.cpp` — standalone ICD tracer (reference for JSON format)

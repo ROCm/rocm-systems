@@ -6,21 +6,22 @@
 
 #pragma once
 
-#include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <vector>
 
 #include "hip/hip_runtime_api.h"
+#include "hip/amd_detail/hip_profiler_ext.h"
 #include "platform/prof_protocol.h"
 
 // ============================================================
 // Internal GPU activity record (mirrors activity_record_t)
+// Accumulated per-slot in the _pad1 area of HipApiRecordExt.
 // ============================================================
-struct HipClrGpuRecord {
+struct HipGpuRecord {
   uint32_t   op;           // OP_ID_DISPATCH=0, OP_ID_COPY=1, OP_ID_BARRIER=2
   uint64_t   begin_ns;
   uint64_t   end_ns;
@@ -33,42 +34,37 @@ struct HipClrGpuRecord {
 };
 
 // ============================================================
-// Combined CPU + GPU profiling record — mirrors reference ProfRecord
+// Access the gpu_ops accumulation vector stored in _pad1.
+// Valid only while the record lives in a chunk (before GetRecords).
+// _pad1 is 80 bytes; std::vector is ≤24 bytes on any supported ABI.
 // ============================================================
-struct HipClrProfRecord {
-  uint32_t          api_id;
-  uint64_t          thread_id;
-  std::chrono::high_resolution_clock::time_point start_;
-  std::chrono::high_resolution_clock::time_point end_;
-  hipError_t        result;
-  bool              has_gpu;
-  HipClrGpuRecord   gpu;
-};
+static_assert(sizeof(std::vector<HipGpuRecord>) <= sizeof(HipApiRecordExt{})._pad1,
+              "gpu_ops vector does not fit in _pad1");
+
+inline std::vector<HipGpuRecord>& GpuOps(HipApiRecordExt& r) {
+  return *std::launder(reinterpret_cast<std::vector<HipGpuRecord>*>(r._pad1));
+}
+inline const std::vector<HipGpuRecord>& GpuOps(const HipApiRecordExt& r) {
+  return *std::launder(reinterpret_cast<const std::vector<HipGpuRecord>*>(r._pad1));
+}
 
 // ============================================================
 // Internal profiler API
 // ============================================================
-void HipClrProfilerInit();
-void HipClrProfilerEnable();
-void HipClrProfilerDisable();
-void HipClrProfilerReset();
-void HipClrProfilerWriteJson(const char* filepath);
-// out_records: pointer to first chunk (caller walks chunks of out_chunk_size)
-// out_count:      total number of valid records across all chunks
-// out_chunk_size: capacity of each chunk (last chunk may be partially filled)
-void HipClrProfilerGetRecords(const HipClrProfRecord** out_records,
-                               size_t* out_count,
-                               size_t* out_chunk_size);
+void HipProfilerInitExt();
+void HipProfilerEnableExt();
+void HipProfilerDisableExt();
+void HipProfilerResetExt();
+void HipProfilerWriteJsonExt(const char* filepath);
 
-// Called from each *Layer wrapper — mirrors reference GetActiveRecord().
-// Returns nullptr when profiling is disabled (wrapper skips end_ stamp).
-HipClrProfRecord* HipClrGetActiveRecord(uint32_t api_id);
+// Called from each *Layer wrapper.
+HipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id);
 
 // Declared in hip_clr_dispatch_wrappers.cpp; called by Enable/Disable/Init
 struct HipDispatchTable;
-void HipClrProfilerInstallWrappers(HipDispatchTable* tbl);
-void HipClrProfilerRemoveWrappers(HipDispatchTable* tbl);
+void HipProfilerInstallWrappersExt(HipDispatchTable* tbl);
+void HipProfilerRemoveWrappersExt(HipDispatchTable* tbl);
 
 // API name table — indexed by api_id, same order as UpdateDispatchTable
-extern const char* const kHipClrApiNames[];
-extern const size_t      kHipClrApiNamesCount;
+extern const char* const kHipApiNamesExt[];
+extern const size_t      kHipApiNamesCountExt;

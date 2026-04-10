@@ -5,6 +5,9 @@
  */
 
 #include "hip_graph_internal.hpp"
+#include "platform/activity.hpp"
+#include "platform/prof_protocol.h"
+#include <cstring>
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -1717,6 +1720,20 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         *out_attach_signal = *out_attach_signal && (i == (segment.nodes.size() - 1));
         // Dispatch the selected batch
         if (!packetsToDispatch->empty()) {
+          // Patch reserved2 (correlation_id) in each dispatch packet so the profiler can
+          // attribute GPU events from graph replay to the current hipGraphLaunch call.
+          // HSA kernel dispatch packets are 64 bytes; reserved2 is at byte offset 56.
+          // Packet type 2 (HSA_PACKET_TYPE_KERNEL_DISPATCH) is in header bits [8:11].
+          if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+            const uint64_t corr_id = amd::activity_prof::correlation_id;
+            for (uint8_t* pkt : *packetsToDispatch) {
+              uint16_t hdr;
+              std::memcpy(&hdr, pkt, sizeof(hdr));
+              if ((hdr & 0xFF) == 2 /* HSA_PACKET_TYPE_KERNEL_DISPATCH */) {
+                std::memcpy(pkt + 56, &corr_id, sizeof(corr_id));
+              }
+            }
+          }
           bool batchStatus = stream->vdev()->dispatchAqlPacketBatch(
               *packetsToDispatch, *kernelNamesToDispatch, accumulate, *out_attach_signal);
           if (!batchStatus) {
