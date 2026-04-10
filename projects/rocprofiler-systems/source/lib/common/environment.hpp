@@ -393,30 +393,38 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
             if(std::string_view{ itr }.find(_env_val_str) == std::string_view::npos)
             {
                 auto _val = std::string{ itr }.substr(_key.length());
-                free(itr);
                 auto _merged =
                     _prepend ? fmt::format("{}{}{}", _env_val_str, _join_delim, _val)
                              : fmt::format("{}{}{}", _val, _join_delim, _env_val_str);
-                *it = strdup(fmt::format("{}={}", _env_var, _merged).c_str());
+                auto* _new = strdup(fmt::format("{}={}", _env_var, _merged).c_str());
+                if(!_new) throw std::bad_alloc{};
+                std::free(itr);
+                *it = _new;
             }
             ++it;
         }
         else
         {
             // REPLACE or WEAK: overwrite with new value
-            std::free(itr);
             if(_weak_upd)
             {
-                *it = strdup(_new_entry.c_str());
+                auto* _new = strdup(_new_entry.c_str());
+                if(!_new) throw std::bad_alloc{};
+                std::free(itr);
+                *it = _new;
                 return;
             }
 
             if(_replace && _found_match)
             {
+                std::free(itr);
                 it = _environ.erase(it);
                 continue;
             }
-            *it          = strdup(_new_entry.c_str());
+            auto* _new = strdup(_new_entry.c_str());
+            if(!_new) throw std::bad_alloc{};
+            std::free(itr);
+            *it          = _new;
             _found_match = true;
             ++it;
         }
