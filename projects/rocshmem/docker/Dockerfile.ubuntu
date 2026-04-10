@@ -7,9 +7,8 @@ FROM rocm/dev-ubuntu-24.04:latest
 
 LABEL org.opencontainers.image.title="ROCm rocSHMEM Container"
 LABEL org.opencontainers.image.description="Container for rocSHMEM development with MPI support"
-#LABEL org.opencontainers.image.version="1.0.0"
 LABEL org.opencontainers.image.authors="rocshmem-maintainers@amd.com"
-LABEL org.opencontainers.image.documentation="https://github.com/ROCm/rocm-systems/projects/rocshmem"
+LABEL org.opencontainers.image.documentation="https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/docker"
 LABEL org.opencontainers.image.source="https://github.com/ROCm/rocm-systems/projects/rocshmem"
 
 WORKDIR /app
@@ -24,7 +23,7 @@ Container for rocSHMEM development with MPI support
 ===================================================
 
 * Source: https://github.com/ROCm/rocm-systems/projects/rocshmem
-* Documentation: https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/
+* Documentation: https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/docker
 * Contact: rocshmem-maintainers@amd.com
 
 Building the container
@@ -42,6 +41,16 @@ Build parameters:
 Moving the image to compute nodes:
 
 `for node in node01 node02; do docker save $USER/rocshmem | ssh $node docker load; done`
+
+Adding DeepEP/VLLM
+------------------
+
+This dockerfile does not contain, but can easily be adapted to build DeepEP/VLLM.
+However, we recommend following up-to-date instructions from https://github.com/ROCm/DeepEP?tab=readme-ov-file#development.
+
+If you still want to adapt this dockerfile:
+1. Change the FROM to use a rocm/pytorch base, and uncomment OPTIONAL dependencies.
+2. ADD rocm/deepep and RUN setup.py to build it in the docker.
 
 How to run examples
 -------------------
@@ -100,20 +109,11 @@ srun -N2 --ntasks-per-node=1 --gpus=8 \
 Important directories
 ---------------------
 
-1. `/app/build`: this is a build of the _develop_ branch.
-2. `/app/build1234`: if `--build-arg PR_NUM=1234` is provided, this is a build of the selected PR branch. This is the default working directory.
+1. `/app/build1234`: if `--build-arg PR_NUM=1234` is provided, this is a build of the selected PR branch. This is the default working directory.
+2. `/app/build`: this is a build of the _develop_ branch.
 3. `/app/rocm-systems/projects/rocshmem`: source directory, it is a git repo, you may fetch, checkout and created new build directories as needed.
 4. `/root/rocshmem`: the default install directory, if you build DeepEP it will pull rocshmem from that location.
 5. `/app/ompi`: build of Open MPI with UCX support as required to run RO backend.
-
-Building DeepEP/VLLM
---------------------
-
-This dockerfile can easily be adapted to build DeepEP/VLLM. Change the FROM to use a rocm/pytorch base, and uncomment OPTIONAL dependencies.
-
-Last, ADD rocm/deepep and RUN setup.py to build it in the docker.
-
-Most up to date instructions will be found at https://github.com/ROCm/DeepEP?tab=readme-ov-file#development
 
 EOT
 
@@ -176,7 +176,6 @@ RUN ./autogen.sh \
 
 # Clone rocSHMEM
 WORKDIR /app
-#RUN git clone https://github.com/ROCm/rocSHMEM -b develop # Moved to rocm-system
 RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && cd rocm-systems \
  && git sparse-checkout set --cone projects/rocshmem \
  && git checkout develop
@@ -186,12 +185,8 @@ RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-syst
 RUN INSTALL_DIR=/app/ompi bash /app/rocm-systems/projects/rocshmem/scripts/install_dependencies.sh
 ENV PATH="/app/ompi/bin:${PATH}"
 
-WORKDIR /app/rocm-systems/projects/rocshmem
-# driver.sh patch only needed if running rocshmem_functional_driver.sh
-# COPY driver.patch driver.patch
-# RUN git apply <driver.patch
-
 # Build rocSHMEM develop
+WORKDIR /app/rocm-systems/projects/rocshmem
 RUN mkdir -p /app/build
 WORKDIR /app/build
 RUN /app/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
@@ -212,7 +207,7 @@ RUN test -n "$PR_NUM" \
       -DUSE_EXTERNAL_MPI=OFF \
       -DMPI_ROOT=/app/ompi \
  || test -z "$PR_NUM"
-# WORKDIR defaults to the PR build, or develop build otherwise
+# WORKDIR defaults to the PR build, or develop build if PR not built
 WORKDIR /app/build${PR_NUM}
 
 # Add environment for running, tune as needed
@@ -221,10 +216,11 @@ ENV ROCSHMEM_TEST_UUID=1 ROCSHMEM_HEAP_SIZE=6442450944
 #ENV ROCSHMEM_DISABLE_MIXED_IPC=1
 ENV OMPI_MCA_plm_rsh_args=-p$SSH_PORT \
     OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
-#ENV OMPI_MCA_pml=ucx OMPI_MCA_osc=ucx
-# FOR DELL Thor2 8N cluster
-#ENV OMPI_MCA_oob_tcp_if_include=eno8303
-#ENV ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME=eno8303
-# FOR OCI RCCL 64N cluster
+# System dependent: you may need to select a different PML on some network types, note RO should not be used in this configuration
+#ENV OMPI_MCA_pml=ob1 OMPI_MCA_osc=rdma
+# System dependent: you may need to force the bootstrap TCP interface if autodetection picks a non-routable iface
 #ENV OMPI_MCA_oob_tcp_if_include=
 #ENV ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME=
+# System dependent: Ignore service/backend RoCE ifaces
+#ENV ROCSHMEM_HCA_LIST=^mlx5_6
+
