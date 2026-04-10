@@ -559,7 +559,7 @@ rocp_add_registered_library_api_table(const char*                        common_
                                       uint64_t                           instance_val)
 {
     LOG(INFO) << fmt::format("rocprofiler-register library api table registration:\n\t-"
-                             "name: {}\n\t- version: {}\n\t- # tables: {}",
+                             " name: {}\n\t- version: {}\n\t- # tables: {}",
                              common_name,
                              lib_version,
                              api_tables_len);
@@ -720,6 +720,12 @@ rocprofiler_register_library_api_table(
     if(api_table_length < 1) return ROCP_REG_BAD_API_TABLE_LENGTH;
 
     rocprofiler_register::logging::initialize();
+
+    LOG(INFO) << fmt::format("[rocprofiler-register] received registration from library "
+                             "'{}', version {}, # API tables: {}",
+                             common_name,
+                             lib_version,
+                             api_table_length);
 
     // rocprofiler-register is disabled via environment
     if(!common::get_env("ROCPROFILER_REGISTER_ENABLED", true))
