@@ -1,15 +1,12 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+/* Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved. */
 
-#pragma once
+#ifndef _WSL_INC_WDDM_CMD_UTIL_H_
+#define _WSL_INC_WDDM_CMD_UTIL_H_
 
 #include <string.h>
-#include "hsa-runtime/inc/hsa.h"
-#include "hsa-runtime/inc/amd_hsa_queue.h"
-#include "hsa-runtime/inc/amd_hsa_kernel_code.h"
+#include "impl/hsa/hsa.h"
+#include "impl/hsa/amd_hsa_queue.h"
+#include "impl/hsa/amd_hsa_kernel_code.h"
 #include "impl/pm4_cmds.h"
 #include "util/utils.h"
 
@@ -82,3 +79,5 @@ public:
 
 } // namespace thunk
 } // namespace wsl
+
+#endif

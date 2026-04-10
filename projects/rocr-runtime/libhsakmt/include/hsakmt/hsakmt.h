@@ -118,6 +118,23 @@ hsaKmtGetNodeProperties(
     );
 
 /**
+  Retrieves the wall clock frequency of a specific HSA node.
+
+  The returned frequency is in hertz (Hz), i.e., KHz * 1000.
+  When possible, prefer using HsaNodeProperties.WallClockKHz from
+  hsaKmtGetNodeProperties(), as this function is mainly for compatibility
+  with clients that expect this API to exist.
+  Not all implementations are required to support this API.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(
+    HSAuint32 NodeId,      // IN
+    uint64_t* Frequency    // OUT (Hz)
+    );
+
+/**
   Retrieves the memory properties of a specific HSA node.
   the memory pointer passed as MemoryProperties is sized as
   NumBanks * sizeof(HsaMemoryProperties). NumBanks is retrieved with the
@@ -133,23 +150,6 @@ hsaKmtGetNodeMemoryProperties(
     HSAuint32             NodeId,             //IN
     HSAuint32             NumBanks,           //IN
     HsaMemoryProperties*  MemoryProperties    //OUT
-    );
-
-/**
-  Retrieves the wall clock frequency of a specific HSA node.
-
-  The returned frequency is in hertz (Hz), i.e., KHz * 1000.
-  When possible, prefer using HsaNodeProperties.WallClockKHz from
-  hsaKmtGetNodeProperties(), as this function is mainly for compatibility
-  with clients that expect this API to exist.
-  Not all implementations are required to support this API.
-*/
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtGetNodeWallclockFrequency(
-    HSAuint32 NodeId,      // IN
-    uint64_t* Frequency    // OUT (Hz)
     );
 
 /**

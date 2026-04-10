@@ -1,4 +1,5 @@
 ////////////////////////////////////////////////////////////////////////////////
+//
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
@@ -5680,31 +5681,6 @@ typedef enum {
    */
   HSA_CODE_SYMBOL_INFO_KERNEL_WAVEFRONT_SIZE = 19
 } hsa_code_symbol_info_t;
-
-/**
- * @brief System dependent handle type.
- */
-#if defined(_WIN32)
-typedef void* hsa_handle_t;
-#else
-typedef int hsa_handle_t;
-#endif
-
-/**
- * @brief Interop map flags.
- */
-typedef uint32_t hsa_interop_map_flag_t;
-
-#define HSA_INTEROP_MAP_FLAG_NONE        0u
-#define HSA_INTEROP_MAP_FLAG_KMT_HANDLE  (1u << 0)
-
-/**
- * @brief Platform-independent container for a Windows LUID.
- */
-typedef struct hsa_luid_s {
-  uint32_t low;         //!< Luid low 4 bytes, valid only on Windows
-  uint32_t high;        //!< Luid high 4 bytes, valid only on Windows
-} hsa_luid_t;
 
 /**
  * @deprecated

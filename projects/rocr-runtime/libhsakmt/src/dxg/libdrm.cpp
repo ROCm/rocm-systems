@@ -189,11 +189,6 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t siz
   return amdgpu_bo_va_op_impl(bo, offset, size, addr, flags, ops);
 }
 
-HSAKMTAPI int amdgpu_bo_query_info(amdgpu_bo_handle bo, struct amdgpu_bo_info* info) { return 0; }
-
-HSAKMTAPI int amdgpu_bo_set_metadata(amdgpu_bo_handle bo, struct amdgpu_bo_metadata* info) {
-  return 0;
-}
 
 HSAKMTAPI int drmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data,
                                   unsigned long size) {

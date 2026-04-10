@@ -317,4 +317,3 @@ int amdgpu_bo_va_op_impl(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, ui
 extern "C" HSAKMT_STATUS HSAKMTAPI DxgAbiCheck(HsaStructureSizes* actual  // IN
 );
 
-#endif

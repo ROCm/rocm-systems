@@ -181,22 +181,14 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
          * because it has small local memory
         */
         if (device->IsDgpu())
-          total_local_size = wsl::Max(device->LocalHeapSize(), total_local_size);
+          total_local_size = rocr::Max(device->LocalHeapSize(), total_local_size);
         else
-          total_local_size = wsl::Max(device->LocalHeapSize() + device->NonLocalHeapSize(), total_local_size);
+          total_local_size = rocr::Max(device->LocalHeapSize() + device->NonLocalHeapSize(), total_local_size);
     }
-    // For APU, use non local memory(shared GPU memory) as GPU memory,
-    // because it has small local memory
-    if (device->IsDgpu()) {
-        total_local_size += rocr::AlignUp(device->LocalHeapSize(), align) * 2;
-    } else {
-        total_local_size += rocr::AlignUp(
-            std::max(device->LocalHeapSize(), device->NonLocalHeapSize()), align) * 2;
-    }
-  }
-  local_heap_space_start_ = 0;
-  local_heap_space_size_ = total_local_size;
-  return ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align);
+    total_local_size = rocr::AlignUp(total_local_size, align) * 4;
+    local_heap_space_start_ = 0;
+    local_heap_space_size_ = total_local_size;
+    return ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align);
 }
 
 bool hsakmtRuntime::FreeSvmSpace(uint64_t &base, uint64_t &size) {

@@ -129,6 +129,8 @@ inline ErrorCode DestroyAllocation(
             const WinAllocationHandle *alloc_handles) {
 
   D3DKMT_DESTROYALLOCATION2 args{};
+
+  memset(&args, 0, sizeof(args));
   args.hDevice = device;
   if (resource) {
     args.hResource = resource;

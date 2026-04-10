@@ -493,57 +493,6 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
   return maxGroupsPerEngine * engines;
 }
 
-uint64_t ComputeQueue::CalcDispatchWavesPerGroup(hsa_kernel_dispatch_packet_t* packet,
-                                                 bool wave32) {
-  const uint32_t lanes_per_wave = wave32 ? 32 : 64;
-
-  const uint64_t lanes_per_group =
-      (uint64_t(packet->workgroup_size_x) * packet->workgroup_size_y) * packet->workgroup_size_z;
-
-  return (lanes_per_group + lanes_per_wave - 1) / lanes_per_wave;
-}
-
-bool ComputeQueue::UpdateScratch(hsa_kernel_dispatch_packet_t* packet, bool wave32) {
-  const uint32_t lanes_per_wave = wave32 ? 32 : 64;
-  const uint64_t size_per_thread =
-      rocr::AlignUp(packet->private_segment_size, scratch_mem_alignment_size_ / lanes_per_wave);
-
-  uint64_t groups = CalcDispatchGroups(packet);
-  uint64_t waves_per_group = CalcDispatchWavesPerGroup(packet, wave32);
-
-  // For packet batching, the maximum value must be used to fit all packets.
-  scratch_size_per_wave_ = std::max(size_per_thread * lanes_per_wave, scratch_size_per_wave_);
-  dispatch_waves_ = std::max(groups * waves_per_group, dispatch_waves_);
-
-  const uint64_t max_scratch_size = scratch_size_per_wave_ * max_scratch_waves_;
-  const uint64_t dispatch_size = scratch_size_per_wave_ * dispatch_waves_;
-
-  scratch_size_ = std::min(dispatch_size, max_scratch_size);
-
-  if (total_scratch_size_ >= scratch_size_) return true;
-
-  pr_debug("need realloc scratch buffer, size %x -> %x\n", scratch_size_, scratch_size);
-
-  GpuMemoryCreateInfo create_info{};
-  create_info.size = scratch_size_;
-  create_info.domain = Wkmi::kLocal;
-  GpuMemory* gpu_mem = nullptr;
-  auto code = device->CreateGpuMemory(create_info, &gpu_mem);
-  if (code != ErrorCode::Success) return false;
-
-  if (scratch_base_) {
-    auto scratch_gpu_mem = GpuMemory::Convert(scratch_mem_);
-    delete scratch_gpu_mem;
-  }
-
-  scratch_size_per_wave_ = scratch_size_per_wave;
-  scratch_size_ = scratch_size;
-  scratch_base_ = reinterpret_cast<void*>(gpu_mem->GpuAddress());
-  scratch_mem_ = gpu_mem->GetGpuMemoryHandle();
-
-  InitScratchSRD();
-  return true;
-}
 
 bool ComputeQueue::RelocateCmdbufScratchBase(uint64_t addr) {
   if (scratch_base_offset_array_.empty()) return true;
