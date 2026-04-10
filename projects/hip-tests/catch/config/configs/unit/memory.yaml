@@ -2250,3 +2250,7 @@ memory:
     <<: *level_2
   Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory: *level_2
   Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory: *level_2
+  Unit_hipMemPoolExportToShareableHandle_multiproc: *level_2
+  Unit_hipMemPoolExportToShareableHandle_multiproc_child:
+    <<: *level_2
+    disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]

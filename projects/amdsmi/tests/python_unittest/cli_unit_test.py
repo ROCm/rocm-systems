@@ -262,7 +262,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         elif "Set" in match_str:
                             if sub_arg == "%":  # arg --fan
                                 options.append(f"{items[item_index]} 50%")
-                                options.append(f"{items[item_index]} 150")
+                                options.append(f"{items[item_index]} 50")
                             elif sub_arg == "LEVEL":  # arg --perf-level
                                 for perf_level in self.perf_levels:
                                     options.append(f"{items[item_index]} {perf_level}")
@@ -1083,10 +1083,24 @@ class TestAmdSmiCli(unittest.TestCase):
         # Restore starting values
         cmds = []
         for index, gpu in enumerate(self.common.processors):
-            # set --fan defaults
+            # Validate max fan speed is sensible; gpu_od GPUs must report <= 100
+            fan_max = self.metric_data["gpu_data"][index]["fan"]["max"]
+            if fan_max != "N/A":
+                self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
+                # Detect gpu_od interface via sysfs for this GPU
+                gpu_bdf = self.list_data[index]["bdf"]
+                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
+                if has_gpu_od:
+                    self.assertLessEqual(
+                        fan_max, 100, f"GPU {index}: gpu_od max fan speed must be <= 100"
+                    )
+                else:
+                    self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
+
+            # reset --fans (works for both legacy hwmon and gpu_od interfaces)
             fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
             if fan_speed != "N/A":
-                cmds.append((f"amd-smi set --fan {fan_speed} --gpu {index}", self.PASS))
+                cmds.append((f"amd-smi reset --fans --gpu {index}", self.PASS))
 
             # set --perf-level defaults
             perf_level = self.metric_data["gpu_data"][index]["perf_level"]

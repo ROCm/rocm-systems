@@ -603,11 +603,20 @@ ValidateInput() {
   INPUT_COUNT=$1
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo 'Usage: ${0} argument1 argument2 argument3 [argument4]'
-    echo "  argument1 : path to the tester driver"
-    echo "  argument2 : test type to run, e.g put"
-    echo "  argument3 : directory to put the output logs"
-    echo "  argument4 : path to hostfile"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile]"
+    echo
+    echo "    <executable>  : path to the tester executable"
+    echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
+    echo "    <test_name>   : name of test to run, e.g. 'putnbi' or 'amo_fadd'"
+    echo "    <test_config> : quoted test configuration to run, in the format"
+    echo '                    "<test_name> <ranks> <workgroups> <threads> [max_msg_size]"'
+    echo '                    e.g. "putnbi 2 8 1024 65536" or "amo_fadd 2 1 64"'
+    echo "        <ranks>        : number of PEs/ranks to use for test"
+    echo "        <workgroups>   : number of workgroups per PE"
+    echo "        <threads>      : number of threads per workgroup"
+    echo "        [max_msg_size] : maximum message size to test"
+    echo "    <log_dir>     : path to output log directory"
+    echo "    [hostfile]    : path to hostfile"
     exit 1
   fi
 }
@@ -691,6 +700,16 @@ RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry
 ValidateInput $#
 ValidateLogDir $LOG_DIR
 
+# Print build info and environment variables before running tests
+ROCSHMEM_INFO="$(dirname "$APP")/rocshmem_info"
+if [ ! -x "$ROCSHMEM_INFO" ]; then
+  # builddir case
+  ROCSHMEM_INFO="$(dirname "$APP")/../../tools/rocshmem_info"
+fi
+if [ -x "$ROCSHMEM_INFO" ]; then
+  "$ROCSHMEM_INFO"
+fi
+
 case $TEST in
   "heatmaprma")
     TestHeatMapRMA
@@ -736,10 +755,25 @@ case $TEST in
     TestOther
     ;;
   *)
-    ##############################################################################
-    #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
-    ##############################################################################
-    ExecTest  $TEST              2       1            1         8
+    #######################################################################################
+    #        |   Name   |   Ranks   |   Workgroups   |   Threads   |   Max Message Size   #
+    #######################################################################################
+    # Allow passing in a test config as "<test_name> <ranks> <workgroups> <threads> [max_msg_size]"
+    # e.g. "putnbi 2 8 1024 65536" or "amo_fadd 2 1 64"
+    TEST_OPTS=($TEST)
+    NAME=${TEST_OPTS[0]}
+    if [ ${#TEST_OPTS[@]} -eq 4 ] || [ ${#TEST_OPTS[@]} -eq 5 ]; then
+      RANKS=${TEST_OPTS[1]}
+      WORKGROUPS=${TEST_OPTS[2]}
+      THREADS=${TEST_OPTS[3]}
+      MAX_MESSAGE_SIZE=${TEST_OPTS[4]}
+    else
+      RANKS=2
+      WORKGROUPS=1
+      THREADS=1
+      MAX_MESSAGE_SIZE=8
+    fi
+    ExecTest  "${NAME}"  "${RANKS}"  "${WORKGROUPS}"  "${THREADS}"  "${MAX_MESSAGE_SIZE}"
     ;;
 esac
 
