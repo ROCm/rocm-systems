@@ -248,6 +248,7 @@ AMDGPU code objects, the compiled GPU kernels embedded in host executables or
 distributed as standalone ``.hsaco`` files.  Prior releases had ``roc-obj-ls``,
 ``roc-obj-extract``, and ``roc-obj`` tools that have been deprecated in favor
 new functionality in existing llvm object tools, like ``llvm-objdump`` and ``llvm-readobj``.
+For more information, see `llvm-objdump - LLVM’s object file dumper <https://llvm.org/docs/CommandGuide/llvm-objdump.html>`__.
  
 The ``llvm-objdump`` utility provides multiple capabilities for analyzing GPU
 binaries. With the ``--offloading`` flag, it can list and extract information
