@@ -250,8 +250,10 @@ if(BUILD_TESTS)
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
-  # librccl.so which are only visible in Debug builds (hidden visibility in Release).
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+  # librccl.so which are only visible in Debug builds (hidden visibility in Release)
+  # or static builds.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND
+      (CMAKE_BUILD_TYPE MATCHES "Debug" OR NOT BUILD_SHARED_LIBS))
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixturesDebug)
 
     set(TEST_FIXTURE_DEBUG_SOURCE_FILES

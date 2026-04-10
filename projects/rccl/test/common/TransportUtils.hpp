@@ -12,7 +12,7 @@
 #include "TestBed.hpp"
 
 void dumpData(struct ncclConnect* data, int ndata);
-ncclResult_t bootstrapAllGather(void* bootstrap, void* data, int size) {
+inline ncclResult_t bootstrapAllGather(void* bootstrap, void* data, int size) {
   memcpy((char*)data + size, data, size); // Simulate copying rank 0 connect to rank 1
   return ncclSuccess;
 }
@@ -20,15 +20,15 @@ ncclResult_t bootstrapAllGather(void* bootstrap, void* data, int size) {
 namespace RcclUnitTesting
 {
 //Mock functions for CollNetRecvSetup and CollNetSendSetup
-ncclResult_t mockSetup(struct ncclComm* comm, struct ncclTopoGraph* graph,
-                       struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo,
-                       struct ncclConnect* connect, struct ncclConnector* connector,
-                       int channelId, int type) {
+inline ncclResult_t mockSetup(struct ncclComm* comm, struct ncclTopoGraph* graph,
+                              struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo,
+                              struct ncclConnect* connect, struct ncclConnector* connector,
+                              int channelId, int type) {
   memset(connect, 42, sizeof(struct ncclConnect)); // dummy data
   return ncclSuccess;
 }
 
-ncclResult_t mockConnect(struct ncclComm* comm, struct ncclConnect* connect,
+inline ncclResult_t mockConnect(struct ncclComm* comm, struct ncclConnect* connect,
                          int nranks, int rank, struct ncclConnector* connector) {
   memset(&connector->conn, 99, sizeof(connector->conn)); // dummy
   return ncclSuccess;
@@ -37,21 +37,15 @@ ncclResult_t mockConnect(struct ncclComm* comm, struct ncclConnect* connect,
 // Dummy bootstrap implementation for testing NcclTransportCollNetCheckTestSuccess and NcclTransportCollNetCheckTestFails
 struct ncclBootstrap {};
 
-ncclResult_t bootstrapIntraNodeAllGather(
-struct ncclBootstrap* bootstrap,
-int* localRankToRank,
-int localRank,
-int localRanks,
-int* data,
-size_t size
-) {
+inline ncclResult_t bootstrapIntraNodeAllGather(struct ncclBootstrap* bootstrap, int* localRankToRank, int localRank,
+                                                int localRanks, int* data, size_t size) {
   data[0] = 0; // Rank 0 is fine
   data[1] = 1; // Rank 1 reports failure
   return ncclSuccess;
 }
 
 //Helper function for capturing the output for DumpDataTest
-std::string captureStdout(std::function<void()> func) {
+inline std::string captureStdout(std::function<void()> func) {
   int pipefd[2];
   pipe(pipefd);
 
