@@ -98,6 +98,8 @@ GPU_TARGETS_FLAGS = $(foreach target,$(GPU_TARGETS),"--offload-arch=$(target)")
 ifneq ($(NCCL_HOME), "")
 HIPCUFLAGS += -I$(NCCL_HOME)/ -I$(NCCL_HOME)/include
 HIPLDFLAGS += -Wl,-rpath,$(NCCL_HOME) -L$(NCCL_HOME) -L$(NCCL_HOME)/lib
+# librccl.so normally lists rocm_smi as NEEDED; static rccl_dlink.o does not — link rsmi explicitly.
+HIPLDFLAGS += -L$(ROCM_PATH)/rocm_smi/lib -Wl,-rpath,$(ROCM_PATH)/rocm_smi/lib -lrocm_smi64
 endif
 
 HIPCUFLAGS += -I$(ROCM_PATH)/include
@@ -137,7 +139,13 @@ ifeq ($(ENABLE_DEVICE_API), 1)
 HIPCUFLAGS += -DENABLE_DEVICE_API
 endif
 
+# With NCCL_HOME + librccl.a, perf binaries link rccl_dlink.o (devlinked objects from the
+# archive). Passing -lrccl as well resolves librccl.a a second time and duplicates symbols.
+ifneq ($(NCCL_HOME), "")
+LIBRARIES += dl
+else
 LIBRARIES += rccl dl
+endif
 HIPLDFLAGS += $(LIBRARIES:%=-l%)
 
 DST_DIR := $(BUILDDIR)
@@ -205,7 +213,12 @@ ${DST_DIR}/rccl_dlink.o: $(NCCL_STATIC_LIB)
 	@printf "DevLink librccl.a -> %s\n" $@
 	@mkdir -p $(RCCL_OBJS_DIR)
 	cd $(RCCL_OBJS_DIR) && ar x $(abspath $(NCCL_STATIC_LIB))
-	rm -f $(RCCL_OBJS_DIR)/client.cc.o
+	# src/ras/client.cc defines main (RCCL RAS tool); archive members are client-<hash>.o not client.cc.o
+	rm -f $(RCCL_OBJS_DIR)/client-*.o $(RCCL_OBJS_DIR)/client.cc.o
+	@cd $(RCCL_OBJS_DIR) && \
+	  if ls net_ib_rocm-*.o >/dev/null 2>&1; then \
+	    ls -1 net_ib_rocm-*.o | sort | tail -n +2 | xargs -r rm -f; \
+	  fi
 	$(HIPCC) $(GPU_TARGETS_FLAGS) -fgpu-rdc --hip-link --rtlib=compiler-rt -unwindlib=libgcc -r -nostdlib -o $@ $(RCCL_OBJS_DIR)/*.o
 
 ifeq ($(DSO), 1)
