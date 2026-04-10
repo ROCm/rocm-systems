@@ -173,8 +173,12 @@ class Team {
    * when MPI assigns non-contiguous ranks to a node).
    *
    * When non-null, get_pe_in_world() and get_pe_in_my_team() use this
-   * table instead of the pe_start/stride formula.
-   * Allocated with hipMalloc; length == num_pes.
+   * table instead of the pe_start/stride formula. Length == num_pes.
+   *
+   * Ownership is external. In the current TEAM_SHARED setup this
+   * aliases IPC-managed storage (ipcImpl.pes_with_ipc_avail), so
+   * Team must not free it. Backend teardown code must set this to
+   * nullptr before destroying the Team to avoid dangling references.
    */
   int* pe_world_map_{nullptr};
 
