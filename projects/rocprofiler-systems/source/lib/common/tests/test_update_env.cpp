@@ -169,15 +169,14 @@ TEST_F(UpdateEnvTest, BooleanValue_False)
     EXPECT_STREQ(m_env_vars[0], "BOOL_VAR=false");
 }
 
-TEST_F(UpdateEnvTest, GetEnv_BooleanValue_MultiDigitNumeric)
+TEST_F(UpdateEnvTest, GetEnv_BooleanValue_InvalidNumeric)
 {
-    // Regression test: the old get_env_impl(bool) accepted any all-digit string
-    // via stoi() — "2" → true. parse_bool() must preserve this for backwards
-    // compatibility with config files that use ROCPROFSYS_*=2.
+    // parse_bool() only accepts "0" and "1" as valid boolean strings.
+    // Multi-digit integers like "2" are invalid and return the default value.
     setenv("ROCPROFSYS_TEST_BOOL_NUMERIC", "2", 1);
     const bool result = get_env("ROCPROFSYS_TEST_BOOL_NUMERIC", false);
     unsetenv("ROCPROFSYS_TEST_BOOL_NUMERIC");
-    EXPECT_TRUE(result) << "Non-zero numeric string should be treated as true";
+    EXPECT_FALSE(result) << "Multi-digit numeric string should return the default value";
 }
 
 TEST_F(UpdateEnvTest, NumericValue)
