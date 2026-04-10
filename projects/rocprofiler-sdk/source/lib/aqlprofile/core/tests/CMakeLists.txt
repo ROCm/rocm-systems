@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16.0)
 project(aqlprofile-sdk-tests)
 
 include(GoogleTest)
-find_package(GTest QUIET)
+find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
 if(NOT DEFINED AQLPROFILE_TARGET)
@@ -18,6 +18,7 @@ endif()
 add_executable(gfx9-memory-manager-test)
 set(AQLPROFILE_MEMORYMANAGER_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/memorymanager_tests.cpp
                                      ${CMAKE_CURRENT_SOURCE_DIR}/../memorymanager.cpp)
+
 target_sources(gfx9-memory-manager-test PRIVATE ${AQLPROFILE_MEMORYMANAGER_SOURCES})
 target_include_directories(
     gfx9-memory-manager-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR}
@@ -25,35 +26,41 @@ target_include_directories(
 target_link_libraries(
     gfx9-memory-manager-test
     PUBLIC aqlprofile::headers
-    PRIVATE $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
-            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}> GTest::gtest GTest::gtest_main)
-gtest_discover_tests(
-    gfx9-memory-manager-test DISCOVERY_MODE PRE_TEST
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PROPERTIES
-    TIMEOUT 45 LABELS "unittests")
+    PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main)
+
+gtest_add_tests(
+    TARGET gfx9-memory-manager-test
+    SOURCES ${AQLPROFILE_MEMORYMANAGER_SOURCES}
+    TEST_LIST gfx9-memory-manager_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(
+    ${gfx9-memory-manager_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
 # Add test for aql profile
 add_executable(aqlprofile-test)
 set(AQLPROFILE_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/aql_profile_tests.cpp)
+
 target_sources(aqlprofile-test PRIVATE ${AQLPROFILE_TEST_SOURCES})
 target_include_directories(aqlprofile-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR}
                                                    ${LIB_DIR}/core/include)
 target_link_libraries(
     aqlprofile-test
-    PRIVATE aqlprofile::aqlprofile-lib
-            $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
-            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
-            GTest::gtest
-            GTest::gtest_main
-            GTest::gmock
-            GTest::gmock_main
-            ${CMAKE_DL_LIBS})
-gtest_discover_tests(
-    aqlprofile-test DISCOVERY_MODE PRE_TEST
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PROPERTIES
-    TIMEOUT 45 LABELS "unittests")
+    PRIVATE aqlprofile::aqlprofile-lib hsa-runtime64::hsa-runtime64 GTest::gtest
+            GTest::gtest_main GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
+
+gtest_add_tests(
+    TARGET aqlprofile-test
+    SOURCES ${AQLPROFILE_TEST_SOURCES}
+    TEST_LIST aqlprofile-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(
+    ${aqlprofile-test_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
 # Add tests for command buffer
 add_executable(command-buffer-test)
@@ -67,14 +74,18 @@ target_include_directories(
 target_link_libraries(
     command-buffer-test
     PUBLIC aqlprofile::headers
-    PRIVATE $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
-            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}> GTest::gtest GTest::gtest_main
-            GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
-gtest_discover_tests(
-    command-buffer-test DISCOVERY_MODE PRE_TEST
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PROPERTIES
-    TIMEOUT 45 LABELS "unittests")
+    PRIVATE hsa-runtime64::hsa-runtime64 GTest::gtest GTest::gtest_main GTest::gmock
+            GTest::gmock_main ${CMAKE_DL_LIBS})
+
+gtest_add_tests(
+    TARGET command-buffer-test
+    SOURCES ${AQLPROFILE_COMMAND_BUFFER_SOURCES}
+    TEST_LIST command-buffer-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${command-buffer-test_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
 # Add tests for counters
 add_executable(counters-test)
@@ -86,14 +97,17 @@ target_include_directories(
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     counters-test
-    PRIVATE $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
-            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}> ${AQLPROFILE_TARGET} GTest::gtest
+    PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET} GTest::gtest
             GTest::gtest_main GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
-gtest_discover_tests(
-    counters-test DISCOVERY_MODE PRE_TEST
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PROPERTIES
-    TIMEOUT 45 LABELS "unittests")
+gtest_add_tests(
+    TARGET counters-test
+    SOURCES ${AQLPROFILE_COUNTERS_SOURCES}
+    TEST_LIST counters-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${counters-test_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
 # Add tests for pm4 factory
 add_executable(pm4-factory-test)
@@ -104,19 +118,18 @@ target_include_directories(pm4-factory-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                                     ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     pm4-factory-test
-    PRIVATE aqlprofile::aqlprofile-lib
-            $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
-            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
-            GTest::gtest
-            GTest::gtest_main
-            GTest::gmock
-            GTest::gmock_main
-            ${CMAKE_DL_LIBS})
-gtest_discover_tests(
-    pm4-factory-test DISCOVERY_MODE PRE_TEST
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PROPERTIES
-    TIMEOUT 45 LABELS "unittests")
+    PRIVATE aqlprofile::aqlprofile-lib hsa-runtime64::hsa-runtime64 GTest::gtest
+            GTest::gtest_main GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
+
+gtest_add_tests(
+    TARGET pm4-factory-test
+    SOURCES ${AQLPROFILE_PM4_FACTORY_SOURCES}
+    TEST_LIST pm4-factory-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${pm4-factory-test_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
 # Add tests for logger
 add_executable(logger-test)
@@ -126,11 +139,16 @@ target_include_directories(logger-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB
                                                ${LIB_DIR}/core/include)
 target_link_libraries(logger-test PRIVATE GTest::gtest GTest::gtest_main GTest::gmock
                                           GTest::gmock_main ${CMAKE_DL_LIBS})
-gtest_discover_tests(
-    logger-test DISCOVERY_MODE PRE_TEST
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PROPERTIES
-    TIMEOUT 45 LABELS "unittests")
+
+gtest_add_tests(
+    TARGET logger-test
+    SOURCES ${AQLPROFILE_LOGGER_SOURCES}
+    TEST_LIST logger-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(
+    ${logger-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                    "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
 # Add tests for aql profile v2 header
 add_executable(aql-profile-v2-test)
@@ -158,16 +176,16 @@ target_include_directories(aql-profile-v2-test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
                                                        ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     aql-profile-v2-test
-    PRIVATE aqlprofile::aqlprofile-lib
-            $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
-            $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
-            GTest::gtest
-            GTest::gtest_main
-            GTest::gmock
-            GTest::gmock_main
-            ${CMAKE_DL_LIBS})
-gtest_discover_tests(
-    aql-profile-v2-test DISCOVERY_MODE PRE_TEST
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    PROPERTIES
-    TIMEOUT 45 LABELS "unittests")
+    PRIVATE aqlprofile::aqlprofile-lib hsa-runtime64::hsa-runtime64 GTest::gtest
+            GTest::gtest_main GTest::gmock GTest::gmock_main ${CMAKE_DL_LIBS})
+
+gtest_add_tests(
+    TARGET aql-profile-v2-test
+    SOURCES ${AQLPROFILE_V2_SOURCES}
+    TEST_LIST aql-profile-v2-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(
+    ${aql-profile-v2-test_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
