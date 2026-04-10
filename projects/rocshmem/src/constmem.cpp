@@ -1,7 +1,10 @@
 #include "constmem.hpp"
+#include "backend_bc.hpp"
 #include "envvar.hpp"
 
 namespace rocshmem {
+
+extern Backend *backend;
 
 void init_constant_memory(void) {
   std::string envstr;
@@ -16,6 +19,13 @@ void init_constant_memory(void) {
   } else {
     constmem_values.alltoall_wg_algo = gda::ALLTOALLV_WG_ALGO_COPY;
   }
+
+  constmem_values.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
+  constmem_values.ipc_stride = backend->ipcImpl.ipc_stride;
+  // ipc_shm_size == 0 means IPC disabled (fast early return on device).
+  // Non-zero when IPC is available, regardless of stride pattern.
+  constmem_values.ipc_shm_size = (backend->ipcImpl.pes_with_ipc_avail != nullptr)
+                                 ? backend->ipcImpl.shm_size : 0;
 
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &constmem_values, sizeof(constmem_t)));
 }

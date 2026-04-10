@@ -160,6 +160,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
     if (use_pod_detection) {
       // In pod detection path, ipc_ranks already contains global ranks
+      ipcDetectPattern(ipc_ranks.data(), shm_size);
       CHECK_HIP(hipMemcpy(pes_with_ipc_avail, ipc_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
     } else {
       // In fallback path, need to translate from shmcomm ranks to thread_comm ranks
@@ -173,6 +174,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
       for(int i = 0; i < shm_size; i++)
         seqranks[i] = i;
       mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp, host_pes_with_ipc_avail);
+      ipcDetectPattern(host_pes_with_ipc_avail, shm_size);
       CHECK_HIP(hipMemcpy(pes_with_ipc_avail, host_pes_with_ipc_avail, shm_size * sizeof(int), hipMemcpyHostToDevice));
       // since we delete host_pes_with_ipc_avail, want to make sure the data transfer is complete
       CHECK_HIP(hipStreamSynchronize(0));
@@ -262,6 +264,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   auto disable_ipc = envvar::disable_mixed_ipc || envvar::ro::disable_ipc || envvar::disable_ipc;
   if (!disable_ipc) {
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
+    ipcDetectPattern(shm_ranks.data(), shm_size);
     CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
   }
 }

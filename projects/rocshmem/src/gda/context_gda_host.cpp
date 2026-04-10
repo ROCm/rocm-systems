@@ -57,6 +57,9 @@ __host__ GDAHostContext::GDAHostContext(Backend *backend,
   ipcImpl_.ipc_bases = ipc_bases;
   ipcImpl_.shm_size = backend->ipcImpl.shm_size;
   ipcImpl_.shm_rank = backend->ipcImpl.shm_rank;
+  ipcImpl_.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
+  ipcImpl_.ipc_stride = backend->ipcImpl.ipc_stride;
+
 }
 
 __host__ GDAHostContext::~GDAHostContext() {
