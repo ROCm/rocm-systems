@@ -37,6 +37,7 @@
  */
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "constmem.hpp"
 
 namespace rocshmem {
 
@@ -58,7 +59,7 @@ namespace rocshmem {
  */
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 #define DISPATCH(Func)                     \
-  switch(this->btype) {                    \
+  switch(constmem.backend_type) {                 \
   case BackendType::GDA_BACKEND:           \
     static_cast<GDAContext *>(this)->Func; \
     break;                                 \
@@ -86,10 +87,10 @@ namespace rocshmem {
  */
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 #define DISPATCH_RET(Func)                                \
-  if (this->btype == BackendType::GDA_BACKEND) {          \
+  if (constmem.backend_type == BackendType::GDA_BACKEND) {       \
     auto ret1 = static_cast<GDAContext *>(this)->Func;    \
     return ret1;                                          \
-  } else if(this->btype == BackendType::RO_BACKEND) {     \
+  } else if(constmem.backend_type == BackendType::RO_BACKEND) {   \
     auto ret2 = static_cast<ROContext *>(this)->Func;     \
     return ret2;                                          \
   } else {                                                \
@@ -116,7 +117,7 @@ namespace rocshmem {
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 #define DISPATCH_RET_PTR(Func)                       \
   void *ret_val{nullptr};                            \
-  switch(this->btype) {                              \
+  switch(constmem.backend_type) {                           \
   case BackendType::GDA_BACKEND:                     \
     ret_val = static_cast<GDAContext *>(this)->Func; \
     break;                                           \

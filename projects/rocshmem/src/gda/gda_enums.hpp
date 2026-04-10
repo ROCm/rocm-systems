@@ -25,8 +25,6 @@
 #ifndef LIBRARY_SRC_GDA_ENUMS_HPP_
 #define LIBRARY_SRC_GDA_ENUMS_HPP_
 
-#include "team.hpp"
-
 namespace rocshmem {
 namespace gda {
   enum alltoallv_wg_algos {

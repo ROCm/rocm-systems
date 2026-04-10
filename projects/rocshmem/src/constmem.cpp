@@ -27,6 +27,8 @@ void init_constant_memory(void) {
   constmem_values.ipc_shm_size = (backend->ipcImpl.pes_with_ipc_avail != nullptr)
                                  ? backend->ipcImpl.shm_size : 0;
 
+  constmem_values.backend_type = backend->get_type();
+
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &constmem_values, sizeof(constmem_t)));
 }
 
