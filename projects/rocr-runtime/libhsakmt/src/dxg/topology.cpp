@@ -415,24 +415,7 @@ HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
   if (!dxg_topology->g_system || dxg_topology->g_props.empty() || NodeId >= dxg_topology->g_system->NumNodes)
     return HSAKMT_STATUS_ERROR;
 
-  // Copy only as many bytes as ROCr's HsaNodeProperties buffer can hold.
-  // If DxgAbiCheck has not run yet (rocr_node_props_size == 0) we fall back
-  // to a full struct copy (old behaviour, same as before this change).
-  //
-  // - ROCr older than us  → rocr_node_props_size < sizeof(HsaNodeProperties)
-  //   Only the base fields are written; new fields (WallClockKHz etc.) are
-  //   not touched, avoiding a buffer overrun.
-  //
-  // - ROCr same / newer   → rocr_node_props_size >= sizeof(HsaNodeProperties)
-  //   All fields including the extended ones are filled in.
-  size_t copySize;
-  if (dxg_runtime->detected_abi_.SizeOfHsaNodeProperties > 0)
-    copySize = std::min((size_t)dxg_runtime->detected_abi_.SizeOfHsaNodeProperties,
-                        sizeof(HsaNodeProperties));
-  else
-    copySize = 368;
-
-  memcpy(NodeProperties, &dxg_topology->g_props[NodeId].node, copySize);
+  *NodeProperties = dxg_topology->g_props[NodeId].node;
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -471,22 +454,6 @@ out:
 
   return err;
 }
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
-  if (!Frequency)
-    return HSAKMT_STATUS_INVALID_PARAMETER;
-
-  CHECK_DXG_OPEN();
-
-  wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
-  if (device_ == nullptr)
-    return HSAKMT_STATUS_INVALID_NODE_UNIT;
-
-  *Frequency = device_->GPUCounterFrequency();
-  return HSAKMT_STATUS_SUCCESS;
-}
-
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
@@ -605,6 +572,24 @@ hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId, HSAuint32 NumIoLinks,
 
 out:
   return err;
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
+  CHECK_DXG_OPEN();
+
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
+
+  if (!Frequency)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  if (!dxg_topology->g_system || NodeId >= dxg_topology->g_system->NumNodes)
+    return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  HsaNodeProperties *NodeProperties = &(dxg_topology->g_props[NodeId].node);
+  *Frequency = NodeProperties->WallClockKHz * 1000ull;
+
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
