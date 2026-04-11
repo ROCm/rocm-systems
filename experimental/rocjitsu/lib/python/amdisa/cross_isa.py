@@ -119,9 +119,26 @@ class CrossIsaAnalyzer:
         inst_map: dict[str, list[tuple[str, InstEncoding, Instruction, InstructionSemantics | None]]] = {}
         for isa_name, spec, sem_spec in specs:
             for enc in spec.inst_encodings:
-                if enc.is_alt:
+                if not enc.insts:
                     continue
-                for inst in enc.insts:
+                # Skip alt encodings — their instructions are classified
+                # under the parent encoding for cross-ISA comparison.
+                if spec.profile.is_alt_encoding(enc.enc_name):
+                    continue
+                # Collect instructions from this encoding plus any child
+                # alt encodings whose instructions reside in the parent's
+                # file.
+                all_insts = list(enc.insts)
+                for child_enc in spec.inst_encodings:
+                    if (
+                        child_enc.insts
+                        and spec.profile.is_alt_encoding(child_enc.enc_name)
+                        and spec.profile.derive_parent_enc_name(
+                            child_enc.enc_name
+                        ) == enc.enc_name
+                    ):
+                        all_insts.extend(child_enc.insts)
+                for inst in all_insts:
                     sem = sem_spec.instructions.get(inst.name) if sem_spec else None
                     inst_map.setdefault(inst.mnemonic, []).append(
                         (isa_name, enc, inst, sem)
