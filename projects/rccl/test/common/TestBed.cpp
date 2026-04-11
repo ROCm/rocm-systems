@@ -596,36 +596,32 @@ namespace RcclUnitTesting
 
   void TestBed::GetSupportedRedOps(std::vector<ncclRedOp_t>& redOps, const std::vector<ncclRedOp_t>& testRedOps)
   {
-    // Filter out any unsupported reduction ops, in case only subset has been compiled for
+    // If UT_REDOPS is unset, no filtering — pass all test-specified ops through.
     auto& supportedOps = ev.GetAllSupportedRedOps();
-    for (auto redop : testRedOps)
+    if (supportedOps.empty())
     {
-      for (int i = 0; i < supportedOps.size(); ++i)
-      {
-        if (supportedOps[i] == redop)
-        {
-          redOps.push_back(redop);
-          break;
-        }
-      }
+      redOps = testRedOps;
+      return;
     }
+    // Otherwise filter to the intersection with the UT_REDOPS override list.
+    for (auto redop : testRedOps)
+      for (auto supported : supportedOps)
+        if (supported == redop) { redOps.push_back(redop); break; }
   }
 
   void TestBed::GetSupportedDataTypes(std::vector<ncclDataType_t>& dataTypes, const std::vector<ncclDataType_t>& testDataTypes)
   {
-    // Filter out any unsupported datatypes, in case only subset has been compiled for
+    // If UT_DATATYPES is unset, no filtering — pass all test-specified types through.
     auto& supportedDataTypes = ev.GetAllSupportedDataTypes();
-    for (auto dt : testDataTypes)
+    if (supportedDataTypes.empty())
     {
-      for (int i = 0; i < supportedDataTypes.size(); ++i)
-      {
-        if (supportedDataTypes[i] == dt)
-        {
-          dataTypes.push_back(dt);
-          break;
-        }
-      }
+      dataTypes = testDataTypes;
+      return;
     }
+    // Otherwise filter to the intersection with the UT_DATATYPES override list.
+    for (auto dt : testDataTypes)
+      for (auto supported : supportedDataTypes)
+        if (supported == dt) { dataTypes.push_back(dt); break; }
   }
 
   std::vector<int> const TestBed::GetNumCollsPerGroup(int numCollectivesInGroup,

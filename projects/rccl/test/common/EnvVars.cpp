@@ -259,28 +259,52 @@ namespace RcclUnitTesting
     onlyPow2Gpus   = GetEnvVar("UT_POW2_GPUS"   , isCpxMode); // Default value set based on whether system is in CPX mode. UT_POW2_GPUS set by user overrides it.
 
     std::vector<std::string> redOpStrings = GetEnvVarsList("UT_REDOPS");
-    for (auto s : redOpStrings)
+    if (std::find(redOpStrings.begin(), redOpStrings.end(), "all") != redOpStrings.end())
     {
-      for (int i = 0; i < numOps; ++i)
+      for (int i = 0; i < numOps; i++)
+        redOps.push_back((ncclRedOp_t)i);
+    }
+    else
+    {
+      for (auto s : redOpStrings)
       {
-        if (!strcmp(s.c_str(), ncclRedOpNames[i]))
+        bool found = false;
+        for (int i = 0; i < numOps; ++i)
         {
-          redOps.push_back((ncclRedOp_t)i);
-          break;
+          if (!strcmp(s.c_str(), ncclRedOpNames[i]))
+          {
+            redOps.push_back((ncclRedOp_t)i);
+            found = true;
+            break;
+          }
         }
+        if (!found)
+          TEST_WARN("UT_REDOPS: unrecognized value '%s' (ignored)", s.c_str());
       }
     }
 
     // Limit number of supported datatypes if only allReduce is built
     std::vector<std::string> dtStrings = GetEnvVarsList("UT_DATATYPES");
-    for (auto s : dtStrings)
+    if (std::find(dtStrings.begin(), dtStrings.end(), "all") != dtStrings.end())
     {
       for (int i = 0; i < ncclNumTypes; ++i)
+        dataTypes.push_back((ncclDataType_t)i);
+    }
+    else
+    {
+      for (auto s : dtStrings)
       {
-        if (!strcmp(s.c_str(), ncclDataTypeNames[i]))
+        bool found = false;
+        for (int i = 0; i < ncclNumTypes; ++i)
         {
-          dataTypes.push_back((ncclDataType_t)i);
+          if (!strcmp(s.c_str(), ncclDataTypeNames[i]))
+          {
+            dataTypes.push_back((ncclDataType_t)i);
+            found = true;
+          }
         }
+        if (!found)
+          TEST_WARN("UT_DATATYPES: unrecognized value '%s' (ignored)", s.c_str());
       }
     }
 
@@ -379,8 +403,8 @@ namespace RcclUnitTesting
         std::make_tuple("UT_POW2_GPUS"        , onlyPow2Gpus  , "Only allow power-of-2 # of GPUs"),
         std::make_tuple("UT_PROCESS_MASK"     , processMask   , "Whether to run single/multi process"),
         std::make_tuple("UT_VERBOSE"          , verbose       , "Show verbose unit test output"),
-        std::make_tuple("UT_REDOPS"           , -1            , "List of reduction ops to test"),
-        std::make_tuple("UT_DATATYPES"        , -1            , "List of datatypes to test"),
+        std::make_tuple("UT_REDOPS"           , -1            , "List of reduction ops to test (or 'all')"),
+        std::make_tuple("UT_DATATYPES"        , -1            , "List of datatypes to test (or 'all')"),
         std::make_tuple("UT_ELEMENTS"         , -1            , "Override element counts for all tests"),
         std::make_tuple("UT_MAX_RANKS_PER_GPU", maxRanksPerGpu, "Maximum number of ranks using the same GPU"),
         std::make_tuple("UT_PRINT_VALUES"     , printValues   , "Print array values (-1 for all)"),
