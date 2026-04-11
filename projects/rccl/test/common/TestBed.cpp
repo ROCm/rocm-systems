@@ -700,12 +700,13 @@ namespace RcclUnitTesting
                                std::vector<bool>           const& inPlaceList,
                                std::vector<bool>           const& managedMemList,
                                std::vector<bool>           const& useHipGraphList,
-                               bool                        const& enableSweep)
+                               bool                        const& enableSweep,
+                               OptionalColArgs             const& options)
   {
     // Sort numElements in descending order to cut down on # of allocations
     std::vector<int> sortedN = numElements;
     std::sort(sortedN.rbegin(), sortedN.rend());
-    OptionalColArgs optionalArgs;
+    OptionalColArgs optionalArgs = options;
     std::vector<ncclDataType_t> dataTypes;
     this->GetSupportedDataTypes(dataTypes, tmpDataTypes);
     if (dataTypes.empty()) {
@@ -797,6 +798,7 @@ namespace RcclUnitTesting
             // There are some cases when data does not need to be re-prepared
             // e.g. AllReduce subarray expected results are still valid
             bool canSkip = (neIdx != 0 && !inPlaceList[ipIdx] &&
+                            !optionalArgs.useBias &&
                             (funcTypes[ftIdx] == ncclCollBroadcast ||
                              funcTypes[ftIdx] == ncclCollReduce    ||
                              funcTypes[ftIdx] == ncclCollAllReduce));
