@@ -11,7 +11,7 @@ Panel Config:
         value: Value
       metric:
         Wavefront Occupancy:
-          value: ROUND(SUM(SQ_ACCUM_PREV_HIRES) / SUM(($GRBM_GUI_ACTIVE_PER_XCD) * ($numActiveCUs)),
+          value: ROUND(SUM(SQ_ACCUM_PREV_HIRES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs),
             0)
           coll_level: SQ_LEVEL_WAVES
         Wave Life:
