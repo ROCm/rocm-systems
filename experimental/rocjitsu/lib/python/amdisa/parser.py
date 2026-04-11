@@ -459,20 +459,21 @@ class Parser:
         return ucode_fields, enc_field_bit_cnt, op_field_bit_cnt, opm_field_bit_cnt
 
     def parse_encoding_identifers(
-        self, enc_node: elem_tree.Element, inst_enc: InstEncoding
+        self, enc_node: elem_tree.Element, inst_enc: InstEncoding,
+        parent_enc: InstEncoding | None = None,
     ) -> None:
         """Parse encoding identifier masks to populate the primary decode table.
 
-        For alternate encodings, this method also derives two behavioral
-        properties from the XML data:
+        Each encoding builds its own ``primary_dt_ptrs`` array independently.
+        When an alternate encoding shares a primary table slot with its
+        parent (same ``encoding`` field value), it reuses the parent's
+        decode table entries and writes its opcodes into the shared
+        sub-decode array.
 
-        * **primary decode**: If every encoding identifier value already
-          exists in the primary table (placed by the parent encoding),
-          the alternate reuses those entries and is marked as a
-          primary-decode alternate.
-        * **unique ops**: If the alternate's opcode values do not collide
-          with the parent's, it has unique opcodes and gets its own
-          entries in the sub-decode table.
+        Args:
+            enc_node: XML element for the encoding.
+            inst_enc: The InstEncoding object being populated.
+            parent_enc: Parent encoding if this is an alternate, else None.
         """
         max_enc_bits = self.profile.max_enc_bits
         enc_ids_node = xs.get_node(enc_node, xs.ENCODING_IDENTIFERS)
@@ -493,17 +494,11 @@ class Parser:
         )
         max_num_opcodes = pow(2, effective_op_bits)
         sub_decode_funcs = ['decodeInvalid'] * max_num_opcodes
-        primary_dt_ptrs = None
         dt = self.isa_spec.primary_decode_table
 
-        if inst_enc.is_alt:
-            primary_dt_ptrs = inst_enc.parent_enc.primary_dt_ptrs
-        else:
-            inst_enc.primary_dt_ptrs = [-1] * max_num_opcodes
-            primary_dt_ptrs = inst_enc.primary_dt_ptrs
+        inst_enc.primary_dt_ptrs = [-1] * max_num_opcodes
+        primary_dt_ptrs = inst_enc.primary_dt_ptrs
 
-        all_primary_slots_exist = True
-        has_unique_opcode = False
         deferred_entries: list[int] = []
 
         for enc_id in enc_ids_node:
@@ -516,29 +511,33 @@ class Parser:
                 << dont_care_bits
             )
             if dt[enc_val]:
-                if inst_enc.is_alt:
-                    if not inst_enc.parent_enc.is_primary_decode:
+                if parent_enc is not None:
+                    if not parent_enc.is_primary_decode:
                         inst_enc.is_primary_decode = False
                 else:
                     inst_enc.is_primary_decode = False
                     if dt[enc_val].is_primary:
                         dt[enc_val].is_primary = False
                         dt[enc_val].sub_decode_funcs = sub_decode_funcs
+                    parent_name = (
+                        self.profile.derive_parent_enc_name(inst_enc.enc_name)
+                        if self.profile.is_alt_encoding(inst_enc.enc_name)
+                        else None
+                    )
                     if (
                         dt[enc_val].enc.enc_name != inst_enc.enc_name
-                        and dt[enc_val].enc.enc_name
-                        != inst_enc.parent_enc.enc_name
+                        and (parent_name is None
+                             or dt[enc_val].enc.enc_name != parent_name)
                     ):
                         raise ValueError(
                             f'Double-mapped encoding in primary decode table: '
                             f'{inst_enc.enc_name} conflicts with '
                             f'{dt[enc_val].enc.enc_name} at index {enc_val}'
                         )
-            elif inst_enc.is_alt:
+            elif parent_enc is not None:
                 # Primary table slot doesn't exist yet. Defer creation
                 # until we know whether this alternate has unique opcodes
                 # (only unique-ops alternates need new primary entries).
-                all_primary_slots_exist = False
                 deferred_entries.append(enc_val)
             else:
                 dt[enc_val] = DecodeTableEntry(
@@ -551,7 +550,7 @@ class Parser:
                     enc_id_text[op_mask[0] : op_mask[1]], enc_id_radix
                 )
             if primary_dt_ptrs[opcode] != -1:
-                if inst_enc.is_alt:
+                if parent_enc is not None:
                     continue
                 if primary_dt_ptrs[opcode] == enc_val:
                     continue
@@ -559,7 +558,6 @@ class Parser:
                     f'Double-mapped opcode {opcode} in {inst_enc.enc_name}: '
                     f'slot already occupied'
                 )
-            has_unique_opcode = True
             primary_dt_ptrs[opcode] = enc_val
 
         # When an opm (opcode modification) field is present, the encoding
@@ -574,20 +572,26 @@ class Parser:
                     if primary_dt_ptrs[op] != -1:
                         primary_dt_ptrs[op + offset] = primary_dt_ptrs[op]
 
-        if inst_enc.is_alt:
-            inst_enc.has_unique_ops = has_unique_opcode
-            if inst_enc.has_unique_ops:
-                self.isa_spec.alt_encs_with_unique_ops.add(inst_enc.enc_name)
-                # Find an existing parent entry to copy sub-decode state from.
+        if parent_enc is not None:
+            # Alternate encoding with unique opcodes: fill deferred primary
+            # table entries by copying state from an existing parent entry.
+            has_unique_opcode = any(
+                v != -1 and (
+                    parent_enc.primary_dt_ptrs is None
+                    or parent_enc.primary_dt_ptrs[i] == -1
+                )
+                for i, v in enumerate(primary_dt_ptrs)
+            )
+            if has_unique_opcode:
                 parent_entry = next(
-                    (dt[v] for v in inst_enc.parent_enc.primary_dt_ptrs
+                    (dt[v] for v in parent_enc.primary_dt_ptrs
                      if v != -1 and dt[v] is not None),
                     None,
                 )
                 for enc_val in deferred_entries:
                     if dt[enc_val] is None:
                         new_entry = DecodeTableEntry(
-                            inst_enc.parent_enc, pow(2, dont_care_bits)
+                            parent_enc, pow(2, dont_care_bits)
                         )
                         if parent_entry is not None:
                             new_entry.is_primary = parent_entry.is_primary
@@ -599,10 +603,8 @@ class Parser:
                                 parent_entry.sub_decode_funcs
                             )
                         dt[enc_val] = new_entry
-            if all_primary_slots_exist:
-                self.isa_spec.alt_encs_primary_decode.add(inst_enc.enc_name)
 
-        if not inst_enc.is_primary_decode and not inst_enc.is_alt:
+        if not inst_enc.is_primary_decode and parent_enc is None:
             for i in primary_dt_ptrs:
                 if i != -1:
                     dte = dt[i]
@@ -625,11 +627,12 @@ class Parser:
 
         1. Parse microcode bitmap and encoding conditions.
         2. Determine if the encoding is alternate using the ISA profile.
-        3. For alternates: link to parent, propagate conditions, and detect
+        3. For alternates: propagate conditions to parent and detect
            implied-literal status from the encoding conditions.
-        4. Parse encoding identifiers for all primary encodings and all
-           alternate encodings (the identifier parser derives whether the
-           alternate has unique opcodes or shares the parent's decode).
+        4. Parse encoding identifiers. Each encoding builds its own
+           ``primary_dt_ptrs`` independently. Alternates that share
+           a primary decode table slot with their parent write into
+           the shared sub-decode array.
         """
         for enc_node in self.encodings_node:
             enc_name_node = xs.get_node(enc_node, xs.ENCODING_NAME)
@@ -659,8 +662,9 @@ class Parser:
             )
             inst_enc.opm_field_bit_cnt = opm_field_bit_cnt
 
-            if self.profile.is_alt_encoding(enc_name):
-                inst_enc.is_alt = True
+            parent_enc: InstEncoding | None = None
+            is_alt = self.profile.is_alt_encoding(enc_name)
+            if is_alt:
                 parent_name = self.profile.derive_parent_enc_name(enc_name)
                 if parent_name in self.profile.skip_encodings:
                     continue
@@ -670,26 +674,28 @@ class Parser:
                         f'alternate encoding {enc_name!r}. Ensure primary '
                         f'encodings appear before their alternates in the XML.'
                     )
-                inst_enc.parent_enc = self.isa_spec.encoding_map[parent_name]
+                parent_enc = self.isa_spec.encoding_map[parent_name]
 
                 for enc_cond in inst_enc.enc_conds:
-                    if enc_cond not in inst_enc.parent_enc.enc_conds:
-                        inst_enc.parent_enc.enc_conds.append(enc_cond)
+                    if enc_cond not in parent_enc.enc_conds:
+                        parent_enc.enc_conds.append(enc_cond)
 
                 has_implied_literal = self.profile.is_implied_literal_encoding(
                     enc_name,
                     inst_enc.enc_conds,
                     inst_enc.bit_cnt,
-                    inst_enc.parent_enc.bit_cnt,
+                    parent_enc.bit_cnt,
                 )
                 if has_implied_literal:
                     inst_enc.is_implied_literal_enc = True
                     self.isa_spec.alt_encs_with_implied_literal.add(enc_name)
 
-            if not inst_enc.is_alt or not self.profile.skip_inst_encoding(
+            if not is_alt or not self.profile.skip_inst_encoding(
                 enc_name, 'default'
             ):
-                self.parse_encoding_identifers(enc_node, inst_enc)
+                self.parse_encoding_identifers(
+                    enc_node, inst_enc, parent_enc
+                )
 
             self.isa_spec.inst_encodings.append(inst_enc)
             if enc_name in self.isa_spec.encoding_map:
@@ -703,6 +709,11 @@ class Parser:
         etc.) and instructions under skipped alternate encodings (e.g.,
         FLAT segment variants) are filtered out by the ISA profile's
         ``skip_inst_encoding()`` method.
+
+        Each instruction is appended to its own encoding's ``insts`` list,
+        except for implied-literal alternates whose instructions are placed
+        in the parent encoding's list (they represent the same instruction
+        class with a literal constant).
         """
         for inst_node in self.insts_node:
             inst_name_node = xs.get_node(inst_node, xs.INST_NAME)
@@ -766,27 +777,28 @@ class Parser:
                     inst_name, enc_name, opcode, opnds, is_implied_literal
                 )
 
-                if enc.is_alt:
-                    enc.parent_enc.insts.append(inst)
+                # Implied-literal instructions go to the parent encoding's
+                # insts list (they represent the same instruction class with
+                # a literal constant). All others go to their own encoding.
+                if is_implied_literal:
+                    parent_name = self.profile.derive_parent_enc_name(enc_name)
+                    parent_enc = self.isa_spec.encoding_map[parent_name]
+                    parent_enc.insts.append(inst)
+                    parent_enc.implied_literal_ops.append(
+                        str(inst.opcode)
+                    )
                 else:
                     enc.insts.append(inst)
 
-                if is_implied_literal:
-                    enc.parent_enc.implied_literal_ops.append(
-                        str(inst.opcode)
-                    )
-
-                if (
-                    not enc.is_alt
-                    or enc.enc_name
-                    in self.isa_spec.alt_encs_with_unique_ops
-                ):
-                    if enc.is_alt:
-                        primary_dt_ptrs = enc.parent_enc.primary_dt_ptrs
-                    else:
-                        primary_dt_ptrs = enc.primary_dt_ptrs
+                # Place the instruction in the decode table if this
+                # encoding has primary_dt_ptrs (i.e., was not skipped
+                # from decode table construction).
+                primary_dt_ptrs = enc.primary_dt_ptrs
+                if primary_dt_ptrs is not None:
                     dt = self.isa_spec.primary_decode_table
                     dt_ptr = primary_dt_ptrs[inst.opcode]
+                    if dt_ptr == -1:
+                        continue
                     decode_func = f'decode{inst.fmt_name}'
                     if enc.is_primary_decode:
                         dt[dt_ptr].decode_func = decode_func
