@@ -27,6 +27,7 @@
 #include "rocshmem/rocshmem.hpp"
 #include "mpi_instance.hpp"
 #include "util.hpp"
+#include "log.hpp"
 
 #if !defined(HAVE_EXTERNAL_MPI)
 // Open MPI specific symbols

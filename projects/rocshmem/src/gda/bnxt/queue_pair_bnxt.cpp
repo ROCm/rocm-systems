@@ -23,7 +23,7 @@
  *****************************************************************************/
 
 #include "gda/queue_pair.hpp"
-#include "util.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 

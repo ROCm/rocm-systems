@@ -31,6 +31,8 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "log.hpp"
+
 #define ERROR(...) { LOG_ERROR_ABORT(__VA_ARGS__); }
 
 namespace rocshmem {

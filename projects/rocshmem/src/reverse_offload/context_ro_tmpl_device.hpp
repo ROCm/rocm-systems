@@ -30,6 +30,7 @@
 #include "context_ro_device.hpp"
 #include "queue_proxy.hpp"
 #include "ro_net_team.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 

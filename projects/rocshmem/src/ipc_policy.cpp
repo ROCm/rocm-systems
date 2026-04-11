@@ -30,6 +30,7 @@
 #include "context_incl.hpp"
 #include "envvar.hpp"
 #include "util.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 

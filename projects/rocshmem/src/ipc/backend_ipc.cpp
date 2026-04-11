@@ -32,6 +32,7 @@
 #include "envvar.hpp"
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 

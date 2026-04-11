@@ -42,6 +42,7 @@
 #include "mpi_transport.hpp"
 #include "ro_net_team.hpp"
 #include "util.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 

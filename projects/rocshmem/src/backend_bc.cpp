@@ -37,6 +37,8 @@
 #include "ipc/backend_ipc.hpp"
 #endif
 
+#include "log.hpp"
+
 #include <cassert>
 
 namespace rocshmem {

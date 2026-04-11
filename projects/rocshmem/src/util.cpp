@@ -22,8 +22,6 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "util.hpp"
-
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
@@ -31,6 +29,9 @@
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+
+#include "util.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 

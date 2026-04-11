@@ -30,6 +30,7 @@
 #include "host_helpers.hpp"
 #include "memory/window_info.hpp"
 #include "util.hpp"
+#include "log.hpp"
 
 #include <cassert>
 

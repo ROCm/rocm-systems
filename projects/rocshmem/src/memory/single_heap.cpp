@@ -25,7 +25,7 @@
 #include "single_heap.hpp"
 
 #include <sstream>
-#include "util.hpp"
+#include "log.hpp"
 
 #include "dlmalloc.hpp"
 #include "default_allocator.hpp"
