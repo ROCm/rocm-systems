@@ -297,6 +297,7 @@ int mlx5dv_funcs_t::create_qp(mlx5_devx_qp& qp, struct ibv_context *ctx,
 
   qp.ctx = ctx;
   qp.pd  = pd;
+  qp.ah  = nullptr;
 
   // calculate buffer size needed for WQ + CQ + QP dbrec + CQ dbrec
   mlx5_qp_umem_alloc_info umem_alloc_info{sq_depth};
@@ -395,11 +396,15 @@ int mlx5dv_funcs_t::destroy_qp(mlx5_devx_qp& qp) {
 
   QPAllocator::free(qp.sq);
 
-  err = ibv.destroy_ah(qp.ah);
-  CHECK_ZERO(err, "ibv_destroy_ah");
+  if (nullptr != qp.ah) {
+    err = ibv.destroy_ah(qp.ah);
+    CHECK_ZERO(err, "ibv_destroy_ah");
+  }
 
   // clear the object's fields
   qp.ctx         = nullptr;
+  qp.ah          = nullptr;
+  qp.pd          = nullptr;
   qp.devx_cq_obj = nullptr;
   qp.devx_qp_obj = nullptr;
   qp.uar         = nullptr;

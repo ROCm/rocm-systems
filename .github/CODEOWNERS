@@ -57,6 +57,7 @@
 /projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
 
 # Experimental
+/experimental/perf-dkms                                               @bwelton
 /experimental/rocjitsu                                                @atgutier
 
 # Documentation-specific ownership by project (last to take precedence)
