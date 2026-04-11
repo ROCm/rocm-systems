@@ -4485,6 +4485,7 @@ class AMDSMICommands:
                     "cpu_dimm_pow_consumption",
                     "cpu_dimm_thermal_sensor",
                     "cpu_dimm_sb_reg",
+                    "cpu_svi3_vr_controller_temp",
                 ):
                     setattr(args, arg, True)
 
