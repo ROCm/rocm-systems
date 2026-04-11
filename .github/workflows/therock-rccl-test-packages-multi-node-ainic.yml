@@ -39,7 +39,7 @@ jobs:
     env:
       VENV_DIR: ${{ github.workspace }}/.venv
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
-      OUTPUT_ARTIFACTS_DIR: /it-share/rccl-ci/dist_new
+      OUTPUT_ARTIFACTS_DIR: /it-share/rccl-ci/dist_new/dist/rocm
       THEROCK_BIN_DIR: "./build/bin"
       AWS_SHARED_CREDENTIALS_FILE: /it-share/rccl-ci/credentials.ini
     steps:
