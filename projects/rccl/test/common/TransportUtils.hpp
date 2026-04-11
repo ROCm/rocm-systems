@@ -47,10 +47,21 @@ inline ncclResult_t bootstrapIntraNodeAllGather(struct ncclBootstrap* bootstrap,
 //Helper function for capturing the output for DumpDataTest
 inline std::string captureStdout(std::function<void()> func) {
   int pipefd[2];
-  pipe(pipefd);
+  if (pipe(pipefd) == -1) return "";
 
   int saved_stdout = dup(STDOUT_FILENO);
-  dup2(pipefd[1], STDOUT_FILENO);
+  if (saved_stdout == -1) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return "";
+  }
+
+  if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    close(saved_stdout);
+    return "";
+  }
   close(pipefd[1]);
 
   func();
@@ -62,6 +73,7 @@ inline std::string captureStdout(std::function<void()> func) {
   char buffer[4096];
   ssize_t count = read(pipefd[0], buffer, sizeof(buffer) - 1);
   close(pipefd[0]);
+  if (count < 0) return "";
   buffer[count] = '\0';
 
   return std::string(buffer);
