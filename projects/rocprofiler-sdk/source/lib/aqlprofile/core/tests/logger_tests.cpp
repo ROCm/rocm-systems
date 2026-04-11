@@ -67,8 +67,7 @@ protected:
         }
     }
 
-    const std::string log_file_path_ =
-        (std::filesystem::temp_directory_path() / "aql_profile_log.txt").string();
+    const std::string log_file_path_ = "/tmp/aql_profile_log.txt";
 
     // Helper function to read log file content
     std::string ReadLogFile()
