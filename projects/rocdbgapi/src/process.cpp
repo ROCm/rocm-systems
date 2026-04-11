@@ -1288,7 +1288,8 @@ process_t::update_code_objects ()
           read_host_memory (link_map_address, &entry);
 
           std::string uri;
-          read_string (reinterpret_cast<uintptr_t> (entry.l_name), &uri, -1);
+          read_string (reinterpret_cast<uintptr_t> (entry.l_name), &uri,
+                       size_t (-1));
 
           code_object_t *code_object = nullptr;
           if (auto found = m_code_objects_index.find (entry.l_addr);
@@ -1772,6 +1773,25 @@ process_t::get_info (amd_dbgapi_process_info_t query, size_t value_size,
                          ? AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_PRECISE
                          : AMD_DBGAPI_ALU_EXCEPTIONS_PRECISION_NONE);
       return;
+
+    case AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS:
+      {
+        if (value_size != sizeof (amd_dbgapi_segment_address_t))
+          throw api_error_t (
+            AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+
+        amd_dbgapi_segment_address_t val = 0;
+
+        for (auto &&agent : range<agent_t> ())
+          {
+            val |= agent.os_info ().local_address_aperture_limit
+                   | agent.os_info ().private_address_aperture_limit
+                   | agent.os_info ().agent_address_limit;
+          }
+
+        *static_cast<amd_dbgapi_segment_address_t *> (value) = val;
+        return;
+      }
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);

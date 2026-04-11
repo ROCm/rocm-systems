@@ -429,7 +429,7 @@ consume_args(Tp&&...)
 auto
 get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    auto backtrace = nlohmann::json();
+    auto backtrace = nlohmann::json::object();
 
     if(_bt_data && !_bt_data->empty())
     {

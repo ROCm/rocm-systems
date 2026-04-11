@@ -2,12 +2,6 @@
 name = "rocprof_compute"
 requires-python = ">=3.9"
 
-[project.optional-dependencies]
-developer = [
-    "ruff>=0.14.11",
-    "pre-commit",
-]
-
 [tool.ruff]
 line-length = 88
 

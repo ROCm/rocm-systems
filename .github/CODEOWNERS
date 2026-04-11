@@ -1,11 +1,13 @@
 # CI ownership
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
+/.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
+/projects/hipfile/                                                    @ROCm/hipfile-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
 /projects/rccl/                                                       @ROCm/rccl-reviewers
