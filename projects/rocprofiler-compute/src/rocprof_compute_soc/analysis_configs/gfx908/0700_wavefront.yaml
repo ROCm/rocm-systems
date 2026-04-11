@@ -89,22 +89,22 @@ Panel Config:
           max: MAX((SQ_INSTS / SQ_WAVES))
           unit: Instructions per Wavefront
         Wave Cycles:
-          avg: SUM((4 * SQ_WAVE_CYCLES)) / SUM($denom)
+          avg: SUM(4 * SQ_WAVE_CYCLES) / SUM($denom)
           min: MIN(((4 * SQ_WAVE_CYCLES) / $denom))
           max: MAX(((4 * SQ_WAVE_CYCLES) / $denom))
           unit: (Cycles + $normUnit)
         Dependency Wait Cycles:
-          avg: SUM((4 * SQ_WAIT_ANY)) / SUM($denom)
+          avg: SUM(4 * SQ_WAIT_ANY) / SUM($denom)
           min: MIN(((4 * SQ_WAIT_ANY) / $denom))
           max: MAX(((4 * SQ_WAIT_ANY) / $denom))
           unit: (Cycles + $normUnit)
         Issue Wait Cycles:
-          avg: SUM((4 * SQ_WAIT_INST_ANY)) / SUM($denom)
+          avg: SUM(4 * SQ_WAIT_INST_ANY) / SUM($denom)
           min: MIN(((4 * SQ_WAIT_INST_ANY) / $denom))
           max: MAX(((4 * SQ_WAIT_INST_ANY) / $denom))
           unit: (Cycles + $normUnit)
         Active Cycles:
-          avg: SUM((4 * SQ_ACTIVE_INST_ANY)) / SUM($denom)
+          avg: SUM(4 * SQ_ACTIVE_INST_ANY) / SUM($denom)
           min: MIN(((4 * SQ_ACTIVE_INST_ANY) / $denom))
           max: MAX(((4 * SQ_ACTIVE_INST_ANY) / $denom))
           unit: (Cycles + $normUnit)

@@ -12,16 +12,16 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          value: SUM((100 * SQ_LDS_IDX_ACTIVE)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          value: SUM(100 * SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Access Rate:
-          value: SUM((200 * SQ_ACTIVE_INST_LDS)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          value: SUM(200 * SQ_ACTIVE_INST_LDS) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Theoretical Bandwidth Utilization:
-          value: SUM((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))) / SUM(((End_Timestamp - Start_Timestamp)) * ((($max_sclk * $cu_per_gpu) * 0.00128)))
+          value: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM((End_Timestamp - Start_Timestamp) * $max_sclk * $cu_per_gpu * 0.00128)
           unit: Percent
         Bank Conflict Rate:
-          value: SUM((SQ_LDS_BANK_CONFLICT * 3.125)) / SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+          value: SUM(SQ_LDS_BANK_CONFLICT * 3.125) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
           unit: Percent
       comparable: false
       cli_style: simple_bar
@@ -42,7 +42,7 @@ Panel Config:
           max: MAX((SQ_INSTS_LDS / $denom))
           unit: (Instructions + $normUnit)
         Theoretical Bandwidth:
-          avg: SUM((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
             / (End_Timestamp - Start_Timestamp)))
           max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
@@ -57,7 +57,7 @@ Panel Config:
           unit: Cycles
           coll_level: SQ_INST_LEVEL_LDS
         Bank Conflicts/Access:
-          avg: SUM(SQ_LDS_BANK_CONFLICT) / SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+          avg: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
           min: MIN(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
             if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
           max: MAX(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))

@@ -36,20 +36,20 @@ Panel Config:
       metric:
         # --- Throughput (gfx950-style: rates first) ---
         VALU FLOPs (FP16):
-          value: SUM((SQ_INSTS_VALU_sum * 64)) / SUM((((End_Timestamp - Start_Timestamp) / 1e9)) * (1e9))
+          value: SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
-          pop: ((100 * SUM((SQ_INSTS_VALU_sum * 64)) / SUM((((End_Timestamp - Start_Timestamp) / 1e9)) * (1e9))) / ((($max_sclk * $cu_per_gpu) * 256) / 1000))
+          pop: 100 * SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 256 / 1000)
         VALU FLOPs (FP32):
-          value: SUM((SQ_INSTS_VALU_sum * 64)) / SUM((((End_Timestamp - Start_Timestamp) / 1e9)) * (1e9))
+          value: SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
-          pop: ((100 * SUM((SQ_INSTS_VALU_sum * 64)) / SUM((((End_Timestamp - Start_Timestamp) / 1e9)) * (1e9))) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+          pop: 100 * SUM(SQ_INSTS_VALU_sum * 64) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 128 / 1000)
         IPC:
-          value: SUM((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum)) / SUM(SQ_BUSY_CYCLES_sum)
+          value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Instr/cycle
           peak: 5
-          pop: ((100 * SUM(SQ_INSTS_ALL_sum) / SUM(SQ_BUSY_CYCLES_sum)) / 5)
+          pop: 100 * SUM(SQ_INSTS_ALL_sum) / SUM(SQ_BUSY_CYCLES_sum) / 5
         Wavefront Occupancy:
           value: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr)
           unit: Wavefronts
@@ -58,17 +58,17 @@ Panel Config:
             / (($max_waves_per_cu * $cu_per_gpu)))
         # --- L2 / fabric (EA) ---
         L2 Cache Hit Rate:
-          value: SUM(100 * GL2C_HIT_sum) / SUM((GL2C_HIT_sum + GL2C_MISS_sum))
+          value: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
           peak: 100
-          pop: SUM(100 * GL2C_HIT_sum) / SUM((GL2C_HIT_sum + GL2C_MISS_sum))
+          pop: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
         L2-Fabric Read BW:
-          value: SUM((GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128)) / SUM(((End_Timestamp - Start_Timestamp) / 1e9))
+          value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None
         L2-Fabric Write BW:
-          value: SUM(((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32 + GL2C_EA_WRREQ_64B_sum * 64)) / SUM(((End_Timestamp - Start_Timestamp) / 1e9))
+          value: SUM((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32 + GL2C_EA_WRREQ_64B_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None
@@ -96,7 +96,7 @@ Panel Config:
           peak: 100
           pop: SUM(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum)) / SUM(TCP_REQ_sum)
         TCP Cache BW:
-          value: SUM((TCP_REQ_sum * 64)) / SUM(((End_Timestamp - Start_Timestamp) / 1e9))
+          value: SUM(TCP_REQ_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None
@@ -107,33 +107,33 @@ Panel Config:
           pop: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
         GL1C Read BW:
           # Same bins as Memory Chart table 307 (GL1C–GL2 read bandwidth).
-          value: SUM((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128)) / SUM(((End_Timestamp - Start_Timestamp) / 1e9))
+          value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None
         GL2C Cache BW:
-          value: SUM((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96)) / SUM(((End_Timestamp - Start_Timestamp) / 1e9))
+          value: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None
         Scalar Data Cache Hit Rate:
-          value: SUM(100 * SQC_DCACHE_HITS_sum) / SUM((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
+          value: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
           unit: Percent
           peak: 100
-          pop: SUM(100 * SQC_DCACHE_HITS_sum) / SUM((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
+          pop: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
         Scalar Data Cache BW:
           # Same as Memory Chart table 302 (Icache-GL1 uses sqc_tc_inst; Dcache uses TC data read).
-          value: SUM((SQC_TC_DATA_READ_REQ_sum * 128)) / SUM(((End_Timestamp - Start_Timestamp) / 1e9))
+          value: SUM(SQC_TC_DATA_READ_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None
         Instruction Cache Hit Rate:
-          value: SUM(100 * SQC_ICACHE_HITS_sum) / SUM((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          value: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
           unit: Percent
           peak: 100
-          pop: SUM(100 * SQC_ICACHE_HITS_sum) / SUM((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          pop: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
         Instruction Cache BW:
-          value: SUM((SQC_TC_INST_REQ_sum * 128)) / SUM(((End_Timestamp - Start_Timestamp) / 1e9))
+          value: SUM(SQC_TC_INST_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: None
           pop: None

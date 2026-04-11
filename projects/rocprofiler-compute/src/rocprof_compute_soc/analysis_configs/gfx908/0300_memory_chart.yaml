@@ -51,7 +51,7 @@ Panel Config:
         LDS Req:
           value: ROUND(SUM(SQ_INSTS_LDS) / SUM($denom), 0)
         LDS Util:
-          value: ROUND(SUM((100 * SQ_LDS_IDX_ACTIVE)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 0)
+          value: ROUND(SUM(100 * SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
         LDS Latency:
           value: ROUND(SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_LDS),0)
           coll_level: SQ_INST_LEVEL_LDS
@@ -60,21 +60,21 @@ Panel Config:
         VL1 Wr:
           value: ROUND(SUM(TCP_TOTAL_WRITE_sum) / SUM($denom), 0)
         VL1 Atomic:
-          value: ROUND(SUM((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)) / SUM($denom), 0)
+          value: ROUND(SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom), 0)
         VL1 Hit:
-          value: ROUND(100 - SUM((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum), 0)
+          value: ROUND(100 - SUM(100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum), 0)
         VL1 Lat:
           value: ROUND(SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TA_TCP_STATE_READ_sum), 0)
         VL1 Coalesce:
-          value: ROUND(SUM(((TA_TOTAL_WAVEFRONTS_sum * 64) * 100)) / SUM((TCP_TOTAL_ACCESSES_sum * 4)), 0)
+          value: ROUND(SUM(TA_TOTAL_WAVEFRONTS_sum * 64 * 100) / SUM(TCP_TOTAL_ACCESSES_sum * 4), 0)
         VL1 Stall:
-          value: ROUND(SUM((100 * TCP_TCR_TCP_STALL_CYCLES_sum)) / SUM(TCP_GATE_EN1_sum), 0)
+          value: ROUND(SUM(100 * TCP_TCR_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN1_sum), 0)
         VL1_L2 Rd:
           value: ROUND(SUM(TCP_TCC_READ_REQ_sum) / SUM($denom), 0)
         VL1_L2 Wr:
           value: ROUND(SUM(TCP_TCC_WRITE_REQ_sum) / SUM($denom), 0)
         VL1_L2 Atomic:
-          value: ROUND(SUM((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom), 0)
+          value: ROUND(SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom), 0)
         sL1D Rd:
           value: ROUND(SUM(SQC_DCACHE_REQ) / SUM($denom), 0)
         sL1D Hit:
@@ -104,11 +104,11 @@ Panel Config:
         L2 Atomic:
           value: ROUND(SUM(TCC_ATOMIC_sum) / SUM($denom), 0)
         L2 Hit:
-          value: ROUND(SUM((100 * TCC_HIT_sum)) / SUM((TCC_HIT_sum + TCC_MISS_sum)), 0)
+          value: ROUND(SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum), 0)
         L2 Rd Lat:
-          value: ROUND(SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)), 0)
+          value: ROUND(SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum), 0)
         L2 Wr Lat:
-          value: ROUND(SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)), 0)
+          value: ROUND(SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), 0)
         Fabric_L2 Rd:
           value: ROUND(SUM(TCC_EA0_RDREQ_sum) / SUM($denom), 0)
         Fabric_L2 Wr:

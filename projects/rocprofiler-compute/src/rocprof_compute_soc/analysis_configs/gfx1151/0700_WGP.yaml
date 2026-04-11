@@ -283,7 +283,7 @@ Panel Config:
         # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ → >100%. Use HITS+MISSES
         # as the outcome denominator (same pairing as Memory Chart / SoL).
         Icache Hit Rate:
-          avg: SUM(100 * SQC_ICACHE_HITS_sum) / SUM((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum))
+          avg: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
           min: MIN((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           max: MAX((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           unit: Percent
@@ -302,7 +302,7 @@ Panel Config:
         unit: Unit
       metric:
         Dcache Hit Rate:
-          avg: SUM(100 * SQC_DCACHE_HITS_sum) / SUM((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum))
+          avg: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
           min: MIN((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
           max: MAX((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
           unit: Percent

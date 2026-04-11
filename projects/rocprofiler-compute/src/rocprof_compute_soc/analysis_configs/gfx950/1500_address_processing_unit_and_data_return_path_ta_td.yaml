@@ -14,26 +14,26 @@ Panel Config:
         unit: Unit
       metric:
         Address Processing Unit Busy:
-          avg: SUM((100 * TA_TA_BUSY_sum)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: SUM(100 * TA_TA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
         Address Stall:
-          avg: SUM((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: SUM(100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
           max: MAX(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
           unit: Percent
         Data Stall:
-          avg: SUM((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: SUM(100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
           max: MAX(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
           unit: Percent
         "Data-Processor \u2192 Address Stall":
-          avg: SUM((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: SUM(100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu)))
           max: MAX(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
@@ -155,17 +155,17 @@ Panel Config:
         unit: Unit
       metric:
         Data-Return Busy:
-          avg: SUM((100 * TD_TD_BUSY_sum)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: SUM(100 * TD_TD_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
         "Cache RAM \u2192 Data-Return Stall":
-          avg: SUM((100 * TD_TC_STALL_sum)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: SUM(100 * TD_TC_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
         "Workgroup manager \u2192 Data-Return Stall":
-          avg: SUM((100 * TD_SPI_STALL_sum)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          avg: SUM(100 * TD_SPI_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
@@ -175,7 +175,7 @@ Panel Config:
           max: MAX((TD_COALESCABLE_WAVEFRONT_sum / $denom))
           unit: (Instructions + $normUnit)
         Read Instructions:
-          avg: SUM(((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)) / SUM($denom)
+          avg: SUM(TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum - TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
           min: MIN((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
             / $denom))
           max: MAX((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)

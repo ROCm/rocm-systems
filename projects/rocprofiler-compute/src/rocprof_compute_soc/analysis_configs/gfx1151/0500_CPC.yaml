@@ -158,7 +158,7 @@ Panel Config:
           max: MAX(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
           unit: (Count + $normUnit)
         Instruction Cache Hit Rate:
-          avg: SUM(100 * CPC_MEC_INSTR_CACHE_HIT_sum) / SUM((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
+          avg: SUM(100 * CPC_MEC_INSTR_CACHE_HIT_sum) / SUM(CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)
           min: MIN((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
           max: MAX((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
           unit: Percent

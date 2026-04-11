@@ -14,12 +14,12 @@ Panel Config:
         unit: Unit
       metric:
         VALU:
-          avg: SUM((SQ_INSTS_VALU - SQ_INSTS_MFMA)) / SUM($denom)
+          avg: SUM(SQ_INSTS_VALU - SQ_INSTS_MFMA) / SUM($denom)
           min: MIN(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
           max: MAX(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
           unit: (Instructions + $normUnit)
         VMEM:
-          avg: SUM((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY)) / SUM($denom)
+          avg: SUM(SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / SUM($denom)
           min: MIN(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
           max: MAX(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
           unit: (Instructions + $normUnit)

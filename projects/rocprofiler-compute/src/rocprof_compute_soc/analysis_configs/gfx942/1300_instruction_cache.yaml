@@ -12,13 +12,13 @@ Panel Config:
         unit: Unit
       metric:
         Bandwidth Utilization:
-          value: SUM((SQC_ICACHE_REQ * 100000)) / SUM((($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
+          value: SUM(SQC_ICACHE_REQ * 100000) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
           unit: Percent
         Cache Hit Rate:
-          value: SUM((SQC_ICACHE_HITS * 100)) / SUM(((SQC_ICACHE_HITS + SQC_ICACHE_MISSES) + SQC_ICACHE_MISSES_DUPLICATE))
+          value: SUM(SQC_ICACHE_HITS * 100) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
           unit: Percent
         L1I-L2 Bandwidth Utilization:
-          value: SUM((SQC_TC_INST_REQ * 100000)) / SUM((2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
+          value: SUM(SQC_TC_INST_REQ * 100000) / SUM(2 * $max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
           unit: Percent
       comparable: false
       cli_style: simple_bar
@@ -54,7 +54,7 @@ Panel Config:
           max: MAX((SQC_ICACHE_MISSES_DUPLICATE / $denom))
           unit: (Requests + $normUnit)
         Cache Hit Rate:
-          avg: SUM((100 * SQC_ICACHE_HITS)) / SUM(((SQC_ICACHE_HITS + SQC_ICACHE_MISSES) + SQC_ICACHE_MISSES_DUPLICATE))
+          avg: SUM(100 * SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
           min: MIN(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
             + SQC_ICACHE_MISSES_DUPLICATE)))
           max: MAX(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
@@ -77,7 +77,7 @@ Panel Config:
         unit: Unit
       metric:
         L1I-L2 Bandwidth:
-          avg: SUM((SQC_TC_INST_REQ * 64)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(SQC_TC_INST_REQ * 64) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
           max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
           unit: Gbps

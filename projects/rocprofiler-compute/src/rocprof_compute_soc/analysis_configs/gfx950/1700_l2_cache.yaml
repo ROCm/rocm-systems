@@ -12,20 +12,20 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          value: SUM((TCC_BUSY_sum * 100)) / SUM((TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD))
+          value: SUM(TCC_BUSY_sum * 100) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
         Peak Bandwidth:
           value: ((100 * SUM((TCC_REQ_sum * 128)) / SUM((End_Timestamp - Start_Timestamp)))
             / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
           unit: Percent
         Hit Rate:
-          value: SUM((100 * TCC_HIT_sum)) / SUM((TCC_HIT_sum + TCC_MISS_sum))
+          value: SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
           unit: Percent
         L2-Fabric Read BW:
-          value: SUM(((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128))) / SUM((End_Timestamp - Start_Timestamp))
+          value: SUM(TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + TCC_EA0_RDREQ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
         L2-Fabric Write and Atomic BW:
-          value: SUM(((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32))) / SUM((End_Timestamp - Start_Timestamp))
+          value: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
         HBM Bandwidth:
           value: $hbmBandwidth
@@ -41,7 +41,7 @@ Panel Config:
         unit: Unit
       metric:
         Read BW:
-          avg: SUM(((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128))) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + TCC_EA0_RDREQ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) +
             (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
           max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) +
@@ -55,7 +55,7 @@ Panel Config:
             != 0) else None))
           unit: Percent
         Remote Read Traffic:
-          avg: SUM(100 * NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
+          avg: SUM(100 * NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
           min: MIN((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) /
             TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
           max: MAX((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) /
@@ -69,7 +69,7 @@ Panel Config:
             != 0) else None))
           unit: Percent
         Write and Atomic BW:
-          avg: SUM(((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32))) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
             * 32)) / (End_Timestamp - Start_Timestamp)))
           max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
@@ -83,7 +83,7 @@ Panel Config:
             != 0) else None))
           unit: Percent
         Remote Write and Atomic Traffic:
-          avg: SUM(100 * NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum)
+          avg: SUM(100 * NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM(TCC_EA0_WRREQ_sum)
           min: MIN((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
             if (TCC_EA0_WRREQ_sum != 0) else None))
           max: MAX((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
@@ -125,7 +125,7 @@ Panel Config:
             != 0) else None))
           unit: Cycles
         Read Stall:
-          avg: SUM((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum))) / SUM(TCC_BUSY_sum)
+          avg: SUM(100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / SUM(TCC_BUSY_sum)
           min: MIN((((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum)
             + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum
             != 0) else None))
@@ -134,7 +134,7 @@ Panel Config:
             != 0) else None))
           unit: Percent
         Write Stall:
-          avg: SUM(100 * (TCC_EA0_WRREQ_STALL_sum)) / SUM(TCC_BUSY_sum)
+          avg: SUM(100 * TCC_EA0_WRREQ_STALL_sum) / SUM(TCC_BUSY_sum)
           min: MIN(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum
             != 0) else None))
           max: MAX(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum
@@ -151,22 +151,22 @@ Panel Config:
         unit: Unit
       metric:
         Bandwidth:
-          avg: SUM((TCC_REQ_sum * 128)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_REQ_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
           max: MAX((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Read Bandwidth:
-          avg: SUM(TCC_READ_SECTORS_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_READ_SECTORS_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Write Bandwidth:
-          avg: SUM(TCC_WRITE_SECTORS_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_WRITE_SECTORS_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Atomic Bandwidth:
-          avg: SUM(TCC_ATOMIC_SECTORS_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_ATOMIC_SECTORS_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
@@ -211,7 +211,7 @@ Panel Config:
           max: MAX((TCC_IB_REQ_sum / $denom))
           unit: (Req + $normUnit)
         Cache Hit:
-          avg: SUM((100 * TCC_HIT_sum)) / SUM((TCC_HIT_sum + TCC_MISS_sum))
+          avg: SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
           min: MIN((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
             + TCC_MISS_sum) != 0) else None))
           max: MAX((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
@@ -410,22 +410,22 @@ Panel Config:
           max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Remote Read:
-          avg: SUM(NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum)) / SUM($denom)
+          avg: SUM(NOISE_CLAMP(TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM($denom)
           min: MIN((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
           max: MAX((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
           unit: (Req + $normUnit)
         Read Bandwidth - PCIe:
-          avg: SUM(TCC_EA0_RDREQ_IO_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_RDREQ_IO_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         "Read Bandwidth - Infinity Fabric\u2122":
-          avg: SUM(TCC_EA0_RDREQ_GMI_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_RDREQ_GMI_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Read Bandwidth - HBM:
-          avg: SUM(TCC_EA0_RDREQ_DRAM_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_RDREQ_DRAM_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_RDREQ_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_RDREQ_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
@@ -450,22 +450,22 @@ Panel Config:
           max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Remote Write and Atomic:
-          avg: SUM(NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum)) / SUM($denom)
+          avg: SUM(NOISE_CLAMP(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum)) / SUM($denom)
           min: MIN((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
           max: MAX((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
           unit: (Req + $normUnit)
         Write Bandwidth - PCIe:
-          avg: SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         "Write Bandwidth - Infinity Fabric\u2122":
-          avg: SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Write Bandwidth - HBM:
-          avg: SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
@@ -480,17 +480,17 @@ Panel Config:
           max: MAX((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Atomic Bandwidth - PCIe:
-          avg: SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         "Atomic Bandwidth - Infinity Fabric\u2122":
-          avg: SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Atomic Bandwidth - HBM:
-          avg: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           max: MAX(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps

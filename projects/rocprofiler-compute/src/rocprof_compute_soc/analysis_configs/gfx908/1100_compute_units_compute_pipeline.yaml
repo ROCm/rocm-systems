@@ -29,7 +29,7 @@ Panel Config:
           max: MAX((SQ_INSTS / SQ_BUSY_CU_CYCLES))
           unit: Instructions per Cycle
         IPC (Issued):
-          avg: SUM((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM)) + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)) / SUM(SQ_ACTIVE_INST_ANY)
+          avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
           min: MIN(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
             + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
             / SQ_ACTIVE_INST_ANY))
@@ -38,12 +38,12 @@ Panel Config:
             / SQ_ACTIVE_INST_ANY))
           unit: Instructions per Cycle
         SALU Utilization:
-          avg: SUM((100 * SQ_ACTIVE_INST_SCA)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD) * ($cu_per_gpu))
+          avg: SUM(100 * SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           unit: Percent
         VALU Utilization:
-          avg: SUM((100 * SQ_ACTIVE_INST_VALU)) / SUM(($GRBM_GUI_ACTIVE_PER_XCD) * ($cu_per_gpu))
+          avg: SUM(100 * SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           unit: Percent

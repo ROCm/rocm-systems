@@ -12,16 +12,16 @@ Panel Config:
         unit: Unit
       metric:
         Hit rate:
-          value: 100 - SUM((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: 100 - SUM(100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
           unit: Percent
         Bandwidth Utilization:
-          value: ((100 * SUM((TCP_TOTAL_CACHE_ACCESSES_sum * 128)) / SUM((End_Timestamp - Start_Timestamp))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
+          value: 100 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / SUM(End_Timestamp - Start_Timestamp) / (($max_sclk / 1000) * 128 * $cu_per_gpu)
           unit: Percent
         Utilization:
-          value: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
+          value: SUM(TCP_GATE_EN2_sum * 100) / SUM(TCP_GATE_EN1_sum)
           unit: Percent
         Coalescing:
-          value: SUM(((TA_TOTAL_WAVEFRONTS_sum * 64) * 100)) / SUM((TCP_TOTAL_ACCESSES_sum * 4))
+          value: SUM(TA_TOTAL_WAVEFRONTS_sum * 64 * 100) / SUM(TCP_TOTAL_ACCESSES_sum * 4)
           unit: Percent
       comparable: false
       cli_style: simple_bar
@@ -76,19 +76,19 @@ Panel Config:
           max: MAX((TCP_TOTAL_WRITE_sum / $denom))
           unit: (Requests + $normUnit)
         Atomic Req:
-          avg: SUM((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)) / SUM($denom)
+          avg: SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
           min: MIN(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
             / $denom))
           max: MAX(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
             / $denom))
           unit: (Requests + $normUnit)
         Cache BW:
-          avg: SUM((TCP_TOTAL_CACHE_ACCESSES_sum * 128)) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
           max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
           unit: Gbps
         Cache Hit Rate:
-          avg: 100 - SUM((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          avg: 100 - SUM(100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
           min: MIN(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
@@ -104,7 +104,7 @@ Panel Config:
           max: MAX((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
           unit: (Requests + $normUnit)
         Cache Hits:
-          avg: SUM((TCP_TOTAL_CACHE_ACCESSES_sum - (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))) / SUM($denom)
+          avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom)
           min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum - (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / $denom))
@@ -118,7 +118,7 @@ Panel Config:
           max: MAX((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
           unit: (Requests + $normUnit)
         L1-L2 BW:
-          avg: SUM((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))) / SUM((End_Timestamp - Start_Timestamp))
+          avg: SUM(128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(End_Timestamp - Start_Timestamp)
           min: MIN(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
             + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
           max: MAX(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
@@ -135,7 +135,7 @@ Panel Config:
           max: MAX((TCP_TCC_WRITE_REQ_sum / $denom))
           unit: (Requests + $normUnit)
         L1-L2 Atomic:
-          avg: SUM((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom)
+          avg: SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom)
           min: MIN(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
             / $denom))
           max: MAX(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
@@ -253,7 +253,7 @@ Panel Config:
           max: MAX((TCP_UTCL1_REQUEST_sum / $denom))
           units: (Requests + $normUnit)
         Hit Ratio:
-          avg: SUM((100 * TCP_UTCL1_TRANSLATION_HIT_sum)) / SUM(TCP_UTCL1_REQUEST_sum)
+          avg: SUM(100 * TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
           min: MIN((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
             if (TCP_UTCL1_REQUEST_sum != 0) else None))
           max: MAX((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
