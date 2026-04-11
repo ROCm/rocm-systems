@@ -70,7 +70,8 @@ namespace rocshmem {
 
 #define VERIFY_BACKEND() do {                                                 \
   if (!backend) {                                                             \
-    LOG_ERROR_ABORT("rocSHMEM not initialized: call rocshmem_init() before"); \
+    LOG_ERROR_ABORT("rocSHMEM not initialized: call rocshmem_init()"          \
+                    " before calling this function");                         \
   }                                                                           \
 } while(0)
 
@@ -113,7 +114,7 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
     if (envstr.find("ipc") != std::string::npos) {
       if (IPCBackend::backend_can_run(comm, bootstrap) != ROCSHMEM_SUCCESS) {
         LOG_ERROR_EXIT("ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
-                       "  Most likely cause is that PEs are distributed accross more than one node.\n"
+                       "  Most likely cause is that PEs are distributed across more than one node.\n"
                        "  ");
       }
       return BackendType::IPC_BACKEND;

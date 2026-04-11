@@ -51,7 +51,7 @@ namespace rocshmem {
  * Output: "IPv4/IPv6 address<port>"
  */
 const char* SocketToString(union SocketAddress* addr, char* buf,
-			   const int numericHostForm /*= 1*/) {
+                           const int numericHostForm /*= 1*/) {
   if (buf == NULL || addr == NULL) return NULL;
   struct sockaddr* saddr = &addr->sa;
   if (saddr->sa_family != AF_INET && saddr->sa_family != AF_INET6) {
@@ -92,7 +92,7 @@ static int envSocketFamily(void) {
 }
 
 static int findInterfaces(const char* prefixList, char* names, union SocketAddress* addrs,
-			  int sock_family, int maxIfNameSize, int maxIfs) {
+                          int sock_family, int maxIfNameSize, int maxIfs) {
 #ifdef BUILD_DEBUG_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
@@ -372,7 +372,7 @@ Socket::Socket(const SocketAddress* addr, uint64_t magic, enum SocketType type, 
     if (family != AF_INET && family != AF_INET6) {
       char line[SOCKET_NAME_MAXLEN + 1];
       ERROR("SocketInit: connecting to address %s with family %d is neither AF_INET(%d) nor AF_INET6(%d)\n",
-	   SocketToString(&addr_, line), family, (int)AF_INET, (int)AF_INET6);
+           SocketToString(&addr_, line), family, (int)AF_INET, (int)AF_INET6);
       return;
     }
     salen_ = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);

@@ -154,7 +154,7 @@ static int copy_device_symbol_to_module(Symbol &builtin_symbol,
     return ROCSHMEM_ERROR;
   }
   if (source == nullptr) {
-    LOG_ERROR("uilt-in %s has null address", label);
+    LOG_ERROR("Built-in %s has null address", label);
     return ROCSHMEM_ERROR;
   }
 
@@ -167,7 +167,7 @@ static int copy_device_symbol_to_module(Symbol &builtin_symbol,
     return ROCSHMEM_ERROR;
   }
   if (symbol_size != expected_size) {
-    LOG_ERROR("Symbol size mismatch for %s. Expected %zu, got %zu\n",
+    LOG_ERROR("Symbol size mismatch for %s. Expected %zu, got %zu",
               label, expected_size, symbol_size);
     return ROCSHMEM_ERROR;
   }
@@ -175,7 +175,7 @@ static int copy_device_symbol_to_module(Symbol &builtin_symbol,
   err = hipMemcpyAsync(target, source, expected_size,
                        hipMemcpyDeviceToDevice, stream);
   if (err != hipSuccess) {
-    LOG_ERROR("Failed to copy %s to device: %s\n",
+    LOG_ERROR("Failed to copy %s to device: %s",
               label, hipGetErrorString(err));
     return ROCSHMEM_ERROR;
   }
