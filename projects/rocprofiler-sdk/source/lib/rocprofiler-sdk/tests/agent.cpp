@@ -45,6 +45,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -301,6 +302,54 @@ TEST(rocprofiler_lib, agent)
     // clean up memory leak
     for(auto& itr : _rocm_info.isas)
         delete[] itr.name_str;
+}
+
+// Verify that construct_agent_cache does not abort when sysfs topology is
+// unavailable (e.g. WSL2 with DXG, or containers without /sys).
+// On systems with sysfs this is a no-op; on systems without it, this is
+// the regression test for the ROCP_FATAL_IF crash.
+TEST(rocprofiler_lib, agent_no_topology_no_crash)
+{
+    namespace agent = ::rocprofiler::agent;
+
+    const bool has_sysfs = std::filesystem::exists("/sys/class/kfd/kfd/topology/nodes");
+
+    if(has_sysfs)
+    {
+        GTEST_SKIP() << "sysfs topology exists — no-topology path not exercised";
+    }
+
+    rocprofiler::registration::init_logging();
+
+    hsa_init();
+    {
+        auto table         = ::HsaApiTable{};
+        auto core_table    = ::CoreApiTable{};
+        auto amd_ext_table = ::AmdExtTable{};
+
+        memset(&table, 0, sizeof(table));
+        memset(&core_table, 0, sizeof(core_table));
+        memset(&amd_ext_table, 0, sizeof(amd_ext_table));
+
+        core_table.hsa_iterate_agents_fn                    = &hsa_iterate_agents;
+        core_table.hsa_status_string_fn                     = &hsa_status_string;
+        core_table.hsa_agent_get_info_fn                    = &hsa_agent_get_info;
+        amd_ext_table.hsa_amd_agent_iterate_memory_pools_fn = &hsa_amd_agent_iterate_memory_pools;
+        amd_ext_table.hsa_amd_memory_pool_get_info_fn       = &hsa_amd_memory_pool_get_info;
+        table.core_                                         = &core_table;
+        table.amd_ext_                                      = &amd_ext_table;
+
+        // Before the fix this call would SIGABRT.  After the fix it logs a
+        // warning and returns early, leaving the agent cache empty.
+        EXPECT_NO_FATAL_FAILURE(agent::construct_agent_cache(&table));
+    }
+
+    // Agent list should be empty since topology was unavailable
+    auto agents = agent::get_agents();
+    EXPECT_TRUE(agents.empty())
+        << "expected no agents when sysfs topology is unavailable, got " << agents.size();
+
+    hsa_shut_down();
 }
 
 namespace

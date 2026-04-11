@@ -1189,6 +1189,19 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
+    // When sysfs topology is unavailable (e.g. WSL2 with the DXG backend, or
+    // containers without /sys mounted), read_topology() returns 0 agents while
+    // the HSA runtime may still discover agents.  Rather than fatally aborting
+    // (which kills the host process), log a warning and return early so
+    // profiling gracefully degrades.
+    if(!rocp_hsa_agent_node_ids.empty() && rocp_agents.empty())
+    {
+        ROCP_WARNING << "rocprofiler agent discovery unavailable ("
+                     << rocp_agents.size() << " rocprofiler agents vs " << hsa_agents.size()
+                     << " HSA agents). Profiling features will be disabled.";
+        return;
+    }
+
     ROCP_FATAL_IF(!rocp_hsa_agent_node_ids.empty())
         << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
         << " HSA agents. HSA agents contained " << rocp_hsa_agent_node_ids.size()
