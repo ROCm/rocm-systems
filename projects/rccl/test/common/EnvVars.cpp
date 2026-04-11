@@ -20,6 +20,8 @@ namespace RcclUnitTesting
   int const UT_SINGLE_PROCESS = (1<<0);
   int const UT_MULTI_PROCESS  = (1<<1);
 
+  namespace {
+
   int getArchInfo(bool *isRightArch,  const char *gfx)
   {
     // Prepare parent->child pipe
@@ -132,7 +134,6 @@ namespace RcclUnitTesting
       close(pipefd[1]);
     }
     return TEST_SUCCESS;
-    return 0;
   }
 
   ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
@@ -204,6 +205,7 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  } // namespace
 
   EnvVars::EnvVars()
   {

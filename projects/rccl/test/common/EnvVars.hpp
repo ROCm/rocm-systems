@@ -5,15 +5,11 @@
  ************************************************************************/
 
 #pragma once
-#include <hsa/hsa.h>
 #include <vector>
 #include "rccl/rccl.h"
 
 namespace RcclUnitTesting
 {
-  // Helper function to count the number of GPUs on system
-  static hsa_status_t CountGpus(hsa_agent_t agent, void* data);
-
   // Helper class to track environment variables that affect the unit tests
   class EnvVars
   {
