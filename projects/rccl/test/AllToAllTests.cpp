@@ -16,10 +16,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat16, ncclFloat32};
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclFloat16, ncclFloat32});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1048576, 1024};
+    std::vector<int>            const numElements     = testBed.ev.GetElements({1048576, 1024});
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {false};
@@ -35,10 +35,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclFloat64, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {5685};
+    std::vector<int>            const numElements     = testBed.ev.GetElements({5685});
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};
@@ -54,10 +54,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclUint8};
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclUint8});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {384 * 1024, 1024};
+    std::vector<int>            const numElements     = testBed.ev.GetElements({384 * 1024, 1024});
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {false};
@@ -73,10 +73,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclUint32, ncclUint64};
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclUint32, ncclUint64});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1048576};
+    std::vector<int>            const numElements     = testBed.ev.GetElements({1048576});
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {true};
@@ -93,10 +93,10 @@ namespace RcclUnitTesting
       if(testBed.ev.isGfx94) {
         // Configuration
         std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
-        std::vector<ncclDataType_t> const dataTypes       = {ncclBfloat16};
-        std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+        std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclBfloat16});
+        std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
         std::vector<int>            const roots           = {0};
-        std::vector<int>            const numElements     = {64 * 1024 * 1024, 1024};
+        std::vector<int>            const numElements     = testBed.ev.GetElements({64 * 1024 * 1024, 1024});
         std::vector<bool>           const inPlaceList     = {false};
         std::vector<bool>           const managedMemList  = {false};
         std::vector<bool>           const useHipGraphList = {false, true};

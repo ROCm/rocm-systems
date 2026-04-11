@@ -52,10 +52,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = DEFAULT_DATATYPES;
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes(DEFAULT_DATATYPES);
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = ELEM_COUNTS_LARGE;
+    std::vector<int>            const numElements     = testBed.ev.GetElements(ELEM_COUNTS_LARGE);
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {false};
@@ -74,10 +74,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = DEFAULT_DATATYPES;
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes(DEFAULT_DATATYPES);
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = ELEM_COUNTS_MEDIUM;
+    std::vector<int>            const numElements     = testBed.ev.GetElements(ELEM_COUNTS_MEDIUM);
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};
@@ -96,10 +96,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = DEFAULT_DATATYPES;
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes(DEFAULT_DATATYPES);
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = ELEM_COUNTS_SMALL;
+    std::vector<int>            const numElements     = testBed.ev.GetElements(ELEM_COUNTS_SMALL);
     std::vector<bool>           const inPlaceList     = {true};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {false};
@@ -118,10 +118,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = DEFAULT_DATATYPES;
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes(DEFAULT_DATATYPES);
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = ELEM_COUNTS_VARYING;
+    std::vector<int>            const numElements     = testBed.ev.GetElements(ELEM_COUNTS_VARYING);
     std::vector<bool>           const inPlaceList     = {true};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};
@@ -140,10 +140,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = DEFAULT_DATATYPES;
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes(DEFAULT_DATATYPES);
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = ELEM_COUNTS_MANAGED;
+    std::vector<int>            const numElements     = testBed.ev.GetElements(ELEM_COUNTS_MANAGED);
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {false};
@@ -162,10 +162,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = DEFAULT_DATATYPES;
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes(DEFAULT_DATATYPES);
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = ELEM_COUNTS_MANAGED_GRAPH;
+    std::vector<int>            const numElements     = testBed.ev.GetElements(ELEM_COUNTS_MANAGED_GRAPH);
     std::vector<bool>           const inPlaceList     = {false};
     std::vector<bool>           const managedMemList  = {true};
     std::vector<bool>           const useHipGraphList = {true};

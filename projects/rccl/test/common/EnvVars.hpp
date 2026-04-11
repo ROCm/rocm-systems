@@ -42,11 +42,19 @@ namespace RcclUnitTesting
     std::vector<int>            const& GetNumGpusList();
     std::vector<int>            const& GetIsMultiProcessList();
     std::vector<int>            const& GetGpuPriorityOrder();   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
+
+    // Each of the following returns the env var override if set,
+    // otherwise the provided per-test defaults.
+    std::vector<ncclDataType_t> GetDataTypes(std::vector<ncclDataType_t> const& defaults) const;
+    std::vector<ncclRedOp_t>    GetRedOps   (std::vector<ncclRedOp_t>    const& defaults) const;
+    std::vector<int>            GetElements (std::vector<int>            const& defaults) const;
+
     void ShowConfig();
 
   protected:
     std::vector<ncclRedOp_t>    redOps;             // Supported reduction ops [UT_REDOPS]
     std::vector<ncclDataType_t> dataTypes;          // Support datatypes       [UT_DATATYPES]
+    std::vector<int>            elements;           // Element count override  [UT_ELEMENTS]
     std::vector<int>            numGpusList;        // List of # Gpus to use   [UT_MIN_GPUS/UT_MAX_GPUS/UT_POW2_GPUS]
     std::vector<int>            isMultiProcessList; // Single or multi process [UT_PROCESS_MASK]
     int                         numDetectedGpus;

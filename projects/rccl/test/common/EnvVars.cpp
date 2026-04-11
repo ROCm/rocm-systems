@@ -270,12 +270,6 @@ namespace RcclUnitTesting
         }
       }
     }
-    // Default back to all ops if no strings are found
-    if (redOps.empty())
-    {
-      for (int i = 0; i < numOps; i++)
-        redOps.push_back((ncclRedOp_t)i);
-    }
 
     // Limit number of supported datatypes if only allReduce is built
     std::vector<std::string> dtStrings = GetEnvVarsList("UT_DATATYPES");
@@ -290,22 +284,12 @@ namespace RcclUnitTesting
       }
     }
 
-    // Default option if no valid datatypes are found in env var
-    if (dataTypes.empty())
+
+    // Parse optional element count override
+    for (auto s : GetEnvVarsList("UT_ELEMENTS"))
     {
-      dataTypes.push_back(ncclFloat32);
-      dataTypes.push_back(ncclInt8);
-      dataTypes.push_back(ncclUint8);
-      dataTypes.push_back(ncclInt32);
-      dataTypes.push_back(ncclUint32);
-      dataTypes.push_back(ncclInt64);
-      dataTypes.push_back(ncclUint64);
-      dataTypes.push_back(ncclFloat16);
-      dataTypes.push_back(ncclFloat32);
-      dataTypes.push_back(ncclFloat64);
-      dataTypes.push_back(ncclBfloat16);
-      dataTypes.push_back(ncclFloat8e4m3);
-      dataTypes.push_back(ncclFloat8e5m2);
+      int val = atoi(s.c_str());
+      if (val > 0) elements.push_back(val);
     }
 
     // Build list of possible # GPU ranks based on env vars
@@ -318,6 +302,21 @@ namespace RcclUnitTesting
     isMultiProcessList.clear();
     if (this->processMask & UT_SINGLE_PROCESS) isMultiProcessList.push_back(0);
     if (this->processMask & UT_MULTI_PROCESS)  isMultiProcessList.push_back(1);
+  }
+
+  std::vector<ncclDataType_t> EnvVars::GetDataTypes(std::vector<ncclDataType_t> const& defaults) const
+  {
+    return dataTypes.empty() ? defaults : dataTypes;
+  }
+
+  std::vector<ncclRedOp_t> EnvVars::GetRedOps(std::vector<ncclRedOp_t> const& defaults) const
+  {
+    return redOps.empty() ? defaults : redOps;
+  }
+
+  std::vector<int> EnvVars::GetElements(std::vector<int> const& defaults) const
+  {
+    return elements.empty() ? defaults : elements;
   }
 
   std::vector<ncclRedOp_t> const& EnvVars::GetAllSupportedRedOps()
@@ -382,6 +381,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_VERBOSE"          , verbose       , "Show verbose unit test output"),
         std::make_tuple("UT_REDOPS"           , -1            , "List of reduction ops to test"),
         std::make_tuple("UT_DATATYPES"        , -1            , "List of datatypes to test"),
+        std::make_tuple("UT_ELEMENTS"         , -1            , "Override element counts for all tests"),
         std::make_tuple("UT_MAX_RANKS_PER_GPU", maxRanksPerGpu, "Maximum number of ranks using the same GPU"),
         std::make_tuple("UT_PRINT_VALUES"     , printValues   , "Print array values (-1 for all)"),
         std::make_tuple("UT_SHOW_TIMING"      , showTiming    , "Show timing table"),
