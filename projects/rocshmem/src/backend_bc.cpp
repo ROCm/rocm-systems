@@ -80,17 +80,18 @@ void Backend::init(void) {
   /*
    * Copy log state to device constant memory for device-side logging.
    */
-  log_state_device_t host_log_state{log_pe_number,
-                                    envvar::log_flags.show_error,
-                                    envvar::log_flags.show_warn,
-                                    envvar::log_flags.show_info,
-                                    envvar::log_flags.show_api,
-                                    envvar::log_flags.show_trace,
-                                    envvar::log_flags.show_color};
-  log_state_device_t* log_state_addr{nullptr};
-  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&log_state_addr),
-                                HIP_SYMBOL(log_device)));
-  CHECK_HIP(hipMemcpy(log_state_addr, &host_log_state, sizeof(host_log_state),
+  uint32_t log_flags = 0;
+  if (envvar::log_flags.show_error) log_flags |= logd_constants::SHOW_ERROR;
+  if (envvar::log_flags.show_warn)  log_flags |= logd_constants::SHOW_WARN;
+  if (envvar::log_flags.show_info)  log_flags |= logd_constants::SHOW_INFO;
+  if (envvar::log_flags.show_api)   log_flags |= logd_constants::SHOW_API;
+  if (envvar::log_flags.show_trace) log_flags |= logd_constants::SHOW_TRACE;
+  if (envvar::log_flags.show_color) log_flags |= logd_constants::SHOW_COLOR;
+  struct logd_constants host_logd_constants{log_pe_number, log_flags};
+  struct logd_constants* logd_constants_addr{nullptr};
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&logd_constants_addr),
+                                HIP_SYMBOL(logd_constants)));
+  CHECK_HIP(hipMemcpy(logd_constants_addr, &host_logd_constants, sizeof(host_logd_constants),
                       hipMemcpyDefault));
 
   /*

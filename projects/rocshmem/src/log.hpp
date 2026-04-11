@@ -68,13 +68,20 @@
 namespace rocshmem {
   inline int log_pe_number = -1;
 
-  // Calling static_assert_host_only from __device__/__global__ code produces a
-  // compile error ("reference to __host__ function in __device__").
-  __host__ inline void static_assert_host_only() {}
-
-  // Calling static_assert_device_only from __host__ code produces a
-  // compile error ("reference to __device__ function in __host__").
+  // __attribute__((error(...))) causes a compile error at the call site
+  // (not at the definition), so it is safe to declare in a header.
+  // __HIP_DEVICE_COMPILE__ is defined only during the device compilation
+  // pass, giving true host-vs-device enforcement regardless of whether the
+  // call site is __host__, __device__, or __host__ __device__.
+#ifdef __HIP_DEVICE_COMPILE__
+  __attribute__((error("host-only macro used in device code")))
+  void static_assert_host_only();
   __device__ inline void static_assert_device_only() {}
+#else
+  __host__ inline void static_assert_host_only() {}
+  __attribute__((error("device-only macro used in host code")))
+  void static_assert_device_only();
+#endif
 }  // namespace rocshmem
 
 /*****************************************************************************
@@ -179,16 +186,18 @@ namespace rocshmem {
 
 namespace rocshmem {
 
-struct log_state_device_t {
-  int  pe_number;
-  bool show_error;
-  bool show_warn;
-  bool show_info;
-  bool show_api;
-  bool show_trace;
-  bool show_color;
-};
-extern __constant__ log_state_device_t log_device;
+struct logd_constants {
+  static constexpr uint32_t SHOW_ERROR = 1u << 0;
+  static constexpr uint32_t SHOW_WARN  = 1u << 1;
+  static constexpr uint32_t SHOW_INFO  = 1u << 2;
+  static constexpr uint32_t SHOW_API   = 1u << 3;
+  static constexpr uint32_t SHOW_TRACE = 1u << 4;
+  static constexpr uint32_t SHOW_COLOR = 1u << 5;
+
+  int      pe_number;
+  uint32_t flags;
+} __attribute__((aligned(16)));
+extern __constant__ logd_constants logd_constants;
 
 template <typename... Args>
 [[maybe_unused]] __device__ __attribute__((noinline))
@@ -197,7 +206,7 @@ void dprintf(const char* fmt, const Args&... args) {
                        hipThreadIdx_z * hipBlockDim_x * hipBlockDim_y;
   int flat_wg_id = hipBlockIdx_x + hipBlockIdx_y * hipGridDim_x +
                    hipBlockIdx_z * hipGridDim_x * hipGridDim_y;
-  printf(fmt, log_device.pe_number, flat_wg_id, flat_thread_id, args...);
+  printf(fmt, logd_constants.pe_number, flat_wg_id, flat_thread_id, args...);
 }
 
 }  // namespace rocshmem
@@ -231,8 +240,9 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #define LOGD_ERROR(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
-  if (rocshmem::log_device.show_error)                                        \
-    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+  if (rocshmem::logd_constants.flags & rocshmem::logd_constants::SHOW_ERROR)  \
+    rocshmem::dprintf(rocshmem::logd_constants.flags                          \
+        & rocshmem::logd_constants::SHOW_COLOR                                \
         ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                             \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
@@ -241,8 +251,9 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #define LOGD_ERROR_ABORT(fmt, ...) do {                                       \
   rocshmem::static_assert_device_only();                                      \
-  if (rocshmem::log_device.show_error)                                        \
-    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+  if (rocshmem::logd_constants.flags & rocshmem::logd_constants::SHOW_ERROR)  \
+    rocshmem::dprintf(rocshmem::logd_constants.flags                          \
+        & rocshmem::logd_constants::SHOW_COLOR                                \
         ? "\033[1;91mE%04dw%04ut%04u\033[0m " fmt                             \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
@@ -254,8 +265,9 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #define LOGD_WARN(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
-  if (rocshmem::log_device.show_warn)                                         \
-    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+  if (rocshmem::logd_constants.flags & rocshmem::logd_constants::SHOW_WARN)   \
+    rocshmem::dprintf(rocshmem::logd_constants.flags                          \
+        & rocshmem::logd_constants::SHOW_COLOR                                \
         ? "\033[1;93mW%04dw%04ut%04u\033[0m " fmt                             \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "W%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
@@ -264,8 +276,9 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #define LOGD_INFO(fmt, ...) do {                                              \
   rocshmem::static_assert_device_only();                                      \
-  if (rocshmem::log_device.show_info)                                         \
-    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+  if (rocshmem::logd_constants.flags & rocshmem::logd_constants::SHOW_INFO)   \
+    rocshmem::dprintf(rocshmem::logd_constants.flags                          \
+        & rocshmem::logd_constants::SHOW_COLOR                                \
         ? "\033[32mI%04dw%04ut%04u\033[0m " fmt                               \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "I%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
@@ -275,8 +288,9 @@ void dprintf(const char* fmt, const Args&... args) {
 #if defined(BUILD_DEBUG_TRACE_DEVICE)
 #define LOGD_API(fmt, ...) do {                                               \
   rocshmem::static_assert_device_only();                                      \
-  if (rocshmem::log_device.show_api)                                          \
-    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+  if (rocshmem::logd_constants.flags & rocshmem::logd_constants::SHOW_API)    \
+    rocshmem::dprintf(rocshmem::logd_constants.flags                          \
+        & rocshmem::logd_constants::SHOW_COLOR                                \
         ? "\033[95mA%04dw%04ut%04u\033[0m " fmt                               \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "A%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
@@ -285,8 +299,9 @@ void dprintf(const char* fmt, const Args&... args) {
 
 #define LOGD_TRACE(fmt, ...) do {                                             \
   rocshmem::static_assert_device_only();                                      \
-  if (rocshmem::log_device.show_trace)                                        \
-    rocshmem::dprintf(rocshmem::log_device.show_color                         \
+  if (rocshmem::logd_constants.flags & rocshmem::logd_constants::SHOW_TRACE)  \
+    rocshmem::dprintf(rocshmem::logd_constants.flags                          \
+        & rocshmem::logd_constants::SHOW_COLOR                                \
         ? "\033[94mT%04dw%04ut%04u\033[0m " fmt                               \
           "\t\033[90m" __FILE__ ":%d\033[0m\n"                                \
         : "T%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \

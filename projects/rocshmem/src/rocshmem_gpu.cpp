@@ -86,6 +86,8 @@ __constant__ constmem_t constmem;
 
 __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
 
+__constant__ struct logd_constants logd_constants;
+
 namespace device {
     extern "C" __constant__ rocshmem_team_t
     __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
