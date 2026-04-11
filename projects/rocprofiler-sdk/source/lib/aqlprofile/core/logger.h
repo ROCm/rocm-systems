@@ -39,6 +39,8 @@
 #    include <unistd.h>
 #endif
 
+#include <fmt/format.h>
+
 #include <exception>
 #include <fstream>
 #include <iostream>
@@ -111,11 +113,13 @@ private:
 
     Logger()
     {
-        const char* path = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
-        if(path != nullptr)
-        {
-            file_ = fopen("/tmp/aql_profile_log.txt", "a");
-        }
+        const char* enable_log = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
+
+        if(enable_log == nullptr) return;
+
+        const auto logfile = fmt::format("/tmp/aql_profile_log_{}.txt", GetPid());
+        file_              = fopen(logfile.c_str(), "a");
+
         ResetStreaming();
     }
 

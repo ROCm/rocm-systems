@@ -67,7 +67,7 @@ protected:
         }
     }
 
-    const std::string log_file_path_ = "/tmp/aql_profile_log.txt";
+    const std::string log_file_path_ = fmt::format("/tmp/aql_profile_log_{}.txt", getpid());
 
     // Helper function to read log file content
     std::string ReadLogFile()
