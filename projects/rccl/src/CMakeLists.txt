@@ -415,8 +415,14 @@ if(ONLY_FUNCS)
 endif()
 
 # Execute the python script to generate required collective functions
+if(ENABLE_UNITY_DEVICE_BUILD)
+  set(UNITY_FLAG "UNITY")
+else()
+  set(UNITY_FLAG "")
+endif()
+
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${UNITY_FLAG} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -443,10 +449,24 @@ endif()
 # Find the generated files in the output directory
 file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
-# Append all found generated files to the list
-foreach(file ${GENERATED_FILES})
-  list(APPEND HIP_SOURCES ${file})
-endforeach()
+if(ENABLE_UNITY_DEVICE_BUILD)
+  # Unity build: only include unity_*.cpp, host_table.cpp, device_table.cpp,
+  # and msccl files. Exclude the individual per-func .cpp files and headers.
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(fname ${file} NAME)
+    if(fname MATCHES "^unity_" OR fname STREQUAL "host_table.cpp" OR fname STREQUAL "device_table.cpp" OR fname MATCHES "^msccl_")
+      list(APPEND HIP_SOURCES ${file})
+    endif()
+  endforeach()
+else()
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(fname ${file} NAME)
+    # In non-unity builds, skip unity files and per-collective device tables
+    if(NOT fname MATCHES "^unity_" AND NOT fname MATCHES "^device_table_[a-z]")
+      list(APPEND HIP_SOURCES ${file})
+    endif()
+  endforeach()
+endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
@@ -463,6 +483,49 @@ add_custom_target(update_git_version
 )
 
 list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
+
+# Compile-time optimization: remove -fgpu-rdc from host-only source files
+#==================================================================================================
+# The target-level -fgpu-rdc flag (set below) forces the compiler to defer GPU
+# code generation to link time for EVERY source file, even the ~100 pure-host
+# .cc files that contain zero device code.  At link time the offload linker must
+# then scan all resulting objects, merge their (empty) device bitcode, and run
+# full LTO + ISA codegen -- the dominant bottleneck in RCCL builds.
+#
+# By overriding with -fno-gpu-rdc on host-only files (last flag wins), those
+# objects are compiled as plain HIP host code with no device sections, so the
+# offload linker skips them entirely.  Device files (.cu.cpp, gensrc/*, and
+# collectives.cc which embeds a __global__ kernel) keep -fgpu-rdc.
+#foreach(src ${HIP_SOURCES})
+#  # Device sources that MUST keep target-level -fgpu-rdc:
+#  #   - .cu.cpp        : hand-written device code (common.cu, onerank.cu)
+#  #   - gensrc/        : generated kernel implementations
+#  #   - collectives.cc : includes hierarchical_ag_shuffle.h (__global__ kernel + <<<>>> launch)
+#  #   - enqueue.cc     : includes device/common.h (extern __shared__, __device__ funcs)
+#  #   - npkit.cc       : includes npkit.h -> device/common.h
+#  #   - init.cc        : includes npkit.h -> device/common.h
+#  #   - net.cc (transport) : includes npkit.h -> device/common.h
+#  #   - msccl_setup.cc : includes msccl_kernel.h (__global__ declarations)
+#  if(src MATCHES "\\.cu\\.cpp$"
+#     OR src MATCHES "/gensrc/"
+#     OR src MATCHES "collectives\\.cc$"
+#     OR src MATCHES "enqueue\\.cc$"
+#     OR src MATCHES "npkit\\.cc$"
+#     OR src MATCHES "/init\\.cc$"
+#     OR src MATCHES "transport/net\\.cc$"
+#     OR src MATCHES "msccl_setup\\.cc$")
+#    continue()
+#  endif()
+#  # Override compilable host sources only (skip headers)
+#  if(src MATCHES "\\.(cc|cpp|c)$")
+#    set_source_files_properties(${src} PROPERTIES COMPILE_OPTIONS "-fno-gpu-rdc")
+#  endif()
+#endforeach()
+
+# Unity device build: exclude common.cu.cpp (kernels are in unity files)
+if(ENABLE_UNITY_DEVICE_BUILD)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
+endif()
 
 # Set up RCCL library
 #==================================================================================================
@@ -740,6 +803,12 @@ endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
 endif()
+if(ENABLE_UNITY_DEVICE_BUILD)
+  target_compile_definitions(rccl PRIVATE ENABLE_UNITY_DEVICE_BUILD)
+  target_include_directories(rccl PRIVATE ${GEN_DIR})
+  file(GLOB UNITY_SRCS "${GEN_DIR}/unity_*.cpp")
+  message(STATUS "Unity device build enabled (${CMAKE_CURRENT_LIST_DIR}): ${UNITY_SRCS}")
+endif()
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)
@@ -752,8 +821,13 @@ if (ROCM_VERSION VERSION_LESS "60200" AND ENABLE_COMPRESS)
 endif()
 
 if (ENABLE_COMPRESS)
-  target_link_libraries(rccl PRIVATE --offload-compress)
-  message(STATUS "--offload-compress enabled")
+  if(ENABLE_UNITY_DEVICE_BUILD)
+    target_compile_options(rccl PRIVATE --offload-compress)
+    message(STATUS "--offload-compress enabled (compile-time, unity build)")
+  else()
+    target_link_libraries(rccl PRIVATE --offload-compress)
+    message(STATUS "--offload-compress enabled (link-time)")
+  endif()
 else()
   message(STATUS "--offload-compress disabled")
 endif()
@@ -764,7 +838,9 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+if(NOT ENABLE_UNITY_DEVICE_BUILD)
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -885,7 +961,9 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+if(NOT ENABLE_UNITY_DEVICE_BUILD)
+  target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -939,6 +1017,13 @@ if (HAVE_PARALLEL_JOBS)
   endif()
   message(STATUS "Use ${num_linker_jobs} jobs for linking")
   target_link_options(rccl PRIVATE -parallel-jobs=${num_linker_jobs})       # Use multiple threads to link
+
+  # Increase device LTO partitions to better utilize available cores.
+  # Default is 8; higher values allow the LTO backend to split the merged
+  # device bitcode into more independent partitions for parallel codegen.
+  #set(RCCL_LTO_PARTITIONS "32" CACHE STRING "Number of LTO partitions for device link")
+  #target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-partitions=${RCCL_LTO_PARTITIONS}")
+  #message(STATUS "Device LTO partitions: ${RCCL_LTO_PARTITIONS}")
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)

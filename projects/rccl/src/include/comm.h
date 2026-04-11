@@ -286,6 +286,10 @@ struct ncclKernelPlan {
   enum ncclDevWorkStorageType workStorageType;
   bool kernelSpecialized;
   void* kernelFn;
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+  int unityCollFunc;
+  int unityDevRedOp;
+#endif
   union {
     struct ncclDevKernelArgs* kernelArgs;
     void* kernelSymArgs;

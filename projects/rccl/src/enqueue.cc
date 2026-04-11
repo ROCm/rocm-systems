@@ -45,7 +45,15 @@ struct ncclKernelMatch {
   bool specialized;
 };
 
-
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+static inline void* ncclGetCollKernelFn(int coll, int devRedOp, struct ncclComm* comm) {
+#ifdef ENABLE_COLLTRACE
+  if (comm->collTraceEnabled)
+    return ncclCollKernelsDebug[coll][devRedOp][comm->unroll];
+#endif
+  return ncclCollKernels[coll][devRedOp][comm->unroll];
+}
+#else
 #ifdef ENABLE_COLLTRACE
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 3 : 0))
 static ncclKernelMatch const ncclKerns[6] = {
@@ -63,6 +71,7 @@ static ncclKernelMatch const ncclKerns[3] = {
   {(void*)ncclDevKernel_Generic_2, true},
   {(void*)ncclDevKernel_Generic_4, true}
 };
+#endif
 #endif
 
 static int rcclProtoGrainSize(int proto, ncclComm *comm){
@@ -95,7 +104,6 @@ NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
 
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
-  constexpr int KernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
   ncclResult_t result = ncclSuccess;
 
   if (maxStackSize) *maxStackSize = 0;
@@ -107,43 +115,61 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   CUDACHECK(hipDeviceGetAttribute(&WarpSize, hipDeviceAttributeWarpSize, cudaDev));
   int ncclMaxSharedMem = rcclShmemDynamicSize(cudaArch, WarpSize);
 
-#ifdef GENERATE_SYM_KERNELS
-  for (int sym=0; sym <= 1; sym++) {
-    int kcount = sym==0 ? KernelCount : ncclSymkKernelCount;
-    for (int k=0; k < kcount; k++) {
-      void* fn = sym==0 ? ncclKerns[k].kernelFn : ncclSymkKernelList[k];
-#else
-  for (int k = 0; k < KernelCount; k++) {
-    void* fn = ncclKerns[k].kernelFn;
-#endif
-      cudaFuncAttributes attr = {0};
-      if (fn == nullptr) continue;
-
-      cudaError_t errcode = cudaFuncGetAttributes(&attr, fn);
-      if (errcode != cudaSuccess) continue; // Silently ignore failures
-      if (maxStackSize) {
-        if (attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
-      }
-      if (carveout) {
-        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
-          cudaFuncAttributePreferredSharedMemoryCarveout, carveout),
-          result, ignore1);
-      ignore1:;
-      }
-      if (ncclMaxSharedMem != 0) {
-        int sharedMemSize = ncclMaxSharedMem;
-        if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {
-          WARN("cudaArch %d ncclMaxSharedMem %d exceeds device/fn maxSharedMem %zu",
-               cudaArch, sharedMemSize, maxSharedMem-attr.sharedSizeBytes);
-          return ncclSystemError;
-        }
-        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
-          cudaFuncAttributeMaxDynamicSharedMemorySize, sharedMemSize),
-          result, next_kernel);
-      }
-    next_kernel:;
+  auto initKernelFn = [&](void* fn) -> ncclResult_t {
+    ncclResult_t res = ncclSuccess;
+    if (fn == nullptr) return res;
+    cudaFuncAttributes attr = {0};
+    cudaError_t errcode = cudaFuncGetAttributes(&attr, fn);
+    if (errcode != cudaSuccess) return res;
+    if (maxStackSize) {
+      if (attr.localSizeBytes > *maxStackSize) *maxStackSize = attr.localSizeBytes;
     }
+    if (carveout) {
+      CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+        cudaFuncAttributePreferredSharedMemoryCarveout, carveout),
+        res, done);
+    }
+    if (ncclMaxSharedMem != 0) {
+      int sharedMemSize = ncclMaxSharedMem;
+      if (sharedMemSize > (maxSharedMem-(int)attr.sharedSizeBytes)) {
+        WARN("cudaArch %d ncclMaxSharedMem %d exceeds device/fn maxSharedMem %zu",
+             cudaArch, sharedMemSize, maxSharedMem-attr.sharedSizeBytes);
+        return ncclSystemError;
+      }
+      CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+        cudaFuncAttributeMaxDynamicSharedMemorySize, sharedMemSize),
+        res, done);
+    }
+  done:
+    return res;
+  };
+
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+  for (int coll = 0; coll < ncclNumFuncs; coll++) {
+    for (int r = 0; r < ncclNumDevRedOps; r++) {
+      for (int u = 0; u < NCCL_NUM_UNROLLS; u++) {
+        NCCLCHECK(initKernelFn(ncclCollKernels[coll][r][u]));
+      }
+    }
+  }
+#ifdef ENABLE_COLLTRACE
+  for (int coll = 0; coll < ncclNumFuncs; coll++) {
+    for (int r = 0; r < ncclNumDevRedOps; r++) {
+      for (int u = 0; u < NCCL_NUM_UNROLLS; u++) {
+        NCCLCHECK(initKernelFn(ncclCollKernelsDebug[coll][r][u]));
+      }
+    }
+  }
+#endif
+#else
+  constexpr int KernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
+  for (int k = 0; k < KernelCount; k++) {
+    NCCLCHECK(initKernelFn(ncclKerns[k].kernelFn));
+  }
+#endif
 #ifdef GENERATE_SYM_KERNELS
+  for (int k = 0; k < ncclSymkKernelCount; k++) {
+    NCCLCHECK(initKernelFn(ncclSymkKernelList[k]));
   }
 #endif
   return result;
@@ -734,6 +760,16 @@ static ncclResult_t scheduleCollTasksToPlan(
     struct ncclDevWorkColl* devWork = (struct ncclDevWorkColl*)(workNode+1);
     size_t elementSize = ncclTypeSize(task->datatype);
 
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+    // Each per-(coll, redop) kernel can only dispatch its own device functions.
+    // If this task needs a different kernel, stop filling this plan so the task
+    // goes into a separate kernel launch.
+    if (plan->kernelSpecialized &&
+        (task->func != plan->unityCollFunc || (int)task->opDev.op != plan->unityDevRedOp)) {
+      break;
+    }
+#endif
+
     int kind = 2*task->isCollnet + task->isNvls;
     if (kind != kindPrev) {
       trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, trafficBytes[kind]/nChannels[kind]);
@@ -943,8 +979,15 @@ static ncclResult_t scheduleCollTasksToPlan(
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
     if (!plan->kernelSpecialized) {
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+      plan->kernelFn = ncclGetCollKernelFn(task->func, (int)task->opDev.op, comm);
+      plan->kernelSpecialized = true;
+      plan->unityCollFunc = task->func;
+      plan->unityDevRedOp = (int)task->opDev.op;
+#else
       plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
       plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+#endif
     }
     // Profiler
     plan->groupApiEventHandle = task->groupApiEventHandle;
@@ -1321,14 +1364,25 @@ static ncclResult_t scheduleP2pTasksToPlan(
   ) {
   int nRanks = comm->nRanks;
   struct ncclKernelPlanner::Peer* peers = comm->planner.peers;
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+  // Each unity kernel only contains device functions for one (coll, redop).
+  // If a collective kernel is already set, P2P (SendRecv) work cannot run in
+  // this plan -- leave it for a subsequent plan that uses the SendRecv kernel.
+  if (plan->kernelSpecialized) return ncclSuccess;
+#endif
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   plan->threadPerBlock = std::max(plan->threadPerBlock, RCCL_P2P_MAX_NTHREADS);
 #else
   plan->threadPerBlock = std::max(plan->threadPerBlock, NCCL_MAX_NTHREADS);
 #endif
   if (!plan->kernelSpecialized) {
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+    plan->kernelFn = ncclGetCollKernelFn(ncclFuncSendRecv, ncclDevSum, comm);
+    plan->kernelSpecialized = true;
+#else
     plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
     plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+#endif
   }
 
   // Compute how much to split operations

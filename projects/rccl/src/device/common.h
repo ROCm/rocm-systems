@@ -12,7 +12,19 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
+#if defined(NCCL_DEVICE_TABLE_HEADER)
+#include NCCL_DEVICE_TABLE_HEADER
+#elif defined(ENABLE_UNITY_DEVICE_BUILD)
+typedef void(*ncclDevFuncPtr_t)();
+__device__ ncclDevFuncPtr_t const ncclDevFuncTable_1[] = {nullptr};
+__device__ ncclDevFuncPtr_t const ncclDevFuncTable_2[] = {nullptr};
+__device__ ncclDevFuncPtr_t const ncclDevFuncTable_4[] = {nullptr};
+__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_1(unsigned short) {}
+__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_2(unsigned short) {}
+__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_4(unsigned short) {}
+#else
 #include "device_table.h"
+#endif
 #include "network/unpack/unpack_defs.h"
 #define NCCL_MAX_DEV_ARITY (NCCL_MAX_TREE_ARITY-1)  // Using balanced tree instead of split tree
 
@@ -189,11 +201,16 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
+#if defined(NCCL_UNITY_BUILD) || defined(ENABLE_UNITY_DEVICE_BUILD)
+__shared__ ncclShmemData ncclShmem;
+__shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+#else
 extern __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ >= 700
   extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
 #else
   extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+#endif
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION

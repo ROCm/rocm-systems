@@ -80,8 +80,12 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
+is_unity_build     = 1 if len(sys.argv) > 7 and sys.argv[7] == "UNITY" else 0
 
-func_pattern = sys.argv[7:8]
+if is_unity_build:
+  func_pattern = sys.argv[8:9]
+else:
+  func_pattern = sys.argv[7:8]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -624,3 +628,292 @@ if is_msccl_kernels:
             "MSCCL_IMPL_KERNEL_ENTRY_FUNC_DEVREDOP_TYPE({redop}, {ty_cxx}, false);\n"
             .format(redop=redop, ty_cxx=ty_to_cxx[ty])
           )
+
+################################################################################
+# Unity build: generate per-collective self-contained TUs compiled with
+# -fno-gpu-rdc so device ISA is produced at compile time (no link-time LTO).
+# Large collectives (multiple redops) are split into per-redop TUs so that
+# compilation can run in parallel across make jobs.
+################################################################################
+if is_unity_build:
+  coll_to_funcs = {}
+  for fn in primary_funcs:
+    if fn.coll not in coll_to_funcs:
+      coll_to_funcs[fn.coll] = []
+    coll_to_funcs[fn.coll].append(fn)
+
+  active_colls = sorted(coll_to_funcs.keys(), key=lambda c: all_colls.index(c))
+  first_unroll = local_unroll[0]
+
+  redop_to_lower = {"Sum": "sum", "Prod": "prod", "MinMax": "minmax",
+                    "PreMulSum": "premulsum", "SumPostDiv": "sumpostdiv"}
+
+  # Determine which collectives need per-redop splitting.
+  # Collectives with only one redop (Broadcast, AllGather, SendRecv, etc.)
+  # stay as a single TU.
+  multi_redop_colls = set()
+  for coll in active_colls:
+    redops_in_coll = set(fn.redop for fn in coll_to_funcs[coll])
+    if len(redops_in_coll) > 1:
+      multi_redop_colls.add(coll)
+
+  # Build (coll, redop) -> [funcs] mapping for split collectives,
+  # and (coll, None) -> [funcs] for non-split collectives.
+  unit_to_funcs = {}
+  for coll in active_colls:
+    if coll in multi_redop_colls:
+      for fn in coll_to_funcs[coll]:
+        key = (coll, fn.redop)
+        if key not in unit_to_funcs:
+          unit_to_funcs[key] = []
+        unit_to_funcs[key].append(fn)
+    else:
+      unit_to_funcs[(coll, None)] = coll_to_funcs[coll]
+
+  # Per-unit local funcId: position within its device table.
+  unit_local_func_id = {}
+  for unit_key, funcs in unit_to_funcs.items():
+    idx = 0
+    for fn in funcs:
+      if fn.unroll != first_unroll:
+        continue
+      unit_local_func_id[(unit_key, fn)] = idx
+      idx += 1
+
+  unity_file_count = 0
+  for unit_key, unit_funcs in unit_to_funcs.items():
+    coll, redop = unit_key
+    lower_coll = coll_camel_to_lower[coll]
+    if redop is not None:
+      lower_redop = redop_to_lower[redop]
+      tag = f"{lower_coll}_{lower_redop}"
+      guard_tag = f"{coll.upper()}_{redop.upper()}"
+      kernel_suffix = f"{coll}_{redop}"
+    else:
+      tag = lower_coll
+      guard_tag = coll.upper()
+      kernel_suffix = coll
+
+    # ---- device_table_<tag>.h ----
+    dt_name = f"device_table_{tag}.h"
+    with open(os.path.join(gensrc, dt_name), "w") as f:
+      print("-- Generating %s" % os.path.join(gensrc, dt_name))
+      out = f.write
+      out(f"// Auto-generated device table for {coll}" + (f" {redop}" if redop else "") + "\n")
+      out(f"#ifndef NCCL_DEVICE_TABLE_{guard_tag}_H_\n")
+      out(f"#define NCCL_DEVICE_TABLE_{guard_tag}_H_\n\n")
+
+      if is_ifc: func_declaration = "__device__ void"
+      else: func_declaration = "__device__ __attribute__((noinline)) void"
+
+      for fn in unit_funcs:
+        sym = paste("_", "ncclDevFunc", *fn)
+        guard = get_arch_guard(fn)
+        if guard:
+          out("#if %s\n%s %s();\n#endif\n" % (guard, func_declaration, sym))
+        else:
+          out("%s %s();\n" % (func_declaration, sym))
+      out("\n")
+
+      local_index = {}
+      out("typedef void(*ncclDevFuncPtr_t)();\n\n")
+      for unroll in all_unrolls:
+        local_index[unroll] = 0
+        out("__device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
+        for fn in unit_funcs:
+          if fn.unroll != unroll: continue
+          sym = paste("_", "ncclDevFunc", *fn)
+          guard = get_arch_guard(fn)
+          if guard:
+            out("#if %s\n/*%4d*/ %s,\n#else\n/*%4d*/ nullptr,\n#endif\n" % (guard, local_index[unroll], sym, local_index[unroll]))
+          else:
+            out("/*%4d*/ %s,\n" % (local_index[unroll], sym))
+          local_index[unroll] += 1
+        out("nullptr};\n\n")
+
+      if not is_ifc:
+        for unroll in all_unrolls:
+          if local_index[unroll] == 0:
+            out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{ }}\n\n")
+            continue
+          out(f"template<unsigned short f, unsigned short l>\n"
+              f"struct Caller{unroll} {{\n"
+              "  static __forceinline__ __device__ __host__\n"
+              f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
+              "    constexpr unsigned short m = f + (l - f) / 2;\n"
+              f"    return (funcIndex < m)\n"
+              f"      ? Caller{unroll}<f, m>::call{unroll}(funcIndex)\n"
+              f"      : Caller{unroll}<m, l>::call{unroll}(funcIndex);\n"
+              "  }\n"
+              "};\n\n")
+          out(f"template<unsigned short f>\n"
+              f"struct Caller{unroll}<f, f + 1> {{\n"
+              "  static __forceinline__ __device__ __host__\n"
+              f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
+              f"    ncclDevFuncTable_{unroll}[f]();\n"
+              "  }\n"
+              "};\n\n")
+          out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{\n")
+          out(f"  Caller{unroll}<0, {local_index[unroll]}>::call{unroll}(funcIndex);\n")
+          out("}\n\n")
+
+      out(f"#endif // NCCL_DEVICE_TABLE_{guard_tag}_H_\n")
+
+    # ---- unity_<tag>.cpp ----
+    unity_name = f"unity_{tag}.cpp"
+    with open(os.path.join(gensrc, unity_name), "w") as f:
+      print("-- Generating %s" % os.path.join(gensrc, unity_name))
+      out = f.write
+      out(f"// Auto-generated unity TU for {coll}" + (f" {redop}" if redop else "") + " -- compiled with -fno-gpu-rdc\n")
+      out("#define NCCL_UNITY_BUILD\n")
+      out(f'#define NCCL_DEVICE_TABLE_HEADER "device_table_{tag}.h"\n\n')
+      out('#include "common.h"\n')
+      out(f'#include "{lower_coll}.h"\n\n')
+
+      for fn in unit_funcs:
+        sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+        guard = get_arch_guard(fn)
+        if guard:
+          out("#if %s\n" % guard)
+        out(
+          "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n"
+          .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop], ty_cxx=ty_to_cxx[fn.ty],
+                  algo=(fn.algo or "RING"), proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline, unroll=fn.unroll)
+        )
+        if guard:
+          out("#endif\n")
+
+      out("\n")
+      out("struct RunWorkNop {\n  __device__ void run() {}\n};\n\n")
+      for unroll in local_unroll:
+        out(f"__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n")
+        out(f"__global__ void ncclDevKernel_{kernel_suffix}_{unroll}(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n")
+        out(f"  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/{unroll}>(&argsStorage.args);\n")
+        out("}\n")
+      if is_colltrace:
+        for unroll in local_unroll:
+          out(f"__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n")
+          out(f"__global__ void ncclDevKernelDebug_{kernel_suffix}_{unroll}(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n")
+          out(f"  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/{unroll}>(&argsStorage.args);\n")
+          out("}\n")
+    unity_file_count += 1
+
+  # ---- Unity host_table.cpp: kernel pointers + local funcId map ----
+  # Overwrites the non-unity host_table.cpp generated above.
+  with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
+    print("-- Generating %s (unity)" % os.path.join(gensrc, "host_table.cpp"))
+    out = f.write
+    out('#include "device.h"\n')
+    out('#include "nccl_tuner.h"\n\n')
+    out("#ifndef NCCL_GRID_CONSTANT\n#define NCCL_GRID_CONSTANT\n#endif\n\n")
+
+    # Forward-declare all kernel entries
+    for unit_key in unit_to_funcs:
+      coll, redop = unit_key
+      if redop is not None:
+        kernel_suffix = f"{coll}_{redop}"
+      else:
+        kernel_suffix = coll
+      for unroll in local_unroll:
+        out(f"__global__ void ncclDevKernel_{kernel_suffix}_{unroll}(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);\n")
+      if is_colltrace:
+        for unroll in local_unroll:
+          out(f"__global__ void ncclDevKernelDebug_{kernel_suffix}_{unroll}(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);\n")
+    out("\n")
+
+    # ncclCollKernels[ncclNumFuncs][ncclNumDevRedOps][NCCL_NUM_UNROLLS]
+    # For split collectives: indexed by (coll, redop, unroll)
+    # For non-split collectives: all redop slots point to the same kernel
+    unroll_to_idx = {"1": 0, "2": 1, "4": 2}
+    redop_to_idx = {"Sum": 0, "Prod": 1, "MinMax": 2, "PreMulSum": 3, "SumPostDiv": 4}
+
+    out(f"void* ncclCollKernels[ncclNumFuncs][ncclNumDevRedOps][NCCL_NUM_UNROLLS] = {{\n")
+    for coll_name in all_colls:
+      if coll_name == "" or coll_name not in coll_to_funcs:
+        out(f"  {{ // {coll_name or '(unused)'}\n")
+        for ri in range(len(all_redops)):
+          out(f"    {{ nullptr, nullptr, nullptr }},\n")
+        out(f"  }},\n")
+        continue
+
+      out(f"  {{ // {coll_name}\n")
+      if coll_name in multi_redop_colls:
+        for redop_name in all_redops:
+          ptrs = ["nullptr", "nullptr", "nullptr"]
+          if (coll_name, redop_name) in unit_to_funcs:
+            for unroll in local_unroll:
+              ptrs[unroll_to_idx[unroll]] = f"(void*)ncclDevKernel_{coll_name}_{redop_name}_{unroll}"
+          out(f"    {{ {', '.join(ptrs)} }}, // {redop_name}\n")
+      else:
+        for redop_name in all_redops:
+          ptrs = ["nullptr", "nullptr", "nullptr"]
+          for unroll in local_unroll:
+            ptrs[unroll_to_idx[unroll]] = f"(void*)ncclDevKernel_{coll_name}_{unroll}"
+          out(f"    {{ {', '.join(ptrs)} }}, // {redop_name} (shared)\n")
+      out(f"  }},\n")
+    out("};\n\n")
+
+    if is_colltrace:
+      out(f"void* ncclCollKernelsDebug[ncclNumFuncs][ncclNumDevRedOps][NCCL_NUM_UNROLLS] = {{\n")
+      for coll_name in all_colls:
+        if coll_name == "" or coll_name not in coll_to_funcs:
+          out(f"  {{ // {coll_name or '(unused)'}\n")
+          for ri in range(len(all_redops)):
+            out(f"    {{ nullptr, nullptr, nullptr }},\n")
+          out(f"  }},\n")
+          continue
+
+        out(f"  {{ // {coll_name}\n")
+        if coll_name in multi_redop_colls:
+          for redop_name in all_redops:
+            ptrs = ["nullptr", "nullptr", "nullptr"]
+            if (coll_name, redop_name) in unit_to_funcs:
+              for unroll in local_unroll:
+                ptrs[unroll_to_idx[unroll]] = f"(void*)ncclDevKernelDebug_{coll_name}_{redop_name}_{unroll}"
+            out(f"    {{ {', '.join(ptrs)} }}, // {redop_name}\n")
+        else:
+          for redop_name in all_redops:
+            ptrs = ["nullptr", "nullptr", "nullptr"]
+            for unroll in local_unroll:
+              ptrs[unroll_to_idx[unroll]] = f"(void*)ncclDevKernelDebug_{coll_name}_{unroll}"
+            out(f"    {{ {', '.join(ptrs)} }}, // {redop_name} (shared)\n")
+        out(f"  }},\n")
+      out("};\n\n")
+
+    # ncclDevFuncNameToId map: funcId is local to (coll, redop) unit
+    out('#include <unordered_map>\n')
+    out("std::unordered_map<uint64_t, int> ncclDevFuncNameToId = {\n")
+    for fn in func_rows[:len(func_rows)//len(local_unroll)]:
+      fn_id = -1
+      if fn is not None:
+        primary = Fn(*equivalent_primary(*fn))
+        if primary.coll in multi_redop_colls:
+          lookup_key = ((primary.coll, primary.redop), primary)
+        else:
+          lookup_key = ((primary.coll, None), primary)
+        fn_id = unit_local_func_id.get(lookup_key, -1)
+        comment = " // " + paste(" ", *fn)
+        coll_idx = all_colls.index(fn.coll)
+        algo_idx = all_algos.index(fn.algo)
+        proto_idx = all_protos.index(fn.proto)
+        redop_idx = all_redops.index(fn.redop)
+        ty_idx = all_tys.index(fn.ty)
+        acc_idx = all_accs.index(fn.acc)
+        pipeline_idx = all_pipelines.index(fn.pipeline)
+        key = (
+          (coll_idx & 0xF)
+          | ((algo_idx & 0xF) << 4)
+          | ((proto_idx & 0xF) << 8)
+          | ((redop_idx & 0xF) << 12)
+          | ((ty_idx & 0xF) << 16)
+          | ((acc_idx & 0xF) << 20)
+          | ((pipeline_idx & 0xF) << 24)
+        )
+        if fn.coll == "Broadcast":
+          key = ((coll_idx & 0x3F) | ((proto_idx & 0x3F) << 8))
+        if fn.coll in ["SendRecv", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
+          key = ((coll_idx & 0x3F))
+        out(f'  {{{key}, {fn_id}}},{comment}\n')
+    out("};\n")
+
+  print("-- Unity build: generated %d unity TUs" % unity_file_count)

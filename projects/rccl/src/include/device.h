@@ -821,6 +821,13 @@ inline bool ncclNvlsSupported(int devRedOp, int type) {
 // Map the uint64_t key to funcIdx
 extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+extern void* ncclCollKernels[][ncclNumDevRedOps][NCCL_NUM_UNROLLS];
+#ifdef ENABLE_COLLTRACE
+extern void* ncclCollKernelsDebug[][ncclNumDevRedOps][NCCL_NUM_UNROLLS];
+#endif
+#endif
+
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
 inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, int acc = 0, int pipeline = 0) {
   int row = -1;
