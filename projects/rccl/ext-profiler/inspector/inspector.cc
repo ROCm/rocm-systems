@@ -752,23 +752,30 @@ struct inspectorDumpThread {
   char* outputRoot;
   uint64_t sampleIntervalUsecs;
   pthread_t pthread;
-  pthread_rwlock_t guard;
   // Mutex + condvar used to wake the sleeping dump thread immediately on stop,
   // replacing the nanosleep-based heuristic that caused teardown hangs.
   pthread_mutex_t sleepMutex;
   pthread_cond_t  sleepCond;
+  clockid_t       sleepCondClock{CLOCK_MONOTONIC}; // clock used for timedwait deadlines
 
   inspectorDumpThread(const char* outputRoot, uint64_t sampleIntervalUsecs)
     : jfo(nullptr), outputRoot(strdup(outputRoot)), sampleIntervalUsecs(sampleIntervalUsecs) {
-    if (inspectorLockInit(&guard) != inspectorSuccess) {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: couldn't init lock");
-    }
     pthread_mutex_init(&sleepMutex, nullptr);
     pthread_condattr_t condAttr;
-    pthread_condattr_init(&condAttr);
-    pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
-    pthread_cond_init(&sleepCond, &condAttr);
-    pthread_condattr_destroy(&condAttr);
+    bool useMonotonic = (pthread_condattr_init(&condAttr) == 0 &&
+                         pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC) == 0);
+    if (useMonotonic) {
+      pthread_cond_init(&sleepCond, &condAttr);
+      pthread_condattr_destroy(&condAttr);
+    } else {
+      // CLOCK_MONOTONIC condvar not supported; fall back to default (CLOCK_REALTIME).
+      // dumpMain will detect this and use CLOCK_REALTIME for its deadline.
+      INFO(NCCL_INSPECTOR,
+           "NCCL Inspector: CLOCK_MONOTONIC condvar unavailable; using CLOCK_REALTIME");
+      pthread_condattr_destroy(&condAttr);
+      pthread_cond_init(&sleepCond, nullptr);
+      sleepCondClock = CLOCK_REALTIME;
+    }
   }
 
   ~inspectorDumpThread() {
@@ -779,9 +786,6 @@ struct inspectorDumpThread {
     if (outputRoot != nullptr) {
       free(outputRoot);
       outputRoot = nullptr;
-    }
-    if (inspectorLockDestroy(&guard) != inspectorSuccess) {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: couldn't destroy lock");
     }
     pthread_cond_destroy(&sleepCond);
     pthread_mutex_destroy(&sleepMutex);
@@ -804,7 +808,7 @@ struct inspectorDumpThread {
   }
 
   void stopThread() {
-    INFO(NCCL_ENV, "NCCL Inspector Stopping Dump thread");
+    INFO(NCCL_INSPECTOR, "NCCL Inspector Stopping Dump thread");
     // Set run = false and signal under sleepMutex so the dump thread cannot
     // miss the wakeup regardless of where it is in its loop.
     pthread_mutex_lock(&sleepMutex);
@@ -868,16 +872,12 @@ struct inspectorDumpThread {
       pthread_mutex_unlock(&dumper->sleepMutex);
       if (!shouldRun) break;
 
-      // Perform the dump without holding dumper->guard. The dump acquires
-      // per-communicator locks internally; holding dumper->guard here would
-      // create a lock-order inversion with profiler proxy threads that hold
-      // commInfo->guard and then indirectly wait on dumper->guard via stopThread.
       res = dumper->inspectorStateDump(dumper->outputRoot);
       if (res == inspectorFileOpenError || res == inspectorDisabledError) break;
 
       // Interruptible sleep: wakes immediately when stopThread signals the condvar.
       struct timespec deadline;
-      clock_gettime(CLOCK_MONOTONIC, &deadline);
+      clock_gettime(dumper->sleepCondClock, &deadline);
       uint64_t nsTotal = dumper->sampleIntervalUsecs * 1000ULL;  // µs → ns
       deadline.tv_sec  += nsTotal / 1000000000ULL;
       deadline.tv_nsec += nsTotal % 1000000000ULL;
@@ -886,8 +886,11 @@ struct inspectorDumpThread {
         deadline.tv_nsec -= 1000000000L;
       }
       pthread_mutex_lock(&dumper->sleepMutex);
-      if (dumper->run) {
-        pthread_cond_timedwait(&dumper->sleepCond, &dumper->sleepMutex, &deadline);
+      // Loop to handle spurious wakeups: keep waiting until the deadline
+      // expires or run becomes false (stopThread signalled us).
+      while (dumper->run) {
+        int rc = pthread_cond_timedwait(&dumper->sleepCond, &dumper->sleepMutex, &deadline);
+        if (rc == ETIMEDOUT) break;
       }
       pthread_mutex_unlock(&dumper->sleepMutex);
     }
@@ -1487,7 +1490,8 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
   uint64_t maxKernelExecTimeUsecs = 0;
   inspectorTimingSource_t bestTimingSource = inspectorTimingSourceCollectiveCpu;
 
-  for (uint32_t i = 0; i < collInfo->nChannels; i++) {
+  uint32_t nCh = (collInfo->nChannels < MAX_CHANNELS) ? collInfo->nChannels : MAX_CHANNELS;
+  for (uint32_t i = 0; i < nCh; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
     if (gpuExecTimeUsecs > 0) {

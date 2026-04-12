@@ -756,7 +756,7 @@ static ncclResult_t scheduleCollTasksToPlan(
       NCCLCHECK(calcCollChunking(comm, task, nChannels, nBytes, &chunkSize, &directFlags, &proxyOp));
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
-      task->nChannels = (uint8_t) nChannels; // Propagate to profiler (mirrors the non-CollNet path).
+      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX; // Propagate to profiler; clamp to avoid uint8 wrap (ENABLE_WARP_SPEED can push MAXCHANNELS to 512).
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;

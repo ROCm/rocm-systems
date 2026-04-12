@@ -219,7 +219,11 @@ static void inspectorPluginCollInfoInit(struct inspectorCollInfo **collInfo,
   inspectorPluginCollInfoRef(collInfoPtr); //self ref; no locks needed
   collInfoPtr->func = eDescr->coll.func;
   collInfoPtr->sn = eDescr->coll.seqNumber;
-  collInfoPtr->nChannels = eDescr->coll.nChannels;
+  // Clamp nChannels to MAX_CHANNELS: kernelCh[] and collEvtTrk.kernelCh[] are
+  // statically sized to MAX_CHANNELS; RCCL MAXCHANNELS can exceed this.
+  collInfoPtr->nChannels = (eDescr->coll.nChannels < MAX_CHANNELS)
+                             ? eDescr->coll.nChannels
+                             : MAX_CHANNELS;
   if (collInfoPtr->nChannels > 0) {
     inspectorPluginCollInfoRef(collInfoPtr); //extra ref for kernel completion
   }
@@ -230,7 +234,7 @@ static void inspectorPluginCollInfoInit(struct inspectorCollInfo **collInfo,
 
   collInfoPtr->commInfo = commInfo;
   collInfoPtr->collEvtTrk.sn = 0;
-  collInfoPtr->collEvtTrk.nChannels = collInfoPtr->nChannels;
+  collInfoPtr->collEvtTrk.nChannels = collInfoPtr->nChannels; // already clamped above
   inspectorRecordEventTrace(collInfoPtr->collEvtTrk.evntTrace,
                             NCCL_INSP_EVT_TRK_COLL_START, collInfoPtr);
 
@@ -392,6 +396,10 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
       = (struct inspectorKernelChInfo *)eHandle;
     struct inspectorCollInfo *collInfo = kernelChInfo->collInfo;
     if (collInfo && collInfo->type == ncclProfileColl) {
+      if (kernelChInfo->channelId >= MAX_CHANNELS) {
+        // Channel ID out of bounds — inspector arrays are sized to MAX_CHANNELS.
+        return ncclSuccess;
+      }
       inspectorLockWr(&collInfo->guard);
       struct inspectorEventTraceInfo *krnlEvtTrk =
         collInfo->collEvtTrk.kernelCh[kernelChInfo->channelId].evntTrace;
@@ -481,6 +489,10 @@ __hidden ncclResult_t inspectorPluginRecordEventState(void* eHandle,
     struct inspectorCollInfo *collInfo = kernelChInfo->collInfo;
     inspectorResult_t res = inspectorSuccess;
     if (collInfo && collInfo->type == ncclProfileColl) {
+      if (kernelChInfo->channelId >= MAX_CHANNELS) {
+        // Channel ID out of bounds — inspector arrays are sized to MAX_CHANNELS.
+        return ncclSuccess;
+      }
       inspectorLockWr(&collInfo->guard);
       struct inspectorEventTraceInfo *krnlEvtTrk
         = collInfo->collEvtTrk.kernelCh[kernelChInfo->channelId].evntTrace;
