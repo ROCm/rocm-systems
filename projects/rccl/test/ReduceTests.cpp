@@ -33,7 +33,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduce};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclFloat16, ncclFloat64, ncclFloat8e4m3, ncclFloat8e5m2});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclMin});
     std::vector<int>            const roots           = {0};
     std::vector<int>            const numElements     = testBed.ev.GetElements({393216});
     std::vector<bool>           const inPlaceList     = {false};
@@ -52,7 +52,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduce};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclInt32, ncclInt8});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclProd});
     std::vector<int>            const roots           = {1};
     std::vector<int>            const numElements     = testBed.ev.GetElements({384});
     std::vector<bool>           const inPlaceList     = {true};
@@ -71,7 +71,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduce};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclMax});
     std::vector<int>            const roots           = {0};
     std::vector<int>            const numElements     = testBed.ev.GetElements({393216});
     std::vector<bool>           const inPlaceList     = {true};

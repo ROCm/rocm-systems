@@ -779,7 +779,8 @@ namespace RcclUnitTesting
           }
 
           // Only allocate once for largest size; bias reuses the same allocation
-          // since PrepareData copies only numBiasElements (current) bytes, not the full allocated size
+          // since PrepareData copies only the current numBiasElements values
+          // (numBiasElements * DataTypeToBytes(dataType) bytes), not the full allocated size
           if (neIdx == 0)
           {
             this->AllocateMem(inPlaceList[ipIdx], managedMemList[mmIdx]);

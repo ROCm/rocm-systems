@@ -309,11 +309,18 @@ namespace RcclUnitTesting
     }
 
 
-    // Parse optional element count override
+    // Parse optional element count override (0 is valid for Send/Recv zero-element tests)
     for (auto s : GetEnvVarsList("UT_ELEMENTS"))
     {
-      int val = atoi(s.c_str());
-      if (val > 0) elements.push_back(val);
+      std::stringstream ss(s);
+      int val;
+      char extra;
+      if (!(ss >> val) || (ss >> extra))
+        TEST_WARN("UT_ELEMENTS: invalid value '%s' (ignored)", s.c_str());
+      else if (val < 0)
+        TEST_WARN("UT_ELEMENTS: negative value '%s' (ignored)", s.c_str());
+      else
+        elements.push_back(val);
     }
 
     // Build list of possible # GPU ranks based on env vars
