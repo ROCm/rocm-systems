@@ -7,6 +7,10 @@
 
 namespace RcclUnitTesting
 {
+  // Note: redOps is a required RunSimpleSweep parameter but is ignored at runtime
+  // for non-reducing collectives. It is hardcoded rather than routed through
+  // GetRedOps() so that UT_REDOPS does not affect which tests run here.
+
   TEST(Gather, OutOfPlace)
   {
     TestBed testBed;
@@ -14,7 +18,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclFloat32});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {1};
     std::vector<int>            const numElements     = testBed.ev.GetElements({1048576, 127});
     std::vector<bool>           const inPlaceList     = {false};
@@ -33,7 +37,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclFloat16, ncclFloat64});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {1};
     std::vector<int>            const numElements     = testBed.ev.GetElements({924873});
     std::vector<bool>           const inPlaceList     = {false};
@@ -53,7 +57,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclInt8, ncclInt32});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
     std::vector<int>            const numElements     = testBed.ev.GetElements({13576});
     std::vector<bool>           const inPlaceList     = {true};
@@ -72,7 +76,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclInt64, ncclFloat16});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
     std::vector<int>            const numElements     = testBed.ev.GetElements({1048576});
     std::vector<bool>           const inPlaceList     = {true};
@@ -111,7 +115,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclUint8, ncclUint32});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {1};
     std::vector<int>            const numElements     = testBed.ev.GetElements({1051234});
     std::vector<bool>           const inPlaceList     = {false};
@@ -130,7 +134,7 @@ namespace RcclUnitTesting
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
     std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclUint64});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {1};
     std::vector<int>            const numElements     = testBed.ev.GetElements({5231});
     std::vector<bool>           const inPlaceList     = {false};
