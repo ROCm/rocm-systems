@@ -69,7 +69,12 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
-  // Test different collectives within the same group call
+  // Test different collectives within the same group call.
+  // Note: ncclFloat is hardcoded for all collective slots and does not respect
+  // UT_DATATYPES. A single shared datatype is required because all collectives
+  // in the group call must be configured before any execute, so there is no
+  // per-collective datatype sweep here — the test exercises group call mechanics,
+  // not datatype coverage.
   TEST(GroupCall, Different)
   {
     TestBed testBed;
@@ -149,14 +154,16 @@ namespace RcclUnitTesting
 
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
-      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+    if (dataTypes.size() < (size_t)numCollPerGroup) {
+      GTEST_SKIP() << "Skipping... MixedDataType requires " << numCollPerGroup
+                   << " datatypes but UT_DATATYPES filtered to " << dataTypes.size() << ".";
     }
 
     std::vector<ncclRedOp_t> redOps;
     testBed.GetSupportedRedOps(redOps, testRedOps);
-    if (redOps.empty()) {
-      GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
+    if (redOps.size() < (size_t)numCollPerGroup) {
+      GTEST_SKIP() << "Skipping... MixedDataType requires " << numCollPerGroup
+                   << " redops but UT_REDOPS filtered to " << redOps.size() << ".";
     }
 
     bool isCorrect = true;
@@ -194,6 +201,9 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // Note: ncclFloat and ncclSum are hardcoded and do not respect UT_DATATYPES or
+  // UT_REDOPS. This test exercises concurrent AllReduce collectives across multiple
+  // streams within a group call; datatype and op coverage are not its purpose.
   TEST(GroupCall, Multistream)
   {
     TestBed testBed;
@@ -267,14 +277,16 @@ namespace RcclUnitTesting
 
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
-    if (dataTypes.empty()) {
-      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+    if (dataTypes.size() < (size_t)numGroupCalls) {
+      GTEST_SKIP() << "Skipping... MultiGroupCall requires " << numGroupCalls
+                   << " datatypes but UT_DATATYPES filtered to " << dataTypes.size() << ".";
     }
 
     std::vector<ncclRedOp_t> redOps;
     testBed.GetSupportedRedOps(redOps, testRedOps);
-    if (redOps.empty()) {
-      GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
+    if (redOps.size() < (size_t)numGroupCalls) {
+      GTEST_SKIP() << "Skipping... MultiGroupCall requires " << numGroupCalls
+                   << " redops but UT_REDOPS filtered to " << redOps.size() << ".";
     }
 
     bool isCorrect = true;
