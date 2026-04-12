@@ -89,7 +89,7 @@ class GLUTWindow {
     GLenum err = glewInit();
     if (err != GLEW_OK) {
       fprintf(stderr, "GLEW init failed: %s\n", glewGetErrorString(err));
-      HipTest::HIP_SKIP_TEST("GLEW Init Failed");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
       exit(1);
     }
 #endif
@@ -259,7 +259,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Basic) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -303,7 +303,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SeparateContextSetups) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -365,7 +365,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_BackAndForth) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -400,7 +400,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidSwitching) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -431,7 +431,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Patterns) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -496,7 +496,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -545,7 +545,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -613,7 +613,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SequentialStableContext) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -694,7 +694,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_InterleavedWithSwitch) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -740,7 +740,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidMultiContextSwitching) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -787,7 +787,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SameContextRepeated) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -813,7 +813,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ReturnToPreviousContext) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -850,7 +850,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ResourceContextAssociation) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -907,7 +907,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DataIntegrity) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -977,7 +977,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AlternatingDataOperations) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1058,7 +1058,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_TextureInterop) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1110,7 +1110,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MixedResources) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1168,7 +1168,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_StreamOperations) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1224,7 +1224,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleStreams) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1286,7 +1286,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  */
 HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   if (!HipTest::isImageSupported()) {
-    HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
     return;
   }
 
@@ -1319,7 +1319,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ManyBuffersStress) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1391,7 +1391,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_LongRunningStress) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1439,7 +1439,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegistrationFlags) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1488,7 +1488,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ContextDestruction) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1519,7 +1519,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleDestructionCycles) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1545,7 +1545,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DeviceListTypes) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 
@@ -1583,7 +1583,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   */
  HIP_TEST_CASE(Unit_hipGL_ContextSwitch_FirstOperationInitialization) {
    if (!HipTest::isImageSupported()) {
-     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
      return;
    }
 

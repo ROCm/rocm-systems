@@ -87,6 +87,7 @@ struct counter_storage
     std::string                           metric_description = {};
     std::string                           storage_name       = {};
     std::string                           track_name         = {};
+    tim::manager::pointer_t               manager            = {};
     std::unique_ptr<counter_storage_type> storage            = {};
     std::unique_ptr<counter_track_type>   track              = {};
 

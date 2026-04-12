@@ -105,6 +105,12 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocdecode_api, ROCPROFSYS_CATEGORY_ROC
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocjpeg_api, ROCPROFSYS_CATEGORY_ROCM_ROCJPEG_API, "rocm_rocjpeg_api", "ROCm RocJPEG API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl_api, ROCPROFSYS_CATEGORY_ROCM_RCCL_API, "rocm_rccl_api", "ROCm RCCL API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_ompt_api, ROCPROFSYS_CATEGORY_ROCM_OMPT_API, "rocm_ompt_api", "ROCm OMPT API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_fault, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_FAULT, "rocm_kfd_page_fault", "KFD Page Fault Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_migrate, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_MIGRATE, "rocm_kfd_page_migrate", "KFD Page Migration Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_QUEUE, "rocm_kfd_queue", "KFD Queue Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_QUEUE, "rocm_kfd_event_queue", "KFD Event Queue Operations")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_unmap_from_gpu, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_UNMAP_FROM_GPU, "rocm_kfd_event_unmap_from_gpu", "KFD Unmap from GPU Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_dropped_events, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_DROPPED_EVENTS, "rocm_kfd_event_dropped_events", "KFD Dropped Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC, "amd_smi_nic", "AMD-SMI NIC data")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_CNP_PKTS, "nic_rx_cnp_pkts", "AI NIC RX CNP Packets")
@@ -195,6 +201,12 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocjpeg_api),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_fault),                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_migrate),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_queue),                          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_queue),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_unmap_from_gpu),           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_dropped_events),           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic),                             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_cnp_pkts),                 \

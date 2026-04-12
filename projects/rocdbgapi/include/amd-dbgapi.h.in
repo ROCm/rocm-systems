@@ -492,19 +492,19 @@
 #endif /* !defined (AMD_DBGAPI_CALL) */
 
 #if !defined(AMD_DBGAPI_EXPORT_DECORATOR)
-#if defined(__GNUC__)
-#define AMD_DBGAPI_EXPORT_DECORATOR __attribute__ ((visibility ("default")))
-#elif defined(_MSC_VER)
-#define AMD_DBGAPI_EXPORT_DECORATOR __declspec(dllexport)
-#endif /* defined (_MSC_VER) */
+# if defined(_WIN32)
+#  define AMD_DBGAPI_EXPORT_DECORATOR __declspec(dllexport)
+# elif defined(__GNUC__)
+#  define AMD_DBGAPI_EXPORT_DECORATOR __attribute__ ((visibility ("default")))
+# endif
 #endif /* !defined (AMD_DBGAPI_EXPORT_DECORATOR) */
 
 #if !defined(AMD_DBGAPI_IMPORT_DECORATOR)
-#if defined(__GNUC__)
-#define AMD_DBGAPI_IMPORT_DECORATOR
-#elif defined(_MSC_VER)
-#define AMD_DBGAPI_IMPORT_DECORATOR __declspec(dllimport)
-#endif /* defined (_MSC_VER) */
+# if defined(_WIN32)
+#  define AMD_DBGAPI_IMPORT_DECORATOR __declspec(dllimport)
+# else
+#  define AMD_DBGAPI_IMPORT_DECORATOR
+# endif
 #endif /* !defined (AMD_DBGAPI_IMPORT_DECORATOR) */
 
 #define AMD_DBGAPI_EXPORT AMD_DBGAPI_EXPORT_DECORATOR AMD_DBGAPI_CALL
@@ -518,7 +518,20 @@
 #endif /* !defined (AMD_DBGAPI_EXPORTS) */
 #endif /* !defined (AMD_DBGAPI) */
 
-#if __cplusplus >= 201103L
+/* By default, MSVC reports 199711L (C++98) for the __cplusplus macro,
+   regardless of the actual language version you are using (like C++17
+   or C++20).  Instead, we need to look at _MSVC_LANG, which correctly
+   reports the C++ standard version being targeted by the
+   compiler.  */
+#if defined(__cplusplus)
+# if defined(_MSVC_LANG)
+#  define AMD_DBGAPI_CPLUSPLUS _MSVC_LANG
+# else
+#  define AMD_DBGAPI_CPLUSPLUS __cplusplus
+# endif
+#endif
+
+#if defined(__cplusplus) && AMD_DBGAPI_CPLUSPLUS >= 201103L
 /* c++11 allows extended initializer lists.  */
 #define AMD_DBGAPI_HANDLE_LITERAL(type, value) (type{ value })
 #elif __STDC_VERSION__ >= 199901L
@@ -528,7 +541,7 @@
 #define AMD_DBGAPI_HANDLE_LITERAL(type, value) {value}
 #endif /* !__STDC_VERSION__ >= 199901L */
 
-#if defined(__cplusplus) && __cplusplus >= 201402L
+#if defined(__cplusplus) && AMD_DBGAPI_CPLUSPLUS >= 201402L
 #define DEPRECATED [[deprecated]]
 #else
 #define DEPRECATED
@@ -628,10 +641,22 @@ typedef unsigned long amd_dbgapi_DWORD;
 #define AMD_DBGAPI_VERSION_0_77
 
 /**
- * The function was introduced in version 0.77 of the interface and has the
+ * The function was introduced in version 0.78 of the interface and has the
  * symbol version string of ``"@AMD_DBGAPI_NAME@_0.78"``.
  */
 #define AMD_DBGAPI_VERSION_0_78
+
+/**
+ * The function was introduced in version 0.79 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.79"``.
+ */
+#define AMD_DBGAPI_VERSION_0_79
+
+/**
+ * The function was introduced in version 0.80 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.80"``.
+ */
+#define AMD_DBGAPI_VERSION_0_80
 
 /** @} */
 
@@ -1839,6 +1864,14 @@ typedef enum
    * ::AMD_DBGAPI_STATUS_ERROR_CLIENT_CALLBACK error.
    */
   AMD_DBGAPI_PROCESS_INFO_CORE_STATE = 7,
+  /**
+   * Return a bitmask of all the bits which are used in at least one of the
+   * address spaces of each of the agents of the system.  It is legal for the
+   * client to not preserve bits not set in this mask, as long as they are
+   * cleared before being returned back to the library.  The type of this
+   * attribute is ::amd_dbgapi_segment_address_t.
+   */
+  AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS = 8,
 } amd_dbgapi_process_info_t;
 
 /**
@@ -1892,7 +1925,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
     amd_dbgapi_process_id_t process_id, amd_dbgapi_process_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_77;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_80;
 
 /**
  * Attach to a process in order to provide debug control of the AMD GPUs it
@@ -6301,6 +6334,13 @@ typedef enum
  * ::amd_dbgapi_write_memory require when reading and writing memory when given
  * a specific segment address in an address space.
  *
+ * \param[in] process_id The process that the \p segment_address belongs to.
+ * This is to handle generic addresses of a process.
+ *
+ * \param[in] wave_id The wave that is using the address.  If the \p
+ * address_space is ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL then \p wave_id may be
+ * ::AMD_DBGAPI_WAVE_NONE.
+ *
  * \param[in] address_space_id The address space of the \p segment_address.
  *
  * \param[in] segment_address The integral value of the segment address.  Only
@@ -6324,18 +6364,32 @@ typedef enum
  * destination_segment_address and \p segment_address_dependencies is
  * unaltered.
  *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID \p process_id is
+ * invalid.  \p segment_address_dependency is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID \p wave_id is invalid
+ * and \p address_space_id is not ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL.
+ * \p segment_address_dependency is unaltered.
+ *
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_ID \p
  * address_space_id is invalid.  \p segment_address_dependencies is unaltered.
  *
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p
  * segment_address_dependencies is NULL. \p segment_address_dependencies is
  * unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY \p
+ * address_space_id depends on the active wave but \p wave_id is
+ * ::AMD_DBGAPI_WAVE_NONE, or \p address_space_id is not supported by the
+ * architecture of \p wave_id.  \p segment_address_dependencies is unaltered.
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_address_dependency (
+  amd_dbgapi_process_id_t process_id,
+  amd_dbgapi_wave_id_t wave_id,
   amd_dbgapi_address_space_id_t address_space_id,
   amd_dbgapi_segment_address_t segment_address,
   amd_dbgapi_segment_address_dependency_t *segment_address_dependency)
-  AMD_DBGAPI_VERSION_0_64;
+  AMD_DBGAPI_VERSION_0_79;
 
 /**
  * Indication of whether a segment address in an address space is a member of

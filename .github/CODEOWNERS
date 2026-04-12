@@ -1,18 +1,13 @@
 # CI ownership
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
-
-# Global documentation ownership
-/**/*.md                                                              @ROCm/rocm-documentation
-/**/*.rst                                                             @ROCm/rocm-documentation
-**/.readthedocs.yaml                                                  @ROCm/rocm-documentation
-**/docs/                                                              @ROCm/rocm-documentation
-**/library/include/                                                   @ROCm/rocm-documentation
+/.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
+/projects/hipfile/                                                    @ROCm/hipfile-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
 /projects/rccl/                                                       @ROCm/rccl-reviewers
@@ -62,6 +57,7 @@
 /projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
 
 # Experimental
+/experimental/perf-dkms                                               @bwelton
 /experimental/rocjitsu                                                @atgutier
 
 # Documentation-specific ownership by project (last to take precedence)

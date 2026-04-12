@@ -47,6 +47,15 @@ def hpc_hip_environment() -> dict[str, str]:
 
 
 @pytest.fixture
+def kfd_rules(validation_rules_dir) -> list[Path]:
+    """Get validation rules for KFD event tests."""
+    rules_dir = validation_rules_dir / "kfd"
+    return [
+        rules_dir / "kfd-rules.json",
+    ]
+
+
+@pytest.fixture
 def matrix_exponential_rules(validation_rules_dir) -> list[Path]:
     """Get validation rules for matrix exponential tests."""
     rules_dir = validation_rules_dir / "hpc" / "matrix-exponential"
@@ -77,17 +86,14 @@ class TestJacobi(RocprofsysTest):
 
     @pytest.mark.openmp
     @pytest.mark.xnack
+    @pytest.mark.rocpd("hpc_openmp_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
-    def test_usm(self, mode, hpc_openmp_environment, gpu_info):
+    def test_usm(self, mode, hpc_openmp_environment, gpu_info, kfd_rules):
         env = hpc_openmp_environment.copy()
-        env["ROCPROFSYS_ROCM_DOMAINS"] = (
-            "hip_api,kernel_dispatch,memory_copy,"
-            "kfd_page_fault,kfd_page_migrate,kfd_queue,"
-            "kfd_event_page_fault,kfd_event_page_migrate,"
-            "kfd_event_queue,kfd_event_unmap_from_gpu,kfd_event_dropped_events"
-        )
+        env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy,kfd_events"
         env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["HSA_XNACK"] = "1"
+        env["ROCPROFSYS_USE_AMD_SMI"] = "OFF"
         if "apu" not in gpu_info.categories:
             # Forces zero-copy behavior on non-APU GPUs
             # Without this, it would be implicit zero-copy behavior
@@ -133,6 +139,22 @@ class TestJacobi(RocprofsysTest):
                 counts=[1],
                 depths=[1],
             )
+
+        # Validate KFD events in perfetto trace
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto KFD event validation",
+            categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate", "rocm_kfd_queue"],
+            label_substrings=["PAGE_FAULT", "PAGE_MIGRATE", "QUEUE_EVICT"],
+            print_output=True,
+        )
+
+        # Validate KFD events in rocpd database
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd KFD event validation",
+            rules_files=kfd_rules,
+        )
 
     @pytest.mark.openmp
     @pytest.mark.roctx
