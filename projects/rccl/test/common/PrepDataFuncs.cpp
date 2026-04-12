@@ -51,9 +51,15 @@ namespace RcclUnitTesting
     // Check bias allocation if bias is enabled
     if (collArgs.options.useBias)
     {
-      if (collArgs.numBiasElements == 0 || collArgs.numBiasBytesAllocated == 0)
+      if (collArgs.numBiasElementsAllocated == 0 || collArgs.numBiasBytesAllocated == 0)
       {
         TEST_ERROR("Bias is enabled but bias buffers are not allocated");
+        return TEST_FAIL;
+      }
+      if (collArgs.numBiasElements > collArgs.numBiasElementsAllocated)
+      {
+        TEST_ERROR("Number of bias elements (%lu) exceeds the number of allocated bias elements (%lu)",
+              collArgs.numBiasElements, collArgs.numBiasElementsAllocated);
         return TEST_FAIL;
       }
       if (collArgs.numBiasElements != collArgs.numOutputElements)
@@ -196,8 +202,8 @@ namespace RcclUnitTesting
         CHECK_CALL(collArgs.biasCpu.FillPattern(collArgs.dataType, collArgs.numBiasElements, 0, false));
       }
 
-      // Copy bias data to GPU
-      size_t const biasBytes = collArgs.numBiasBytesAllocated;
+      // Copy only the current number of bias elements (not the full allocated size)
+      size_t const biasBytes = collArgs.numBiasElements * DataTypeToBytes(collArgs.dataType);
       CHECK_HIP(hipMemcpy(collArgs.biasGpu.ptr, collArgs.biasCpu.ptr, biasBytes, hipMemcpyHostToDevice));
 
       // Apply bias to expected output using the SAME reduction operation as AllReduce

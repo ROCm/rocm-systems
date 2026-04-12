@@ -135,8 +135,9 @@ namespace RcclUnitTesting
     PtrUnion       biasGpu;           // Bias buffer on GPU
     PtrUnion       biasCpu;           // Bias buffer on CPU (for initialization/validation)
     void*          biasRegHandle;     // Handle for registered bias buffer
-    size_t         numBiasElements;   // Number of elements in bias buffer
-    size_t         numBiasBytesAllocated;  // Number of bytes allocated for bias
+    size_t         numBiasElements;          // Current number of elements in bias buffer
+    size_t         numBiasElementsAllocated; // Max number of elements allocated for bias
+    size_t         numBiasBytesAllocated;    // Number of bytes allocated for bias
 
     // Set collective arguments
     ErrCode SetArgs(int             const globalRank,

@@ -103,6 +103,7 @@ namespace RcclUnitTesting
     if (this->options.useBias)
     {
       this->numBiasElements = this->options.biasNumElements;
+      this->numBiasElementsAllocated = this->numBiasElements;
       this->numBiasBytesAllocated = this->numBiasElements * DataTypeToBytes(this->dataType);
       CHECK_CALL(this->biasGpu.AllocateGpuMem(this->numBiasBytesAllocated, useManagedMem, userRegistered));
       CHECK_CALL(this->biasCpu.AllocateCpuMem(this->numBiasBytesAllocated));
