@@ -484,44 +484,6 @@ add_custom_target(update_git_version
 
 list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
 
-# Compile-time optimization: remove -fgpu-rdc from host-only source files
-#==================================================================================================
-# The target-level -fgpu-rdc flag (set below) forces the compiler to defer GPU
-# code generation to link time for EVERY source file, even the ~100 pure-host
-# .cc files that contain zero device code.  At link time the offload linker must
-# then scan all resulting objects, merge their (empty) device bitcode, and run
-# full LTO + ISA codegen -- the dominant bottleneck in RCCL builds.
-#
-# By overriding with -fno-gpu-rdc on host-only files (last flag wins), those
-# objects are compiled as plain HIP host code with no device sections, so the
-# offload linker skips them entirely.  Device files (.cu.cpp, gensrc/*, and
-# collectives.cc which embeds a __global__ kernel) keep -fgpu-rdc.
-#foreach(src ${HIP_SOURCES})
-#  # Device sources that MUST keep target-level -fgpu-rdc:
-#  #   - .cu.cpp        : hand-written device code (common.cu, onerank.cu)
-#  #   - gensrc/        : generated kernel implementations
-#  #   - collectives.cc : includes hierarchical_ag_shuffle.h (__global__ kernel + <<<>>> launch)
-#  #   - enqueue.cc     : includes device/common.h (extern __shared__, __device__ funcs)
-#  #   - npkit.cc       : includes npkit.h -> device/common.h
-#  #   - init.cc        : includes npkit.h -> device/common.h
-#  #   - net.cc (transport) : includes npkit.h -> device/common.h
-#  #   - msccl_setup.cc : includes msccl_kernel.h (__global__ declarations)
-#  if(src MATCHES "\\.cu\\.cpp$"
-#     OR src MATCHES "/gensrc/"
-#     OR src MATCHES "collectives\\.cc$"
-#     OR src MATCHES "enqueue\\.cc$"
-#     OR src MATCHES "npkit\\.cc$"
-#     OR src MATCHES "/init\\.cc$"
-#     OR src MATCHES "transport/net\\.cc$"
-#     OR src MATCHES "msccl_setup\\.cc$")
-#    continue()
-#  endif()
-#  # Override compilable host sources only (skip headers)
-#  if(src MATCHES "\\.(cc|cpp|c)$")
-#    set_source_files_properties(${src} PROPERTIES COMPILE_OPTIONS "-fno-gpu-rdc")
-#  endif()
-#endforeach()
-
 # Unity device build: exclude common.cu.cpp (kernels are in unity files)
 if(ENABLE_UNITY_DEVICE_BUILD)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
@@ -1017,13 +979,6 @@ if (HAVE_PARALLEL_JOBS)
   endif()
   message(STATUS "Use ${num_linker_jobs} jobs for linking")
   target_link_options(rccl PRIVATE -parallel-jobs=${num_linker_jobs})       # Use multiple threads to link
-
-  # Increase device LTO partitions to better utilize available cores.
-  # Default is 8; higher values allow the LTO backend to split the merged
-  # device bitcode into more independent partitions for parallel codegen.
-  #set(RCCL_LTO_PARTITIONS "32" CACHE STRING "Number of LTO partitions for device link")
-  #target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-partitions=${RCCL_LTO_PARTITIONS}")
-  #message(STATUS "Device LTO partitions: ${RCCL_LTO_PARTITIONS}")
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)

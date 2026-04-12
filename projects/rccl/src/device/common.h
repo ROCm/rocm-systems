@@ -202,6 +202,10 @@ struct ncclShmemData {
 };
 
 #if defined(NCCL_UNITY_BUILD) || defined(ENABLE_UNITY_DEVICE_BUILD)
+// With -fno-gpu-rdc there is no device linker to resolve extern __shared__.
+// Use plain (non-extern) __shared__ so the compiler allocates each variable
+// at a separate, non-overlapping offset -- same layout the device linker
+// would produce in the default build.  No dynamic shared memory needed.
 __shared__ ncclShmemData ncclShmem;
 __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
 #else

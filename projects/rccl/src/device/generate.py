@@ -80,12 +80,9 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
-is_unity_build     = 1 if len(sys.argv) > 7 and sys.argv[7] == "UNITY" else 0
-
-if is_unity_build:
-  func_pattern = sys.argv[8:9]
-else:
-  func_pattern = sys.argv[7:8]
+is_unity_build     = 1 if "UNITY" in sys.argv[7:] else 0
+remaining_args     = [a for a in sys.argv[7:] if a != "UNITY"]
+func_pattern       = remaining_args[:1]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -824,8 +821,7 @@ if is_unity_build:
     # ncclCollKernels[ncclNumFuncs][ncclNumDevRedOps][NCCL_NUM_UNROLLS]
     # For split collectives: indexed by (coll, redop, unroll)
     # For non-split collectives: all redop slots point to the same kernel
-    unroll_to_idx = {"1": 0, "2": 1, "4": 2}
-    redop_to_idx = {"Sum": 0, "Prod": 1, "MinMax": 2, "PreMulSum": 3, "SumPostDiv": 4}
+    unroll_to_idx = {u: i for i, u in enumerate(all_unrolls)}
 
     out(f"void* ncclCollKernels[ncclNumFuncs][ncclNumDevRedOps][NCCL_NUM_UNROLLS] = {{\n")
     for coll_name in all_colls:

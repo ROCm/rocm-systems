@@ -47,11 +47,17 @@ struct ncclKernelMatch {
 
 #ifdef ENABLE_UNITY_DEVICE_BUILD
 static inline void* ncclGetCollKernelFn(int coll, int devRedOp, struct ncclComm* comm) {
+  void* fn = nullptr;
 #ifdef ENABLE_COLLTRACE
   if (comm->collTraceEnabled)
-    return ncclCollKernelsDebug[coll][devRedOp][comm->unroll];
+    fn = ncclCollKernelsDebug[coll][devRedOp][comm->unroll];
+  else
 #endif
-  return ncclCollKernels[coll][devRedOp][comm->unroll];
+    fn = ncclCollKernels[coll][devRedOp][comm->unroll];
+  if (fn == nullptr) {
+    WARN("Unity build: no kernel for coll=%d redOp=%d unroll=%d", coll, devRedOp, comm->unroll);
+  }
+  return fn;
 }
 #else
 #ifdef ENABLE_COLLTRACE
@@ -113,7 +119,11 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   int cudaDev = -1;
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUDACHECK(hipDeviceGetAttribute(&WarpSize, hipDeviceAttributeWarpSize, cudaDev));
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+  int ncclMaxSharedMem = 0;
+#else
   int ncclMaxSharedMem = rcclShmemDynamicSize(cudaArch, WarpSize);
+#endif
 
   auto initKernelFn = [&](void* fn) -> ncclResult_t {
     ncclResult_t res = ncclSuccess;
@@ -1938,7 +1948,11 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
+#ifdef ENABLE_UNITY_DEVICE_BUILD
+  int smem = 0;
+#else
   int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
+#endif
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
