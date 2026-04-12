@@ -369,10 +369,11 @@ static inspectorResult_t inspectorCommInfoMetaHeader(jsonFileOutput* jfo) {
     JSON_CHK(jsonKey(jfo, "rec_mechanism")); JSON_CHK(jsonStr(jfo, "nccl_profiler_interface"));
     JSON_CHK(jsonKey(jfo, "dump_timestamp_us")); JSON_CHK(jsonUint64(jfo, inspectorGetTime()));
     char hostname[256];
+    // RCCL: gethostname() does not NUL-terminate on truncation.
     if (gethostname(hostname, sizeof(hostname)) != 0) {
       hostname[0] = '\0';
     } else {
-      hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
+      hostname[sizeof(hostname) - 1] = 0;
     }
     JSON_CHK(jsonKey(jfo, "hostname")); JSON_CHK(jsonStr(jfo, hostname));
     JSON_CHK(jsonKey(jfo, "pid")); JSON_CHK(jsonUint64(jfo, getpid()));
@@ -745,6 +746,9 @@ static void genDumpDir(char** workdir) {
   }
 }
 
+// RCCL: rewritten as a plain struct with pthread condvar sleep replacing
+// std::this_thread::sleep_for. Fixes teardown hang.
+// For upcoming syncs with Prometheus/ROCm extensions — do not sync without manual review.
 struct inspectorDumpThread {
   bool run{false};
   bool threadStarted{false};
@@ -752,8 +756,7 @@ struct inspectorDumpThread {
   char* outputRoot;
   uint64_t sampleIntervalUsecs;
   pthread_t pthread;
-  // Mutex + condvar used to wake the sleeping dump thread immediately on stop,
-  // replacing the nanosleep-based heuristic that caused teardown hangs.
+  // Mutex + condvar replacing nanosleep-based polling; wakes immediately on stopThread.
   pthread_mutex_t sleepMutex;
   pthread_cond_t  sleepCond;
   clockid_t       sleepCondClock{CLOCK_MONOTONIC}; // clock used for timedwait deadlines
@@ -830,10 +833,11 @@ struct inspectorDumpThread {
 
     if (jfo == 0) {
       char hostname[256];
+      // RCCL: gethostname() does not NUL-terminate on truncation.
       if (gethostname(hostname, sizeof(hostname)) != 0) {
         hostname[0] = '\0';
       } else {
-        hostname[sizeof(hostname) - 1] = 0; // POSIX does not guarantee NUL on truncation
+        hostname[sizeof(hostname) - 1] = 0;
       }
       char tmp[2048];
       snprintf(tmp, sizeof(tmp), "%s/%s-pid%d.log", output_root, hostname, getpid());
@@ -850,8 +854,7 @@ struct inspectorDumpThread {
       inspectorCommInfoListDump(jfo, &g_state.deletedComms);
     }
 
-    // Re-check ncomms under the list's own lock to avoid a TOCTOU race between
-    // inspectorCommInfoListDump releasing the lock and this read.
+    // RCCL: re-read ncomms under lock to avoid TOCTOU after inspectorCommInfoListDump.
     inspectorLockRd(&g_state.deletedComms.guard);
     bool hasDeleted = (g_state.deletedComms.ncomms > 0);
     inspectorUnlockRWLock(&g_state.deletedComms.guard);
@@ -1406,10 +1409,12 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
     factor = ((double)(2 * (commInfo->nranks - 1))) / ((double)commInfo->nranks);
     break;
   case ncclFuncReduceScatter:
+    // RCCL: cast before multiply to avoid uint64 overflow on large messages.
     trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
   case ncclFuncAllGather:
+    // RCCL: cast before multiply to avoid uint64 overflow on large messages.
     trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
@@ -1452,8 +1457,8 @@ static uint64_t calculateKernelGpuExecTimeUsecs(struct inspectorKernelChInfo *ke
   if (kernelCh->startGpuClk != 0 && kernelCh->stopGpuClk != 0) {
     if (kernelCh->stopGpuClk > kernelCh->startGpuClk) {
       uint64_t ticks = kernelCh->stopGpuClk - kernelCh->startGpuClk;
-      // AMD wall_clock64() / HIP clock64() runs at 100 MHz (10 ns per tick).
-      // Convert ticks → µs: ticks * 10ns / 1000 = ticks / 100.
+      // RCCL: AMD wall_clock64() runs at 100 MHz (10 ns/tick); divide by 100 for µs.
+      // NCCL uses CUDA globaltimer at ~1 GHz (divide by 1000). Do not sync from NCCL.
       return ticks / 100;
     }
   }
@@ -1490,6 +1495,7 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
   uint64_t maxKernelExecTimeUsecs = 0;
   inspectorTimingSource_t bestTimingSource = inspectorTimingSourceCollectiveCpu;
 
+  // RCCL: cap iteration to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
   uint32_t nCh = (collInfo->nChannels < MAX_CHANNELS) ? collInfo->nChannels : MAX_CHANNELS;
   for (uint32_t i = 0; i < nCh; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
@@ -1515,7 +1521,7 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
     return maxKernelExecTimeUsecs;
   } else {
     *timingSource = inspectorTimingSourceCollectiveCpu;
-    if (collInfo->tsCompletedUsec <= collInfo->tsStartUsec) return 0;
+    if (collInfo->tsCompletedUsec <= collInfo->tsStartUsec) return 0; // RCCL: underflow guard
     return collInfo->tsCompletedUsec - collInfo->tsStartUsec;
   }
 }

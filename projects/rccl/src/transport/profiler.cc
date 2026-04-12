@@ -28,6 +28,8 @@ static ncclResult_t profilerProxyProgress(struct ncclProxyState* proxyState, str
     args->state = ncclProxyOpProgress;
   }
   if (args->state == ncclProxyOpProgress) {
+    // RCCL: teardown drain — skip kernel-channel events for channels whose GPU counters
+    // were never written; without this, stopEvent dereferences an uninitialised collInfo.
     int stopping = proxyState->progressState.stop;
     for (int s = 0; s < args->nsubs; s++) {
       struct ncclProxySubArgs* sub = args->subs + s;

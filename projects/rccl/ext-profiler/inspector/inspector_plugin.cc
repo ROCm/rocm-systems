@@ -159,6 +159,8 @@ inspectorResult_t inspectorPluginCollInfoRefSafe(struct inspectorCollInfo *collI
   inspectorUnlockRWLock(&collInfo->guard);
   return inspectorSuccess;
 }
+// RCCL: DeRef no longer calls free; caller unlocks first then calls CollInfoFree.
+// Fixes POSIX UB of destroying a locked rwlock. Careful when syncing.
 inspectorResult_t inspectorPluginCollInfoDeRef(struct inspectorCollInfo *collInfo) {
   collInfo->refCount -= 1;
   if (collInfo->refCount == 0) {
@@ -219,8 +221,7 @@ static void inspectorPluginCollInfoInit(struct inspectorCollInfo **collInfo,
   inspectorPluginCollInfoRef(collInfoPtr); //self ref; no locks needed
   collInfoPtr->func = eDescr->coll.func;
   collInfoPtr->sn = eDescr->coll.seqNumber;
-  // Clamp nChannels to MAX_CHANNELS: kernelCh[] and collEvtTrk.kernelCh[] are
-  // statically sized to MAX_CHANNELS; RCCL MAXCHANNELS can exceed this.
+  // RCCL: clamp nChannels to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
   collInfoPtr->nChannels = (eDescr->coll.nChannels < MAX_CHANNELS)
                              ? eDescr->coll.nChannels
                              : MAX_CHANNELS;
@@ -234,7 +235,7 @@ static void inspectorPluginCollInfoInit(struct inspectorCollInfo **collInfo,
 
   collInfoPtr->commInfo = commInfo;
   collInfoPtr->collEvtTrk.sn = 0;
-  collInfoPtr->collEvtTrk.nChannels = collInfoPtr->nChannels; // already clamped above
+  collInfoPtr->collEvtTrk.nChannels = collInfoPtr->nChannels;
   inspectorRecordEventTrace(collInfoPtr->collEvtTrk.evntTrace,
                             NCCL_INSP_EVT_TRK_COLL_START, collInfoPtr);
 
@@ -379,7 +380,7 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
     // KernelCh stop events arrive via the proxy thread after CollStop,
     // so they use collStopFired to know when it is safe to trigger the dump.
     inspectorLockWr(&collInfo->guard);
-    collInfo->collStopFired = true;
+    collInfo->collStopFired = true; // RCCL: guards dump trigger ordering vs KernelCh stop
     inspectorRecordEventTrace(collInfo->collEvtTrk.evntTrace,
                               NCCL_INSP_EVT_TRK_COLL_STOP,
                               collInfo);
@@ -396,10 +397,8 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
       = (struct inspectorKernelChInfo *)eHandle;
     struct inspectorCollInfo *collInfo = kernelChInfo->collInfo;
     if (collInfo && collInfo->type == ncclProfileColl) {
-      if (kernelChInfo->channelId >= MAX_CHANNELS) {
-        // Channel ID out of bounds — inspector arrays are sized to MAX_CHANNELS.
-        return ncclSuccess;
-      }
+      // RCCL: guard against channelId >= MAX_CHANNELS; RCCL MAXCHANNELS can exceed 64.
+      if (kernelChInfo->channelId >= MAX_CHANNELS) return ncclSuccess;
       inspectorLockWr(&collInfo->guard);
       struct inspectorEventTraceInfo *krnlEvtTrk =
         collInfo->collEvtTrk.kernelCh[kernelChInfo->channelId].evntTrace;
@@ -489,10 +488,8 @@ __hidden ncclResult_t inspectorPluginRecordEventState(void* eHandle,
     struct inspectorCollInfo *collInfo = kernelChInfo->collInfo;
     inspectorResult_t res = inspectorSuccess;
     if (collInfo && collInfo->type == ncclProfileColl) {
-      if (kernelChInfo->channelId >= MAX_CHANNELS) {
-        // Channel ID out of bounds — inspector arrays are sized to MAX_CHANNELS.
-        return ncclSuccess;
-      }
+      // RCCL: guard against channelId >= MAX_CHANNELS; RCCL MAXCHANNELS can exceed 64.
+      if (kernelChInfo->channelId >= MAX_CHANNELS) return ncclSuccess;
       inspectorLockWr(&collInfo->guard);
       struct inspectorEventTraceInfo *krnlEvtTrk
         = collInfo->collEvtTrk.kernelCh[kernelChInfo->channelId].evntTrace;
