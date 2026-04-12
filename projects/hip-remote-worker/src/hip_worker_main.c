@@ -1509,18 +1509,17 @@ static void handle_memcpy(int fd, uint32_t request_id,
         }
 
         if (err == hipSuccess) {
-            HipRemoteHeader header;
-            hip_remote_init_header(&header, HIP_OP_MEMCPY, request_id,
-                                   sizeof(HipRemoteMemcpyResponse) + req->size);
-            header.flags |= HIP_REMOTE_FLAG_RESPONSE | HIP_REMOTE_FLAG_HAS_INLINE_DATA;
-
-            HipRemoteMemcpyResponse resp = {
-                .header = { .error_code = (int32_t)err }
-            };
-
-            send_all(fd, &header, sizeof(header));
-            send_all(fd, &resp, sizeof(resp));
-            send_all(fd, buffer, req->size);
+            size_t resp_payload = sizeof(HipRemoteMemcpyResponse) + req->size;
+            uint8_t* resp_buf = (uint8_t*)malloc(resp_payload);
+            if (resp_buf) {
+                HipRemoteMemcpyResponse* resp = (HipRemoteMemcpyResponse*)resp_buf;
+                resp->header.error_code = (int32_t)err;
+                memcpy(resp_buf + sizeof(HipRemoteMemcpyResponse), buffer, req->size);
+                send_response(fd, HIP_OP_MEMCPY, request_id, resp_buf, resp_payload);
+                free(resp_buf);
+            } else {
+                send_simple_response(fd, HIP_OP_MEMCPY, request_id, hipErrorOutOfMemory);
+            }
         } else {
             send_simple_response(fd, HIP_OP_MEMCPY, request_id, err);
         }
@@ -1640,18 +1639,18 @@ static void handle_memcpy2d(int fd, uint32_t request_id,
         }
 
         if (err == hipSuccess) {
-            HipRemoteHeader header;
-            hip_remote_init_header(&header, is_async ? HIP_OP_MEMCPY_2D_ASYNC : HIP_OP_MEMCPY_2D,
-                                   request_id, sizeof(HipRemoteMemcpyResponse) + total_size);
-            header.flags |= HIP_REMOTE_FLAG_RESPONSE | HIP_REMOTE_FLAG_HAS_INLINE_DATA;
-
-            HipRemoteMemcpyResponse resp = {
-                .header = { .error_code = (int32_t)err }
-            };
-
-            send_all(fd, &header, sizeof(header));
-            send_all(fd, &resp, sizeof(resp));
-            send_all(fd, buffer, total_size);
+            HipRemoteOpCode op = is_async ? HIP_OP_MEMCPY_2D_ASYNC : HIP_OP_MEMCPY_2D;
+            size_t resp_payload = sizeof(HipRemoteMemcpyResponse) + total_size;
+            uint8_t* resp_buf = (uint8_t*)malloc(resp_payload);
+            if (resp_buf) {
+                HipRemoteMemcpyResponse* resp = (HipRemoteMemcpyResponse*)resp_buf;
+                resp->header.error_code = (int32_t)err;
+                memcpy(resp_buf + sizeof(HipRemoteMemcpyResponse), buffer, total_size);
+                send_response(fd, op, request_id, resp_buf, resp_payload);
+                free(resp_buf);
+            } else {
+                send_simple_response(fd, op, request_id, hipErrorOutOfMemory);
+            }
         } else {
             send_simple_response(fd, is_async ? HIP_OP_MEMCPY_2D_ASYNC : HIP_OP_MEMCPY_2D,
                                  request_id, err);
@@ -4699,6 +4698,8 @@ static void handle_client_shm(int tcp_fd, HipShmHandle* shm) {
                     handle_event_record(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
                 case HIP_OP_MODULE_LOAD_DATA:
                     handle_module_load_data(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
+                case HIP_OP_MODULE_LOAD_AND_GET_FUNCTION:
+                    handle_module_load_and_get_function(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
                 case HIP_OP_MODULE_UNLOAD:
                     handle_module_unload(-1, fnf_hdr.request_id, fnf_payload, fnf_hdr.payload_length); break;
                 case HIP_OP_FUNC_SET_ATTRIBUTE:
@@ -4777,6 +4778,28 @@ static void handle_client_shm(int tcp_fd, HipShmHandle* shm) {
                     handle_occupancy_max_potential_block_size(-1, hdr->request_id, payload, plen); break;
                 case HIP_OP_OCCUPANCY_MAX_ACTIVE_BLOCKS_PER_SM:
                     handle_occupancy_max_active_blocks_per_sm(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_MEMCPY: case HIP_OP_MEMCPY_ASYNC:
+                    handle_memcpy(-1, hdr->request_id, payload, plen, has_inline_data); break;
+                case HIP_OP_MEMCPY_2D:
+                    handle_memcpy2d(-1, hdr->request_id, payload, plen, has_inline_data, false); break;
+                case HIP_OP_MEMCPY_2D_ASYNC:
+                    handle_memcpy2d(-1, hdr->request_id, payload, plen, has_inline_data, true); break;
+                case HIP_OP_MALLOC:
+                    handle_malloc(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_MALLOC_ASYNC:
+                    handle_malloc_async(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_EVENT_CREATE: case HIP_OP_EVENT_CREATE_WITH_FLAGS:
+                    handle_event_create(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_EVENT_CREATE_BATCH:
+                    handle_event_create_batch(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_EVENT_QUERY:
+                    handle_event_query(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_POINTER_GET_ATTRIBUTE:
+                    handle_pointer_get_attribute(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_MEMPOOL_GET_ATTRIBUTE:
+                    handle_mempool_get_attribute(-1, hdr->request_id, payload, plen); break;
+                case HIP_OP_MEMPOOL_SET_ATTRIBUTE:
+                    handle_mempool_set_attribute(-1, hdr->request_id, payload, plen); break;
                 default:
                     LOG_ERROR("SHM: unhandled sync opcode 0x%04x", hdr->op_code);
                     send_simple_response(-1, (HipRemoteOpCode)hdr->op_code,

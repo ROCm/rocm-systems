@@ -1171,6 +1171,44 @@ hipError_t hip_remote_request_receive_data(
                          hip_remote_op_name(op_code),
                          header.request_id, request_size, data_size);
 
+    /* SHM path: send via sync slot, receive response + data in resp slot */
+    if (g_use_shm && g_shm_initialized) {
+        size_t total_req = sizeof(header) + (request ? request_size : 0);
+        uint8_t sync_buf[4096];
+        uint8_t* req_buf = (total_req <= sizeof(sync_buf))
+            ? sync_buf : (uint8_t*)malloc(total_req);
+        memcpy(req_buf, &header, sizeof(header));
+        if (request && request_size > 0)
+            memcpy(req_buf + sizeof(header), request, request_size);
+
+        size_t resp_total = sizeof(HipRemoteHeader) + response_size + data_size;
+        uint8_t* rbuf = (uint8_t*)malloc(resp_total);
+
+        int rsize = hip_shm_sync_request(&g_shm, req_buf, total_req,
+                                         rbuf, resp_total);
+        if (req_buf != sync_buf) free(req_buf);
+
+        hipError_t result = hipSuccess;
+        if (rsize >= (int)(sizeof(HipRemoteHeader) + response_size)) {
+            if (response && response_size > 0)
+                memcpy(response, rbuf + sizeof(HipRemoteHeader), response_size);
+            if (data_out && data_size > 0) {
+                size_t avail = rsize - sizeof(HipRemoteHeader) - response_size;
+                size_t copy = avail < data_size ? avail : data_size;
+                memcpy(data_out, rbuf + sizeof(HipRemoteHeader) + response_size, copy);
+            }
+            HipRemoteResponseHeader* resp = (HipRemoteResponseHeader*)
+                (rbuf + sizeof(HipRemoteHeader));
+            result = (hipError_t)resp->error_code;
+        } else if (rsize < 0) {
+            result = hipErrorNotInitialized;
+        }
+
+        free(rbuf);
+        hip_mutex_unlock(&g_client_state.lock);
+        return result;
+    }
+
     hip_iovec_t iov[2] = {
         { &header, sizeof(header) },
         { request, request_size }
