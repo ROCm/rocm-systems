@@ -209,8 +209,6 @@ namespace RcclUnitTesting
       // Apply bias to expected output using the SAME reduction operation as AllReduce
       CHECK_CALL(result.Reduce(collArgs.dataType, collArgs.numInputElements, collArgs.biasCpu, tempOp));
 
-      // Update the biasPtr in options to point to the GPU buffer
-      collArgs.options.biasPtr = collArgs.biasGpu.ptr;
     }
 
     return TEST_SUCCESS;

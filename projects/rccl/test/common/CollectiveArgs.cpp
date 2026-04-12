@@ -39,6 +39,12 @@ namespace RcclUnitTesting
     this->streamIdx         = streamIdx;
     this->options           = optionalColArgs;
 
+    // Keep numBiasElements in sync with the current element count on every SetArgs call.
+    // biasGpu.ptr is a direct field (like inputGpu/outputGpu) and is not part of options,
+    // so it persists across iterations without any special handling here.
+    if (this->options.useBias)
+      this->numBiasElements = this->options.biasNumElements;
+
     if (this->options.scalarMode != -1)
     {
       size_t const numBytes = DataTypeToBytes(dataType);
