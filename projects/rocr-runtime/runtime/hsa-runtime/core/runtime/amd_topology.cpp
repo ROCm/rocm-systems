@@ -187,23 +187,26 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
     }
   } catch (const hsa_exception& e) {
     const hsa_status_t err = e.error_code();
-    const bool unsupported_isa = (err == HSA_STATUS_ERROR_INVALID_ISA);
-    if (unsupported_isa) {
-      // Ignore unsupported GPUs and proceed with supported ones. Warn so users
-      // know why a device is missing (e.g. older generations no longer supported).
+    // Skip unsupported GPUs and proceed with supported ones. This covers:
+    //   - HSA_STATUS_ERROR_INVALID_ISA: unrecognized GPU generation
+    //   - HSA_STATUS_ERROR_INVALID_ISA: deprecated doorbell type (pre-Vega GPUs)
+    //   - Any future GpuAgent construction failure for unsupported hardware
+    // Without this, a single unsupported GPU in a multi-GPU system would
+    // abort HSA initialization for all devices.
+    const bool unsupported_device = (err == HSA_STATUS_ERROR_INVALID_ISA ||
+                                     err == HSA_STATUS_ERROR);
+    if (unsupported_device) {
       std::string desc = GpuNodeDescription(node_id, node_prop);
-      ifdebug {
-        fprintf(stderr,
-              "ROCm/HSA: Skipping unsupported GPU: %s.\n"
-              "  Reason: %s\n"
-              "  Use ROCR_VISIBLE_DEVICES to limit to supported GPU(s) if needed.\n",
-              desc.c_str(),
-              (e.what() == nullptr || strIsEmpty(e.what())) ? "unsupported or deprecated device"
-                                                            : e.what());
-      }
+      fprintf(stderr,
+            "ROCm/HSA: Skipping unsupported GPU: %s.\n"
+            "  Reason: %s\n"
+            "  Use ROCR_VISIBLE_DEVICES to limit to supported GPU(s) if needed.\n",
+            desc.c_str(),
+            (e.what() == nullptr || strIsEmpty(e.what())) ? "unsupported or deprecated device"
+                                                          : e.what());
       return nullptr;
     }
-    // Rethrow remaining exceptions.
+    // Rethrow remaining exceptions (e.g. out of memory, internal errors).
     throw;
   }
   if (enabled) gpu->Enable();
