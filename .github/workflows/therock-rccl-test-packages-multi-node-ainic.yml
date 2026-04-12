@@ -41,6 +41,8 @@ jobs:
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
       OUTPUT_ARTIFACTS_DIR: /it-share/rccl-ci/dist_new/dist/rocm
       THEROCK_BIN_DIR: "./build/bin"
+      TMPDIR: /it-share/tmp
+      XDG_CACHE_HOME: /it-share/.cache
       AWS_SHARED_CREDENTIALS_FILE: /it-share/rccl-ci/credentials.ini
     steps:
       - name: Checkout Repository
@@ -53,7 +55,7 @@ jobs:
         uses: './.github/actions/setup_test_environment'
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          AMDGPU_TARGETS: ${{ inputs.amdgpu_families }}
           ARTIFACT_GROUP: ${{ inputs.artifact_group }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
@@ -69,7 +71,6 @@ jobs:
           echo "Submitting RCCL heatmap job..."
 
           JOB_ID=$(CVS_CONFIG_FILE=/it-share/rccl-ci/configs/rccl_config_TheRock-sp.json CVS_CLUSTER_FILE=/it-share/rccl-ci/configs/cluster.json sbatch ./sp.sh | awk '{print $4}')
-          sbatch  ./sp.sh
           echo "Submitted job $JOB_ID"
 
           echo "Waiting for job to complete..."
