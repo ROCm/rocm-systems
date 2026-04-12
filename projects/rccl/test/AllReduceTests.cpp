@@ -150,14 +150,20 @@ namespace RcclUnitTesting
   }
 
   // This tests using custom pre-mult scalars reductions
+  // Note: dataTypes and redOps are hardcoded and do not respect UT_DATATYPES or UT_REDOPS.
+  // Pre-multiplied scalar reduction is only valid for ncclSum: each rank's input is scaled
+  // by its per-rank scalar before summing, and the expected-output computation matches this.
+  // float8 types have too few mantissa bits to represent scaled intermediate values accurately.
+  // Other ops (ncclProd, ncclMax, ncclMin, ncclAvg) produce different semantics under scaling
+  // and would yield incorrect expected values.
   TEST(AllReduce, PreMultScalar)
   {
     TestBed testBed;
 
     // Configuration
     ncclFunc_t                   const  funcType      = ncclCollAllReduce;
-    std::vector<ncclDataType_t>  const  dataTypes     = testBed.ev.GetDataTypes({ncclFloat32, ncclFloat16, ncclBfloat16});
-    std::vector<ncclRedOp_t>     const  redOps        = testBed.ev.GetRedOps({ncclSum});
+    std::vector<ncclDataType_t>  const  dataTypes     = {ncclFloat32, ncclFloat16, ncclBfloat16};
+    std::vector<ncclRedOp_t>     const  redOps        = {ncclSum};
     std::vector<int>             const  numElements   = testBed.ev.GetElements({384 * 1024, 384 * 32, 384});
     bool                         const  inPlace       = false;
     bool                         const  useManagedMem = false;
