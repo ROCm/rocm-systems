@@ -5518,41 +5518,44 @@ int main(int argc, char** argv) {
             }
         }
 
-        /* Initialize HIP if needed */
-        if (!g_hip_initialized) {
-            hipError_t herr = hipSetDevice(g_default_device);
-            if (herr != hipSuccess) {
-                LOG_ERROR("HIP init failed: %s", hipGetErrorString(herr));
-                close_socket(client_fd);
-                continue;
-            }
-            g_hip_initialized = 1;
-            if (g_gpu_cache_enabled) gpu_cache_size_from_vram();
-        }
-
-        /* Send init response via TCP */
-        handle_init(client_fd, init_hdr.request_id);
-
-        reset_session_state();
-
-        if (use_shm) {
-            HipShmHandle shm;
-            if (hip_shm_open(&shm, shm_name) == 0) {
-                handle_client_shm(client_fd, &shm);
-                close_socket(client_fd);
-                continue;
-            }
-            LOG_ERROR("Failed to open SHM %s, falling back to TCP", shm_name);
-        }
-
+        /* SHM and sequential modes: init HIP in the current process.
+         * Fork mode: defer HIP init to the child process. */
 #ifdef _WIN32
-        handle_client(client_fd);
+        #define SHOULD_FORK 0
 #else
-        if (g_gpu_cache_enabled) {
+        #define SHOULD_FORK (!g_gpu_cache_enabled && !use_shm)
+#endif
+
+        if (!SHOULD_FORK || use_shm) {
+            /* Sequential / Windows / SHM: init HIP in current process */
+            if (!g_hip_initialized) {
+                hipError_t herr = hipSetDevice(g_default_device);
+                if (herr != hipSuccess) {
+                    LOG_ERROR("HIP init failed: %s", hipGetErrorString(herr));
+                    close_socket(client_fd);
+                    continue;
+                }
+                g_hip_initialized = 1;
+                if (g_gpu_cache_enabled) gpu_cache_size_from_vram();
+            }
+            handle_init(client_fd, init_hdr.request_id);
+            reset_session_state();
+
+            if (use_shm) {
+                HipShmHandle shm;
+                if (hip_shm_open(&shm, shm_name) == 0) {
+                    handle_client_shm(client_fd, &shm);
+                    close_socket(client_fd);
+                    continue;
+                }
+                LOG_ERROR("Failed to open SHM %s, falling back to TCP", shm_name);
+            }
             handle_client(client_fd);
             continue;
         }
 
+#ifndef _WIN32
+        /* Fork mode: child handles everything including init */
         pid_t pid = fork();
         if (pid < 0) {
             LOG_ERROR("fork failed: %s", strerror(errno));
@@ -5562,12 +5565,20 @@ int main(int argc, char** argv) {
 
         if (pid == 0) {
             close(g_server_fd);
+            hipError_t herr = hipSetDevice(g_default_device);
+            if (herr != hipSuccess) {
+                LOG_ERROR("Child HIP init failed: %s", hipGetErrorString(herr));
+                _exit(1);
+            }
+            handle_init(client_fd, init_hdr.request_id);
+            reset_session_state();
             handle_client(client_fd);
             _exit(0);
         }
 
         close(client_fd);
 #endif
+#undef SHOULD_FORK
     }
 
     if (g_server_fd >= 0) {
