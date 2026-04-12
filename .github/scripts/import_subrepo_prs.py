@@ -1,12 +1,19 @@
 import os
-import sys
+import shlex
 import subprocess
+import sys
+
 from github import Github
 from git import Repo
 
+
 def run(cmd, **kwargs):
-    print(f">> {cmd}")
-    subprocess.check_call(cmd, shell=True, **kwargs)
+    if isinstance(cmd, str):
+        args = shlex.split(cmd)
+    else:
+        args = list(cmd)
+    print(f">> {' '.join(args)}")
+    subprocess.check_call(args, **kwargs)
 
 def main():
     # 1) Read and validate env vars
@@ -69,7 +76,10 @@ def main():
         except subprocess.CalledProcessError:
             print(f"❌ Merge conflict: subtree pull failed for PR #{pr_num}, skipping.")
             conflicted_prs.append(pr_num)  # 🔹 Track the failed PR
-            run(f"git merge --abort || true")  # Clean up merge state if needed
+            try:
+                run("git merge --abort")  # Clean up merge state if needed
+            except subprocess.CalledProcessError:
+                pass  # No merge in progress — safe to ignore
             run(f"git reset --hard")  # Ensure clean state
             run(f"git checkout {target}")
             continue

@@ -31,6 +31,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -88,14 +89,23 @@ def main(argv=None) -> None:
     if not changed_files:
         logger.warning("REST API failed or returned no changed files. Falling back to SHA-based Git diff...")
         try:
-            pr_data = os.popen(f"gh api repos/{args.repo}/pulls/{args.pr}").read()
-            pr = json.loads(pr_data)
+            pr_result = subprocess.run(
+                ["gh", "api", f"repos/{args.repo}/pulls/{args.pr}"],
+                capture_output=True, text=True, check=True,
+            )
+            pr = json.loads(pr_result.stdout)
             base_sha = pr["base"]["sha"]
             head_sha = pr["head"]["sha"]
             logger.debug(f"Base SHA: {base_sha}, Head SHA: {head_sha}")
-            os.system(f"git fetch origin {base_sha} {head_sha}")
-            result = os.popen(f"git diff --name-only {base_sha} {head_sha}").read()
-            changed_files = result.strip().splitlines()
+            subprocess.run(
+                ["git", "fetch", "origin", base_sha, head_sha],
+                check=True,
+            )
+            diff_result = subprocess.run(
+                ["git", "diff", "--name-only", base_sha, head_sha],
+                capture_output=True, text=True, check=True,
+            )
+            changed_files = diff_result.stdout.strip().splitlines()
             logger.info(f"Fallback changed files (SHA-based): {changed_files}")
         except Exception as e:
             logger.error(f"SHA-based Git CLI fallback failed: {e}")
