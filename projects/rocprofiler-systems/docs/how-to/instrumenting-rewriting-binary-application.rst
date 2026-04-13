@@ -955,7 +955,7 @@ When this occurs, an error message is always logged to the console that reads:
 
 .. code-block:: shell
 
-   Failed to transform trace trace <N> in function '<func>' in module '<module>' in object '<object>' at address <address>
+   Failed to transform trace <N> in function '<func>' in module '<module>' in object '<object>' at address <address>
 
 If instrumentation then fails, it may be possible to fix the issue by excluding ``<func>`` from instrumentation.
 
