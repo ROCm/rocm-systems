@@ -63,7 +63,7 @@ namespace memory_allocation
 namespace
 {
 using context_t                = context::context;
-using external_corr_id_map_t   = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t   = tracing::external_correlation_id_map_t;
 using region_to_agent_map      = std::unordered_map<hsa_region_t, rocprofiler_agent_id_t>;
 using memory_pool_to_agent_map = std::unordered_map<hsa_amd_memory_pool_t, rocprofiler_agent_id_t>;
 using region_to_agent_pair     = std::pair<region_to_agent_map*, rocprofiler_agent_id_t>;

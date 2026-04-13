@@ -101,24 +101,3 @@ set_tests_properties(
 set_tests_properties(
     device_counting_service_test.sync_counters device_counting_service_test.async_counters
     PROPERTIES DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
-
-set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
-
-add_executable(consumer-test)
-target_sources(consumer-test PRIVATE ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES})
-
-target_link_libraries(
-    consumer-test rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-    rocprofiler-sdk::rocprofiler-sdk-hip rocprofiler-sdk::rocprofiler-sdk-common-library
-    rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest GTest::gtest_main)
-
-gtest_add_tests(
-    TARGET consumer-test
-    SOURCES ${ROCPROFILER_LIB_CONSUMER_TEST_SOURCES}
-    TEST_LIST consumer-tests_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${consumer-tests_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

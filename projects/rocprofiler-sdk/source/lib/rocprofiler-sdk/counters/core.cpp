@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
@@ -145,13 +146,13 @@ counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& 
 void
 start_context(const context::context* ctx)
 {
-    if(!ctx || !ctx->counter_collection) return;
+    if(!ctx || !ctx->dispatch_counter_collection) return;
 
     auto* controller = hsa::get_queue_controller();
 
     bool already_enabled = true;
     CHECK_NOTNULL(controller)->enable_serialization();
-    ctx->counter_collection->enabled.wlock([&](auto& enabled) {
+    ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
         already_enabled = false;
         enabled         = true;
@@ -159,40 +160,45 @@ start_context(const context::context* ctx)
 
     if(!already_enabled)
     {
-        callback_thread_start();
-
-        for(auto& cb : ctx->counter_collection->callbacks)
+        for(auto& cb : ctx->dispatch_counter_collection->callbacks)
         {
+            using external_corr_id_map_t = tracing::external_correlation_id_map_t;
+
             // Insert our callbacks into HSA Interceptor. This
             // turns on counter instrumentation.
             if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
             cb->queue_id = controller->add_callback(
                 std::nullopt,
-                [=](const hsa::Queue&                                               q,
-                    const hsa::rocprofiler_packet&                                  kern_pkt,
-                    rocprofiler_kernel_id_t                                         kernel_id,
-                    rocprofiler_dispatch_id_t                                       dispatch_id,
-                    rocprofiler_user_data_t*                                        user_data,
-                    const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-                    const context::correlation_id* correlation_id) {
-                    return queue_cb(ctx,
-                                    cb,
-                                    q,
-                                    kern_pkt,
-                                    kernel_id,
-                                    dispatch_id,
-                                    user_data,
-                                    extern_corr_ids,
-                                    correlation_id);
-                },
-                // Completion CB
-                [=](const hsa::Queue& /* q */,
-                    hsa::rocprofiler_packet /* kern_pkt */,
-                    std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                    inst_pkt_t&                                        aql,
-                    kernel_dispatch::profiling_time                    dispatch_time) {
-                    completed_cb(ctx, cb, session, aql, dispatch_time);
-                });
+                hsa::queue_callbacks_t{.batch_packets = []() { return false; },
+                                       .write_interceptor =
+                                           [=](const hsa::Queue&              q,
+                                               const hsa::rocprofiler_packet& kern_pkt,
+                                               rocprofiler_kernel_id_t        kernel_id,
+                                               rocprofiler_dispatch_id_t      dispatch_id,
+                                               rocprofiler_user_data_t*       user_data,
+                                               const external_corr_id_map_t&  extern_corr_ids,
+                                               const context::correlation_id* correlation_id) {
+                                               return queue_cb(ctx,
+                                                               cb,
+                                                               q,
+                                                               kern_pkt,
+                                                               kernel_id,
+                                                               dispatch_id,
+                                                               user_data,
+                                                               extern_corr_ids,
+                                                               correlation_id);
+                                           },
+                                       // Completion CB
+                                       .signal_completion =
+                                           [=](const hsa::Queue& /*queue*/,
+                                               hsa::rocprofiler_packet /*kern_pkt*/,
+                                               std::shared_ptr<hsa::queue_info_session_t>& session,
+                                               hsa::packet_data_t&                         packet,
+                                               inst_pkt_t&                                 aql,
+                                               kernel_dispatch::profiling_time dispatch_time) {
+                                               completed_cb(
+                                                   ctx, cb, session, packet, aql, dispatch_time);
+                                           }});
         }
     }
 }
@@ -200,18 +206,16 @@ start_context(const context::context* ctx)
 void
 stop_context(const context::context* ctx)
 {
-    if(!ctx || !ctx->counter_collection) return;
+    if(!ctx || !ctx->dispatch_counter_collection) return;
 
     auto* controller = hsa::get_queue_controller();
 
-    ctx->counter_collection->enabled.wlock([&](auto& enabled) {
+    ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
         enabled = false;
     });
 
     if(controller) controller->disable_serialization();
-
-    callback_thread_stop();
 }
 
 rocprofiler_status_t

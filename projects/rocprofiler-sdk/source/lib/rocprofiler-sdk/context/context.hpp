@@ -124,12 +124,11 @@ struct context
     std::unique_ptr<callback_tracing_service> callback_tracer    = {};
     std::unique_ptr<buffer_tracing_service>   buffered_tracer    = {};
     // Only one of counter collection/agent counter collection can exists in the ctx.
-    std::unique_ptr<dispatch_counter_collection_service> counter_collection        = {};
-    std::unique_ptr<device_counting_service>             device_counter_collection = {};
-    std::unique_ptr<pc_sampling_service>                 pc_sampler                = {};
-
-    std::unique_ptr<thread_trace::DispatchThreadTracer> dispatch_thread_trace = {};
-    std::unique_ptr<thread_trace::DeviceThreadTracer>   device_thread_trace   = {};
+    std::unique_ptr<dispatch_counter_collection_service> dispatch_counter_collection = {};
+    std::unique_ptr<device_counting_service>             device_counter_collection   = {};
+    std::unique_ptr<pc_sampling_service>                 pc_sampler                  = {};
+    std::unique_ptr<thread_trace::DispatchThreadTracer>  dispatch_thread_trace       = {};
+    std::unique_ptr<thread_trace::DeviceThreadTracer>    device_thread_trace         = {};
 
     template <typename KindT>
     bool is_tracing(KindT _kind) const;

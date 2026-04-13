@@ -19,7 +19,6 @@ set(ROCPROFILER_LIB_COUNTERS_HEADERS
     sample_processing.hpp
     controller.hpp
     device_counting.hpp
-    sample_consumer.hpp
     ioctl.hpp)
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
                                                       ${ROCPROFILER_LIB_COUNTERS_HEADERS})
