@@ -22,6 +22,7 @@
 # SOFTWARE.
 
 
+import csv
 import sys
 import pytest
 import re
@@ -384,6 +385,83 @@ def test_shaderdata(att_shaderdata_out_dir_path):
 
     # Require at least one ui_output_agent_* directory with shaderdata data.
     assert found_shaderdata, "No ui_output_agent_* directory contains shaderdata data."
+
+
+def test_multi_gpu_separate_agents(att_multi_gpu_out_dir_path):
+    """
+    When multiple GPUs are traced for the same dispatch, each agent must get
+    its own ui_output_agent_* directory.  Before the fix, all agents' ATT data
+    was merged into a single directory, causing shaderdata timestamp resets
+    (each GPU has its own independent SQTT counter) and silently dropping
+    occupancy data from all but the first agent.
+    """
+
+    out_dir = Path(att_multi_gpu_out_dir_path)
+
+    # Use agent_info.csv to determine how many GPUs are on this machine.
+    # The file is inside a hostname subdirectory: <out_dir>/<hostname>/<pid>_agent_info.csv
+    agent_csvs = list(out_dir.glob("**/*_agent_info.csv"))
+    assert agent_csvs, (
+        f"No *_agent_info.csv found under {out_dir}. "
+        f"Ensure the execute test runs with --output-format csv."
+    )
+    with open(agent_csvs[0], "r") as f:
+        gpu_count = sum(1 for row in csv.DictReader(f) if row["Agent_Type"] == "GPU")
+    if gpu_count < 2:
+        pytest.skip(f"Only {gpu_count} GPU(s) on this machine, need >= 2")
+
+    ui_dirs = sorted(p for p in out_dir.glob("ui_output_agent_*") if p.is_dir())
+
+    # With --att-gpu-index 0,1 we expect at least two output directories
+    # (one per agent).
+    assert len(ui_dirs) >= 2, (
+        f"Expected at least 2 ui_output_agent_* directories (one per GPU), "
+        f"found {len(ui_dirs)}.  ATT data from multiple agents may be merged."
+    )
+
+    # Extract agent ids from directory names and verify they are distinct.
+    agent_ids = set()
+    pattern = re.compile(r"ui_output_agent_(\d+)_dispatch_(\d+)")
+    for d in ui_dirs:
+        m = pattern.search(d.name)
+        assert m, f"Unexpected directory name format: {d.name}"
+        agent_ids.add(m.group(1))
+
+    assert len(agent_ids) >= 2, (
+        f"Expected directories for at least 2 distinct agents, "
+        f"found agent ids: {agent_ids}"
+    )
+
+    # For each directory that has shaderdata, verify timestamps are
+    # monotonically increasing across all chunks (no resets from other GPUs).
+    for ui_dir in ui_dirs:
+        filenames_path = ui_dir / "filenames.json"
+        if not filenames_path.exists():
+            continue
+
+        with open(filenames_path, "r") as f:
+            filenames_json = json.load(f)
+
+        shaderdata_filenames = filenames_json.get("shaderdata_filenames", {})
+        if not shaderdata_filenames:
+            continue
+
+        for se, files in shaderdata_filenames.items():
+            prev_end_time = -1
+            for file_entry in files:
+                begin_time = file_entry[1]
+                end_time = file_entry[2]
+
+                # Each chunk's begin_time must be >= the previous chunk's
+                # end_time.  A reset (begin < prev_end) indicates data from a
+                # different GPU was mixed in.
+                assert begin_time >= prev_end_time, (
+                    f"Shaderdata timestamp reset in {ui_dir.name} SE {se}: "
+                    f"chunk {file_entry[0]} begins at {begin_time} but "
+                    f"previous chunk ended at {prev_end_time}.  "
+                    f"Data from multiple agents may be merged."
+                )
+                prev_end_time = end_time
 
 
 if __name__ == "__main__":

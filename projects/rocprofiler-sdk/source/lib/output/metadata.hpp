@@ -98,10 +98,11 @@ using marker_message_ordered_map_t = std::map<uint64_t, std::string>;
 using string_entry_map_t           = std::unordered_map<size_t, std::unique_ptr<std::string>>;
 using counter_dimension_vec_t      = std::vector<rocprofiler_counter_record_dimension_info_t>;
 using external_corr_id_set_t       = std::unordered_set<uint64_t>;
-using code_obj_decoder_t    = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
-using instruction_t         = rocprofiler::sdk::codeobj::disassembly::Instruction;
-using att_agent_filenames_t = std::pair<rocprofiler_agent_id_t, std::vector<std::string>>;
-using att_filenames_map_t   = std::unordered_map<rocprofiler_dispatch_id_t, att_agent_filenames_t>;
+using code_obj_decoder_t = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+using instruction_t      = rocprofiler::sdk::codeobj::disassembly::Instruction;
+using att_dispatch_agent_key_t =
+    std::pair<rocprofiler_dispatch_id_t, uint64_t>;  // (dispatch_id, agent_handle)
+using att_filenames_map_t         = std::map<att_dispatch_agent_key_t, std::vector<std::string>>;
 using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;

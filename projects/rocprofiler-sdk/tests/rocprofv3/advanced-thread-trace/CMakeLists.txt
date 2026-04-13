@@ -248,15 +248,32 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;thread-trace;pc-sampling"
     DISABLED ${ATT_PLUS_PCS_DISABLE})
 
-# Trace two GPUs
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-gpu-index-two-gpus
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input -o out
-            --att-gpu-index 0,1 -- $<TARGET_FILE:vector-ops>
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d att-multi-gpu --att --att-gpu-index
+        0,1 --att-consecutive-kernels 1 --kernel-trace --output-format csv --
+        $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED ${IS_DISABLED})
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-gpu-index-two-gpus)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-gpu-index-two-gpus
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_multi_gpu_separate_agents
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    FIXTURES_REQUIRED rocprofv3-test-att-gpu-index-two-gpus
+    ARGS --att-multi-gpu-out-dir ${CMAKE_CURRENT_BINARY_DIR}/att-multi-gpu
+    FAIL_REGULAR_EXPRESSION "AssertionError")
 
 # No machine has gpu index = 9999 The FAIL regex for this test is the ROCP_ERROR specific
 # to invalid device index
