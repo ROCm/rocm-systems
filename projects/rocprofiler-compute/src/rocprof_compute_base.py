@@ -526,23 +526,24 @@ class RocProfCompute:
 
     def _validate_profile_mode_exclusions(self) -> None:
         """Validate mutually exclusive profile mode options."""
-        exclusive_options: list[str] = []
-        if getattr(self.__args, "filter_blocks", None):
-            exclusive_options.append("--block")
-        if getattr(self.__args, "set_selected", None):
-            exclusive_options.append("--set")
-        if getattr(self.__args, "roof_only", False):
-            exclusive_options.append("--roof-only")
-        if getattr(self.__args, "bench_only", False):
-            exclusive_options.append("--bench-only")
-        if len(exclusive_options) > 1:
+        args = self.__args
+        if (
+            sum((
+                bool(getattr(args, "filter_blocks", None)),
+                bool(getattr(args, "set_selected", None)),
+                bool(getattr(args, "roof_only", False)),
+                bool(getattr(args, "bench_only", False)),
+            ))
+            > 1
+        ):
             console_error(
-                f"{', '.join(exclusive_options)} are mutually"
-                " exclusive options. Please use only one of them."
+                "--block, --set, --roof-only, and --bench-only"
+                " are mutually exclusive options."
+                " Please use only one of them."
             )
 
-        if getattr(self.__args, "bench_only", False) and getattr(
-            self.__args, "no_roof", False
+        if getattr(args, "bench_only", False) and getattr(
+            args, "no_roof", False
         ):
             console_error(
                 "--bench-only cannot be used with --no-roof."
