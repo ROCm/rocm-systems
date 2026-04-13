@@ -5,7 +5,7 @@
 .. _cdna-performance-model:
 
 ***********************************
-CDNA 2/3/4
+AMD CDNA architecture (CDNA-CDNA4)
 ***********************************
 
 ROCm Compute Profiler makes available an extensive list of metrics to better understand
