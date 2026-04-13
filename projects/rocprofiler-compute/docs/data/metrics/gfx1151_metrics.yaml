@@ -184,7 +184,7 @@ Memory chart - GCEA to System Memory:
     rst: 'Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy. Description: SARB handles arbitration between the GPU and the system memory interface. Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum'
     unit: Percent
   DRAM Read Bandwidth:
-    rst: 'Definition: Bandwidth for read requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time'
+    rst: 'Definition: Bandwidth for read requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5X system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time'
     unit: Bytes/s
   DRAM Write Bandwidth:
     rst: 'Definition: Bandwidth for write requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5X system memory instead of HBM. Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time'
