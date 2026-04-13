@@ -21,8 +21,8 @@
       "displayName": "macOS Debug",
       "description": "Target a remote macOS system.",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "installDir": "${sourceDir}/out/install/${presetName}",
+      "binaryDir": "${sourceDir}/_build/out/build/${presetName}",
+      "installDir": "${sourceDir}/_build/out/install/${presetName}",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
       "condition": {
         "type": "equals",
@@ -36,8 +36,8 @@
       "description": "Target Windows with the Visual Studio development environment.",
       "hidden": true,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "installDir": "${sourceDir}/out/install/${presetName}",
+      "binaryDir": "${sourceDir}/_build/out/build/${presetName}",
+      "installDir": "${sourceDir}/_build/out/install/${presetName}",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl.exe",
         "CMAKE_CXX_COMPILER": "cl.exe"
