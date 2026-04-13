@@ -46,7 +46,7 @@ control the behavior of rocSHMEM.
       - Maximum number of teams.
 
     * - | ``ROCSHMEM_BACKEND``
-        | When rocSHMEM is compiled for all backends, this enviroment variable
+        | When rocSHMEM is compiled for all backends, this environment variable
         | selects which backend to execute. The default value is an empty string and rocSHMEM auto-selects the most appropriate backend.
       - `` ``
       - | ``ipc``: IPC Backend
@@ -88,7 +88,7 @@ control the behavior of rocSHMEM.
 
     * - | ``ROCSHMEM_GDA_PROVIDER``
         | When rocSHMEM is compiled with support for multiple NIC vendors,
-        | the enviroment variable selects the desired provider.
+        | the environment variable selects the desired provider.
         | The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC.
       - `` ``
       - | ``bnxt``: Broadcom Thor 2
@@ -134,7 +134,7 @@ control the behavior of rocSHMEM.
         | ``COPY``: Copy alltoallv algorithm
 
     * - | ``ROCSHMEM_GDA_OVERRIDE_NIC_FIRMWARE_CHECK``
-        | This enviroment variable should be used with caution.
+        | This environment variable should be used with caution.
         | It overrides the NIC firmware check if
         | a user wants to use an unsupported NIC firmware.
         | If the firmware check is disabled rocSHMEM is not guaranteed to work.

@@ -59,7 +59,7 @@ option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on t
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (Requires MPI)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
-option(BUILD_TESTS_ONLY "Build only tests. Used to link agains rocSHMEM in a ROCm Release" OFF)
+option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)

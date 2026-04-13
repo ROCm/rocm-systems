@@ -186,7 +186,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 
     /* Update the SQ head
      * This param provides us the wqe_idx but we need to convert to the slot idx.
-     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multipy by this value */
+     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multiply by this value */
     sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
     bnxt_sq.head = sq_head;
 
