@@ -221,7 +221,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation-truncated
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 #########################################################################################
@@ -328,8 +328,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_trunc_kernels_summary.csv
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation
-                      rocprofv3-test-rocpd-generation-truncated)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
 # Validate region category filtering
 rocprofiler_add_integration_validate_test(
