@@ -777,10 +777,13 @@ Benchmark only
 --------------
 
 If you only want to run the roofline microbenchmark without profiling an application
-or collecting any performance counters, use the ``--bench-only`` option. This is useful
-for pre-generating ``roofline.csv`` benchmark data independently of a workload run.
+or collecting any performance counters, use the ``--bench-only`` option. No workload
+command is required.
 
-No workload command is required with ``--bench-only``.
+This is useful for:
+
+* Re-generating ``roofline.csv`` in an existing workload directory without re-profiling.
+* Running the microbenchmark on a system where only HIP is available (no rocprofiler-sdk needed).
 
 .. note::
 
@@ -789,25 +792,29 @@ No workload command is required with ``--bench-only``.
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name my_bench --bench-only
-                                    __                                       _
-    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-
-   INFO [roofline] Running roofline microbenchmark on device 0
-   Empirical Roofline Calculation
-   Copyright © 2026  Advanced Micro Devices, Inc. All rights reserved.
    ...
-   INFO [roofline] Roofline data saved to workloads/my_bench/MI325X/roofline.csv
-     Run 'rocprof-compute analyze -p workloads/my_bench/MI325X' for charts
+   INFO [roofline] Running roofline microbenchmark on device 0
+   GPU Device 0 (gfx942) with 304 CUs: Profiling...
+   ...
+   GPU Benchmarking completed
+   INFO [roofline] Roofline data saved to workloads/my_bench/MI300X_A1/roofline.csv
+     Run 'rocprof-compute analyze -p workloads/my_bench/MI300X_A1' for charts
 
 To target a specific GPU device, use ``--device``:
 
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name my_bench --bench-only --device 2
+
+To regenerate benchmark data in an existing profiled workload directory, use
+``--output-directory`` to point at the workload path directly:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --bench-only --output-directory workloads/vcopy/MI300X_A1
+   ...
+   INFO [roofline] Roofline data saved to workloads/vcopy/MI300X_A1/roofline.csv
+     Run 'rocprof-compute analyze -p workloads/vcopy/MI300X_A1' for charts
 
 .. _torch-operator-mapping:
 

@@ -562,6 +562,7 @@ class RocProfCompute:
         setup_file_handler(self.__args.loglevel, str(output_dir))
 
         roofline_csv = output_dir / "roofline.csv"
+        existing_roofline = roofline_csv.is_file()
         console_log(
             "roofline",
             "Running roofline microbenchmark"
@@ -573,6 +574,10 @@ class RocProfCompute:
             )
         except Exception as e:
             console_error(f"Benchmark execution failed: {e}")
+        if existing_roofline:
+            console_warning(
+                f"Overwrote existing {roofline_csv}"
+            )
 
         is_valid, error_message = validate_roofline_csv(
             str(output_dir)
