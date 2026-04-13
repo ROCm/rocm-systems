@@ -98,7 +98,7 @@ Memory chart - Scalar Data Cache
       .. jinja:: rdna1151-memory-chart-scalar-data-cache-gfx1151
          :file: _templates/metrics_table.j2
 
-Memory chart - TCP Cache (Vector L0)
+Memory chart - TCP Cache (Vector Data Cache)
 -------------------------------------
 
 .. tab-set::
