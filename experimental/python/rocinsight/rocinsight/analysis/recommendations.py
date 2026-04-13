@@ -138,14 +138,14 @@ def _filter_rec_commands(
     - If after stripping, a rocprofv3 command has no remaining flags AND
       its args contain only output-path or scope-filter entries (-d / -o /
       --kernel-names / etc.), the command adds no new data and is dropped.
-    - ``rocprof-sys --trace`` alone is equivalent to ``rocprofv3 --sys-trace``
+    - ``rocprof-sys-sample --trace`` alone is equivalent to ``rocprofv3 --sys-trace``
       (same HIP/HSA API data, just in Perfetto format instead of rocpd format)
-      and is dropped when sys-trace data is already present.  ``rocprof-sys``
+      and is dropped when sys-trace data is already present.  ``rocprof-sys-sample``
       commands that carry *additional* flags beyond ``--trace`` (e.g.
-      ``--trace-gpu-memory``, ``--call-stack-sampling``) are always kept
+      ``--device``, ``--call-stack-sampling``) are always kept
       because they collect data that rocprofv3 cannot.
     - ``rocprof-compute`` commands are always kept -- they perform a deep
-      hardware counter analysis that neither rocprofv3 nor rocprof-sys covers.
+      hardware counter analysis that neither rocprofv3 nor rocprof-sys-sample covers.
     - A short note is appended to ``description`` when flags/counters are
       stripped so the user knows why the command looks different from the docs.
     """
@@ -170,8 +170,8 @@ def _filter_rec_commands(
         flags = cmd.get("flags", [])
         args = cmd.get("args", [])
 
-        # -- rocprof-sys -------------------------------------------------------
-        if tool == "rocprof-sys" and has_sys_trace:
+        # -- rocprof-sys-sample ------------------------------------------------
+        if tool == "rocprof-sys-sample" and has_sys_trace:
             # --trace alone ~ rocprofv3 --sys-trace; drop if it adds nothing new
             extra_flags = [f for f in flags if f != "--trace"]
             meaningful_args = [
@@ -179,7 +179,7 @@ def _filter_rec_commands(
             ]
             if not extra_flags and not meaningful_args:
                 continue  # equivalent to already-collected sys-trace data
-            # Has meaningful extra flags (e.g. --trace-gpu-memory) -> keep as-is
+            # Has meaningful extra flags (e.g. --device) -> keep as-is
             filtered.append(cmd)
             continue
 
@@ -399,11 +399,11 @@ def generate_recommendations(
                             "full_command": "rocprofv3 --sys-trace --pmc GRBM_GUI_ACTIVE GRBM_COUNT -d ./utilization_output -o profile -- ./app",
                         },
                         {
-                            "tool": "rocprof-sys",
+                            "tool": "rocprof-sys-sample",
                             "description": "System-level timeline: identify host/GPU idle gaps and synchronization stalls",
                             "flags": ["--trace"],
                             "args": [],
-                            "full_command": "rocprof-sys --trace -- ./app",
+                            "full_command": "rocprof-sys-sample --trace -- ./app",
                         },
                     ],
                 }
@@ -569,13 +569,11 @@ def generate_recommendations(
                         "full_command": "rocprofv3 --sys-trace --hsa-trace -d ./memcpy_output -o profile -- ./app",
                     },
                     {
-                        "tool": "rocprof-sys",
-                        "description": "Detailed memory transfer timeline with PCIe bandwidth and overlap analysis",
-                        "flags": [],
-                        "args": [
-                            {"name": "--trace-gpu-memory", "value": None},
-                        ],
-                        "full_command": "rocprof-sys --trace-gpu-memory -- ./app",
+                        "tool": "rocprof-sys-sample",
+                        "description": "System-level trace with device metrics for memory transfer overlap analysis",
+                        "flags": ["--trace", "--device"],
+                        "args": [],
+                        "full_command": "rocprof-sys-sample --trace --device -- ./app",
                     },
                 ],
             }
@@ -638,11 +636,11 @@ def generate_recommendations(
                         "full_command": "rocprofv3 --hip-api-trace --hsa-trace -d ./api_output -o profile -- ./app",
                     },
                     {
-                        "tool": "rocprof-sys",
+                        "tool": "rocprof-sys-sample",
                         "description": "System-level API call frequency and per-call latency breakdown",
                         "flags": ["--trace"],
                         "args": [],
-                        "full_command": "rocprof-sys --trace -- ./app",
+                        "full_command": "rocprof-sys-sample --trace -- ./app",
                     },
                 ],
             }
@@ -793,11 +791,11 @@ def generate_recommendations(
                                 "full_command": "rocprofv3 --sys-trace -d ./launch_output -o profile -- ./app",
                             },
                             {
-                                "tool": "rocprof-sys",
+                                "tool": "rocprof-sys-sample",
                                 "description": "Visualize kernel launch timeline and inter-launch gaps in a Perfetto trace",
                                 "flags": ["--trace"],
                                 "args": [],
-                                "full_command": "rocprof-sys --trace -- ./app",
+                                "full_command": "rocprof-sys-sample --trace -- ./app",
                             },
                         ],
                     }
@@ -947,11 +945,11 @@ def generate_recommendations(
                         "full_command": "rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -d ./counters_output -o profile -- ./app",
                     },
                     {
-                        "tool": "rocprof-sys",
+                        "tool": "rocprof-sys-sample",
                         "description": "Full system trace for comprehensive performance timeline",
                         "flags": ["--trace"],
                         "args": [],
-                        "full_command": "rocprof-sys --trace -- ./app",
+                        "full_command": "rocprof-sys-sample --trace -- ./app",
                     },
                     {
                         "tool": "rocprof-compute",

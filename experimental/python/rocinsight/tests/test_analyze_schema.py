@@ -91,7 +91,7 @@ REQUIRED_TOP_LEVEL = [
     "errors",
 ]
 
-COMMAND_TOOLS = {"rocprofv3", "rocprof-sys", "rocprof-compute"}
+COMMAND_TOOLS = {"rocprofv3", "rocprof-sys-sample", "rocprof-sys-instrument", "rocprof-sys-run", "rocprof-compute"}
 
 
 def _load_schema():

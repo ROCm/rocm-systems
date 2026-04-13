@@ -754,8 +754,8 @@
       "properties": {
         "tool": {
           "type": "string",
-          "enum": ["rocprofv3", "rocprof-sys", "rocprof-compute"],
-          "description": "The ROCm profiling tool to invoke. 'rocprofv3' for trace/counter collection, 'rocprof-sys' for system-level profiling (Omnitrace), 'rocprof-compute' for kernel-level hardware counter analysis."
+          "enum": ["rocprofv3", "rocprof-sys-sample", "rocprof-sys-instrument", "rocprof-sys-run", "rocprof-compute"],
+          "description": "The ROCm profiling tool to invoke. 'rocprofv3' for trace/counter collection, 'rocprof-sys-sample' for sampling-based system profiling, 'rocprof-sys-instrument' for binary instrumentation, 'rocprof-sys-run' for running instrumented binaries, 'rocprof-compute' for kernel-level hardware counter analysis."
         },
         "description": {
           "type": "string",
@@ -805,8 +805,8 @@
           "description": "Complete ready-to-run shell command including tool name, all flags, all args, and application placeholder '-- ./app'. Consumers can display this directly for copy-paste. Application arguments should be appended after '-- ./app'.",
           "examples": [
             "rocprofv3 --sys-trace --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -d ./output -o profile -- ./app",
-            "rocprof-sys --trace-gpu-memory -- ./app",
-            "rocprof-compute -i profile.db --filter kernel_name -- ./app"
+            "rocprof-sys-sample --trace --device -- ./app",
+            "rocprof-compute profile --kernel my_kernel -- ./app"
           ]
         }
       }
@@ -993,13 +993,11 @@
                 "full_command": "rocprofv3 --sys-trace --hsa-trace -d ./memcpy_output -o profile -- ./app"
               },
               {
-                "tool": "rocprof-sys",
-                "description": "Detailed memory transfer timeline with PCIe bandwidth and overlap analysis",
-                "flags": [],
-                "args": [
-                  {"name": "--trace-gpu-memory", "value": null}
-                ],
-                "full_command": "rocprof-sys --trace-gpu-memory -- ./app"
+                "tool": "rocprof-sys-sample",
+                "description": "System-level trace with device metrics for memory transfer overlap analysis",
+                "flags": ["--trace", "--device"],
+                "args": [],
+                "full_command": "rocprof-sys-sample --trace --device -- ./app"
               }
             ]
           }

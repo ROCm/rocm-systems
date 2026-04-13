@@ -1182,11 +1182,11 @@ class SourceAnalyzer:
                             "full_command": "rocprofv3 --sys-trace -d ./sync_output -o sync_profile -- ./app",
                         },
                         {
-                            "tool": "rocprof-sys",
+                            "tool": "rocprof-sys-sample",
                             "description": "System-level timeline showing CPU/GPU sync points and idle gaps",
                             "flags": ["--trace"],
                             "args": [],
-                            "full_command": "rocprof-sys --trace -- ./app",
+                            "full_command": "rocprof-sys-sample --trace -- ./app",
                         },
                     ],
                 }
@@ -1208,11 +1208,11 @@ class SourceAnalyzer:
                     "estimated_impact": "Depends on call frequency; 5-30% improvement if in hot loop",
                     "commands": [
                         {
-                            "tool": "rocprof-sys",
+                            "tool": "rocprof-sys-sample",
                             "description": "Timeline view to identify CPU/GPU synchronization points",
                             "flags": ["--trace"],
                             "args": [],
-                            "full_command": "rocprof-sys --trace -- ./app",
+                            "full_command": "rocprof-sys-sample --trace -- ./app",
                         },
                     ],
                 }
@@ -1273,11 +1273,11 @@ class SourceAnalyzer:
                     "estimated_impact": "10-50% throughput improvement for workloads with independent work",
                     "commands": [
                         {
-                            "tool": "rocprof-sys",
+                            "tool": "rocprof-sys-sample",
                             "description": "Visualize kernel concurrency gaps on the default stream",
                             "flags": ["--trace"],
                             "args": [],
-                            "full_command": "rocprof-sys --trace -- ./app",
+                            "full_command": "rocprof-sys-sample --trace -- ./app",
                         },
                     ],
                 }
@@ -1295,18 +1295,18 @@ class SourceAnalyzer:
                     ),
                     "suggestion": "Replace hipMallocManaged with explicit hipMalloc + hipMemcpy for predictable performance",
                     "actions": [
-                        "Profile page-fault overhead with rocprof-sys --trace-gpu-memory",
+                        "Profile page-fault overhead with rocprof-sys-sample --trace --device",
                         "Replace hipMallocManaged with hipMalloc (device) + hipHostMalloc (host) pairs",
                         "Use explicit hipMemcpy to control when data moves between host and device",
                     ],
                     "estimated_impact": "Can eliminate page-migration stalls; 2-10x improvement in some cases",
                     "commands": [
                         {
-                            "tool": "rocprof-sys",
+                            "tool": "rocprof-sys-sample",
                             "description": "Trace GPU memory page migrations and access patterns",
-                            "flags": [],
-                            "args": [{"name": "--trace-gpu-memory", "value": None}],
-                            "full_command": "rocprof-sys --trace-gpu-memory -- ./app",
+                            "flags": ["--trace", "--device"],
+                            "args": [],
+                            "full_command": "rocprof-sys-sample --trace --device -- ./app",
                         },
                     ],
                 }
@@ -1418,11 +1418,11 @@ class SourceAnalyzer:
                     "estimated_impact": "Framework profiler reveals op-level bottlenecks before HW counter collection",
                     "commands": [
                         {
-                            "tool": "rocprof-sys",
+                            "tool": "rocprof-sys-sample",
                             "description": f"System-level trace capturing {fw} GPU kernel timeline",
                             "flags": ["--trace"],
                             "args": [],
-                            "full_command": "rocprof-sys --trace -- python ./train.py",
+                            "full_command": "rocprof-sys-sample --trace -- python ./train.py",
                         },
                         {
                             "tool": "rocprofv3",
@@ -1458,11 +1458,11 @@ class SourceAnalyzer:
                     "estimated_impact": "Communication optimizations can yield 1.2-2x on multi-GPU workloads",
                     "commands": [
                         {
-                            "tool": "rocprof-sys",
+                            "tool": "rocprof-sys-sample",
                             "description": "System timeline showing inter-GPU communication and kernel overlap",
                             "flags": ["--trace"],
                             "args": [],
-                            "full_command": "rocprof-sys --trace -- ./app",
+                            "full_command": "rocprof-sys-sample --trace -- ./app",
                         },
                     ],
                 }
