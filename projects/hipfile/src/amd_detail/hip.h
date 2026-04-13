@@ -113,4 +113,22 @@ private:
     int original_device;
 };
 
+class ScopedHipHostRegister {
+public:
+    ScopedHipHostRegister(void *ptr, size_t size, unsigned int flags);
+    ~ScopedHipHostRegister();
+    void release();
+
+    // Don't allow copying
+    ScopedHipHostRegister(const ScopedHipHostRegister &)            = delete;
+    ScopedHipHostRegister &operator=(const ScopedHipHostRegister &) = delete;
+
+    // Don't allow moving
+    ScopedHipHostRegister(ScopedHipHostRegister &&)            = delete;
+    ScopedHipHostRegister &operator=(ScopedHipHostRegister &&) = delete;
+
+private:
+    void *ptr;
+};
+
 }

@@ -249,4 +249,28 @@ ScopedHipSetDevice::~ScopedHipSetDevice()
         Context<Sys>::get()->syslog(LOG_CRIT, "Error setting HIP device back to original.");
     }
 }
+
+ScopedHipHostRegister::ScopedHipHostRegister(void *_ptr, size_t size, unsigned int flags) : ptr{_ptr}
+{
+    Context<Hip>::get()->hipHostRegister(ptr, size, flags);
+}
+
+ScopedHipHostRegister::~ScopedHipHostRegister()
+{
+    if (ptr != nullptr) {
+        try {
+            Context<Hip>::get()->hipHostUnregister(ptr);
+        }
+        catch (Hip::RuntimeError &e) {
+            Context<Sys>::get()->syslog(LOG_CRIT, "Error unregistering host memory.");
+        }
+    }
+}
+
+void
+ScopedHipHostRegister::release()
+{
+    ptr = nullptr;
+}
+
 }
