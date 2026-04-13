@@ -207,7 +207,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16{*(reinterpret_cast<int16_t*>(val))};
-      asm volatile("global_store_short %0, %1, off sc0 sc1" : : "v"(dst), "v"(val16));
+      asm volatile("global_store_short %0, %1, off sc0 sc1 nt" : : "v"(dst), "v"(val16));
 #endif
 #if defined(__gfx1100__)
       int32_t val32{*(reinterpret_cast<int32_t*>(val))};
@@ -215,7 +215,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
 #endif
 #if defined(__gfx1201__)
       int32_t val32{*(reinterpret_cast<int32_t*>(val))};
-      asm volatile("global_store_b16 %0, %1, off scope:SCOPE_SYS" : : "v"(dst), "v"(val32));
+      asm volatile("global_store_b16 %0, %1, off scope:SCOPE_SYS th:TH_STORE_NT" : : "v"(dst), "v"(val32));
 #endif
       break;
     }
@@ -225,10 +225,10 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
       asm volatile("global_store_dword %0, %1, off glc slc" : : "v"(dst), "v"(val32));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("global_store_dword %0, %1, off sc0 sc1" : : "v"(dst), "v"(val32));
+      asm volatile("global_store_dword %0, %1, off sc0 sc1 nt" : : "v"(dst), "v"(val32));
 #endif
 #if defined(__gfx1201__)
-      asm volatile("global_store_b32 %0, %1, off scope:SCOPE_SYS" : : "v"(dst), "v"(val32));
+      asm volatile("global_store_b32 %0, %1, off scope:SCOPE_SYS th:TH_STORE_NT" : : "v"(dst), "v"(val32));
 #endif
       break;
     }
@@ -238,10 +238,10 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
       asm volatile("global_store_dwordx2 %0, %1, off glc slc" : : "v"(dst), "v"(val64));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("global_store_dwordx2 %0, %1, off sc0 sc1" : : "v"(dst), "v"(val64));
+      asm volatile("global_store_dwordx2 %0, %1, off sc0 sc1 nt" : : "v"(dst), "v"(val64));
 #endif
 #if defined(__gfx1201__)
-      asm volatile("global_store_b64 %0, %1, off scope:SCOPE_SYS" : : "v"(dst), "v"(val64));
+      asm volatile("global_store_b64 %0, %1, off scope:SCOPE_SYS th:TH_STORE_NT" : : "v"(dst), "v"(val64));
 #endif
       break;
     }
@@ -251,10 +251,10 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
       asm volatile("global_store_dwordx4 %0, %1, off glc slc" : : "v"(dst), "v"(val128));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("global_store_dwordx4 %0, %1, off sc0 sc1" : : "v"(dst), "v"(val128));
+      asm volatile("global_store_dwordx4 %0, %1, off sc0 sc1 nt" : : "v"(dst), "v"(val128));
 #endif
 #if defined(__gfx1201__)
-      asm volatile("global_store_b128 %0, %1, off scope:SCOPE_SYS" : : "v"(dst), "v"(val128));
+      asm volatile("global_store_b128 %0, %1, off scope:SCOPE_SYS th:TH_STORE_NT" : : "v"(dst), "v"(val128));
 #endif
       break;
     }
