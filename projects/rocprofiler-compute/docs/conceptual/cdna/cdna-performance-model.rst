@@ -169,7 +169,7 @@ to use ROCm Compute Profiler to optimize your code.
    Instinct MI250X, MI250, and MI210 accelerators interchangeably in cases
    where the exact product at hand is not relevant. For product details, see `AMD Instinct GPUs <https://www.amd.com/en/products/accelerators/instinct.html>`_.
 
-   For a comparison of AMD Instinct accelerator specifications, refer to
+   For a comparison of AMD Instinct GPU specifications, refer to
    :doc:`Hardware specifications <rocm:reference/gpu-arch-specs>`.
 
 .. rubric:: Hardware block chapters
