@@ -21,6 +21,43 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
+
+#if ROCPROFILER_BUILD_WSL
+
+namespace rocprofiler
+{
+namespace pc_sampling
+{
+namespace ioctl
+{
+int
+get_kfd_fd()
+{
+    return -1;
+}
+
+rocprofiler_status_t
+ioctl_query_pcs_configs(const rocprofiler_agent_t*, rocp_pcs_cfgs_vec_t&)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+rocprofiler_status_t
+ioctl_pcs_create(const rocprofiler_agent_t*,
+                 rocprofiler_pc_sampling_method_t,
+                 rocprofiler_pc_sampling_unit_t,
+                 uint64_t,
+                 uint32_t*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+}  // namespace ioctl
+}  // namespace pc_sampling
+}  // namespace rocprofiler
+
+#else  // !ROCPROFILER_BUILD_WSL
+
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter_types.hpp"
@@ -657,3 +694,5 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
 }  // namespace ioctl
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif  // !ROCPROFILER_BUILD_WSL

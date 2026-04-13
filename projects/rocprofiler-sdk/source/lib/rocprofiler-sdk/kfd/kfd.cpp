@@ -21,6 +21,44 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
+
+#if ROCPROFILER_BUILD_WSL
+
+#include "lib/common/logging.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+
+namespace rocprofiler
+{
+namespace kfd
+{
+rocprofiler_status_t
+init()
+{
+    ROCP_INFO << "KFD event tracing is not supported on WSL";
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+void
+finalize()
+{}
+
+const char*
+name_by_id(uint32_t, uint32_t)
+{
+    return "KFD events: not supported on WSL";
+}
+
+std::vector<uint32_t>
+get_ids(uint32_t)
+{
+    return {};
+}
+}  // namespace kfd
+}  // namespace rocprofiler
+
+#else  // !ROCPROFILER_BUILD_WSL
+
 #include "include/rocprofiler-sdk/kfd/kfd_id.h"
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
@@ -1679,3 +1717,5 @@ get_ids(uint32_t kind)
 }
 }  // namespace kfd
 }  // namespace rocprofiler
+
+#endif  // !ROCPROFILER_BUILD_WSL

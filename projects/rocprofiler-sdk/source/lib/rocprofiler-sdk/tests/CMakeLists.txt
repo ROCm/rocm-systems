@@ -26,15 +26,19 @@ set(rocprofiler_lib_sources
 add_executable(rocprofiler-sdk-lib-tests)
 target_sources(rocprofiler-sdk-lib-tests PRIVATE ${rocprofiler_lib_sources}
                                                  details/agent.cpp)
-target_link_libraries(
-    rocprofiler-sdk-lib-tests
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::counter-test-constants
-            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-            rocprofiler-sdk::rocprofiler-sdk-drm
-            GTest::gtest
-            GTest::gtest_main)
+set(_ROCPROFILER_TEST_DEPS
+    rocprofiler-sdk::rocprofiler-sdk-static-library
+    rocprofiler-sdk::rocprofiler-sdk-common-library
+    rocprofiler-sdk::counter-test-constants
+    rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+    GTest::gtest
+    GTest::gtest_main)
+
+if(NOT ROCPROFILER_BUILD_WSL)
+    list(APPEND _ROCPROFILER_TEST_DEPS rocprofiler-sdk::rocprofiler-sdk-drm)
+endif()
+
+target_link_libraries(rocprofiler-sdk-lib-tests PRIVATE ${_ROCPROFILER_TEST_DEPS})
 
 file(GLOB _NODE_PROPERTIES ${CMAKE_CURRENT_LIST_DIR}/data/topology/nodes/*/properties)
 rocprofiler_add_unit_test(
@@ -60,15 +64,19 @@ set(rocprofiler_shared_lib_sources external_correlation.cpp intercept_table.cpp
 
 add_executable(rocprofiler-sdk-lib-tests-shared)
 target_sources(rocprofiler-sdk-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
-target_link_libraries(
-    rocprofiler-sdk-lib-tests-shared
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-            rocprofiler-sdk::rocprofiler-sdk-drm
-            rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library
-            GTest::gtest
-            GTest::gtest_main)
+set(_ROCPROFILER_SHARED_TEST_DEPS
+    rocprofiler-sdk::rocprofiler-sdk-shared-library
+    rocprofiler-sdk::rocprofiler-sdk-common-library
+    rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+    rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library
+    GTest::gtest
+    GTest::gtest_main)
+
+if(NOT ROCPROFILER_BUILD_WSL)
+    list(APPEND _ROCPROFILER_SHARED_TEST_DEPS rocprofiler-sdk::rocprofiler-sdk-drm)
+endif()
+
+target_link_libraries(rocprofiler-sdk-lib-tests-shared PRIVATE ${_ROCPROFILER_SHARED_TEST_DEPS})
 set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
                                                                   "\$ORIGIN/../lib")
 

@@ -34,6 +34,10 @@ rocprofiler_add_option(
     ROCPROFILER_BUILD_CI "Enable continuous integration default values for options" OFF
     ADVANCED)
 
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_WSL
+    "Build for WSL2 (uses rocdxg instead of hsakmt, disables KFD ioctls and DRM)" OFF)
+
 rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"

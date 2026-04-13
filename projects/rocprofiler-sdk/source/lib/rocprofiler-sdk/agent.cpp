@@ -39,8 +39,13 @@
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
-#include <libdrm/amdgpu.h>
-#include <xf86drm.h>
+#if ROCPROFILER_BUILD_WSL
+#    include <hsakmt/hsakmt.h>
+#    include <hsakmt/hsakmttypes.h>
+#else
+#    include <libdrm/amdgpu.h>
+#    include <xf86drm.h>
+#endif
 
 #include <fstream>
 #include <iomanip>
@@ -235,7 +240,8 @@ get_cpu_info()
     return _v;
 }
 
-// check to see if the file is readable
+#if !ROCPROFILER_BUILD_WSL
+
 bool
 is_readable(const fs::path& fpath)
 {
@@ -392,6 +398,8 @@ read_property(const MapT& data, const std::string& label, Tp& value)
             value = static_cast<Tp>(local_value);
     }
 }
+
+#endif  // !ROCPROFILER_BUILD_WSL
 
 void
 update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
@@ -605,6 +613,322 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
 }
 
 using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
+
+#if ROCPROFILER_BUILD_WSL
+
+auto
+read_topology()
+{
+    auto data = std::vector<unique_agent_t>{};
+
+    static bool kfd_opened = false;
+    if(!kfd_opened)
+    {
+        if(hsaKmtOpenKFD() != HSAKMT_STATUS_SUCCESS)
+        {
+            ROCP_CI_LOG(WARNING) << "WSL: hsaKmtOpenKFD() failed";
+            return data;
+        }
+        kfd_opened = true;
+    }
+
+    HsaSystemProperties sys_props = {};
+    if(hsaKmtAcquireSystemProperties(&sys_props) != HSAKMT_STATUS_SUCCESS)
+    {
+        ROCP_CI_LOG(WARNING) << "WSL: hsaKmtAcquireSystemProperties() failed";
+        return data;
+    }
+
+    auto _sys_prop_release =
+        common::scope_destructor{[]() { hsaKmtReleaseSystemProperties(); }};
+
+    ROCP_INFO << fmt::format("WSL: discovered {} topology nodes via hsaKmt", sys_props.NumNodes);
+
+    const auto& cpu_info_v = get_cpu_info();
+    uint64_t    idcount    = 0;
+    uint64_t    cpucount   = 0;
+    uint64_t    gpucount   = 0;
+    uint64_t    unkcount   = 0;
+
+    for(uint32_t node_id = 0; node_id < sys_props.NumNodes; ++node_id)
+    {
+        HsaNodeProperties node_props = {};
+        if(hsaKmtGetNodeProperties(node_id, &node_props) != HSAKMT_STATUS_SUCCESS)
+        {
+            ROCP_CI_LOG(WARNING)
+                << fmt::format("WSL: hsaKmtGetNodeProperties({}) failed", node_id);
+            continue;
+        }
+
+        auto agent_info                 = common::init_public_api_struct(rocprofiler_agent_t{});
+        agent_info.type                 = ROCPROFILER_AGENT_TYPE_NONE;
+        agent_info.logical_node_id      = idcount++;
+        agent_info.node_id              = node_id;
+        agent_info.id.handle            = (agent_info.logical_node_id) + get_agent_offset();
+        agent_info.logical_node_type_id = -1;
+
+        agent_info.cpu_cores_count = node_props.NumCPUCores;
+        agent_info.simd_count      = node_props.NumFComputeCores;
+
+        if(agent_info.cpu_cores_count > 0 && agent_info.simd_count == 0)
+            agent_info.type = ROCPROFILER_AGENT_TYPE_CPU;
+        else if(agent_info.simd_count > 0 && agent_info.cpu_cores_count == 0)
+            agent_info.type = ROCPROFILER_AGENT_TYPE_GPU;
+        else if(agent_info.cpu_cores_count > 0 && agent_info.simd_count > 0)
+            agent_info.type = ROCPROFILER_AGENT_TYPE_GPU;
+        else
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "WSL: agent-{} is neither a CPU nor a GPU. CPU cores: {}, SIMD count: {}",
+                agent_info.node_id,
+                agent_info.cpu_cores_count,
+                agent_info.simd_count);
+        }
+
+        if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
+            agent_info.logical_node_type_id = cpucount++;
+        else if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
+            agent_info.logical_node_type_id = gpucount++;
+        else
+            agent_info.logical_node_type_id = unkcount++;
+
+        agent_info.mem_banks_count         = node_props.NumMemoryBanks;
+        agent_info.caches_count            = node_props.NumCaches;
+        agent_info.io_links_count          = node_props.NumIOLinks;
+        agent_info.cpu_core_id_base        = node_props.CComputeIdLo;
+        agent_info.simd_id_base            = node_props.FComputeIdLo;
+        agent_info.max_waves_per_simd      = node_props.MaxWavesPerSIMD;
+        agent_info.lds_size_in_kb          = node_props.LDSSizeInKB;
+        agent_info.gds_size_in_kb          = node_props.GDSSizeInKB;
+        agent_info.num_gws                 = node_props.NumGws;
+        agent_info.wave_front_size         = node_props.WaveFrontSize;
+        agent_info.simd_arrays_per_engine  = node_props.NumArrays;
+        agent_info.cu_per_simd_array       = node_props.NumCUPerArray;
+        agent_info.simd_per_cu             = node_props.NumSIMDPerCU;
+        agent_info.max_slots_scratch_cu    = node_props.MaxSlotsScratchCU;
+        agent_info.vendor_id               = node_props.VendorId;
+        agent_info.device_id               = node_props.DeviceId;
+        agent_info.location_id             = node_props.LocationId;
+        agent_info.domain                  = node_props.Domain;
+        agent_info.drm_render_minor        = node_props.DrmRenderMinor;
+        agent_info.hive_id                 = node_props.HiveID;
+        agent_info.num_sdma_engines        = node_props.NumSdmaEngines;
+        agent_info.num_sdma_xgmi_engines   = node_props.NumSdmaXgmiEngines;
+        agent_info.num_sdma_queues_per_engine = node_props.NumSdmaQueuesPerEngine;
+        agent_info.num_cp_queues           = node_props.NumCpQueues;
+        agent_info.max_engine_clk_ccompute = node_props.MaxEngineClockMhzCCompute;
+        agent_info.gpu_id                  = node_props.KFDGpuID;
+        agent_info.family_id               = node_props.FamilyID;
+        agent_info.num_shader_banks        = node_props.NumShaderBanks;
+
+        // array_count in sysfs = total SIMD arrays = NumShaderBanks * NumArrays(per engine)
+        agent_info.array_count = node_props.NumShaderBanks * node_props.NumArrays;
+
+        // gfx_target_version: reconstruct decimal form from EngineId bit fields
+        agent_info.gfx_target_version = node_props.EngineId.ui32.Major * 10000 +
+                                        node_props.EngineId.ui32.Minor * 100 +
+                                        node_props.EngineId.ui32.Stepping;
+
+        agent_info.name         = "";
+        agent_info.product_name = "";
+        agent_info.vendor_name  = "";
+        agent_info.model_name   = "";
+        memset(&agent_info.uuid.bytes, 0, sizeof(agent_info.uuid.bytes));
+
+        if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            constexpr auto workgrp_max = 1024;
+            constexpr auto grid_max    = std::numeric_limits<uint32_t>::max();
+            constexpr auto grid_max_x  = std::numeric_limits<int32_t>::max();
+            constexpr auto grid_max_y  = std::numeric_limits<uint16_t>::max();
+            constexpr auto grid_max_z  = std::numeric_limits<uint16_t>::max();
+
+            agent_info.max_engine_clk_fcompute = node_props.MaxEngineClockMhzFCompute;
+            agent_info.local_mem_size          = node_props.LocalMemSize;
+            agent_info.fw_version.Value        = node_props.EngineId.Value & 0x3ff;
+            agent_info.capability.Value        = node_props.Capability.Value;
+            agent_info.sdma_fw_version.Value   = node_props.uCodeEngineVersions.Value & 0x3ff;
+            agent_info.workgroup_max_size      = workgrp_max;
+            agent_info.workgroup_max_dim       = {workgrp_max, workgrp_max, workgrp_max};
+            agent_info.grid_max_size           = grid_max;
+            agent_info.grid_max_dim            = {grid_max_x, grid_max_y, grid_max_z};
+
+            if(agent_info.simd_per_cu > 0)
+                agent_info.cu_count = agent_info.simd_count / agent_info.simd_per_cu;
+
+            auto _uuid         = uuid_view_t{};
+            _uuid.value64[0]   = node_props.UniqueID;
+            agent_info.uuid    = static_cast<rocprofiler_uuid_t>(_uuid);
+
+            // Convert MarketingName (HSAuint16 Unicode) to UTF-8 for product_name
+            {
+                std::string mkt_name;
+                for(size_t i = 0; i < HSA_PUBLIC_NAME_SIZE && node_props.MarketingName[i]; ++i)
+                    mkt_name += static_cast<char>(node_props.MarketingName[i] & 0xFF);
+
+                if(!mkt_name.empty())
+                    agent_info.product_name =
+                        common::get_string_entry(mkt_name)->c_str();
+                else
+                    agent_info.product_name = common::get_string_entry("unknown")->c_str();
+            }
+
+            // AMDName (ASCII) for model_name
+            {
+                std::string amd_name(reinterpret_cast<const char*>(node_props.AMDName),
+                                     strnlen(reinterpret_cast<const char*>(node_props.AMDName),
+                                             HSA_PUBLIC_NAME_SIZE));
+                if(!amd_name.empty())
+                    agent_info.model_name = common::get_string_entry(amd_name)->c_str();
+            }
+
+            // Derive the GFX ISA name from gfx_target_version
+            if(agent_info.gfx_target_version >= 10000)
+            {
+                auto major = (agent_info.gfx_target_version / 10000) % 100;
+                auto minor = (agent_info.gfx_target_version / 100) % 100;
+                auto step  = (agent_info.gfx_target_version % 100);
+                agent_info.name =
+                    common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
+                        ->c_str();
+            }
+
+            agent_info.vendor_name = common::get_string_entry("AMD")->c_str();
+        }
+        else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
+        {
+            agent_info.cu_count    = agent_info.cpu_cores_count;
+            agent_info.vendor_name = common::get_string_entry("CPU")->c_str();
+            for(const auto& itr : cpu_info_v)
+            {
+                if(agent_info.cpu_core_id_base == itr.apicid)
+                {
+                    agent_info.name         = common::get_string_entry(itr.model_name)->c_str();
+                    agent_info.product_name = common::get_string_entry(agent_info.name)->c_str();
+                    agent_info.family_id    = itr.family;
+                    break;
+                }
+            }
+        }
+
+        agent_info.num_xcc          = (node_props.NumXcc > 0) ? node_props.NumXcc : 1;
+        agent_info.max_waves_per_cu = agent_info.simd_per_cu * agent_info.max_waves_per_simd;
+
+        if(agent_info.simd_arrays_per_engine > 0 && agent_info.num_shader_banks > 0)
+        {
+            agent_info.cu_per_engine = (agent_info.simd_count / agent_info.simd_per_cu) /
+                                       (agent_info.num_shader_banks);
+        }
+
+        // Memory banks
+        agent_info.mem_banks = nullptr;
+        agent_info.caches    = nullptr;
+        agent_info.io_links  = nullptr;
+
+        if(agent_info.mem_banks_count > 0)
+        {
+            auto* mem_props = new HsaMemoryProperties[agent_info.mem_banks_count];
+            if(hsaKmtGetNodeMemoryProperties(
+                   node_id, agent_info.mem_banks_count, mem_props) == HSAKMT_STATUS_SUCCESS)
+            {
+                auto* banks = new rocprofiler_agent_mem_bank_t[agent_info.mem_banks_count];
+                for(uint32_t i = 0; i < agent_info.mem_banks_count; ++i)
+                {
+                    banks[i].heap_type           = mem_props[i].HeapType;
+                    banks[i].size_in_bytes       = mem_props[i].SizeInBytes;
+                    banks[i].flags.MemoryProperty = mem_props[i].Flags.MemoryProperty;
+                    banks[i].width               = mem_props[i].Width;
+                    banks[i].mem_clk_max         = mem_props[i].MemoryClockMax;
+                }
+                agent_info.mem_banks = banks;
+            }
+            else
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "WSL: hsaKmtGetNodeMemoryProperties({}) failed", node_id);
+                agent_info.mem_banks_count = 0;
+            }
+            delete[] mem_props;
+        }
+
+        if(agent_info.caches_count > 0)
+        {
+            auto* cache_props = new HsaCacheProperties[agent_info.caches_count];
+            if(hsaKmtGetNodeCacheProperties(
+                   node_id, 0, agent_info.caches_count, cache_props) == HSAKMT_STATUS_SUCCESS)
+            {
+                auto* caches = new rocprofiler_agent_cache_t[agent_info.caches_count];
+                for(uint32_t i = 0; i < agent_info.caches_count; ++i)
+                {
+                    caches[i].processor_id_low   = cache_props[i].ProcessorIdLow;
+                    caches[i].level              = cache_props[i].CacheLevel;
+                    caches[i].size               = cache_props[i].CacheSize;
+                    caches[i].cache_line_size    = cache_props[i].CacheLineSize;
+                    caches[i].cache_lines_per_tag = cache_props[i].CacheLinesPerTag;
+                    caches[i].association        = cache_props[i].CacheAssociativity;
+                    caches[i].latency            = cache_props[i].CacheLatency;
+                    caches[i].type.Value         = cache_props[i].CacheType.Value;
+                }
+                agent_info.caches = caches;
+            }
+            else
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "WSL: hsaKmtGetNodeCacheProperties({}) failed", node_id);
+                agent_info.caches_count = 0;
+            }
+            delete[] cache_props;
+        }
+
+        if(agent_info.io_links_count > 0)
+        {
+            auto* link_props = new HsaIoLinkProperties[agent_info.io_links_count];
+            if(hsaKmtGetNodeIoLinkProperties(
+                   node_id, agent_info.io_links_count, link_props) == HSAKMT_STATUS_SUCCESS)
+            {
+                auto* links = new rocprofiler_agent_io_link_t[agent_info.io_links_count];
+                for(uint32_t i = 0; i < agent_info.io_links_count; ++i)
+                {
+                    links[i].type          = link_props[i].IoLinkType;
+                    links[i].version_major = link_props[i].VersionMajor;
+                    links[i].version_minor = link_props[i].VersionMinor;
+                    links[i].node_from     = link_props[i].NodeFrom;
+                    links[i].node_to       = link_props[i].NodeTo;
+                    links[i].weight        = link_props[i].Weight;
+                    links[i].min_latency   = link_props[i].MinimumLatency;
+                    links[i].max_latency   = link_props[i].MaximumLatency;
+                    links[i].min_bandwidth = link_props[i].MinimumBandwidth;
+                    links[i].max_bandwidth = link_props[i].MaximumBandwidth;
+                    links[i].recommended_transfer_size = link_props[i].RecTransferSize;
+                    links[i].flags.LinkProperty = link_props[i].Flags.LinkProperty;
+                }
+                agent_info.io_links = links;
+            }
+            else
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "WSL: hsaKmtGetNodeIoLinkProperties({}) failed", node_id);
+                agent_info.io_links_count = 0;
+            }
+            delete[] link_props;
+        }
+
+        update_agent_runtime_visibility(agent_info);
+
+        data.emplace_back(new rocprofiler_agent_t{agent_info}, [](rocprofiler_agent_t* ptr) {
+            if(ptr)
+            {
+                delete[] ptr->mem_banks;
+                delete[] ptr->caches;
+                delete[] ptr->io_links;
+            }
+            delete ptr;
+        });
+    }
+    return data;
+}
+
+#else  // !ROCPROFILER_BUILD_WSL
 
 auto
 read_topology()
@@ -1003,6 +1327,8 @@ read_topology()
     return data;
 }
 
+#endif  // ROCPROFILER_BUILD_WSL
+
 auto&
 get_agent_topology()
 {
@@ -1243,6 +1569,152 @@ construct_agent_cache(::HsaApiTable* table)
     ROCP_FATAL_IF(agent_map.size() != hsa_agents.size())
         << "rocprofiler was only able to map " << agent_map.size()
         << " rocprofiler agents to HSA agents, expected " << hsa_agents.size();
+
+#if ROCPROFILER_BUILD_WSL
+    // DXG doesn't populate all HsaNodeProperties fields correctly.
+    // Patch agent fields with authoritative values from the HSA runtime.
+    for(auto& topo_agent : get_agent_topology())
+    {
+        auto* agent = topo_agent.get();
+        auto  it    = hsa_agent_node_map.find(static_cast<uint32_t>(agent->logical_node_id));
+        if(it == hsa_agent_node_map.end()) continue;
+        auto hsa_ag = it->second;
+
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            char name_buf[64] = {};
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag, HSA_AGENT_INFO_NAME, name_buf) == HSA_STATUS_SUCCESS)
+            {
+                agent->name = common::get_string_entry(std::string{name_buf})->c_str();
+
+                auto sv = std::string_view{name_buf};
+                if(sv.substr(0, 3) == "gfx" && sv.size() >= 7)
+                {
+                    auto major = static_cast<uint32_t>(std::stoul(std::string{sv.substr(3, 2)}));
+                    auto minor = static_cast<uint32_t>(std::stoul(std::string{sv.substr(5, 1)}, nullptr, 16));
+                    uint32_t step = 0;
+                    if(sv.size() > 6)
+                        step = static_cast<uint32_t>(std::stoul(std::string{sv.substr(6)}, nullptr, 16));
+                    agent->gfx_target_version = major * 10000 + minor * 100 + step;
+                }
+            }
+
+            char vendor_buf[64] = {};
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag, HSA_AGENT_INFO_VENDOR_NAME, vendor_buf) == HSA_STATUS_SUCCESS)
+                agent->vendor_name = common::get_string_entry(std::string{vendor_buf})->c_str();
+
+            char mkt_buf[64] = {};
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME),
+                   mkt_buf) == HSA_STATUS_SUCCESS)
+                agent->product_name = common::get_string_entry(std::string{mkt_buf})->c_str();
+
+            uint32_t chip_id = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID),
+                   &chip_id) == HSA_STATUS_SUCCESS)
+                agent->device_id = chip_id;
+
+            uint32_t bdf_id = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID),
+                   &bdf_id) == HSA_STATUS_SUCCESS)
+                agent->location_id = bdf_id;
+
+            uint32_t shader_engs = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                   &shader_engs) == HSA_STATUS_SUCCESS)
+                agent->num_shader_banks = shader_engs;
+
+            uint32_t sa_per_se = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
+                   &sa_per_se) == HSA_STATUS_SUCCESS)
+            {
+                agent->simd_arrays_per_engine = sa_per_se;
+                if(shader_engs > 0)
+                    agent->array_count = shader_engs * sa_per_se;
+            }
+
+            uint32_t compute_unit = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+                   &compute_unit) == HSA_STATUS_SUCCESS)
+                agent->cu_count = compute_unit;
+
+            uint32_t simds_per_cu = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
+                   &simds_per_cu) == HSA_STATUS_SUCCESS)
+            {
+                agent->simd_per_cu  = simds_per_cu;
+                agent->simd_count   = compute_unit * simds_per_cu;
+            }
+
+            uint32_t max_waves = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
+                   &max_waves) == HSA_STATUS_SUCCESS)
+            {
+                agent->max_waves_per_cu = max_waves;
+                if(simds_per_cu > 0)
+                    agent->max_waves_per_simd = max_waves / simds_per_cu;
+            }
+
+            uint32_t family = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_FAMILY_ID),
+                   &family) == HSA_STATUS_SUCCESS)
+                agent->family_id = family;
+
+            uint32_t ucode = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UCODE_VERSION),
+                   &ucode) == HSA_STATUS_SUCCESS)
+            {
+                agent->fw_version.Value = ucode & 0x3ff;
+            }
+
+            uint32_t sdma_ucode = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION),
+                   &sdma_ucode) == HSA_STATUS_SUCCESS)
+            {
+                agent->sdma_fw_version.Value = sdma_ucode & 0x3ff;
+            }
+
+            uint32_t wavefront = 0;
+            if(table->core_->hsa_agent_get_info_fn(
+                   hsa_ag, HSA_AGENT_INFO_WAVEFRONT_SIZE, &wavefront) == HSA_STATUS_SUCCESS)
+                agent->wave_front_size = wavefront;
+
+            if(agent->num_shader_banks > 0)
+                agent->cu_per_engine = agent->cu_count / agent->num_shader_banks;
+
+            ROCP_INFO << fmt::format(
+                "WSL: patched agent node={} name={} gfx_ver={} se={} sa/se={} cu={} "
+                "max_waves/cu={} family={} ucode={} sdma_ucode={}",
+                agent->node_id, agent->name, agent->gfx_target_version,
+                agent->num_shader_banks, agent->simd_arrays_per_engine,
+                agent->cu_count, agent->max_waves_per_cu,
+                agent->family_id, ucode, sdma_ucode);
+        }
+    }
+#endif
 
 // For Pre-ROCm 6.0 releases
 #if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900

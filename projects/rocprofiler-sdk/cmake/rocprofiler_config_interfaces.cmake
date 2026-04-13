@@ -239,75 +239,96 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
-# HSAKMT
+# HSAKMT / rocdxg (WSL)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(
-    hsakmt
-    REQUIRED
-    CONFIG
-    HINTS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATHS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATH_SUFFIXES
-    lib/cmake/hsakmt)
+if(ROCPROFILER_BUILD_WSL)
+    find_package(
+        rocdxg
+        REQUIRED
+        CONFIG
+        HINTS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATHS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATH_SUFFIXES
+        lib/cmake/rocdxg)
 
-target_link_libraries(rocprofiler-sdk-hsakmt INTERFACE hsakmt::hsakmt)
-rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
-
-# ----------------------------------------------------------------------------------------#
-#
-# drm
-#
-# ----------------------------------------------------------------------------------------#
-
-find_package(PkgConfig)
-
-if(PkgConfig_FOUND)
-    pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
-    pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
-
-    target_include_directories(rocprofiler-sdk-drm SYSTEM
-                               INTERFACE ${DRM_INCLUDE_DIRS} ${DRM_AMDGPU_INCLUDE_DIRS})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM
-                                                        PkgConfig::DRM_AMDGPU)
+    target_link_libraries(rocprofiler-sdk-hsakmt INTERFACE rocdxg::rocdxg)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink rocdxg::rocdxg)
 else()
-    find_path(
-        drm_INCLUDE_DIR
-        NAMES drm.h
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+    find_package(
+        hsakmt
+        REQUIRED
+        CONFIG
+        HINTS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATHS
+        ${rocm_version_DIR}
+        ${ROCM_PATH}
+        PATH_SUFFIXES
+        lib/cmake/hsakmt)
 
-    find_path(
-        xf86drm_INCLUDE_DIR
-        NAMES xf86drm.h
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+    target_link_libraries(rocprofiler-sdk-hsakmt INTERFACE hsakmt::hsakmt)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
+endif()
 
-    find_library(
-        drm_LIBRARY
-        NAMES drm
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+# ----------------------------------------------------------------------------------------#
+#
+# drm (not available on WSL)
+#
+# ----------------------------------------------------------------------------------------#
 
-    find_library(
-        drm_amdgpu_LIBRARY
-        NAMES drm_amdgpu
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+if(NOT ROCPROFILER_BUILD_WSL)
+    find_package(PkgConfig)
 
-    target_include_directories(rocprofiler-sdk-drm SYSTEM
-                               INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY}
-                                                        ${drm_amdgpu_LIBRARY})
+    if(PkgConfig_FOUND)
+        pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+        pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+
+        target_include_directories(
+            rocprofiler-sdk-drm SYSTEM INTERFACE ${DRM_INCLUDE_DIRS}
+                                                 ${DRM_AMDGPU_INCLUDE_DIRS})
+        target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM
+                                                            PkgConfig::DRM_AMDGPU)
+    else()
+        find_path(
+            drm_INCLUDE_DIR
+            NAMES drm.h
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+
+        find_path(
+            xf86drm_INCLUDE_DIR
+            NAMES xf86drm.h
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+
+        find_library(
+            drm_LIBRARY
+            NAMES drm
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+
+        find_library(
+            drm_amdgpu_LIBRARY
+            NAMES drm_amdgpu
+            HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+            PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+
+        target_include_directories(rocprofiler-sdk-drm SYSTEM
+                                   INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})
+        target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY}
+                                                            ${drm_amdgpu_LIBRARY})
+    endif()
 endif()
 
 # ----------------------------------------------------------------------------------------#

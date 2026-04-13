@@ -18,6 +18,11 @@ if(ROCPROFILER_BUILD_CI)
                                            INTERFACE ROCPROFILER_CI)
 endif()
 
+if(ROCPROFILER_BUILD_WSL)
+    rocprofiler_target_compile_definitions(rocprofiler-sdk-build-flags
+                                           INTERFACE ROCPROFILER_BUILD_WSL=1)
+endif()
+
 if(ROCPROFILER_BUILD_CODECOV)
     target_link_libraries(rocprofiler-sdk-build-flags INTERFACE gcov)
 endif()

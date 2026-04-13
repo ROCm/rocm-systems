@@ -58,16 +58,24 @@ add_subdirectory(details)
 add_subdirectory(ompt)
 add_subdirectory(registration)
 
+set(_ROCPROFILER_OBJECT_LIB_DEPS
+    rocprofiler-sdk::rocprofiler-sdk-build-flags
+    rocprofiler-sdk::rocprofiler-sdk-memcheck
+    rocprofiler-sdk::rocprofiler-sdk-common-library
+    rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+    rocprofiler-sdk::rocprofiler-sdk-aqlprofile
+    rocprofiler-sdk::rocprofiler-sdk-dw)
+
+if(ROCPROFILER_BUILD_WSL)
+    list(APPEND _ROCPROFILER_OBJECT_LIB_DEPS rocprofiler-sdk::rocprofiler-sdk-hsakmt)
+else()
+    list(APPEND _ROCPROFILER_OBJECT_LIB_DEPS rocprofiler-sdk::rocprofiler-sdk-drm)
+endif()
+
 target_link_libraries(
     rocprofiler-sdk-object-library
     PUBLIC rocprofiler-sdk::rocprofiler-sdk-headers
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
-            rocprofiler-sdk::rocprofiler-sdk-memcheck
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-aqlprofile
-            rocprofiler-sdk::rocprofiler-sdk-drm
-            rocprofiler-sdk::rocprofiler-sdk-dw)
+    PRIVATE ${_ROCPROFILER_OBJECT_LIB_DEPS})
 
 target_compile_definitions(
     rocprofiler-sdk-object-library
