@@ -27,6 +27,7 @@
 #include "src/cuid_gpu.h"
 #include "src/cuid_cpu.h"
 #include "src/cuid_nic.h"
+#include "src/cuid_npu.h"
 #include "src/cuid_platform.h"
 #include "src/cuid_util.h"
 #include "src/hmac.h"
@@ -328,6 +329,32 @@ amdcuid_status_t get_device_from_udev(std::string *action_output, CuidFileEntry 
         }
         entry.derived_cuid = derived_id.UUIDv8_representation;
         entry.device_node = info.network_interface;
+        entry.bdf = info.bdf;
+        entry.device_index = 0; // could be set based on existing entries
+        entry.last_update = time(nullptr);
+    } else if (subsys_str == "accel") {
+        // NPU device (via accel subsystem, e.g. amdxdna driver)
+        amdcuid_npu_info info = {};
+        amdcuid_status_t status = CuidNpu::discover_single(&info, syspath + "/device");
+        auto npu_device = std::make_shared<CuidNpu>(info);
+
+        entry.device_type = AMDCUID_DEVICE_TYPE_NPU;
+        amdcuid_primary_id primary_id;
+        status = npu_device->get_primary_cuid(primary_id);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            log_err() << "Error: Failed to get primary CUID for NPU device" << std::endl;
+            return status;
+        }
+        entry.primary_cuid = primary_id.UUIDv8_representation;
+        amdcuid_derived_id derived_id;
+        status = npu_device->get_derived_cuid(derived_id, hmac);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            log_err() << "Error: Failed to generate derived CUID for NPU device" << std::endl;
+            return status;
+        }
+        log_out() << "Generated derived CUID for NPU device: " << CuidUtilities::get_cuid_as_string(&derived_id.UUIDv8_representation) << std::endl;
+        entry.derived_cuid = derived_id.UUIDv8_representation;
+        entry.device_node = info.accel_node;
         entry.bdf = info.bdf;
         entry.device_index = 0; // could be set based on existing entries
         entry.last_update = time(nullptr);

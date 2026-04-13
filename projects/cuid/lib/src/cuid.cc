@@ -28,6 +28,7 @@
 #include "src/cuid_cpu.h"
 #include "src/cuid_gpu.h"
 #include "src/cuid_nic.h"
+#include "src/cuid_npu.h"
 #include "src/cuid_platform.h"
 #include "src/hmac.h"
 #include <climits>
@@ -180,6 +181,15 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
             device = std::make_shared<CuidNic>(nic_info);
             break;
         }
+        case AMDCUID_DEVICE_TYPE_NPU: {
+            amdcuid_npu_info npu_info = {};
+            status = CuidNpu::discover_single(&npu_info, real_dev_path);
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                return nullptr;
+            }
+            device = std::make_shared<CuidNpu>(npu_info);
+            break;
+        }
         default:
             return nullptr;
     }
@@ -205,8 +215,10 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
         || device_type == AMDCUID_DEVICE_TYPE_GPU
         || device_type == AMDCUID_DEVICE_TYPE_CPU
         || device_type == AMDCUID_DEVICE_TYPE_PLATFORM
+        || device_type == AMDCUID_DEVICE_TYPE_NPU
         || dev_path_str.find("/sys/class/net/") != std::string::npos
         || dev_path_str.find("/sys/class/drm/") != std::string::npos
+        || dev_path_str.find("/sys/class/accel/") != std::string::npos
         || dev_path_str.find("/sys/devices/system/cpu/") != std::string::npos) {
         real_dev_path = dev_path_str;
     } else {
