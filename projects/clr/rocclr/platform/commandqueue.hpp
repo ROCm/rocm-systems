@@ -17,6 +17,8 @@
 #include "thread/thread.hpp"
 #include "platform/object.hpp"
 #include "platform/command.hpp"
+
+#include <unordered_set>
 /*! \brief Holds commands that will be executed on a specific device.
  *
  *  \details A command queue is created on a specific device in
@@ -134,6 +136,11 @@ class CommandQueue : public RuntimeObject {
   SharedReference<Context> context_;    //!< The context of this command queue
   const std::vector<uint32_t> cuMask_;  //!< The CU mask
   bool dedicated_queue_ = false;        //!< TRUE if this queue requires a dedicated HW queue
+  const std::unordered_set<uint64_t>* exclude_queue_ids_ = nullptr;  //!< Queue IDs to exclude
+
+ public:
+  void setExcludeQueueIds(const std::unordered_set<uint64_t>* ids) { exclude_queue_ids_ = ids; }
+  const std::unordered_set<uint64_t>* getExcludeQueueIds() const { return exclude_queue_ids_; }
 
  private:
   //! Disable copy constructor

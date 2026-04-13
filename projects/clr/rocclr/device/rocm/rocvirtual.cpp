@@ -1840,7 +1840,7 @@ bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   gpu_queue_ = roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
-                                         dedicated_queue_);
+                                         dedicated_queue_, exclude_queue_ids_);
   if (!gpu_queue_) return false;
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {

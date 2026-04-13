@@ -402,6 +402,7 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_agent_t gpu_device() const { return gpu_device_; }
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
   void set_gpu_queue(hsa_queue_t* gpu_queue) { gpu_queue_ = gpu_queue; }
+  void setExcludeQueueIds(const std::unordered_set<uint64_t>* ids) { exclude_queue_ids_ = ids; }
 
   // Return pointer to PrintfDbg
   PrintfDbg* printfDbg() const { return printfdbg_; }
@@ -650,6 +651,7 @@ class VirtualGPU : public device::VirtualDevice {
   const std::vector<uint32_t> cuMask_;
   amd::CommandQueue::Priority priority_;  //!< The priority for the hsa queue
   bool dedicated_queue_;                  //!< TRUE if this VirtualGPU has a dedicated queue (e.g., null stream)
+  const std::unordered_set<uint64_t>* exclude_queue_ids_ = nullptr;  //!< Queue IDs to exclude during acquire
 
   cl_command_type copy_command_type_;  //!< Type of the copy command, used for ROC profiler
                                        //!< OCL doesn't distinguish different copy types,

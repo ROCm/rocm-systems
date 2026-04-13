@@ -830,13 +830,17 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Creating %u parallel streams for device %d",
     max_streams, devId);
   parallel_streams_[devId].reserve(max_streams);
+  std::unordered_set<uint64_t> exclude_queue_ids;
   for (uint32_t i = 0; i < max_streams; ++i) {
+    constexpr bool kDedicatedQueue = true;
     auto stream = new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal,
-                                  hipStreamNonBlocking);
+                                  hipStreamNonBlocking, kDedicatedQueue);
+    stream->setExcludeQueueIds(&exclude_queue_ids);
 
     if (!stream->Create()) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create stream %u for device %d",
               i, devId);
+      stream->setExcludeQueueIds(nullptr);
       hip::Stream::Destroy(stream);
       // Clean up any previously created streams for this device
       for (auto& created_stream : parallel_streams_[devId]) {
@@ -846,6 +850,8 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
       return hipErrorOutOfMemory;
     }
 
+    exclude_queue_ids.insert(stream->getQueueID());
+    stream->setExcludeQueueIds(nullptr);
     parallel_streams_[devId].push_back(stream);
   }
   return hipSuccess;
@@ -883,13 +889,8 @@ void GraphExec::FindStreamsReqPerDev() {
     }
   }
 
-  // Account for the launch stream that's available only on the instantiation device
-  // We only need to create (count - 1) extra streams for the instantiation device
-  for (auto& [dev_id, count] : max_streams_dev_) {
-    if (dev_id == instantiateDeviceId_ && count > 0) {
-      count = count - 1;
-    }
-  }
+  // Launch stream is used only for synchronization, not execution.
+  // All execution streams are internal parallel streams, so no subtraction needed.
 }
 
 // ================================================================================================
@@ -923,13 +924,8 @@ void GraphExec::FindStreamsReqPerDevForSegments() {
     }
   }
 
-  // Account for the launch stream that's available only on the instantiation device
-  // We only need to create (count - 1) extra streams for the instantiation device
-  for (auto& [dev_id, count] : max_streams_dev_) {
-    if (dev_id == instantiateDeviceId_ && count > 0) {
-      count = count - 1;
-    }
-  }
+  // Launch stream is used only for synchronization, not execution.
+  // All execution streams are internal parallel streams, so no subtraction needed.
 }
 
 // ================================================================================================
@@ -1380,7 +1376,8 @@ void GraphExec::AssignStreamsToSegments(
     const std::vector<hip::Stream*>& streams,
     std::unordered_map<int, hip::Stream*>& segment_to_stream) {
 
-  // Assign streams to segments at this level using round-robin
+  // Assign streams to segments at this level using round-robin.
+  // Launch stream is used only for synchronization, not for segment execution.
   for (size_t idx = 0; idx < segments_at_level.size(); ++idx) {
     int segment_id = segments_at_level[idx];
     const auto& segment = segments_[segment_id];
@@ -1393,19 +1390,18 @@ void GraphExec::AssignStreamsToSegments(
 
     hip::Stream* assigned_stream = nullptr;
 
-    // Use collision-handled streams if provided (single-device case)
+    // Use internal streams if provided (single-device case)
     if (!streams.empty()) {
-      // Round-robin across the collision-handled streams
       size_t stream_idx = idx % streams.size();
       assigned_stream = streams[stream_idx];
     } else if (parallel_streams_.find(segment_device_id) != parallel_streams_.end() &&
                !parallel_streams_[segment_device_id].empty()) {
-      // Multi-device case: Use device-aware stream selection from parallel_streams_
+      // Multi-device case: round-robin across device's internal streams only
       const auto& device_streams = parallel_streams_[segment_device_id];
-      size_t stream_idx = idx % (device_streams.size() + 1);
-      assigned_stream = (stream_idx == 0) ? launch_stream : device_streams[stream_idx - 1];
+      size_t stream_idx = idx % device_streams.size();
+      assigned_stream = device_streams[stream_idx];
     } else {
-      // Fallback to launch stream if no parallel streams available
+      // Fallback to launch stream if no parallel streams available (single-branch)
       assigned_stream = launch_stream;
     }
 
@@ -1996,15 +1992,20 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       launch_stream->vdev()->HiddenHeapInit();
       initialized = true;
     }
-    // Update streams for the graph execution only if launch stream changed
-    if (lastLaunchStream_ != launch_stream) {
-      UpdateStreams(launch_stream);
-      lastLaunchStream_ = launch_stream;
-    }
     amd::Command* last_cmd = nullptr;
     if (max_streams_dev_.size() == 1) {
-      // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph
-      last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status);
+      // Single-device: use only internal parallel streams for execution.
+      // Launch stream is used only for synchronization.
+      int devId = launch_stream->DeviceId();
+      std::vector<hip::Stream*> internal_streams;
+      if (parallel_streams_.find(devId) != parallel_streams_.end()) {
+        internal_streams = parallel_streams_[devId];
+      }
+      if (internal_streams.empty()) {
+        // Single branch: fall back to launch stream
+        internal_streams.push_back(launch_stream);
+      }
+      last_cmd = EnqueueSegmentedGraph(launch_stream, internal_streams, &status);
     } else {
       // Multi-device: pass empty vector, will use parallel_streams_ internally
       last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status);
