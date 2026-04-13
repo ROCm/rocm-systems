@@ -78,7 +78,7 @@ schema_path = pkg_resources.files("rocinsight.ai_analysis") / "docs" / "analysis
 
 ---
 
-## v0.4.0 — 2026-04-13
+## v0.5.0 — 2026-04-13
 
 **ROCM-21553: Proposed improvements after first tests.**
 

@@ -166,17 +166,27 @@ def _format_as_json(
         doc["metadata"]["analysis_version"] = "0.4.0"
         doc["profiling_info"]["analysis_tier"] = 3
 
-    # ROCM-21553: kernel resources and API overhead
+    # ROCM-21553: kernel resources, API overhead, roctx regions
+    _has_rocm21553_fields = False
     if kernel_resources and kernel_resources.get("kernels"):
         doc["kernel_resources"] = kernel_resources
+        _has_rocm21553_fields = True
     if api_overhead and api_overhead.get("has_api_data"):
         doc["api_breakdown"] = {
             "total_api_ns": api_overhead["total_api_ns"],
             "launch_overhead_ns": api_overhead["launch_overhead_ns"],
             "api_calls": api_overhead["api_calls"],
         }
+        _has_rocm21553_fields = True
     if roctx_regions and roctx_regions.get("has_markers"):
         doc["roctx_regions"] = roctx_regions
+        _has_rocm21553_fields = True
+
+    # Recommendations always carry confidence now (added in ROCM-21553)
+    # Bump schema version to 0.5.0 when any ROCM-21553 field is present
+    if _has_rocm21553_fields:
+        doc["schema_version"] = "0.5.0"
+        doc["metadata"]["analysis_version"] = "0.5.0"
 
     return _json.dumps(doc, indent=2)
 
