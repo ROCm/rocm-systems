@@ -28,7 +28,12 @@ endfunction()
 
 # Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
 if(GPU_TARGETS)
-  strip_arch_features("${GPU_TARGETS}" _BITCODE_DEFAULT_ARCHS)
+  # Convert comma-separated string to CMake list (semicolon-separated)
+  # This handles both -DGPU_TARGETS=gfx942,gfx950 and -DGPU_TARGETS="gfx942;gfx950"
+  string(REPLACE "," ";" _GPU_TARGETS_LIST "${GPU_TARGETS}")
+  # Ensure it's treated as a list even if already semicolon-separated
+  set(_GPU_TARGETS_LIST ${_GPU_TARGETS_LIST})
+  strip_arch_features("${_GPU_TARGETS_LIST}" _BITCODE_DEFAULT_ARCHS)
 elseif(COMMAND rocm_local_targets)
   rocm_local_targets(_LOCAL_GPUS)
   if(_LOCAL_GPUS)
@@ -50,6 +55,7 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -std=c++17
     -emit-llvm
     -fvisibility=default
+    -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
     -I${CMAKE_CURRENT_SOURCE_DIR}/src

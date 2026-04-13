@@ -25,7 +25,7 @@ application that lets you view results from your preferred web browser.
    See the :doc:`/reference/faq` for more details on SSH tunneling.
 
 Launch the standalone GUI analyzer
-----------------------------------
+==================================
 
 To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
 desired analysis command.

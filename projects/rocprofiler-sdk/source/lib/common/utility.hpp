@@ -102,20 +102,22 @@ get_process_start_time_ns(pid_t _pid);
 std::vector<std::string>
 read_command_line(pid_t _pid);
 
-template <class Container, typename Key = typename Container::key_type>
+// supports all STL containers with find method and small_vector
+template <typename ContainerT, typename KeyT = typename ContainerT::key_type>
 const auto*
-get_val(const Container& map, const Key& key)
+get_val(const ContainerT& data, const KeyT& key)
 {
-    auto pos = map.find(key);
-    return (pos != map.end() ? &pos->second : nullptr);
+    auto pos = data.find(key);
+    return (pos != data.end() ? &pos->second : nullptr);
 }
 
-template <class Container, typename Key = typename Container::key_type>
+// supports all STL containers with find method and small_vector
+template <typename ContainerT, typename KeyT = typename ContainerT::key_type>
 auto*
-get_val(Container& map, const Key& key)
+get_val(ContainerT& data, const KeyT& key)
 {
-    auto pos = map.find(key);
-    return (pos != map.end() ? &pos->second : nullptr);
+    auto pos = data.find(key);
+    return (pos != data.end() ? &pos->second : nullptr);
 }
 
 template <typename Tp>

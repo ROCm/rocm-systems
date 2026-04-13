@@ -79,7 +79,7 @@ class GDABackend : public Backend {
   union ibv_gid gid;
   int port = 1;
   int gid_index = 0;
-  uint32_t gid_type;
+  uint32_t gid_type = IBV_GID_TYPE_IB;
 
   uint32_t *heap_rkey = nullptr;
   struct ibv_mr *heap_mr = nullptr;
@@ -114,6 +114,19 @@ class GDABackend : public Backend {
   /* GDA_MLX5 START */
   std::vector<mlx5_devx_qp> mlx5_qps;
   /* GDA_MLX5 END */
+
+  /**
+   * Determine number of QPs to create per PE =
+   * ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX +
+   * ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX * ROCSHMEM_MAX_NUM_CONTEXTS
+   */
+  size_t num_qps_per_pe {1};
+
+  /**
+   * Total number of QPs created =
+   * num_qps_per_pe * num_pes;
+   */
+  uint32_t num_qps {1};
 
  /**
    * @brief Choose nic device according to locality/user preferences
@@ -204,8 +217,9 @@ class GDABackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team, TeamInfo *team_info_wrt_parent,
-                       TeamInfo *team_info_wrt_world, int num_pes,
+  void create_new_team(Team *parent_team,
+                       const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes,
                        int my_pe_in_new_team, MPI_Comm team_comm,
                        rocshmem_team_t *new_team) override;
 

@@ -181,7 +181,7 @@ void IPCBackend::setup_ctxs() {
   }
 }
 
-__device__ bool IPCBackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool IPCBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   IPCContext *ctx_{nullptr};
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -201,17 +201,8 @@ __device__ void IPCBackend::destroy_ctx(rocshmem_ctx_t *ctx) {
 }
 
 void IPCBackend::setup_team_world() {
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  /**
-   * Allocate device-side memory for team_world and construct a
-   * IPC team in it.
-   */
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-
-  new (team_info_wrt_parent) TeamInfo(nullptr, 0, 1, num_pes);
-  new (team_info_wrt_world) TeamInfo(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
   IPCTeam *team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(IPCTeam)));
@@ -260,7 +251,7 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
     abort();
   }
 
-  for (int i = 0; i < num_bytes; i++) {
+  for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
     for (int j = 1; j < num_pes; j++) {
       outbuf[i] &= tmp_buffer[j * num_bytes + i];
@@ -271,9 +262,10 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
 }
 
 void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
@@ -364,7 +356,7 @@ void IPCBackend::teams_destroy() {
 
 void IPCBackend::setup_wrk_sync_buffers() {
   /**
-   * calcualte work/sync buffer size
+   * calculate work/sync buffer size
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -481,7 +473,7 @@ void IPCBackend::rocshmem_collective_init() {
   /*
    * Initialize the barrier synchronization array with default values.
    */
-  for (int i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
+  for (size_t i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
     barrier_sync[i] = ROCSHMEM_SYNC_VALUE;
   }
 
@@ -498,7 +490,7 @@ void IPCBackend::rocshmem_collective_init() {
 
 void IPCBackend::teams_init() {
   /**
-   * Allocate pools for the teams sync and work arrary from the SHEAP.
+   * Allocate pools for the teams sync and work array from the SHEAP.
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -557,7 +549,7 @@ void IPCBackend::teams_init() {
    * Logical:
    * MSB..........................................................................LSB
    * Physical: MSB...1st least significant 8 bits...LSB  MSB...2nd least
-   * signifant 8 bits...LSB
+   * significant 8 bits...LSB
    *
    * Description shows only a 2-byte long mask but idea extends to any
    * arbitrary size.

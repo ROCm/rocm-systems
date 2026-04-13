@@ -24,9 +24,9 @@
 
 /* Declare the template with a generic implementation */
 template <typename T>
-__device__ void wg_team_broadcast(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                  T *dest, const T *source, int nelem,
-                                  int pe_root) {
+__device__ void wg_team_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
+                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelem,
+                                  [[maybe_unused]] int pe_root) {
   return;
 }
 
@@ -71,7 +71,7 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
 
-  int n_pes = rocshmem_ctx_n_pes(ctx);
+  [[maybe_unused]] int n_pes = rocshmem_ctx_n_pes(ctx);
   source_buf += wg_id * size;
   dest_buf += wg_id * size;
 
@@ -178,11 +178,11 @@ template <typename T1>
 void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
 
   int num_elems = size / sizeof(T1);
-  int buff_size = num_elems * sizeof(T1) * args.num_wgs;
+  [[maybe_unused]] int buff_size = num_elems * sizeof(T1) * args.num_wgs;
   int idx = 0;
 
-  for (int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
-    for (int i = 0; i < num_elems; i++) {
+  for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+    for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
       idx = wg_id * num_elems + i;
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||
@@ -220,7 +220,7 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
    * contents from its own source to dest during
    * the broadcast.
    */
-  for (int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+  for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (int i = 0; i < num_elems; i++) {
       idx = wg_id * num_elems + i;
       if constexpr (std::is_same<T1, char>::value ||

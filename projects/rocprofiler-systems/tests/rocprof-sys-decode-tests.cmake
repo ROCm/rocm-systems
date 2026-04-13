@@ -28,12 +28,12 @@
 
 set(_video_decode_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api"
-    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage"
+    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,vcn_busy,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none"
 )
 set(_jpeg_decode_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocjpeg_api"
-    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,jpeg_activity,mem_usage"
+    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,jpeg_activity,jpeg_busy,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none"
 )
 
@@ -58,8 +58,8 @@ endif()
 rocprofiler_systems_get_gfx_archs(MI300_DETECTED GFX_MATCH "gfx9[4-9][A-Fa-f0-9]" ECHO)
 
 if(MI300_DETECTED)
-    list(APPEND _vcn_counter_names --counter-names "VCN Activity")
-    list(APPEND _jpeg_counter_names --counter-names "JPEG Activity")
+    list(APPEND _vcn_counter_names --counter-names "VCN Busy")
+    list(APPEND _jpeg_counter_names --counter-names "JPEG Busy")
     list(
         APPEND _vcn_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/video-decode/amd-smi-rules.json"

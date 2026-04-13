@@ -34,6 +34,7 @@
 #include "rocshmem/rocshmem.hpp"
 
 #include "backend_bc.hpp"
+#include "build_info.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
 #if defined(USE_GDA)
@@ -88,9 +89,8 @@ BackendType get_backend_type() { return backend->get_backend_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
-  BackendType type;
 
-  /* Check whether the user explicitely requests a particular backend type */
+  /* Check whether the user explicitly requests a particular backend type */
   std::string envstr = envvar::backend;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
@@ -185,7 +185,32 @@ static void setFilesLimit() {
             "rocSHMEM requires MPI library to be loaded at runtime. Aborting.\n");
     exit(1);
   }
+
   mpi_instance = new MPIInstance(comm);
+
+  // Print build info and/or environment variables based on DEBUG_LEVEL.
+  // Only PE 0 prints to avoid duplicated output.
+  if (mpi_instance->get_rank() == 0) {
+    using rocshmem::envvar::types::debug_level;
+    auto debug_val = envvar::debug_level.get_value();
+    if (debug_val >= debug_level::INFO) {
+      print_build_info(std::cout);
+    }
+    if (debug_val == debug_level::ENV ||
+        debug_val == debug_level::ENV_ALL ||
+        debug_val == debug_level::ENV_FULL ||
+        debug_val >= debug_level::INFO) {
+      envvar::print_mode mode;
+      if (debug_val == debug_level::ENV_ALL) {
+        mode = envvar::print_mode::ALL_VALUES;
+      } else if (debug_val == debug_level::ENV_FULL) {
+        mode = envvar::print_mode::FULL_DOCUMENTATION;
+      } else {
+        mode = envvar::print_mode::MODIFIED;
+      }
+      envvar::print_envvars(mode, std::cout);
+    }
+  }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   BackendType type = select_backend_type(comm, nullptr);
@@ -225,7 +250,7 @@ static void setFilesLimit() {
   init_constant_memory();
 }
 
-[[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
+[[maybe_unused]] __host__ static void inline library_init_subcomm([[maybe_unused]] TcpBootstrap *bootstrap, int nranks, int rank) {
   int initialized;
   int world_size = -1;
 
@@ -297,6 +322,30 @@ static void setFilesLimit() {
 
   setFilesLimit();
   rocm_init();
+
+  // Print build info and/or environment variables based on DEBUG_LEVEL.
+  // Only PE 0 prints to avoid duplicated output.
+  if (bootstrap->getRank() == 0) {
+    using rocshmem::envvar::types::debug_level;
+    auto debug_val = envvar::debug_level.get_value();
+    if (debug_val >= debug_level::INFO) {
+      print_build_info(std::cout);
+    }
+    if (debug_val == debug_level::ENV ||
+        debug_val == debug_level::ENV_ALL ||
+        debug_val == debug_level::ENV_FULL ||
+        debug_val >= debug_level::INFO) {
+      envvar::print_mode mode;
+      if (debug_val == debug_level::ENV_ALL) {
+        mode = envvar::print_mode::ALL_VALUES;
+      } else if (debug_val == debug_level::ENV_FULL) {
+        mode = envvar::print_mode::FULL_DOCUMENTATION;
+      } else {
+        mode = envvar::print_mode::MODIFIED;
+      }
+      envvar::print_envvars(mode, std::cout);
+    }
+  }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
   BackendType type = select_backend_type(MPI_COMM_NULL, bootstrap);
@@ -586,7 +635,7 @@ __host__ int rocshmem_team_split_strided(
 
   Team *parent_team_obj = get_internal_team(parent_team);
 
-  /* Santity check inputs */
+  /* Sanity check inputs */
   if (start < 0 || start >= parent_team_obj->num_pes || size < 1 ||
       size > parent_team_obj->num_pes || stride < 1) {
     return -1;
@@ -607,16 +656,11 @@ __host__ int rocshmem_team_split_strided(
   int my_pe_in_new_team = pe_in_active_set(pe_start_in_world, stride_in_world,
                                            size, my_pe_in_world);
 
-  /* Create team infos */
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  new (team_info_wrt_parent) TeamInfo(parent_team_obj, start, stride, size);
-
+  /* Create team infos on the stack; Team constructor will handle device alloc */
   auto *team_world{backend->team_tracker.get_team_world()};
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-  new (team_info_wrt_world)
-      TeamInfo(team_world, pe_start_in_world, stride_in_world, size);
+  TeamInfo team_info_wrt_parent(parent_team_obj, start, stride, size);
+  TeamInfo team_info_wrt_world(team_world, pe_start_in_world,
+                               stride_in_world, size);
 
   MPI_Comm team_comm{MPI_COMM_NULL};
   if (parent_team_obj->mpi_comm != MPI_COMM_NULL &&
@@ -630,7 +674,7 @@ __host__ int rocshmem_team_split_strided(
     }
 
     mpilib_ftable_.Comm_split(parent_team_obj->mpi_comm, color, my_pe_in_world, &team_comm);
-}
+  }
   /**
    * Allocate new team for GPU-inittiated communication with backend-specific
    * objects
