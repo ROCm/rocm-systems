@@ -97,6 +97,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     thread-limit
     transferBench
     hpc
+    hip-graph-bubbles
     shmem
     scratch-memory
     sdma_test

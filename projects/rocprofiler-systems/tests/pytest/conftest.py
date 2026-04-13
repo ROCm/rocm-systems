@@ -307,6 +307,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "hpc",
         "hip",
+        "hip_graph_bubbles",
         "kfd",
         "selective_regions",
     ]

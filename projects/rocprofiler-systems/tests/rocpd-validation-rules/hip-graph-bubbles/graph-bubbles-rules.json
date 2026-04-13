@@ -1,0 +1,114 @@
+{
+    "required_tables": [
+        {
+            "commit": "HIP graph bubbles: kernel count must match RUN_ARGS in rocprof-sys-hip-graph-bubbles-tests.cmake and _HIP_GRAPH_BUBBLES_* in test_hip_graph_bubbles.py; if those change, update min_rows, expected_result, and descriptions below.",
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "min_rows": 384,
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Kernel row count equals num_kernels * num_iterations from RUN_ARGS (64*6 here); change with RUN_ARGS and CMake/pytest.",
+                    "error_message": "Kernel count does not match 64 * 6 graph executions",
+                    "expected_result": 384,
+                    "query": "SELECT COUNT(*) AS count FROM kernels"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No kernels with null names",
+                    "error_message": "Found kernels with null function names",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) AS count FROM kernels WHERE name IS NULL"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No kernels with zero active time",
+                    "error_message": "Kernels with no active execution times found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) AS count FROM kernels WHERE (end - start) = 0"
+                }
+            ]
+        },
+        {
+            "commit": "HIP graph bubbles:  PMC rows present when ROCPROFSYS_ROCM_EVENTS is set (raw COUNT rocpd_pmc_event % COUNT kernels).",
+            "name": "rocpd_pmc_event",
+            "required_columns": [
+                "id",
+                "guid",
+                "event_id",
+                "pmc_id",
+                "value",
+                "extdata"
+            ],
+            "min_rows": 1,
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Total rocpd_pmc_event rows must be an exact multiple of kernel count.",
+                    "error_message": "rocpd_pmc_event count is not a multiple of kernel count",
+                    "expected_result": 0,
+                    "query": "SELECT (SELECT COUNT(*) FROM rocpd_pmc_event) % (SELECT COUNT(*) FROM kernels) AS count"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No NULL ids in rocpd_pmc_event",
+                    "error_message": "NULL value found in rocpd_pmc_event id column",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) AS count FROM rocpd_pmc_event WHERE id IS NULL"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No NULL event_id in rocpd_pmc_event",
+                    "error_message": "NULL value found in rocpd_pmc_event event_id column",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) AS count FROM rocpd_pmc_event WHERE event_id IS NULL"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No NULL pmc_id in rocpd_pmc_event",
+                    "error_message": "NULL value found in rocpd_pmc_event pmc_id column",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) AS count FROM rocpd_pmc_event WHERE pmc_id IS NULL"
+                }
+            ]
+        },
+        {
+            "commit": "HIP graph bubbles: graph_launch region count must match num_iterations RUN_ARG; keep in sync with CMake/pytest when RUN_ARGS change.",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name",
+                "tid",
+                "start",
+                "end"
+            ],
+            "min_rows": 1,
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "roctxRangePush(graph_launch) once per iteration (6 here); must match num_iterations RUN_ARG.",
+                    "error_message": "Expected 6 roctx marker regions for graph_launch",
+                    "expected_result": 6,
+                    "query": "SELECT COUNT(*) AS count FROM regions WHERE category = 'rocm_marker_api' AND name LIKE '%graph_launch%'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "No zero-duration rocTX API regions",
+                    "error_message": "Found rocTX API captures where duration is 0",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) AS count FROM regions WHERE category = 'rocm_marker_api' AND duration = 0"
+                }
+            ]
+        }
+    ]
+}
