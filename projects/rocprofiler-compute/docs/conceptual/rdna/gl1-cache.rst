@@ -10,7 +10,7 @@ GL1 (GL1C)
 
 GL1C is the shared L1 cache layer on gfx1151, supplied by the TCP (vector L0).
 For TCP panels and Memory Chart rows through the TCP-GL1 boundary, see
-:doc:`tcp-cache`. The GL1C to GL2 path is under :doc:`gl2-cache`.
+:doc:`tcp-cache`. The GL1C to GL2 path is described in :doc:`gl2-cache`.
 
 GL1C (panel)
 ============
