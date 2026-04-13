@@ -22,6 +22,60 @@
 
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/common/environment.hpp"
+
+#if ROCPROFILER_BUILD_WSL
+
+namespace rocprofiler
+{
+namespace counters
+{
+bool
+counter_collection_has_device_lock()
+{
+    return false;
+}
+
+rocprofiler_status_t
+counter_collection_device_lock(const rocprofiler_agent_t*, bool)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+rocprofiler_status_t
+counter_collection_device_unlock(const rocprofiler_agent_t*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+bool
+ptl_control_supported()
+{
+    return false;
+}
+
+bool
+use_device_lock_at_start()
+{
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false);
+    return value;
+}
+
+rocprofiler_status_t
+counter_collection_ptl_disable(const rocprofiler_agent_t*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+rocprofiler_status_t
+counter_collection_ptl_enable(const rocprofiler_agent_t*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+}  // namespace counters
+}  // namespace rocprofiler
+
+#else  // !ROCPROFILER_BUILD_WSL
+
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 
@@ -176,3 +230,5 @@ counter_collection_ptl_enable(const rocprofiler_agent_t* agent)
 }
 }  // namespace counters
 }  // namespace rocprofiler
+
+#endif  // !ROCPROFILER_BUILD_WSL

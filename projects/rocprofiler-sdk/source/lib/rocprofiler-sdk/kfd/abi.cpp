@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#if !ROCPROFILER_BUILD_WSL
+
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/mpl.hpp"
@@ -86,3 +88,5 @@ ASSERT_SAME(ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU,     KFD_SVM_UNM
 
 }  // namespace kfd
 }  // namespace rocprofiler
+
+#endif  // !ROCPROFILER_BUILD_WSL
