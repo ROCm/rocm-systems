@@ -286,9 +286,12 @@ class AnalysisResult:
                 hardware_counters=raw["hardware_counters"],
                 database_path=raw["database_path"],
                 output_format="json",
-                interval_timeline=raw.get("interval_timeline"),  # NEW
-                kernel_categories=raw.get("kernel_categories"),  # NEW
-                short_kernels=raw.get("short_kernels"),  # NEW
+                interval_timeline=raw.get("interval_timeline"),
+                kernel_categories=raw.get("kernel_categories"),
+                short_kernels=raw.get("short_kernels"),
+                kernel_resources=raw.get("kernel_resources"),
+                api_overhead=raw.get("api_overhead"),
+                roctx_regions=raw.get("roctx_regions"),
             )
         raise RuntimeError(
             "Raw analysis data not available. "
@@ -320,9 +323,12 @@ class AnalysisResult:
             hardware_counters=raw["hardware_counters"],
             database_path=raw["database_path"],
             output_format="webview",
-            interval_timeline=raw.get("interval_timeline"),  # NEW
-            kernel_categories=raw.get("kernel_categories"),  # NEW
-            short_kernels=raw.get("short_kernels"),  # NEW
+            interval_timeline=raw.get("interval_timeline"),
+            kernel_categories=raw.get("kernel_categories"),
+            short_kernels=raw.get("short_kernels"),
+            kernel_resources=raw.get("kernel_resources"),
+            api_overhead=raw.get("api_overhead"),
+            roctx_regions=raw.get("roctx_regions"),
         )
 
     def to_text(self) -> str:
