@@ -2193,10 +2193,7 @@ static ncclResult_t topoGetAlgoInfo(
     float** collCostTable, ncclSimInfo_t* simInfo
   ) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
-  static int userAlgoInput = -2;
-  if (userAlgoInput == -2) {
-    userAlgoInput = ncclGetEnv("NCCL_ALGO") ? 1 : 0;
-  }
+  static const int userAlgoInput = ncclGetEnv("NCCL_ALGO") ? 1 : 0;
 
   float minTime = 3600000000.0;
   int algorithm = info->algorithm = NCCL_ALGO_UNDEF;
@@ -2255,6 +2252,11 @@ static ncclResult_t topoGetAlgoInfo(
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
     }
+  }
+  if (info->algorithm >= 0 && info->algorithm < NCCL_NUM_ALGORITHMS &&
+      info->protocol >= 0 && info->protocol < NCCL_NUM_PROTOCOLS) {
+    float selectedTime = table[info->algorithm][info->protocol];
+    if (selectedTime != NCCL_ALGO_PROTO_IGNORE && selectedTime >= 0.0) time = selectedTime;
   }
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
