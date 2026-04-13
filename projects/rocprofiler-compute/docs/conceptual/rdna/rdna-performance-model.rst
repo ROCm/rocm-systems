@@ -24,7 +24,7 @@ This chapter covers AMD Radeon / RDNA configurations exposed in ROCm Compute Pro
 
 For Instinct / CDNA naming (CU, shader engine, etc.), use the top-level :doc:`../performance-model`
 overview and :doc:`../cdna/cdna-performance-model`. Here the focus is on WGPs, TCP / GL1C / GL2C,
-GCEA, and related panels when an analysis config targets RDNA-class parts.
+GCEA, and related panels when an analysis config targets RDNA hardware.
 
 Public architecture summaries and :doc:`GPU / accelerator specifications <rocm:reference/gpu-arch-specs>`
 remain the best reference for packaging, SIMD width, and generational differences between
