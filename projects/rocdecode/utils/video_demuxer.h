@@ -32,6 +32,7 @@ extern "C" {
 }
 
 #include "rocdecode/rocdecode.h"
+#include "../src/commons.h"
 
 /*!
  * \file
@@ -175,11 +176,11 @@ class VideoDemuxer {
                     av_packet_unref(packet_filtered_);
                 }
                 if (av_bsf_send_packet(av_bsf_ctx_, packet_) != 0) {
-                    std::cerr << "ERROR: av_bsf_send_packet failed!" << std::endl;
+                    CriticalLog(g_rocdec_logger, "av_bsf_send_packet failed!");
                     return false;
                 }
                 if (av_bsf_receive_packet(av_bsf_ctx_, packet_filtered_) != 0) {
-                    std::cerr << "ERROR: av_bsf_receive_packet failed!" << std::endl;
+                    CriticalLog(g_rocdec_logger, "av_bsf_receive_packet failed!");
                     return false;
                 }
                 *video = packet_filtered_->data;
@@ -199,7 +200,7 @@ class VideoDemuxer {
                     if (ext_data_size > 0) {
                         data_with_header_ = (uint8_t *)av_malloc(ext_data_size + packet_->size - 3 * sizeof(uint8_t));
                         if (!data_with_header_) {
-                            std::cerr << "ERROR: av_malloc failed!" << std::endl;
+                            CriticalLog(g_rocdec_logger, "av_malloc failed!");
                             return false;
                         }
                         memcpy(data_with_header_, av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata, ext_data_size);
@@ -233,12 +234,12 @@ class VideoDemuxer {
                 */
 
             if (!is_seekable_) {
-                std::cerr << "ERROR: Seek isn't supported for this input." << std::endl;
+                CriticalLog(g_rocdec_logger, "Seek isn't supported for this input.");
                 return false;
             }
 
             if (IsVFR() && (SEEK_CRITERIA_FRAME_NUM == seek_ctx.seek_crit_)) {
-                std::cerr << "ERROR: Can't seek by frame number in VFR sequences. Seek by timestamp instead." << std::endl;
+                CriticalLog(g_rocdec_logger, "Can't seek by frame number in VFR sequences. Seek by timestamp instead.");
                 return false;
             }
             int64_t timestamp = 0;
@@ -257,7 +258,7 @@ class VideoDemuxer {
                         ret = av_seek_frame(av_fmt_input_ctx_, av_stream_, timestamp, seek_backward ? AVSEEK_FLAG_BACKWARD | flags : flags);
                         break;
                     default:
-                        std::cerr << "ERROR: Invalid seek mode" << std::endl;
+                        CriticalLog(g_rocdec_logger, "Invalid seek mode");
                         ret = -1;
                 }
 
@@ -278,7 +279,7 @@ class VideoDemuxer {
                         target_ts = TsFromTime(seek_ctx.seek_frame_);
                         break;
                     default:
-                        std::cerr << "ERROR::Invalid seek criteria" << std::endl;
+                        CriticalLog(g_rocdec_logger, "Invalid seek criteria");
                         return -1;
                 }
 
@@ -375,22 +376,22 @@ class VideoDemuxer {
         VideoDemuxer(AVFormatContext *av_fmt_input_ctx) : av_fmt_input_ctx_(av_fmt_input_ctx) {
             av_log_set_level(AV_LOG_QUIET);
             if (!av_fmt_input_ctx_) {
-                std::cerr << "ERROR: av_fmt_input_ctx_ is not vaild!" << std::endl;
+                CriticalLog(g_rocdec_logger, "av_fmt_input_ctx_ is not valid!");
                 return;
             }
             packet_ = av_packet_alloc();
             packet_filtered_ = av_packet_alloc();
             if (!packet_ || !packet_filtered_) {
-                std::cerr << "ERROR: av_packet_alloc failed!" << std::endl;
+                CriticalLog(g_rocdec_logger, "av_packet_alloc failed!");
                 return;
             }
             if (avformat_find_stream_info(av_fmt_input_ctx_, nullptr) < 0) {
-                std::cerr << "ERROR: avformat_find_stream_info failed!" << std::endl;
+                CriticalLog(g_rocdec_logger, "avformat_find_stream_info failed!");
                 return;
             }
             av_stream_ = av_find_best_stream(av_fmt_input_ctx_, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
             if (av_stream_ < 0) {
-                std::cerr << "ERROR: av_find_best_stream failed!" << std::endl;
+                CriticalLog(g_rocdec_logger, "av_find_best_stream failed!");
                 av_packet_free(&packet_);
                 av_packet_free(&packet_filtered_);
                 return;
@@ -471,36 +472,36 @@ class VideoDemuxer {
             if (is_h264_) {
                 const AVBitStreamFilter *bsf = av_bsf_get_by_name("h264_mp4toannexb");
                 if (!bsf) {
-                    std::cerr << "ERROR: av_bsf_get_by_name() failed" << std::endl;
+                    CriticalLog(g_rocdec_logger, "av_bsf_get_by_name() failed for h264_mp4toannexb");
                     av_packet_free(&packet_);
                     av_packet_free(&packet_filtered_);
                     return;
                 }
                 if (av_bsf_alloc(bsf, &av_bsf_ctx_) != 0) {
-                    std::cerr << "ERROR: av_bsf_alloc failed!" << std::endl;
-                        return;
+                    CriticalLog(g_rocdec_logger, "av_bsf_alloc failed!");
+                    return;
                 }
                 avcodec_parameters_copy(av_bsf_ctx_->par_in, av_fmt_input_ctx_->streams[av_stream_]->codecpar);
                 if (av_bsf_init(av_bsf_ctx_) < 0) {
-                    std::cerr << "ERROR: av_bsf_init failed!" << std::endl;
+                    CriticalLog(g_rocdec_logger, "av_bsf_init failed!");
                     return;
                 }
             }
             if (is_hevc_) {
                 const AVBitStreamFilter *bsf = av_bsf_get_by_name("hevc_mp4toannexb");
                 if (!bsf) {
-                    std::cerr << "ERROR: av_bsf_get_by_name() failed" << std::endl;
+                    CriticalLog(g_rocdec_logger, "av_bsf_get_by_name() failed for hevc_mp4toannexb");
                     av_packet_free(&packet_);
                     av_packet_free(&packet_filtered_);
                     return;
                 }
                 if (av_bsf_alloc(bsf, &av_bsf_ctx_) != 0 ) {
-                    std::cerr << "ERROR: av_bsf_alloc failed!" << std::endl;
+                    CriticalLog(g_rocdec_logger, "av_bsf_alloc failed!");
                     return;
                 }
                 avcodec_parameters_copy(av_bsf_ctx_->par_in, av_fmt_input_ctx_->streams[av_stream_]->codecpar);
                 if (av_bsf_init(av_bsf_ctx_) < 0) {
-                    std::cerr << "ERROR: av_bsf_init failed!" << std::endl;
+                    CriticalLog(g_rocdec_logger, "av_bsf_init failed!");
                     return;
                 }
             }
@@ -508,26 +509,26 @@ class VideoDemuxer {
         AVFormatContext *CreateFmtContextUtil(StreamProvider *stream_provider) {
             AVFormatContext *ctx = nullptr;
             if (!(ctx = avformat_alloc_context())) {
-                std::cerr << "ERROR: avformat_alloc_context failed" << std::endl;
+                CriticalLog(g_rocdec_logger, "avformat_alloc_context failed!");
                 return nullptr;
             }
             uint8_t *avioc_buffer = nullptr;
             int avioc_buffer_size = stream_provider->GetBufferSize();
             avioc_buffer = (uint8_t *)av_malloc(avioc_buffer_size);
             if (!avioc_buffer) {
-                std::cerr << "ERROR: av_malloc failed!" << std::endl;
+                CriticalLog(g_rocdec_logger, "av_malloc failed!");
                 return nullptr;
             }
             av_io_ctx_ = avio_alloc_context(avioc_buffer, avioc_buffer_size,
                     0, stream_provider, &ReadPacket, nullptr, nullptr);
             if (!av_io_ctx_) {
-                std::cerr << "ERROR: avio_alloc_context failed!" << std::endl;
+                CriticalLog(g_rocdec_logger, "avio_alloc_context failed!");
                 return nullptr;
             }
             ctx->pb = av_io_ctx_;
 
             if (avformat_open_input(&ctx, nullptr, nullptr, nullptr) != 0) {
-                std::cerr << "ERROR: avformat_open_input failed!" << std::endl;
+                CriticalLog(g_rocdec_logger, "avformat_open_input failed!");
                 return nullptr;
             }
             return ctx;
@@ -536,7 +537,7 @@ class VideoDemuxer {
             avformat_network_init();
             AVFormatContext *ctx = nullptr;
             if (avformat_open_input(&ctx, input_file_path, nullptr, nullptr) != 0 ) {
-                std::cerr << "ERROR: avformat_open_input failed!" << std::endl;
+                CriticalLog(g_rocdec_logger, "avformat_open_input failed!");
                 return nullptr;
             }
             return ctx;
