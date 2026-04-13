@@ -1210,6 +1210,7 @@ process_t::update_queues ()
                   /* This isn't a new queue, and it is fully initialized.
                      Mark it as active, and continue to the next snapshot.  */
                   queue->set_mark (queue_mark);
+                  queue->update (queue_info);
                   continue;
                 }
             }

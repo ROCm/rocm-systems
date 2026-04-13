@@ -60,7 +60,7 @@ public:
   };
 
 protected:
-  os_queue_snapshot_entry_t const m_os_queue_info;
+  os_queue_snapshot_entry_t m_os_queue_info;
 
 private:
   state_t m_state{ state_t::running };
@@ -84,6 +84,11 @@ public:
   }
 
   virtual ~queue_t () = default;
+
+  void update (const os_queue_snapshot_entry_t &queue_info)
+  {
+    m_os_queue_info = queue_info;
+  }
 
   /* Return the queue's type.  */
   virtual amd_dbgapi_os_queue_type_t type () const = 0;
