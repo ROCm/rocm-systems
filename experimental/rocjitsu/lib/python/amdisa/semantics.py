@@ -1504,6 +1504,8 @@ _ENC_DERIVE = {
     'VOP2': _derive_vop2,
     'VOPC': _derive_vopc,
     'VOP3': _derive_vop3,
+    'VOP3_SDST': _derive_vop3,
+    'VOP3_SDST_ENC': _derive_vop3,
     'VOP3P': _derive_vop3p,
     'VOP3P_MFM': _derive_vop3p,  # VOP3P_MFMA after trailing A strip
     'SMEM': _derive_smem,
@@ -1561,8 +1563,8 @@ def derive_semantics(name: str, enc_name: str) -> InstructionSemantics | None:
         return None
     sem = derive_fn(name)
 
-    # VOP3 can re-encode VOP1/VOP2/VOPC instructions - try those too
-    if sem is None and base_enc == 'VOP3':
+    # VOP3 (and VOP3_SDST_ENC) can re-encode VOP1/VOP2/VOPC instructions.
+    if sem is None and base_enc.startswith('VOP3'):
         for fallback in (_derive_vop1, _derive_vop2, _derive_vopc):
             sem = fallback(name)
             if sem is not None:

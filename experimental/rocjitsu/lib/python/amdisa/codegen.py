@@ -5162,7 +5162,14 @@ class CodeGenerator:
         # values that actually exist in this ISA's generated enum.
         _opr = set(self.isa_spec.operand_types)
         _vgpr_only_parts = ['t == OperandType::OPR_VGPR']
-        for _opt in ('OPR_VGPR_OR_ACCVGPR', 'OPR_VGPR_OR_LDS', 'OPR_SRC_VGPR'):
+        for _opt in (
+            'OPR_VGPR_OR_ACCVGPR',
+            'OPR_VGPR_OR_LDS',
+            'OPR_SRC_VGPR',
+            'OPR_ACCVGPR',
+            'OPR_SRC_ACCVGPR',
+            'OPR_SRC_VGPR_OR_ACCVGPR',
+        ):
             if _opt in _opr:
                 _vgpr_only_parts.append(f't == OperandType::{_opt}')
         _is_vgpr_only_body = (
@@ -5182,18 +5189,99 @@ class CodeGenerator:
             '  return ' + ' ||\n         '.join(_imm_parts) + ';\n'
             '}'
         )
-        _has_accvgpr = 'OPR_VGPR_OR_ACCVGPR' in _opr
-        _vgpr_index_cond = (
-            '(opr_type == OperandType::OPR_VGPR || '
-            'opr_type == OperandType::OPR_VGPR_OR_ACCVGPR)'
-            if _has_accvgpr else
-            'opr_type == OperandType::OPR_VGPR'
-        )
-        _vgpr_index_body = (
-            'uint32_t vgpr_index(OperandType opr_type, int ev) {\n'
-            f'  if ({_vgpr_index_cond})\n'
+        _vgpr_index_lines = ['uint32_t vgpr_index(OperandType opr_type, int ev) {']
+        if 'OPR_VGPR_OR_ACCVGPR' in _opr:
+            _vgpr_index_lines.append(
+                '  if (opr_type == OperandType::OPR_VGPR || '
+                'opr_type == OperandType::OPR_VGPR_OR_ACCVGPR)\n'
+                '    return static_cast<uint32_t>(ev);'
+            )
+        else:
+            _vgpr_index_lines.append(
+                '  if (opr_type == OperandType::OPR_VGPR)\n'
+                '    return static_cast<uint32_t>(ev);'
+            )
+        if 'OPR_ACCVGPR' in _opr:
+            _vgpr_index_lines.append(
+                '  if (opr_type == OperandType::OPR_ACCVGPR)\n'
+                '    return static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);'
+            )
+        if 'OPR_SRC_ACCVGPR' in _opr:
+            _vgpr_index_lines.append(
+                '  if (opr_type == OperandType::OPR_SRC_ACCVGPR)\n'
+                '    return static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);'
+            )
+        if 'OPR_SRC_VGPR_OR_ACCVGPR' in _opr:
+            _vgpr_index_lines.append(
+                '  if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR) {\n'
+                '    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN)\n'
+                '      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN);\n'
+                '    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)\n'
+                '      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN);\n'
+                '    return static_cast<uint32_t>(ev);\n'
+                '  }'
+            )
+        _vgpr_index_lines.append('  return static_cast<uint32_t>(ev - 256);')
+        _vgpr_index_lines.append('}')
+        _vgpr_index_body = '\n'.join(_vgpr_index_lines)
+
+        _read_lane_extra = ''
+        _read_lane64_extra = ''
+        if 'OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST' in _opr:
+            _read_lane_extra = (
+                '  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&\n'
+                '      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&\n'
+                '      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {\n'
+                '    return wf.cu().read_vgpr(\n'
+                '        wf.vgpr_alloc().base + static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN),\n'
+                '        lane);\n'
+                '  }\n'
+            )
+            _read_lane64_extra = (
+                '  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&\n'
+                '      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&\n'
+                '      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {\n'
+                '    uint32_t idx = wf.vgpr_alloc().base +\n'
+                '        static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN);\n'
+                '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
+                '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
+                '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
+                '  }\n'
+            )
+
+        _read_lane_body = (
+            'uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
+            '  int ev = encoding_value_;\n'
+            '  if (is_vgpr_only_type(opr_type_))\n'
+            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + vgpr_index(opr_type_, ev), lane);\n'
+            '  if (is_immediate_type(opr_type_))\n'
             '    return static_cast<uint32_t>(ev);\n'
-            '  return static_cast<uint32_t>(ev - 256);\n'
+            '  if (ev >= 256 && ev <= 511)\n'
+            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);\n'
+            f'{_read_lane_extra}'
+            '  return resolve_src_scalar(wf, ev);\n'
+            '}'
+        )
+
+        _read_lane64_body = (
+            'uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
+            '  int ev = encoding_value_;\n'
+            '  if (is_vgpr_only_type(opr_type_)) {\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + vgpr_index(opr_type_, ev);\n'
+            '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
+            '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
+            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
+            '  }\n'
+            '  if (ev >= 256 && ev <= 511) {\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256);\n'
+            '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
+            '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
+            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
+            '  }\n'
+            f'{_read_lane64_extra}'
+            '  if (is_immediate_type(opr_type_))\n'
+            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
+            '  return resolve_src_scalar64(wf, ev);\n'
             '}'
         )
 
@@ -5337,17 +5425,7 @@ class CodeGenerator:
             '  return resolve_src_scalar(wf, encoding_value_);\n'
             '}\n'
             '\n'
-            'uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
-            '  int ev = encoding_value_;\n'
-            '  if (is_vgpr_only_type(opr_type_))\n'
-            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + vgpr_index(opr_type_, ev), lane);\n'
-            '  if (is_immediate_type(opr_type_))\n'
-            '    return static_cast<uint32_t>(ev);\n'
-            '  if (ev >= 256 && ev <= 511)\n'
-            '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);\n'
-            '  return resolve_src_scalar(wf, ev);\n'
-            '}\n'
-            '\n'
+            + _read_lane_body + '\n\n'
             'void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {\n'
             '  resolve_dst_write(wf, encoding_value_, val);\n'
             '}\n'
@@ -5361,25 +5439,7 @@ class CodeGenerator:
             '  throw std::logic_error("write_lane called on non-VGPR operand type");\n'
             '}\n'
             '\n'
-            'uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {\n'
-            '  int ev = encoding_value_;\n'
-            '  if (is_vgpr_only_type(opr_type_)) {\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + vgpr_index(opr_type_, ev);\n'
-            '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
-            '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-            '  }\n'
-            '  if (ev >= 256 && ev <= 511) {\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256);\n'
-            '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
-            '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
-            '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
-            '  }\n'
-            '  if (is_immediate_type(opr_type_))\n'
-            '    return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(ev)));\n'
-            '  return resolve_src_scalar64(wf, ev);\n'
-            '}\n'
-            '\n'
+            + _read_lane64_body + '\n\n'
             'void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {\n'
             '  int ev = encoding_value_;\n'
             '  if (is_vgpr_only_type(opr_type_)) {\n'

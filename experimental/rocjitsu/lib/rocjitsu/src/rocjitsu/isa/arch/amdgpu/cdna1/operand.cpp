@@ -1014,7 +1014,8 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
 
 bool is_vgpr_only_type(OperandType t) {
   return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_LDS ||
-         t == OperandType::OPR_SRC_VGPR;
+         t == OperandType::OPR_SRC_VGPR || t == OperandType::OPR_ACCVGPR ||
+         t == OperandType::OPR_SRC_ACCVGPR || t == OperandType::OPR_SRC_VGPR_OR_ACCVGPR;
 }
 
 bool is_immediate_type(OperandType t) {
@@ -1026,6 +1027,17 @@ bool is_immediate_type(OperandType t) {
 uint32_t vgpr_index(OperandType opr_type, int ev) {
   if (opr_type == OperandType::OPR_VGPR)
     return static_cast<uint32_t>(ev);
+  if (opr_type == OperandType::OPR_ACCVGPR)
+    return static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);
+  if (opr_type == OperandType::OPR_SRC_ACCVGPR)
+    return static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);
+  if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR) {
+    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN)
+      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN);
+    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN);
+    return static_cast<uint32_t>(ev);
+  }
   return static_cast<uint32_t>(ev - 256);
 }
 
