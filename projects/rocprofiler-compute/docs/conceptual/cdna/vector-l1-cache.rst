@@ -224,7 +224,7 @@ The address processor counts these instruction types as follows:
    * Global/Generic: global and flat memory operations, that are used for global
      and generic memory access.
 
-   * Spill/Stack: buffer instructions which are used on the MI50, MI100, and
+   * Spill/Stack: buffer instructions which are used on the MI100, and
      :ref:`MI2XX <mixxx-note>` accelerators for register spills / stack memory.
 
    These concepts are described in more detail in the :ref:`memory-spaces`,
