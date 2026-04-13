@@ -12,7 +12,7 @@ The page lists the System Speed-of-Light metrics from various sections
 of the ROCm Compute Profiler’s profiling report for AMD Instinct™ MI-series
 GPUs based on CDNA-CDNA4 architectures.
 
-For **RDNA3.5 (gfx1151)** client GPUs, see :doc:`../rdna/system-speed-of-light`.
+For RDNA3.5 (gfx1151) client GPUs, see :doc:`../rdna/system-speed-of-light` under RDNA3.
 
 .. warning::
 
