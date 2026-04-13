@@ -11,7 +11,7 @@ MI-series accelerators and for select **AMD Radeon™ / RDNA™** client GPUs wh
 analysis configuration is shipped in the tool.
 
 Use the pages below for architecture-specific naming, panel layout, and conceptual
-material:
+overview:
 
 * **Instinct (CDNA)** — :doc:`AMD CDNA architecture (CDNA-CDNA4) <cdna/cdna-performance-model>`:
   Architecture and data-type tables, top-level CDNA block diagrams, MI-series terminology,
