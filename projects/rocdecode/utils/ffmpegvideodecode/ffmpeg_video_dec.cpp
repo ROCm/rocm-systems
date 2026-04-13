@@ -414,12 +414,12 @@ int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
 
     // Copy luma data
     int dst_pitch = disp_width_ * byte_per_pixel_;
-    uint8_t *p_src_ptr_y = static_cast<uint8_t *>(src_ptr[0]) + (disp_rect_.top + crop_rect_.top) * src_pitch[0] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
     uint8_t *p_frame_y = p_dec_frame;
-    if (!p_frame_y && !p_src_ptr_y) {
+    if (!p_frame_y || !src_ptr[0]) {
         CriticalLog(g_rocdec_logger, "HandlePictureDisplay: Invalid memory address for src/dst");
         return 0;
     }
+    uint8_t *p_src_ptr_y = static_cast<uint8_t *>(src_ptr[0]) + (disp_rect_.top + crop_rect_.top) * src_pitch[0] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
     if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
         if (src_pitch[0] == dst_pitch) {
             int luma_size = src_pitch[0] * disp_height_;
