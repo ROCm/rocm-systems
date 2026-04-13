@@ -132,7 +132,7 @@ The table provides key details and support available for the different architect
         - ✅
 
 To best use profiling data, it's important to understand the role of various
-hardware blocks of AMD Instinct accelerators. Refer to the following top level GPU architecture diagram to understand the hardware blocks of each architectures.
+hardware blocks of AMD Instinct GPUs. Refer to the following top-level GPU architecture diagram to understand the hardware blocks of each architecture.
 
 .. tab-set::
 
