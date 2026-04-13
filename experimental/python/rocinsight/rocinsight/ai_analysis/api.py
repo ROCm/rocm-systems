@@ -23,6 +23,7 @@ Example:
         print(f"- {rec.title}")
 """
 
+import warnings
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
@@ -526,7 +527,7 @@ def analyze_database(
     llm_provider: Optional[str] = None,
     llm_api_key: Optional[str] = None,
     llm_thinking_tokens: Optional[int] = None,
-    output_format: OutputFormat = OutputFormat.PYTHON_OBJECT,
+    output_format: Any = None,
     verbose: bool = False,
     top_kernels: int = 10,
     att_dir: Optional[str] = None,
@@ -546,7 +547,10 @@ def analyze_database(
         llm_thinking_tokens: Enable extended thinking with this token budget.
             Only supported with the Anthropic provider and compatible models
             (claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet).
-        output_format: Desired output format
+        output_format: Deprecated. This parameter is ignored. The function
+            always returns an AnalysisResult object. Use `result.to_json()`,
+            `result.to_text()`, `result.to_markdown()`, or `result.to_webview()`
+            to obtain formatted output.
         verbose: Enable verbose logging
         top_kernels: Number of top kernels to analyze
 
@@ -568,6 +572,18 @@ def analyze_database(
         ...     print(f"- {rec.title}")
     """
     database_path = Path(database_path)
+
+    # Deprecation warning for output_format parameter
+    if output_format is not None:
+        warnings.warn(
+            "The 'output_format' parameter is deprecated and ignored. "
+            "analyze_database() always returns an AnalysisResult object. "
+            "Use result.to_json(), result.to_text(), result.to_markdown(), "
+            "or result.to_webview() for formatted output.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     # Validate database exists
     if not database_path.exists():
         raise DatabaseNotFoundError(f"Database file not found: {database_path}")

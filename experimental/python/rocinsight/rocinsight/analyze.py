@@ -972,7 +972,7 @@ def add_args(parser: argparse.ArgumentParser):
     llm_options.add_argument(
         "--llm",
         type=str,
-        choices=["anthropic", "openai", "claude-code"],
+        choices=["anthropic", "openai", "claude-code", "private", "local"],
         default=None,
         help=(
             "Enable LLM-powered analysis enhancement. "
@@ -980,6 +980,11 @@ def add_args(parser: argparse.ArgumentParser):
             "'openai' uses the OpenAI API (requires OPENAI_API_KEY). "
             "'claude-code' uses the Claude Code CLI installed on this machine — "
             "no API key needed, uses existing Claude Code credentials. "
+            "'private' uses an OpenAI-compatible endpoint configured via "
+            "ROCINSIGHT_LLM_PRIVATE_URL (required), ROCINSIGHT_LLM_PRIVATE_MODEL, "
+            "ROCINSIGHT_LLM_PRIVATE_API_KEY, and ROCINSIGHT_LLM_PRIVATE_HEADERS. "
+            "'local' uses a locally-running model (e.g. Ollama) configured via "
+            "ROCINSIGHT_LLM_LOCAL_URL (default: http://localhost:11434). "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
     )
