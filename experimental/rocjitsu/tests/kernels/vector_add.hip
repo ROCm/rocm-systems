@@ -21,8 +21,7 @@
 extern "C" __global__ void vector_add(const float *__restrict__ A,
                                       const float *__restrict__ B,
                                       float *__restrict__ C, unsigned N) {
-  constexpr unsigned BLOCK_SIZE = 64;
-  unsigned gid = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (gid < N)
     C[gid] = A[gid] + B[gid];

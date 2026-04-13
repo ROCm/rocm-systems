@@ -36,6 +36,7 @@ rj_add_device_kernel(matmul_naive gfx950)
 rj_add_device_kernel(matmul_mfma gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
+rj_add_device_kernel(two_kernels gfx950)
 
 # Umbrella target for all device kernels.
 add_custom_target(device_kernels DEPENDS
@@ -43,6 +44,7 @@ add_custom_target(device_kernels DEPENDS
     kernel_matmul_mfma
     kernel_matmul_tiled
     kernel_vector_add
+    kernel_two_kernels
 )
 
 # Export variables to the parent scope so the test executable can use them.
