@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler CDNA 2/3/4 (Instinct) performance model — architecture tables and conceptual sections
+   :description: Understand the AMD CDNA architectures and hardware blocks with ROCm Compute Profiler to analyze and optimize performance on AMD Instinct MI accelerators.
    :keywords: ROCm Compute Profiler, CDNA, Instinct, performance model, MI-series
 
 .. _cdna-performance-model:
