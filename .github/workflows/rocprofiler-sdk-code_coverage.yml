@@ -354,7 +354,6 @@ jobs:
           --coverage all
           --run-attempt ${{ github.run_attempt }}
           --
-          -DROCPROFILER_BUILD_FMT=OFF \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
@@ -380,7 +379,6 @@ jobs:
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
           --
-          -DROCPROFILER_BUILD_FMT=OFF \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
@@ -406,7 +404,6 @@ jobs:
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
           --
-          -DROCPROFILER_BUILD_FMT=OFF \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
