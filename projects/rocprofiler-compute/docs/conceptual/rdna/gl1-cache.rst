@@ -15,7 +15,7 @@ For TCP panels and Memory Chart rows through the TCP-GL1 boundary, see
 GL1C (panel)
 ============
 
-GL1C Utilization
+GL1C utilization
 ----------------
 
 .. tab-set::
