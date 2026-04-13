@@ -736,6 +736,23 @@ memory:
   Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
   Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
   Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_Swap:
+    <<: *level_2
+  Unit_hipMemcpyBatchAsync_Multicast: *level_2
+  Unit_hipMemcpyBatchAsync_Multicast_Large: *level_2
+  Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources: *level_2
+  Unit_hipMemcpyBatchAsync_P2P_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Swap:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Multicast:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Multicast_Large:
+    <<: *level_3
+    tags: [multigpu]
   Unit_hipMemcpyBatchAsync_NegativeTsts:
     <<: *level_2
     tags: [transfer]
