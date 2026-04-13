@@ -27,7 +27,7 @@ RDNA3, RDNA3.5, and later APUs. The sections below describe what the profiler me
 for RDNA3.5 (gfx1151).
 
 ROCm Profiler includes analysis panels targeting RDNA3.5 parts reporting as
-gfx1151 — for example integrated graphics on AMD Ryzen AI Max+ (Strix Halo) class
+gfx1151 — for example integrated graphics on AMD Ryzen AI Max Series - Strix Halo
 processors.
 
 .. rubric:: Memory hierarchy in the tool
@@ -67,7 +67,7 @@ and embed the RDNA3.5 (gfx1151) metric tables under each block:
 
 * :doc:`shader-engine` — GRBM GPU/SE utilization and SPI dispatch statistics.
 
-* :doc:`command-processor` — CPC / MEC metrics (same role as CDNA CP, different tab layout in gfx1151).
+* :doc:`command-processor` — CPC / ME(Micro Engine) metrics (same role as CDNA CP, different tab layout in gfx1151).
 
 * :doc:`references` — public references and link to Instinct citations.
 

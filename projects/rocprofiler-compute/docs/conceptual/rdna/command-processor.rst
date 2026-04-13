@@ -12,7 +12,7 @@ The command processor (CP) connects the host and kernel driver to on-GPU
 scheduling. During the process it pulls work from HSA queues, decodes packets, and dispatches the kernel
 launches to the front-end (SPI / WGP path). On Instinct GPUs, the profiler
 often seperates the metrics into CPF (fetcher) and CPC (packet processor). The
-shipped gfx1151 analysis panels emphasize CPC and MEC(Micro Engine Compute) activity, including utilization,
+shipped gfx1151 analysis panels emphasize CPC and ME (Micro Engine) activity, including utilization,
 interface utilization, stall cycles, memory requests, and instruction cache).
 
 For the complete CDNA architecture overview and the CPF and CPC metric tabs across MI-series GPUs, see
@@ -43,7 +43,7 @@ CPC interface utilization
       .. jinja:: rdna1151-cpc-interface-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-MEC stall cycles
+ME(Micro Engine) stall cycles
 ----------------
 
 .. tab-set::
@@ -65,7 +65,7 @@ CPC memory requests
       .. jinja:: rdna1151-cpc-memory-requests-gfx1151
          :file: _templates/metrics_table.j2
 
-MEC instruction cache
+ME(Micro Engine) instruction cache
 -----------------------
 
 .. tab-set::

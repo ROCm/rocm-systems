@@ -259,7 +259,7 @@ CPC Interface Utilization:
   GCRIU Busy:
     rst: Percentage of CPC always-count cycles the GCR (Graphics Cache Rinse) Interface Unit was busy. Computed as 100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT.
     unit: Percent
-MEC Stall Cycles:
+ME(Micro Engine) Stall Cycles:
   ME1 Stall on RCIU Ready:
     rst: Cycles ME1 was stalled waiting for RCIU (Register Cache Interface Unit) to be ready (CPC_ME1_STALL_WAIT_ON_RCIU_READY).
     unit: Cycles per Normalization Unit
@@ -285,15 +285,15 @@ CPC Memory Requests:
   GUS Write Requests:
     rst: Number of write requests sent to the Global Unified Shader memory interface.
     unit: Count per Normalization Unit
-MEC Instruction Cache:
+ME(Micro Engine) Instruction Cache:
   Instruction Cache Hits:
-    rst: Number of MEC instruction cache hits.
+    rst: Number of ME(Micro Engine) instruction cache hits.
     unit: Count per Normalization Unit
   Instruction Cache Misses:
-    rst: Number of MEC instruction cache misses.
+    rst: Number of ME(Micro Engine) instruction cache misses.
     unit: Count per Normalization Unit
   Instruction Cache Hit Rate:
-    rst: Percentage of MEC instruction cache accesses that hit in the cache.
+    rst: Percentage of ME(Micro Engine) instruction cache accesses that hit in the cache.
     unit: Percent
 SPI Utilization:
   SPI Busy:
