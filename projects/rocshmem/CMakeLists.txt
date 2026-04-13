@@ -237,6 +237,9 @@ if (NOT BUILD_TESTS_ONLY)
     ${PROJECT_NAME}
     PUBLIC
       -fgpu-rdc
+      -Wall
+      -Wextra
+      -Werror
   )
 
   target_include_directories(
@@ -260,6 +263,9 @@ if (NOT BUILD_TESTS_ONLY)
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
+      -Wall
+      -Wextra
+      -Werror
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
