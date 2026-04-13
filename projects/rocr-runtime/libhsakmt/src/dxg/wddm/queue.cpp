@@ -477,12 +477,13 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
   if (tmp_scratch_size > UINT32_MAX) {
     pr_err("scratch_size overflow!\n");
     HandleError(HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    return false;
   }
 
   if (scratch_size_ >= scratch_size)
     return true;
 
-  pr_debug("need realloc scratch buffer, size %x -> %x\n",
+  pr_debug("need realloc scratch buffer, size %" PRIx64 " -> %" PRIx32 "\n",
            scratch_size_, scratch_size);
 
   GpuMemoryCreateInfo create_info{};
@@ -676,7 +677,8 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
                                        AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32);
 
   assert(packet->private_segment_size >= kernel_object->workitem_private_segment_byte_size);
-  UpdateScratch(packet->private_segment_size, wave32);
+  if (!UpdateScratch(packet->private_segment_size, wave32))
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   amd_signal_t* signal = (amd_signal_t*)packet->completion_signal.handle;
 

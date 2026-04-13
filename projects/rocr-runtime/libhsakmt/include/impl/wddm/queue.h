@@ -204,8 +204,6 @@ public:
 
   void *ring;
   uint64_t ring_size;
-  std::atomic<uint64_t> *ring_wptr;
-  std::atomic<uint64_t> *ring_rptr;
 
   // ib_start_addr is the current ib start address
   uint64_t ib_start_addr;
