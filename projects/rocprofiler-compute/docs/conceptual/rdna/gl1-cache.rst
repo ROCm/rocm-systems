@@ -59,7 +59,7 @@ GL1C stalls
       .. jinja:: rdna1151-gl1c-stalls-gfx1151
          :file: _templates/metrics_table.j2
 
-Memory Chart: GL1C (L1)
+Memory Chart
 =======================
 
 Memory chart - GL1C Cache (L1)
