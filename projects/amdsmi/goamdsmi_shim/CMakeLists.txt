@@ -90,8 +90,8 @@ add_library(${GOAMDSMI_SHIM_TARGET} SHARED ${go_amd_smi_sources} ${go_amd_smi_he
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} pthread rt m)
 
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} amd_smi)
-target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib)
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib64)
+target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib)
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
