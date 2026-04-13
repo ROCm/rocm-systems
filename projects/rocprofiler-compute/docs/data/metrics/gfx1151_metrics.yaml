@@ -105,7 +105,7 @@ Memory chart - TCP Cache (Vector L0):
     rst: TCP write requests per normalization unit (TCP_REQ_WRITE_sum).
     unit: Requests per Normalization Unit
   TCP Miss Requests:
-    rst: TCP requests that missed in the L0 vector cache and required a fill from GL1C (TCP_REQ_MISS_sum / $denom).
+    rst: TCP requests that missed in the vector data cache and required a fill from GL1C (TCP_REQ_MISS_sum / $denom).
     unit: Requests per Normalization Unit
   TCP Request Bandwidth:
     rst: Heuristic TCP request throughput using 64 B per TCP_REQ event over the kernel window.
