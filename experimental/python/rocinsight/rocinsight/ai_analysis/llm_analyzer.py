@@ -138,7 +138,7 @@ def load_reference_guide() -> str:
     Raises:
         ReferenceGuideNotFoundError: If guide file not found.
     """
-    return get_reference_guide_path().read_text()
+    return get_reference_guide_path().read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +414,7 @@ class LLMAnalyzer:
         if not self.reference_guide_path.exists():
             raise ReferenceGuideNotFoundError([str(self.reference_guide_path)])
 
-        return self.reference_guide_path.read_text()
+        return self.reference_guide_path.read_text(encoding="utf-8")
 
     def _sanitize_data(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
         """
