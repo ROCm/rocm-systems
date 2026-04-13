@@ -99,6 +99,10 @@ if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
   set(USING_THE_ROCK ON)
 endif()
 
+# Option to enable extended tests (tests 7-15)
+# These can be run with: cmake -DENABLE_EXTENDED_TESTS=ON
+option(ENABLE_EXTENDED_TESTS "Enable extended FFmpeg-based tests (tests 7-15)" OFF)
+
 # 1 - videoDecodeRaw HEVC
 add_test(
   NAME
@@ -176,8 +180,7 @@ add_test(
             --test-command "rocdecodenegativetest"
 )
 
-if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
-  message("-- ${Green}${PROJECT_NAME} FFmpeg found - rocdecode tests requiring FFmpeg added")
+if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   # 7 - videoDecode HEVC
   add_test(
     NAME
@@ -295,7 +298,7 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
             -i "${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4" -resize 640x360 -of rgb
   )
 
-  if(rocdecode-host_FOUND)
+  if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
     # 16 - videoDecode Host backend
     add_test(
       NAME
@@ -311,7 +314,7 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
     )
   else()
     message("-- ${Yellow}${PROJECT_NAME} rocdecode-host NOT found. rocdecode tests requiring rocdecode-host excluded")
-  endif(rocdecode-host_FOUND)
+  endif(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
 else()
   message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")
-endif(FFMPEG_FOUND AND NOT USING_THE_ROCK)
+endif(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
