@@ -9,12 +9,17 @@
 #include "util/except.h"
 
 #include <cerrno>
+#include <cstdlib>
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <linux/types.h>
+#include <sstream>
 #include <string_view>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
@@ -35,6 +40,11 @@ namespace {
 constexpr uint64_t kfd_mmap_gpu_id(uint32_t gpu_id) {
   return (static_cast<uint64_t>(gpu_id) << KFD_MMAP_GPU_ID_SHIFT) &
          ((1ULL << KFD_MMAP_TYPE_SHIFT) - (1ULL << KFD_MMAP_GPU_ID_SHIFT));
+}
+
+bool vm_trace_enabled() {
+  static const bool enabled = (std::getenv("RJ_VMEM_TRACE") != nullptr);
+  return enabled;
 }
 
 // Owned state for the default driver (lives as long as the SimulatedDriver).
@@ -219,6 +229,16 @@ void SimulatedDriver::setup_topology(const Sysfs::GpuInfo &gpu) {
   topology_.setup_environment();
 }
 
+bool SimulatedDriver::is_doorbell_range(const void *addr, size_t length) const {
+  if (!doorbell_page_ || doorbell_page_size_ == 0 || !addr || length == 0)
+    return false;
+  auto base = reinterpret_cast<uintptr_t>(doorbell_page_);
+  auto end = base + doorbell_page_size_;
+  auto query_base = reinterpret_cast<uintptr_t>(addr);
+  auto query_end = query_base + length;
+  return query_base < end && query_end > base;
+}
+
 int SimulatedDriver::open() {
   // Allocate the synthetic KFD fd only once using memfd_create. The real kernel
   // fd table entry keeps the fd number reserved so other opens can never reuse it,
@@ -248,6 +268,11 @@ int SimulatedDriver::close() {
   // /dev/kfd during its lifetime (e.g., Init() failure → Close() → retry).
   // Releasing the primary causes the engine to terminate, and it cannot
   // be restarted. The engine stays alive for the process lifetime.
+  const bool trace_enabled = vm_trace_enabled();
+  size_t leaked_allocations = 0;
+  uint64_t leaked_bytes = 0;
+  size_t leaked_queues = 0;
+  std::vector<uint64_t> leaked_handles;
   {
     // Hold event_mutex_ while setting closing_ to ensure wait_events_ioctl's
     // predicate sees the closed state before we notify.
@@ -265,7 +290,7 @@ int SimulatedDriver::close() {
     auto *slots = static_cast<uint64_t *>(event_page_);
     size_t count = event_page_size_ / sizeof(uint64_t);
     for (size_t i = 0; i < count; ++i)
-      std::atomic_ref<uint64_t>(slots[i]).store(1, std::memory_order_release);
+      std::atomic_ref<uint64_t>(slots[i]).store(KFD_SIGNAL_EVENT_LIMIT, std::memory_order_release);
   }
   event_cv_.notify_all();
 
@@ -274,12 +299,19 @@ int SimulatedDriver::close() {
   // but guard against leaks on abnormal shutdown.
   {
     std::lock_guard<std::mutex> lk(alloc_mutex_);
+    leaked_queues = active_queue_ids_.size();
     for (uint32_t qid : active_queue_ids_)
       cp_->unregister_queue(qid);
     active_queue_ids_.clear();
 
     auto *mem = soc_.memory();
+    if (trace_enabled)
+      leaked_handles.reserve(allocations_.size());
     for (auto &[handle, alloc] : allocations_) {
+      ++leaked_allocations;
+      leaked_bytes += alloc.size;
+      if (trace_enabled)
+        leaked_handles.push_back(handle);
       if (alloc.host_ptr && !(alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)) {
         if (mem)
           mem->unmap_host_pages(alloc.gpu_va, alloc.size);
@@ -288,6 +320,43 @@ int SimulatedDriver::close() {
       }
     }
     allocations_.clear();
+  }
+
+  if (doorbell_page_ && doorbell_page_size_)
+    munmap(doorbell_page_, doorbell_page_size_);
+
+  if (trace_enabled) {
+    if (leaked_allocations == 0 && leaked_queues == 0) {
+      util::trace::print("kfd.close: no outstanding GPUVM allocations or queues");
+    } else {
+      util::trace::print("kfd.close: leaked_allocations=", leaked_allocations,
+                         " leaked_bytes=", leaked_bytes, " leaked_queues=", leaked_queues);
+      if (!leaked_handles.empty()) {
+        std::ostringstream oss;
+        oss << "[";
+        for (size_t i = 0; i < leaked_handles.size(); ++i) {
+          oss << leaked_handles[i];
+          if (i + 1 < leaked_handles.size())
+            oss << ",";
+        }
+        oss << "]";
+        util::trace::print("kfd.close: leaked_handles=", oss.str());
+      }
+    }
+  }
+
+  for (auto &[handle, dmabuf] : imported_dmabufs_) {
+    (void)handle;
+    if (dmabuf.fd >= 0)
+      ::close(dmabuf.fd);
+  }
+  imported_dmabufs_.clear();
+  fd_to_import_handle_.clear();
+  svm_ranges_.clear();
+  memory_policies_.clear();
+  {
+    std::lock_guard<std::mutex> lock(runtime_mutex_);
+    runtime_state_ = RuntimeState{};
   }
 
   return 0;
@@ -332,6 +401,8 @@ int SimulatedDriver::ioctl(unsigned long request, void *arg) {
     return wait_events_ioctl(arg);
   case AMDKFD_IOC_SET_XNACK_MODE:
     return set_xnack_mode_ioctl(arg);
+  case AMDKFD_IOC_SET_MEMORY_POLICY:
+    return set_memory_policy_ioctl(arg);
   case AMDKFD_IOC_AVAILABLE_MEMORY: {
     auto *args = static_cast<kfd_ioctl_get_available_memory_args *>(arg);
     uint64_t allocated = 0;
@@ -346,9 +417,7 @@ int SimulatedDriver::ioctl(unsigned long request, void *arg) {
     return 0;
   }
   case AMDKFD_IOC_RUNTIME_ENABLE: {
-    auto *args = static_cast<kfd_ioctl_runtime_enable_args *>(arg);
-    args->capabilities_mask = 0;
-    return 0;
+    return runtime_enable_ioctl(arg);
   }
   // Scratch backing VA: ROCR stores the flat-scratch base here so the CP can
   // program the SH_STATIC_MEM_CONFIG register. No-op in simulation — kernels
@@ -359,6 +428,14 @@ int SimulatedDriver::ioctl(unsigned long request, void *arg) {
   // No-op in simulation — we do not emulate the trap handler mechanism.
   case AMDKFD_IOC_SET_TRAP_HANDLER:
     return 0;
+  case AMDKFD_IOC_GET_DMABUF_INFO:
+    return get_dmabuf_info_ioctl(arg);
+  case AMDKFD_IOC_IMPORT_DMABUF:
+    return import_dmabuf_ioctl(arg);
+  case AMDKFD_IOC_EXPORT_DMABUF:
+    return export_dmabuf_ioctl(arg);
+  case AMDKFD_IOC_SVM:
+    return svm_ioctl(arg);
   default:
     util::debug::print("rocjitsu: unhandled ioctl 0x", std::hex, request);
     return 0;
@@ -385,13 +462,14 @@ void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_
     void *ptr = (raw < 0) ? MAP_FAILED : reinterpret_cast<void *>(static_cast<uintptr_t>(raw));
     if (ptr != MAP_FAILED) {
       doorbell_page_ = ptr;
+      doorbell_page_size_ = length;
+      doorbell_gpu_va_ = reinterpret_cast<uint64_t>(ptr);
       // Sentinel: fill with 0xFF so the initial read is 0xFFFF…FFFF.
       // The CP's last_doorbell is also 0xFFFF…FFFF, so any ROCR write
       // (including write_ptr=0) is detected as a change.
       memset(ptr, 0xFF, length);
-      uint64_t gpu_va = reinterpret_cast<uint64_t>(ptr);
       if (auto *mem = soc_.memory())
-        mem->map_host_pages(gpu_va, ptr, length);
+        mem->map_host_pages(doorbell_gpu_va_, ptr, length);
       // Provide the aperture base to the CP. All previously registered KFD queues
       // (doorbell_offset already set) now become active in the poll loop.
       // Mirrors the kernel's model: doorbell BO allocated before userspace mmap;
@@ -487,7 +565,15 @@ void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_
 
 int SimulatedDriver::munmap(void *addr, size_t length) {
   if (addr == doorbell_page_) {
+    if (!closing_.load(std::memory_order_acquire)) {
+      errno = EPERM;
+      return -1;
+    }
+    if (auto *mem = soc_.memory(); mem && doorbell_gpu_va_ && doorbell_page_size_)
+      mem->unmap_host_pages(doorbell_gpu_va_, doorbell_page_size_);
     doorbell_page_ = nullptr;
+    doorbell_gpu_va_ = 0;
+    doorbell_page_size_ = 0;
     cp_->set_doorbell_base(nullptr);
     syscall(SYS_munmap, addr, length);
     return 0;
@@ -600,7 +686,14 @@ int SimulatedDriver::free_memory_ioctl(void *arg) {
   auto it = allocations_.find(args->handle);
   if (it != allocations_.end()) {
     auto &alloc = it->second;
-    if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) && alloc.host_ptr) {
+    if (alloc.imported && alloc.dmabuf_fd >= 0) {
+      ::close(alloc.dmabuf_fd);
+      if (auto dmabuf_it = imported_dmabufs_.find(args->handle); dmabuf_it != imported_dmabufs_.end()) {
+        fd_to_import_handle_.erase(dmabuf_it->second.fd);
+        imported_dmabufs_.erase(dmabuf_it);
+      }
+    }
+    if (alloc.host_ptr) {
       if (auto *mem = soc_.memory())
         mem->unmap_host_pages(alloc.gpu_va, alloc.size);
     }
@@ -748,6 +841,178 @@ int SimulatedDriver::reset_event_ioctl(void *arg) {
     if (args->event_id < event_page_size_ / sizeof(uint64_t))
       std::atomic_ref<uint64_t>(slots[args->event_id]).store(0, std::memory_order_release);
   }
+  return 0;
+}
+
+int SimulatedDriver::set_memory_policy_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_set_memory_policy_args *>(arg);
+  if (args->gpu_id != gpu_id_)
+    return -EINVAL;
+  MemoryPolicy policy{};
+  policy.alternate_base = args->alternate_aperture_base;
+  policy.alternate_size = args->alternate_aperture_size;
+  policy.default_policy = args->default_policy;
+  policy.alternate_policy = args->alternate_policy;
+  memory_policies_[args->gpu_id] = policy;
+  return 0;
+}
+
+int SimulatedDriver::import_dmabuf_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_import_dmabuf_args *>(arg);
+  if (args->gpu_id != gpu_id_)
+    return -EINVAL;
+
+  struct stat st {};
+  if (fstat(args->dmabuf_fd, &st) != 0)
+    return -errno;
+  uint64_t size = static_cast<uint64_t>(st.st_size);
+
+  int dupfd = fcntl(args->dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+  if (dupfd < 0)
+    return -errno;
+
+  uint64_t handle;
+  {
+    std::lock_guard<std::mutex> lk(alloc_mutex_);
+    handle = next_handle_++;
+    GpuAllocation alloc{};
+    alloc.gpu_va = args->va_addr;
+    alloc.size = size;
+    alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    alloc.handle = handle;
+    alloc.user_va = true;
+    alloc.imported = true;
+    alloc.dmabuf_fd = dupfd;
+    alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
+    allocations_[handle] = alloc;
+  }
+
+  if (auto *mem = soc_.memory(); mem && args->va_addr)
+    mem->map_host_pages(args->va_addr, reinterpret_cast<void *>(args->va_addr), size);
+
+  ImportedDmabuf info{};
+  info.handle = handle;
+  info.fd = dupfd;
+  info.size = size;
+  info.va = args->va_addr;
+  info.gpu_id = args->gpu_id;
+  imported_dmabufs_[handle] = info;
+  fd_to_import_handle_[dupfd] = handle;
+
+  args->handle = handle;
+  return 0;
+}
+
+int SimulatedDriver::export_dmabuf_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
+  std::lock_guard<std::mutex> lk(alloc_mutex_);
+  auto it = allocations_.find(args->handle);
+  if (it == allocations_.end())
+    return -EINVAL;
+  const auto &alloc = it->second;
+  int memfd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_export", MFD_CLOEXEC));
+  if (memfd < 0)
+    return -errno;
+  if (ftruncate(memfd, static_cast<off_t>(alloc.size)) != 0) {
+    ::close(memfd);
+    return -errno;
+  }
+  args->dmabuf_fd = memfd;
+  return 0;
+}
+
+int SimulatedDriver::get_dmabuf_info_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_get_dmabuf_info_args *>(arg);
+  uint64_t size = 0;
+  uint32_t gpu_id = gpu_id_;
+
+  bool found = false;
+  for (const auto &[handle, info] : imported_dmabufs_) {
+    (void)handle;
+    if (info.fd >= 0 && static_cast<uint32_t>(info.fd) == args->dmabuf_fd) {
+      size = info.size;
+      gpu_id = info.gpu_id;
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    struct stat st {};
+    if (fstat(args->dmabuf_fd, &st) != 0)
+      return -errno;
+    size = static_cast<uint64_t>(st.st_size);
+  }
+
+  args->size = size;
+  args->gpu_id = gpu_id;
+  args->flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+  if (args->metadata_ptr && args->metadata_size) {
+    std::memset(reinterpret_cast<void *>(args->metadata_ptr), 0,
+                static_cast<size_t>(args->metadata_size));
+  }
+  args->metadata_size = 0;
+  return 0;
+}
+
+int SimulatedDriver::svm_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_svm_args *>(arg);
+  auto *attrs = reinterpret_cast<kfd_ioctl_svm_attribute *>(args + 1);
+
+  if (args->op == KFD_IOCTL_SVM_OP_SET_ATTR) {
+    SvmRange range{};
+    range.size = args->size;
+    for (uint32_t i = 0; i < args->nattr; ++i)
+      range.attributes[attrs[i].type] = attrs[i].value;
+    svm_ranges_[args->start_addr] = std::move(range);
+    return 0;
+  }
+
+  if (args->op == KFD_IOCTL_SVM_OP_GET_ATTR) {
+    auto it = svm_ranges_.find(args->start_addr);
+    for (uint32_t i = 0; i < args->nattr; ++i) {
+      uint32_t type = attrs[i].type;
+      uint32_t value = 0;
+      if (it != svm_ranges_.end()) {
+        if (auto vit = it->second.attributes.find(type); vit != it->second.attributes.end())
+          value = vit->second;
+      }
+      switch (type) {
+      case KFD_IOCTL_SVM_ATTR_PREFERRED_LOC:
+      case KFD_IOCTL_SVM_ATTR_PREFETCH_LOC:
+        attrs[i].value = value ? value : KFD_IOCTL_SVM_LOCATION_UNDEFINED;
+        break;
+      default:
+        attrs[i].value = value;
+        break;
+      }
+    }
+    return 0;
+  }
+
+  return -EINVAL;
+}
+
+int SimulatedDriver::runtime_enable_ioctl(void *arg) {
+  auto *args = static_cast<kfd_ioctl_runtime_enable_args *>(arg);
+  std::lock_guard<std::mutex> lock(runtime_mutex_);
+
+  if (args->mode_mask & KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK) {
+    if (runtime_state_.pending)
+      return -EBUSY;
+    if (!runtime_state_.enabled && !active_queue_ids_.empty())
+      return -EEXIST;
+    runtime_state_.enabled = true;
+    runtime_state_.pending = false;
+    runtime_state_.mode_mask = args->mode_mask;
+    runtime_state_.capabilities_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+    runtime_state_.r_debug = args->r_debug;
+    args->capabilities_mask = runtime_state_.capabilities_mask;
+    return 0;
+  }
+
+  runtime_state_ = RuntimeState{};
+  args->capabilities_mask = 0;
   return 0;
 }
 

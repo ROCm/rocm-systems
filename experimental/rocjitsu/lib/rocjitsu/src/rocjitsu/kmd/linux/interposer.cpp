@@ -43,6 +43,37 @@ std::unordered_map<int, std::string> g_sysfs_fds;
 std::mutex g_drm_fd_mutex;
 std::unordered_set<int> g_drm_fds;
 
+std::mutex g_kfd_dup_mutex;
+std::unordered_set<int> g_kfd_dup_fds;
+
+bool is_kfd_primary_fd(int fd) { return fd == SimulatedDriver::kfd_fd(); }
+
+bool is_kfd_duplicate_fd(int fd) {
+  std::lock_guard<std::mutex> lock(g_kfd_dup_mutex);
+  return g_kfd_dup_fds.count(fd) != 0;
+}
+
+bool is_kfd_tracked_fd(int fd) { return is_kfd_primary_fd(fd) || is_kfd_duplicate_fd(fd); }
+
+void track_kfd_duplicate_fd(int fd) {
+  if (fd < 0 || is_kfd_primary_fd(fd))
+    return;
+  std::lock_guard<std::mutex> lock(g_kfd_dup_mutex);
+  g_kfd_dup_fds.insert(fd);
+}
+
+void untrack_kfd_duplicate_fd(int fd) {
+  if (fd < 0)
+    return;
+  std::lock_guard<std::mutex> lock(g_kfd_dup_mutex);
+  g_kfd_dup_fds.erase(fd);
+}
+
+void clear_kfd_duplicate_fds() {
+  std::lock_guard<std::mutex> lock(g_kfd_dup_mutex);
+  g_kfd_dup_fds.clear();
+}
+
 } // namespace
 
 // Convert a standard fopen mode string to open(2) flags.
@@ -99,8 +130,10 @@ int open(const char *path, int flags, ...) {
     }
     // If the driver was previously closed (e.g., Init() failed and scope
     // guard called Close()), re-open it to get a fresh fd.
-    if (SimulatedDriver::kfd_fd() < 0)
+    if (SimulatedDriver::kfd_fd() < 0) {
       drv->open();
+      clear_kfd_duplicate_fds();
+    }
     return SimulatedDriver::kfd_fd();
   }
 
@@ -210,9 +243,16 @@ int close(int fd) {
       return 0;
     }
   }
+  if (is_kfd_duplicate_fd(fd)) {
+    untrack_kfd_duplicate_fd(fd);
+    return static_cast<int>(syscall(SYS_close, fd));
+  }
   auto *drv = SimulatedDriver::lookup(fd);
-  if (drv)
-    return drv->close();
+  if (drv) {
+    int rc = drv->close();
+    clear_kfd_duplicate_fds();
+    return rc;
+  }
   return static_cast<int>(syscall(SYS_close, fd));
 }
 
@@ -259,10 +299,137 @@ int ioctl(int fd, unsigned long request, ...) {
   }
 
   auto *drv = SimulatedDriver::lookup(fd);
+  if (!drv && is_kfd_duplicate_fd(fd))
+    drv = SimulatedDriver::lookup(SimulatedDriver::kfd_fd());
   if (drv)
     return drv->ioctl(request, arg);
 
   return static_cast<int>(syscall(SYS_ioctl, fd, request, arg));
+}
+
+int dup(int oldfd) {
+  int rc = static_cast<int>(syscall(SYS_dup, oldfd));
+  if (rc >= 0) {
+    if (is_kfd_tracked_fd(oldfd))
+      track_kfd_duplicate_fd(rc);
+    else
+      untrack_kfd_duplicate_fd(rc);
+  }
+  return rc;
+}
+
+int dup2(int oldfd, int newfd) {
+  int rc = static_cast<int>(syscall(SYS_dup2, oldfd, newfd));
+  if (rc >= 0) {
+    if (is_kfd_tracked_fd(oldfd))
+      track_kfd_duplicate_fd(rc);
+    else
+      untrack_kfd_duplicate_fd(rc);
+  }
+  return rc;
+}
+
+#ifdef SYS_dup3
+int dup3(int oldfd, int newfd, int flags) {
+  int rc = static_cast<int>(syscall(SYS_dup3, oldfd, newfd, flags));
+  if (rc >= 0) {
+    if (is_kfd_tracked_fd(oldfd))
+      track_kfd_duplicate_fd(rc);
+    else
+      untrack_kfd_duplicate_fd(rc);
+  }
+  return rc;
+}
+#endif
+
+namespace {
+enum class FcntlArgKind { None, Int, Ptr };
+
+FcntlArgKind fcntl_arg_kind(int cmd) {
+  switch (cmd) {
+  case F_DUPFD:
+  case F_DUPFD_CLOEXEC:
+  case F_SETFD:
+  case F_SETFL:
+  case F_SETOWN:
+  case F_SETSIG:
+  case F_SETLEASE:
+  case F_NOTIFY:
+  case F_SETPIPE_SZ:
+  case F_ADD_SEALS:
+    return FcntlArgKind::Int;
+#ifdef F_SETLK
+  case F_SETLK:
+  case F_SETLKW:
+#endif
+#if defined(F_SETLK64) && (!defined(F_SETLK) || F_SETLK64 != F_SETLK)
+  case F_SETLK64:
+  case F_SETLKW64:
+#endif
+  case F_GETLK:
+#if defined(F_GETLK64) && (!defined(F_GETLK) || F_GETLK64 != F_GETLK)
+  case F_GETLK64:
+#endif
+#ifdef F_GETOWNER_UIDS
+  case F_GETOWNER_UIDS:
+#endif
+#ifdef F_GET_RW_HINT
+  case F_GET_RW_HINT:
+#endif
+#ifdef F_SET_RW_HINT
+  case F_SET_RW_HINT:
+#endif
+#ifdef F_GET_FILE_RW_HINT
+  case F_GET_FILE_RW_HINT:
+#endif
+#ifdef F_SET_FILE_RW_HINT
+  case F_SET_FILE_RW_HINT:
+#endif
+    return FcntlArgKind::Ptr;
+#ifdef F_SETOWN_EX
+  case F_SETOWN_EX:
+    return FcntlArgKind::Ptr;
+#endif
+#ifdef F_GETOWN_EX
+  case F_GETOWN_EX:
+    return FcntlArgKind::Ptr;
+#endif
+  default:
+    return FcntlArgKind::None;
+  }
+}
+} // namespace
+
+int fcntl(int fd, int cmd, ...) {
+  va_list ap;
+  va_start(ap, cmd);
+  FcntlArgKind kind = fcntl_arg_kind(cmd);
+  long rc = 0;
+  switch (kind) {
+  case FcntlArgKind::Int: {
+    int arg = va_arg(ap, int);
+    rc = syscall(SYS_fcntl, fd, cmd, arg);
+    break;
+  }
+  case FcntlArgKind::Ptr: {
+    void *arg = va_arg(ap, void *);
+    rc = syscall(SYS_fcntl, fd, cmd, arg);
+    break;
+  }
+  case FcntlArgKind::None:
+  default:
+    rc = syscall(SYS_fcntl, fd, cmd, 0L);
+    break;
+  }
+  va_end(ap);
+
+  if (rc >= 0 && (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC)) {
+    if (is_kfd_tracked_fd(fd))
+      track_kfd_duplicate_fd(static_cast<int>(rc));
+    else
+      untrack_kfd_duplicate_fd(static_cast<int>(rc));
+  }
+  return static_cast<int>(rc);
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
@@ -271,6 +438,15 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
     return drv->mmap(addr, length, prot, flags, offset);
 
   return reinterpret_cast<void *>(syscall(SYS_mmap, addr, length, prot, flags, fd, offset));
+}
+
+int mprotect(void *addr, size_t length, int prot) {
+  auto *drv = SimulatedDriver::lookup(SimulatedDriver::kfd_fd());
+  if (drv && drv->is_doorbell_range(addr, length)) {
+    errno = EPERM;
+    return -1;
+  }
+  return static_cast<int>(syscall(SYS_mprotect, addr, length, prot));
 }
 
 int munmap(void *addr, size_t length) {

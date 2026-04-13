@@ -23,6 +23,8 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -74,6 +76,9 @@ public:
   /// @details Must be called before ROCR's hsa_init().
   void setup_topology(const Sysfs::GpuInfo &gpu);
 
+  /// @brief Returns true if the address range overlaps the mapped doorbell aperture.
+  bool is_doorbell_range(const void *addr, size_t length) const;
+
   /// Get the topology generator (for inspection/testing).
   const Sysfs &topology() const { return topology_; }
 
@@ -93,10 +98,16 @@ private:
   int update_queue_ioctl(void *arg);
   int destroy_queue_ioctl(void *arg);
   int create_event_ioctl(void *arg);
+  int set_memory_policy_ioctl(void *arg);
   int destroy_event_ioctl(void *arg);
   int set_event_ioctl(void *arg);
   int reset_event_ioctl(void *arg);
   int wait_events_ioctl(void *arg);
+  int import_dmabuf_ioctl(void *arg);
+  int export_dmabuf_ioctl(void *arg);
+  int get_dmabuf_info_ioctl(void *arg);
+  int svm_ioctl(void *arg);
+  int runtime_enable_ioctl(void *arg);
   int set_xnack_mode_ioctl(void *arg);
 
   simdojo::SimulationEngine &engine_;
@@ -117,6 +128,8 @@ private:
     uint32_t flags = 0;
     uint64_t handle = 0;
     bool user_va = false; ///< True if va_addr was provided by the caller (ROCR FMM path).
+    bool imported = false;
+    int dmabuf_fd = -1;
   };
 
   std::mutex alloc_mutex_;
@@ -145,6 +158,8 @@ private:
       active_queue_ids_; ///< Tracks queue IDs registered with the CP (for cleanup on close).
   void *doorbell_page_ =
       nullptr; ///< Mapped aperture page; base address given to the CP via set_doorbell_base().
+  size_t doorbell_page_size_ = 0; ///< Size of the mapped doorbell aperture.
+  uint64_t doorbell_gpu_va_ = 0;  ///< GPU VA associated with the doorbell aperture.
 
   int event_memfd_ = -1;       ///< memfd backing the KFD signal event page.
   void *event_page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
@@ -162,6 +177,41 @@ private:
   std::unordered_map<uint32_t, GpuEvent> events_;
   uint32_t next_event_id_ = 1;
   std::atomic<bool> closing_{false}; ///< Set on close(); read inside and outside event_mutex_.
+
+  struct MemoryPolicy {
+    uint64_t alternate_base = 0;
+    uint64_t alternate_size = 0;
+    uint32_t default_policy = 0;
+    uint32_t alternate_policy = 0;
+  };
+
+  struct ImportedDmabuf {
+    uint64_t handle = 0;
+    int fd = -1;
+    uint64_t size = 0;
+    uint64_t va = 0;
+    uint32_t gpu_id = 0;
+  };
+
+  struct SvmRange {
+    uint64_t size = 0;
+    std::unordered_map<uint32_t, uint32_t> attributes;
+  };
+
+  struct RuntimeState {
+    bool enabled = false;
+    bool pending = false;
+    uint32_t mode_mask = 0;
+    uint32_t capabilities_mask = 0;
+    uint64_t r_debug = 0;
+  };
+
+  std::unordered_map<uint32_t, MemoryPolicy> memory_policies_;
+  std::unordered_map<uint64_t, ImportedDmabuf> imported_dmabufs_;
+  std::unordered_map<int, uint64_t> fd_to_import_handle_;
+  std::unordered_map<uint64_t, SvmRange> svm_ranges_;
+  std::mutex runtime_mutex_;
+  RuntimeState runtime_state_;
 
   Sysfs topology_;
 };

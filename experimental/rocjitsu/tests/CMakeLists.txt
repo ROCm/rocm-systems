@@ -41,6 +41,7 @@ add_executable(rocjitsu_tests
     shared_infra_test.cpp
     transcendental_test.cpp
     mtype_flags_test.cpp
+    kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
