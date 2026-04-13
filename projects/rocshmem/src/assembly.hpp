@@ -251,10 +251,6 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
                                                size_t stride,
                                                size_t thread_idx) {
   static_assert(N >= 1 && N <= 16, "load_store_asm: N must be in [1, 16]");
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
 #if defined(__gfx90a__) || defined(__gfx1100__)
 
   __int128_t regs[N];
@@ -269,7 +265,7 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
     llvm_amdgcn_raw_buffer_store_b128(regs[i], *reinterpret_cast<i32x4*>(dst),
                                       thread_idx, i * stride, 0b11u);
   }
-  __builtin_amdgcn_s_barrier();
+  // __builtin_amdgcn_s_barrier();
 
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
@@ -287,7 +283,7 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
                                       thread_idx, i * stride, 0b10011u);
   }
   // __builtin_amdgcn_s_setprio(0);
-  __builtin_amdgcn_s_barrier();
+  // __builtin_amdgcn_s_barrier();
 
 #endif
 #if defined(__gfx1201__)
@@ -304,7 +300,7 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src,
     llvm_amdgcn_raw_buffer_store_b128(regs[i], *reinterpret_cast<i32x4*>(dst),
                                       thread_idx, i * stride, 0b1100u);
   }
-  __builtin_amdgcn_s_barrier();
+  // __builtin_amdgcn_s_barrier();
 
 #endif
 }
