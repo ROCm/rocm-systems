@@ -4178,6 +4178,34 @@ class CodeGenerator:
         esz, ne = sem.elem_size, sem.num_elems
         sc0, sc1, nt = self._coherency_exprs()
         addr_fn = 'mtbuf_calculate_addresses' if cls == 'tbuffer_load' else 'mubuf_calculate_addresses'
+        # Direct-to-LDS: when the lds bit is set, data goes to LDS instead of VGPRs.
+        if cls == 'buffer_load':
+            L.append('  if (inst_.lds) {')
+            L.append(f'    std::array<uint64_t, 64> addrs = {{}};')
+            L.append(f'    uint64_t lane_mask = 0;')
+            L.append(f'    {addr_fn}(inst_, wf, addrs, lane_mask);')
+            L.append(f'    uint32_t m0 = wf.m0();')
+            L.append(f'    auto &lds = wf.cu().lds();')
+            L.append(f'    auto *memory = wf.cu().memory();')
+            L.append(f'    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{')
+            L.append(f'      if (!(lane_mask & (1ULL << lane))) continue;')
+            L.append(f'      uint32_t voffset = wf.cu().read_vgpr(wf.vgpr_alloc().base + inst_.vdata, lane);')
+            L.append(f'      uint32_t lds_addr = m0 + voffset;')
+            for i in range(ne):
+                offset = i * esz
+                L.append(f'      {{')
+                L.append(f'        uint32_t val = memory->read32(addrs[lane] + {offset});')
+                L.append(f'        lds.write32(lds_addr + {offset}, val);')
+                L.append(f'      }}')
+            L.append(f'    }}')
+            L.append(f'    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
+            L.append(f'    d->lane_mask = 0;')
+            L.append(f'    d->is_load = true;')
+            L.append(f'    d->num_elems = 0;')
+            L.append(f'    d->elem_size = 0;')
+            L.append(f'    set_data(std::move(d));')
+            L.append(f'    return;')
+            L.append('  }')
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;')
         L.append(f'  d->elem_size = {esz};')

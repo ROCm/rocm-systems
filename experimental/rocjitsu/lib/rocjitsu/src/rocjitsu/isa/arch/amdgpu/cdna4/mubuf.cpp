@@ -468,6 +468,40 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
 }
 
 void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds) {
+    std::array<uint64_t, 64> addrs = {};
+    uint64_t lane_mask = 0;
+    mubuf_calculate_addresses(inst_, wf, addrs, lane_mask);
+    uint32_t m0 = wf.m0();
+    auto &lds = wf.cu().lds();
+    auto *memory = wf.cu().memory();
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(lane_mask & (1ULL << lane))) continue;
+      uint32_t voffset = wf.cu().read_vgpr(wf.vgpr_alloc().base + inst_.vdata, lane);
+      uint32_t lds_addr = m0 + voffset;
+      uint32_t val = memory->read32(addrs[lane]);
+      lds.write32(lds_addr, val);
+    }
+    // Register GLOBAL_TO_LDS event for race detection.
+    if (auto *rs = wf.race_state()) {
+      std::vector<uint32_t> ldsAddrs(wf.wf_size());
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        uint32_t voff = wf.cu().read_vgpr(wf.vgpr_alloc().base + inst_.vdata, lane);
+        ldsAddrs[lane] = m0 + voff;
+      }
+      rs->registerLdsEvent(static_cast<int>(wf.pc),
+                           raceemulator::MemoryEventType::GLOBAL_TO_LDS,
+                           /*registers=*/{}, lane_mask, wf.wf_size(),
+                           ldsAddrs, /*bytesPerLane=*/4);
+    }
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->lane_mask = 0;
+    d->is_load = true;
+    d->num_elems = 0;
+    d->elem_size = 0;
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;
   d->elem_size = 4;
