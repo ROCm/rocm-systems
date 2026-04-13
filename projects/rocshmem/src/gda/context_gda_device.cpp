@@ -169,8 +169,10 @@ __device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {
 
 __device__ void GDAContext::pe_quiet(size_t pe) {
   ActiveWFInfo wf_info(ctx_id_);
-  internal_quiet(wf_info);
-  qps[pe].quiet(wf_info);
+  for(uint32_t i = 0; i < num_qps_per_pe; i++) {
+    int qp_index = i * num_pes + pe;
+    qps[qp_index].quiet(wf_info);
+  }
 }
 
 __device__ void *GDAContext::shmem_ptr(const void *dest, int pe) {
