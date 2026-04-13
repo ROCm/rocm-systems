@@ -1234,7 +1234,7 @@ def test_parser_utility_functions():
     import numpy as np
     import pandas as pd
 
-    from utils.parser import (
+    from utils.metrics.aggregation import (
         to_concat,
         to_int,
         to_max,
@@ -1339,7 +1339,7 @@ def test_parser_error_handling():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import (
+    from utils.metrics.expression import (
         build_eval_string,
         update_denominator_string,
     )
@@ -1381,7 +1381,7 @@ def test_ast_transformer_edge_cases():
 
     import ast
 
-    from utils.parser import CodeTransformer
+    from utils.metrics.expression import CodeTransformer
 
     transformer = CodeTransformer()
 
@@ -1422,7 +1422,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
 
     import pandas as pd
 
-    from utils.parser import eval_metric
+    from utils.metrics.evaluation_pipeline import eval_metric
 
     mock_dfs = {
         1: pd.DataFrame({
@@ -1623,7 +1623,7 @@ def test_build_dfs_edge_cases():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import gen_counter_list
+    from utils.metrics.expression import gen_counter_list
 
     visited, counters = gen_counter_list(None)
     assert not visited
@@ -1652,7 +1652,10 @@ def test_update_functions_coverage():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import update_denominator_string, update_normal_unit_string
+    from utils.metrics.expression import (
+        update_denominator_string,
+        update_normal_unit_string,
+    )
 
     result = update_denominator_string("SUM(SQ_WAVES) / SUM($denom)", "per_wave")
     assert "$denom" not in result
@@ -1676,7 +1679,7 @@ def test_metric_evaluation_no_valid_data():
     """Test emetric evaluation with no valid data"""
     import numpy as np
 
-    from utils.parser import MetricEvaluator
+    from utils.metrics.evaluator import MetricEvaluator
 
     metric_evaluator = MetricEvaluator({}, {}, {})
     with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
