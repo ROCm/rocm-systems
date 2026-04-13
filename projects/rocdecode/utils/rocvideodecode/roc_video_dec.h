@@ -39,7 +39,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
-#include "../../src/commons.h"
+#include "commons.h"
 
 /*!
  * \file
