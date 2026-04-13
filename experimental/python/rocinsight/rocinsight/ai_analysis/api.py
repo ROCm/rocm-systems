@@ -877,11 +877,24 @@ def _build_analysis_result(
     return result
 
 
+_MEMORY_DIR_MAP = {
+    "Host-to-Device": "h2d",
+    "Device-to-Host": "d2h",
+    "Device-to-Device": "d2d",
+}
+
+
 def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
     """Convert AnalysisResult to the format expected by LLMAnalyzer._sanitize_data().
 
     Populates all sections from the raw analysis payloads stored on the result
     so the LLM receives real profiling data rather than empty placeholders.
+
+    Field name mapping (api.py -> llm_analyzer.py):
+        - ``calls`` -> ``dispatch_count``
+        - ``percent_of_total`` -> ``pct_total_time``
+        - Memory direction keys normalised via ``_MEMORY_DIR_MAP``
+          (e.g. ``"Host-to-Device"`` -> ``"h2d"``).
     """
     raw = getattr(result, "_raw", {})
     hotspots = raw.get("hotspots", [])
@@ -896,20 +909,20 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
             "memcpy_time_pct": result.execution_breakdown.memcpy_time_pct,
             "api_overhead_pct": result.execution_breakdown.api_overhead_pct,
         },
-        # Real kernel hotspot data
+        # Real kernel hotspot data — field names aligned with llm_analyzer expectations
         "kernels": [
             {
                 "name": k.get("name"),
-                "calls": k.get("calls"),
+                "dispatch_count": k.get("calls"),
                 "total_duration_ns": k.get("total_duration"),
                 "avg_duration_ns": k.get("avg_duration"),
-                "percent_of_total": k.get("percent_of_total"),
+                "pct_total_time": k.get("percent_of_total"),
             }
             for k in hotspots
         ],
-        # Real memory transfer data keyed by direction
+        # Real memory transfer data — normalise direction keys for _format_data_for_llm
         "memory_ops": {
-            direction: {
+            _MEMORY_DIR_MAP.get(direction, direction.lower()): {
                 "count": info.get("count"),
                 "total_bytes": info.get("total_bytes"),
                 "avg_duration_ns": info.get("avg_duration"),
