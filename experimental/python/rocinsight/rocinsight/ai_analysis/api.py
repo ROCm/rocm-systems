@@ -292,6 +292,7 @@ class AnalysisResult:
                 kernel_resources=raw.get("kernel_resources"),
                 api_overhead=raw.get("api_overhead"),
                 roctx_regions=raw.get("roctx_regions"),
+                att_analysis=raw.get("att_analysis"),
             )
         raise RuntimeError(
             "Raw analysis data not available. "
@@ -329,6 +330,7 @@ class AnalysisResult:
             kernel_resources=raw.get("kernel_resources"),
             api_overhead=raw.get("api_overhead"),
             roctx_regions=raw.get("roctx_regions"),
+            att_analysis=raw.get("att_analysis"),
         )
 
     def to_text(self) -> str:
