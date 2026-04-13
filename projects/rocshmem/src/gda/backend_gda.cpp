@@ -95,7 +95,7 @@ void GDABackend::init() {
 
   configure_nic_policy();
 
-  LOG_INFO("PE %d QP config: num_nics=%d, "
+  LOG_TRACE("PE %d QP config: num_nics=%d, "
     "qps_per_pe_default_ctx=%zu, qps_per_pe_usr_ctx=%zu, "
     "num_qps_per_pe=%zu, num_qps=%u, nic_policy=%s",
     my_pe, num_nics_, qps_per_pe_default_ctx_, qps_per_pe_usr_ctx_,
@@ -178,9 +178,9 @@ void GDABackend::configure_nic_policy() {
         std::max(qps_per_pe_default_ctx_, qps_per_pe_usr_ctx_));
     if (limit < 1) limit = 1;
     if (limit < num_nics_) {
-      LOG_INFO("ROUND_ROBIN limiting num_nics from %d to %d "
-               "(max qps_per_pe=%d)",
-               num_nics_, limit, limit);
+      LOG_TRACE("ROUND_ROBIN limiting num_nics from %d to %d "
+                "(max qps_per_pe=%d)",
+                num_nics_, limit, limit);
       nic_devices_.resize(limit);
       num_nics_ = limit;
     }
@@ -188,7 +188,7 @@ void GDABackend::configure_nic_policy() {
 }
 
 void GDABackend::select_nics() {
-  bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::INFO;
+  bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::TRACE;
 
   const std::string &force_merge = envvar::gda::net_force_merge.get_value();
   const std::string &merge_level_str = envvar::gda::net_merge_level.get_value();
@@ -279,15 +279,15 @@ void GDABackend::log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe,
     if (r) nic_list += " ";
     nic_list += nic_devices_[nidx].nic_name;
   }
-  LOG_INFO("PE %d ctx %u qps_per_pe=%zu NICs=[%s]",
-           my_pe, ctx_id, qps_per_pe, nic_list.c_str());
+  LOG_TRACE("PE %d ctx %u qps_per_pe=%zu NICs=[%s]",
+            my_pe, ctx_id, qps_per_pe, nic_list.c_str());
 }
 
 void GDABackend::setup_ctxs() {
   setup_host_ctx();
   setup_default_ctx();
 
-  bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::INFO;
+  bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::TRACE;
   if (verbose) log_ctx_nics(0, qps_per_pe_default_ctx_, 0);
 
   CHECK_HIP(hipMalloc(&ctx_array, sizeof(GDAContext) * envvar::max_num_contexts));
