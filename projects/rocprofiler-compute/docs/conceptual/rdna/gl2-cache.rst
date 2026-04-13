@@ -19,7 +19,7 @@ For Instinct L2 (TCC) coherence, channel hashing, and fabric metrics on CDNA arc
 GL1C to GL2C and GL2C panels
 =============================
 
-GL1C GL1C-GL2 Interface (panel)
+GL1C GL1C-GL2 interface (panel)
 ---------------------------------
 
 .. tab-set::
