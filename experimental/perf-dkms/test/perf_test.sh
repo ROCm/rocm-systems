@@ -102,10 +102,10 @@ test_perf_stat() {
     log_info "Testing perf stat with PMU events..."
 
     local events=(
-        "${PMU_NAME}/cycles/"
-        "${PMU_NAME}/instructions/"
-        "${PMU_NAME}/cache-misses/"
-        "${PMU_NAME}/bandwidth/"
+        "${PMU_NAME}/sq_waves/"
+        "${PMU_NAME}/sq_instructions/"
+        "${PMU_NAME}/gl2c_miss/"
+        "${PMU_NAME}/gl2c_hit/"
     )
 
     for event in "${events[@]}"; do
@@ -129,7 +129,7 @@ test_perf_stat() {
 test_multiple_events() {
     log_info "Testing multiple events simultaneously..."
 
-    local event_list="${PMU_NAME}/cycles/,${PMU_NAME}/instructions/,${PMU_NAME}/cache-misses/"
+    local event_list="${PMU_NAME}/sq_waves/,${PMU_NAME}/sq_instructions/,${PMU_NAME}/gl2c_miss/"
 
     local output=$(timeout 15 perf stat -e "$event_list" sleep $TEST_DURATION 2>&1 || true)
 
@@ -166,7 +166,7 @@ test_perf_record() {
     log_info "Testing perf record (if supported)..."
 
     # Note: Our PMU doesn't support sampling, so this should fail gracefully
-    local output=$(timeout 10 perf record -e "${PMU_NAME}/cycles/" sleep 1 2>&1 || true)
+    local output=$(timeout 10 perf record -e "${PMU_NAME}/sq_waves/" sleep 1 2>&1 || true)
 
     if echo "$output" | grep -qi "not supported\|sampling"; then
         log_info "Sampling correctly not supported (as expected)"
@@ -188,7 +188,7 @@ check_counter_increment() {
         log_info "PMU sysfs path found: $sysfs_path"
 
         # Run a short test and check if counters are updating
-        timeout 10 perf stat -e "${PMU_NAME}/cycles/" sleep 2 2>&1 | grep -E "cycles|performance" || true
+        timeout 10 perf stat -e "${PMU_NAME}/sq_waves/" sleep 2 2>&1 | grep -E "sq_waves|performance" || true
 
         return 0
     else
