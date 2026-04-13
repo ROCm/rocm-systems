@@ -1,9 +1,9 @@
 System Speed-of-Light:
   VALU FLOPs (FP16):
-    rst: 'Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time. Theoretical peak uses packed FP16 at 2× the FP32 per-CU rate: max_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s. Public RDNA 3.5 summaries cite dual-CU WGPs, dual-issue VALU, and chip FP16 peak ~2× FP32; this formula is the same 2× relationship at the per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3.5).'
+    rst: 'Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time. Theoretical peak uses packed FP16 at 2× the FP32 per-CU rate: max_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s. this formula is the same 2× relationship at the per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3.5).'
     unit: GFLOP/s
   VALU FLOPs (FP32):
-    rst: 'Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time. Theoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s (wave64 / dual-issue VALU class used for Navi3-style parts). $cu_per_gpu is the total number of Compute Units from system info, not WGP count (on RDNA 3.5, one WGP pairs two CUs).'
+    rst: 'Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time. Theoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s (wave64 / dual-issue VALU class used for Ryzen APU-style parts). $cu_per_gpu is the total number of Compute Units from system info, not WGP count (on RDNA 3.5, one WGP pairs two CUs).'
     unit: GFLOP/s
   IPC:
     rst: Instructions Per Cycle — ratio of instructions executed over busy cycles. Calculated as (Total Instructions - Internal Instructions) / Busy Cycles. Higher IPC indicates better instruction throughput.
@@ -206,10 +206,10 @@ Memory chart - GCEA to System Memory:
     unit: Count per Normalization Unit
 Roofline Performance Rates:
   VALU FLOPs (F16):
-    rst: The total 16-bit floating-point operations executed per second on the VALU. Theoretical FP16 throughput is 2× the FP32 FMA peak (packed half on Navi3 / RDNA3-class VALU). This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator.
+    rst: The total 16-bit floating-point operations executed per second on the VALU. Theoretical FP16 throughput is 2× the FP32 FMA peak (packed half on Ryzen APU / RDNA3-class VALU). This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator.
     unit: GFLOP/s
   VALU FLOPs (F32):
-    rst: The total 32-bit floating-point operations executed per second on the VALU. Navi3 / RDNA3-class CUs sustain up to 128 V_FMA_F32 ops per cycle per CU in wave64 mode; the roofline peak column uses empirically measured F32 throughput. This is presented with the value of the peak empirical F32 FLOPs achievable on the specific accelerator.
+    rst: The total 32-bit floating-point operations executed per second on the VALU. Ryzen APU CUs sustain up to 128 V_FMA_F32 ops per cycle per CU in wave64 mode; the roofline peak column uses empirically measured F32 throughput. This is presented with the value of the peak empirical F32 FLOPs achievable on the specific accelerator.
     unit: GFLOP/s
   VALU FLOPs (F64):
     rst: The total 64-bit floating-point operations executed per second on the VALU. FP64 throughput is typically 1/16 or 1/32 of FP32 on RDNA3.5 hardware. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator.
