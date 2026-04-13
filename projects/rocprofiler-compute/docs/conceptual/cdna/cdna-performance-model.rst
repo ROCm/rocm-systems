@@ -14,7 +14,7 @@ including Graphics Core Next™ (GCN) GPUs like the AMD Instinct MI50, CDNA™
 accelerators like the MI100, CDNA2 accelerators such as the AMD Instinct MI250X, MI250,
 and MI210, CDNA3 accelerators such as the AMD Instinct MI300A, MI300X, MI325X, and CDNA4 accelerators such as MI350X and MI355X.
 
-For **AMD Radeon™ / RDNA™** client GPUs (e.g. **gfx1151** / RDNA3.5), see
+For AMD Radeon™ / RDNA™ client GPUs (e.g. gfx1151/RDNA3.5), see
 :doc:`RDNA3 <../rdna/rdna-performance-model>`. The top-level
 :doc:`../performance-model` page summarizes how the CDNA and RDNA architecture-specific details are organized.
 
