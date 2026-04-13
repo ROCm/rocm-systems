@@ -3,7 +3,6 @@ set(target rocprofiler-compute-tool)
 add_library(${target} SHARED
     rocprofiler_compute_tool.h
     rocprofiler_compute_tool.cpp
-    sdk_common.h
     sdk_callbacks.h
     sdk_callbacks.cpp
     helper.hpp

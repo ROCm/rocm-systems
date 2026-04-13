@@ -4,7 +4,7 @@
 #include "rocprofiler_compute_tool.h"
 
 #include "input_parameters.h"
-#include "sdk_common.h"
+#include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
 #include <unistd.h>
@@ -12,19 +12,25 @@
 #include <fstream>
 #include <iostream>
 
-using namespace rocprof_compute_tool;
+using namespace rocprofiler_compute_tool;
 
-std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
-std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacks>();
+std::shared_ptr<InputParameters>  g_input_parameters = std::make_shared<EnvInputParameters>();
+std::shared_ptr<SdkWrapper>       g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
+std::shared_ptr<SdkCallbacksImpl> g_sdk_callbacks    = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
 
-void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters> & input_parameters)
+void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
     g_input_parameters = input_parameters;
 }
 
-void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacks>& sdk_callbacks)
+void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacksImpl>& sdk_callbacks)
 {
     g_sdk_callbacks = sdk_callbacks;
+}
+
+void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
+{
+    g_sdk_wrapper = sdk_wrapper;
 }
 
 namespace
@@ -73,22 +79,20 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
     std::clog << "[rocprofiler-compute] In tool init\n";
-    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation");
+    g_sdk_wrapper->create_context(&get_client_ctx());
 
-    ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                              dispatch_callback,
-                                                                              user_data,
-                                                                              record_callback,
-                                                                              user_data),
-                     "setup counting service");
-    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(get_client_ctx(),
-                                                                    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-                                                                    nullptr,
-                                                                    0,
-                                                                    tool_tracing_callback,
-                                                                    user_data),
-                     "setup code object tracing service");
-    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+    g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                dispatch_callback,
+                                                                user_data,
+                                                                record_callback,
+                                                                user_data);
+    g_sdk_wrapper->configure_callback_tracing_service(get_client_ctx(),
+                                                      ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+                                                      nullptr,
+                                                      0,
+                                                      tool_tracing_callback,
+                                                      user_data);
+    g_sdk_wrapper->start_context(get_client_ctx());
 
     return 0;
 }

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "helper.hpp"
+#include "sdk_wrapper.h"
 
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -18,6 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace rocprofiler_compute_tool
+{
 enum class iteration_multiplexing_mode_t
 {
     DISABLED,
@@ -90,6 +93,23 @@ struct tool_data_t
 class SdkCallbacks
 {
 public:
+    virtual ~SdkCallbacks()                                  = default;
+    virtual void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                   rocprofiler_counter_config_id_t*             config,
+                                   void* callback_data_args) = 0;
+    virtual void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                 rocprofiler_counter_record_t*                record_data,
+                                 size_t                                       record_count,
+                                 void* callback_data_args)   = 0;
+    virtual void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                       void*                                 callback_data) = 0;
+};
+
+class SdkCallbacksImpl
+{
+public:
+    SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper);
+
     void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                            rocprofiler_counter_config_id_t*             config,
                            void*                                        callback_data_args);
@@ -107,4 +127,7 @@ private:
         tool_data_t*                                                                tool,
         rocprofiler_agent_id_t                                                      agent_id,
         std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache);
+
+    std::shared_ptr<SdkWrapper> m_sdk_wrapper;
 };
+}  // namespace rocprofiler_compute_tool

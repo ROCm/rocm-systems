@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-namespace rocprof_compute_tool
+namespace rocprofiler_compute_tool
 {
 class InputParameters
 {

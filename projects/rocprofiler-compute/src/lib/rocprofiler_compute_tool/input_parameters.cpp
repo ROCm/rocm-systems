@@ -3,7 +3,7 @@
 #include "input_parameters.h"
 #include <stdlib.h>
 
-using namespace rocprof_compute_tool;
+using namespace rocprofiler_compute_tool;
 
 char* EnvInputParameters::get_output_path()
 {

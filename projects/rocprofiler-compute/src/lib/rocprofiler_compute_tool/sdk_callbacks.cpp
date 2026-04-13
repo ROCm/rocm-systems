@@ -2,15 +2,23 @@
 // SPDX-License-Identifier:  MIT
 #include "sdk_callbacks.h"
 
-#include "sdk_common.h"
-
 #include <algorithm>
 #include <iostream>
 #include <map>
 
+using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
-bool SdkCallbacks::is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
+SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
+    : m_sdk_wrapper(sdk_wrapper)
+{
+    if (!m_sdk_wrapper)
+    {
+        throw std::invalid_argument("SdkWrapper pointer cannot be null");
+    }
+}
+
+bool SdkCallbacksImpl::is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
 {
     if (!tool->target_kernel_ids.empty() && !tool->target_kernel_ids.count(kernel_id))
         return false;
@@ -26,7 +34,7 @@ bool SdkCallbacks::is_targetted_dispatch(const tool_data_t* tool, uint64_t kerne
     return true;
 }
 
-void SdkCallbacks::create_counter_collection_profile(
+void SdkCallbacksImpl::create_counter_collection_profile(
     tool_data_t*                                                                tool,
     rocprofiler_agent_id_t                                                      agent_id,
     std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache)
@@ -53,31 +61,28 @@ void SdkCallbacks::create_counter_collection_profile(
 
     // Get available counters for this agent
     std::vector<rocprofiler_counter_id_t> gpu_counters;
-    ROCPROFILER_CALL(
-        rocprofiler_iterate_agent_supported_counters(
-            agent_id,
-            [](rocprofiler_agent_id_t, rocprofiler_counter_id_t* counters, size_t num_counters, void* user_data)
+    m_sdk_wrapper->iterate_agent_supported_counters(
+        agent_id,
+        [](rocprofiler_agent_id_t, rocprofiler_counter_id_t* counters, size_t num_counters, void* user_data)
+        {
+            std::vector<rocprofiler_counter_id_t>* vec =
+                static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
+            for (size_t i = 0; i < num_counters; i++)
             {
-                std::vector<rocprofiler_counter_id_t>* vec =
-                    static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
-                for (size_t i = 0; i < num_counters; i++)
-                {
-                    vec->push_back(counters[i]);
-                }
-                return ROCPROFILER_STATUS_SUCCESS;
-            },
-            static_cast<void*>(&gpu_counters)),
-        "fetch supported counters");
+                vec->push_back(counters[i]);
+            }
+            return ROCPROFILER_STATUS_SUCCESS;
+        },
+        static_cast<void*>(&gpu_counters));
 
     std::vector<std::string>                        gpu_counter_names;
     std::map<std::string, rocprofiler_counter_id_t> gpu_counter_map;
     for (auto& counter : gpu_counters)
     {
         rocprofiler_counter_info_v0_t info;
-        ROCPROFILER_CALL(rocprofiler_query_counter_info(counter,
-                                                        ROCPROFILER_COUNTER_INFO_VERSION_0,
-                                                        static_cast<void*>(&info)),
-                         "query counter info");
+        m_sdk_wrapper->query_counter_info(counter,
+                                          ROCPROFILER_COUNTER_INFO_VERSION_0,
+                                          static_cast<void*>(&info));
         gpu_counter_names.push_back(std::string(info.name));
         gpu_counter_map.insert({std::string(info.name), counter});
     }
@@ -127,17 +132,16 @@ void SdkCallbacks::create_counter_collection_profile(
     for (auto& collect_counters_one_iter : collect_counters)
     {
         rocprofiler_counter_config_id_t profile = {.handle = 0};
-        ROCPROFILER_CALL(rocprofiler_create_counter_config(agent_id,
-                                                           collect_counters_one_iter.data(),
-                                                           collect_counters_one_iter.size(),
-                                                           &profile),
-                         "construct profile cfg");
+        m_sdk_wrapper->create_counter_config(agent_id,
+                                             collect_counters_one_iter.data(),
+                                             collect_counters_one_iter.size(),
+                                             &profile);
         profiles.push_back(profile);
         profile_cache[agent_id.handle] = profiles;
     }
 }
 
-void SdkCallbacks::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                      rocprofiler_counter_config_id_t*             config,
                                      void* callback_data_args)
 {
@@ -270,7 +274,7 @@ void SdkCallbacks::dispatch_callback(rocprofiler_dispatch_counting_service_data_
     set_config_from_cache();
 }
 
-void SdkCallbacks::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                    rocprofiler_counter_record_t*                record_data,
                                    size_t                                       record_count,
                                    void*                                        callback_data_args)
@@ -287,8 +291,7 @@ void SdkCallbacks::record_callback(rocprofiler_dispatch_counting_service_data_t 
     for (size_t i = 0; i < record_count; ++i)
     {
         rocprofiler_counter_id_t counter_id{};
-        ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[i].id, &counter_id),
-                         "query record counter id");
+        m_sdk_wrapper->query_record_counter_id(record_data[i].id, &counter_id);
 
         // Store the counter info record in tool_data
         counter_info_record_t record{dispatch_data.dispatch_info.dispatch_id,
@@ -305,7 +308,7 @@ void SdkCallbacks::record_callback(rocprofiler_dispatch_counting_service_data_t 
     }
 }
 
-void SdkCallbacks::tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data)
+void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data)
 {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
         record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
