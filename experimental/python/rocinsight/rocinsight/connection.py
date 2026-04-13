@@ -64,6 +64,10 @@ class RocinsightConnection:
         "pmc_events",
     ]
 
+    # SQL views defined inside each rocpd database that analysis code queries
+    # directly (e.g. analysis/core.py uses "kernels", "memory_copies", "regions").
+    _ANALYSIS_VIEWS = ["kernels", "memory_copies", "regions"]
+
     def __init__(
         self,
         db_paths: Union[str, Path, List[Union[str, Path]]],
@@ -151,6 +155,27 @@ class RocinsightConnection:
             conn.execute(
                 f"CREATE TEMP VIEW IF NOT EXISTS {table} AS {union_sql}"
             )
+
+        # Union analysis-facing views (kernels, memory_copies, regions) that
+        # are defined as SQL VIEWs inside each rocpd database file.
+        for view_name in self._ANALYSIS_VIEWS:
+            parts = []
+            for idx in range(n):
+                alias = f"db{idx}"
+                try:
+                    check = conn.execute(
+                        f"SELECT COUNT(*) FROM {alias}.sqlite_master "
+                        f"WHERE (type='table' OR type='view') AND name='{view_name}'"
+                    ).fetchone()
+                    if check and check[0] > 0:
+                        parts.append(f"SELECT * FROM {alias}.{view_name}")
+                except Exception:
+                    continue
+            if parts:
+                union_sql = " UNION ALL ".join(parts)
+                conn.execute(
+                    f"CREATE TEMP VIEW IF NOT EXISTS [{view_name}] AS {union_sql}"
+                )
 
 
 # ---------------------------------------------------------------------------
