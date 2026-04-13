@@ -23,22 +23,22 @@ Panel Config:
         unit: Unit
       metric:
         DRAM Read Requests:
-          avg: AVG(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
+          avg: SUM(GCEA_RDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
           min: MIN(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
           max: MAX(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
           unit: (Count + $normUnit)
         DRAM Read Chained Requests:
-          avg: AVG(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          avg: SUM(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
           min: MIN(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
           max: MAX(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
           unit: (Count + $normUnit)
         DRAM Read Banks Active:
-          avg: AVG(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
+          avg: SUM(GCEA_RDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
           min: MIN(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
           max: MAX(GCEA_RDRAM_NUM_BANKS_VLD_sum / $denom)
           unit: (Count + $normUnit)
         DRAM Read Size (32B increments):
-          avg: AVG(GCEA_RDRAM_SIZE_REQ_sum / $denom)
+          avg: SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM($denom)
           min: MIN(GCEA_RDRAM_SIZE_REQ_sum / $denom)
           max: MAX(GCEA_RDRAM_SIZE_REQ_sum / $denom)
           unit: (Count + $normUnit)
@@ -57,22 +57,22 @@ Panel Config:
         unit: Unit
       metric:
         DRAM Write Requests:
-          avg: AVG(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
+          avg: SUM(GCEA_WDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
           min: MIN(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
           max: MAX(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
           unit: (Count + $normUnit)
         DRAM Write Chained Requests:
-          avg: AVG(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
+          avg: SUM(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
           min: MIN(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
           max: MAX(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum / $denom)
           unit: (Count + $normUnit)
         DRAM Write Banks Active:
-          avg: AVG(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
+          avg: SUM(GCEA_WDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
           min: MIN(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
           max: MAX(GCEA_WDRAM_NUM_BANKS_VLD_sum / $denom)
           unit: (Count + $normUnit)
         DRAM Write Size (32B increments):
-          avg: AVG(GCEA_WDRAM_SIZE_REQ_sum / $denom)
+          avg: SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM($denom)
           min: MIN(GCEA_WDRAM_SIZE_REQ_sum / $denom)
           max: MAX(GCEA_WDRAM_SIZE_REQ_sum / $denom)
           unit: (Count + $normUnit)
@@ -91,27 +91,27 @@ Panel Config:
         unit: Unit
       metric:
         SARB Busy:
-          avg: AVG((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          avg: SUM(100 * GCEA_SARB_BUSY) / SUM(GCEA_ALWAYS_COUNT)
           min: MIN((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
           max: MAX((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
           unit: Percent
         SARB Stalled:
-          avg: AVG((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          avg: SUM(100 * GCEA_SARB_STALLED) / SUM(GCEA_ALWAYS_COUNT)
           min: MIN((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
           max: MAX((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
           unit: Percent
         SARB Starving:
-          avg: AVG((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          avg: SUM(100 * GCEA_SARB_STARVING) / SUM(GCEA_ALWAYS_COUNT)
           min: MIN((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
           max: MAX((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
           unit: Percent
         SARB Total Requests:
-          avg: AVG(GCEA_SARB_REQ_PER_VC_sum / $denom)
+          avg: SUM(GCEA_SARB_REQ_PER_VC_sum) / SUM($denom)
           min: MIN(GCEA_SARB_REQ_PER_VC_sum / $denom)
           max: MAX(GCEA_SARB_REQ_PER_VC_sum / $denom)
           unit: (Count + $normUnit)
         SARB DRAM Requests:
-          avg: AVG(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
+          avg: SUM(GCEA_SARB_DRAM_REQ_PER_VC_sum) / SUM($denom)
           min: MIN(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
           max: MAX(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
           unit: (Count + $normUnit)
@@ -130,17 +130,17 @@ Panel Config:
         unit: Unit
       metric:
         Read Returns:
-          avg: AVG(GCEA_RRET_VLD_sum / $denom)
+          avg: SUM(GCEA_RRET_VLD_sum) / SUM($denom)
           min: MIN(GCEA_RRET_VLD_sum / $denom)
           max: MAX(GCEA_RRET_VLD_sum / $denom)
           unit: (Count + $normUnit)
         Write Returns:
-          avg: AVG(GCEA_WRET_VLD_sum / $denom)
+          avg: SUM(GCEA_WRET_VLD_sum) / SUM($denom)
           min: MIN(GCEA_WRET_VLD_sum / $denom)
           max: MAX(GCEA_WRET_VLD_sum / $denom)
           unit: (Count + $normUnit)
         Probe Requests:
-          avg: AVG(GCEA_PRB_REQ_sum / $denom)
+          avg: SUM(GCEA_PRB_REQ_sum) / SUM($denom)
           min: MIN(GCEA_PRB_REQ_sum / $denom)
           max: MAX(GCEA_PRB_REQ_sum / $denom)
           unit: (Count + $normUnit)

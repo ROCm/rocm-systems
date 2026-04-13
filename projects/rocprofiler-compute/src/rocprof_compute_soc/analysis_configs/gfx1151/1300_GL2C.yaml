@@ -23,17 +23,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2C Hit Rate:
-          avg: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
+          avg: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           min: MIN((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
           max: MAX((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
           unit: Percent
         GL2C Hits:
-          avg: AVG(GL2C_HIT_sum / $denom)
+          avg: SUM(GL2C_HIT_sum) / SUM($denom)
           min: MIN(GL2C_HIT_sum / $denom)
           max: MAX(GL2C_HIT_sum / $denom)
           unit: (Count + $normUnit)
         GL2C Misses:
-          avg: AVG(GL2C_MISS_sum / $denom)
+          avg: SUM(GL2C_MISS_sum) / SUM($denom)
           min: MIN(GL2C_MISS_sum / $denom)
           max: MAX(GL2C_MISS_sum / $denom)
           unit: (Count + $normUnit)
@@ -52,32 +52,32 @@ Panel Config:
         unit: Unit
       metric:
         Total Requests:
-          avg: AVG(GL2C_REQ_sum / $denom)
+          avg: SUM(GL2C_REQ_sum) / SUM($denom)
           min: MIN(GL2C_REQ_sum / $denom)
           max: MAX(GL2C_REQ_sum / $denom)
           unit: (Count + $normUnit)
         Read Requests:
-          avg: AVG(GL2C_READ_sum / $denom)
+          avg: SUM(GL2C_READ_sum) / SUM($denom)
           min: MIN(GL2C_READ_sum / $denom)
           max: MAX(GL2C_READ_sum / $denom)
           unit: (Count + $normUnit)
         Write Requests:
-          avg: AVG(GL2C_WRITE_sum / $denom)
+          avg: SUM(GL2C_WRITE_sum) / SUM($denom)
           min: MIN(GL2C_WRITE_sum / $denom)
           max: MAX(GL2C_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         Atomic Requests:
-          avg: AVG(GL2C_ATOMIC_sum / $denom)
+          avg: SUM(GL2C_ATOMIC_sum) / SUM($denom)
           min: MIN(GL2C_ATOMIC_sum / $denom)
           max: MAX(GL2C_ATOMIC_sum / $denom)
           unit: (Count + $normUnit)
         EA Read Requests (DRAM):
-          avg: AVG(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          avg: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
           min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
           max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
           unit: (Count + $normUnit)
         EA Write Requests (DRAM):
-          avg: AVG(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          avg: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
           min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
           max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
           unit: (Count + $normUnit)
@@ -97,13 +97,13 @@ Panel Config:
       metric:
         GL2C Read BW:
           # 32/64/128 B read bins plus 96 B compressed reads; GL2C_EA_RDREQ_96B covers EA-side 96 B reads.
-          avg: AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          avg: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           min: MIN((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
           max: MAX((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
         GL2C Write BW:
           # Note: GL2C write requests use 64B as the average transaction size.
-          avg: AVG((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          avg: SUM(GL2C_WRITE_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
           min: MIN((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
           max: MAX((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s

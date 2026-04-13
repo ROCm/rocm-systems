@@ -27,7 +27,7 @@ Panel Config:
         # Denominator: GRBM_GUI_ACTIVE * NUM_TCP with NUM_TCP = max(1, floor($cu_per_gpu / 2))
         # (one TCP per WGP, 2 CUs per WGP on RDNA3.x). AVG/MIN/MAX apply per sample.
         TCP Busy:
-          avg: AVG((100 * TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))) if ((GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))) != 0) else None)
+          avg: SUM(100 * TCP_GATE_EN2) / SUM(GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))
           min: MIN((100 * TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))) if ((GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))) != 0) else None)
           max: MAX((100 * TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))) if ((GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))) != 0) else None)
           unit: Percent
@@ -46,22 +46,22 @@ Panel Config:
         unit: Unit
       metric:
         Total Requests:
-          avg: AVG(TCP_REQ_sum / $denom)
+          avg: SUM(TCP_REQ_sum) / SUM($denom)
           min: MIN(TCP_REQ_sum / $denom)
           max: MAX(TCP_REQ_sum / $denom)
           unit: (Count + $normUnit)
         Read Requests:
-          avg: AVG(TCP_REQ_READ_sum / $denom)
+          avg: SUM(TCP_REQ_READ_sum) / SUM($denom)
           min: MIN(TCP_REQ_READ_sum / $denom)
           max: MAX(TCP_REQ_READ_sum / $denom)
           unit: (Count + $normUnit)
         Write Requests:
-          avg: AVG(TCP_REQ_WRITE_sum / $denom)
+          avg: SUM(TCP_REQ_WRITE_sum) / SUM($denom)
           min: MIN(TCP_REQ_WRITE_sum / $denom)
           max: MAX(TCP_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         Miss Requests:
-          avg: AVG(TCP_REQ_MISS_sum / $denom)
+          avg: SUM(TCP_REQ_MISS_sum) / SUM($denom)
           min: MIN(TCP_REQ_MISS_sum / $denom)
           max: MAX(TCP_REQ_MISS_sum / $denom)
           unit: (Count + $normUnit)
@@ -80,7 +80,7 @@ Panel Config:
         unit: Unit
       metric:
         Hit Rate:
-          avg: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
+          avg: SUM(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum)) / SUM(TCP_REQ_sum)
           min: MIN((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           max: MAX((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
@@ -99,17 +99,17 @@ Panel Config:
         unit: Unit
       metric:
         GL1 Read Requests:
-          avg: AVG(TCP_GL1_REQ_READ_sum / $denom)
+          avg: SUM(TCP_GL1_REQ_READ_sum) / SUM($denom)
           min: MIN(TCP_GL1_REQ_READ_sum / $denom)
           max: MAX(TCP_GL1_REQ_READ_sum / $denom)
           unit: (Count + $normUnit)
         GL1 Read 128B Requests:
-          avg: AVG(TCP_GL1_REQ_READ_128B_sum / $denom)
+          avg: SUM(TCP_GL1_REQ_READ_128B_sum) / SUM($denom)
           min: MIN(TCP_GL1_REQ_READ_128B_sum / $denom)
           max: MAX(TCP_GL1_REQ_READ_128B_sum / $denom)
           unit: (Count + $normUnit)
         GL1 Write Requests:
-          avg: AVG(TCP_GL1_REQ_WRITE_sum / $denom)
+          avg: SUM(TCP_GL1_REQ_WRITE_sum) / SUM($denom)
           min: MIN(TCP_GL1_REQ_WRITE_sum / $denom)
           max: MAX(TCP_GL1_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
@@ -128,17 +128,17 @@ Panel Config:
         unit: Unit
       metric:
         TA Req Stall:
-          avg: AVG(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          avg: SUM(TCP_TCP_TA_REQ_STALL_sum) / SUM($denom)
           min: MIN(TCP_TCP_TA_REQ_STALL_sum / $denom)
           max: MAX(TCP_TCP_TA_REQ_STALL_sum / $denom)
           unit: (Cycles + $normUnit)
         GL1 Back Pressure:
-          avg: AVG(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
+          avg: SUM(TCP_GL1_TCP_BACK_PRESSURE_sum) / SUM($denom)
           min: MIN(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
           max: MAX(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
           unit: (Cycles + $normUnit)
         Data FIFO Stall:
-          avg: AVG(TCP_DATA_FIFO_STALL_sum / $denom)
+          avg: SUM(TCP_DATA_FIFO_STALL_sum) / SUM($denom)
           min: MIN(TCP_DATA_FIFO_STALL_sum / $denom)
           max: MAX(TCP_DATA_FIFO_STALL_sum / $denom)
           unit: (Cycles + $normUnit)

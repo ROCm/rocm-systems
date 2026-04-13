@@ -477,7 +477,10 @@ class MetricEvaluator:
             if (
                 eval_result is None
                 or eval_result is pd.NA
-                or (np.isscalar(eval_result) and pd.isna(eval_result))
+                or (
+                    np.isscalar(eval_result)
+                    and (pd.isna(eval_result) or np.isinf(eval_result))
+                )
             ):
                 # Do not give warning if None is explicitly specified in expression
                 if "None" not in expr:

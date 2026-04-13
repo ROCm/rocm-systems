@@ -24,14 +24,12 @@ Panel Config:
         unit: Unit
       metric:
         IPC:
-          avg: AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))
+          avg: SUM(SQ_INSTS) / SUM(SQ_BUSY_CU_CYCLES)
           min: MIN((SQ_INSTS / SQ_BUSY_CU_CYCLES))
           max: MAX((SQ_INSTS / SQ_BUSY_CU_CYCLES))
           unit: Instructions per Cycle
         IPC (Issued):
-          avg: AVG(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
-            + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
-            / SQ_ACTIVE_INST_ANY))
+          avg: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
           min: MIN(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
             + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
             / SQ_ACTIVE_INST_ANY))
@@ -40,18 +38,17 @@ Panel Config:
             / SQ_ACTIVE_INST_ANY))
           unit: Instructions per Cycle
         SALU Utilization:
-          avg: AVG((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: SUM(100 * SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           unit: Percent
         VALU Utilization:
-          avg: AVG((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: SUM(100 * SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           unit: Percent
         VALU Active Threads:
-          avg: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
-            != 0) else None))
+          avg: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
           min: MIN(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
             != 0) else None))
           max: MAX(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU

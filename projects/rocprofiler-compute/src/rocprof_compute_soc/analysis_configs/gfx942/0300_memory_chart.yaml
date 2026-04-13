@@ -11,28 +11,27 @@ Panel Config:
         value: Value
       metric:
         Wavefront Occupancy:
-          value: ROUND(AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD) / $numActiveCUs),
+          value: ROUND(SUM(SQ_ACCUM_PREV_HIRES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs),
             0)
           coll_level: SQ_LEVEL_WAVES
         Wave Life:
-          value: ROUND(AVG(((4 * (SQ_WAVE_CYCLES / SQ_WAVES)) if (SQ_WAVES != 0) else
-            0)), 0)
+          value: ROUND(SUM(4 * SQ_WAVE_CYCLES) / SUM(SQ_WAVES), 0)
         SALU:
-          value: ROUND(AVG((SQ_INSTS_SALU / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_SALU) / SUM($denom), 0)
         SMEM:
-          value: ROUND(AVG((SQ_INSTS_SMEM / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_SMEM) / SUM($denom), 0)
         VALU:
-          value: ROUND(AVG((SQ_INSTS_VALU / $denom)), 0)
-        Matrix Ops:
-          value: ROUND(AVG((SQ_INSTS_MFMA / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_VALU) / SUM($denom), 0)
+        MFMA:
+          value: ROUND(SUM(SQ_INSTS_MFMA) / SUM($denom), 0)
         VMEM:
-          value: ROUND(AVG((SQ_INSTS_VMEM / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_VMEM) / SUM($denom), 0)
         LDS:
-          value: ROUND(AVG((SQ_INSTS_LDS / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_LDS) / SUM($denom), 0)
         GWS:
-          value: ROUND(AVG((SQ_INSTS_GDS / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_GDS) / SUM($denom), 0)
         BR:
-          value: ROUND(AVG((SQ_INSTS_BRANCH / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_BRANCH) / SUM($denom), 0)
         Active CUs (deprecated):
           value: $numActiveCUs
         Num CUs:
@@ -50,92 +49,76 @@ Panel Config:
         Workgroups:
           value: ROUND(AVG(SPI_CSN_NUM_THREADGROUPS), 0)
         LDS Req:
-          value: ROUND(AVG((SQ_INSTS_LDS / $denom)), 0)
+          value: ROUND(SUM(SQ_INSTS_LDS) / SUM($denom), 0)
         LDS Util:
-          value: ROUND(AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu))), 0)
+          value: ROUND(SUM(100 * SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
         LDS Latency:
-          value: ROUND(AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS
-            != 0) else None)),0)
+          value: ROUND(SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_LDS),0)
           coll_level: SQ_INST_LEVEL_LDS
         VL1 Rd:
-          value: ROUND(AVG((TCP_TOTAL_READ_sum / $denom)), 0)
+          value: ROUND(SUM(TCP_TOTAL_READ_sum) / SUM($denom), 0)
         VL1 Wr:
-          value: ROUND(AVG((TCP_TOTAL_WRITE_sum / $denom)), 0)
+          value: ROUND(SUM(TCP_TOTAL_WRITE_sum) / SUM($denom), 0)
         VL1 Atomic:
-          value: ROUND(AVG(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
-            / $denom)), 0)
+          value: ROUND(SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom), 0)
         VL1 Hit:
-          value: ROUND(AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
-            + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-            / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
-            else None )), 0)
+          value: ROUND(100 - SUM(100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum), 0)
         VL1 Coalesce:
-          value: ROUND(AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
-            * 4)) if (TCP_TOTAL_ACCESSES_sum != None) else 0)), 0)
+          value: ROUND(SUM(TA_TOTAL_WAVEFRONTS_sum * 64 * 100) / SUM(TCP_TOTAL_ACCESSES_sum * 4), 0)
         VL1 Stall:
-          value: ROUND(AVG((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-            if (TCP_GATE_EN1_sum != 0) else None)), 0)
+          value: ROUND(SUM(100 * TCP_TCR_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN1_sum), 0)
         VL1_L2 Rd:
-          value: ROUND(AVG((TCP_TCC_READ_REQ_sum / $denom)), 0)
+          value: ROUND(SUM(TCP_TCC_READ_REQ_sum) / SUM($denom), 0)
         VL1_L2 Wr:
-          value: ROUND(AVG((TCP_TCC_WRITE_REQ_sum / $denom)), 0)
+          value: ROUND(SUM(TCP_TCC_WRITE_REQ_sum) / SUM($denom), 0)
         VL1_L2 Atomic:
-          value: ROUND(AVG(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
-            / $denom)), 0)
+          value: ROUND(SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom), 0)
         sL1D Rd:
-          value: ROUND(AVG((SQC_DCACHE_REQ / $denom)), 0)
+          value: ROUND(SUM(SQC_DCACHE_REQ) / SUM($denom), 0)
         sL1D Hit:
-          value: ROUND((AVG(((SQC_DCACHE_HITS / SQC_DCACHE_REQ) if (SQC_DCACHE_REQ
-            != 0) else None)) * 100), 0)
+          value: ROUND((SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ) * 100), 0)
         sL1D Lat:
-          value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_DCACHE_REQ) if (SQC_DCACHE_REQ
-            != 0) else None)) * 100), 0)
+          value: ROUND((SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQC_DCACHE_REQ) * 100), 0)
           coll_level: SQC_DCACHE_INFLIGHT_LEVEL
         sL1D_L2 Rd:
-          value: ROUND(AVG((SQC_TC_DATA_READ_REQ / $denom)), 0)
+          value: ROUND(SUM(SQC_TC_DATA_READ_REQ) / SUM($denom), 0)
         sL1D_L2 Wr:
-          value: ROUND(AVG((SQC_TC_DATA_WRITE_REQ / $denom)), 0)
+          value: ROUND(SUM(SQC_TC_DATA_WRITE_REQ) / SUM($denom), 0)
         sL1D_L2 Atomic:
-          value: ROUND(AVG((SQC_TC_DATA_ATOMIC_REQ / $denom)), 0)
+          value: ROUND(SUM(SQC_TC_DATA_ATOMIC_REQ) / SUM($denom), 0)
         IL1 Fetch:
-          value: ROUND(AVG((SQC_ICACHE_REQ / $denom)), 0)
+          value: ROUND(SUM(SQC_ICACHE_REQ) / SUM($denom), 0)
         IL1 Hit:
-          value: ROUND((AVG((SQC_ICACHE_HITS / SQC_ICACHE_REQ)) * 100), 0)
+          value: ROUND((SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ) * 100), 0)
         IL1 Lat:
-          value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
-            != 0) else None)) * 100), 0)
+          value: ROUND((SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQC_ICACHE_REQ) * 100), 0)
           coll_level: SQC_ICACHE_INFLIGHT_LEVEL
         IL1_L2 Rd:
-          value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
+          value: ROUND(SUM(SQC_TC_INST_REQ) / SUM($denom), 0)
         L2 Rd:
-          value: ROUND(AVG((TCC_READ_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_READ_sum) / SUM($denom), 0)
         L2 Wr:
-          value: ROUND(AVG((TCC_WRITE_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_WRITE_sum) / SUM($denom), 0)
         L2 Atomic:
-          value: ROUND(AVG((TCC_ATOMIC_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_ATOMIC_sum) / SUM($denom), 0)
         L2 Hit:
-          value: ROUND(AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if
-            ((TCC_HIT_sum + TCC_MISS_sum) != 0) else 0)), 0)
+          value: ROUND(SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum), 0)
         Fabric_L2 Rd:
-          value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_EA0_RDREQ_sum) / SUM($denom), 0)
         Fabric_L2 Wr:
-          value: ROUND(AVG((TCC_EA0_WRREQ_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_EA0_WRREQ_sum) / SUM($denom), 0)
         Fabric_L2 Atomic:
-          value: ROUND(AVG((TCC_EA0_ATOMIC_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_EA0_ATOMIC_sum) / SUM($denom), 0)
         Fabric Rd Lat:
-          value: ROUND(AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
-            != 0) else 0)), 0)
+          value: ROUND(SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum), 0)
         Fabric Wr Lat:
-          value: ROUND(AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
-            != 0) else 0)), 0)
+          value: ROUND(SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum), 0)
         Fabric Atomic Lat:
-          value: ROUND(AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
-            != 0) else 0)), 0)
+          value: ROUND(SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum), 0)
         HBM Rd:
-          value: ROUND(AVG((TCC_EA0_RDREQ_DRAM_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM($denom), 0)
         HBM Wr:
-          value: ROUND(AVG((TCC_EA0_WRREQ_DRAM_sum / $denom)), 0)
+          value: ROUND(SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM($denom), 0)
       comparable: false
       cli_style: mem_chart
       tui_style: mem_chart
@@ -147,7 +130,7 @@ Panel Config:
     SMEM: Total number of SMEM (Scalar Memory Read) instructions issued normalization
       unit.
     VALU: The number of VALU (Vector ALU) instructions issued per normalization unit.
-    Matrix Ops: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued per
+    MFMA: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued per
       normalization unit.
     VMEM: The number of VMEM (GPU Memory) read instructions issued (including FLAT/scratch
       memory) per normalization unit.
