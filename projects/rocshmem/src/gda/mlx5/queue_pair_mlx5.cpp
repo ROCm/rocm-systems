@@ -265,7 +265,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr,
    * doorbell register, it's easier if the LAST thread is the leader; does this
    * have any performance implications?
    */
-  // TODO: change the leader to first active lane-id, since leader is already calcualted
+  // TODO: change the leader to first active lane-id, since leader is already calculated
   bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
 
   if (is_leader) {
@@ -342,7 +342,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
    * doorbell register, it's easier if the LAST thread is the leader; does this
    * have any performance implications? 
    */
-  // TODO: change the leader to first active lane-id, since leader is already calcualted
+  // TODO: change the leader to first active lane-id, since leader is already calculated
   bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
   if (is_leader) {
     // get SQ lock

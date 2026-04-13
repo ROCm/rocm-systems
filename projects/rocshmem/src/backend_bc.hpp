@@ -85,7 +85,7 @@ class Backend {
   /**
    * @brief Create a new team object and initialize it.
    *
-   * @param[in] parent_team Pointer to the parrent team object.
+   * @param[in] parent_team Pointer to the parent team object.
    * @param[in] team_info_wrt_parent TeamInfo object wrt parent team.
    * @param[in] team_info_wrt_world TeamInfo object wrt TEAM_WORLD.
    * @param[in] num_pes Number of PEs in this team.
