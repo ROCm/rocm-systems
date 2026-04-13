@@ -24,6 +24,7 @@
 
 #include "ipc_policy.hpp"
 
+#include <algorithm>
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "memory/default_allocator.hpp"
 #include "backend_bc.hpp"
@@ -47,6 +48,10 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   if (use_pod_detection) {
     // Use pod-based detection
     PodIds localPodIds = detectLocalPodIds();
+    if (IS_PODIDS_ZERO(localPodIds)) {
+      printf("Could not detect local Pod ID. Please use a different heap allocator\n");
+      abort();
+    }
 
     // Get communicator info
     int all_ranks;
@@ -155,17 +160,24 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
     if (use_pod_detection) {
       // In pod detection path, ipc_ranks already contains global ranks
-      std::copy(ipc_ranks.begin(), ipc_ranks.end(), pes_with_ipc_avail);
+      CHECK_HIP(hipMemcpy(pes_with_ipc_avail, ipc_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
     } else {
       // In fallback path, need to translate from shmcomm ranks to thread_comm ranks
       MPI_Group thread_grp;
       MPI_Group shm_grp;
+      int *host_pes_with_ipc_avail = new int[shm_size];
+
       mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
       mpilib_ftable_.Comm_group(shmcomm, &shm_grp);
       int *seqranks = new int[shm_size];
       for(int i = 0; i < shm_size; i++)
         seqranks[i] = i;
-      mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp, pes_with_ipc_avail);
+      mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp, host_pes_with_ipc_avail);
+      CHECK_HIP(hipMemcpy(pes_with_ipc_avail, host_pes_with_ipc_avail, shm_size * sizeof(int), hipMemcpyHostToDevice));
+      // since we delete host_pes_with_ipc_avail, want to make sure the data transfer is complete
+      CHECK_HIP(hipStreamSynchronize(0));
+
+      delete [] host_pes_with_ipc_avail;
       delete [] seqranks;
       mpilib_ftable_.Group_free(&shm_grp);
       mpilib_ftable_.Group_free(&thread_grp);
@@ -182,6 +194,10 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   // For VMM_FABRIC, use pod-based IPC capability detection; otherwise use local ranks
   auto shm_ranks = use_pod_detection ? bootstr->getIpcCapableRanks() : bootstr->getLocalRanks();
   shm_size = shm_ranks.size();
+  if (shm_size == 0) {
+    printf("Error in detecting IPC / shared memory rank, shm_size is 0\n");
+    abort();
+  }
   shm_rank = std::find(shm_ranks.begin(), shm_ranks.end(), my_pe) - shm_ranks.begin();
 
   /*
@@ -246,7 +262,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   auto disable_ipc = envvar::disable_mixed_ipc || envvar::ro::disable_ipc || envvar::disable_ipc;
   if (!disable_ipc) {
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
-    std::copy(shm_ranks.begin(), shm_ranks.end(), pes_with_ipc_avail);
+    CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
   }
 }
 
