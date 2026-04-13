@@ -605,6 +605,7 @@ write_perfetto(
                 // sample_gen
                 if(!itr.symbol.empty())
                 {
+                    // Collect index for the track name in perfetto (ie, CPU [0], GPU [0], GPU [1])
                     // For CPU tracks, use (thread_index, 0) as the track index
                     // For GPU tracks, use (0, agent_type_index) as the track index
                     std::pair<uint64_t, uint64_t> track_index = {itr.thread_index,
@@ -996,9 +997,16 @@ write_perfetto(
                 if(track_data.size() != 1)
                 {
                     if(data.agent_type == "CPU")
-                        track_name << " [" << track_index.first - 1 << "]";
+                    {
+                        if(track_index.first != 0)
+                        {
+                            track_name << " [" << track_index.first - 1 << "]";
+                        }
+                    }
                     else if(data.agent_type == "GPU")
+                    {
                         track_name << " [" << track_index.second << "]";
+                    }
                 }
 
                 track_name << " (S)";
