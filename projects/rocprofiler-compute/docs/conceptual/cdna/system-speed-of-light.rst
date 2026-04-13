@@ -9,7 +9,7 @@ System Speed-of-Light
 *********************
 
 The page lists the System Speed-of-Light metrics from various sections
-of ROCm Compute Profiler’s profiling report for **AMD Instinct™ MI-series**
+of the ROCm Compute Profiler’s profiling report for AMD Instinct™ MI-series
 accelerators (CDNA through CDNA4).
 
 For **RDNA3.5 (gfx1151)** client GPUs, see :doc:`../rdna/system-speed-of-light`.
