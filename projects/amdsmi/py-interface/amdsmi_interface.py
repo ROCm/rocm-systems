@@ -78,7 +78,7 @@ AMDSMI_MAX_NUM_PM_POLICIES = 32
 # Max supported frequencies
 AMDSMI_MAX_NUM_FREQUENCIES = 33
 
-# Max Fan speed
+# Max Fan speed (legacy hwmon). For gpu_od GPUs, use amdsmi_get_gpu_fan_speed_max().
 AMDSMI_MAX_FAN_SPEED = 255
 
 # Max Votlage Curve Points
@@ -1075,7 +1075,7 @@ def amdsmi_get_socket_handles() -> List[c_void_p]:
     return sockets
 
 
-def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
+def amdsmi_get_cpu_handles() -> Dict[str, Any]:
     """
     Function that gets cpu socket handles. Wraps the same named function call.
 
@@ -1083,7 +1083,9 @@ def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
         `None`.
 
     Returns:
-        `List`: List containing all of the found cpu socket handles.
+        `Dict[str, Any]`: Dictionary with keys:
+            - ``cpu_count`` (`int`): Number of CPU socket handles found.
+            - ``processor_handles`` (`List[c_void_p]`): List of CPU socket handles.
     """
     cpu_count = ctypes.c_uint32(0)
     null_ptr = POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
@@ -1094,7 +1096,25 @@ def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
         amdsmi_wrapper.amdsmi_processor_handle(proc_handles[sock_idx])
         for sock_idx in range(cpu_count.value)
     ]
-    return cpu_handles
+    return {"cpu_count": len(cpu_handles), "processor_handles": cpu_handles}
+
+
+def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
+    """Deprecated: Use amdsmi_get_cpu_handles() instead.\
+        Will be deprecated in Rocm 8.0.
+
+    Returns:
+        `List[c_void_p]`: List of CPU socket handles (legacy format).
+    """
+    import warnings
+
+    warnings.warn(
+        "amdsmi_get_cpusocket_handles() is deprecated, use amdsmi_get_cpu_handles() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    result = amdsmi_get_cpu_handles()
+    return result["processor_handles"]
 
 
 def amdsmi_get_socket_info(socket_handle):
@@ -5124,10 +5144,17 @@ def amdsmi_set_gpu_clk_limit(
         clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_SYS
     elif clk_type.lower() == "mclk":
         clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_MEM
+    elif clk_type.lower() == "fclk":
+        clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_DF
+    else:
+        raise AmdSmiParameterException(f"Unsupported clock type: {clk_type}", str)
+    
     if limit_type.lower() == "min":
         limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MIN
     elif limit_type.lower() == "max":
         limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MAX
+    else:
+        raise AmdSmiParameterException(f"Unsupported limit type: {limit_type}", str)
     _check_res(
         amdsmi_wrapper.amdsmi_set_gpu_clk_limit(
             processor_handle, clk_type_conversion, limit_type_conversion, ctypes.c_uint64(value)
@@ -6705,11 +6732,6 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         return False, "Could not find librocm-core.so"
     except Exception as e:
         return False, f"Unable to detect ROCm installation, Unknown Error: {e}"
-
-
-def amdsmi_get_cpu_handles() -> Dict[str, Any]:
-    cpu_handles = amdsmi_get_cpusocket_handles()
-    return {"cpu_count": len(cpu_handles), "processor_handles": cpu_handles}
 
 
 def amdsmi_get_esmi_err_msg(status: AmdSmiStatus) -> str:

@@ -20,6 +20,53 @@ target_compile_definitions(
 configure_file(smallkernel.bin smallkernel.bin COPYONLY)
 configure_file(hipcc_output.s hipcc_output.s COPYONLY)
 
+# Compile a HIP kernel with debug info to test DWARF inline annotation. Two-step: compile
+# to offload bundle, then unbundle to get the GPU ELF.
+find_program(
+    CODEOBJ_AMDCLANGPP REQUIRED
+    NAMES amdclang++
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES bin llvm/bin NO_CACHE)
+
+find_program(
+    CODEOBJ_OFFLOAD_BUNDLER REQUIRED
+    NAMES clang-offload-bundler
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES bin llvm/bin NO_CACHE)
+
+# The arch only matters for compilation, not execution — the test only parses DWARF debug
+# info from the resulting ELF.  Any valid arch works here.
+set(_SYNCKERNEL_ARCH "gfx90a")
+set(_SYNCKERNEL_SRC "${CMAKE_CURRENT_SOURCE_DIR}/syncthreads_kernel.hip")
+set(_SYNCKERNEL_BUNDLE "${CMAKE_CURRENT_BINARY_DIR}/syncthreads_kernel_bundle.o")
+set(_SYNCKERNEL_BIN "${CMAKE_CURRENT_BINARY_DIR}/syncthreads_kernel.bin")
+
+add_custom_command(
+    OUTPUT "${_SYNCKERNEL_BIN}"
+    COMMAND
+        ${CODEOBJ_AMDCLANGPP} -x hip -ggdb --offload-arch=${_SYNCKERNEL_ARCH}
+        --offload-device-only -c -fno-gpu-rdc --no-offload-new-driver -o
+        "${_SYNCKERNEL_BUNDLE}" "${_SYNCKERNEL_SRC}"
+    COMMAND
+        ${CODEOBJ_OFFLOAD_BUNDLER} --type=o --input=${_SYNCKERNEL_BUNDLE}
+        --output=${_SYNCKERNEL_BIN} --unbundle
+        --targets=hipv4-amdgcn-amd-amdhsa--${_SYNCKERNEL_ARCH}
+    DEPENDS "${_SYNCKERNEL_SRC}"
+    COMMENT
+        "Compiling syncthreads_kernel.hip -> syncthreads_kernel.bin (${_SYNCKERNEL_ARCH})"
+    VERBATIM)
+
+add_custom_target(syncthreads_kernel_bin DEPENDS "${_SYNCKERNEL_BIN}")
+add_dependencies(codeobj-library-tests syncthreads_kernel_bin)
+
+install(
+    FILES "${_SYNCKERNEL_BIN}"
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+    COMPONENT tests
+    OPTIONAL)
+
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/hipcc_output.s
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin

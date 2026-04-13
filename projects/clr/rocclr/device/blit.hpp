@@ -211,6 +211,13 @@ class BlitManager : public amd::HeapObject {
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const = 0;
 
+  //! Stream memory increment operation - Increment memory by a 'value'.
+  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const = 0;
+
+  //! Stream memory decrement operation - Decrement memory by a 'value'.
+  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                  size_t sizeBytes) const = 0;
 
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(

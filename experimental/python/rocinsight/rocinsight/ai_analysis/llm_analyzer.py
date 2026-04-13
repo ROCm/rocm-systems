@@ -1082,13 +1082,20 @@ Follow the reference guide strictly for analysis methodology and output format."
         verify_ssl = verify_ssl_env not in ("0", "false", "no")
         http_client = None
         if not verify_ssl:
+            import warnings
+
+            warnings.warn(
+                "[LLMAnalyzer] SSL certificate verification is DISABLED via "
+                "ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL — LLM traffic is exposed "
+                "to MITM. Only use this for trusted private endpoints with "
+                "self-signed certs.",
+                stacklevel=2,
+            )
             try:
                 import httpx as _httpx
 
                 http_client = _httpx.Client(verify=False)
             except ImportError:
-                import warnings
-
                 warnings.warn(
                     "ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is not installed. "
                     "SSL verification will remain enabled. Run: pip install httpx",

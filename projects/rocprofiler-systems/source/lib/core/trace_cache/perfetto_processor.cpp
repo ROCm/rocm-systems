@@ -46,9 +46,7 @@
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <rocprofiler-sdk/context.h>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 namespace
 {
@@ -74,8 +72,10 @@ template <typename CategoryT>
 ::perfetto::Track
 get_track(CategoryT, std::string name, uint64_t hash_arg)
 {
-    auto  _uuid        = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
-    auto& _track_uuids = tracing::get_perfetto_track_uuids();
+    auto _uuid = tracing::get_perfetto_category_uuid<CategoryT>(hash_arg);
+
+    std::lock_guard<std::mutex> _lk{ tracing::get_perfetto_track_uuids_mutex() };
+    auto&                       _track_uuids = tracing::get_perfetto_track_uuids();
 
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
@@ -1282,5 +1282,64 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     }
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+void
+perfetto_processor_t::handle(const kfd_sample& _kfd)
+{
+    auto _beg_ts     = _kfd.start_timestamp;
+    auto _end_ts     = _kfd.end_timestamp;
+    auto _track_name = _kfd.track_name;
+    auto _name       = _kfd.name;
+    auto _category   = _kfd.category;
+    auto _track_hash = std::hash<std::string>{}(_track_name);
+
+    auto emit_kfd_event = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        auto _track     = get_track(CategoryT{}, _track_name, _track_hash);
+
+        auto add_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
+            std::vector<annotation_entry> annotations = {
+                { "begin_ns", _beg_ts },
+                { "end_ns", _end_ts },
+            };
+
+            auto args = process_arguments_string(_kfd.args_str);
+            for(const auto& arg : args)
+            {
+                annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
+            }
+
+            annotate_perfetto(ctx, annotations);
+        };
+
+        if(_beg_ts == _end_ts)
+        {
+            TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
+                                ::perfetto::DynamicString{ _name }, _track, _beg_ts,
+                                add_annotations);
+        }
+        else
+        {
+            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _track, _beg_ts,
+                                         add_annotations);
+            tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _track, _end_ts);
+        }
+    };
+
+    if(_category == trait::name<category::rocm_kfd_page_fault>::value)
+        emit_kfd_event(category::rocm_kfd_page_fault{});
+    else if(_category == trait::name<category::rocm_kfd_page_migrate>::value)
+        emit_kfd_event(category::rocm_kfd_page_migrate{});
+    else if(_category == trait::name<category::rocm_kfd_queue>::value)
+        emit_kfd_event(category::rocm_kfd_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_queue>::value)
+        emit_kfd_event(category::rocm_kfd_event_queue{});
+    else if(_category == trait::name<category::rocm_kfd_event_unmap_from_gpu>::value)
+        emit_kfd_event(category::rocm_kfd_event_unmap_from_gpu{});
+    else if(_category == trait::name<category::rocm_kfd_event_dropped_events>::value)
+        emit_kfd_event(category::rocm_kfd_event_dropped_events{});
+    else
+        LOG_WARNING("Unknown KFD category: {}", _category);
+}
+}  // namespace rocprofsys::trace_cache
