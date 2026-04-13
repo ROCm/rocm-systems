@@ -53,7 +53,7 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if ROCM_VERSION >= 70002
+#if ROCM_VERSION >= 71200
   cudaMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;

@@ -56,9 +56,9 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
       INFO(NCCL_INIT, "CE multi-stream enabled: rank %d using %d streams (requested=%d)", comm->rank, targetStreams, multiStreams);
       for (int i = 0; i < targetStreams; i++) {
         CUDACHECKGOTO(cudaStreamCreateWithFlags(&comm->ceColl.copyStreams[i], cudaStreamNonBlocking), ret, fail);
-        CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.copyEvents[i], cudaEventDisableTiming), ret, fail);
-        // Track successfully created pairs so ncclCeFinalize only cleans up what exists
+        // Track successfully created streams so ncclCeFinalize only cleans up what exists
         comm->ceColl.nCopyStreams++;
+        CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.copyEvents[i], cudaEventDisableTiming), ret, fail);
       }
     } 
   }
@@ -105,8 +105,9 @@ bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
 
-  // CE is supported in CUDA 12.5 and later
-  if (driverVersion >= 12050) {
+  // CE is supported in ROCm 7.12 and later
+  // hipDriverGetVersion() returns 70200000 for ROCm 7.12
+  if (driverVersion >= 70200000) {
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
@@ -152,7 +153,7 @@ ncclResult_t ncclPrepMCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   for (int r = 0; r < comm->nRanks; ++r) {
     if (r == comm->rank) continue;
     batchParams[*opIdx] = {};
-    // batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+    batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
     batchParams[*opIdx].waitValue.value = waitValue;
     batchParams[*opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
@@ -235,10 +236,10 @@ ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream) {
   if (ncclCudaGraphValid(comm->planner.capturingGraph)) {
     for (int i = 0; i < comm->nRanks; i++) {
       batchParams[opIdx] = {};
-      // batchParams[opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+      batchParams[opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
       batchParams[opIdx].writeValue.address = (CUdeviceptr)(comm->ceColl.useCompletePtr ? (void*)&completePtrs[i] : (void*)&readyPtrs[i]);
       batchParams[opIdx].writeValue.value = 0;
-      // batchParams[opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+      batchParams[opIdx].writeValue.flags = 0;
       opIdx++;
     }
   }
@@ -264,7 +265,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   params->sizes = nullptr;
   params->numOps = 0;
   params->intraBatchSync = false;
-#if ROCM_VERSION >= 70002
+#if ROCM_VERSION >= 71200
   params->attrs = nullptr;
   params->attrIdxs = nullptr;
   params->numAttrs = 0;
@@ -273,7 +274,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   NCCLCHECKGOTO(ncclCalloc(&params->srcs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->dsts, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->sizes, nRanks), ret, fail);
-#if ROCM_VERSION >= 70002
+#if ROCM_VERSION >= 71200
   NCCLCHECKGOTO(ncclCalloc(&params->attrs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->attrIdxs, nRanks), ret, fail);
 #endif
@@ -287,7 +288,7 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params->srcs) free(params->srcs);
   if (params->dsts) free(params->dsts);
   if (params->sizes) free(params->sizes);
-#if ROCM_VERSION >= 70002
+#if ROCM_VERSION >= 71200
   if (params->attrs) free(params->attrs);
   if (params->attrIdxs) free(params->attrIdxs);
 #endif
@@ -325,9 +326,10 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   } 
   //--------------No graph capture--------------
   else {
-    if (ROCM_VERSION >= 70002 && driverVersion >= 70051831) {
-#if ROCM_VERSION >= 70002 
-      // For ROCm 7.0.2+, use batch memory copy for better performance
+    // driverVersion is reported as 70200000 for ROCm 7.12 when using hipDriverGetVersion().
+    if (ROCM_VERSION >= 71200 && driverVersion >= 70200000) {
+#if ROCM_VERSION >= 71200 
+      // For ROCm 7.12+, use batch memory copy for better performance
       params->attrs[0] = {};
       params->attrs[0].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
       params->attrs[0].flags = cudaMemcpyFlagPreferOverlapWithCompute;
@@ -356,8 +358,8 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
           (void**)params->dsts, (void**)params->srcs, params->sizes, params->numOps,
           params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
       }
-  #endif
-    } else if (comm->ceColl.nCopyStreams > 0 && (int)params->numOps > 1) {
+#endif
+    } else if (comm->ceColl.nCopyStreams > 0 && (int)params->numOps > 1 && !params->intraBatchSync) {
 
       int nStreams = comm->ceColl.nCopyStreams;
       int activeStreams = ((int)params->numOps < nStreams) ? (int)params->numOps : nStreams;
@@ -387,8 +389,8 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
       }
     } else {
       // For older ROCm versions, fall back to individual transfers
-      for (int i = 0; i < params->numOps; i++) {
-        INFO(NCCL_COLL, "CE: rank %d -> No-Batch Single-Stream path (cudaMemcpyAsync), numOps=%zu", comm->rank, params->numOps);      
+      INFO(NCCL_COLL, "CE: rank %d -> No-Batch Single-Stream path (cudaMemcpyAsync), numOps=%zu", comm->rank, params->numOps);
+      for (int i = 0; i < params->numOps; i++) {  
         CUDACHECKGOTO(cudaMemcpyAsync(
           (void*)params->dsts[i],
           (void*)params->srcs[i],
