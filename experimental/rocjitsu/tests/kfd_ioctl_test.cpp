@@ -93,8 +93,7 @@ TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {
   constexpr uint64_t kStart = 0x4000;
   constexpr uint64_t kSize = 0x2000;
 
-  std::vector<uint8_t> buffer(sizeof(kfd_ioctl_svm_args) +
-                              2 * sizeof(kfd_ioctl_svm_attribute));
+  std::vector<uint8_t> buffer(sizeof(kfd_ioctl_svm_args) + 2 * sizeof(kfd_ioctl_svm_attribute));
   auto *svm_args = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
   auto *attrs = reinterpret_cast<kfd_ioctl_svm_attribute *>(svm_args + 1);
 

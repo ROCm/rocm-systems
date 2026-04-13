@@ -8,11 +8,11 @@
 #include "util/debug_print.h"
 #include "util/except.h"
 
-#include <cerrno>
-#include <cstdlib>
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <linux/types.h>
@@ -688,7 +688,8 @@ int SimulatedDriver::free_memory_ioctl(void *arg) {
     auto &alloc = it->second;
     if (alloc.imported && alloc.dmabuf_fd >= 0) {
       ::close(alloc.dmabuf_fd);
-      if (auto dmabuf_it = imported_dmabufs_.find(args->handle); dmabuf_it != imported_dmabufs_.end()) {
+      if (auto dmabuf_it = imported_dmabufs_.find(args->handle);
+          dmabuf_it != imported_dmabufs_.end()) {
         fd_to_import_handle_.erase(dmabuf_it->second.fd);
         imported_dmabufs_.erase(dmabuf_it);
       }
@@ -862,7 +863,7 @@ int SimulatedDriver::import_dmabuf_ioctl(void *arg) {
   if (args->gpu_id != gpu_id_)
     return -EINVAL;
 
-  struct stat st {};
+  struct stat st{};
   if (fstat(args->dmabuf_fd, &st) != 0)
     return -errno;
   uint64_t size = static_cast<uint64_t>(st.st_size);
@@ -938,7 +939,7 @@ int SimulatedDriver::get_dmabuf_info_ioctl(void *arg) {
   }
 
   if (!found) {
-    struct stat st {};
+    struct stat st{};
     if (fstat(args->dmabuf_fd, &st) != 0)
       return -errno;
     size = static_cast<uint64_t>(st.st_size);
