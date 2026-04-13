@@ -590,16 +590,16 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
     ``MARKER_CORE_RANGE_API`` (user roctx markers), then correlates kernel
     dispatches and memory copy operations by timestamp overlap.
 
-    **Attribution model** (innermost-wins, no double-counting):
+    **Conservation-correct attribution model:**
 
-    Each GPU event is assigned to exactly one marker range — the innermost
-    (most specific) range that overlaps it. For nested ranges
-    (``roctxRangePush``/``Pop``), this means child ranges capture events
-    before parent ranges. For partially overlapping ranges
-    (``roctxRangeStart``/``Stop`` across threads), events go to the range
-    with the greatest time overlap. Only the overlapping time portion is
-    counted. Parent ranges in a hierarchy show only work directly inside
-    them but outside any child — they do NOT include child activity.
+    Every nanosecond of GPU work is accounted for exactly once — either
+    inside a marker region or in the unranged bucket. For per-region
+    ownership, the overlapping portion of each event goes to the innermost
+    (shortest-duration) marker. The non-overlapping portion goes to the
+    unranged bucket. Wall-time coverage uses the UNION of marker intervals
+    (not sum of durations) to correctly handle nested and overlapping ranges
+    per the ROC-TX library spec (``roctxRangePush``/``Pop`` nesting and
+    ``roctxRangeStart``/``Stop`` cross-thread overlaps).
 
     Returns ``None`` if no user roctx markers are found in the trace
     (graceful no-op — callers check ``if roctx_regions:``).
@@ -647,62 +647,70 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
     except Exception:
         all_memcpy = []
 
-    # Step 3: Correlate each event with a marker by timestamp overlap.
+    # Step 3: Conservation-correct interval accounting.
     #
-    # Attribution model (innermost-wins, no double-counting):
-    #   - Each GPU event is assigned to exactly ONE marker range.
-    #   - When ranges are nested (roctxRangePush/Pop), events go to the
-    #     innermost (most specific) range that contains them.
-    #   - When ranges partially overlap (roctxRangeStart/Stop across
-    #     threads), events go to the range with the greatest overlap.
-    #   - Ties broken by range duration (shorter = more specific).
-    #   - Only the overlapping time portion is counted for partial overlaps.
-    #   - Events with zero overlap to any range go to the "unranged" bucket.
+    # Key principles:
+    #   1. Every nanosecond of an event is accounted for exactly once —
+    #      either inside a marker region or in the unranged bucket.
+    #   2. For per-region ownership, each event is assigned to the
+    #      innermost (shortest) marker that overlaps it. Only the
+    #      overlapping portion counts toward that region.
+    #   3. The non-overlapping portion of a partially-overlapping event
+    #      goes to the unranged bucket (not lost).
+    #   4. Wall-time coverage uses the UNION of marker intervals (not
+    #      sum of durations) to correctly handle nested/overlapping ranges.
     #
-    # This model avoids double-counting: every nanosecond of GPU work is
-    # attributed to at most one range. Parent ranges in a nested hierarchy
-    # do NOT include child activity — they show only work that is directly
-    # inside the parent but outside any child range.
+    # This ensures: sum(region_kernel_time) + unranged_kernel_time == total_kernel_time
     all_marker_ranges = [(m["start"], m["end"], m["duration"]) for m in markers]
 
     def _best_marker_idx(event_start: int, event_end: int) -> int:
-        """Return index of the best-matching marker for this event.
-
-        Prefers the marker with the greatest overlap. On ties (e.g. an
-        event fully inside both a parent and child range), prefers the
-        shorter (more specific / innermost) range.
-        """
+        """Return index of the marker with greatest overlap, preferring shorter (innermost) on ties."""
         best_idx = -1
         best_overlap = 0
         best_duration = float("inf")
         for i, (ms, me, mdur) in enumerate(all_marker_ranges):
-            overlap_start = max(event_start, ms)
-            overlap_end = min(event_end, me)
-            overlap = max(0, overlap_end - overlap_start)
-            if overlap > best_overlap or (overlap == best_overlap and overlap > 0 and mdur < best_duration):
-                best_overlap = overlap
+            ov = max(0, min(event_end, me) - max(event_start, ms))
+            if ov > best_overlap or (ov == best_overlap and ov > 0 and mdur < best_duration):
+                best_overlap = ov
                 best_idx = i
                 best_duration = mdur
         return best_idx
 
-    def _in_marker(event_start: int, event_end: int) -> bool:
-        return _best_marker_idx(event_start, event_end) >= 0
+    def _compute_union_coverage(intervals):
+        """Compute total wall-time covered by the union of intervals."""
+        if not intervals:
+            return 0
+        sorted_iv = sorted(intervals, key=lambda x: x[0])
+        merged = [sorted_iv[0]]
+        for s, e in sorted_iv[1:]:
+            if s <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+            else:
+                merged.append((s, e))
+        return sum(e - s for s, e in merged)
 
+    # Per-region accounting: for each event, split time into covered and uncovered
     region_data: List[Dict[str, Any]] = []
+    # Track total ranged time per event type for conservation check
+    total_ranged_kernel_ns = 0
+    total_ranged_memcpy_ns = 0
+
     for mi, m in enumerate(markers):
         ms, me = m["start"], m["end"]
+        # Events whose best marker is this one
         m_kernels = [k for k in all_kernels if _best_marker_idx(k[1], k[2]) == mi]
         m_memcpy = [mc for mc in all_memcpy if _best_marker_idx(mc[1], mc[2]) == mi]
 
-        # For partially overlapping events, count only the overlapping portion
         kernel_time = 0
         for k in m_kernels:
-            overlap = min(k[2], me) - max(k[1], ms)
-            kernel_time += max(0, overlap)
+            kernel_time += max(0, min(k[2], me) - max(k[1], ms))
         memcpy_time = 0
         for mc in m_memcpy:
-            overlap = min(mc[2], me) - max(mc[1], ms)
-            memcpy_time += max(0, overlap)
+            memcpy_time += max(0, min(mc[2], me) - max(mc[1], ms))
+
+        total_ranged_kernel_ns += kernel_time
+        total_ranged_memcpy_ns += memcpy_time
+
         wall_time = m["duration"]
         overhead_time = max(0, wall_time - kernel_time - memcpy_time)
 
@@ -719,9 +727,30 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
             "overhead_pct": (overhead_time / wall_time * 100) if wall_time > 0 else 0,
         })
 
-    # Step 4: Compute (unranged) bucket
-    unranged_kernels = [k for k in all_kernels if not _in_marker(k[1], k[2])]
-    unranged_memcpy = [mc for mc in all_memcpy if not _in_marker(mc[1], mc[2])]
+    # Step 4: Conservation-correct unranged bucket.
+    #
+    # Unranged kernel/memcpy time = total event time minus what was attributed
+    # to regions. This correctly accounts for partial overlaps: the uncovered
+    # portion of a partially-overlapping event lands here automatically.
+    total_kernel_time = sum(k[3] for k in all_kernels)
+    total_memcpy_time = sum(mc[3] for mc in all_memcpy)
+
+    unranged_kernel_time = total_kernel_time - total_ranged_kernel_ns
+    unranged_memcpy_time = total_memcpy_time - total_ranged_memcpy_ns
+
+    # Count events that have ANY unranged portion
+    unranged_kernel_count = sum(
+        1 for k in all_kernels
+        if _best_marker_idx(k[1], k[2]) < 0  # fully unranged
+        or (k[3] > max(0, min(k[2], all_marker_ranges[_best_marker_idx(k[1], k[2])][1])
+                        - max(k[1], all_marker_ranges[_best_marker_idx(k[1], k[2])][0])))  # partially unranged
+    )
+    unranged_memcpy_count = sum(
+        1 for mc in all_memcpy
+        if _best_marker_idx(mc[1], mc[2]) < 0
+        or (mc[3] > max(0, min(mc[2], all_marker_ranges[_best_marker_idx(mc[1], mc[2])][1])
+                         - max(mc[1], all_marker_ranges[_best_marker_idx(mc[1], mc[2])][0])))
+    )
 
     # Total runtime from event span
     total_runtime = 0
@@ -731,10 +760,11 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
         if all_starts:
             total_runtime = max(all_ends) - min(all_starts)
 
-    total_marker_time = sum(m["duration"] for m in markers)
-    unranged_wall = max(0, total_runtime - total_marker_time)
-    unranged_kernel_time = sum(k[3] for k in unranged_kernels)
-    unranged_memcpy_time = sum(mc[3] for mc in unranged_memcpy)
+    # Use UNION of marker intervals (not sum) to handle nesting/overlap
+    marker_union_coverage = _compute_union_coverage(
+        [(m["start"], m["end"]) for m in markers]
+    )
+    unranged_wall = max(0, total_runtime - marker_union_coverage)
     unranged_overhead = max(0, unranged_wall - unranged_kernel_time - unranged_memcpy_time)
 
     unranged_pct = (unranged_wall / total_runtime * 100) if total_runtime > 0 else 0
@@ -745,9 +775,9 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
         "regions": region_data,
         "unranged": {
             "wall_time_ns": unranged_wall,
-            "kernel_count": len(unranged_kernels),
+            "kernel_count": unranged_kernel_count,
             "kernel_time_ns": unranged_kernel_time,
-            "memcpy_count": len(unranged_memcpy),
+            "memcpy_count": unranged_memcpy_count,
             "memcpy_time_ns": unranged_memcpy_time,
             "overhead_time_ns": unranged_overhead,
             "kernel_pct": (unranged_kernel_time / unranged_wall * 100) if unranged_wall > 0 else 0,

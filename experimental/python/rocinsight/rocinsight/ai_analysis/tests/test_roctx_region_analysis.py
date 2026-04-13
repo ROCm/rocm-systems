@@ -1,4 +1,4 @@
-"""Tests for ROCM-21553 PR3: roctx support and profiling scope.
+"""Tests for roctx marker region analysis, GPU idle scoping, and profiling scope.
 
 Tests cover:
 - C1: analyze_roctx_regions() marker detection and correlation
