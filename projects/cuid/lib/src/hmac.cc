@@ -23,10 +23,12 @@
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
-#include <iostream>
+#include <cerrno>
 #include <cstring>
-#include <unistd.h>
+#include <fcntl.h>
+#include <iostream>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "hmac.h"
 
 cuid_hmac::cuid_hmac()
@@ -142,28 +144,37 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
     key = new uint8_t[key_length];
     std::memcpy(key, key_data, key_length);
 
-    // if key_file exists, delete it first
-    if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT) {
-        // failed to delete existing file due to different permissions
+    // Remove existing key file (unlink is safe; the new file is created
+    // atomically below with O_EXCL).
+    if (unlink(key_file_path.c_str()) != 0 && errno != ENOENT) {
         return AMDCUID_STATUS_KEY_ERROR;
     }
 
-    std::ofstream key_file(key_file_path, std::ios::out | std::ios::binary);
-    if (!key_file) {
+    // Create file with restrictive permissions from the start.
+    // O_CREAT|O_EXCL: atomic create, fails if path already exists.
+    // O_NOFOLLOW: refuse to follow symlinks (prevents symlink attacks).
+    // Mode 0600: file is never world-readable, even briefly.
+    int fd = open(key_file_path.c_str(),
+                  O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+                  S_IRUSR | S_IWUSR);
+    if (fd < 0) {
         return AMDCUID_STATUS_KEY_ERROR;
     }
-    key_file.write(reinterpret_cast<const char*>(key), key_length);
-    if (!key_file) {
-        key_file.close();
-        return AMDCUID_STATUS_KEY_ERROR;
-    }
-    key_file.close();
 
-    // set permissions to read/write for owner only
-    if (chmod(key_file_path.c_str(), S_IRUSR | S_IWUSR) != 0) {
+    ssize_t written = write(fd, key, key_length);
+    if (written != static_cast<ssize_t>(key_length)) {
+        close(fd);
+        unlink(key_file_path.c_str());
+        return AMDCUID_STATUS_KEY_ERROR;
+    }
+
+    // fchmod on the fd, not chmod on the path — immune to TOCTOU.
+    if (fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
+        close(fd);
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
 
+    close(fd);
     return AMDCUID_STATUS_SUCCESS;
 }
 

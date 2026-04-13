@@ -687,7 +687,8 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::stri
     return RSMI_STATUS_FILE_ERROR;
   }
 
-  chmod(fileName, S_IRUSR | S_IRGRP | S_IROTH);
+  // Use fchmod on the fd from mkstemp — immune to TOCTOU path swaps.
+  fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH);
   ssize_t rc_write = write(fd, storageData.c_str(), storageData.size());
   close(fd);
   if (rc_write == -1) {

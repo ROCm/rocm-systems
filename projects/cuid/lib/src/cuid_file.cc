@@ -491,11 +491,17 @@ amdcuid_status_t CuidFile::save() {
         return AMDCUID_STATUS_FILE_ERROR;
     }
 
-    // Create temporary file first for atomic write
+    // Create temporary file first for atomic write.
+    // Set umask so the file is created with the correct permissions from
+    // the start, eliminating the TOCTOU window between creation and chmod.
+    mode_t old_umask = umask(is_privileged_ ? 0177 : 0133);
     std::string temp_path = file_path_ + ".tmp";
+    // Remove stale temp file to prevent symlink attacks on the path
+    unlink(temp_path.c_str());
     std::ofstream file(temp_path);
-    
+
     if (!file.is_open()) {
+        umask(old_umask);
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
     
@@ -593,22 +599,17 @@ amdcuid_status_t CuidFile::save() {
     }
     
     file.close();
-    
-    // Atomically move temp file to actual file
+    umask(old_umask);
+
+    // Atomically move temp file to actual file.
+    // rename() preserves the source file's permissions, so no separate
+    // chmod is needed — the temp file was already created with the
+    // correct mode via umask above.
     if (rename(temp_path.c_str(), file_path_.c_str()) != 0) {
         unlink(temp_path.c_str());
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
-    
-    // Set permissions
-    if (!is_privileged_) {
-        // Unprivileged file: readable by all (644)
-        chmod(file_path_.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    } else {
-        // Privileged file: readable by root only (600)
-        chmod(file_path_.c_str(), S_IRUSR | S_IWUSR);
-    }
-    
+
     return AMDCUID_STATUS_SUCCESS;
 }
 

@@ -44,9 +44,12 @@
 // C++ Header File(s)
 #include <cstdlib>
 #include <ctime>
+#include <fcntl.h>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <sys/stat.h>
+#include <unistd.h>
 
 // Code Specific Header Files(s)
 #include "rocm_smi/rocm_smi_logger.h"
@@ -499,7 +502,14 @@ void ROCmLogging::Logger::initialize_resources() {
   if (m_File.fail()) {
     std::cout << "WARNING: Failed opening log file." << std::endl;
   }
-  chmod(logFileName, S_IRUSR | S_IRGRP | S_IROTH | S_IWUSR | S_IWGRP | S_IWOTH);
+  // Set permissions via fd to avoid TOCTOU race on the path.
+  // Reduced from 0666 to 0640 (owner rw, group read) — a log file
+  // should not be world-writable.
+  int log_fd = open(logFileName, O_WRONLY | O_NOFOLLOW);
+  if (log_fd >= 0) {
+    fchmod(log_fd, S_IRUSR | S_IWUSR | S_IRGRP);
+    close(log_fd);
+  }
 }
 
 void ROCmLogging::Logger::destroy_resources() { m_File.close(); }
