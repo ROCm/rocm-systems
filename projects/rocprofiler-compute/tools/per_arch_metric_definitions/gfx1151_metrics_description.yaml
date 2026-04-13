@@ -174,11 +174,11 @@ Memory chart - LDS (Local Data Share):
 Memory chart - GL1C Cache (L1):
   GL1C Utilization:
     plain: "Definition: Percentage of cycles the GL1C (L1 cache) is busy.\nFormula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum"
-    rst: "Definition: Percentage of cycles the GL1C (L1 cache) is busy. Formula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum"
+    rst: "Percentage of cycles the GL1C (L1 cache) is busy. Formula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum"
     unit: Percent
   GL1C Hit Rate:
     plain: "Definition: Percentage of GL1C cache requests that hit.\nFormula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum"
-    rst: "Definition: Percentage of GL1C cache requests that hit. Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum"
+    rst: "Percentage of GL1C cache requests that hit. Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum"
     unit: Percent
   GL1C Total Requests:
     plain: Total GL1C cache requests per normalization unit (GL1C_REQ_sum).
@@ -207,7 +207,7 @@ Memory chart - GL1C Cache (L1):
 Memory chart - GL2C Cache (L2):
   GL2C Hit Rate:
     plain: "Definition: Percentage of GL2C (L2 cache) requests that hit.\nFormula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)"
-    rst: "Definition: Percentage of GL2C (L2 cache) requests that hit. Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)"
+    rst: "Percentage of GL2C (L2 cache) requests that hit. Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)"
     unit: Percent
   GL2C Utilization:
     plain: "Percent of GL2C cycles the L2 cache was busy. Formula:\n100 * GL2C_BUSY_sum / GL2C_CYCLE_sum."
@@ -240,11 +240,11 @@ Memory chart - GL2C Cache (L2):
 Memory chart - GCEA to System Memory:
   SARB Utilization:
     plain: "Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy.\nDescription: SARB handles arbitration between the GPU and the system memory interface.\nFormula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum"
-    rst: "Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy. Description: SARB handles arbitration between the GPU and the system memory interface. Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum"
+    rst: "Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy. SARB handles arbitration between the GPU and the system memory interface. Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum"
     unit: Percent
   DRAM Read Bandwidth:
     plain: "Definition: Bandwidth for read requests to system memory (DRAM).\nDescription: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM.\nFormula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time"
-    rst: "Definition: Bandwidth for read requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time"
+    rst: "Bandwidth for read requests to system memory (DRAM). RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time"
     unit: Bytes/s
   DRAM Write Bandwidth:
     plain: "Definition: Bandwidth for write requests to system memory (DRAM).\nDescription: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM.\nFormula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time"
