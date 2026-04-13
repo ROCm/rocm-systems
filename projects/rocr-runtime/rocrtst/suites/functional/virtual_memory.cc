@@ -1230,6 +1230,287 @@ void VirtMemoryTestBasic::MemoryAccountingTest(void) {
   }
 }
 
+void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
+                                      hsa_amd_memory_pool_t device_pool) {
+  rocrtst::pool_info_t pool_i;
+  hsa_status_t err;
+
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(device_pool, &pool_i));
+
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL ||
+      pool_i.global_flag != HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED)
+    return;
+
+  hsa_amd_memory_pool_access_t access;
+  ASSERT_SUCCESS(hsa_amd_agent_memory_pool_get_info(
+      cpuAgent, device_pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access));
+
+  if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
+    if (verbosity() > 0) {
+      std::cout << "    Test not applicable as system is not large bar - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  hsa_queue_t* queue = NULL;
+  hsa_signal_t signal = {0};
+
+  size_t& granule_size = pool_i.alloc_granule;
+  size_t alloc_size = granule_size * 10;
+  static const int kMemoryAllocSize = alloc_size / sizeof(int);
+
+  // Get queue size and create queue
+  uint32_t queue_size = 0;
+  ASSERT_SUCCESS(hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+  ASSERT_SUCCESS(
+      hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue));
+
+  // Find memory pools
+  hsa_amd_memory_pool_t kernarg_pool;
+  ASSERT_SUCCESS(
+      hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetKernArgMemoryPool, &kernarg_pool));
+
+  hsa_amd_memory_pool_t global_pool;
+  ASSERT_SUCCESS(
+      hsa_amd_agent_iterate_memory_pools(cpuAgent, rocrtst::GetGlobalMemoryPool, &global_pool));
+
+  // Reserve two separate virtual address ranges
+  void* addr1 = nullptr;
+  void* addr2 = nullptr;
+
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr1, alloc_size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr2, alloc_size, 0, 0));
+
+  if (verbosity() > 0) {
+    std::cout << "    Reserved VA addr1: " << addr1 << std::endl;
+    std::cout << "    Reserved VA addr2: " << addr2 << std::endl;
+  }
+
+  // Create a single memory handle (physical allocation)
+  hsa_amd_vmem_alloc_handle_t memory_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(device_pool, alloc_size, MEMORY_TYPE_NONE, 0, &memory_handle));
+
+  // Map the same memory handle to both VA ranges (creating VA aliases)
+  ASSERT_SUCCESS(hsa_amd_vmem_map(addr1, alloc_size, 0, memory_handle, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(addr2, alloc_size, 0, memory_handle, 0));
+
+  if (verbosity() > 0) {
+    std::cout << "    Mapped memory_handle to both addr1 and addr2" << std::endl;
+  }
+
+  // Verify initial per-VA permissions are NONE for both addr1 and addr2
+  {
+    hsa_access_permission_t perm1 = HSA_ACCESS_PERMISSION_RW;
+    hsa_access_permission_t perm2 = HSA_ACCESS_PERMISSION_RW;
+
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr1, &perm1, gpuAgent));
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr2, &perm2, gpuAgent));
+
+    if (verbosity() > 0) {
+      std::cout << "    Initial permissions - addr1: " << perm1 << ", addr2: " << perm2 << std::endl;
+    }
+
+    // Both should start with no access
+    ASSERT_EQ(perm1, HSA_ACCESS_PERMISSION_NONE);
+    ASSERT_EQ(perm2, HSA_ACCESS_PERMISSION_NONE);
+  }
+
+  // Set access permissions on VA alias
+  hsa_amd_memory_access_desc_t access_desc[] = {{HSA_ACCESS_PERMISSION_RW, gpuAgent},
+                                                {HSA_ACCESS_PERMISSION_RW, cpuAgent}};
+
+  if (verbosity() > 0) {
+    std::cout << "    Setting access on addr1..." << std::endl;
+  }
+  ASSERT_SUCCESS(hsa_amd_vmem_set_access(addr1, alloc_size, access_desc, 2));
+
+  // Verify that access permissions changed only for addr1, not addr2
+  {
+    hsa_access_permission_t perm1 = HSA_ACCESS_PERMISSION_NONE;
+    hsa_access_permission_t perm2 = HSA_ACCESS_PERMISSION_RW;
+
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr1, &perm1, gpuAgent));
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr2, &perm2, gpuAgent));
+
+    if (verbosity() > 0) {
+      std::cout << "    After setting addr1 - addr1: " << perm1 << ", addr2: " << perm2 << std::endl;
+    }
+
+    ASSERT_EQ(perm1, HSA_ACCESS_PERMISSION_RW);
+    ASSERT_EQ(perm2, HSA_ACCESS_PERMISSION_NONE);
+  }
+
+  // Allocate host buffer for verification
+  int* host_data = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize * sizeof(int), 0,
+                                              reinterpret_cast<void**>(&host_data)));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &gpuAgent, NULL, host_data));
+
+  // Allocate a dummy buffer for kernArgs->b
+  int* dummy_data = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize * sizeof(int), 0,
+                                              reinterpret_cast<void**>(&dummy_data)));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &gpuAgent, NULL, dummy_data));
+
+  // Initialize host data
+  for (int i = 0; i < kMemoryAllocSize; ++i) {
+    host_data[i] = i;
+  }
+
+  // Allocate kernel arguments
+  args_t* kernArgs = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
+                                              reinterpret_cast<void**>(&kernArgs)));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &gpuAgent, NULL, kernArgs));
+
+  // Create completion signal
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &signal));
+
+  // Load kernel
+  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+  set_kernel_name("gpuReadWrite");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &gpuAgent));
+
+  // Setup kernel args to write to addr1
+  kernArgs->a = host_data;
+  kernArgs->b = dummy_data;  // dummy buffer kernel writes to 
+  kernArgs->c = reinterpret_cast<int*>(addr1);
+
+  // Create and dispatch AQL packet for addr1
+  hsa_kernel_dispatch_packet_t aql;
+  memset(&aql, 0, sizeof(aql));
+  aql.workgroup_size_x = 256;
+  aql.workgroup_size_y = 1;
+  aql.workgroup_size_z = 1;
+  aql.grid_size_x = kMemoryAllocSize;
+  aql.grid_size_y = 1;
+  aql.grid_size_z = 1;
+  aql.kernel_object = kernel_object();
+  aql.kernarg_address = kernArgs;
+  aql.completion_signal = signal;
+
+  const uint32_t queue_mask = queue->size - 1;
+  uint64_t index = hsa_queue_load_write_index_relaxed(queue);
+  hsa_queue_store_write_index_relaxed(queue, index + 1);
+
+  rocrtst::WriteAQLToQueueLoc(queue, index, &aql);
+
+  hsa_kernel_dispatch_packet_t* q_base_addr =
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address);
+  rocrtst::AtomicSetPacketHeader(
+      (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+          (1 << HSA_PACKET_HEADER_BARRIER) |
+          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE),
+      (1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(&q_base_addr[index & queue_mask]));
+
+  hsa_signal_store_relaxed(queue->doorbell_signal, index);
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
+  hsa_signal_store_relaxed(signal, 1);
+
+  if (verbosity() > 0) {
+    std::cout << "    Kernel using addr1 completed successfully" << std::endl;
+  }
+
+  // set access permission on second VA alias
+  if (verbosity() > 0) {
+    std::cout << "    Setting access on addr2 (VA alias)..." << std::endl;
+  }
+  ASSERT_SUCCESS(hsa_amd_vmem_set_access(addr2, alloc_size, access_desc, 2));
+
+  // Verify that addr2 now has RW access and addr1 remains RW (not clobbered)
+  {
+    hsa_access_permission_t perm1 = HSA_ACCESS_PERMISSION_NONE;
+    hsa_access_permission_t perm2 = HSA_ACCESS_PERMISSION_NONE;
+
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr1, &perm1, gpuAgent));
+    ASSERT_SUCCESS(hsa_amd_vmem_get_access(addr2, &perm2, gpuAgent));
+
+    if (verbosity() > 0) {
+      std::cout << "    After setting addr2 - addr1: " << perm1 << ", addr2: " << perm2 << std::endl;
+    }
+
+    // Verify addr1 was not clobbered
+    ASSERT_EQ(perm1, HSA_ACCESS_PERMISSION_RW);
+    // Verify addr2 now has RW access
+    ASSERT_EQ(perm2, HSA_ACCESS_PERMISSION_RW);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Verifying data written via addr1 is visible via addr2..." << std::endl;
+  }
+
+  int* addr2_data = reinterpret_cast<int*>(addr2);
+  for (int i = 0; i < kMemoryAllocSize; ++i) {
+    ASSERT_EQ(addr2_data[i], host_data[i]);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    VA alias test PASSED - data visible through both aliases" << std::endl;
+  }
+
+  // Cleanup
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(addr1, alloc_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(addr2, alloc_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(memory_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addr1, alloc_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addr2, alloc_size));
+
+  if (host_data) hsa_memory_free(host_data);
+  if (dummy_data) hsa_memory_free(dummy_data);
+  if (kernArgs) hsa_memory_free(kernArgs);
+  if (signal.handle) hsa_signal_destroy(signal);
+  if (queue) hsa_queue_destroy(queue);
+}
+
+void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
+  hsa_status_t err;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("VA Alias Access Test");
+  }
+
+  bool supp = false;
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, (void*)&supp));
+  if (!supp) {
+    if (verbosity() > 0) {
+      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  // Find all cpu agents
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+
+  // Find all gpu agents
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
+    hsa_amd_memory_pool_t gpu_pool;
+    memset(&gpu_pool, 0, sizeof(gpu_pool));
+    ASSERT_SUCCESS(
+        hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
+    if (gpu_pool.handle == 0) {
+      std::cout << "    No global mempool in GPU agent" << std::endl;
+      continue;
+    }
+    TestVirtAddressAlias(cpus[0], gpus[i], gpu_pool);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
 void VirtMemoryTestBasic::NonContiguousChunks(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
                                               hsa_amd_memory_pool_t device_pool) {
   rocrtst::pool_info_t pool_i;

@@ -18,3 +18,5 @@ services:
       - 8050:8050
     tty: true
     stdin_open: true
+    cap_add:
+      - SYS_PTRACE

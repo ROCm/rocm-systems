@@ -1148,7 +1148,7 @@ void GDABackend::modify_qps_init_to_rtr() {
   if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
     attr.ah_attr.grh.sgid_index = gid_index;
     attr.ah_attr.is_global      = 1;
-    attr.ah_attr.grh.hop_limit  = 1;
+    attr.ah_attr.grh.hop_limit  = 255; // Max possible value
     attr.ah_attr.sl             = 1;
     attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
   }
