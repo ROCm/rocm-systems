@@ -91,7 +91,7 @@ unload_module() {
 check_sysfs() {
     log_info "Checking sysfs interface..."
 
-    local sysfs_path="/sys/bus/event_source/devices/pmu_stub"
+    local sysfs_path="/sys/bus/event_source/devices/amdgpu_pmu"
 
     if [ -d "$sysfs_path" ]; then
         log_info "Found sysfs directory: $sysfs_path"
@@ -122,12 +122,12 @@ check_sysfs() {
 check_dmesg() {
     log_info "Checking kernel messages..."
 
-    local recent_messages=$(dmesg | tail -20 | grep -i "pmu_stub" || true)
+    local recent_messages=$(dmesg | tail -20 | grep -i "amdgpu_pmu" || true)
 
     if [ -n "$recent_messages" ]; then
         echo "$recent_messages"
     else
-        log_warn "No recent kernel messages from pmu_stub"
+        log_warn "No recent kernel messages from amdgpu_pmu"
     fi
 }
 
