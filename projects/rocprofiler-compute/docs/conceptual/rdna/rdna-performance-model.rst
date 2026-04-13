@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler RDNA3 client GPU performance model
+   :description: ROCm Compute Profiler RDNA3 APU performance model
    :keywords: ROCm Compute Profiler, RDNA, RDNA3, gfx1151, Radeon, ROCm
 
 .. _rdna-performance-model:
@@ -14,13 +14,8 @@ This chapter covers AMD Radeon / RDNA configurations exposed in ROCm Compute Pro
    :alt: AMD RDNA3 generation series block diagram — host CPU, system and device memory, memory controller, L2/L1 caches, global data share, command processors, ultra-threaded dispatch, and processor array of WGPs with CUs, LDS, instruction and constant caches
    :align: center
 
-   **Figure: AMD RDNA3 generation series (block diagram).** Work flows from the host and from
-   system/device memory through the memory controller into the L2 / L1 stack, Global Data
-   Share, and command processors, then through the Ultra-Threaded Dispatch Processor into a
-   processor array of Workgroup Processors (WGPs). Each WGP groups Compute Units (CUs)
-   (vector/scalar ALUs and registers) with Local Data Share, while dedicated instruction and
-   constant caches feed the front end. The diagram is a high-level guide for how profiler panels
-   (e.g. TCP, GL1C, GL2C, GCEA on gfx1151) map to these blocks — not a literal floorplan for every SKU.
+   **Figure: AMD RDNA3 generation series (block diagram).** See page 5 of
+   `RDNA3 shader instruction set architecture <https://docs.amd.com/v/u/en-US/rdna3-shader-instruction-set-architecture-feb-2023_0#page=5>`__.
 
 For Instinct / CDNA naming (CU, shader engine, etc.), use the top-level :doc:`../performance-model`
 overview and :doc:`../cdna/cdna-performance-model`. Here the focus is on WGPs, TCP / GL1C / GL2C,
@@ -28,7 +23,7 @@ GCEA, and related panels when an analysis config targets RDNA hardware.
 
 Public architecture summaries and :doc:`GPU / accelerator specifications <rocm:reference/gpu-arch-specs>`
 remain the best reference for packaging, SIMD width, and generational differences between
-RDNA3, RDNA3.5, and later client GPUs. The sections below describe what the profiler measures and names
+RDNA3, RDNA3.5, and later APUs. The sections below describe what the profiler measures and names
 for RDNA3.5 (gfx1151).
 
 ROCm Profiler includes analysis panels targeting RDNA3.5 parts reporting as
@@ -38,7 +33,7 @@ processors.
 .. rubric:: Memory hierarchy in the tool
 
 For gfx1151, the Memory Chart panel walks the path from instruction and scalar
-paths, TCP (vector L0), LDS, interfaces to GL1C (L1), GL2C (L2), and GCEA toward
+paths, TCP (GL0), LDS, interfaces to GL1C (L1), GL2C (L2), and GCEA toward
 system memory.
 
 .. rubric:: Workgroups and execution
@@ -57,14 +52,14 @@ naming such as CU and SE in places).
   command processor / CPC). The :doc:`system-speed-of-light` page uses the same
   metric keys as the analysis panel.
 
-In this chapter, profiler concepts for RDNA use client GPU naming (WGP, GL1/GL2, ...)
+In this chapter, profiler concepts for RDNA use APU naming (WGP, GL1/GL2, ...)
 and embed the RDNA3.5 (gfx1151) metric tables under each block:
 
 * :doc:`system-speed-of-light` — SoL table for gfx1151.
 
 * :doc:`wgp` — roofline, WGP utilization, waves, instruction mix, WGP instruction and data caches.
 
-* :doc:`tcp-cache` — TCP (vector L0 / GL0): panel tables and Memory Chart rows through TCP-GL1.
+* :doc:`tcp-cache` — TCP (GL0): panel tables and Memory Chart rows through TCP-GL1.
 
 * :doc:`gl1-cache` — GL1C (L1): panel tables and Memory Chart GL1C Cache (L1).
 

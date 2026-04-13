@@ -143,7 +143,7 @@ rdna_gfx1151_section_map = {
         "Memory chart - Scalar Data Cache"
     ),
     "rdna1151-memory-chart-tcp-cache-vector-l0-gfx1151": (
-        "Memory chart - TCP Cache (Vector L0)"
+        "Memory chart - TCP Cache (GL0)"
     ),
     "rdna1151-memory-chart-lds-local-data-share-gfx1151": (
         "Memory chart - LDS (Local Data Share)"

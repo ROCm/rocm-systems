@@ -91,7 +91,7 @@ Memory chart - Scalar Data Cache:
   Dcache-GL1 Read Bandwidth:
     rst: Bytes per second of scalar read traffic from SQC toward GL1 (SQC_TC_DATA_READ_REQ at 128 B per request).
     unit: Bytes/s
-Memory chart - TCP Cache (Vector L0):
+Memory chart - TCP Cache (GL0):
   TCP Hit Rate:
     rst: 'Definition: Percentage of TCP (vector data cache) requests that hit in cache. Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum'
     unit: Percent

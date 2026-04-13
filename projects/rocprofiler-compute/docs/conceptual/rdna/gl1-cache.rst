@@ -4,11 +4,11 @@
 
 .. _rdna-gl1:
 
-==========
-GL1 (GL1C)
-==========
+===
+GL1
+===
 
-GL1C is the shared L1 cache layer on gfx1151, supplied by the TCP (vector L0).
+GL1C is the shared L1 cache layer on gfx1151, supplied by TCP (GL0).
 For TCP panels and Memory Chart rows through the TCP-GL1 boundary, see
 :doc:`tcp-cache`. The GL1C to GL2 path is described in :doc:`gl2-cache`.
 

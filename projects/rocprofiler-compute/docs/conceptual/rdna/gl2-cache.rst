@@ -4,9 +4,9 @@
 
 .. _rdna-gl2:
 
-===============================
-GL2 cache (GL2C) and GCEA
-===============================
+===
+GL2
+===
 
 On gfx1151, GL2C (RDNA naming for what Instinct documentation refers to as L2/TCC) is the last-level on-chip cache for most clients.
  Traffic leaving GL2

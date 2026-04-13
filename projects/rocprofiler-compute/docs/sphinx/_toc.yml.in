@@ -62,11 +62,11 @@ subtrees:
         - file: conceptual/rdna/wgp.rst
           title: Workgroup processor (WGP)
         - file: conceptual/rdna/tcp-cache.rst
-          title: TCP (GL0)
+          title: GL0
         - file: conceptual/rdna/gl1-cache.rst
-          title: GL1 — GL1C
+          title: GL1
         - file: conceptual/rdna/gl2-cache.rst
-          title: GL2 — GL2C and GCEA
+          title: GL2
         - file: conceptual/rdna/shader-engine.rst
           title: Shader engine
         - file: conceptual/rdna/command-processor.rst

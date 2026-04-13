@@ -8,7 +8,7 @@
 Workgroup processor (WGP)
 =========================
 
-On RDNA3-class GPUs (including discrete Navi 3x and RDNA3.5 / gfx1151
+On RDNA3-class GPUs (including discrete Ryzen APU 3x and RDNA3.5 / gfx1151
 integrations), shader work is organized into Workgroup Processors (WGPs). A WGP
 pairs two Compute Units (CUs) that share resources; compute kernels are typically
 tracked with wave32-oriented waves in the gfx1151 panel set. The profiler's
