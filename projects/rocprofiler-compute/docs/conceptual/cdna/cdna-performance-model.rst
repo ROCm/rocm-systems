@@ -31,14 +31,14 @@ The table provides key details and support available for the different CDNA arch
   |Architecture     |CDNA       |CDNA 2                           |CDNA 3                               |CDNA 4                   |
   +=================+===========+=================================+=====================================+=========================+
   |Chip packaging   |Single Die |Two graphics Compute Dies (GCDs) |One logical processor with dozen     |Similar to CDNA3,        |
-  |                 |           |into single package.             |chiplets, configurable with partition|Multi-Die chiplet, but   |
-  |                 |           |                                 |modes.                               |with two I/O Dies (IODs) |
+  |                 |           |into single package.             |chiplets, configurable with partition|Multi-Die chiplet        |
+  |                 |           |                                 |modes.                               |                         |
   +-----------------+-----------+---------------------------------+-------------------------------------+-------------------------+
   |Supported series |MI100      |MI200                            |MI300A                               |MI350X                   |
-  |                 |           +---------------------------------+-------------------------------------+-------------------------+
-  |                 |           |MI210                            |MI300X                               |MI355X                   |
-  |                 |           +---------------------------------+-------------------------------------+-------------------------+
-  |                 |           |MI250                            |MI325X                               |                         |
+  |                 +-----------+---------------------------------+-------------------------------------+-------------------------+
+  |                 |MI210      |MI250X                           |MI300X                               |MI355X                   |
+  |                 |           |                                 +-------------------------------------+-------------------------+
+  |                 |           |                                 |MI325X                               |                         |
   +-----------------+-----------+---------------------------------+-------------------------------------+-------------------------+
   |Spatial partition|❌         |❌                               |Compute partition mode and           |Compute partition mode   |
   |mode             |           |                                 |Memory partition mode                |and Memory partition mode|
