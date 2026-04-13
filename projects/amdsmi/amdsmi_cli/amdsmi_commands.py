@@ -162,6 +162,7 @@ class AMDSMICommands:
             "sys": amdsmi_interface.AmdSmiClkType.SYS,
             "mem": amdsmi_interface.AmdSmiClkType.MEM,
             "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
             "soc": amdsmi_interface.AmdSmiClkType.SOC,
             "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
             # vclk and dclk currently do not support levels so average clk is given for frequency levels
@@ -8983,22 +8984,22 @@ class AMDSMICommands:
 
             # Validate the value against the extremum
             try:
-                # Parser only allows two options sclk or mclk
+                # Parser only allows three options sclk, mclk or fclk
                 if clk_type == "sclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.GFX
                 elif clk_type == "mclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.MEM
+                elif clk_type == "fclk":
+                    amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.DF
                 else:
-                    print(f"Valid clock types are: sclk, mclk\n")
+                    print(f"Valid clock types are: sclk, mclk, fclk\n")
                     self.logger.store_output(
                         args.gpu, "clk_limit", f"Invalid clock type {args.clk_limit.clk_type}"
                     )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
-
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
-
                 if lim_type == "min":
                     amdsmi_lim_type = amdsmi_interface.AmdSmiClkLimitType.MIN
                     if val > clk_tuple["max_clk"]:
