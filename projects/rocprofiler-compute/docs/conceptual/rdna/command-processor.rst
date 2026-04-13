@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 command processor / CPC metrics
+   :description: Learn about the Command Processor Compute (CPC) metrics in ROCm Compute Profiler, including utilization, interface activity, stalls, and cache behavior on RDNA 3.5 (gfx1151).
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, command processor, CPC
 
 .. _rdna-command-processor:
