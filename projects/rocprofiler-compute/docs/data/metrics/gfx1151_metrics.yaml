@@ -93,7 +93,7 @@ Memory chart - Scalar Data Cache:
     unit: Bytes/s
 Memory chart - TCP Cache (Vector L0):
   TCP Hit Rate:
-    rst: 'Definition: Percentage of TCP (L0 vector cache) requests that hit in cache. Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum'
+    rst: 'Definition: Percentage of TCP (vector data cache) requests that hit in cache. Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum'
     unit: Percent
   TCP Total Requests:
     rst: Total TCP (vector data cache) requests per normalization unit (reads, writes, and related traffic aggregated in TCP_REQ_sum).
