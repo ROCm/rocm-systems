@@ -2159,6 +2159,43 @@ get_counter_storage()
 }
 
 void
+flush_counter_storage_outputs()
+{
+    auto* _agent_counter_storage = get_counter_storage();
+    if(!_agent_counter_storage) return;
+
+    auto _cleanup_keys = std::vector<std::pair<std::string, const counter_storage*>>{};
+    for(const auto& [agent_id, counter_map] : *_agent_counter_storage)
+    {
+        static_cast<void>(agent_id);
+        for(const auto& [counter_id, storage] : counter_map)
+        {
+            static_cast<void>(counter_id);
+            _cleanup_keys.emplace_back(storage.storage_name + "cleanup", &storage);
+        }
+    }
+
+    std::sort(_cleanup_keys.begin(), _cleanup_keys.end(),
+              [](const auto& lhs, const auto& rhs) { return *lhs.second < *rhs.second; });
+
+    for(const auto& [cleanup_key, storage] : _cleanup_keys)
+    {
+        if(!storage || !storage->storage) continue;
+        if(storage->manager)
+        {
+            storage->manager->cleanup(cleanup_key);
+        }
+        else
+        {
+            // No tim::manager at construction (add_cleanup was skipped); still flush
+            // timemory storage once at shutdown.
+            counter_storage::write(storage->storage.get(), storage->metric_name,
+                                   storage->metric_description);
+        }
+    }
+}
+
+void
 counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                         rocprofiler_record_counter_t* record_data, size_t record_count,
                         rocprofiler_user_data_t /*user_data*/,
@@ -2744,6 +2781,7 @@ finalize_sdk_common()
 
     if(get_counter_storage())
     {
+        flush_counter_storage_outputs();
         get_counter_storage()->clear();
         delete get_counter_storage();
         get_counter_storage() = nullptr;
