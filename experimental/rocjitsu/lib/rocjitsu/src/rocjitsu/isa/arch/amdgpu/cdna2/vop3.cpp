@@ -12014,8 +12014,38 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
 }
 
 void VDivScaleF32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  uint64_t vcc = wf.vcc();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float s2 = std::bit_cast<float>(src2.read_lane(wf, lane));
+    if (inst_.neg & (1u << 0))
+      s0 = -s0;
+    if (inst_.neg & (1u << 1))
+      s1 = -s1;
+    if (inst_.neg & (1u << 2))
+      s2 = -s2;
+    float result = s0;
+    bool needs_scale = false;
+    if (!std::isnan(s1) && !std::isnan(s2) && !std::isinf(s1) && !std::isinf(s2) && s1 != 0.0f &&
+        s2 != 0.0f) {
+      int exp1, exp2;
+      std::frexp(s1, &exp1);
+      std::frexp(s2, &exp2);
+      needs_scale = std::abs(exp1 - exp2) > 100;
+      if (needs_scale)
+        result = std::ldexp(s0, exp2 > exp1 ? 128 : -128);
+    }
+    if (needs_scale)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+  }
+  wf.set_vcc(vcc);
 }
 
 VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
@@ -12036,8 +12066,38 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
 }
 
 void VDivScaleF64Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  uint64_t vcc = wf.vcc();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    double s0 = std::bit_cast<double>(src0.read_lane64(wf, lane));
+    double s1 = std::bit_cast<double>(src1.read_lane64(wf, lane));
+    double s2 = std::bit_cast<double>(src2.read_lane64(wf, lane));
+    if (inst_.neg & (1u << 0))
+      s0 = -s0;
+    if (inst_.neg & (1u << 1))
+      s1 = -s1;
+    if (inst_.neg & (1u << 2))
+      s2 = -s2;
+    double result = s0;
+    bool needs_scale = false;
+    if (!std::isnan(s1) && !std::isnan(s2) && !std::isinf(s1) && !std::isinf(s2) && s1 != 0.0 &&
+        s2 != 0.0) {
+      int exp1, exp2;
+      std::frexp(s1, &exp1);
+      std::frexp(s2, &exp2);
+      needs_scale = std::abs(exp1 - exp2) > 768;
+      if (needs_scale)
+        result = std::ldexp(s0, exp2 > exp1 ? 1024 : -1024);
+    }
+    if (needs_scale)
+      vcc |= (1ULL << lane);
+    else
+      vcc &= ~(1ULL << lane);
+    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>(result));
+  }
+  wf.set_vcc(vcc);
 }
 
 VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
@@ -12058,8 +12118,16 @@ VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
 }
 
 void VMadU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint64_t s0 = src0.read_lane(wf, lane);
+    uint64_t s1 = src1.read_lane(wf, lane);
+    uint64_t s2 = src2.read_lane64(wf, lane);
+    uint64_t result = s0 * s1 + s2;
+    vdst.write_lane64(wf, lane, result);
+  }
 }
 
 VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
@@ -12080,8 +12148,16 @@ VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
 }
 
 void VMadI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    int64_t s0 = static_cast<int32_t>(src0.read_lane(wf, lane));
+    int64_t s1 = static_cast<int32_t>(src1.read_lane(wf, lane));
+    int64_t s2 = static_cast<int64_t>(src2.read_lane64(wf, lane));
+    uint64_t result = static_cast<uint64_t>(s0 * s1 + s2);
+    vdst.write_lane64(wf, lane, result);
+  }
 }
 
 } // namespace cdna2

@@ -1186,7 +1186,9 @@ void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {
 
 bool is_vgpr_only_type(OperandType t) {
   return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_ACCVGPR ||
-         t == OperandType::OPR_VGPR_OR_LDS || t == OperandType::OPR_SRC_VGPR;
+         t == OperandType::OPR_VGPR_OR_LDS || t == OperandType::OPR_SRC_VGPR ||
+         t == OperandType::OPR_ACCVGPR || t == OperandType::OPR_SRC_ACCVGPR ||
+         t == OperandType::OPR_SRC_VGPR_OR_ACCVGPR;
 }
 
 bool is_immediate_type(OperandType t) {
@@ -1196,8 +1198,19 @@ bool is_immediate_type(OperandType t) {
 }
 
 uint32_t vgpr_index(OperandType opr_type, int ev) {
-  if ((opr_type == OperandType::OPR_VGPR || opr_type == OperandType::OPR_VGPR_OR_ACCVGPR))
+  if (opr_type == OperandType::OPR_VGPR || opr_type == OperandType::OPR_VGPR_OR_ACCVGPR)
     return static_cast<uint32_t>(ev);
+  if (opr_type == OperandType::OPR_ACCVGPR)
+    return static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);
+  if (opr_type == OperandType::OPR_SRC_ACCVGPR)
+    return static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);
+  if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR) {
+    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN)
+      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN);
+    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)
+      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN);
+    return static_cast<uint32_t>(ev);
+  }
   return static_cast<uint32_t>(ev - 256);
 }
 
@@ -1217,6 +1230,15 @@ uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
     return static_cast<uint32_t>(ev);
   if (ev >= 256 && ev <= 511)
     return wf.cu().read_vgpr(wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256), lane);
+  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&
+      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&
+      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {
+    return wf.cu().read_vgpr(
+        wf.vgpr_alloc().base +
+            static_cast<uint32_t>(
+                ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN),
+        lane);
+  }
   return resolve_src_scalar(wf, ev);
 }
 
@@ -1243,6 +1265,16 @@ uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const 
   }
   if (ev >= 256 && ev <= 511) {
     uint32_t idx = wf.vgpr_alloc().base + static_cast<uint32_t>(ev - 256);
+    uint32_t lo = wf.cu().read_vgpr(idx, lane);
+    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);
+    return static_cast<uint64_t>(hi) << 32 | lo;
+  }
+  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&
+      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&
+      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {
+    uint32_t idx = wf.vgpr_alloc().base +
+                   static_cast<uint32_t>(
+                       ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN);
     uint32_t lo = wf.cu().read_vgpr(idx, lane);
     uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);
     return static_cast<uint64_t>(hi) << 32 | lo;
