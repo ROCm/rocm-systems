@@ -48,14 +48,6 @@ protected:
         return _output.empty() || _output.find(_substr) == std::string::npos;
     }
 
-    void clear_streams()
-    {
-        m_cout_stream.str("");
-        m_cout_stream.clear();
-        m_cerr_stream.str("");
-        m_cerr_stream.clear();
-    }
-
 private:
     std::stringstream  m_cout_stream;
     std::stringstream  m_cerr_stream;
@@ -87,7 +79,7 @@ TEST_F(OutputTest, PrintCommand_EmptyArgv)
     std::vector<char*> command_args = {};
     print_command(command_args);
     std::string output = get_cout();
-    EXPECT_NE(output.find("Executing"), std::string::npos);
+    EXPECT_TRUE(does_not_contain(output, "Executing"));
 }
 
 TEST_F(OutputTest, PrintEnvironment_WithUpdates)
@@ -189,12 +181,51 @@ TEST_F(OutputTest, PrintEnvironment_NonRocprofsysVarsNotShown)
     EXPECT_TRUE(does_not_contain(output, "OTHER_VAR"));
 }
 
-TEST_F(OutputTest, PrintEnvironment_StringSet)
+TEST_F(OutputTest, MatchesEnvKey_ExactMatch)
 {
-    std::vector<char*>              env     = { make_env("ROCPROFSYS_TEST=value") };
-    std::unordered_set<std::string> updated = { "ROCPROFSYS_TEST" };
+    EXPECT_TRUE(matches_env_key("ROCPROFSYS_VERBOSE=1", "ROCPROFSYS_VERBOSE"));
+}
 
-    print_environment(env, updated);
-    std::string output = get_cerr();
-    EXPECT_NE(output.find("ROCPROFSYS_TEST"), std::string::npos);
+TEST_F(OutputTest, MatchesEnvKey_RejectsPrefixMatch)
+{
+    EXPECT_FALSE(matches_env_key("ROCPROFSYS_VERBOSE_LEVEL=1", "ROCPROFSYS_VERBOSE"));
+}
+
+TEST_F(OutputTest, MatchesEnvKey_EmptyKey)
+{
+    EXPECT_FALSE(matches_env_key("ROCPROFSYS_VERBOSE=1", ""));
+}
+
+TEST_F(OutputTest, MatchesEnvKey_EmptyEntry)
+{
+    EXPECT_FALSE(matches_env_key("", "ROCPROFSYS_VERBOSE"));
+}
+
+TEST_F(OutputTest, MatchesEnvKey_NoEquals)
+{
+    EXPECT_FALSE(matches_env_key("ROCPROFSYS_VERBOSE", "ROCPROFSYS_VERBOSE"));
+}
+
+TEST_F(OutputTest, StartsWithRocprofsys)
+{
+    EXPECT_TRUE(starts_with_rocprofsys("ROCPROFSYS_TRACE=ON"));
+    EXPECT_FALSE(starts_with_rocprofsys("OTHER_VAR=value"));
+    EXPECT_FALSE(starts_with_rocprofsys(""));
+}
+
+TEST_F(OutputTest, BuildCommandString_AllNullptr)
+{
+    std::vector<char*> argv   = { nullptr, nullptr };
+    auto               result = build_command_string(argv);
+    EXPECT_TRUE(result.empty());
+}
+
+TEST_F(OutputTest, PrintCommand_NullptrEntries)
+{
+    std::vector<char*> command_args = { make_env("./test"), nullptr, make_env("arg1") };
+    print_command(command_args);
+    std::string output = get_cout();
+    EXPECT_NE(output.find("Executing"), std::string::npos);
+    EXPECT_NE(output.find("./test"), std::string::npos);
+    EXPECT_NE(output.find("arg1"), std::string::npos);
 }

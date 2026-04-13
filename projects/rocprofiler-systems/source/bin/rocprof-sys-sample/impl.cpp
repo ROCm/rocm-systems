@@ -85,9 +85,9 @@ get_updated_envs()
 int
 get_verbose_level()
 {
-    verbose     = get_env<int>("ROCPROFSYS_VERBOSE", verbose, false);
-    auto _debug = get_env<bool>("ROCPROFSYS_DEBUG", false, false);
-    if(_debug) verbose += rocprofsys::common::debug_verbose_boost;
+    verbose           = get_env<int>(std::string{ env::VERBOSE }, verbose, false);
+    const auto _debug = get_env<bool>(std::string{ env::DEBUG }, false, false);
+    if(_debug) verbose += env::debug_verbose_boost;
     return verbose;
 }
 

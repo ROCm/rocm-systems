@@ -45,23 +45,21 @@ using namespace ::timemory::join;
 using ::tim::get_env;
 using ::tim::log::stream;
 
+int
+get_verbose(parser_data_t& _data)
+{
+    auto& verbose     = _data.verbose;
+    verbose           = get_env<int>(std::string{ env::VERBOSE }, verbose, false);
+    const auto _debug = get_env<bool>(std::string{ env::DEBUG }, false, false);
+    if(_debug) verbose += env::debug_verbose_boost;
+    return verbose;
+}
+
 namespace
 {
 using rocprofsys::common::update_mode;
 
 auto original_envs = std::unordered_set<std::string>{};
-
-int
-get_verbose(parser_data_t& _data)
-{
-    auto& verbose = _data.verbose;
-    verbose       = get_env(std::string{ env::CAUSAL_VERBOSE },
-                            get_env<int>(std::string{ env::VERBOSE }, verbose, false));
-    auto _debug   = get_env(std::string{ env::CAUSAL_DEBUG },
-                            get_env<bool>(std::string{ env::DEBUG }, false, false));
-    if(_debug) verbose += 8;
-    return verbose;
-}
 
 // Export configuration to JSON file or stdout
 void

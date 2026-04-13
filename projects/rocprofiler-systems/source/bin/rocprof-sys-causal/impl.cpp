@@ -1,28 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "rocprof-sys-causal.hpp"
 
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "core/mproc.hpp"
@@ -57,6 +39,7 @@ namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
+namespace env      = rocprofsys::env_vars;
 using namespace ::timemory::join;
 using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
@@ -110,11 +93,11 @@ forward_signal(int sig)
 int
 get_verbose()
 {
-    verbose     = get_env("ROCPROFSYS_CAUSAL_VERBOSE",
-                          get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
-    auto _debug = get_env("ROCPROFSYS_CAUSAL_DEBUG",
-                          get_env<bool>("ROCPROFSYS_DEBUG", false, false));
-    if(_debug) verbose += rocprofsys::common::debug_verbose_boost;
+    verbose           = get_env(std::string{ env::CAUSAL_VERBOSE },
+                                get_env<int>(std::string{ env::VERBOSE }, verbose, false));
+    const auto _debug = get_env(std::string{ env::CAUSAL_DEBUG },
+                                get_env<bool>(std::string{ env::DEBUG }, false, false));
+    if(_debug) verbose += env::debug_verbose_boost;
     return verbose;
 }
 

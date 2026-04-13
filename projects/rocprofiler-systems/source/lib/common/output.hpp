@@ -8,6 +8,7 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofsys
@@ -17,7 +18,21 @@ inline namespace common
 namespace output
 {
 
-inline std::string
+[[nodiscard]] constexpr bool
+matches_env_key(std::string_view _entry, std::string_view _key) noexcept
+{
+    return _entry.size() > _key.size() && _entry[_key.size()] == '=' &&
+           _entry.substr(0, _key.size()) == _key;
+}
+
+[[nodiscard]] constexpr bool
+starts_with_rocprofsys(std::string_view _entry) noexcept
+{
+    constexpr std::string_view _prefix = "ROCPROFSYS";
+    return _entry.size() >= _prefix.size() && _entry.substr(0, _prefix.size()) == _prefix;
+}
+
+[[nodiscard]] inline std::string
 build_command_string(const std::vector<char*>& _argv)
 {
     std::string _result;
@@ -40,46 +55,42 @@ build_command_string(const std::vector<char*>& _argv)
 inline void
 print_command(const std::vector<char*>& _argv, std::string_view _prefix = {})
 {
-    auto _cmd = build_command_string(_argv);
-    std::cout << _prefix << "Executing '" << _cmd << "'..." << std::endl;
+    if(_argv.empty()) return;
+    const auto _cmd = build_command_string(_argv);
+    if(_cmd.empty()) return;
+    std::cout << _prefix << "Executing '" << _cmd << "'...\n" << std::flush;
 }
 
-template <typename UpdatedEnvsT>
 inline void
-print_environment(const std::vector<char*>& _env, const UpdatedEnvsT& _updated_envs,
+print_environment(const std::vector<char*>&                   _env,
+                  const std::unordered_set<std::string_view>& _updated_envs,
                   bool _include_general_vars = false, std::string_view _prefix = {})
 {
     auto _env_sorted = _env;
-    std::sort(_env_sorted.begin(), _env_sorted.end(),
+
+    const auto _valid_end = std::remove(_env_sorted.begin(), _env_sorted.end(), nullptr);
+    std::sort(_env_sorted.begin(), _valid_end,
               [](const char* const _lhs, const char* const _rhs) {
-                  if(!_lhs) return false;
-                  if(!_rhs) return true;
                   return std::string_view{ _lhs } < std::string_view{ _rhs };
               });
 
-    auto valid_end = std::remove(_env_sorted.begin(), _env_sorted.end(), nullptr);
+    const auto _partition_point =
+        std::stable_partition(_env_sorted.begin(), _valid_end, [&](const char* _entry) {
+            auto       _sv     = std::string_view{ _entry };
+            const auto _eq_pos = _sv.find('=');
+            if(_eq_pos == std::string_view::npos) return false;
+            return _updated_envs.count(_sv.substr(0, _eq_pos)) > 0;
+        });
 
-    auto is_updated = [&](const char* entry) {
-        auto sv = std::string_view{ entry };
-        return std::any_of(
-            _updated_envs.begin(), _updated_envs.end(),
-            [sv](const auto& key) { return sv.substr(0, key.size()) == key; });
-    };
-
-    auto partition_point =
-        std::stable_partition(_env_sorted.begin(), valid_end, is_updated);
-
-    std::vector<std::string_view> _updated_vars(_env_sorted.begin(), partition_point);
+    const std::vector<std::string_view> _updated_vars(_env_sorted.begin(),
+                                                      _partition_point);
 
     std::vector<std::string_view> _general_vars;
     if(_include_general_vars)
     {
-        constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
-        std::copy_if(partition_point, valid_end, std::back_inserter(_general_vars),
-                     [rocprofsys_prefix](const char* entry) {
-                         auto sv = std::string_view{ entry };
-                         return sv.substr(0, rocprofsys_prefix.size()) ==
-                                rocprofsys_prefix;
+        std::copy_if(_partition_point, _valid_end, std::back_inserter(_general_vars),
+                     [](const char* _entry) {
+                         return starts_with_rocprofsys(std::string_view{ _entry });
                      });
     }
 

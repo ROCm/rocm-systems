@@ -142,8 +142,10 @@ constexpr std::string_view TRACE_PERIODS         = "ROCPROFSYS_TRACE_PERIODS";
 constexpr std::string_view TRACE_PERIOD_CLOCK_ID = "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID";
 constexpr std::string_view VERBOSE               = "ROCPROFSYS_VERBOSE";
 constexpr std::string_view DEBUG                 = "ROCPROFSYS_DEBUG";
-constexpr std::string_view TIMEMORY_COMPONENTS   = "ROCPROFSYS_TIMEMORY_COMPONENTS";
-constexpr std::string_view NETWORK_INTERFACE     = "ROCPROFSYS_NETWORK_INTERFACE";
+// well above the highest verbose threshold (3) so debug mode enables all verbose output
+constexpr int              debug_verbose_boost = 8;
+constexpr std::string_view TIMEMORY_COMPONENTS = "ROCPROFSYS_TIMEMORY_COMPONENTS";
+constexpr std::string_view NETWORK_INTERFACE   = "ROCPROFSYS_NETWORK_INTERFACE";
 
 }  // namespace env_vars
 }  // namespace rocprofsys
