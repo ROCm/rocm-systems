@@ -105,7 +105,7 @@ public:
                                        void*                                 callback_data) = 0;
 };
 
-class SdkCallbacksImpl
+class SdkCallbacksImpl : public SdkCallbacks
 {
 public:
     SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper);

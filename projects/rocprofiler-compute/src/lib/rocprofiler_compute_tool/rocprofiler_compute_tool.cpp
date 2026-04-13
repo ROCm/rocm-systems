@@ -14,16 +14,16 @@
 
 using namespace rocprofiler_compute_tool;
 
-std::shared_ptr<InputParameters>  g_input_parameters = std::make_shared<EnvInputParameters>();
-std::shared_ptr<SdkWrapper>       g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
-std::shared_ptr<SdkCallbacksImpl> g_sdk_callbacks    = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
+std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
+std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
+std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
     g_input_parameters = input_parameters;
 }
 
-void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacksImpl>& sdk_callbacks)
+void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacks>& sdk_callbacks)
 {
     g_sdk_callbacks = sdk_callbacks;
 }
