@@ -41,10 +41,15 @@ struct PodIds {
 };
 
 /**
+ * Zero-initialized pod ID buffer used for portable zero checks.
+ */
+static constexpr uint8_t kZeroPhysicalPodId[16] = {};
+
+/**
  * Macro to check if PodIds structure contains all zeros (detection failed)
  */
 #define IS_PODIDS_ZERO(podIds) \
-  (memcmp((podIds).physicalPodId, (const uint8_t[16]){0}, 16) == 0 && \
+  (memcmp((podIds).physicalPodId, kZeroPhysicalPodId, 16) == 0 && \
    (podIds).virtualPodId == 0)
 
 /**
