@@ -136,14 +136,6 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
-  /*if (static_cast<int>(nblocks) > nBlocksMax) {
-    WARN(
-        "DDA IPC allreduce: grid %u exceeds init max %d (scratch %zu bytes)",
-        nblocks,
-        nBlocksMax,
-        comm->ddaIpcScratchBytes);
-    return ncclInternalError;
-  }*/
 
   auto* barrierState =
       static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
@@ -193,6 +185,8 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
 
 bool ncclAllReduceDdaIpcEligible(
     ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
     size_t count,
     ncclDataType_t datatype,
     ncclRedOp_t op) {
@@ -226,6 +220,19 @@ bool ncclAllReduceDdaIpcEligible(
   if (need > comm->ddaIpcScratchBytes) {
     return false;
   }
+  if (((uintptr_t)sendbuff % 16) || ((uintptr_t)recvbuff % 16) ||
+      ((count *  ncclTypeSize(datatype)) % 16)) {
+    // 16 byte alignment as we do 16-byte loads in DDA kernel
+    return false;
+  }
+  if ((count *  ncclTypeSize(datatype)) > kDdaFlatTreeThresholdBytes) {
+    if (count % comm->nRanks || ((count / comm->nRanks * ncclTypeSize(datatype)) % 16)) {
+      // In two-shot algo, each rank is reduces count/nRanks_ elements so we
+      // need to make sure that is 16-byte aligned
+      return false;
+    }	
+  }
+
   return true;
 }
 

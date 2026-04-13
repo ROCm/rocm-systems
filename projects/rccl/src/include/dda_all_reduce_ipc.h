@@ -17,6 +17,8 @@ ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm);*/
 
 bool ncclAllReduceDdaIpcEligible(
     ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
     size_t count,
     ncclDataType_t datatype,
     ncclRedOp_t op);

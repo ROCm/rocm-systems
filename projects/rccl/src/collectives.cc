@@ -242,6 +242,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 }
 
 RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
+RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 
 NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream);
@@ -425,7 +426,9 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     }
   }
 
-  if ((count * ncclTypeSize(datatype) <= 67108864) && ncclAllReduceDdaIpcEligible(comm, count, datatype, op)) {
+  size_t ddaThreshold =  rcclParamDdaThreshold();
+
+  if ((count * ncclTypeSize(datatype) <= ddaThreshold) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     NCCLCHECK(ncclAllReduceDdaIpc(
         sendbuff,
         recvbuff,
