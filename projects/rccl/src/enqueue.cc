@@ -2190,7 +2190,7 @@ extern int64_t ncclParamMaxNchannels();
 
 static ncclResult_t topoGetAlgoInfo(
     struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
-    float** collCostTable, ncclSimInfo_t* simInfo
+    float** collCostTable, ncclSimInfo_t* simInfo, int userAlgoInput
   ) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
@@ -2244,6 +2244,14 @@ static ncclResult_t topoGetAlgoInfo(
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
   }
   rcclSetPipelining(comm, nBytes, info);
+  //override algo, tree doesn't work with fewer than 64 bytes
+  if (!isTunerMatchFound) {
+    size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
+    if (!userAlgoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144){
+      info->algorithm = NCCL_ALGO_TREE;
+      info->protocol = NCCL_PROTO_LL;
+    }
+  }
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
   int nc = comm->nChannels;
@@ -2415,15 +2423,9 @@ rccl_static ncclResult_t getAlgoInfo(
           comm->tunerContext, info->func, nBytes,
           numPipeOps, (float **)collCostTable, NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS,
           regBuff, &nMaxChannels));
-    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo));
+    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo, userAlgoInput));
   } else {
-    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo));
-    //override algo, tree doesn't work with fewer than 64 bytes
-    size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
-    if (!userAlgoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144){
-      info->algorithm = NCCL_ALGO_TREE;
-      info->protocol = NCCL_PROTO_LL;
-    }
+    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo, userAlgoInput));
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
     if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
       // make algorithm selection based on buffer registration
