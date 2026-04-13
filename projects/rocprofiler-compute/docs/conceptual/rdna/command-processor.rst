@@ -65,7 +65,7 @@ CPC Memory Requests
       .. jinja:: rdna1151-cpc-memory-requests-gfx1151
          :file: _templates/metrics_table.j2
 
-MEC Instruction Cache
+MEC instruction cache
 -----------------------
 
 .. tab-set::
