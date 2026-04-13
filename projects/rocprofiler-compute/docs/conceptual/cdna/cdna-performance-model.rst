@@ -156,7 +156,7 @@ hardware blocks of AMD Instinct accelerators. Refer to the following top level G
     .. image:: ../../data/conceptual/CDNA4.png
       :alt: CDNA4 top level architecture diagram
 
-This section describes each hardware block on the accelerator as interacted with by a software developer to
+This section describes each hardware block on the GPUs as interacted with by a software developer to
 give a deeper understanding of the metrics reported by profiling data. Refer to
 :doc:`/tutorial/profiling-by-example` for more practical examples and details on how
 to use ROCm Compute Profiler to optimize your code.
