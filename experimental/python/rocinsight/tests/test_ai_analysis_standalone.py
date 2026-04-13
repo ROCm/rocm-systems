@@ -441,8 +441,9 @@ class TestBugFixes:
             "total_runtime": 1_500_000,
         }
         recs = generate_recommendations(time_breakdown, hotspots, {}, [])
-        compute_recs = [r for r in recs if r["category"] == "Compute Bottleneck"]
-        assert compute_recs, "Expected a compute bottleneck recommendation"
+        _rule3_cats = {"Kernel Hotspot", "Compute-Bound Kernel", "Mixed Bottleneck Kernel", "Memory-Bound Kernel"}
+        compute_recs = [r for r in recs if r["category"] in _rule3_cats]
+        assert compute_recs, "Expected a kernel hotspot recommendation"
 
         quoted_name = shlex.quote(dangerous_name)
         rocprofv3_cmds = [
