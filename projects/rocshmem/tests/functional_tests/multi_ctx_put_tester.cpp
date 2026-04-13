@@ -46,6 +46,10 @@ __global__ void MultiCtxPutTest(int loop, int skip,
   int t_id  = get_flat_block_id();
   int wf_id = t_id / wf_size;
 
+  int my_pe = rocshmem_my_pe();
+  int n_pes = rocshmem_n_pes();
+  int next_pe = (my_pe + 1) % n_pes;
+
   rocshmem_wg_team_create_ctx(teams[wg_id % num_ctxs], ctx_type, &ctx);
 
   __shared__ long long int wf_start_time[32];
@@ -64,7 +68,7 @@ __global__ void MultiCtxPutTest(int loop, int skip,
       wf_start_time[wf_id] = wall_clock64();
     }
 
-    rocshmem_ctx_putmem_nbi(ctx, dest, source, size, 1);
+    rocshmem_ctx_putmem_nbi(ctx, dest, source, size, next_pe);
   }
 
   __syncthreads();
@@ -172,15 +176,14 @@ void MultiCtxPutTester::postLaunchKernel() {
 }
 
 void MultiCtxPutTester::verifyResults(size_t size) {
-  if (args.myid == 1) {
-    size_t buff_size = size * args.wg_size * args.num_wgs;
-    for (uint64_t i = 0; i < buff_size; i++) {
-      if (dest[i] != source[i]) {
-        std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << " Got " << dest[i] << ", Expected "
-                  << source[i] << std::endl;
-        rocshmem_global_exit(1);
-      }
+  size_t buff_size = size * args.wg_size * args.num_wgs;
+  for (uint64_t i = 0; i < buff_size; i++) {
+    if (dest[i] != source[i]) {
+      std::cerr << "PE " << args.myid
+                << ": data validation error at idx " << i << std::endl;
+      std::cerr << " Got " << dest[i] << ", Expected "
+                << source[i] << std::endl;
+      rocshmem_global_exit(1);
     }
   }
 }
