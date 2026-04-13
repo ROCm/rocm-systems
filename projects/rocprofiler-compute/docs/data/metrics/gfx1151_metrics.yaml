@@ -331,7 +331,7 @@ Wave Instruction Mix:
     rst: Number of Vector Memory instructions executed. Includes global, buffer, and texture memory operations.
     unit: Count per Normalization Unit
   Instructions - LDS:
-    rst: Total Local Data Share instructions (SQ_INSTS_LDS). LDS provides fast shared memory within a workgroup. For LDS sub-categories (direct/param/ wave32 param loads), see the "LDS Instruction Mix" table.
+    rst: Total Local Data Share instructions (SQ_INSTS_LDS). LDS provides fast shared memory within a workgroup. For LDS sub-categories (direct/param/wave32 param loads), see the "LDS Instruction Mix" table.
     unit: Count per Normalization Unit
   Instructions - Internal:
     rst: Internal SQ instructions (SQ_INSTS_INTERNAL) per normalization unit — bookkeeping or non-user-visible work attributed to the scheduler.
