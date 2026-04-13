@@ -37,7 +37,7 @@ GL1C request statistics
       .. jinja:: rdna1151-gl1c-request-statistics-gfx1151
          :file: _templates/metrics_table.j2
 
-GL1C Cache Performance
+GL1C cache performance
 ----------------------
 
 .. tab-set::
