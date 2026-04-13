@@ -9,14 +9,14 @@
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
-TEST_CASE(Unit_hipModuleGetFunction_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipModuleGetFunction_Positive_Basic) {
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
   HIP_CHECK(hipModuleGetFunction(&kernel, mg.module(), "GlobalKernel"));
   REQUIRE(kernel != nullptr);
 }
 
-TEST_CASE(Unit_hipModuleGetFunction_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipModuleGetFunction_Negative_Parameters) {
   auto mg = ModuleGuard::InitModule("get_function_module.code");
   hipFunction_t kernel = nullptr;
 
@@ -56,11 +56,11 @@ TEST_CASE(Unit_hipModuleGetFunction_Negative_Parameters) {
 
 // Test description: Loading kernel function from different device than the one on which the module
 // is loaded
-TEST_CASE(Unit_hipModuleGetFunction_DiffDevice) {
+HIP_TEST_CASE(Unit_hipModuleGetFunction_DiffDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    SUCCEED("skipped the testcase as no of devices is less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

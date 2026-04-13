@@ -60,10 +60,10 @@ void HostKernelDouble(float* Hmm, float* hPtr, size_t n) {
 /*
    This testcase verifies the concurrent access of hipMallocManaged Memory on host and device.
  */
-TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
+HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -97,10 +97,10 @@ TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
 // Equal parts of Hmm is accessed and
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
-TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -149,10 +149,10 @@ TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
 // Equal parts of Hmm is accessed on available gpus and
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
-TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -161,7 +161,7 @@ TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   int NumDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
   if (NumDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping test because more than one device was not found.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   unsigned int NUM_ELMS = (1024 * 1024);
@@ -205,10 +205,10 @@ TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
 }
 
 // The following tests oversubscription hipMallocManaged() api
-TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
+HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -216,10 +216,7 @@ TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
   int isPageableHMM = 0;
   HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
   if (!isPageableHMM) {
-    SUCCEED(
-        "Running on a system  where all the memory requested in hipMallocManged "
-        "is allocated on the host.\nThis can cause instability because of out of memory failures.\n"
-        "Hence skipping the test with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
     return;
   }
 #endif
@@ -232,7 +229,7 @@ TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
 
 // The following test does negative testing of hipMallocManaged() api
 // by passing invalid values and check if the behavior is as expected
-TEST_CASE(Unit_hipMallocManaged_Negative) {
+HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
   void* A;
   size_t total = 0, free = 0;
   HIP_CHECK(hipMemGetInfo(&free, &total));
@@ -292,11 +289,11 @@ TEST_CASE(Unit_hipMallocManaged_Negative) {
 // Allocate two pointers using hipMallocManaged(), initialize,
 // then launch kernel using these pointers directly and
 // later validate the content without using any Memcpy.
-TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
                    float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -333,22 +330,23 @@ TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
 // to all other devices. This include verification and Device two Device
 // transfers and kernel launch o discover if there any access issues.
 
-TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
                    unsigned char, int, float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    return;
+  }
+
+  int NumDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&NumDevices));
+  if (NumDevices < 2) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
   std::atomic<unsigned int> DataMismatch;
   TestType *Ah1 = new TestType[N], *Ah2 = new TestType[N], *Ad = nullptr, *Hmm = nullptr;
-  int NumDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&NumDevices));
-  if (NumDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping test because more than one device was not found.");
-    return;
-  }
 
   for (size_t i = 0; i < N; ++i) {
     Ah1[i] = INIT_VAL;

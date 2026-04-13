@@ -44,6 +44,7 @@ set(SRC_FILES
   src/device/reduce_scatter.h
   src/device/rccl_metadata.h
   src/device/sendrecv.h
+  src/device/hierarchical_ag_shuffle.h
   src/device/common.cu
   src/device/onerank.cu
   src/device/network/unpack/unpack_defs.h
@@ -377,7 +378,7 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
@@ -387,7 +388,7 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
@@ -431,7 +432,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -803,7 +804,9 @@ if(ENABLE_CODE_COVERAGE)
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
   target_compile_options(rccl PRIVATE
-    -fvisibility=default -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
+    -fvisibility=default
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping")
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate

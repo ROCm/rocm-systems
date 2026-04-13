@@ -29,7 +29,7 @@
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipMalloc_gpptest) {
+HIP_TEST_CASE(Unit_hipMalloc_gpptest) {
   printf("calling cpp function from here\n");
   int result = MallocFunc();
   REQUIRE(result == 1);

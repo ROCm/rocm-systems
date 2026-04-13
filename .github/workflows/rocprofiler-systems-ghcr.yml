@@ -41,7 +41,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_ci_base.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
 
@@ -67,13 +67,13 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems
           submodules: recursive
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -116,14 +116,14 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.7.9
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ghcr.io/ROCm/rocprofiler-${{ matrix.system.distro }}
 
       - name: Build CI GFX Container (Does not Push on PR)
         id: docker_build
         continue-on-error: true
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64
@@ -144,7 +144,7 @@ jobs:
       # Retry a copy of docker_build if Docker build failed due to intermittent failure
       - name: Build CI GFX Container Retry (Does not Push on PR)
         if: steps.docker_build.outcome != 'success'
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           file: projects/rocprofiler-systems/docker/${{ steps.setup_vars_gfx.outputs.docker_file }}
           platforms: linux/amd64

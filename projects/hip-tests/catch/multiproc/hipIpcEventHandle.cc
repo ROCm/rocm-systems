@@ -225,7 +225,7 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipIpcEventHandle_Functional) {
+HIP_TEST_CASE(Unit_hipIpcEventHandle_Functional) {
   ipcDevices_t* shmDevices;
   ipcEventInfo_t* shmEventInfo;
   shmDevices = reinterpret_cast<ipcDevices_t*>(
@@ -235,7 +235,7 @@ TEST_CASE(Unit_hipIpcEventHandle_Functional) {
   getDevices(shmDevices);
 
   if (shmDevices->count < 2) {
-    WARN("Test requires atleast two GPUs with P2P access. Skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -320,7 +320,7 @@ TEST_CASE(Unit_hipIpcEventHandle_Functional) {
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
+HIP_TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
   hipEvent_t event;
   hipIpcEventHandle_t eventHandle;
   hipError_t ret;

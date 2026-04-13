@@ -6,7 +6,7 @@
 
 #include <hip_test_common.hh>
 
-TEST_CASE(Unit_library_negative) {
+HIP_TEST_CASE(Unit_library_negative) {
   SECTION("load negative") {
     HIP_CHECK_ERROR(hipLibraryLoadData(nullptr, nullptr, nullptr, nullptr, 0, nullptr, nullptr, 0),
                     hipErrorInvalidValue);

@@ -41,18 +41,14 @@ static int HmmAttrPrint() {
 // hipMemRangeGetAttribute api by passing possible extreme values.
 // Curently the only way to test if count param working properly is to verify
 // the first parameter of hipMemRangeGetAttribute() api has value 1 stored
-TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
 #if HT_AMD
     int isPageableHMM = 0;
     HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
     if (!isPageableHMM) {
-      SUCCEED(
-          "Running on a system  where all the memory requested in hipMallocManaged "
-          "is allocated on the host.\nThis can cause instability because of out-of-memory "
-          "failures.\n"
-          "Hence skipping the test with Pass result.\n");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
       return;
     }
 #endif
@@ -95,15 +91,13 @@ TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
 
     REQUIRE(IfTestPassed);
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
 /* This test case checks the behavior of hipMemRangeGetAttribute() with
    AccessedBy flag is consistent with cuda's counter part*/
-TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0, *Hmm = NULL, MEM_SZ = 4096, RND_NUM = 999;
@@ -150,9 +144,7 @@ TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
     }
     HIP_CHECK(hipFree(Hmm));
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -160,7 +152,7 @@ TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
    by hipMemAdvise() but being probed using hipMemRangeGetAttribute() should
    not result in a crash*/
 
-TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, PageSz = 4096, Ngpus, RND_NUM = 999;
@@ -197,8 +189,6 @@ TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
     HIP_CHECK(hipFree(Hmm));
     delete[] OutData;
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }

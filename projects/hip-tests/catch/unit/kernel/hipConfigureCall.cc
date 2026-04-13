@@ -17,7 +17,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_ConfigureCall) {
+HIP_TEST_CASE(Unit_ConfigureCall) {
   struct dim3 grid_dim{};
   struct dim3 block_dim{};
   size_t shared_memory_size = 1024;
@@ -36,7 +36,7 @@ TEST_CASE(Unit_ConfigureCall) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_ConfigureCall_CheckParams) {
+HIP_TEST_CASE(Unit_ConfigureCall_CheckParams) {
   struct dim3 grid_dim{16, 8, 1};
   struct dim3 test_grid_dim{};
   struct dim3 block_dim{16, 8, 1};

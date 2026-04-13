@@ -10,9 +10,9 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -24,14 +24,14 @@ TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Basic) {
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 }
 
-TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
   if (!DeviceAttributesSupport(0, hipDeviceAttributePageableMemoryAccess)) {
-    HipTest::HIP_SKIP_TEST("Pageable memory access is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
     return;
   }
 
@@ -45,9 +45,9 @@ TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_Pageable) {
 // CUDA docs:
 // If the cudaMemAttachGlobal flag is specified, the memory can be accessed by any stream on any
 // device.
-TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -90,14 +90,14 @@ TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachGlobal) {
 // If the cudaMemAttachHost flag is specified, the program makes a guarantee that it won't access
 // the memory on the device from any stream on a device that has a zero value for the device
 // attribute cudaDevAttrConcurrentManagedAccess.
-TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HipTest::HIP_SKIP_TEST("Device supports concurrent managed access");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
     return;
   }
 
@@ -121,14 +121,14 @@ TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachHost) {
 // If the cudaMemAttachSingle flag is specified and stream is associated with a device that has a
 // zero value for the device attribute cudaDevAttrConcurrentManagedAccess, the program makes a
 // guarantee that it will only access the memory on the device from stream.
-TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
   if (DeviceAttributesSupport(0, hipDeviceAttributeConcurrentManagedAccess)) {
-    HipTest::HIP_SKIP_TEST("Device supports concurrent managed access");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
     return;
   }
 
@@ -158,9 +158,9 @@ TEST_CASE(Unit_hipStreamAttachMemAsync_Positive_AttachSingle) {
   REQUIRE(*managed_single.ptr() == 128);
 }
 
-TEST_CASE(Unit_hipStreamAttachMemAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 

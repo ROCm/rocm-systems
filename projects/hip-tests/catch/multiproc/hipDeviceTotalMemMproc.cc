@@ -139,7 +139,7 @@ static bool getTotalMemoryOfMaskedDevices(int actualNumGPUs) {
  *  - Multi-device test
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceTotalMem_MaskedDevices) {
+HIP_TEST_CASE(Unit_hipDeviceTotalMem_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
   bool ret;
@@ -150,7 +150,7 @@ TEST_CASE(Unit_hipDeviceTotalMem_MaskedDevices) {
     ret = getTotalMemoryOfMaskedDevices(count);
     REQUIRE(ret == true);
   } else {
-    SUCCEED("Not enough GPUs to run the masked GPU tests");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 

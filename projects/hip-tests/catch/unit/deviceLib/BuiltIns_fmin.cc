@@ -15,6 +15,7 @@ This testfile verifies Built fmin API scenarios
 */
 
 #include <hip_test_checkers.hh>
+#include <string>
 #include <hip_test_common.hh>
 #include <hip/hiprtc.h>
 
@@ -37,7 +38,7 @@ static constexpr auto fminGlobalMem{
 extern "C"
 __global__ void unsafeAtomicMin_GlobalMem(double* addr, double* result) {
   double comp = 10;
-  *result = unsafeAtomicMin(addr, comp);   
+  *result = unsafeAtomicMin(addr, comp);
 }
 )"};
 
@@ -60,7 +61,7 @@ Input: A_h with INITIAL_VAL
 Output: Return val would be 0 and the input value to API will not
         get updated. A_h would be INITIAL_VAL, B_h is 0
 */
-TEST_CASE(Unit_BuiltinAtomics_fminCoherentGlobalMem) {
+HIP_TEST_CASE(Unit_BuiltinAtomics_fminCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -68,7 +69,7 @@ TEST_CASE(Unit_BuiltinAtomics_fminCoherentGlobalMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       double *A_h, *B_h;
       double* A_d;
@@ -91,10 +92,13 @@ TEST_CASE(Unit_BuiltinAtomics_fminCoherentGlobalMem) {
       free(B_h);
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, Hence"
-        "skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, Hence"
+          "skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 
@@ -107,7 +111,7 @@ Output: Return val would be initial val of A_h and the input value of
         API would be updated with the min value
         A_h would be INITIAL_VAL, B_h would be INITIAL_VAL
 */
-TEST_CASE(Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem) {
+HIP_TEST_CASE(Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem) {
   auto mem_type = GENERATE(0, 1);
   hipDeviceProp_t prop;
   int device;
@@ -116,7 +120,7 @@ TEST_CASE(Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       double *A_h, *B_h;
       double* A_d;
@@ -145,10 +149,13 @@ TEST_CASE(Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem) {
       free(B_h);
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, Hence"
-        "skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, Hence"
+          "skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 /*
@@ -159,7 +166,7 @@ Output: Return val would be 0 and the input value to API will not
         get updated. A_h would be INITIAL_VAL, B_h is 0
 */
 
-TEST_CASE(Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem) {
+HIP_TEST_CASE(Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -167,7 +174,7 @@ TEST_CASE(Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       hiprtcProgram prog;
       hiprtcCreateProgram(&prog,          // prog
@@ -225,10 +232,13 @@ TEST_CASE(Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem) {
       free(B_h);
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, Hence"
-        "skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, Hence"
+          "skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }
 
@@ -241,7 +251,7 @@ Output: Return val would be initial val of A_h and the input value of
         API would be updated with the max value
         A_h would be 10, B_h would be INITIAL_VAL
 */
-TEST_CASE(Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem) {
+HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem) {
   int mem_type = GENERATE(0, 1);
   hipDeviceProp_t prop;
   int device;
@@ -250,7 +260,7 @@ TEST_CASE(Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem) {
   std::string gfxName(prop.gcnArchName);
   if ((gfxName == "gfx90a" || gfxName.find("gfx90a:")) == 0) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       hiprtcProgram prog;
       if (mem_type) {
@@ -319,9 +329,12 @@ TEST_CASE(Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem) {
       free(B_h);
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, Hence"
-        "skipping the testcase for this GPU "
-        << device);
+    {
+      std::string const skip_gfx_msg = std::string(
+          "Memory model feature is only supported for gfx90a, Hence"
+          "skipping the testcase for this GPU ") +
+          std::to_string(device);
+      HipTest::HIP_SKIP_TEST(skip_gfx_msg.c_str());
+    }
   }
 }

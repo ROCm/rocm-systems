@@ -384,12 +384,6 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
                                PATTERN "pal" EXCLUDE
                                PATTERN "libamdhsacode" EXCLUDE)
       endif()
-    else()
-      # Exclude .bat files on Linux.
-      #Hip bin files moved to /opt/rocm/bin and the file permission need to set properly
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
-              DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-              PATTERN *.bat EXCLUDE)
     endif()
 
     if(WIN32) #not required for flat folder structure
@@ -415,7 +409,6 @@ endif()
 if(HIP_PLATFORM STREQUAL "amd")
 install(FILES ${PROJECT_BINARY_DIR}/include/hip/amd_detail/hip_prof_str.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/amd_detail)
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin DESTINATION . USE_SOURCE_PERMISSIONS)
 endif()
 install(FILES ${PROJECT_BINARY_DIR}/include/hip/hip_version.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip)

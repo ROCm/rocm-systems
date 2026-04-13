@@ -54,7 +54,7 @@ static void RunBenchmark(unsigned int expected_flag) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamGetFlags) {
+HIP_TEST_CASE(Performance_hipStreamGetFlags) {
   unsigned int expected_flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   RunBenchmark(expected_flag);
 }

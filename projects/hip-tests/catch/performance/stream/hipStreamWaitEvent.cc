@@ -61,7 +61,7 @@ static void RunBenchmark(Streams stream_type) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamWaitEvent) {
+HIP_TEST_CASE(Performance_hipStreamWaitEvent) {
   Streams stream_type = GENERATE(Streams::nullstream, Streams::created);
   RunBenchmark(stream_type);
 }

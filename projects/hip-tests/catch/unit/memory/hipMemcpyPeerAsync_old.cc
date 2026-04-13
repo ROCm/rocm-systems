@@ -28,7 +28,7 @@ This testfile verifies the following scenarios of hipMemcpyPeerAsync API
  * where stream is created in GPU-1
  * Then performs the addition and validates the sum
  */
-TEST_CASE(Unit_hipMemcpyPeerAsync_StreamOnDiffDevice) {
+HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_StreamOnDiffDevice) {
   constexpr auto numElements{10};
   constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;
@@ -77,9 +77,10 @@ TEST_CASE(Unit_hipMemcpyPeerAsync_StreamOnDiffDevice) {
       HipTest::freeArrays<int>(X_d, Y_d, Z_d, nullptr, nullptr, nullptr, false);
       HIP_CHECK(hipStreamDestroy(stream));
     } else {
-      SUCCEED("Machine Does not have P2P capability");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    SUCCEED("Number of devices are < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }

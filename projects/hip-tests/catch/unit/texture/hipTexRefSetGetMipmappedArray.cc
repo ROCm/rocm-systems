@@ -9,7 +9,7 @@
 texture<float, 2, hipReadModeElementType> tex;
 
 // Test for hipTexRefSetMipmappedArray and hipTexRefGetMipmappedArray, including error handling
-TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
+HIP_TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
   CHECK_IMAGE_SUPPORT;
 
   // Retrieve the texture reference for our symbol
@@ -43,7 +43,7 @@ TEST_CASE(Unit_hipTexRefSetGetMipmappedArray) {
     auto res = hipMallocMipmappedArray(&mipmapped_array, &channel_desc, extent, 2 * mipmap_level,
                                        hipArrayDefault);
     if (res == hipErrorNotSupported) {
-      SUCCEED("Mipmapped arrays not supported on this device");
+      WARN("Skipping section: " << HipTest::SkipReason::kMipmappedArraysUnsupported);
       return;
     }
     HIP_CHECK(res);

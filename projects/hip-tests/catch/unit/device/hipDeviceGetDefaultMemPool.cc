@@ -26,14 +26,14 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Positive_Basic) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   int mem_pool_support = 0;
   HIP_CHECK(
       hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST("Test only runs on devices with memory pool support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
 
@@ -59,7 +59,7 @@ TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Negative_Parameters) {
   hipMemPool_t mem_pool;
 
   SECTION("mem_pool == nullptr") {

@@ -43,7 +43,7 @@
 constexpr size_t size = 1 << 12;
 enum fnType { normal, object };
 
-TEST_CASE(Unit_hipGraphAddKernelNode_Negative) {
+HIP_TEST_CASE(Unit_hipGraphAddKernelNode_Negative) {
   constexpr int N = 1024;
   size_t NElem{N};
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -211,7 +211,7 @@ static void kernelFnChange(int* A_d, int* A_h, int* B_d, int* B_h, int* C_d, int
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph) {
+HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph) {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, size, false);
@@ -282,7 +282,7 @@ TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate) {
+HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate) {
   size_t maxBlocks = 512;
   int *A_d, *B_d, *C_d;  // Device pointers
   int *A_h, *B_h, *C_h;  // Host Pointers
@@ -310,7 +310,7 @@ TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph) {
+HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph) {
   int *A_d, *B_d, *C_d;  // Device pointers
   int *A_h, *B_h, *C_h;  // Host Pointers
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, size, false);
@@ -387,7 +387,7 @@ TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture) {
+HIP_TEST_CASE(Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture) {
   size_t maxBlocks = 512;
   size_t Nbytes = sizeof(int) * maxBlocks;
 

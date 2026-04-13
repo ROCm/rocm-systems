@@ -32,7 +32,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamEndCapture_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Parameters) {
   hipGraph_t graph{nullptr};
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
@@ -63,7 +63,7 @@ TEST_CASE(Unit_hipStreamEndCapture_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamEndCapture_Positive_GraphDestroy) {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_GraphDestroy) {
   hipGraph_t graph{nullptr};
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
@@ -103,7 +103,7 @@ static void thread_func_neg(hipStream_t stream, hipGraph_t graph) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamEndCapture_Negative_Thread) {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_Negative_Thread) {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
 
@@ -147,7 +147,7 @@ static void thread_func_pos(hipStream_t stream, hipGraph_t* graph) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamEndCapture_Positive_Thread) {
+HIP_TEST_CASE(Unit_hipStreamEndCapture_Positive_Thread) {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
 

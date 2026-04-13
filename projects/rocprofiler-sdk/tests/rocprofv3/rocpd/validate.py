@@ -71,6 +71,18 @@ def test_csv_data(csv_data, json_data):
     )
 
 
+def test_arg_annotations_exist(pftrace_reader):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_perfetto_arg_annotations(pftrace_reader)
+
+
+def test_event_id_annotations(pftrace_reader):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_perfetto_event_id_annotations(pftrace_reader)
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

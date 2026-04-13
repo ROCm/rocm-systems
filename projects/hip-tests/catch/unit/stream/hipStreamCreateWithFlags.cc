@@ -10,11 +10,11 @@
 
 namespace hipStreamCreateWithFlagsTests {
 
-TEST_CASE(Unit_hipStreamCreateWithFlags_Negative_NullStream) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_Negative_NullStream) {
   HIP_CHECK_ERROR(hipStreamCreateWithFlags(nullptr, hipStreamDefault), hipErrorInvalidValue);
 }
 
-TEST_CASE(Unit_hipStreamCreateWithFlags_Negative_InvalidFlag) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_Negative_InvalidFlag) {
   hipStream_t stream{};
   unsigned int flag = 0xFF;
   REQUIRE(flag != hipStreamDefault);
@@ -23,7 +23,7 @@ TEST_CASE(Unit_hipStreamCreateWithFlags_Negative_InvalidFlag) {
 }
 
 // create a stream and check the properties are correctly set
-TEST_CASE(Unit_hipStreamCreateWithFlags_Default) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_Default) {
   const unsigned int flagUnderTest = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreateWithFlags(&stream, flagUnderTest));
@@ -43,7 +43,7 @@ TEST_CASE(Unit_hipStreamCreateWithFlags_Default) {
 // a stream will default to blocking the null stream, but will not block the null stream when
 // created with hipStreamNonBlocking
 #if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
-TEST_CASE(Unit_hipStreamCreateWithFlags_DefaultStreamInteraction) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithFlags_DefaultStreamInteraction) {
   const hipStream_t defaultStream = GENERATE(static_cast<hipStream_t>(nullptr), hipStreamPerThread);
   const unsigned int flagUnderTest = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   CAPTURE(defaultStream, flagUnderTest);

@@ -29,11 +29,11 @@
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_Buffered_Printf_Specifier) {
+HIP_TEST_CASE(Unit_Buffered_Printf_Specifier) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     return;
   }
 #ifdef __HIP_PLATFORM_NVIDIA__

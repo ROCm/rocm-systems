@@ -99,7 +99,7 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
   free(hOutputData);
 }
 
-TEST_CASE(Unit_hipSimpleTexture3D_Check_DataTypes) {
+HIP_TEST_CASE(Unit_hipSimpleTexture3D_Check_DataTypes) {
   CHECK_IMAGE_SUPPORT
 
 

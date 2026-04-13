@@ -27,7 +27,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_NegativeTsts) {
+HIP_TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_NegativeTsts) {
   HIP_CHECK(hipInit(0));
   hipGraph_t graph, graph1;
   hipGraphExec_t graphExec;

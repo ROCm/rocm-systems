@@ -118,7 +118,7 @@ static auto get_uadd_inputs() -> std::pair<std::vector<unsigned>, std::vector<un
   return std::make_pair(a, b);
 }
 
-TEST_CASE(Unit_hadd_int_varaint) {
+HIP_TEST_CASE(Unit_hadd_int_varaint) {
   auto [a, b] = get_hadd_inputs();
 
   REQUIRE(a.size() == b.size());
@@ -229,7 +229,7 @@ TEST_CASE(Unit_hadd_int_varaint) {
   HIP_CHECK(hipFree(d_res));
 }
 
-TEST_CASE(Unit_rhadd_int_varaint) {
+HIP_TEST_CASE(Unit_rhadd_int_varaint) {
   auto [a, b] = get_hadd_inputs();
 
   REQUIRE(a.size() == b.size());
@@ -340,7 +340,7 @@ TEST_CASE(Unit_rhadd_int_varaint) {
   HIP_CHECK(hipFree(d_res));
 }
 
-TEST_CASE(Unit_uhadd_int_varaint) {
+HIP_TEST_CASE(Unit_uhadd_int_varaint) {
   auto [a, b] = get_uadd_inputs();
 
   REQUIRE(a.size() == b.size());
@@ -500,7 +500,7 @@ TEST_CASE(Unit_uhadd_int_varaint) {
   HIP_CHECK(hipFree(d_res));
 }
 
-TEST_CASE(Unit_urhadd_int_varaint) {
+HIP_TEST_CASE(Unit_urhadd_int_varaint) {
   auto [a, b] = get_uadd_inputs();
 
   REQUIRE(a.size() == b.size());

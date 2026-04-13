@@ -344,7 +344,7 @@ kfd_wave_launch_trap_mask (os_wave_launch_trap_mask_t wave_launch_trap)
       case os_wave_launch_trap_mask_t::wave_start:
         return KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START;
       case os_wave_launch_trap_mask_t::wave_end:
-        return KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END;
+        return (__u32)KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END;
       }
 
     dbgapi_assert_not_reached ();
@@ -387,7 +387,7 @@ os_wave_launch_trap_mask (__u32 wave_launch_trap)
     mask |= os_wave_launch_trap_mask_t::address_watch;
   if (!!(wave_launch_trap & KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START))
     mask |= os_wave_launch_trap_mask_t::wave_start;
-  if (!!(wave_launch_trap & KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END))
+  if (!!(wave_launch_trap & (__u32)KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END))
     mask |= os_wave_launch_trap_mask_t::wave_end;
 
   return mask;
@@ -420,7 +420,7 @@ decode_queue_id (__u32 queue_id)
   os_queue_state_t queue_state{};
   if (queue_id & KFD_DBG_QUEUE_ERROR_MASK)
     queue_state |= os_queue_state_t::error;
-  if (queue_id & KFD_DBG_QUEUE_INVALID_MASK)
+  if (queue_id & (__u32)KFD_DBG_QUEUE_INVALID_MASK)
     queue_state |= os_queue_state_t::invalid;
 
   return { queue_id & ~(KFD_DBG_QUEUE_ERROR_MASK | KFD_DBG_QUEUE_INVALID_MASK),
@@ -659,11 +659,13 @@ kfd_driver_base_t::agent_snapshot (
 
       agent_info.os_agent_id = entry.gpu_id;
 
+      agent_info.agent_address_base = entry.gpuvm_base;
+      agent_info.agent_address_limit = entry.gpuvm_limit;
       agent_info.local_address_aperture_base = entry.lds_base;
       agent_info.local_address_aperture_limit = entry.lds_limit;
       agent_info.private_address_aperture_base = entry.scratch_base;
       agent_info.private_address_aperture_limit = entry.scratch_limit;
-      agent_info.location_id = entry.location_id;
+      utils::narrow_assign (agent_info.location_id, entry.location_id);
       agent_info.simd_count = entry.simd_count;
       agent_info.max_waves_per_simd = entry.max_waves_per_simd;
       agent_info.vendor_id = entry.vendor_id;
@@ -1219,7 +1221,7 @@ kfd_driver_t::kfd_dbg_trap_ioctl (uint32_t action,
 {
   dbgapi_assert (m_os_pid);
 
-  args->pid = *m_os_pid;
+  utils::narrow_assign (args->pid, *m_os_pid);
   args->op = action;
 
   int ret = kfd_ioctl (AMDKFD_IOC_DBG_TRAP, args);
@@ -1272,7 +1274,7 @@ struct kfd_snapshots
 
     dbgapi_assert (n_ent == entries.size ());
 
-    n_entries = n_ent;
+    utils::narrow_assign (n_entries, n_ent);
     entry_size = sizeof (T);
 
     /* The rest of the code assumes that a T is 64-bit aligned.  */
@@ -1482,7 +1484,7 @@ kfd_driver_t::enable_debug (os_exception_mask_t exceptions_reported,
   args.enable.exception_mask = kfd_exception_mask (exceptions_reported);
   args.enable.rinfo_ptr = reinterpret_cast<uintptr_t> (&os_runtime_info);
   args.enable.rinfo_size = sizeof (kfd_runtime_info);
-  args.enable.dbg_fd = notifier;
+  utils::narrow_assign (args.enable.dbg_fd, notifier);
 
   int err = kfd_dbg_trap_ioctl (KFD_IOC_DBG_TRAP_ENABLE, &args);
   if (err == -ESRCH)
@@ -1566,8 +1568,10 @@ kfd_driver_t::send_exceptions (os_exception_mask_t exceptions,
 
   kfd_ioctl_dbg_trap_args args{};
   args.send_runtime_event.exception_mask = kfd_exception_mask (exceptions);
-  args.send_runtime_event.gpu_id = agent_id.has_value () ? *agent_id : -1;
-  args.send_runtime_event.queue_id = queue_id.has_value () ? *queue_id : -1;
+  args.send_runtime_event.gpu_id
+    = agent_id.has_value () ? *agent_id : os_agent_id_t (-1);
+  args.send_runtime_event.queue_id
+    = queue_id.has_value () ? *queue_id : os_agent_id_t (-1);
 
   int err = kfd_dbg_trap_ioctl (KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT, &args);
   if (err == -ESRCH)
@@ -1700,7 +1704,7 @@ kfd_driver_t::suspend_queues (const os_queue_id_t *queues, size_t queue_count,
   else if (ret < 0)
     return AMD_DBGAPI_STATUS_ERROR;
 
-  *suspended_count = ret;
+  utils::narrow_assign (*suspended_count, ret);
   for (size_t i = 0; i < queue_count; i++)
     {
       auto [queue_id, queue_state] = decode_queue_id (kfd_queue_ids[i]);
@@ -1744,7 +1748,7 @@ kfd_driver_t::resume_queues (const os_queue_id_t *queues, size_t queue_count,
   else if (ret < 0)
     return AMD_DBGAPI_STATUS_ERROR;
 
-  *resumed_count = ret;
+  utils::narrow_assign (*resumed_count, ret);
   for (size_t i = 0; i < queue_count; i++)
     {
       auto [queue_id, queue_state] = decode_queue_id (kfd_queue_ids[i]);
@@ -1815,7 +1819,9 @@ kfd_driver_t::set_address_watch (os_agent_id_t os_agent_id,
   kfd_ioctl_dbg_trap_args args{};
   args.set_node_address_watch.address = address;
   args.set_node_address_watch.mode = kfd_watch_mode (os_watch_mode);
-  args.set_node_address_watch.mask = mask;
+  using mask_t = decltype (args.set_node_address_watch.mask);
+  utils::narrow_assign (args.set_node_address_watch.mask,
+                        mask & mask_t (-1));
   args.set_node_address_watch.gpu_id = os_agent_id;
 
   int err
@@ -1945,9 +1951,10 @@ kfd_driver_t::xfer_global_memory_partial (global_address_t address, void *read,
 
   ++(read != nullptr ? m_read_request_count : m_write_request_count);
 
+  auto offset = utils::narrow<off_t> (address);
   ssize_t ret = read != nullptr
-                  ? pread (*m_proc_mem_fd, read, *size, address)
-                  : pwrite (*m_proc_mem_fd, write, *size, address);
+                  ? pread (*m_proc_mem_fd, read, *size, offset)
+                  : pwrite (*m_proc_mem_fd, write, *size, offset);
 
   if (ret < 0 && errno != EIO && errno != EINVAL)
     warning ("kfd_driver_t::xfer_memory failed: %s", strerror (errno));
@@ -1957,9 +1964,10 @@ kfd_driver_t::xfer_global_memory_partial (global_address_t address, void *read,
   else if (ret < 0)
     return AMD_DBGAPI_STATUS_ERROR_MEMORY_ACCESS;
 
-  (read != nullptr ? m_bytes_read : m_bytes_written) += ret;
+  auto uret = static_cast<size_t> (ret);
+  (read != nullptr ? m_bytes_read : m_bytes_written) += uret;
 
-  *size = ret;
+  *size = uret;
   return AMD_DBGAPI_STATUS_SUCCESS;
 }
 

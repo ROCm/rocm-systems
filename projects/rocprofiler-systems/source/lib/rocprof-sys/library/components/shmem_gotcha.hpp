@@ -199,6 +199,9 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static void start();
     static void stop();
 
+    static void pause();
+    static void resume();
+
     template <typename... Args>
     static void audit(const typename SHMEMPolicy::gotcha_data& _data, audit::incoming,
                       Args...)
@@ -213,6 +216,9 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, void*);
     static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, int);
     static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, long);
+
+private:
+    static std::mutex s_mutex;
 };
 
 namespace detail
@@ -518,6 +524,27 @@ template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::stop()
 {}
+
+template <typename SHMEMPolicy>
+std::mutex shmem_gotcha<SHMEMPolicy>::s_mutex = {};
+
+template <typename SHMEMPolicy>
+void
+shmem_gotcha<SHMEMPolicy>::pause()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
+    shmem_gotcha_t::set_ready(false);
+}
+
+template <typename SHMEMPolicy>
+void
+shmem_gotcha<SHMEMPolicy>::resume()
+{
+    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    using shmem_gotcha_t = typename SHMEMPolicy::shmem_gotcha_t;
+    shmem_gotcha_t::set_ready(true);
+}
 
 template <typename SHMEMPolicy>
 void

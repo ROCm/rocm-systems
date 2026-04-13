@@ -45,7 +45,7 @@ static bool verify(int N, int* x, int val) {
   return true;
 }
 
-TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check) {
+HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check) {
   constexpr size_t N = 10000;
   hipError_t ret;
   int* x;
@@ -85,7 +85,7 @@ TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check) {
   HIP_CHECK(hipFree(x));
 }
 
-TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check) {
+HIP_TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check) {
   constexpr size_t N = 10000;
   hipError_t ret;
   int* x;

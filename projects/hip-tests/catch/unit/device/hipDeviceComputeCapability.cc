@@ -33,7 +33,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceComputeCapability_Negative) {
+HIP_TEST_CASE(Unit_hipDeviceComputeCapability_Negative) {
   int major, minor, numDevices;
   hipDevice_t device;
 
@@ -60,7 +60,8 @@ TEST_CASE(Unit_hipDeviceComputeCapability_Negative) {
       REQUIRE_FALSE(hipDeviceComputeCapability(&major, &minor, numDevices) == hipSuccess);
     }
   } else {
-    WARN("Test skipped as no gpu devices available");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    return;
   }
 }
 
@@ -75,7 +76,7 @@ TEST_CASE(Unit_hipDeviceComputeCapability_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceComputeCapability_ValidateVersion) {
+HIP_TEST_CASE(Unit_hipDeviceComputeCapability_ValidateVersion) {
   int major, minor;
   hipDevice_t device;
   int numDevices = -1;

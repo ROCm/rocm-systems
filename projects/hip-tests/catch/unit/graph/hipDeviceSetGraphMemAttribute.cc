@@ -32,7 +32,7 @@ static void GraphSetGetAttribute(int device, hipGraphMemAttributeType attr, size
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Positive_Default) {
+HIP_TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   const auto attr_type = GENERATE(hipGraphMemAttrUsedMemHigh, hipGraphMemAttrReservedMemHigh);
 
@@ -58,7 +58,7 @@ TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Positive_Default) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 

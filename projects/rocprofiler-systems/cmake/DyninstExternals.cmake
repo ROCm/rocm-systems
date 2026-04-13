@@ -1,3 +1,22 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+# ========================================================================================
+# DyninstExternals.cmake
+#
+# Orchestrates the configuration and building of Dyninst's external dependencies
+#
+# ----------------------------------------
+#
+# This module:
+# - Maps deprecated DYNINST_BUILD_* variables to ROCPROFSYS_BUILD_* variables
+# - Sets up TPL_STAGING_PREFIX for third-party library installation
+# - Includes and configures Dyninst dependencies (Boost, TBB, ElfUtils, LibIberty)
+# - Creates build targets with serialized dependency chains
+# - Creates external-prebuild and external-deps-complete targets for coordination
+#
+# ========================================================================================
+
 include(MacroUtilities)
 
 # Map deprecated DYNINST_BUILD_* variables to new ROCPROFSYS_BUILD_* variables
@@ -78,49 +97,4 @@ endif()
 add_custom_target(external-deps-complete)
 if(TARGET external-prebuild)
     add_dependencies(external-deps-complete external-prebuild)
-endif()
-
-if(NOT TARGET Dyninst::Boost AND TARGET rocprofiler-systems-boost)
-    add_library(Dyninst::Boost INTERFACE IMPORTED)
-    set_target_properties(
-        Dyninst::Boost
-        PROPERTIES INTERFACE_LINK_LIBRARIES rocprofiler-systems-boost
-    )
-    message(
-        STATUS
-        "Created imported target Dyninst::Boost linked to rocprofiler-systems-boost"
-    )
-endif()
-
-if(NOT TARGET Dyninst::ElfUtils AND TARGET rocprofiler-systems-elfutils)
-    add_library(Dyninst::ElfUtils INTERFACE IMPORTED)
-    set_target_properties(
-        Dyninst::ElfUtils
-        PROPERTIES INTERFACE_LINK_LIBRARIES rocprofiler-systems-elfutils
-    )
-    message(STATUS "Created imported target Dyninst::ElfUtils linked to ElfUtils")
-endif()
-
-if(NOT TARGET Dyninst::TBB AND TARGET rocprofiler-systems-tbb)
-    add_library(Dyninst::TBB INTERFACE IMPORTED)
-    set_target_properties(
-        Dyninst::TBB
-        PROPERTIES INTERFACE_LINK_LIBRARIES rocprofiler-systems-tbb
-    )
-    message(
-        STATUS
-        "Created imported target Dyninst::TBB linked to rocprofiler-systems-tbb"
-    )
-endif()
-
-if(NOT TARGET Dyninst::LibIberty AND TARGET rocprofiler-systems-libiberty)
-    add_library(Dyninst::LibIberty INTERFACE IMPORTED)
-    set_target_properties(
-        Dyninst::LibIberty
-        PROPERTIES INTERFACE_LINK_LIBRARIES rocprofiler-systems-libiberty
-    )
-    message(
-        STATUS
-        "Created imported target Dyninst::LibIberty linked to rocprofiler-systems-libiberty"
-    )
 endif()
