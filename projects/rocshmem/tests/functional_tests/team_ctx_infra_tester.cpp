@@ -140,6 +140,10 @@ TeamCtxInfraTester::TeamCtxInfraTester(TesterArguments args) : Tester(args) {
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
     num_teams = atoi(value);
+    if (num_teams < 1) {
+      printf("ROCSHMEM_MAX_NUM_TEAMS must be >= 1; got %d\n", num_teams);
+      abort();
+    }
   }
 
   CHECK_HIP(hipMalloc(&team_world_dup,
@@ -157,6 +161,11 @@ void TeamCtxInfraTester::preLaunchKernel() {
   int my_pe = rocshmem_team_my_pe(_parentTeam);
 
   if (_splitType == ROCSHMEM_TEST_TEAM_DUP) {
+    if (num_teams < 2) {
+      printf("ROCSHMEM_TEST_TEAM_DUP requires num_teams >= 2; got %d\n", num_teams);
+      abort();
+    }
+
     if (auto maximum_num_contexts_str = getenv("ROCSHMEM_MAX_NUM_CONTEXTS")) {
       int max_ctx = atoi(maximum_num_contexts_str);
       if (max_ctx <= num_teams) {
