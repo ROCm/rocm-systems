@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler — RDNA3.5 GL2C and GCEA / DRAM interface metrics
+   :description: Learn about GL2C metrics in ROCm Compute Profiler, including the GL1C–GL2 interface, cache performance, bandwidth, GCEA, and DRAM interfaces on RDNA 3.5 (gfx1151).
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, GL2C, GL2, GCEA
 
 .. _rdna-gl2:
