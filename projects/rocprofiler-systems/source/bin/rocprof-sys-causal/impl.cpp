@@ -50,7 +50,7 @@ using ::tim::log::stream;
 namespace
 {
 int  verbose       = 0;
-auto updated_envs  = std::unordered_set<std::string_view>{};
+auto updated_envs  = std::unordered_set<std::string>{};
 auto original_envs = std::unordered_set<std::string>{};
 auto child_pids    = std::unordered_set<pid_t>{};
 auto launcher      = std::string{};

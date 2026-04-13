@@ -39,7 +39,7 @@ using tim::log::stream;
 namespace
 {
 int  verbose          = 0;
-auto updated_envs     = std::unordered_set<std::string_view>{};
+auto updated_envs     = std::unordered_set<std::string>{};
 auto original_envs    = std::unordered_set<std::string>{};
 auto clock_id_choices = []() {
     auto clock_name = [](std::string _v) {
