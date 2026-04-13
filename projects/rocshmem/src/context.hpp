@@ -533,7 +533,7 @@ class Context {
 
   /**
    * @brief Used to broadcast signal across wg.
-   *        Note: There are potentional issues where multiple wgs share the ctx
+   *        Note: There are potentional issues where multiple wgs share the ctx (AIROCSHMEM-368)
    */
 
   uint64_t wg_signal_scratch = 0;
