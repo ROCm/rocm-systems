@@ -99,7 +99,7 @@ Memory chart - Scalar Data Cache
          :file: _templates/metrics_table.j2
 
 Memory chart - TCP Cache (Vector Data Cache)
--------------------------------------
+---------------------------------------------
 
 .. tab-set::
 
