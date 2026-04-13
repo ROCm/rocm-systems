@@ -12,3 +12,4 @@
 # Visual Studio Code settings
 .vscode/
 /.rocshmem-worktree
+/projects/cuid/_build
