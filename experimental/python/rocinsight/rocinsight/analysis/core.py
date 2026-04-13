@@ -689,15 +689,30 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
                 merged.append((s, e))
         return sum(e - s for s, e in merged)
 
+    # Pre-compute child coverage for each marker to get exclusive wall time.
+    # A child is any other marker fully contained within this one.
+    marker_exclusive_wall: List[int] = []
+    for mi, m in enumerate(markers):
+        ms, me = m["start"], m["end"]
+        # Collect intervals of child markers nested inside this one
+        child_intervals = []
+        for mj, m2 in enumerate(markers):
+            if mj == mi:
+                continue
+            m2s, m2e = m2["start"], m2["end"]
+            # m2 is a child if it's fully inside m (or overlaps and is shorter)
+            if m2s >= ms and m2e <= me and (m2e - m2s) < (me - ms):
+                child_intervals.append((m2s, m2e))
+        child_coverage = _compute_union_coverage(child_intervals)
+        marker_exclusive_wall.append(max(0, m["duration"] - child_coverage))
+
     # Per-region accounting: for each event, split time into covered and uncovered
     region_data: List[Dict[str, Any]] = []
-    # Track total ranged time per event type for conservation check
     total_ranged_kernel_ns = 0
     total_ranged_memcpy_ns = 0
 
     for mi, m in enumerate(markers):
         ms, me = m["start"], m["end"]
-        # Events whose best marker is this one
         m_kernels = [k for k in all_kernels if _best_marker_idx(k[1], k[2]) == mi]
         m_memcpy = [mc for mc in all_memcpy if _best_marker_idx(mc[1], mc[2]) == mi]
 
@@ -711,20 +726,26 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
         total_ranged_kernel_ns += kernel_time
         total_ranged_memcpy_ns += memcpy_time
 
-        wall_time = m["duration"]
-        overhead_time = max(0, wall_time - kernel_time - memcpy_time)
+        # Use exclusive wall time (total minus nested children) as the
+        # denominator for percentages. This ensures that when child ranges
+        # own the kernel work inside them, the parent's percentages reflect
+        # only the parent's exclusive time slice.
+        exclusive_wall = marker_exclusive_wall[mi]
+        total_wall = m["duration"]
+        overhead_time = max(0, exclusive_wall - kernel_time - memcpy_time)
 
         region_data.append({
             "name": m["name"],
-            "wall_time_ns": wall_time,
+            "wall_time_ns": total_wall,
+            "exclusive_wall_time_ns": exclusive_wall,
             "kernel_count": len(m_kernels),
             "kernel_time_ns": kernel_time,
             "memcpy_count": len(m_memcpy),
             "memcpy_time_ns": memcpy_time,
             "overhead_time_ns": overhead_time,
-            "kernel_pct": (kernel_time / wall_time * 100) if wall_time > 0 else 0,
-            "memcpy_pct": (memcpy_time / wall_time * 100) if wall_time > 0 else 0,
-            "overhead_pct": (overhead_time / wall_time * 100) if wall_time > 0 else 0,
+            "kernel_pct": (kernel_time / exclusive_wall * 100) if exclusive_wall > 0 else 0,
+            "memcpy_pct": (memcpy_time / exclusive_wall * 100) if exclusive_wall > 0 else 0,
+            "overhead_pct": (overhead_time / exclusive_wall * 100) if exclusive_wall > 0 else 0,
         })
 
     # Step 4: Conservation-correct unranged bucket.

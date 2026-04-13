@@ -197,3 +197,67 @@ class TestE2ProfilerPause:
         recs = generate_recommendations(tb, [], {}, None, roctx_regions=roctx)
         scope_recs = [r for r in recs if r["category"] == "Profiling Scope"]
         assert len(scope_recs) == 0
+
+
+# ---------------------------------------------------------------------------
+# Nested marker conservation tests
+# ---------------------------------------------------------------------------
+
+class TestNestedMarkerAccounting:
+    def test_nested_parent_uses_exclusive_wall(self):
+        """Parent exclusive wall = total duration minus child coverage."""
+        mock_conn = MagicMock()
+        marker_cursor = MagicMock()
+        marker_cursor.fetchall.return_value = [
+            ("parent", 0, 100, 100),
+            ("child", 20, 80, 60),
+        ]
+        kernel_cursor = MagicMock()
+        kernel_cursor.fetchall.return_value = [("k1", 30, 70, 40)]
+        memcpy_cursor = MagicMock()
+        memcpy_cursor.fetchall.return_value = []
+
+        call_count = [0]
+        def mock_exec(conn, query, *args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1: return marker_cursor
+            elif call_count[0] == 2: return kernel_cursor
+            return memcpy_cursor
+
+        with patch("rocinsight.analysis.core.execute_statement", side_effect=mock_exec):
+            result = analyze_roctx_regions(mock_conn)
+
+        parent = result["regions"][0]
+        child = result["regions"][1]
+        assert child["kernel_count"] == 1
+        assert child["kernel_time_ns"] == 40
+        assert parent["exclusive_wall_time_ns"] == 40
+        assert parent["kernel_time_ns"] == 0
+        assert parent["kernel_pct"] == 0.0
+
+    def test_nested_conservation_total_kernel_time(self):
+        """sum(region kernel time) + unranged kernel time == total kernel time."""
+        mock_conn = MagicMock()
+        marker_cursor = MagicMock()
+        marker_cursor.fetchall.return_value = [
+            ("outer", 0, 100, 100),
+            ("inner", 20, 80, 60),
+        ]
+        kernel_cursor = MagicMock()
+        kernel_cursor.fetchall.return_value = [("k1", 10, 90, 80)]
+        memcpy_cursor = MagicMock()
+        memcpy_cursor.fetchall.return_value = []
+
+        call_count = [0]
+        def mock_exec(conn, query, *args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1: return marker_cursor
+            elif call_count[0] == 2: return kernel_cursor
+            return memcpy_cursor
+
+        with patch("rocinsight.analysis.core.execute_statement", side_effect=mock_exec):
+            result = analyze_roctx_regions(mock_conn)
+
+        ranged = sum(r["kernel_time_ns"] for r in result["regions"])
+        unranged = result["unranged"]["kernel_time_ns"]
+        assert ranged + unranged == 80
