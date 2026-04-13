@@ -18,7 +18,7 @@ For **AMD Radeon™ / RDNA™** client GPUs (e.g. **gfx1151** / RDNA3.5), see
 :doc:`RDNA3 <../rdna/rdna-performance-model>`. The top-level
 :doc:`../performance-model` page summarizes how the CDNA and RDNA architecture-specific details are organized.
 
-The table provides key details and support available for the different architectures:
+The table provides key details and support available for the different CDNA architectures:
 
 ✅: Supported
 ❌: Unsupported
