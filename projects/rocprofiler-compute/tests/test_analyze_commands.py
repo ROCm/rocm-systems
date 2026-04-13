@@ -1654,17 +1654,17 @@ def test_update_functions_coverage():
 
     from utils.parser import update_denominator_string, update_normal_unit_string
 
-    result = update_denominator_string("AVG(SQ_WAVES / $denom)", "per_wave")
+    result = update_denominator_string("SUM(SQ_WAVES) / SUM($denom)", "per_wave")
     assert "$denom" not in result
     assert "SQ_WAVES" in result
 
-    result = update_denominator_string("AVG(DATA / $denom)", "per_cycle")
+    result = update_denominator_string("SUM(DATA) / SUM($denom)", "per_cycle")
     assert "$GRBM_GUI_ACTIVE_PER_XCD" in result
 
-    result = update_denominator_string("AVG(DATA / $denom)", "per_second")
+    result = update_denominator_string("SUM(DATA) / SUM($denom)", "per_second")
     assert "End_Timestamp - Start_Timestamp" in result
 
-    result = update_denominator_string("AVG(DATA / $denom)", "unsupported_unit")
+    result = update_denominator_string("SUM(DATA) / SUM($denom)", "unsupported_unit")
     assert "$denom" in result
 
     result = update_normal_unit_string("(Prefix + $normUnit)", "per_wave")
