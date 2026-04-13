@@ -3444,6 +3444,9 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
       vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
       phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+      if (phys_mem_obj->getMemFlags() & ROCCLR_MEM_INTERPROCESS) {
+        vaddr_sub_obj->setVmmImported(true);
+      }
     } else {
       LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
@@ -3799,7 +3802,11 @@ static inline void nontemporalMemcpy(void* __restrict dst, const void* __restric
 }
 #endif
 
-void VirtualGPU::HiddenHeapInit() { const_cast<Device&>(dev()).HiddenHeapInit(*this); }
+void VirtualGPU::HiddenHeapInit() {
+  // We don't really need its id, just want to ensure the queue is created.
+  (void)getQueueID();
+  const_cast<Device&>(dev()).HiddenHeapInit(*this);
+}
 
 // ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,

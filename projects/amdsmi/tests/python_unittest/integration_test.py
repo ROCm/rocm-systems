@@ -646,7 +646,8 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name("")
 
         try:
-            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+            ret = amdsmi.amdsmi_get_cpu_handles()
+            cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
         if not cpu_processors:
@@ -701,7 +702,8 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name("")
 
         try:
-            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+            ret = amdsmi.amdsmi_get_cpu_handles()
+            cpu_processors = ret["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_processors = []
         if not cpu_processors:
@@ -859,12 +861,27 @@ class TestAmdSmiPython(unittest.TestCase):
                     self.raise_exception = e
                 found_error = True
 
-            # Determine max fan speed
+            if found_error:
+                continue
+
+            # Verify max fan speed returns a sensible value
             msg = f"\t### amdsmi_get_gpu_fan_speed_max(gpu={i}, index=0):"
             try:
                 fan_speed_max = amdsmi.amdsmi_get_gpu_fan_speed_max(gpu, 0)
                 self.common.print(msg, fan_speed_max)
                 self.common.check_ret("", "", self.common.PASS)
+                assert fan_speed_max > 0, f"Max fan speed must be > 0, got {fan_speed_max}"
+                # Detect gpu_od interface to set appropriate max threshold
+                gpu_bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
+                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
+                if has_gpu_od:
+                    assert fan_speed_max <= 100, (
+                        f"gpu_od max fan speed must be <= 100, got {fan_speed_max}"
+                    )
+                else:
+                    assert fan_speed_max <= 255, (
+                        f"Max fan speed must be <= 255, got {fan_speed_max}"
+                    )
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
@@ -873,10 +890,13 @@ class TestAmdSmiPython(unittest.TestCase):
             if found_error:
                 continue
 
-            if fan_speed_orig == fan_speed_max:
-                fan_speed = int(fan_speed_max / 2)
-            else:
-                fan_speed = fan_speed_max
+            # Calculate a safe mid-range value based on actual hardware limits.
+            # This avoids hardcoding and works with any OD_RANGE configuration.
+            # For legacy hwmon: min=0, max=255 -> mid=127
+            # For gpu_od: min=0 (conservative), max from API -> mid dynamically calculated
+            min_value = 0  # Conservative minimum (works for both legacy and gpu_od)
+            max_value = fan_speed_max
+            fan_speed = min_value + ((max_value - min_value) // 2)
 
             # Set fan speed
             msg = f"\t### amdsmi_set_gpu_fan_speed(gpu={i}, index=0, fan_speed={fan_speed}):"
@@ -888,10 +908,10 @@ class TestAmdSmiPython(unittest.TestCase):
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
 
-            # Set to original fan speed
-            msg = f"\t### amdsmi_set_gpu_fan_speed(gpu={i}, index=0, fan_speed_current={fan_speed_orig}):"
+            # Reset fan to driver control (works for both legacy and gpu_od)
+            msg = f"\t### amdsmi_reset_gpu_fan(gpu={i}, index=0):"
             try:
-                ret = amdsmi.amdsmi_set_gpu_fan_speed(gpu, 0, fan_speed_orig)
+                ret = amdsmi.amdsmi_reset_gpu_fan(gpu, 0)
                 self.common.print(msg, ret)
                 self.common.check_ret("", "", self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:

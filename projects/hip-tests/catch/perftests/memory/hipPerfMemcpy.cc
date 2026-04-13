@@ -200,7 +200,7 @@ HIP_TEST_CASE(Perf_hipPerfMemcpy_test) {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    SUCCEED("Skipped testcase hipPerfMemcpy as there is no device to test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {
     int deviceId = 0;
     HIP_CHECK(hipSetDevice(deviceId));

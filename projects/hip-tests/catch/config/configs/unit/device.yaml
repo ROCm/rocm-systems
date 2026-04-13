@@ -363,8 +363,12 @@ device:
     <<: *level_2
     # (amd_linux) SWDEV-511679 : Below tests fail in stress test
     # (amd_wsl) Note: hsa_amd_ipc_ is dummy
-    disabled: [amd_linux, amd_wsl]
+    disabled: [amd_linux]
   Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_wsl]
+  Unit_hipIpcOpenMemHandle_Multiproc: *level_2
+  Unit_hipIpcOpenMemHandle_Multiproc_Child:
+    <<: *level_2
+    disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]

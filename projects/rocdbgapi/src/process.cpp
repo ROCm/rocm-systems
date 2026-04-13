@@ -337,12 +337,8 @@ process_t::xfer_segment_memory (const address_space_t &address_space,
                                 void *read, const void *write,
                                 size_t size) const
 {
-  auto [lowered_address_space, lowered_address]
-    = address_space.lower (segment_address);
-
-  if (lowered_address_space.kind () == address_space_t::kind_t::global)
-    return xfer_global_memory (global_address_t{ lowered_address }, read,
-                               write, size);
+  if (address_space.kind () == address_space_t::kind_t::global)
+    return xfer_global_memory (segment_address, read, write, size);
   else
     throw memory_access_error_t (address_space, segment_address,
                                  "address is not supported");

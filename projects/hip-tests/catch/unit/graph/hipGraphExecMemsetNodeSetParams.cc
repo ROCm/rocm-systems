@@ -151,7 +151,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
 
   SECTION("Changing dst allocation device") {
     if (HipTest::getDeviceCount() < 2) {
-      HipTest::HIP_SKIP_TEST("Test requires two connected GPUs");
+      WARN("Skipping section: fewer than two GPUs (second device required for this negative case).");
     } else {
       HIP_CHECK(hipSetDevice(1));
       LinearAllocGuard<int> new_alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));

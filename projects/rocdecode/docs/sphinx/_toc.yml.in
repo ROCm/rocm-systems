@@ -12,12 +12,8 @@ subtrees:
     title: Prerequisites
   - file: install/rocDecode-clone-project.rst
     title: Cloning the project
-  - file: install/rocDecode-package-install.rst
-    title: Installing with the package installer
   - file: install/rocDecode-build-and-install.rst
     title: Installing from source code
-  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/docker
-    title: Docker containers
 
 - caption: Conceptual
   entries:
