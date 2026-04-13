@@ -39,6 +39,7 @@
 
 namespace rocshmem {
 
+#if defined(USE_SDMA)
 class SdmaOnImpl {
  public:
   // Configuration (set from environment variables during init)
@@ -176,6 +177,7 @@ class SdmaOnImpl {
   }
 #endif  // __HIPCC__ || __CUDACC__
 };
+#endif  // USE_SDMA
 
 // clang-format off
 NOWARN(-Wunused-parameter,
