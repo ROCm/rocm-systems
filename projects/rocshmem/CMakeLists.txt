@@ -185,6 +185,13 @@ if (NOT BUILD_TESTS_ONLY)
   find_package(hip REQUIRED PATHS /opt/rocm)
   find_package(hsa-runtime64 REQUIRED)
 
+  if (USE_SDMA)
+    find_library(HSAKMT_LIB hsakmt REQUIRED)
+    find_library(NUMA_LIB numa REQUIRED)
+    find_library(DRM_LIB drm PATHS /opt/amdgpu/lib/x86_64-linux-gnu REQUIRED)
+    find_library(DRM_AMDGPU_LIB drm_amdgpu PATHS /opt/amdgpu/lib/x86_64-linux-gnu REQUIRED)
+  endif()
+
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
@@ -268,7 +275,10 @@ if (NOT BUILD_TESTS_ONLY)
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
-      $<$<BOOL:${USE_SDMA}>:hsakmt>
+      $<$<BOOL:${USE_SDMA}>:${HSAKMT_LIB}>
+      $<$<BOOL:${USE_SDMA}>:${NUMA_LIB}>
+      $<$<BOOL:${USE_SDMA}>:${DRM_LIB}>
+      $<$<BOOL:${USE_SDMA}>:${DRM_AMDGPU_LIB}>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
