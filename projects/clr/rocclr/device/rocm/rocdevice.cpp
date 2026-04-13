@@ -1032,11 +1032,13 @@ bool Device::populateOCLDeviceConstants() {
                          unique_id)) {
     // ROCr gives the UUID info in the format GPU-XXXX with length 20 bytes
     // Strip the first 4 bytes and store only the 16 bytes representing UUID
-    for (size_t i = 0; i < 16; i++) {
-      info_.uuid_[i] = unique_id[i + 4];
-    }
+    std::memcpy(info_.uuid_, unique_id + 4, sizeof(info_.uuid_));
   }
-
+  if (HSA_STATUS_SUCCESS ==
+      Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CUID),
+                         unique_id)) {
+    std::memcpy(info_.cuid_, unique_id, sizeof(info_.cuid_));
+  }
   hsa_luid_t localUID = {0};
   if (HSA_STATUS_SUCCESS ==
       Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
