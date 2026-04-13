@@ -228,11 +228,14 @@ hsa_ven_amd_aqlprofile_version_minor()
     return HSA_AQLPROFILE_VERSION_MINOR;
 }
 
-// Returns the last error message
+// Returns the last error message. Pointer is valid until the next call on
+// the same thread (strerror/dlerror-style contract).
 PUBLIC_API hsa_status_t
 hsa_ven_amd_aqlprofile_error_string(const char** str)
 {
-    *str = aql_profile::Logger::LastMessage().c_str();
+    thread_local std::string last_error_copy;
+    last_error_copy = aql_profile::Logger::LastMessage();
+    *str            = last_error_copy.c_str();
     return HSA_STATUS_SUCCESS;
 }
 

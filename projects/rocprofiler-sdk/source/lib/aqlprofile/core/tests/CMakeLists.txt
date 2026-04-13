@@ -132,6 +132,20 @@ gtest_discover_tests(
     PROPERTIES
     TIMEOUT 45 LABELS "unittests")
 
+# Regression test for hsa_ven_amd_aqlprofile_error_string() pointer lifetime.
+add_executable(error-string-test)
+set(AQLPROFILE_ERROR_STRING_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/error_string_tests.cpp)
+target_sources(error-string-test PRIVATE ${AQLPROFILE_ERROR_STRING_SOURCES})
+target_include_directories(error-string-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR}
+                                                     ${LIB_DIR}/core/include)
+target_link_libraries(error-string-test PRIVATE GTest::gtest GTest::gtest_main GTest::gmock
+                                                GTest::gmock_main ${CMAKE_DL_LIBS})
+gtest_discover_tests(
+    error-string-test DISCOVERY_MODE PRE_TEST
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    PROPERTIES
+    TIMEOUT 45 LABELS "unittests")
+
 # Add tests for aql profile v2 header
 add_executable(aql-profile-v2-test)
 set(AQLPROFILE_V2_SOURCES

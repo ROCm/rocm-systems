@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <string.h>
 
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "core/context.h"
@@ -475,10 +476,13 @@ PUBLIC_API void OnUnload() {
 PUBLIC_API uint32_t rocprofiler_version_major() { return ROCPROFILER_VERSION_MAJOR; }
 PUBLIC_API uint32_t rocprofiler_version_minor() { return ROCPROFILER_VERSION_MINOR; }
 
-// Returns the last error message
+// Returns the last error message. Pointer is valid until the next call on
+// the same thread (strerror/dlerror-style contract).
 PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
   API_METHOD_PREFIX
-  *str = rocprofiler::util::Logger::LastMessage().c_str();
+  thread_local std::string last_error_copy;
+  last_error_copy = rocprofiler::util::Logger::LastMessage();
+  *str = last_error_copy.c_str();
   API_METHOD_SUFFIX
 }
 
