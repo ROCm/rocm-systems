@@ -1758,9 +1758,7 @@ def test_metric_evaluator_division_by_zero():
     })
     eval_str = to_eval_str("SUM(NUMERATOR) / SUM(DENOMINATOR)")
     result = evaluator.eval_expression(eval_str)
-    assert result == "N/A", (
-        "SUM(0) / SUM(0) should produce NaN, caught as N/A"
-    )
+    assert result == "N/A", "SUM(0) / SUM(0) should produce NaN, caught as N/A"
 
     # ---------------------------------------------------------------
     # 3. Normal case: all non-zero → valid numeric result

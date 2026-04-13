@@ -60,13 +60,13 @@ Panel Config:
           unit: Percent
         CPC Packet Decoding Utilization:
           avg: SUM(100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / SUM(CPC_CPC_STAT_BUSY)
-          min: MIN((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY)
-          max: MAX((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY)
+          min: MIN(100 * CPC_ME1_BUSY_FOR_PACKET_DECODE / CPC_CPC_STAT_BUSY)
+          max: MAX(100 * CPC_ME1_BUSY_FOR_PACKET_DECODE / CPC_CPC_STAT_BUSY)
           unit: Percent
         CPC-Workgroup Manager Utilization:
           avg: SUM(100 * CPC_ME1_DC0_SPI_BUSY) / SUM(CPC_CPC_STAT_BUSY)
-          min: MIN((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY)
-          max: MAX((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY)
+          min: MIN(100 * CPC_ME1_DC0_SPI_BUSY / CPC_CPC_STAT_BUSY)
+          max: MAX(100 * CPC_ME1_DC0_SPI_BUSY / CPC_CPC_STAT_BUSY)
           unit: Percent
         CPC-L2 Utilization:
           avg: SUM(100 * CPC_CPC_TCIU_BUSY) / SUM(CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE)
