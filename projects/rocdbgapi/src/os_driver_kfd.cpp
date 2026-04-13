@@ -659,6 +659,8 @@ kfd_driver_base_t::agent_snapshot (
 
       agent_info.os_agent_id = entry.gpu_id;
 
+      agent_info.agent_address_base = entry.gpuvm_base;
+      agent_info.agent_address_limit = entry.gpuvm_limit;
       agent_info.local_address_aperture_base = entry.lds_base;
       agent_info.local_address_aperture_limit = entry.lds_limit;
       agent_info.private_address_aperture_base = entry.scratch_base;

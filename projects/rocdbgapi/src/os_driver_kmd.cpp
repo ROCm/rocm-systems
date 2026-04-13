@@ -1424,6 +1424,10 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
 
       os_agent_info.fw_version = kmd_snap.fwVersion;
 
+      os_agent_info.agent_address_base = kmd_snap.gpuvmBase;
+      os_agent_info.agent_address_limit = kmd_snap.gpuvmLimit;
+      if (agent.kmd_version < kmd::version_t {1, 4})
+        os_agent_info.agent_address_limit -= 1;
       os_agent_info.local_address_aperture_base = kmd_snap.ldsBase;
       os_agent_info.local_address_aperture_limit = kmd_snap.ldsLimit;
       os_agent_info.private_address_aperture_base = kmd_snap.scratchBase;

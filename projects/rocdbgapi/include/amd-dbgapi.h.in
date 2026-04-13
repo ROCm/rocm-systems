@@ -652,6 +652,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_79
 
+/**
+ * The function was introduced in version 0.80 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.80"``.
+ */
+#define AMD_DBGAPI_VERSION_0_80
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -1858,6 +1864,14 @@ typedef enum
    * ::AMD_DBGAPI_STATUS_ERROR_CLIENT_CALLBACK error.
    */
   AMD_DBGAPI_PROCESS_INFO_CORE_STATE = 7,
+  /**
+   * Return a bitmask of all the bits which are used in at least one of the
+   * address spaces of each of the agents of the system.  It is legal for the
+   * client to not preserve bits not set in this mask, as long as they are
+   * cleared before being returned back to the library.  The type of this
+   * attribute is ::amd_dbgapi_segment_address_t.
+   */
+  AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS = 8,
 } amd_dbgapi_process_info_t;
 
 /**
@@ -1911,7 +1925,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
     amd_dbgapi_process_id_t process_id, amd_dbgapi_process_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_77;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_80;
 
 /**
  * Attach to a process in order to provide debug control of the AMD GPUs it
