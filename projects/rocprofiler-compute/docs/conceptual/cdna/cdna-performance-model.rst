@@ -6,7 +6,7 @@
 
 ************
 CDNA 2/3/4
-************
+***********************************
 
 ROCm Compute Profiler makes available an extensive list of metrics to better understand
 achieved application performance on AMD Instinct™ MI-series accelerators
