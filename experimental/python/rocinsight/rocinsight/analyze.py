@@ -68,6 +68,7 @@ from .analysis import (  # noqa: F401 -- re-exports for backward compat
     detect_warmup_issues,
     analyze_kernel_resources,
     analyze_api_overhead,
+    analyze_roctx_regions,
     analyze_thread_trace,
     generate_recommendations,
     _split_pmc_into_passes,
@@ -285,6 +286,7 @@ def analyze_performance(
         warmup_issues = detect_warmup_issues(connection, hotspots)
         kernel_resources = analyze_kernel_resources(connection, hotspots)
         api_overhead_data = analyze_api_overhead(connection)
+        roctx_regions = analyze_roctx_regions(connection)
         already_collected = _detect_already_collected(connection)
         # Tier 3: ATT thread trace (optional — only when --att-dir is provided)
         att_analysis: Dict[str, Any] = {}
@@ -313,6 +315,7 @@ def analyze_performance(
             att_analysis=att_analysis if att_dir else None,
             warmup_issues=warmup_issues,
             api_overhead=api_overhead_data,
+            roctx_regions=roctx_regions,
         )
     else:
         time_breakdown = {}
@@ -327,6 +330,7 @@ def analyze_performance(
         warmup_issues = None
         kernel_resources = {"arch": None, "arch_specs": None, "kernels": []}
         api_overhead_data = {}
+        roctx_regions = None
         recommendations = tier0_result.recommendations if tier0_result else []
 
     # Format output
@@ -347,6 +351,7 @@ def analyze_performance(
         custom_prompt=prompt,
         kernel_resources=kernel_resources,
         api_overhead=api_overhead_data,
+        roctx_regions=roctx_regions,
     )
 
     # Expose structured results to caller (used by interactive mode)

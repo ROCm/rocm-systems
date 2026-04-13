@@ -580,3 +580,128 @@ def analyze_api_overhead(connection: RocpdImportData) -> Dict[str, Any]:
     except Exception:
         # Graceful fallback if regions view doesn't exist in older DBs
         return {"api_calls": [], "launch_overhead_ns": 0, "total_api_ns": 0, "has_api_data": False}
+
+
+def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any]]:
+    """
+    Discover roctx marker regions and correlate with kernel/memcpy activity.
+
+    Queries the ``regions`` view for entries with category
+    ``MARKER_CORE_RANGE_API`` (user roctx markers), then correlates kernel
+    dispatches and memory copy operations by timestamp overlap.
+
+    Returns ``None`` if no user roctx markers are found in the trace
+    (graceful no-op — callers check ``if roctx_regions:``).
+
+    When markers are found, returns a dict with:
+    - ``regions``: per-marker breakdown (wall time, kernel/memcpy counts and %)
+    - ``unranged``: activity that falls outside any marker
+    - ``unranged_pct_of_total``: fraction of total runtime that is unranged
+    """
+    # Step 1: Find user roctx markers
+    marker_query = """
+    SELECT name, start, end, duration
+    FROM regions
+    WHERE category = 'MARKER_CORE_RANGE_API'
+    ORDER BY start ASC
+    """
+    try:
+        rows = execute_statement(connection, marker_query).fetchall()
+    except Exception:
+        return None  # regions view may not exist in older DBs
+
+    if not rows:
+        return None  # No markers — no-op
+
+    markers = []
+    for row in rows:
+        markers.append({
+            "name": row[0],
+            "start": row[1],
+            "end": row[2],
+            "duration": row[3] or (row[2] - row[1]),
+        })
+
+    # Step 2: Get all kernels and memcpy with timestamps
+    kernel_query = "SELECT name, start, end, duration FROM kernels ORDER BY start"
+    memcpy_query = "SELECT name, start, end, duration FROM memory_copies ORDER BY start"
+
+    try:
+        all_kernels = execute_statement(connection, kernel_query).fetchall()
+    except Exception:
+        all_kernels = []
+    try:
+        all_memcpy = execute_statement(connection, memcpy_query).fetchall()
+    except Exception:
+        all_memcpy = []
+
+    # Step 3: Correlate each event with a marker by timestamp overlap
+    all_marker_ranges = [(m["start"], m["end"]) for m in markers]
+
+    def _in_marker(event_start: int, event_end: int) -> bool:
+        for ms, me in all_marker_ranges:
+            if event_start >= ms and event_end <= me:
+                return True
+        return False
+
+    region_data: List[Dict[str, Any]] = []
+    for m in markers:
+        m_kernels = [k for k in all_kernels if k[1] >= m["start"] and k[2] <= m["end"]]
+        m_memcpy = [mc for mc in all_memcpy if mc[1] >= m["start"] and mc[2] <= m["end"]]
+
+        kernel_time = sum(k[3] for k in m_kernels)
+        memcpy_time = sum(mc[3] for mc in m_memcpy)
+        wall_time = m["duration"]
+        overhead_time = max(0, wall_time - kernel_time - memcpy_time)
+
+        region_data.append({
+            "name": m["name"],
+            "wall_time_ns": wall_time,
+            "kernel_count": len(m_kernels),
+            "kernel_time_ns": kernel_time,
+            "memcpy_count": len(m_memcpy),
+            "memcpy_time_ns": memcpy_time,
+            "overhead_time_ns": overhead_time,
+            "kernel_pct": (kernel_time / wall_time * 100) if wall_time > 0 else 0,
+            "memcpy_pct": (memcpy_time / wall_time * 100) if wall_time > 0 else 0,
+            "overhead_pct": (overhead_time / wall_time * 100) if wall_time > 0 else 0,
+        })
+
+    # Step 4: Compute (unranged) bucket
+    unranged_kernels = [k for k in all_kernels if not _in_marker(k[1], k[2])]
+    unranged_memcpy = [mc for mc in all_memcpy if not _in_marker(mc[1], mc[2])]
+
+    # Total runtime from event span
+    total_runtime = 0
+    if all_kernels or all_memcpy:
+        all_starts = [k[1] for k in all_kernels] + [mc[1] for mc in all_memcpy]
+        all_ends = [k[2] for k in all_kernels] + [mc[2] for mc in all_memcpy]
+        if all_starts:
+            total_runtime = max(all_ends) - min(all_starts)
+
+    total_marker_time = sum(m["duration"] for m in markers)
+    unranged_wall = max(0, total_runtime - total_marker_time)
+    unranged_kernel_time = sum(k[3] for k in unranged_kernels)
+    unranged_memcpy_time = sum(mc[3] for mc in unranged_memcpy)
+    unranged_overhead = max(0, unranged_wall - unranged_kernel_time - unranged_memcpy_time)
+
+    unranged_pct = (unranged_wall / total_runtime * 100) if total_runtime > 0 else 0
+
+    return {
+        "has_markers": True,
+        "marker_count": len(markers),
+        "regions": region_data,
+        "unranged": {
+            "wall_time_ns": unranged_wall,
+            "kernel_count": len(unranged_kernels),
+            "kernel_time_ns": unranged_kernel_time,
+            "memcpy_count": len(unranged_memcpy),
+            "memcpy_time_ns": unranged_memcpy_time,
+            "overhead_time_ns": unranged_overhead,
+            "kernel_pct": (unranged_kernel_time / unranged_wall * 100) if unranged_wall > 0 else 0,
+            "memcpy_pct": (unranged_memcpy_time / unranged_wall * 100) if unranged_wall > 0 else 0,
+            "overhead_pct": (unranged_overhead / unranged_wall * 100) if unranged_wall > 0 else 0,
+        },
+        "unranged_pct_of_total": unranged_pct,
+        "total_runtime_ns": total_runtime,
+    }

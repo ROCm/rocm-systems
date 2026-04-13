@@ -298,6 +298,7 @@ def generate_recommendations(
     att_analysis: Optional[Dict[str, Any]] = None,  # Tier 3 ATT
     warmup_issues: Optional[Dict[str, Any]] = None,  # Warmup detection
     api_overhead: Optional[Dict[str, Any]] = None,  # Per-API breakdown
+    roctx_regions: Optional[Dict[str, Any]] = None,  # roctx marker regions
 ) -> List[Dict[str, Any]]:
     """
     Generate performance recommendations based on analysis results.
@@ -719,8 +720,21 @@ def generate_recommendations(
                     "estimated_impact": f"Kernel accounts for {percent:.1f}% of GPU time ({top_kernel.get('total_duration', 0) / 1e6:.1f}ms) — bottleneck type unknown without counters; impact depends on classification",
                     "commands": [
                         {
+                            "tool": "rocprof-compute",
+                            "description": "Roofline model, instruction mix, and memory bottleneck analysis for this kernel",
+                            "flags": [],
+                            "args": [
+                                {"name": "profile", "value": None},
+                                {
+                                    "name": "--kernel",
+                                    "value": kernel_name,
+                                },
+                            ],
+                            "full_command": f"rocprof-compute profile --kernel {shlex.quote(kernel_name)} -- ./app",
+                        },
+                        {
                             "tool": "rocprofv3",
-                            "description": "Collect GPU hardware counters scoped to the dominant kernel",
+                            "description": "Collect GPU hardware counters scoped to the dominant kernel (alternative to rocprof-compute)",
                             "flags": ["--sys-trace"],
                             "args": [
                                 {
@@ -730,7 +744,7 @@ def generate_recommendations(
                                 {
                                     "name": "--kernel-names",
                                     "value": kernel_name,
-                                },  # display only; full_command uses shlex.quote
+                                },
                                 {"name": "-d", "value": "./kernel_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
@@ -739,19 +753,6 @@ def generate_recommendations(
                                 f" --kernel-names {shlex.quote(kernel_name)}"
                                 f" -d ./kernel_output -o profile -- ./app"
                             ),
-                        },
-                        {
-                            "tool": "rocprof-compute",
-                            "description": "Roofline model, instruction mix, and memory bottleneck analysis for this kernel",
-                            "flags": [],
-                            "args": [
-                                {"name": "profile", "value": None},
-                                {
-                                    "name": "--kernel",
-                                    "value": kernel_name,
-                                },  # display only; full_command uses shlex.quote
-                            ],
-                            "full_command": f"rocprof-compute profile --kernel {shlex.quote(kernel_name)} -- ./app",
                         },
                     ],
                 }
@@ -872,23 +873,48 @@ def generate_recommendations(
     # Rule 10 -- GPU IDLE TIME (TraceLens interval arithmetic, more accurate than overhead%)
     if interval_timeline and interval_timeline.get("idle_pct", 0) > 20.0:
         idle_pct = interval_timeline["idle_pct"]
-        recommendations.append(
-            {
-                "priority": "HIGH",
-                "category": "GPU Utilization",
-                "issue": f"High GPU idle time detected: {idle_pct:.1f}% of wall time the GPU is idle",
-                "suggestion": "Overlap CPU dispatch work with GPU execution to reduce idle gaps",
-                "actions": [
-                    "- Use async HIP API calls (hipMemcpyAsync, kernel launches without hipDeviceSynchronize)",
-                    "- Introduce hipStream_t streams to overlap independent kernels and transfers",
-                    "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
-                    "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
-                ],
-                "confidence": 0.65,
-                "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
-                "commands": [],
-            }
-        )
+
+        # Scope to figure-of-merit region when roctx markers are present
+        _suppress_idle = False
+        if roctx_regions and roctx_regions.get("has_markers"):
+            best_region = max(roctx_regions["regions"], key=lambda r: r["kernel_time_ns"], default=None)
+            if best_region and best_region["kernel_pct"] > 90:
+                _suppress_idle = True
+                recommendations.append({
+                    "priority": "INFO",
+                    "category": "GPU Utilization (Scoped)",
+                    "issue": (
+                        f"Global GPU idle time is {idle_pct:.1f}%, but within "
+                        f"'{best_region['name']}' region, GPU utilization is "
+                        f"{best_region['kernel_pct']:.1f}% \u2014 idle time is in setup/teardown"
+                    ),
+                    "suggestion": "Consider scoping profiling to the figure-of-merit region",
+                    "actions": [
+                        "Use roctxProfilerPause()/roctxProfilerResume() to limit profiling to the timing region",
+                    ],
+                    "confidence": 0.85,
+                    "estimated_impact": f"Would eliminate {roctx_regions['unranged_pct_of_total']:.0f}% of trace data (setup/teardown)",
+                    "commands": [],
+                })
+
+        if not _suppress_idle:
+            recommendations.append(
+                {
+                    "priority": "HIGH",
+                    "category": "GPU Utilization",
+                    "issue": f"High GPU idle time detected: {idle_pct:.1f}% of wall time the GPU is idle",
+                    "suggestion": "Overlap CPU dispatch work with GPU execution to reduce idle gaps",
+                    "actions": [
+                        "- Use async HIP API calls (hipMemcpyAsync, kernel launches without hipDeviceSynchronize)",
+                        "- Introduce hipStream_t streams to overlap independent kernels and transfers",
+                        "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
+                        "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
+                    ],
+                    "confidence": 0.65,
+                    "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
+                    "commands": [],
+                }
+            )
 
     # Rule 6: Default if no issues found (MUST be last -- sentinel for "nothing actionable")
     if not recommendations:
@@ -959,6 +985,31 @@ def generate_recommendations(
                 ],
                 "estimated_impact": f"First dispatch adds {first_us - avg_us:.1f}\u03bcs ({(ratio - 1) * 100:.0f}% overhead) to the first iteration",
                 "confidence": 0.80,
+                "commands": [],
+            })
+
+    # E2: Recommend roctxProfilerPause/Resume when significant unranged time
+    if roctx_regions and roctx_regions.get("has_markers"):
+        unranged_pct = roctx_regions.get("unranged_pct_of_total", 0)
+        if unranged_pct > 50:
+            recommendations.append({
+                "priority": "INFO",
+                "category": "Profiling Scope",
+                "issue": f"{unranged_pct:.0f}% of traced time is outside annotated roctx regions (setup/teardown)",
+                "suggestion": "Scope profiling to the figure-of-merit region to reduce trace size and avoid misleading metrics",
+                "actions": [
+                    "Add roctxProfilerPause() before setup/warmup code",
+                    "Add roctxProfilerResume() before the figure-of-merit region",
+                    "Add roctxProfilerPause() after the figure-of-merit region",
+                    "Example:\n"
+                    "    roctxProfilerPause();   // before setup\n"
+                    "    // ... setup, warmup ...\n"
+                    "    roctxProfilerResume();  // before timing region\n"
+                    "    // ... figure-of-merit work ...\n"
+                    "    roctxProfilerPause();   // after timing region",
+                ],
+                "estimated_impact": f"Would eliminate {unranged_pct:.0f}% of trace data, focusing analysis on the region that matters",
+                "confidence": 0.90,
                 "commands": [],
             })
 

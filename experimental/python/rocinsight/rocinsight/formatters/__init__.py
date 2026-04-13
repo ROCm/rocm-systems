@@ -65,6 +65,7 @@ def format_analysis_output(
     custom_prompt: Optional[str] = None,
     kernel_resources: Optional[Dict[str, Any]] = None,
     api_overhead: Optional[Dict[str, Any]] = None,
+    roctx_regions: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Format analysis results for display.
@@ -107,6 +108,7 @@ def format_analysis_output(
             custom_prompt=custom_prompt,
             kernel_resources=kernel_resources,
             api_overhead=api_overhead,
+            roctx_regions=roctx_regions,
         )
         # Combined mode: embed tier0 into JSON document
         if tier0_result is not None:
@@ -414,6 +416,58 @@ def format_analysis_output(
                     f"    {off['name'][:50]:<52} \u00d7{off['count']}  avg {off['avg_us']:.1f}\u03bcs"
                 )
         lines.append("")
+
+    # ROCTX Range Analysis (ROCM-21553 C1) — only when markers present
+    if roctx_regions and roctx_regions.get("has_markers"):
+        lines.append("\u2501" * width)
+        lines.append("ROCTX RANGE ANALYSIS".center(width))
+        lines.append("\u2501" * width)
+        lines.append("")
+        lines.append(
+            f" {'Range':<20}  {'Wall Time':>10}  {'Kernels':>7}  {'Kernel Time':>11}  {'MemCopies':>9}  {'MemCopy Time':>12}"
+        )
+        lines.append("\u2500" * width)
+        for rd in roctx_regions["regions"]:
+            rname = rd["name"]
+            if len(rname) > 20:
+                rname = rname[:17] + "..."
+            wall_ms = rd["wall_time_ns"] / 1e6
+            kc = rd["kernel_count"]
+            kt_ms = rd["kernel_time_ns"] / 1e6
+            mc = rd["memcpy_count"]
+            mt_ms = rd["memcpy_time_ns"] / 1e6
+            lines.append(
+                f" {rname:<20}  {wall_ms:10.2f} ms  {kc:7}  {kt_ms:10.2f} ms  {mc:9}  {mt_ms:11.2f} ms"
+            )
+        # Unranged
+        ur = roctx_regions["unranged"]
+        ur_wall = ur["wall_time_ns"] / 1e6
+        lines.append(
+            f" {'(unranged)':<20}  {ur_wall:10.2f} ms  {ur['kernel_count']:7}  {ur['kernel_time_ns']/1e6:10.2f} ms  {ur['memcpy_count']:9}  {ur['memcpy_time_ns']/1e6:11.2f} ms"
+        )
+        lines.append("")
+
+        # Per-range breakdown
+        lines.append("  Per-Range Time Breakdown:")
+        lines.append("")
+
+        def _make_bar_roctx(pct: float, w: int = 30) -> str:
+            return "\u2588" * int(pct / 100.0 * w)
+
+        all_regions = list(roctx_regions["regions"]) + [{"name": "(unranged)", **roctx_regions["unranged"]}]
+        for rd in all_regions:
+            rname = rd["name"]
+            wall_ms = rd["wall_time_ns"] / 1e6
+            if wall_ms <= 0:
+                continue
+            kpct = rd["kernel_pct"]
+            mpct = rd["memcpy_pct"]
+            opct = rd["overhead_pct"]
+            lines.append(f"  [{rname}]  {wall_ms:.2f} ms wall")
+            lines.append(f"    Kernel Execution:  {rd['kernel_time_ns']/1e6:10.2f} ms  ({kpct:5.1f}%)  {_make_bar_roctx(kpct)}")
+            lines.append(f"    Memory Copies:     {rd['memcpy_time_ns']/1e6:10.2f} ms  ({mpct:5.1f}%)  {_make_bar_roctx(mpct)}")
+            lines.append(f"    API Overhead:      {rd['overhead_time_ns']/1e6:10.2f} ms  ({opct:5.1f}%)  {_make_bar_roctx(opct)}")
+            lines.append("")
 
     # Recommendations
     lines.append("\u2501" * width)

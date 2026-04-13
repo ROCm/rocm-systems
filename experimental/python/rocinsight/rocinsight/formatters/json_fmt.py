@@ -46,6 +46,7 @@ def _format_as_json(
     custom_prompt: Optional[str] = None,
     kernel_resources: Optional[Dict[str, Any]] = None,
     api_overhead: Optional[Dict[str, Any]] = None,
+    roctx_regions: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
@@ -174,6 +175,8 @@ def _format_as_json(
             "launch_overhead_ns": api_overhead["launch_overhead_ns"],
             "api_calls": api_overhead["api_calls"],
         }
+    if roctx_regions and roctx_regions.get("has_markers"):
+        doc["roctx_regions"] = roctx_regions
 
     return _json.dumps(doc, indent=2)
 
