@@ -8,7 +8,7 @@
 Shader engine
 ===============
 
-Shader engines (SEs) still partition the GPU on RDNA parts; gfx1151 reports
+Shader engines (SEs) still partition the GPU on RDNA hardware; gfx1151 reports
 chip- and SE-level utilization through GRBM-derived counters and SPI (Shader
 Processor Input) dispatch statistics. This complements the WGP chapter, which
 focuses on per-WGP execution metrics.
