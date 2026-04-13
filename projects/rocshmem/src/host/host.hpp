@@ -74,12 +74,12 @@ class HostContextWindowInfo {
   WindowInfo* get() { return window_info_; }
 
   /**
-   * @brief Mark the window info as avaialable (not allocated)
+   * @brief Mark the window info as available (not allocated)
    */
   void mark_avail() { avail_ = true; }
 
   /**
-   * @brief Mark the window info as unavaialble (allocated)
+   * @brief Mark the window info as unavailable (allocated)
    */
   void mark_unavail() { avail_ = false; }
 

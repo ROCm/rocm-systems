@@ -90,7 +90,7 @@ BackendType get_backend_type() { return backend->get_backend_type(); }
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
 
-  /* Check whether the user explicitely requests a particular backend type */
+  /* Check whether the user explicitly requests a particular backend type */
   std::string envstr = envvar::backend;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
@@ -635,7 +635,7 @@ __host__ int rocshmem_team_split_strided(
 
   Team *parent_team_obj = get_internal_team(parent_team);
 
-  /* Santity check inputs */
+  /* Sanity check inputs */
   if (start < 0 || start >= parent_team_obj->num_pes || size < 1 ||
       size > parent_team_obj->num_pes || stride < 1) {
     return -1;

@@ -760,7 +760,8 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
         setFlag(HSA_EXTENSION_IMAGES);
       }
 
-      if (aqlprofile_lib_ != nullptr) {
+      if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
+        os::CloseLib(lib);
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
@@ -2339,7 +2340,6 @@ Runtime::Runtime()
       ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
       ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
-  aqlprofile_lib_ = nullptr;
   ipc_dmabuf_supported_ = false;
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
@@ -2403,9 +2403,6 @@ hsa_status_t Runtime::Load() {
   // Load extensions
   LoadExtensions();
 
-  // Probe aqlprofile availability once and cache the result
-  aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
-
   // Initialize per GPU scratch, blits, and trap handler
   for (core::Agent* agent : gpu_agents_) {
     hsa_status_t status =
@@ -2447,16 +2444,6 @@ void Runtime::Unload() {
 
   UnloadTools();
   UnloadExtensions();
-
-  // Close the aqlprofile probe handle. Skip the dlclose when
-  // running under Valgrind due to a Valgrind bug, see below:
-  // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
-  if (aqlprofile_lib_ != nullptr) {
-    if (!flag_.running_valgrind()) {
-      os::CloseLib(aqlprofile_lib_);
-    }
-    aqlprofile_lib_ = nullptr;
-  }
 
   amd::hsa::loader::Loader::Destroy(loader_.get());
   loader_.reset();
