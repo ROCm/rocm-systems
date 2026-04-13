@@ -166,7 +166,7 @@ to use ROCm Compute Profiler to optimize your code.
 .. note::
 
    In this documentation, **MI2XX** refers to any of the CDNA2 architecture-based MI200 series accelerators such as AMD
-   Instinct MI250X, MI250, and MI210 accelerators interchangeably in cases
+   Instinct MI250X, MI250, and MI210 GPUs interchangeably in cases
    where the exact product at hand is not relevant. For product details, see `AMD Instinct GPUs <https://www.amd.com/en/products/accelerators/instinct.html>`_.
 
    For a comparison of AMD Instinct GPU specifications, refer to
