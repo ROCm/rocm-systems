@@ -3,103 +3,107 @@
  *
  * SPDX-License-Identifier: MIT
  */
- 
- #include <hip_test_common.hh>
- #include <hip_test_defgroups.hh>
- #include <resource_guards.hh>
 
- #include "memcpyBatchAsync_common.hh"
- 
- #if HT_AMD
- 
- /**
-  * Batch device-to-device copies across GPUs: each entry uses a distinct source allocation on
-  * `device_for_src` and a distinct destination on `device_for_dst`. Peer access is enabled from
-  * `device_for_dst` to `device_for_src`.
-  */
- template <typename TestType> struct BasicCopyP2PTest {
-   BasicCopyP2PTest(size_t count, size_t num_elements, int device_src, int device_dst)
-       : count{count},
-         num_elements{num_elements},
-         size_in_bytes{num_elements * sizeof(TestType)},
-         device_for_src{device_src},
-         device_for_dst{device_dst},
-         initial_values(num_elements, get_test_values<TestType>().first),
-         src_ptrs(count),
-         dst_ptrs(count) {}
- 
-   void runTest() {
-     initialize_mem();
-     execute();
-     verify_results();
-     free_mem();
-     disable_peer_access();
-   }
- 
-  private:
-   void initialize_mem() {
-     HIP_CHECK(hipSetDevice(device_for_dst));
-     HIP_CHECK(hipDeviceEnablePeerAccess(device_for_src, 0));
- 
-     HIP_CHECK(hipStreamCreate(&stream));
- 
-     for (size_t i = 0; i < count; ++i) {
-       HIP_CHECK(hipSetDevice(device_for_src));
-       LinearAllocGuard<TestType> src_alloc(LinearAllocs::hipMalloc, size_in_bytes);
-       src_ptrs[i] = src_alloc.ptr();
-       HIP_CHECK(
-           hipMemcpy(src_ptrs[i], initial_values.data(), size_in_bytes, hipMemcpyHostToDevice));
-       allocations.push_back(std::move(src_alloc));
- 
-       HIP_CHECK(hipSetDevice(device_for_dst));
-       LinearAllocGuard<TestType> dst_alloc(LinearAllocs::hipMalloc, size_in_bytes);
-       dst_ptrs[i] = dst_alloc.ptr();
-       HIP_CHECK(hipMemset(dst_ptrs[i], 0, size_in_bytes));
-       allocations.push_back(std::move(dst_alloc));
-     }
-   }
- 
-   void execute() {
-     HIP_CHECK(hipSetDevice(device_for_dst));
-     std::vector<size_t> sizes(count, size_in_bytes);
-     const size_t num_attributes = 0;
-     std::vector<size_t> attributes_indexes(1);
-     attributes_indexes[0] = 0;
-     size_t fail_index = 0;
-     HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), count, nullptr,
-                                   attributes_indexes.data(), num_attributes, &fail_index, stream));
-     HIP_CHECK(hipStreamSynchronize(stream));
-   }
- 
-   void verify_results() {
-     std::vector<std::vector<TestType>> host_out(count, std::vector<TestType>(num_elements));
-     HIP_CHECK(hipSetDevice(device_for_dst));
-     for (size_t i = 0; i < count; ++i) {
-       HIP_CHECK(hipMemcpy(host_out[i].data(), dst_ptrs[i], size_in_bytes, hipMemcpyDeviceToHost));
-       for (size_t j = 0; j < num_elements; ++j) {
-         REQUIRE(host_out[i][j] == initial_values[j]);
-       }
-     }
-   }
- 
-   void free_mem() { HIP_CHECK(hipStreamDestroy(stream)); }
- 
-   void disable_peer_access() {
-     HIP_CHECK(hipSetDevice(device_for_dst));
-     HIP_CHECK(hipDeviceDisablePeerAccess(device_for_src));
-   }
- 
-   const size_t count;
-   const size_t num_elements;
-   const size_t size_in_bytes;
-   const int device_for_src;
-   const int device_for_dst;
- 
-   std::vector<TestType> initial_values;
-   std::vector<LinearAllocGuard<TestType>> allocations;
-   hipStream_t stream{};
-   std::vector<void*> src_ptrs;
-   std::vector<void*> dst_ptrs;
+#include <hip_test_common.hh>
+#include <hip_test_defgroups.hh>
+#include <resource_guards.hh>
+
+#include "memcpyBatchAsync_common.hh"
+
+#if HT_AMD
+
+/**
+ * Batch device-to-device copies across GPUs: each entry uses a distinct source
+ * allocation on `device_for_src` and a distinct destination on
+ * `device_for_dst`. Peer access is enabled from `device_for_dst` to
+ * `device_for_src`.
+ */
+template <typename TestType> struct BasicCopyP2PTest {
+  BasicCopyP2PTest(size_t count, size_t num_elements, int device_src,
+                   int device_dst)
+      : count{count}, num_elements{num_elements},
+        size_in_bytes{num_elements * sizeof(TestType)},
+        device_for_src{device_src}, device_for_dst{device_dst},
+        initial_values(num_elements, get_test_values<TestType>().first),
+        src_ptrs(count), dst_ptrs(count) {}
+
+  void runTest() {
+    initialize_mem();
+    execute();
+    verify_results();
+    free_mem();
+    disable_peer_access();
+  }
+
+private:
+  void initialize_mem() {
+    HIP_CHECK(hipSetDevice(device_for_dst));
+    HIP_CHECK(hipDeviceEnablePeerAccess(device_for_src, 0));
+
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    for (size_t i = 0; i < count; ++i) {
+      HIP_CHECK(hipSetDevice(device_for_src));
+      LinearAllocGuard<TestType> src_alloc(LinearAllocs::hipMalloc,
+                                           size_in_bytes);
+      src_ptrs[i] = src_alloc.ptr();
+      HIP_CHECK(hipMemcpy(src_ptrs[i], initial_values.data(), size_in_bytes,
+                          hipMemcpyHostToDevice));
+      allocations.push_back(std::move(src_alloc));
+
+      HIP_CHECK(hipSetDevice(device_for_dst));
+      LinearAllocGuard<TestType> dst_alloc(LinearAllocs::hipMalloc,
+                                           size_in_bytes);
+      dst_ptrs[i] = dst_alloc.ptr();
+      HIP_CHECK(hipMemset(dst_ptrs[i], 0, size_in_bytes));
+      allocations.push_back(std::move(dst_alloc));
+    }
+  }
+
+  void execute() {
+    HIP_CHECK(hipSetDevice(device_for_dst));
+    std::vector<size_t> sizes(count, size_in_bytes);
+    const size_t num_attributes = 0;
+    std::vector<size_t> attributes_indexes(1);
+    attributes_indexes[0] = 0;
+    size_t fail_index = 0;
+    HIP_CHECK(hipMemcpyBatchAsync(
+        dst_ptrs.data(), src_ptrs.data(), sizes.data(), count, nullptr,
+        attributes_indexes.data(), num_attributes, &fail_index, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  void verify_results() {
+    std::vector<std::vector<TestType>> host_out(
+        count, std::vector<TestType>(num_elements));
+    HIP_CHECK(hipSetDevice(device_for_dst));
+    for (size_t i = 0; i < count; ++i) {
+      HIP_CHECK(hipMemcpy(host_out[i].data(), dst_ptrs[i], size_in_bytes,
+                          hipMemcpyDeviceToHost));
+      for (size_t j = 0; j < num_elements; ++j) {
+        REQUIRE(host_out[i][j] == initial_values[j]);
+      }
+    }
+  }
+
+  void free_mem() { HIP_CHECK(hipStreamDestroy(stream)); }
+
+  void disable_peer_access() {
+    HIP_CHECK(hipSetDevice(device_for_dst));
+    HIP_CHECK(hipDeviceDisablePeerAccess(device_for_src));
+  }
+
+  const size_t count;
+  const size_t num_elements;
+  const size_t size_in_bytes;
+  const int device_for_src;
+  const int device_for_dst;
+
+  std::vector<TestType> initial_values;
+  std::vector<LinearAllocGuard<TestType>> allocations;
+  hipStream_t stream{};
+  std::vector<void *> src_ptrs;
+  std::vector<void *> dst_ptrs;
  };
  
  /**
