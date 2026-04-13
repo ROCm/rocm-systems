@@ -821,7 +821,7 @@ def _build_analysis_result(
 
         if priority_upper == "HIGH":
             rec_set.high_priority.append(recommendation)
-        elif priority_upper == "MEDIUM":
+        elif priority_upper in ("MEDIUM", "INFO"):
             rec_set.medium_priority.append(recommendation)
         else:
             rec_set.low_priority.append(recommendation)

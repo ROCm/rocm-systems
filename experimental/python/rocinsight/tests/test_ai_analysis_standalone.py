@@ -399,8 +399,9 @@ class TestBuildAnalysisResultKeyMapping:
             database_path=Path("test.db"),
             custom_prompt=None,
         )
-        assert len(result.recommendations.low_priority) == 1
-        assert len(result.recommendations.medium_priority) == 0
+        # INFO recs are bucketed as medium_priority (actionable guidance)
+        assert len(result.recommendations.medium_priority) == 1
+        assert len(result.recommendations.low_priority) == 0
 
 
 # ===========================================================================
