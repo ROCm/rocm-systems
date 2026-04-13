@@ -541,7 +541,7 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
 endif()
 
 ## Disable WARP_SPEED if the build environment is invalid
-set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+set(WARP_SPEED_SUPPORTED_ARCHS "no_supported_arches")
 set(ARCH_MATCH_FOUND OFF)
 foreach(ARCH IN LISTS GPU_TARGETS)
   if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)
