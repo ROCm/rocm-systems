@@ -332,9 +332,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
       REQUIRE(false);
     }
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -474,7 +472,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
   HIPCHECK(hipGetDeviceProperties(&device_properties, 0));
   /* Test whether target device supports cooperative groups ****************/
   if (device_properties.cooperativeLaunch == 0) {
-    SUCCEED("Cooperative group support not available...");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   } else {
     /* We will launch enough waves to fill up all of the GPU *****************/
     int warp_size = device_properties.warpSize;

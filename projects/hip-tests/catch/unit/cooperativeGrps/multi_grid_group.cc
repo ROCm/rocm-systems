@@ -151,7 +151,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Basic) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
       return;
     }
   }
@@ -298,7 +298,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
       return;
     }
   }
@@ -420,7 +420,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
       return;
     }
   }
@@ -533,7 +533,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
       return;
     }
   }

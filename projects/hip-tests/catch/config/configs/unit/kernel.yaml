@@ -70,8 +70,6 @@ kernel:
     tags: [language, multigpu]
   Unit_hipExtLaunchKernelGGL:
     <<: *level_2
-    # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
-    disabled: [amd_windows, amd_wsl]
     tags: [launch]
   Unit_hipSetupArgument_Simple:
     <<: *level_2

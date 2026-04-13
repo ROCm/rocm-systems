@@ -76,11 +76,11 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I8",
         "I32",
         "I64",
-    ],  # Unsupported:
+    ],
 }
 
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
-MFMA_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
+MATRIX_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
 
 TOP_N = 10
@@ -136,7 +136,7 @@ class GraphPoints:
     l1: list[Union[list[float], float, None]]
     lds: list[Union[list[float], float, None]]
     valu: list[Union[list[float], float, None]]
-    mfma: list[Union[list[float], float, None]]
+    matrix_ops: list[Union[list[float], float, None]]
 
     @classmethod
     def empty(cls) -> "GraphPoints":
@@ -147,7 +147,7 @@ class GraphPoints:
             l1=[None, None, None],
             lds=[None, None, None],
             valu=[None, None, None],
-            mfma=[None, None, None],
+            matrix_ops=[None, None, None],
         )
 
 
@@ -207,7 +207,7 @@ def calc_ceilings(
         "l1": [],
         "lds": [],
         "valu": [],
-        "mfma": [],
+        "matrix_ops": [],
     }
 
     mem_level = roofline_parameters["mem_level"]
@@ -216,7 +216,7 @@ def calc_ceilings(
     )
 
     x1 = y1 = x2 = y2 = -1
-    x1_mfma = y1_mfma = x2_mfma = y2_mfma = -1
+    x1_matrix = y1_matrix = x2_matrix = y2_matrix = -1
 
     ops_flops = "Ops" if dtype.startswith("I") else "Flops"
 
@@ -254,22 +254,22 @@ def calc_ceilings(
             x2 = peak_ops / peak_bw
             y2 = peak_ops  # noqa
 
-            # Plot MFMA lines (NOTE: Assuming MI200 soc)
-            x1_mfma = peak_ops / peak_bw
-            y1_mfma = peak_ops
+            # Plot Matrix Ops lines (NOTE: Assuming MI200 soc)
+            x1_matrix = peak_ops / peak_bw
+            y1_matrix = peak_ops
 
-        peak_mfma = 0.0
-        if dtype in MFMA_DATATYPES:
+        peak_matrix = 0.0
+        if dtype in MATRIX_DATATYPES:
             target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
 
             try:
-                peak_mfma = float(
+                peak_matrix = float(
                     benchmark_data[f"MFMA{target_precision}{ops_flops}"][
                         roofline_parameters["device_id"]
                     ]
                 )
-                x2_mfma = peak_mfma / peak_bw
-                y2_mfma = peak_mfma
+                x2_matrix = peak_matrix / peak_bw
+                y2_matrix = peak_matrix
             except KeyError:
                 console_warning(
                     f"Missing benchmark data for "
@@ -279,12 +279,12 @@ def calc_ceilings(
                 )
 
         # Check which peak is higher for formatting bandwidth lines
-        if y2_mfma > y1_mfma:  # peak_mfma
-            peak_x = x2_mfma
-            peak_y = y2_mfma
+        if y2_matrix > y1_matrix:  # peak_matrix
+            peak_x = x2_matrix
+            peak_y = y2_matrix
         else:  # peakVALU
-            peak_x = x1_mfma
-            peak_y = y1_mfma
+            peak_x = x1_matrix
+            peak_y = y1_matrix
 
         cache_key = cache_level.lower()
         graph_points[cache_key].extend([[x1, peak_x], [y1, peak_y], peak_bw])
@@ -302,14 +302,16 @@ def calc_ceilings(
             peak_ops,
         ])
 
-    # Plot MFMA roof
-    if dtype in MFMA_DATATYPES:  # assert that mfma has been assigned
-        x0_mfma = min(x2_mfma, dynamic_xmax) if x2_mfma < dynamic_xmax else dynamic_xmax
+    # Plot Matrix Ops roof
+    if dtype in MATRIX_DATATYPES:  # assert that "matrix_ops" has been assigned
+        x0_matrix = (
+            min(x2_matrix, dynamic_xmax) if x2_matrix < dynamic_xmax else dynamic_xmax
+        )
 
-        graph_points["mfma"].extend([
-            [x0_mfma, dynamic_xmax],
-            [peak_mfma, peak_mfma],
-            peak_mfma,
+        graph_points["matrix_ops"].extend([
+            [x0_matrix, dynamic_xmax],
+            [peak_matrix, peak_matrix],
+            peak_matrix,
         ])
 
     return graph_points
@@ -512,7 +514,7 @@ def construct_roof(
     for cache_level in cache_hierarchy:
         expected_columns.append(f"{cache_level}Bw")
 
-    if dtype in MFMA_DATATYPES:
+    if dtype in MATRIX_DATATYPES:
         target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
         expected_columns.append(f"MFMA{target_precision}{ops_flops}")
 

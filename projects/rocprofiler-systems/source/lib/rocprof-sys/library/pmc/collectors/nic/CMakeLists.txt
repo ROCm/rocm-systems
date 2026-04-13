@@ -2,7 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 # Add tests subdirectory
-add_subdirectory(tests)
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 # PMC NIC Collector Sources
 set(pmc_nic_sources

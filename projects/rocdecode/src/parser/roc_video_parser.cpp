@@ -57,7 +57,7 @@ RocVideoParser::~RocVideoParser() {
 rocDecStatus RocVideoParser::Initialize(RocdecParserParams *pParams) {
     FunctionEntryLog(logger_);
     if(pParams == nullptr) {
-        logger_.CriticalLog(STR("Parser parameters are not set for the parser"));
+        CriticalLog(logger_, STR("Parser parameters are not set for the parser"));
         FunctionExitLog(logger_);
         return ROCDEC_NOT_INITIALIZED;
     }
