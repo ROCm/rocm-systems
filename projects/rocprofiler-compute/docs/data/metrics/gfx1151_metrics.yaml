@@ -221,7 +221,7 @@ Roofline Performance Rates:
     rst: The number of bytes transferred between TCP (L0) and GL1C per unit time. GL1C is the shared L1 cache within each Shader Engine. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
     unit: Bytes/s
   TCP (L0) Cache Bandwidth:
-    rst: The number of bytes looked up in the TCP (Texture Cache Per-pipe) per unit time. TCP is the L0 vector cache in RDNA3.5, one per WGP. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    rst: The number of bytes looked up in the TCP (Texture Cache Per-pipe) per unit time. TCP is the vector data cache in RDNA3.5, one per WGP. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
     unit: Bytes/s
   LDS Bandwidth:
     rst: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time. RDNA3.5 has 32 LDS banks per CU. The peak empirically measured LDS bandwidth achievable on the specific accelerator is displayed alongside for comparison.
