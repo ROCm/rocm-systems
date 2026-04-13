@@ -1,4 +1,4 @@
-"""Tests for ROCM-21553 PR2: New analysis data functions.
+"""Tests for per-API overhead breakdown and kernel resource/occupancy analysis.
 
 Tests cover:
 - C2: analyze_api_overhead() per-API breakdown
