@@ -1138,19 +1138,23 @@ void Device::IpcDetach(amd::Memory* amd_mem_obj) const {
 }
 
 std::vector<amd::CommandQueue*> Device::getActiveQueues() {
+  std::vector<amd::CommandQueue*> result;
+  result.reserve(activeQueues.size());
+
   amd::ScopedLock lock(activeQueuesLock_);
-  for (auto it = activeQueues.begin(); it != activeQueues.end();) {
-    if ((*it)->referenceCount() == 0) {
+  for (auto it = activeQueues.begin(); it != activeQueues.end(); ++it) {
+    if (it->first->referenceCount() == 0) {
       // It is being terminated in HostQueue::terminate().
       // We should not wait for commands in a queue being terminated.
-      it = activeQueues.erase(it);
-    } else {
+      it->second = false;
+    } else if (it->second) {
       // In case the queue will be destroyed in Stream::Destroy().
-      (*it)->retain();
-      ++it;
+      it->first->retain();
+      result.push_back(it->first);
     }
   }
-  return std::vector<amd::CommandQueue*>(activeQueues.begin(), activeQueues.end());
+
+  return result;
 }
 
 // =================================================================================================

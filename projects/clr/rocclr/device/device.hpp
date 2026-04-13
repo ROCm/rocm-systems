@@ -2159,13 +2159,13 @@ class Device : public RuntimeObject {
   //! Adds the queue to the set of active command queues
   void addToActiveQueues(amd::CommandQueue* commandQueue) {
     amd::ScopedLock lock(activeQueuesLock_);
-    activeQueues.insert(commandQueue);
+    activeQueues[commandQueue] = true;
   }
 
   //! Removes the queue from the set of active command queues
   void removeFromActiveQueues(amd::CommandQueue* commandQueue) {
     amd::ScopedLock lock(activeQueuesLock_);
-    activeQueues.erase(commandQueue);
+    activeQueues[commandQueue] = false;
   }
 
   // Notifies device about context destroy
@@ -2244,7 +2244,7 @@ class Device : public RuntimeObject {
   device::Memory* initial_heap_buffer_;                 //!< Initial heap buffer
   uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};     //!< Initial device heap size
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
-  std::unordered_set<amd::CommandQueue*> activeQueues;  //!< The set of active queues
+  std::unordered_map<amd::CommandQueue*, bool> activeQueues;  //!< The set of active queues
 
  private:
   const Isa* isa_;  //!< Device isa
