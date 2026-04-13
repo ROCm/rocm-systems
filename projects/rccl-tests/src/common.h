@@ -30,6 +30,7 @@
 #include <pthread.h>
 #include "nccl1_compat.h"
 #include "rccl_compat.h"  // Weak symbols forward declarations
+#include <hip/hip_version.h>
 #include "timer.h"
 #include <string>
 #include <fstream>
