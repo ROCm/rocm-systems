@@ -2190,9 +2190,13 @@ extern int64_t ncclParamMaxNchannels();
 
 static ncclResult_t topoGetAlgoInfo(
     struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
-    float** collCostTable, ncclSimInfo_t* simInfo, int userAlgoInput
+    float** collCostTable, ncclSimInfo_t* simInfo
   ) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+  static int userAlgoInput = -2;
+  if (userAlgoInput == -2) {
+    userAlgoInput = ncclGetEnv("NCCL_ALGO") ? 1 : 0;
+  }
 
   float minTime = 3600000000.0;
   int algorithm = info->algorithm = NCCL_ALGO_UNDEF;
@@ -2423,9 +2427,9 @@ rccl_static ncclResult_t getAlgoInfo(
           comm->tunerContext, info->func, nBytes,
           numPipeOps, (float **)collCostTable, NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS,
           regBuff, &nMaxChannels));
-    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo, userAlgoInput));
+    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo));
   } else {
-    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo, userAlgoInput));
+    NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo));
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
     if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
       // make algorithm selection based on buffer registration
