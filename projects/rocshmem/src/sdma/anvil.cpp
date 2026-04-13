@@ -126,8 +126,8 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAg
   memFlags.ui32.ExecuteAccess = 1;
   memFlags.ui32.Uncached = 1;
 
-  fprintf(stdout, "SDMA: Allocating Queue Buffer for device: %d remote device: %d engineId: %d\n",
-          localDeviceId, remoteDeviceId, engineId);
+  // fprintf(stdout, "SDMA: Allocating Queue Buffer for device: %d remote device: %d engineId: %d\n",
+  //         localDeviceId, remoteDeviceId, engineId);
 
   CHECK_HSAKMT_SUCCESS(hsaKmtAllocMemory(localNodeId, SDMA_QUEUE_SIZE, memFlags, &queueBuffer_),
                        "Failed");
@@ -208,8 +208,8 @@ void AnvilLib::init() {
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   uint32_t engineId = getSdmaEngineId(srcDeviceId, dstDeviceId);
-  fprintf(stdout, "SDMA: Connect from %d to %d with %d channels using engine %d\n",
-          srcDeviceId, dstDeviceId, numChannels, engineId);
+  // fprintf(stdout, "SDMA: Connect from %d to %d with %d channels using engine %d\n",
+  //         srcDeviceId, dstDeviceId, numChannels, engineId);
   for (int c = 0; c < numChannels; ++c) {
     sdma_channels_[dstDeviceId].emplace_back(
         std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, gpuAgents_[srcDeviceId], engineId));

@@ -65,7 +65,12 @@ class SdmaOnImpl {
   __host__ __device__ bool isSdmaAvailable(int src_pe, int target_pe) {
     // SDMA is only available for local (same-node) PEs
     // and when device handles have been initialized
-    if (deviceHandles_d == nullptr) return false;
+    if (deviceHandles_d == nullptr) {
+      // printf("[SDMA] isSdmaAvailable: src=%d target=%d -> false (no handles)\n",
+      //        src_pe, target_pe);
+      return false;
+    }
+    // printf("[SDMA] isSdmaAvailable: src=%d target=%d -> true\n", src_pe, target_pe);
     // For now, assume all local PEs can use SDMA
     return true;
   }
@@ -78,6 +83,8 @@ class SdmaOnImpl {
     int idx = local_pe * numChannels;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
+      // printf("[SDMA] sdmaCopy: dst=%p src=%p size=%zu pe=%d idx=%d\n",
+      //        dst, src, size, pe, idx);
       anvil::putWithSignal(*handle, dst, src, size, &signalPtrs[idx]);
       __hip_atomic_fetch_add(&expectedSignals[idx], 1,
                              __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -112,6 +119,8 @@ class SdmaOnImpl {
       if (handle != nullptr && chunk_size > 0) {
         char* dst_chunk = static_cast<char*>(dst) + offset;
         char* src_chunk = static_cast<char*>(src) + offset;
+        // printf("[SDMA] sdmaCopy_wave: lane=%d dst=%p src=%p size=%zu pe=%d ch=%d idx=%d\n",
+        //        lane_id, dst_chunk, src_chunk, chunk_size, pe, channel_idx, idx);
         anvil::putWithSignal(*handle, dst_chunk, src_chunk, chunk_size, &signalPtrs[idx]);
         __hip_atomic_fetch_add(&expectedSignals[idx], 1,
                                __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -145,6 +154,8 @@ class SdmaOnImpl {
       if (handle != nullptr && chunk_size > 0) {
         char* dst_chunk = static_cast<char*>(dst) + offset;
         char* src_chunk = static_cast<char*>(src) + offset;
+        // printf("[SDMA] sdmaCopy_wg: thread=%d dst=%p src=%p size=%zu pe=%d ch=%d idx=%d\n",
+        //        thread_id, dst_chunk, src_chunk, chunk_size, pe, channel_idx, idx);
         anvil::putWithSignal(*handle, dst_chunk, src_chunk, chunk_size, &signalPtrs[idx]);
         __hip_atomic_fetch_add(&expectedSignals[idx], 1,
                                __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -156,6 +167,7 @@ class SdmaOnImpl {
   // Wait for SDMA completions for a specific PE (all channels)
   __device__ void sdmaQuiet(int pe) {
     int local_pe = pe % shm_size;
+    // printf("[SDMA] sdmaQuiet: pe=%d\n", pe);
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = local_pe * numChannels + ch;
       uint64_t expected = __hip_atomic_load(&expectedSignals[idx],
@@ -166,6 +178,7 @@ class SdmaOnImpl {
 
   // Wait for all SDMA completions (all PEs, all channels)
   __device__ void sdmaQuietAll() {
+    // printf("[SDMA] sdmaQuietAll: shm_size=%d\n", shm_size);
     for (int pe = 0; pe < shm_size; pe++) {
       for (int ch = 0; ch < numChannels; ch++) {
         int idx = pe * numChannels + ch;
