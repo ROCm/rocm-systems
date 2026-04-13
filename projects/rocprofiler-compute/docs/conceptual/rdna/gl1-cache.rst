@@ -48,7 +48,7 @@ GL1C cache performance
       .. jinja:: rdna1151-gl1c-cache-performance-gfx1151
          :file: _templates/metrics_table.j2
 
-GL1C Stalls
+GL1C stalls
 -----------
 
 .. tab-set::
