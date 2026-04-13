@@ -1540,11 +1540,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       len = Min(len, importSize - fragOffset);
     }
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    if (allocation_map_.find(importAddress) == allocation_map_.end()) {
-      allocation_map_[importAddress] =
-          AllocationRegion(nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
-      allocation_map_[importAddress].thunk_bo = thunk_bo;
-    }
+    allocation_map_.try_emplace(
+        importAddress, nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
+    allocation_map_[importAddress].thunk_bo = thunk_bo;
   };
 
   auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
