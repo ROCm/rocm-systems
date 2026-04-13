@@ -36,15 +36,12 @@ THE SOFTWARE.
 #define STR(X) std::string(X)
 
 #if DBGINFO
-#define INFO(X) std::clog << "[INF] " << " {" << __func__ <<"} " << " " << X << std::endl;
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
 #else
-#define INFO(X) ;
 #define MSG(X) ;
 #define MSG_NO_NEWLINE(X) ;
 #endif
-#define ERR(X) std::cerr << "[ERR] "  << " {" << __func__ <<"} " << " " << X << std::endl;
 
 // Logging control
 enum RocDecLogLevel {
@@ -77,7 +74,7 @@ public:
     void SetLogLevel(int log_level) {log_level_ = std::clamp(log_level, 0, static_cast<int>(kRocDecLogLevelMax));};
     int GetLogLevel() {return log_level_;};
 
-    static void AlwaysLog(std::string msg) {
+    void AlwaysLog(std::string msg) {
         OutputMsg(msg);
     };
 

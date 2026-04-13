@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
+#include "../../src/commons.h"
 
 /*!
  * \file
@@ -63,16 +64,6 @@ typedef enum OutputSurfaceMemoryType_enum {
     OUT_SURFACE_MEM_HOST_COPIED = 2,        /**<  decoded output will be copied to a separate host memory (the user doesn't need to call release) **/
     OUT_SURFACE_MEM_NOT_MAPPED  = 3         /**< <  decoded output is not available (interop won't be used): useful for decode only performance app*/
 } OutputSurfaceMemoryType;
-
-#define TOSTR(X) std::to_string(static_cast<int>(X))
-#define STR(X) std::string(X)
-
-#if DBGINFO
-#define ROCDEC_INFO(X) std::clog << "[INF] " << " {" << __func__ <<"} " << " " << X << std::endl;
-#else
-#define ROCDEC_INFO(X) ;
-#endif
-#define ROCDEC_ERR(X) std::cerr << "[ERR] "  << " {" << __func__ <<"} " << " " << X << std::endl;
 
 inline int GetChromaPlaneCount(rocDecVideoSurfaceFormat surface_format) {
     int num_planes = 1;
@@ -157,7 +148,7 @@ private:
 
 #define CHECK_ZERO(str, value)              \
     if (value == 0) {                      \
-        ROCDEC_ERR(STR(str) + " is 0.");    \
+        CriticalLog(g_rocdec_logger, STR(str) + " is 0.");    \
     }
 
 struct Rect {
