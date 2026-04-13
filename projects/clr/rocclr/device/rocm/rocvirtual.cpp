@@ -1770,8 +1770,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
 // ================================================================================================
 VirtualGPU::~VirtualGPU() {
   // Release SDMA engine assignment for this VirtualGPU
-  dev().ReleaseSdmaEngine(this);
-  ClearAssignedSdmaEngine();
+  ReleaseSdmaEngines();
 
   delete blitMgr_;
 
@@ -1997,6 +1996,9 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 
 // ================================================================================================
 void VirtualGPU::ReleaseSdmaEngines() {
+  if (!hasAssignedSdmaEngine()) {
+    return;
+  }
   // Release SDMA engine assignment when queue is idle
   // This allows the engine to be reassigned to other active streams
   dev().ReleaseSdmaEngine(this);
