@@ -633,7 +633,7 @@ def generate_recommendations(
                             {"name": "-d", "value": "./api_output"},
                             {"name": "-o", "value": "profile"},
                         ],
-                        "full_command": "rocprofv3 --hip-api-trace --hsa-trace -d ./api_output -o profile -- ./app",
+                        "full_command": "rocprofv3 --hip-trace --hsa-trace -d ./api_output -o profile -- ./app",
                     },
                     {
                         "tool": "rocprof-sys-sample",
