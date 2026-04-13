@@ -65,7 +65,7 @@ namespace
 {
 using context_t              = context::context;
 using context_array_t        = common::container::small_vector<const context_t*>;
-using external_corr_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t = tracing::external_correlation_id_map_t;
 
 template <size_t OpIdx>
 struct async_copy_info;

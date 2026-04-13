@@ -93,7 +93,7 @@ def generate_broadcast_api():
 /**
  * @name SHMEM_BROADCAST
  * @brief Perform a broadcast between PEs in the active set. The caller
- * is blocked until the broadcase completes.
+ * is blocked until the broadcast completes.
  *
  * This function must be called as a work-group collective.
  *

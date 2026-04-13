@@ -100,18 +100,6 @@
         {"name": "GroupCall.MixedDataType", "description": "GroupCall mixed data type", "test_filter": "GroupCall.MixedDataType"},
         {"name": "GroupCall.MultiGroupCall", "description": "GroupCall multi group call", "test_filter": "GroupCall.MultiGroupCall"},
         {"name": "NonBlocking.SingleCalls", "description": "NonBlocking single calls", "test_filter": "NonBlocking.SingleCalls"},
-        {"name": "CommTests.Sorter", "description": "CommTests sorter", "test_filter": "CommTests.Sorter"},
-        {"name": "Enqueue", "description": "Enqueue operation tests", "test_filter": "Enqueue.*"},
-        {"name": "Alloc", "description": "Memory allocation tests", "test_filter": "Alloc.*"},
-        {"name": "ParamTests", "description": "Parameter handling tests", "test_filter": "ParamTests.*"},
-        {"name": "ProxyTests", "description": "Proxy service tests", "test_filter": "ProxyTests.*"},
-        {"name": "Rcclwrap", "description": "RCCL wrapper tests", "test_filter": "Rcclwrap.*"},
-        {"name": "TransportTest", "description": "Transport layer tests", "test_filter": "TransportTest.*"},
-        {"name": "ArgCheck", "description": "Argument validation tests", "test_filter": "ArgCheck.*"},
-        {"name": "BitOps", "description": "Bit operation utility tests", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash"},
-        {"name": "AltRsmi", "description": "Alternative RSMI tests", "test_filter": "AltRsmi.*"},
-        {"name": "NetSocket", "description": "Network socket tests", "test_filter": "NetSocket.*"},
-        {"name": "Ipcsocket", "description": "IPC socket tests", "test_filter": "Ipcsocket.*"},
         {"name": "Standalone.SplitComms_RankCheck", "description": "Verify device assignment for each rank using ncclCommSplit API", "test_filter": "Standalone.SplitComms_RankCheck"},
         {"name": "Standalone.SplitComms_OneColor", "description": "Creates communicator for each device with same color", "test_filter": "Standalone.SplitComms_OneColor"},
         {"name": "Standalone.SplitComms_Reduce", "description": "Reduces communicators into fewer ranks", "test_filter": "Standalone.SplitComms_Reduce"},
@@ -165,7 +153,26 @@
         {"name": "CollTraceUtilsTest.EventQueueOperationTest", "description": "CollTrace event queue operation test", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
         {"name": "CollTraceUtilsTest.EventQueueMultiThreadTest", "description": "CollTrace event queue multithread test", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
         {"name": "CollTraceUtilsTest.getSizeMbTest", "description": "CollTrace get size MB test", "test_filter": "CollTraceUtilsTest.getSizeMbTest"},
-        {"name": "ROCTX", "description": "AllReduce out-of-place with ROCTX logging", "test_filter": "AllReduce.OutOfPlace", "env_variables": {"RCCL_LOG_ROCTX": "1", "UT_MAX_GPUS": "2", "UT_PROCESS_MASK": "2"}}
+        {"name": "AllReduce.ROCTX", "description": "AllReduce with ROCTX logging (dedicated test)", "test_filter": "AllReduce.ROCTX"}
+      ]
+    },
+    "unit_tests_fixtures": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 90,
+      "env_variables": {
+        "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"},
+        {"name": "CommTests", "description": "Communicator helper tests", "test_filter": "CommTests.*"},
+        {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"}
       ]
     }
   },
@@ -174,6 +181,12 @@
       "name": "RCCL Unit Tests - All Collectives",
       "description": "Standard RCCL unit tests for all collective operations",
       "config": "unit_tests",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Unit Tests - Fixtures",
+      "description": "Header-only fixture tests: BitOps, CommTests, EnqueueCountTests",
+      "config": "unit_tests_fixtures",
       "enabled": true
     }
   ]

@@ -122,7 +122,7 @@ struct ExtInfo {
    char *recv_buf = new char[size * num_pes];
    std::memset(recv_buf, 0, num_pes * size);
 
-   // Perform pairwise exchange - local copy is ommitted
+   // Perform pairwise exchange - local copy is omitted
    for (int step = 1; step < num_pes; step++) {
      int sendto   = (rank_pos + step) % num_pes;
      int recvfrom = (rank_pos + num_pes - step) % num_pes;
