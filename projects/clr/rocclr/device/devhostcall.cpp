@@ -127,8 +127,8 @@ void HostcallBuffer::initialize(uint32_t num_packets,
   auto base = reinterpret_cast<uint8_t*>(this);
 
   device::Memory* dm = occupied_mem->getDeviceMemory(*device_);
-  device_phase_    = reinterpret_cast<uint32_t*>(base + getDevicePhaseOffset());
-  host_phase_      = reinterpret_cast<uint32_t*>(base + getHostPhaseOffset(num_packets));
+  device_phase_    = reinterpret_cast<std::atomic<uint32_t>*>(base + getDevicePhaseOffset());
+  host_phase_      = reinterpret_cast<std::atomic<uint32_t>*>(base + getHostPhaseOffset(num_packets));
   occupied_        = reinterpret_cast<uint32_t*>(dm->virtualAddress());
   headers_         = reinterpret_cast<PacketHeader*>(base + getHeaderOffset(num_packets));
   payloads_        = reinterpret_cast<Payload*>(base + getPayloadOffset(num_packets));
@@ -142,8 +142,8 @@ void HostcallBuffer::initialize(uint32_t num_packets,
 
 bool HostcallBuffer::hasWorkPending() const {
   for (uint32_t i = 0; i < scan_limit_; ++i) {
-    uint32_t dp = __atomic_load_n(&device_phase_[i], __ATOMIC_RELAXED);
-    uint32_t hp = __atomic_load_n(&host_phase_[i],   __ATOMIC_RELAXED);
+    uint32_t dp = device_phase_[i].load(std::memory_order_relaxed);
+    uint32_t hp = host_phase_[i].load(std::memory_order_relaxed);
     if (dp != hp)
       return true;
   }
@@ -153,8 +153,8 @@ bool HostcallBuffer::hasWorkPending() const {
 void HostcallBuffer::processPackets(MessageHandler& messages) {
   uint32_t new_limit = 0;
   for (uint32_t i = 0; i < scan_limit_; ++i) {
-    uint32_t dp = __atomic_load_n(&device_phase_[i], __ATOMIC_RELAXED);
-    uint32_t hp = __atomic_load_n(&host_phase_[i],   __ATOMIC_RELAXED);
+    uint32_t dp = device_phase_[i].load(std::memory_order_relaxed);
+    uint32_t hp = host_phase_[i].load(std::memory_order_relaxed);
 
     if (dp == hp)
       continue;
@@ -183,7 +183,7 @@ void HostcallBuffer::processPackets(MessageHandler& messages) {
     }
 
     std::atomic_thread_fence(std::memory_order_release);
-    __atomic_store_n(&host_phase_[i], hp ^ 1, __ATOMIC_RELAXED);
+    host_phase_[i].store(hp ^ 1, std::memory_order_relaxed);
   }
   if (new_limit > 0)
     scan_limit_ = new_limit;

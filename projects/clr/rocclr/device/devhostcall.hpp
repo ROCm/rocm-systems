@@ -9,6 +9,7 @@
 #include "top.hpp"
 #include "device/device.hpp"
 #include "device/devhcmessages.hpp"
+#include <atomic>
 #include <cstddef>
 
 #if defined(__clang__)
@@ -127,9 +128,9 @@ class HostcallBuffer {
   // --- Shared prefix: must match device-side buffer_t layout ---
 
   /** Per-packet phase toggled by the device on submission */
-  uint32_t *device_phase_;
+  std::atomic<uint32_t> *device_phase_;
   /** Per-packet phase toggled by the host on completion */
-  uint32_t *host_phase_;
+  std::atomic<uint32_t> *host_phase_;
   /** Device VA of the occupied bitfield (device-local memory) */
   uint32_t *occupied_;
   /** Array of packet headers */
@@ -172,5 +173,9 @@ class HostcallBuffer {
 
 static_assert(std::is_standard_layout<HostcallBuffer>::value,
               "the hostcall buffer must be useable from other languages");
+
+static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t) &&
+                  alignof(std::atomic<uint32_t>) == alignof(uint32_t),
+              "std::atomic<uint32_t> must have the same size and alignment as uint32_t");
 
 }  // namespace amd
