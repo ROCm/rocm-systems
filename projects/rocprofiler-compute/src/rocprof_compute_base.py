@@ -183,21 +183,10 @@ class RocProfCompute:
                         f"--membw-analysis --experimental"
                     )
 
-        # Validate --bench-only mutual exclusion
-        if self.__mode == "profile" and getattr(self.__args, "bench_only", False):
-            conflicts = []
-            if getattr(self.__args, "filter_blocks", None):
-                conflicts.append("--block")
-            if getattr(self.__args, "set_selected", None):
-                conflicts.append("--set")
-            if getattr(self.__args, "roof_only", False):
-                conflicts.append("--roof-only")
-            if getattr(self.__args, "no_roof", False):
-                conflicts.append("--no-roof")
-            if conflicts:
-                console_error(
-                    f"--bench-only cannot be used with {', '.join(conflicts)}."
-                )
+        if self.__mode == "profile" and getattr(
+            self.__args, "bench_only", False
+        ):
+            self._validate_bench_only_exclusions()
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -537,42 +526,64 @@ class RocProfCompute:
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
 
+    def _validate_bench_only_exclusions(self) -> None:
+        """Validate --bench-only is not used with conflicting options."""
+        conflicting_options: list[str] = []
+        if getattr(self.__args, "filter_blocks", None):
+            conflicting_options.append("--block")
+        if getattr(self.__args, "set_selected", None):
+            conflicting_options.append("--set")
+        if getattr(self.__args, "roof_only", False):
+            conflicting_options.append("--roof-only")
+        if getattr(self.__args, "no_roof", False):
+            conflicting_options.append("--no-roof")
+        if not conflicting_options:
+            return
+        console_error(
+            "--bench-only cannot be used with "
+            f"{', '.join(conflicting_options)}."
+        )
+
     @demarcate
     def _run_bench_only(self) -> None:
-        """Run roofline microbenchmark only, without application profiling."""
-        from roofline.run_benchmark import load_bench
+        """Orchestrate standalone roofline microbenchmark execution."""
+        from roofline.run_benchmark import run_roofline_benchmark
         from utils.utils_common import validate_roofline_csv
 
-        device = self.__args.device
-        output_path = self.__args.path
+        output_dir = Path(self.__args.path)
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
 
-        p = Path(output_path)
-        if not p.exists():
-            p.mkdir(parents=True, exist_ok=True)
+        setup_file_handler(self.__args.loglevel, str(output_dir))
 
-        setup_file_handler(self.__args.loglevel, output_path)
-
-        console_log("roofline", f"Running roofline microbenchmark on device {device}")
-
+        roofline_csv = output_dir / "roofline.csv"
+        console_log(
+            "roofline",
+            "Running roofline microbenchmark"
+            f" on device {self.__args.device}",
+        )
         try:
-            bench = load_bench([device])
-            result = bench.run_on_devices([device])
-            bench.dump_csv(result, f"{output_path}/roofline.csv")
+            run_roofline_benchmark(
+                self.__args.device, roofline_csv
+            )
         except Exception as e:
             console_error(f"Benchmark execution failed: {e}")
 
-        is_valid, error_msg = validate_roofline_csv(output_path)
+        is_valid, error_message = validate_roofline_csv(
+            str(output_dir)
+        )
         if not is_valid:
             console_error(
-                f"Invalid roofline.csv: {error_msg}",
+                f"Invalid roofline.csv: {error_message}",
                 exit=False,
             )
             return
 
         console_log(
             "roofline",
-            f"Roofline data saved to {output_path}/roofline.csv\n"
-            f"  Run 'rocprof-compute analyze -p {output_path}' for charts",
+            f"Roofline data saved to {roofline_csv}\n"
+            "  Run 'rocprof-compute analyze"
+            f" -p {output_dir}' for charts",
         )
 
     @demarcate
