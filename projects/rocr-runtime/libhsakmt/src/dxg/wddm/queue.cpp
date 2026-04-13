@@ -470,11 +470,10 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
   const uint32_t alignment = 1024 / wavefront;
   private_segment_size = rocr::AlignUp(private_segment_size, alignment);
 
-  uint32_t scratch_size_per_wave = private_segment_size * wavefront;
-  uint32_t scratch_size = scratch_size_per_wave * scratch_waves_;
+  uint64_t scratch_size_per_wave = private_segment_size * wavefront;
+  uint64_t scratch_size = scratch_size_per_wave * scratch_waves_;
 
-  uint64_t tmp_scratch_size = (uint64_t)scratch_size_per_wave * scratch_waves_;
-  if (tmp_scratch_size > UINT32_MAX) {
+  if (scratch_size > UINT32_MAX) {
     pr_err("scratch_size overflow!\n");
     HandleError(HSA_STATUS_ERROR_INVALID_ARGUMENT);
     return false;
