@@ -74,7 +74,7 @@ Memory Chart: path up to GL1
 ============================
 
 The following Memory Chart tables align with the on-screen flow through instruction
-and scalar paths, TCP (vector L0), LDS, and the TCP-GL1 interface.
+and scalar paths, TCP (GL0), LDS, and the TCP-GL1 interface.
 
 Memory chart - Instruction Cache
 ---------------------------------
