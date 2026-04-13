@@ -26,7 +26,7 @@ GL1C utilization
       .. jinja:: rdna1151-gl1c-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-GL1C Request Statistics
+GL1C request statistics
 -----------------------
 
 .. tab-set::
