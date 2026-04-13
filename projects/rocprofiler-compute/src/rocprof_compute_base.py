@@ -183,10 +183,8 @@ class RocProfCompute:
                         f"--membw-analysis --experimental"
                     )
 
-        if self.__mode == "profile" and getattr(
-            self.__args, "bench_only", False
-        ):
-            self._validate_bench_only_exclusions()
+        if self.__mode == "profile":
+            self._validate_profile_mode_exclusions()
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -526,23 +524,29 @@ class RocProfCompute:
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
 
-    def _validate_bench_only_exclusions(self) -> None:
-        """Validate --bench-only is not used with conflicting options."""
-        conflicting_options: list[str] = []
+    def _validate_profile_mode_exclusions(self) -> None:
+        """Validate mutually exclusive profile mode options."""
+        exclusive_options: list[str] = []
         if getattr(self.__args, "filter_blocks", None):
-            conflicting_options.append("--block")
+            exclusive_options.append("--block")
         if getattr(self.__args, "set_selected", None):
-            conflicting_options.append("--set")
+            exclusive_options.append("--set")
         if getattr(self.__args, "roof_only", False):
-            conflicting_options.append("--roof-only")
-        if getattr(self.__args, "no_roof", False):
-            conflicting_options.append("--no-roof")
-        if not conflicting_options:
-            return
-        console_error(
-            "--bench-only cannot be used with "
-            f"{', '.join(conflicting_options)}."
-        )
+            exclusive_options.append("--roof-only")
+        if getattr(self.__args, "bench_only", False):
+            exclusive_options.append("--bench-only")
+        if len(exclusive_options) > 1:
+            console_error(
+                f"{', '.join(exclusive_options)} are mutually"
+                " exclusive options. Please use only one of them."
+            )
+
+        if getattr(self.__args, "bench_only", False) and getattr(
+            self.__args, "no_roof", False
+        ):
+            console_error(
+                "--bench-only cannot be used with --no-roof."
+            )
 
     @demarcate
     def _run_bench_only(self) -> None:
