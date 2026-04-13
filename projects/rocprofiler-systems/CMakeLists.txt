@@ -191,6 +191,29 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 # own python discovery, even when versions differ. Unset them to prevent this.
 unset(Python3_EXECUTABLE CACHE)
 
+# Old behavior, will be removed once CTest calls pytest
+if(ROCPROFSYS_BUILD_FOR_THEROCK AND NOT DEFINED ROCPROFSYS_USE_PYTESTS)
+    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
+    set(ROCPROFSYS_USE_PYTESTS ON CACHE BOOL "Enable pytest suite" FORCE)
+
+    # Lulesh does not build with TheRock
+    if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
+        set(ROCPROFSYS_DISABLE_EXAMPLES
+            "lulesh"
+            CACHE STRING
+            "Disable building examples"
+            FORCE
+        )
+    else()
+        if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
+        endif()
+    endif()
+else()
+    set(ROCPROFSYS_USE_PYTESTS OFF CACHE BOOL "Enable pytest suite" FORCE)
+endif()
+
 include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
@@ -299,26 +322,10 @@ if(ROCPROFSYS_BUILD_TESTING)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
 endif()
 
-if(ROCPROFSYS_BUILD_FOR_THEROCK)
+# Examples are built independently on TheRock
+if(ROCPROFSYS_BUILD_FOR_THEROCK AND NOT ROCPROFSYS_USE_PYTESTS)
     set(ROCPROFSYS_BUILD_EXAMPLES OFF CACHE BOOL "Enable building the examples" FORCE)
-    set(ROCPROFSYS_INSTALL_EXAMPLES OFF CACHE BOOL "Install the examples" FORCE)
-
-    # TODO: Code below this point will be deprecated
-    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
-    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
-    # Lulesh does not build with TheRock
-    if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
-        set(ROCPROFSYS_DISABLE_EXAMPLES
-            "lulesh"
-            CACHE STRING
-            "Disable building examples"
-            FORCE
-        )
-    else()
-        if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
-        endif()
-    endif()
+    set(ROCPROFSYS_INSTALL_EXAMPLES OFF CACHE BOOL "Enable installing examples" FORCE)
 endif()
 
 include(ProcessorCount)
