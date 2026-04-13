@@ -15,28 +15,28 @@ Panel Config:
       metric:
         CPF Utilization:
           avg: SUM(100 * CPF_CPF_STAT_BUSY) / SUM(CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE)
-          min: MIN((((100 * CPF_CPF_STAT_BUSY) / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))))
-          max: MAX((((100 * CPF_CPF_STAT_BUSY) / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))))
+          min: MIN(100 * CPF_CPF_STAT_BUSY / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
+          max: MAX(100 * CPF_CPF_STAT_BUSY / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
           unit: Percent
         CPF Stall:
           avg: SUM(100 * CPF_CPF_STAT_STALL) / SUM(CPF_CPF_STAT_BUSY)
-          min: MIN((((100 * CPF_CPF_STAT_STALL) / CPF_CPF_STAT_BUSY)))
-          max: MAX((((100 * CPF_CPF_STAT_STALL) / CPF_CPF_STAT_BUSY)))
+          min: MIN(100 * CPF_CPF_STAT_STALL / CPF_CPF_STAT_BUSY)
+          max: MAX(100 * CPF_CPF_STAT_STALL / CPF_CPF_STAT_BUSY)
           unit: Percent
         CPF-L2 Utilization:
           avg: SUM(100 * CPF_CPF_TCIU_BUSY) / SUM(CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE)
-          min: MIN((((100 * CPF_CPF_TCIU_BUSY) / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))))
-          max: MAX((((100 * CPF_CPF_TCIU_BUSY) / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))))
+          min: MIN(100 * CPF_CPF_TCIU_BUSY / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))
+          max: MAX(100 * CPF_CPF_TCIU_BUSY / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))
           unit: Percent
         CPF-L2 Stall:
           avg: SUM(100 * CPF_CPF_TCIU_STALL) / SUM(CPF_CPF_TCIU_BUSY)
-          min: MIN((((100 * CPF_CPF_TCIU_STALL) / CPF_CPF_TCIU_BUSY)))
-          max: MAX((((100 * CPF_CPF_TCIU_STALL) / CPF_CPF_TCIU_BUSY)))
+          min: MIN(100 * CPF_CPF_TCIU_STALL / CPF_CPF_TCIU_BUSY)
+          max: MAX(100 * CPF_CPF_TCIU_STALL / CPF_CPF_TCIU_BUSY)
           unit: Percent
         CPF-UTCL1 Stall:
           avg: SUM(100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION) / SUM(CPF_CPF_STAT_BUSY)
-          min: MIN(((100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION) / CPF_CPF_STAT_BUSY))
-          max: MAX(((100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION) / CPF_CPF_STAT_BUSY))
+          min: MIN(100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION / CPF_CPF_STAT_BUSY)
+          max: MAX(100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION / CPF_CPF_STAT_BUSY)
           unit: Percent
   - metric_table:
       id: 502
@@ -50,13 +50,13 @@ Panel Config:
       metric:
         CPC Utilization:
           avg: SUM(100 * CPC_CPC_STAT_BUSY) / SUM(CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE)
-          min: MIN((((100 * CPC_CPC_STAT_BUSY) / (CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE))))
-          max: MAX((((100 * CPC_CPC_STAT_BUSY) / (CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE))))
+          min: MIN(100 * CPC_CPC_STAT_BUSY / (CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE))
+          max: MAX(100 * CPC_CPC_STAT_BUSY / (CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE))
           unit: Percent
         CPC Stall Rate:
           avg: SUM(100 * CPC_CPC_STAT_STALL) / SUM(CPC_CPC_STAT_BUSY)
-          min: MIN((((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY)))
-          max: MAX((((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY)))
+          min: MIN(100 * CPC_CPC_STAT_STALL / CPC_CPC_STAT_BUSY)
+          max: MAX(100 * CPC_CPC_STAT_STALL / CPC_CPC_STAT_BUSY)
           unit: Percent
         CPC Packet Decoding Utilization:
           avg: SUM(100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / SUM(CPC_CPC_STAT_BUSY)
@@ -70,18 +70,18 @@ Panel Config:
           unit: Percent
         CPC-L2 Utilization:
           avg: SUM(100 * CPC_CPC_TCIU_BUSY) / SUM(CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE)
-          min: MIN((((100 * CPC_CPC_TCIU_BUSY) / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))))
-          max: MAX((((100 * CPC_CPC_TCIU_BUSY) / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))))
+          min: MIN(100 * CPC_CPC_TCIU_BUSY / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))
+          max: MAX(100 * CPC_CPC_TCIU_BUSY / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))
           unit: Percent
         CPC-UTCL1 Stall:
           avg: SUM(100 * CPC_UTCL1_STALL_ON_TRANSLATION) / SUM(CPC_CPC_STAT_BUSY)
-          min: MIN(((100 * CPC_UTCL1_STALL_ON_TRANSLATION) / CPC_CPC_STAT_BUSY))
-          max: MAX(((100 * CPC_UTCL1_STALL_ON_TRANSLATION) / CPC_CPC_STAT_BUSY))
+          min: MIN(100 * CPC_UTCL1_STALL_ON_TRANSLATION / CPC_CPC_STAT_BUSY)
+          max: MAX(100 * CPC_UTCL1_STALL_ON_TRANSLATION / CPC_CPC_STAT_BUSY)
           unit: Percent
         CPC-UTCL2 Utilization:
           avg: SUM(100 * CPC_CPC_UTCL2IU_BUSY) / SUM(CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE)
-          min: MIN((((100 * CPC_CPC_UTCL2IU_BUSY) / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))))
-          max: MAX((((100 * CPC_CPC_UTCL2IU_BUSY) / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))))
+          min: MIN(100 * CPC_CPC_UTCL2IU_BUSY / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))
+          max: MAX(100 * CPC_CPC_UTCL2IU_BUSY / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))
           unit: Percent
   metrics_description:
     CPF Utilization: Percent of total cycles where the CPF was busy actively doing

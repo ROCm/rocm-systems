@@ -97,7 +97,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: (((100 * TCC_HIT[::_1]) / (TCC_HIT[::_1] + TCC_MISS[::_1])))
+          expr: 100 * TCC_HIT[::_1] / (TCC_HIT[::_1] + TCC_MISS[::_1])
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
@@ -157,7 +157,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]))
+          expr: TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
@@ -170,7 +170,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]))
+          expr: TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
