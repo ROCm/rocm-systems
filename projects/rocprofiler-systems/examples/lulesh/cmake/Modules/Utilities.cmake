@@ -65,7 +65,21 @@ function(CHECKOUT_GIT_SUBMODULE)
     # if this file exists --> project has been checked out if not exists --> not been
     # checked out
     set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
-    # find .gitmodules at the git repo root (cached after first call)
+
+    set(_TEST_FILE_EXISTS OFF)
+    if(EXISTS "${_TEST_FILE}" AND NOT IS_DIRECTORY "${_TEST_FILE}")
+        set(_TEST_FILE_EXISTS ON)
+    endif()
+
+    if(_TEST_FILE_EXISTS)
+        return()
+    endif()
+
+    find_package(Git REQUIRED)
+
+    # .gitmodules lives at the monorepo root, not under PROJECT_SOURCE_DIR, because
+    # rocprofiler-systems was moved into the rocm-systems monorepo. Use git rev-parse
+    # to locate the root (result cached in CMakeCache.txt after first configure run).
     if(NOT DEFINED CACHE{ROCPROFILER_SYSTEMS_GIT_TOPLEVEL})
         execute_process(
             COMMAND ${GIT_EXECUTABLE} rev-parse --show-toplevel
@@ -88,17 +102,6 @@ function(CHECKOUT_GIT_SUBMODULE)
         )
     endif()
     set(_SUBMODULE "${ROCPROFILER_SYSTEMS_GIT_TOPLEVEL}/.gitmodules")
-
-    set(_TEST_FILE_EXISTS OFF)
-    if(EXISTS "${_TEST_FILE}" AND NOT IS_DIRECTORY "${_TEST_FILE}")
-        set(_TEST_FILE_EXISTS ON)
-    endif()
-
-    if(_TEST_FILE_EXISTS)
-        return()
-    endif()
-
-    find_package(Git REQUIRED)
 
     set(_SUBMODULE_EXISTS OFF)
     if(EXISTS "${_SUBMODULE}" AND NOT IS_DIRECTORY "${_SUBMODULE}")
