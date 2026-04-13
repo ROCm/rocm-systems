@@ -4486,6 +4486,7 @@ class AMDSMICommands:
                     "cpu_dimm_pow_consumption",
                     "cpu_dimm_thermal_sensor",
                     "cpu_dimm_sb_reg",
+                    "cpu_svi3_vr_controller_temp",
                 ):
                     setattr(args, arg, True)
 
@@ -9939,8 +9940,8 @@ class AMDSMICommands:
                 return
             if args.power_cap:
                 final_output = {
-                    "ppt0": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
-                    "ppt1": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
+                    "ppt0": "N/A",
+                    "ppt1": "N/A",
                 }
                 power_limit_types = {}
                 for power_type in amdsmi_interface.AmdSmiPowerCapType:
