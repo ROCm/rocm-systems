@@ -8,7 +8,7 @@
 System Speed-of-Light
 *********************
 
-System Speed-of-Light summarizes some of the key metrics from various sections
+The page lists the System Speed-of-Light metrics from various sections
 of ROCm Compute Profiler’s profiling report for **AMD Instinct™ MI-series**
 accelerators (CDNA through CDNA4).
 
