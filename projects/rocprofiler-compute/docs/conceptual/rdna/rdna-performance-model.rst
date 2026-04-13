@@ -62,7 +62,7 @@ and embed the RDNA3.5 (gfx1151) metric tables under each block:
 
 * :doc:`system-speed-of-light` — SoL table for gfx1151.
 
-* :doc:`wgp` — roofline, WGP utilization, waves, instruction mix, WGP I$/scalar caches.
+* :doc:`wgp` — roofline, WGP utilization, waves, instruction mix, WGP instruction and data caches.
 
 * :doc:`tcp-cache` — TCP (vector L0 / GL0): panel tables and Memory Chart rows through TCP-GL1.
 
