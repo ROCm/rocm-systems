@@ -2,6 +2,17 @@ name: Publish GHCR Packages for rocprofiler-compute CI Images
 
 on:
   workflow_dispatch:
+    inputs:
+      gpu:
+        description: 'GPU target(s) to publish'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - gfx94X
+          - gfx950
+          - gfx1151
   schedule:
     - cron: 0 5 * * *
   push:
@@ -20,19 +31,30 @@ jobs:
     if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
-      matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
+      containers_list: ${{ steps.generate_containers_list.outputs.containers_list }}
+      gpu_list: ${{ steps.generate_gpu_list.outputs.gpu_list }}
 
     steps:
       - uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-compute/docker
 
-      - name: Output data for containers matrix
+      - name: Generate containers list
         working-directory: projects/rocprofiler-compute/docker
-        id: generate_matrix_ci
+        id: generate_containers_list
         run: |
-          MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
-          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+          CONTAINERS_LIST=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
+          echo "containers_list=$CONTAINERS_LIST" >> $GITHUB_OUTPUT
+
+      - name: Generate GPU list
+        id: generate_gpu_list
+        run: |
+          GPU_INPUT="${{ github.event.inputs.gpu }}"
+          if [ -z "$GPU_INPUT" ] || [ "$GPU_INPUT" = "all" ]; then
+            echo 'gpu_list=["gfx94X","gfx950","gfx1151"]' >> $GITHUB_OUTPUT
+          else
+            echo "gpu_list=[\"$GPU_INPUT\"]" >> $GITHUB_OUTPUT
+          fi
 
   rocprofiler-compute-ci-gfx:
     needs: prepare_matrix_ci
@@ -44,8 +66,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
-        gpu: [ 'gfx94X', 'gfx950' ]
+        system: ${{ fromJSON(needs.prepare_matrix_ci.outputs.containers_list) }}
+        gpu: ${{ fromJSON(needs.prepare_matrix_ci.outputs.gpu_list) }}
 
     steps:
       - name: Checkout Repository
@@ -79,7 +101,7 @@ jobs:
             DOCKER_FILE=Dockerfile.${{ matrix.system.distro }}.ci
           fi
           echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
-      
+
       - name: Get the latest build of The Rock tarball
         id: therock
         run: |
@@ -95,7 +117,7 @@ jobs:
           KEY=${KEY//\"/}
           test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
           echo "tarball=${KEY}" >> $GITHUB_OUTPUT
-      
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0

@@ -299,7 +299,7 @@ template <typename T> void DrvMemcpy3D<T>::HostDevice_DrvMemcpy3D(bool device_co
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -369,7 +369,7 @@ template <typename T> void DrvMemcpy3D<T>::HostArray_DrvMemcpy3D(bool device_con
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -519,7 +519,8 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_H2DDeviceContextChange) {
     DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostDevice_DrvMemcpy3D(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -544,7 +545,8 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange) {
     DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostArray_DrvMemcpy3D(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 

@@ -467,7 +467,7 @@ template <typename... Args>
   uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
   uint8_t* src_bytes{static_cast<uint8_t*>(src)};
 
-  for (size_t i = 8; i > 1; i >>= 1) {
+  for (int i = 16; i > 1; i >>= 1) {
     while (size >= i) {
       store_asm(src_bytes, dst_bytes, i);
       src_bytes += i;
@@ -536,9 +536,9 @@ template <typename... Args>
     }
   }
 
-  for (int j{16}; j > 1; j >>= 1) {
+  for (int j = 16; j > 1; j >>= 1) {
     cpy_size = size / j;
-    for (int i{thread_id}; i < cpy_size; i += block_size) {
+    for (int i = thread_id; i < cpy_size; i += block_size) {
       dst_bytes = dst_def;
       src_bytes = src_def;
 
@@ -616,9 +616,9 @@ template <typename... Args>
     }
   }
 
-  for (int j{16}; j > 1; j >>= 1) {
+  for (int j = 16; j > 1; j >>= 1) {
     cpy_size = size / j;
-    for (int i{wave_tid}; i < cpy_size; i += wave_size) {
+    for (int i = wave_tid; i < cpy_size; i += wave_size) {
       dst_bytes = dst_def;
       src_bytes = src_def;
 

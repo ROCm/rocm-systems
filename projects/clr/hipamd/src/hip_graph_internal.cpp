@@ -187,7 +187,7 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
     if (cur->stream_id_ != -1) {
       continue;
     }
-   
+
     // Schedule current node on this branch's stream
     cur->stream_id_ = sid;
 
@@ -1053,20 +1053,26 @@ void GraphExec::PacketBatch::rebuildFilteredLists() {
     return;
   }
 
-  // Cache is stale - rebuild it
+  // Cache is stale - rebuild filtered lists and the filtered flat buffer together.
   enabledPackets.clear();
   enabledKernelNames.clear();
+  filteredFlatPacketData.clear();
+  filteredValidPacketFullHeaders.clear();
 
   enabledPackets.reserve(expectedCount);
   enabledKernelNames.reserve(expectedCount);
+  filteredFlatPacketData.reserve(expectedCount * kAqlPktSize);
+  filteredValidPacketFullHeaders.reserve(expectedCount);
 
-  // Build filtered lists from enabled node ranges
   for (const auto& range : nodeRanges) {
     if (range.enabled) {
       for (size_t j = 0; j < range.packetCount; ++j) {
-        size_t packetIndex = range.startIndex + j;
+        const size_t packetIndex = range.startIndex + j;
+        const uint8_t* pkt_raw = dispatchPackets[packetIndex];
         enabledPackets.push_back(dispatchPackets[packetIndex]);
         enabledKernelNames.push_back(dispatchKernelNames[packetIndex]);
+        appendPacketToFlatBuffer(pkt_raw, filteredFlatPacketData,
+                                 filteredValidPacketFullHeaders);
       }
     }
   }
@@ -1134,12 +1140,20 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           // Reserve space to avoid reallocations during insertion
           newBatch.dispatchPackets.reserve(startIndex + packetCount);
           newBatch.dispatchKernelNames.reserve(startIndex + packetCount);
+          newBatch.flatPacketData.reserve((startIndex + packetCount) * PacketBatch::kAqlPktSize);
+          newBatch.validPacketFullHeaders.reserve(startIndex + packetCount);
 
           // Add to dispatch lists (initially all enabled)
           newBatch.dispatchPackets.insert(newBatch.dispatchPackets.end(), nodePackets.begin(),
                                           nodePackets.end());
           newBatch.dispatchKernelNames.insert(newBatch.dispatchKernelNames.end(),
                                               nodeKernelNames.begin(), nodeKernelNames.end());
+
+          // Build the flat packet buffer for fast bulk dispatch.
+          for (auto* pkt_raw : nodePackets) {
+            PacketBatch::appendPacketToFlatBuffer(pkt_raw, newBatch.flatPacketData,
+                                                  newBatch.validPacketFullHeaders);
+          }
 
           // Store node mapping with range info
           newBatch.nodeRanges.push_back({startIndex, packetCount, true});
@@ -1324,10 +1338,46 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
         packetBatch.dispatchPackets[packetIndex] = newPackets[i];
         packetBatch.dispatchKernelNames[packetIndex] = newKernelNames[i];
       }
+      // Rebuild the flat buffer immediately so the next dispatch uses updated packets.
+      // The flat buffer always represents the full packet sequence; the dispatch path
+      // independently skips it when any nodes are disabled (disabledNodeCount != 0).
+      packetBatch.rebuildFlatBuffer();
       return hipSuccess;
     }
   }
   return hipSuccess;  // Node not in any batch
+}
+
+// ================================================================================================
+// Append one 64-byte AQL packet to a flat buffer: copies the body, saves the original full_header
+// and invalidates the header.
+void GraphExec::PacketBatch::appendPacketToFlatBuffer(const uint8_t* pkt_raw,
+                                                      std::vector<uint8_t>& flatData,
+                                                      std::vector<uint32_t>& fullHeaders) {
+  static constexpr size_t kSigOff = 56;
+  const size_t baseOff = flatData.size();
+  flatData.insert(flatData.end(), pkt_raw, pkt_raw + kAqlPktSize);
+  uint8_t* dst = flatData.data() + baseOff;
+  uint32_t fullHeader = 0;
+  memcpy(&fullHeader, pkt_raw, sizeof(fullHeader));
+  fullHeaders.push_back(fullHeader);
+  // Invalidate header
+  dst[0] = dst[1] = 0;
+  // Zero completion_signal
+  memset(dst + kSigOff, 0, sizeof(uint64_t));
+}
+
+// ================================================================================================
+// Rebuild the flat packet buffer from the current dispatchPackets contents.
+void GraphExec::PacketBatch::rebuildFlatBuffer() {
+  const size_t n = dispatchPackets.size();
+  flatPacketData.clear();
+  validPacketFullHeaders.clear();
+  flatPacketData.reserve(n * kAqlPktSize);
+  validPacketFullHeaders.reserve(n);
+  for (const uint8_t* pkt_raw : dispatchPackets) {
+    appendPacketToFlatBuffer(pkt_raw, flatPacketData, validPacketFullHeaders);
+  }
 }
 
 // ================================================================================================
@@ -1715,11 +1765,17 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
           accumulate->addHwEvent(old_hw_event);
         }
         *out_attach_signal = *out_attach_signal && (i == (segment.nodes.size() - 1));
-        // Dispatch the selected batch
+        // Dispatch via the flat buffer: all-enabled uses flatPacketData,
+        // partially-disabled uses filteredFlatPacketData.
         if (!packetsToDispatch->empty()) {
-          bool batchStatus = stream->vdev()->dispatchAqlPacketBatch(
-              *packetsToDispatch, *kernelNamesToDispatch, accumulate, *out_attach_signal);
-          if (!batchStatus) {
+          const bool useFiltered = (packetBatch.disabledNodeCount > 0);
+          const auto& flatData = useFiltered ? packetBatch.filteredFlatPacketData
+                                             : packetBatch.flatPacketData;
+          const auto& flatHdrs = useFiltered ? packetBatch.filteredValidPacketFullHeaders
+                                             : packetBatch.validPacketFullHeaders;
+          if (!stream->vdev()->dispatchAqlPacketBatchFlat(flatData, flatHdrs, accumulate,
+                                                          *out_attach_signal, false,
+                                                          kernelNamesToDispatch)) {
             status = hipErrorUnknown;
             return status;
           }

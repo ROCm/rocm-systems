@@ -138,7 +138,7 @@ class TcpBootstrap : public Bootstrap {
   void barrier() override;
 
  private:
-  // The interal implementation.
+  // The internal implementation.
   class Impl;
 
   // Pointer to the internal implementation.

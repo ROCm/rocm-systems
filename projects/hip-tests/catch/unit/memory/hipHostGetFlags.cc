@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST("Device Property canMapHostMemory is not set");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     return;
   } else {
     // Allocate using the generated flags combos
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST("Device Property canMapHostMemory is not set");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     return;
   } else {
     // Make sure we allocate before trying to get the flags
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST("Device Property canMapHostMemory is not set");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     return;
   } else {
     SECTION("Invalid flag ptr being passed to hipHostGetFlags") {
