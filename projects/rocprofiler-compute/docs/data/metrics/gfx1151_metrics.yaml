@@ -30,7 +30,7 @@ System Speed-of-Light:
     rst: Percent of wave lifetime spent waiting for any instruction to be ready to issue.
     unit: Percent
   TCP Cache Hit Rate:
-    rst: 'Texture Cache Per-pipe (TCP) hit rate. TCP is the L0 vector cache in RDNA3.5. Same as Memory Chart TCP Hit Rate: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum.'
+    rst: 'Texture Cache Per-pipe (TCP) hit rate. TCP is the vector data cache in RDNA3.5. Same as Memory Chart TCP Hit Rate: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum.'
     unit: Percent
   TCP Cache BW:
     rst: 'Same as Memory Chart “TCP Request Bandwidth” (table 303): TCP_REQ_sum × 64 B / kernel wall time. Peak / % of peak are N/A (same as Memory Chart — no theoretical ceiling row).'
