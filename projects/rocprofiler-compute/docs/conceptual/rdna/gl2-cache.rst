@@ -14,7 +14,7 @@ heads toward GCEA and DRAM through the DRAM read/write, SARB, and
 return interfaces in the panel YAMLs.
 
 For Instinct L2 (TCC) coherence, channel hashing, and fabric metrics on CDNA architecture across MI-series GPUs, see
-:doc:`../cdna/l2-cache`.
+:doc:`../cdna/l2-cache` under CDNA-CDNA4.
 
 GL1C to GL2C and GL2C panels
 =============================
