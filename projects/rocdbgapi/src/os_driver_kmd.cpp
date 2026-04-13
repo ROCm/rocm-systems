@@ -1895,6 +1895,7 @@ kmd_driver_t::queue_snapshot (os_queue_snapshot_entry_t *snapshots,
     {
       auto &[agent_id, snap] = queues[queue_idx];
       os_queue_snapshot_entry_t &queue = snapshots[queue_idx];
+      queue = {};
       queue.queue_id = make_queue_id (agent_id, snap.queueId);
       queue.gpu_id = agent_id;
       queue.exception_status = os_exception_mask (snap.queueExceptionMask);
@@ -1956,6 +1957,7 @@ kmd_driver_t::queue_snapshot (os_queue_snapshot_entry_t *snapshots,
           queue.read_pointer_address
             = static_cast<host_address_t> (snap.readPtrAddress);
           queue.ring_size = static_cast<amd_dbgapi_size_t> (snap.ringSize);
+          queue.compute_tmpring_size = snap.computeTmpRingSize;
         }
     }
 

@@ -413,6 +413,7 @@ struct os_queue_snapshot_entry_t
   host_address_t read_pointer_address;
   agent_address_t ctx_save_restore_address;
   amd_dbgapi_size_t ctx_save_restore_area_size;
+  std::optional<uint32_t> compute_tmpring_size;
 };
 
 enum class os_wave_launch_mode_t : uint32_t
