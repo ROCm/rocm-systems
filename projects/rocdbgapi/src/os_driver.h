@@ -107,6 +107,10 @@ struct os_agent_info_t
   uint32_t subsystem_device_id{ 0 };
   /* ucode version.  */
   uint32_t fw_version{ 0 };
+  /* Agent address base.  */
+  agent_address_t agent_address_base{ 0 };
+  /* Agent address limit.  */
+  agent_address_t agent_address_limit{ 0 };
   /* local/shared address aperture base.  */
   agent_address_t local_address_aperture_base{ 0 };
   /* local/shared address aperture limit.  */
