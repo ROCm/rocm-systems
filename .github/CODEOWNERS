@@ -105,13 +105,13 @@
 /projects/rocr-runtime/**/*.rst                                       @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
-/projects/rocdecode/**/*.md                                           @spolifroni-amd @ROCm/rocdecode-docs-reviewers @ROCm/rocm-documentation
-/projects/rocdecode/**/*.rst                                          @spolifroni-amd @ROCm/rocdecode-docs-reviewers @ROCm/rocm-documentation
-/projects/rocdecode/**/.readthedocs.yaml                              @spolifroni-amd @ROCm/rocdecode-docs-reviewers @ROCm/rocm-documentation
+/projects/rocdecode/**/*.md                                           @spolifroni-amd @ROCm/rocm-documentation
+/projects/rocdecode/**/*.rst                                          @spolifroni-amd @ROCm/rocm-documentation
+/projects/rocdecode/**/.readthedocs.yaml                              @spolifroni-amd @ROCm/rocm-documentation
 
-/projects/rocjpeg/**/*.md                                             @spolifroni-amd @ROCm/rocjpeg-docs-reviewers @ROCm/rocm-documentation
-/projects/rocjpeg/**/*.rst                                            @spolifroni-amd @ROCm/rocjpeg-docs-reviewers @ROCm/rocm-documentation
-/projects/rocjpeg/**/.readthedocs.yaml                                @spolifroni-amd @ROCm/rocjpeg-docs-reviewers @ROCm/rocm-documentation
+/projects/rocjpeg/**/*.md                                             @spolifroni-amd @ROCm/rocm-documentation
+/projects/rocjpeg/**/*.rst                                            @spolifroni-amd @ROCm/rocm-documentation
+/projects/rocjpeg/**/.readthedocs.yaml                                @spolifroni-amd @ROCm/rocm-documentation
 
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
