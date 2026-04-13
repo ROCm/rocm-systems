@@ -7,9 +7,10 @@
 /*************************************************************************
  * Network Counter Collector
  *
- * Self-contained library for collecting Thor2 NIC counters before/after
- * an operation and printing a summary table.  No dependency on NCCL,
- * RCCL, or any GPU runtime -- can be integrated into any application.
+ * Self-contained library for collecting Thor2 / AINIC NIC counters
+ * before/after an operation and printing a summary table.  No dependency
+ * on NCCL, RCCL, or any GPU runtime -- can be integrated into any
+ * application.
  *
  * Environment variables:
  *   RCCL_TESTS_NET_COUNTER_ENABLE=1   – enable collection
@@ -46,11 +47,14 @@ struct CounterDescriptor {
   bool is_prefix;   // true  → prefix match (expands to name0..name7)
 };
 
+typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC } NicType;
+
 struct NetworkCounterSnapshot {
   std::map<std::string, uint64_t> counters;
-  char nic_name[256];
-  char ib_device[256];
-  long timestamp;
+  char    nic_name[256];
+  char    ib_device[256];
+  int64_t timestamp_us;
+  NicType nic_type;
 };
 
 struct NetworkCounterContext {
@@ -65,6 +69,12 @@ struct NetworkCounterContext {
 };
 
 // ---- public API ---------------------------------------------------------
+
+// Detect NIC type from IB device driver symlink
+NicType NetCounterDetectNicType(const std::string& ib_device);
+
+// Human-readable NIC type string
+const char* NicTypeStr(NicType t);
 
 // Check RCCL_TESTS_NET_COUNTER_ENABLE=1
 bool NetCounterIsEnabled();
@@ -98,6 +108,11 @@ uint64_t NetCounterComputeDelta(
     const NetworkCounterSnapshot& before,
     const NetworkCounterSnapshot& after,
     const CounterDescriptor& desc);
+
+// Filter counter list to only those valid for the NIC types in snapshots
+std::vector<CounterDescriptor> NetCounterFilterByNicType(
+    const std::vector<CounterDescriptor>& selected,
+    const std::vector<NetworkCounterSnapshot>& snapshots);
 
 // Print one table per node to stdout
 void NetCounterPrintTable(

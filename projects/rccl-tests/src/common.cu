@@ -1153,12 +1153,19 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
       ctx.nic_names.push_back(NetCounterFindNicForIbDevice(ib));
     }
   } else {
-    NetCounterGetNetworkInterfaces(ctx.nic_names);
-    if (ctx.nic_names.empty()) { ctx.nic_names.push_back("eth0"); }
-    ctx.ib_names.resize(ctx.nic_names.size());
-    for (size_t i = 0; i < ctx.nic_names.size(); i++) {
-      ctx.ib_names[i] = NetCounterFindIbDeviceForNic(ctx.nic_names[i]);
+    std::vector<std::string> all_nics;
+    NetCounterGetNetworkInterfaces(all_nics);
+    // Get all NICs -> for each, check if it has an IB device -> only keep NICs that do
+    for (const auto& nic : all_nics) {
+      std::string ib = NetCounterFindIbDeviceForNic(nic);
+      // it skips non-RDMA interfaces. Only NICs that actually have
+      // an associated InfiniBand device are added
+      if (ib.empty()) continue;
+      ctx.nic_names.push_back(nic);
+      ctx.ib_names.push_back(ib);
     }
+    // If no IB devices are found, use eth0 as a fallback.
+    if (ctx.nic_names.empty()) { ctx.nic_names.push_back("eth0"); ctx.ib_names.push_back(""); }
   }
 
   size_t ndevs = ctx.nic_names.size();
@@ -1168,6 +1175,9 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
         NetCounterCollectSnapshot(ctx.nic_names[i], ctx.ib_names[i],
                                   ctx.selected_counters);
   }
+
+  ctx.selected_counters =
+      NetCounterFilterByNicType(ctx.selected_counters, ctx.snapshots_before);
 
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname));
@@ -1185,6 +1195,14 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
+  NicType detected_nic = NIC_UNKNOWN;
+  for (size_t i = 0; i < ndevs; i++) {
+    if (ctx.snapshots_before[i].nic_type != NIC_UNKNOWN) {
+      detected_nic = ctx.snapshots_before[i].nic_type;
+      break;
+    }
+  }
+  printf("# NIC type: %s\n", NicTypeStr(detected_nic));
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");
