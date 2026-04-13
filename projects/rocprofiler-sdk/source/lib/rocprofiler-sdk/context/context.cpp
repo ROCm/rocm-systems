@@ -288,7 +288,7 @@ start_context(rocprofiler_context_id_t context_id)
         {
             return ROCPROFILER_STATUS_SUCCESS;
         }
-        else if(cfg->counter_collection && itr->counter_collection)
+        else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection)
         {
             // conflicting context
             return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
@@ -338,7 +338,7 @@ start_context(rocprofiler_context_id_t context_id)
 
     auto status = ROCPROFILER_STATUS_SUCCESS;
 
-    if(cfg->counter_collection) rocprofiler::counters::start_context(cfg);
+    if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
@@ -369,7 +369,7 @@ stop_context(rocprofiler_context_id_t idx)
                 auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
                 if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
 
-                if(_expected->counter_collection)
+                if(_expected->dispatch_counter_collection)
                 {
                     rocprofiler::counters::stop_context(const_cast<context*>(_expected));
                 }

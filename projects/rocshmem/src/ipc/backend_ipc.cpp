@@ -356,7 +356,7 @@ void IPCBackend::teams_destroy() {
 
 void IPCBackend::setup_wrk_sync_buffers() {
   /**
-   * calcualte work/sync buffer size
+   * calculate work/sync buffer size
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -490,7 +490,7 @@ void IPCBackend::rocshmem_collective_init() {
 
 void IPCBackend::teams_init() {
   /**
-   * Allocate pools for the teams sync and work arrary from the SHEAP.
+   * Allocate pools for the teams sync and work array from the SHEAP.
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -549,7 +549,7 @@ void IPCBackend::teams_init() {
    * Logical:
    * MSB..........................................................................LSB
    * Physical: MSB...1st least significant 8 bits...LSB  MSB...2nd least
-   * signifant 8 bits...LSB
+   * significant 8 bits...LSB
    *
    * Description shows only a 2-byte long mask but idea extends to any
    * arbitrary size.

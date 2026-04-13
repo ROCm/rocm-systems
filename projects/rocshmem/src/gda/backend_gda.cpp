@@ -479,7 +479,7 @@ void GDABackend::setup_collectives() {
 
 void GDABackend::setup_teams() {
   /**
-   * Allocate pools for the teams sync and work arrary from the SHEAP.
+   * Allocate pools for the teams sync and work array from the SHEAP.
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -538,7 +538,7 @@ void GDABackend::setup_teams() {
    * Logical:
    * MSB..........................................................................LSB
    * Physical: MSB...1st least significant 8 bits...LSB  MSB...2nd least
-   * signifant 8 bits...LSB
+   * significant 8 bits...LSB
    *
    * Description shows only a 2-byte long mask but idea extends to any
    * arbitrary size.
@@ -572,7 +572,7 @@ void GDABackend::rte_barrier() {
 }
 
 GDAProvider GDABackend::requested_provider() {
-  /* Check whether the user explicitely requests a particular provider type */
+  /* Check whether the user explicitly requests a particular provider type */
   std::string envstr = envvar::gda::provider;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {

@@ -3369,6 +3369,10 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
     }
     // Use a blit kernel to perform the wait operation
     else {
+      // Even though the blit kernel uses an atomic with system scope, we still need to add system scope on
+      // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
+      addSystemScope();
+
       // mask is applied on value before performing
       // the comparision defined by 'condition'
       bool result = blitMgr().streamOpsWait(*memory, value, offset, sizeBytes, flags, mask);
@@ -3381,13 +3385,30 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       }
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    amd::Coord3D origin(offset);
-    amd::Coord3D size(sizeBytes);
-    // Add system scope to the write kernel for memory ordering
+    // Even though the blit kernel uses system scope atomic, we still need to add system scope on
+    // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
     addSystemScope();
 
-    bool result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+    bool result;
+    switch (flags) {
+      case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
+        result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_INCREMENT: {
+        result = blitMgr().streamOpsIncrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_DECREMENT: {
+        result = blitMgr().streamOpsDecrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      default: {
+        ShouldNotReachHere();
+        break;
+      }
+    }
+
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }
