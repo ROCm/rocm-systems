@@ -63,6 +63,8 @@ def format_analysis_output(
     short_kernels: Optional[Dict[str, Any]] = None,
     att_analysis: Optional[Dict[str, Any]] = None,  # Tier 3 ATT
     custom_prompt: Optional[str] = None,
+    kernel_resources: Optional[Dict[str, Any]] = None,
+    api_overhead: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Format analysis results for display.
@@ -103,6 +105,8 @@ def format_analysis_output(
             short_kernels=short_kernels,
             att_analysis=att_analysis,
             custom_prompt=custom_prompt,
+            kernel_resources=kernel_resources,
+            api_overhead=api_overhead,
         )
         # Combined mode: embed tier0 into JSON document
         if tier0_result is not None:
@@ -195,6 +199,15 @@ def format_analysis_output(
     lines.append(
         f"  API Overhead:      {overhead_time_ms:10,.2f} ms  ({overhead_pct:5.1f}%)  {make_bar(overhead_pct)}"
     )
+    # Per-API annotation (ROCM-21553 C2)
+    if api_overhead and api_overhead.get("has_api_data"):
+        top_calls = api_overhead["api_calls"][:3]
+        parts = []
+        for ac in top_calls:
+            ms = ac["total_ns"] / 1e6
+            parts.append(f"{ac['name']} x{ac['calls']} ({ms:.1f}ms)")
+        if parts:
+            lines.append(f"    -> top: {', '.join(parts)}")
     lines.append("")
 
     # Hotspots
@@ -228,6 +241,49 @@ def format_analysis_output(
                 f"{i:2}  {name:<30}  {calls:6}  {total_ms:10,.2f}  {avg_us:9,.1f}  {percent:6.1f}%"
             )
 
+        lines.append("")
+
+    # Kernel Resources (ROCM-21553 I1)
+    if kernel_resources and kernel_resources.get("kernels"):
+        lines.append("\u2501" * width)
+        lines.append("KERNEL RESOURCES".center(width))
+        lines.append("\u2501" * width)
+        lines.append("")
+        lines.append(
+            f" #  {'Kernel Name':<30}  {'Block':<10}  {'VGPR':>5}  {'SGPR':>5}  {'Scratch':>9}  {'LDS':>9}"
+        )
+        lines.append("\u2500" * width)
+        for i, kr in enumerate(kernel_resources["kernels"], 1):
+            kname = kr.get("name", "unknown")
+            if len(kname) > 30:
+                kname = kname[:27] + "..."
+            block = kr.get("block", "?")
+            vgpr = kr.get("vgpr", 0)
+            sgpr = kr.get("sgpr", 0)
+            scratch = kr.get("scratch_bytes", 0)
+            lds = kr.get("lds_bytes", 0)
+            scratch_s = f"{scratch} B" if scratch < 1024 else f"{scratch / 1024:.1f} KB"
+            lds_s = f"{lds} B" if lds < 1024 else f"{lds / 1024:.1f} KB"
+            lines.append(
+                f"{i:2}  {kname:<30}  {block:<10}  {vgpr:5}  {sgpr:5}  {scratch_s:>9}  {lds_s:>9}"
+            )
+        lines.append("")
+        # Occupancy
+        arch = kernel_resources.get("arch")
+        for kr in kernel_resources["kernels"]:
+            occ = kr.get("occupancy")
+            if occ:
+                kname = kr["name"]
+                if len(kname) > 40:
+                    kname = kname[:37] + "..."
+                w = occ["waves_per_simd"]
+                mw = occ["max_waves_per_simd"]
+                pct = occ["percent"]
+                lim = occ["limiting_resource"]
+                lim_str = f"limited by {lim}" if lim != "none" else "no resource bottleneck"
+                lines.append(
+                    f"  Occupancy ({arch}): {w}/{mw} waves/SIMD ({pct:.0f}%) \u2014 {lim_str}  [{kname}]"
+                )
         lines.append("")
 
     # Memory Analysis

@@ -392,3 +392,191 @@ def detect_warmup_issues(
         except Exception:
             continue
     return {"has_warmup_issues": len(outliers) > 0, "outliers": outliers}
+
+
+# ---------------------------------------------------------------------------
+# Architecture specs for occupancy calculation (ROCM-21553 I1)
+# ---------------------------------------------------------------------------
+
+_ARCH_SPECS: Dict[str, Dict[str, Any]] = {
+    "gfx908": {"max_waves_per_simd": 8, "vgprs_per_simd": 512, "lds_per_cu_kb": 64, "wavefront_size": 64, "simds_per_cu": 4},
+    "gfx90a": {"max_waves_per_simd": 8, "vgprs_per_simd": 512, "lds_per_cu_kb": 64, "wavefront_size": 64, "simds_per_cu": 4},
+    "gfx942": {"max_waves_per_simd": 8, "vgprs_per_simd": 512, "lds_per_cu_kb": 64, "wavefront_size": 64, "simds_per_cu": 4},
+    "gfx950": {"max_waves_per_simd": 8, "vgprs_per_simd": 512, "lds_per_cu_kb": 160, "wavefront_size": 64, "simds_per_cu": 4},
+    "gfx1030": {"max_waves_per_simd": 16, "vgprs_per_simd": 1024, "lds_per_cu_kb": 128, "wavefront_size": 32, "simds_per_cu": 2},
+    "gfx1100": {"max_waves_per_simd": 16, "vgprs_per_simd": 1536, "lds_per_cu_kb": 128, "wavefront_size": 32, "simds_per_cu": 2},
+}
+
+
+def analyze_kernel_resources(
+    connection: RocpdImportData,
+    hotspots: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Extract kernel resource usage (VGPR, SGPR, LDS, scratch) and compute
+    theoretical occupancy for top hotspot kernels.
+
+    Queries the ``kernels`` view which JOINs ``rocpd_kernel_dispatch`` with
+    ``rocpd_info_kernel_symbol``, exposing register counts, LDS/scratch sizes,
+    and launch configuration (block/grid dimensions).
+
+    Architecture is detected from ``rocpd_info_agent`` to look up hardware
+    limits for occupancy calculation.
+
+    Returns:
+        Dictionary with ``arch``, ``arch_specs``, and ``kernels`` list.
+    """
+    import math
+    import re as _re
+
+    # Detect architecture
+    arch = None
+    arch_specs = None
+    try:
+        agent_query = "SELECT name FROM rocpd_info_agent WHERE type='GPU' LIMIT 1"
+        row = execute_statement(connection, agent_query).fetchone()
+        if row and row[0]:
+            m = _re.search(r"gfx\d+", row[0])
+            if m:
+                arch = m.group(0)
+                arch_specs = _ARCH_SPECS.get(arch)
+    except Exception:
+        pass
+
+    kernel_list: List[Dict[str, Any]] = []
+    for kernel in hotspots[:10]:
+        kernel_name = kernel.get("name", "")
+        if not kernel_name:
+            continue
+        safe_name = kernel_name.replace("'", "''")
+        query = (
+            f"SELECT DISTINCT name, vgpr_count, accum_vgpr_count, sgpr_count, "
+            f"lds_size, scratch_size, workgroup_x, workgroup_y, workgroup_z, "
+            f"grid_x, grid_y, grid_z "
+            f"FROM kernels WHERE name = '{safe_name}' LIMIT 1"
+        )
+        try:
+            row = execute_statement(connection, query).fetchone()
+            if not row:
+                continue
+        except Exception:
+            continue
+
+        vgpr = row[1] or 0
+        accum_vgpr = row[2] or 0
+        sgpr = row[3] or 0
+        lds = row[4] or 0
+        scratch = row[5] or 0
+        wg_x, wg_y, wg_z = row[6] or 1, row[7] or 1, row[8] or 1
+        grid_x, grid_y, grid_z = row[9] or 1, row[10] or 1, row[11] or 1
+
+        entry: Dict[str, Any] = {
+            "name": kernel_name,
+            "vgpr": vgpr,
+            "accum_vgpr": accum_vgpr,
+            "sgpr": sgpr,
+            "lds_bytes": lds,
+            "scratch_bytes": scratch,
+            "block": f"{wg_x}x{wg_y}x{wg_z}",
+            "grid": f"{grid_x}x{grid_y}x{grid_z}",
+        }
+
+        # Compute occupancy if architecture known
+        if arch_specs and vgpr > 0:
+            max_w = arch_specs["max_waves_per_simd"]
+            vgprs_per_simd = arch_specs["vgprs_per_simd"]
+            lds_per_cu = arch_specs["lds_per_cu_kb"] * 1024
+            wf_size = arch_specs["wavefront_size"]
+            simds = arch_specs["simds_per_cu"]
+
+            vgpr_limited = min(math.floor(vgprs_per_simd / max(vgpr, 1)), max_w)
+
+            threads_per_block = wg_x * wg_y * wg_z
+            waves_per_block = math.ceil(threads_per_block / wf_size)
+            max_threads_per_cu = max_w * simds * wf_size
+            max_blocks = math.floor(max_threads_per_cu / max(threads_per_block, 1))
+            block_waves = max_blocks * waves_per_block
+            block_limited = min(math.floor(block_waves / simds), max_w)
+
+            if lds > 0:
+                lds_blocks = math.floor(lds_per_cu / lds)
+                lds_limited = min(math.floor(lds_blocks * waves_per_block / simds), max_w)
+            else:
+                lds_limited = max_w
+
+            achieved = min(vgpr_limited, lds_limited, block_limited)
+            occ_pct = achieved / max_w * 100.0
+
+            limiting = "none"
+            if achieved == vgpr_limited and achieved < max_w:
+                limiting = "VGPR"
+            elif achieved == lds_limited and achieved < max_w:
+                limiting = "LDS"
+            elif achieved == block_limited and achieved < max_w:
+                limiting = "block size"
+
+            entry["occupancy"] = {
+                "waves_per_simd": achieved,
+                "max_waves_per_simd": max_w,
+                "percent": round(occ_pct, 1),
+                "limiting_resource": limiting,
+                "vgpr_limited": vgpr_limited,
+                "lds_limited": lds_limited,
+                "block_limited": block_limited,
+            }
+
+        kernel_list.append(entry)
+
+    return {"arch": arch, "arch_specs": arch_specs, "kernels": kernel_list}
+
+
+def analyze_api_overhead(connection: RocpdImportData) -> Dict[str, Any]:
+    """
+    Break down HIP/HSA API overhead by individual API call.
+
+    Queries the ``regions`` SQL view for per-API-call duration aggregates
+    so recommendations can distinguish kernel launch overhead from setup
+    overhead (e.g., hipSetDevice, hipMalloc).
+
+    Returns:
+        Dictionary with ``api_calls`` list (sorted by total time DESC),
+        ``launch_overhead_ns``, ``total_api_ns``, and ``has_api_data`` flag.
+        Gracefully returns empty structure if ``regions`` view is unavailable.
+    """
+    query = """
+    SELECT name, COUNT(*) as calls, SUM(duration) as total_ns, AVG(duration) as avg_ns
+    FROM regions
+    WHERE category IN ('HIP_RUNTIME_API_EXT', 'HIP_COMPILER_API_EXT')
+    GROUP BY name
+    ORDER BY total_ns DESC
+    """
+    try:
+        rows = execute_statement(connection, query).fetchall()
+        if not rows:
+            return {"api_calls": [], "launch_overhead_ns": 0, "total_api_ns": 0, "has_api_data": False}
+
+        api_calls: List[Dict[str, Any]] = []
+        launch_overhead_ns = 0
+        total_api_ns = 0
+
+        for row in rows:
+            name, calls, total_ns, avg_ns = row[0], row[1], row[2] or 0, row[3] or 0
+            api_calls.append({
+                "name": name,
+                "calls": calls,
+                "total_ns": total_ns,
+                "avg_ns": avg_ns,
+            })
+            total_api_ns += total_ns
+            if name and "hipLaunchKernel" in name:
+                launch_overhead_ns += total_ns
+
+        return {
+            "api_calls": api_calls,
+            "launch_overhead_ns": launch_overhead_ns,
+            "total_api_ns": total_api_ns,
+            "has_api_data": True,
+        }
+    except Exception:
+        # Graceful fallback if regions view doesn't exist in older DBs
+        return {"api_calls": [], "launch_overhead_ns": 0, "total_api_ns": 0, "has_api_data": False}
