@@ -35,6 +35,7 @@ add_executable(rocjitsu_tests
     config_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
+    lds_race_test.cpp
     simdojo_sim_test.cpp
     simulated_driver_test.cpp
     decode_smoke_test.cpp
@@ -47,7 +48,7 @@ add_executable(rocjitsu_tests
     decode_execute_benchmark.cpp
 )
 target_link_libraries(rocjitsu_tests PRIVATE
-    ${RJ_OBJECT_LIBS} rocjitsu_kmd util flatbuffers Threads::Threads GTest::gtest_main)
+    ${RJ_OBJECT_LIBS} rocjitsu_kmd util race_detector flatbuffers Threads::Threads GTest::gtest_main)
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
@@ -57,7 +58,7 @@ gtest_discover_tests(rocjitsu_tests)
 
 add_executable(scaling_test scaling_test.cpp)
 target_link_libraries(scaling_test PRIVATE
-    ${RJ_OBJECT_LIBS} util flatbuffers Threads::Threads)
+    ${RJ_OBJECT_LIBS} util race_detector flatbuffers Threads::Threads)
 target_compile_options(scaling_test PRIVATE -O2)
 rj_configure_target(scaling_test TEST)
 

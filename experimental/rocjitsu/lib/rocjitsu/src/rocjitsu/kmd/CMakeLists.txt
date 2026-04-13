@@ -20,7 +20,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_isa_rdna1 rocjitsu_isa_rdna2 rocjitsu_isa_rdna3 rocjitsu_isa_rdna3_5 rocjitsu_isa_rdna4
         rocjitsu_isa_risc_v
         simdojo rocjitsu_vm rocjitsu_vm_amdgpu rocjitsu_vm_risc_v rocjitsu_config
-        util flatbuffers Threads::Threads dl)
+        util race_detector flatbuffers Threads::Threads dl)
     target_compile_definitions(rocjitsu_kmd_shim PRIVATE _GNU_SOURCE)
     target_compile_options(rocjitsu_kmd_shim PRIVATE -Wall -Wextra -Wpedantic -Werror)
     set_target_properties(rocjitsu_kmd_shim PROPERTIES OUTPUT_NAME "rocjitsu_kmd")

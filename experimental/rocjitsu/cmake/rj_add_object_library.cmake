@@ -13,7 +13,7 @@ function(rj_add_object_library name)
         ${ROCJITSU_INCLUDE_DIR}
         ${ROCJITSU_SRC_DIR}
         ${HSA_INCLUDE_DIR})
-    target_link_libraries(${name} PRIVATE util simdojo)
+    target_link_libraries(${name} PRIVATE util simdojo race_detector)
     if(MSVC)
         target_compile_options(${name} PRIVATE /W4 /WX)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")

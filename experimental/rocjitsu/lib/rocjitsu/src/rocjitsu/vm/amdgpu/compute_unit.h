@@ -22,6 +22,8 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/log.h"
 
+#include <race-emulator/WaveRaceState.h>
+
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/simulation.h"
@@ -283,7 +285,15 @@ public:
   /// @brief Read a scalar register from the physical SGPR file.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
-  uint32_t read_sgpr(uint32_t reg_idx) const { return sgpr_file_[reg_idx]; }
+  uint32_t read_sgpr(uint32_t reg_idx) const {
+    if (current_wf_) {
+      if (auto *rs = current_wf_->race_state()) {
+        uint32_t logical_reg = reg_idx - current_wf_->sgpr_alloc().base;
+        rs->checkSgprRead(static_cast<int>(logical_reg));
+      }
+    }
+    return sgpr_file_[reg_idx];
+  }
 
   /// @brief Write a scalar register in the physical SGPR file.
   /// @param reg_idx Physical register index.
@@ -394,6 +404,7 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  Wavefront *current_wf_ = nullptr; ///< Wavefront being executed in step().
   simdojo::Port *cpl_ = nullptr;  ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr;  ///< Requester port: L2 cache request (structural).
 };
@@ -506,6 +517,13 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
+    if (this->current_wf_) {
+      if (auto *rs = this->current_wf_->race_state()) {
+        uint32_t logical_reg = reg_idx - this->current_wf_->vgpr_alloc().base;
+        rs->checkVgprRead(static_cast<int>(logical_reg),
+                          static_cast<int>(lane), 0xF);
+      }
+    }
     return vgpr_file_[reg_idx][lane];
   }
 

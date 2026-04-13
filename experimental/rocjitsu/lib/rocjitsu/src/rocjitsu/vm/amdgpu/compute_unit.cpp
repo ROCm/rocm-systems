@@ -17,6 +17,9 @@
 #include "util/except.h"
 #include "util/log.h"
 
+#include <race-emulator/RaceDetector.h>
+#include <race-emulator/WaveRaceState.h>
+
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -217,6 +220,90 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+  if (inst->data()->tag() == LOCAL_MEM) {
+    if (auto *rs = wf.race_state()) {
+      auto &d = *inst->data_as<VectorMemState>();
+      auto type = d.is_load ? raceemulator::MemoryEventType::LDS_TO_VGPR
+                            : raceemulator::MemoryEventType::VGPR_TO_LDS;
+      auto *detector = rs->getDetector();
+      auto waveId = rs->getWaveId();
+
+      // Validate each active lane's access against outstanding events.
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        if (!(wf.exec() & (1ULL << lane)))
+          continue;
+        int addr = static_cast<int>(d.per_lane_addr[lane]);
+        int nBytes = static_cast<int>(d.elem_size);
+        if (d.is_load) {
+          detector->validateRead(addr, waveId, static_cast<int>(lane), nBytes);
+        } else {
+          detector->validateWrite(addr, waveId, static_cast<int>(lane), nBytes);
+        }
+      }
+
+      // Register the event for future conflict detection.
+      std::vector<uint32_t> laneAddrs(wf.wf_size());
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        laneAddrs[lane] = static_cast<uint32_t>(d.per_lane_addr[lane]);
+      }
+      // For loads (LDS_TO_VGPR), include destination VGPRs so checkVgprRead
+      // can detect reads of the VGPR before lgkmcnt resolves.
+      std::vector<uint32_t> registers;
+      if (d.is_load) {
+        uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
+        registers.resize(d.num_elems);
+        for (uint32_t i = 0; i < d.num_elems; ++i) {
+          registers[i] = logicalBase + i;
+        }
+      }
+      rs->registerLdsEvent(static_cast<int>(wf.pc), type, std::move(registers),
+                           wf.exec(), wf.wf_size(), laneAddrs, d.elem_size);
+    }
+  }
+
+  if (inst->data()->tag() == GLOBAL_MEM) {
+    if (auto *rs = wf.race_state()) {
+      auto &d = *inst->data_as<VectorMemState>();
+      if (d.lds_dst) {
+        // Direct-to-LDS buffer load: register GLOBAL_TO_LDS event.
+        uint32_t perLaneBytes = d.num_elems * d.elem_size;
+        std::vector<uint32_t> ldsAddrs(wf.wf_size());
+        for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+          ldsAddrs[lane] = d.lds_base + lane * perLaneBytes;
+        }
+        rs->registerLdsEvent(static_cast<int>(wf.pc),
+                             raceemulator::MemoryEventType::GLOBAL_TO_LDS,
+                             /*registers=*/{}, wf.exec(), wf.wf_size(),
+                             ldsAddrs, perLaneBytes);
+      } else if (d.is_load && d.dst_reg_base >= wf.vgpr_alloc().base) {
+        uint32_t logicalBase = d.dst_reg_base - wf.vgpr_alloc().base;
+        std::vector<uint32_t> registers(d.num_elems);
+        for (uint32_t i = 0; i < d.num_elems; ++i) {
+          registers[i] = logicalBase + i;
+        }
+        rs->registerEvent(static_cast<int>(wf.pc),
+                          raceemulator::MemoryEventType::GLOBAL_TO_VGPR,
+                          std::move(registers), wf.exec());
+      }
+    }
+  }
+
+  if (inst->data()->tag() == SCALAR_MEM) {
+    if (auto *rs = wf.race_state()) {
+      auto &d = *inst->data_as<ScalarMemState>();
+      if (d.is_load) {
+        uint32_t logicalBase = d.dst_reg_base - wf.sgpr_alloc().base;
+        std::vector<uint32_t> registers(d.num_dwords);
+        for (uint32_t i = 0; i < d.num_dwords; ++i) {
+          registers[i] = logicalBase + i;
+        }
+        rs->registerEvent(static_cast<int>(wf.pc),
+                          raceemulator::MemoryEventType::GLOBAL_TO_SGPR,
+                          std::move(registers), wf.exec());
+      }
+    }
+  }
+
   switch (inst->data()->tag()) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(inst, wf);
@@ -401,6 +488,7 @@ bool ComputeUnitCore::step() {
     }
   }
 
+  current_wf_ = active;
   execute_instruction(inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
@@ -424,6 +512,7 @@ bool ComputeUnitCore::step() {
     route_memory_inst(inst, *active);
   } else
     delete inst;
+  current_wf_ = nullptr;
 
   // Advance PC past the current instruction. Branch execute() methods are required
   // to account for this by computing: wf.pc = target - inst_size, so the net result
