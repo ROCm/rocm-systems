@@ -590,10 +590,22 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
     ``MARKER_CORE_RANGE_API`` (user roctx markers), then correlates kernel
     dispatches and memory copy operations by timestamp overlap.
 
+    **Attribution model** (innermost-wins, no double-counting):
+
+    Each GPU event is assigned to exactly one marker range — the innermost
+    (most specific) range that overlaps it. For nested ranges
+    (``roctxRangePush``/``Pop``), this means child ranges capture events
+    before parent ranges. For partially overlapping ranges
+    (``roctxRangeStart``/``Stop`` across threads), events go to the range
+    with the greatest time overlap. Only the overlapping time portion is
+    counted. Parent ranges in a hierarchy show only work directly inside
+    them but outside any child — they do NOT include child activity.
+
     Returns ``None`` if no user roctx markers are found in the trace
     (graceful no-op — callers check ``if roctx_regions:``).
 
     When markers are found, returns a dict with:
+
     - ``regions``: per-marker breakdown (wall time, kernel/memcpy counts and %)
     - ``unranged``: activity that falls outside any marker
     - ``unranged_pct_of_total``: fraction of total runtime that is unranged
@@ -635,22 +647,62 @@ def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any
     except Exception:
         all_memcpy = []
 
-    # Step 3: Correlate each event with a marker by timestamp overlap
-    all_marker_ranges = [(m["start"], m["end"]) for m in markers]
+    # Step 3: Correlate each event with a marker by timestamp overlap.
+    #
+    # Attribution model (innermost-wins, no double-counting):
+    #   - Each GPU event is assigned to exactly ONE marker range.
+    #   - When ranges are nested (roctxRangePush/Pop), events go to the
+    #     innermost (most specific) range that contains them.
+    #   - When ranges partially overlap (roctxRangeStart/Stop across
+    #     threads), events go to the range with the greatest overlap.
+    #   - Ties broken by range duration (shorter = more specific).
+    #   - Only the overlapping time portion is counted for partial overlaps.
+    #   - Events with zero overlap to any range go to the "unranged" bucket.
+    #
+    # This model avoids double-counting: every nanosecond of GPU work is
+    # attributed to at most one range. Parent ranges in a nested hierarchy
+    # do NOT include child activity — they show only work that is directly
+    # inside the parent but outside any child range.
+    all_marker_ranges = [(m["start"], m["end"], m["duration"]) for m in markers]
+
+    def _best_marker_idx(event_start: int, event_end: int) -> int:
+        """Return index of the best-matching marker for this event.
+
+        Prefers the marker with the greatest overlap. On ties (e.g. an
+        event fully inside both a parent and child range), prefers the
+        shorter (more specific / innermost) range.
+        """
+        best_idx = -1
+        best_overlap = 0
+        best_duration = float("inf")
+        for i, (ms, me, mdur) in enumerate(all_marker_ranges):
+            overlap_start = max(event_start, ms)
+            overlap_end = min(event_end, me)
+            overlap = max(0, overlap_end - overlap_start)
+            if overlap > best_overlap or (overlap == best_overlap and overlap > 0 and mdur < best_duration):
+                best_overlap = overlap
+                best_idx = i
+                best_duration = mdur
+        return best_idx
 
     def _in_marker(event_start: int, event_end: int) -> bool:
-        for ms, me in all_marker_ranges:
-            if event_start >= ms and event_end <= me:
-                return True
-        return False
+        return _best_marker_idx(event_start, event_end) >= 0
 
     region_data: List[Dict[str, Any]] = []
-    for m in markers:
-        m_kernels = [k for k in all_kernels if k[1] >= m["start"] and k[2] <= m["end"]]
-        m_memcpy = [mc for mc in all_memcpy if mc[1] >= m["start"] and mc[2] <= m["end"]]
+    for mi, m in enumerate(markers):
+        ms, me = m["start"], m["end"]
+        m_kernels = [k for k in all_kernels if _best_marker_idx(k[1], k[2]) == mi]
+        m_memcpy = [mc for mc in all_memcpy if _best_marker_idx(mc[1], mc[2]) == mi]
 
-        kernel_time = sum(k[3] for k in m_kernels)
-        memcpy_time = sum(mc[3] for mc in m_memcpy)
+        # For partially overlapping events, count only the overlapping portion
+        kernel_time = 0
+        for k in m_kernels:
+            overlap = min(k[2], me) - max(k[1], ms)
+            kernel_time += max(0, overlap)
+        memcpy_time = 0
+        for mc in m_memcpy:
+            overlap = min(mc[2], me) - max(mc[1], ms)
+            memcpy_time += max(0, overlap)
         wall_time = m["duration"]
         overhead_time = max(0, wall_time - kernel_time - memcpy_time)
 
