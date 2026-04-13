@@ -6,5 +6,6 @@ add_executable(${target}
 target_link_libraries(${target} PRIVATE 
     rocprofiler-compute-tool
     gtest_main
+    gmock
 )
 

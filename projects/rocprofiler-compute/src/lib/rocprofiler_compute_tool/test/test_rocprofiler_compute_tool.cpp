@@ -1,5 +1,6 @@
 #include "rocprofiler_compute_tool.h"
 #include "input_parameters.h"
+#include "mocks.h"
 
 #include <gtest/gtest.h>
 
