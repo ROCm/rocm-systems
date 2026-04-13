@@ -212,7 +212,7 @@ Roofline Performance Rates:
     rst: The total 32-bit floating-point operations executed per second on the VALU. Navi3 / RDNA3-class CUs sustain up to 128 V_FMA_F32 ops per cycle per CU in wave64 mode; the roofline peak column uses empirically measured F32 throughput. This is presented with the value of the peak empirical F32 FLOPs achievable on the specific accelerator.
     unit: GFLOP/s
   VALU FLOPs (F64):
-    rst: The total 64-bit floating-point operations executed per second on the VALU. FP64 throughput is typically 1/16 or 1/32 of FP32 on RDNA3.5 consumer parts. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator.
+    rst: The total 64-bit floating-point operations executed per second on the VALU. FP64 throughput is typically 1/16 or 1/32 of FP32 on RDNA3.5 hardware. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator.
     unit: GFLOP/s
   GL2 Cache Bandwidth:
     rst: The number of bytes transferred between GL1C and GL2C per unit time. GL2C is the last-level cache in RDNA3.5 before system memory. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
