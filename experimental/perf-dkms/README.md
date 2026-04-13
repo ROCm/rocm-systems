@@ -40,9 +40,13 @@ This kernel module bridges AMD GPU hardware performance counters with the Linux 
 sudo apt update
 sudo apt install build-essential linux-headers-$(uname -r)
 
-# Verify perf tools are available
+# Verify perf tools are available (may not be available on custom kernels)
 perf --version
 ```
+
+**Important Notes:**
+- **AMD GPU Driver Required**: The `amdgpu` kernel driver must be loaded before loading this module
+- **Custom Kernel Limitation**: Custom development kernels (e.g., 6.17.0-rc4-rocm-gdb) may not have matching `linux-tools` packages, meaning the `perf` command may not be available. The module can still be built and loaded, but you cannot use the standard `perf` command to access the counters.
 
 ### Building the Module
 
@@ -63,11 +67,8 @@ cmake -B build && cmake --build build
 ### Loading the Module
 
 ```bash
-# Load the module
+# Load the module (ensure amdgpu driver is already loaded)
 sudo insmod build/src/amdgpu_pmu.ko
-
-# Or if using .o file (development kernels):
-sudo insmod build/src/amdgpu_pmu.o
 
 # Verify module is loaded
 lsmod | grep amdgpu_pmu
@@ -75,6 +76,8 @@ lsmod | grep amdgpu_pmu
 # Check kernel messages
 dmesg | tail -20
 ```
+
+**Note**: Development kernels (tested with 6.17.0-rc4) produce `.ko` files, not `.o` files. The CMake build system generates a proper kernel module.
 
 ### Verification
 
@@ -412,6 +415,20 @@ ls /lib/modules/$(uname -r)/build
 sudo dmesg | grep -i error
 ```
 
+**Common Issues:**
+
+1. **"File exists" error when loading module**:
+   - The module is already loaded. Unload it first: `sudo rmmod amdgpu_pmu`
+
+2. **Module dependency errors**:
+   - Ensure the `amdgpu` kernel driver is loaded: `lsmod | grep amdgpu`
+   - If not loaded, the module will fail to load with missing symbol errors
+
+3. **Perf tools not available on custom kernels**:
+   - Custom development kernels may not have matching `linux-tools` packages
+   - The module can be built and loaded, but the `perf` command will not be available
+   - Consider using a stable kernel version if perf tool access is required
+
 ### No events visible
 
 ```bash
@@ -484,8 +501,9 @@ dmesg | tail -20
    - **GFX10/11: Not supported** (framework only, missing event definitions)
 
 4. **Kernel Compatibility**:
-   - Development kernels may produce `.o` instead of `.ko` files
+   - Development kernels (tested with 6.17.0-rc4) produce `.ko` files
    - DKMS requires stable kernel versions
+   - Custom kernels may not have matching perf tools packages
 
 ### Future Work
 
