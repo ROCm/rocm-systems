@@ -18,6 +18,7 @@ saved_analysis
 pmc_kernel_top.csv
 VERSION.sha
 **/_build
+**/out
 
 # temp files
 /tests/Testing

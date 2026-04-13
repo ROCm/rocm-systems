@@ -14,9 +14,9 @@
 
 using namespace rocprofiler_compute_tool;
 
-std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
-std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
-std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
+static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
+static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
+static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -33,10 +33,9 @@ void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     g_sdk_wrapper = sdk_wrapper;
 }
 
-namespace
+namespace rocprofiler_compute_tool
 {
-
-rocprofiler_context_id_t& get_client_ctx()
+static rocprofiler_context_id_t& get_client_ctx()
 {
     static rocprofiler_context_id_t ctx{0};
     return ctx;
@@ -152,7 +151,7 @@ void tool_fini(void* user_data)
     delete tool_data_ptr;
 }
 
-}  // namespace
+}  // namespace rocprofiler_compute_tool
 
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
