@@ -13,15 +13,15 @@ scheduling. During the process it pulls work from HSA queues, decodes packets, a
 launches to the front-end (SPI / WGP path). On Instinct GPUs, the profiler
 often seperates the metrics into CPF (fetcher) and CPC (packet processor). The
 shipped gfx1151 analysis panels emphasize CPC and MEC activity, including utilization,
-interface, stalls, memory requests, instruction cache).
+interface utilization, stall cycles, memory requests, and instruction cache).
 
-For the full CDNA narrative and CPF / CPC metric tabs across MI-series arches, see
-:doc:`../cdna/command-processor`.
+For the complete CDNA architecture overview and the CPF and CPC metric tabs across MI-series GPUs, see
+:doc:`../cdna/command-processor` under CDNA-CDNA4.
 
-Command Processor Compute (CPC) — gfx1151
+Command processor compute (CPC) — gfx1151
 ===========================================
 
-CPC Utilization
+CPC utilization
 ---------------
 
 .. tab-set::
@@ -32,7 +32,7 @@ CPC Utilization
       .. jinja:: rdna1151-cpc-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-CPC Interface Utilization
+CPC interface utilization
 -------------------------
 
 .. tab-set::
@@ -43,7 +43,7 @@ CPC Interface Utilization
       .. jinja:: rdna1151-cpc-interface-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-MEC Stall Cycles
+MEC stall cycles
 ----------------
 
 .. tab-set::
@@ -54,7 +54,7 @@ MEC Stall Cycles
       .. jinja:: rdna1151-mec-stall-cycles-gfx1151
          :file: _templates/metrics_table.j2
 
-CPC Memory Requests
+CPC memory requests
 -------------------
 
 .. tab-set::

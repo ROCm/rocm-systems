@@ -30,7 +30,7 @@ GL1C GL1C-GL2 interface (panel)
       .. jinja:: rdna1151-gl1c-gl1c-gl2-interface-gfx1151
          :file: _templates/metrics_table.j2
 
-GL2C Cache Performance
+GL2C cache performance
 ----------------------
 
 .. tab-set::
@@ -41,7 +41,7 @@ GL2C Cache Performance
       .. jinja:: rdna1151-gl2c-cache-performance-gfx1151
          :file: _templates/metrics_table.j2
 
-GL2C Request Statistics
+GL2C request statistics
 -----------------------
 
 .. tab-set::
@@ -52,7 +52,7 @@ GL2C Request Statistics
       .. jinja:: rdna1151-gl2c-request-statistics-gfx1151
          :file: _templates/metrics_table.j2
 
-GL2C Bandwidth
+GL2C bandwidth
 --------------
 
 .. tab-set::
@@ -66,7 +66,7 @@ GL2C Bandwidth
 GCEA and DRAM interfaces
 =========================
 
-DRAM Read Interface
+DRAM read interface
 -------------------
 
 .. tab-set::
@@ -77,7 +77,7 @@ DRAM Read Interface
       .. jinja:: rdna1151-dram-read-interface-gfx1151
          :file: _templates/metrics_table.j2
 
-DRAM Write Interface
+DRAM write interface
 --------------------
 
 .. tab-set::
@@ -99,7 +99,7 @@ System Arbiter (SARB)
       .. jinja:: rdna1151-system-arbiter-sarb-gfx1151
          :file: _templates/metrics_table.j2
 
-Return Interface
+Return interface
 ----------------
 
 .. tab-set::
