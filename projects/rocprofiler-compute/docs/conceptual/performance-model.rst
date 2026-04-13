@@ -10,7 +10,7 @@ ROCm Compute Profiler exposes detailed metrics for **AMD Instinct™ / CDNA™**
 MI-series accelerators and for select **AMD Radeon™ / RDNA™** client GPUs where an
 analysis configuration is shipped in the tool.
 
-Use the pages below for architecture-specific naming, panel layout, and conceptual
+Use the following pages for architecture-specific naming, panel layout, and conceptual
 overview:
 
 * **Instinct (CDNA)** — :doc:`AMD CDNA architecture (CDNA-CDNA4) <cdna/cdna-performance-model>`:
