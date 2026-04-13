@@ -9,7 +9,8 @@
 #
 # Roofline benchmarking is called from within rocprofiler-compute profiling run.
 # To run standalone roofline benchmarking without counter collection, use:
-#   rocprof-compute profile --bench-only -n <name> [--device <id>]
+#   `rocprof-compute profile --bench-only -n test_bench` -> runs on current device
+#   `rocprof-compute profile --bench-only --device 2 -n test_bench` -> runs on device 2 using the `--device` option
 #
 # Note: there is an expectation that if more than one device is requested
 # for benchmarking that the devices are the same product.
