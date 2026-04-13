@@ -250,17 +250,8 @@ __device__ void GDABackend::destroy_ctx(rocshmem_ctx_t *ctx) {
 }
 
 void GDABackend::setup_team_world() {
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  /**
-   * Allocate device-side memory for team_world and construct a
-   * GDA team in it.
-   */
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-
-  new (team_info_wrt_parent) TeamInfo(nullptr, 0, 1, num_pes);
-  new (team_info_wrt_world) TeamInfo(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
   GDATeam *team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(GDATeam)));
@@ -331,9 +322,10 @@ void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
 }
 
 void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
@@ -1156,7 +1148,7 @@ void GDABackend::modify_qps_init_to_rtr() {
   if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
     attr.ah_attr.grh.sgid_index = gid_index;
     attr.ah_attr.is_global      = 1;
-    attr.ah_attr.grh.hop_limit  = 1;
+    attr.ah_attr.grh.hop_limit  = 255; // Max possible value
     attr.ah_attr.sl             = 1;
     attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
   }

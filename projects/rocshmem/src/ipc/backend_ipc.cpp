@@ -201,17 +201,8 @@ __device__ void IPCBackend::destroy_ctx(rocshmem_ctx_t *ctx) {
 }
 
 void IPCBackend::setup_team_world() {
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  /**
-   * Allocate device-side memory for team_world and construct a
-   * IPC team in it.
-   */
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-
-  new (team_info_wrt_parent) TeamInfo(nullptr, 0, 1, num_pes);
-  new (team_info_wrt_world) TeamInfo(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
   IPCTeam *team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(IPCTeam)));
@@ -271,9 +262,10 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
 }
 
 void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into

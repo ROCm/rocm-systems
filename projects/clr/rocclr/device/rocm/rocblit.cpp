@@ -608,15 +608,18 @@ inline void DmaBlitManager::resolveAgents(const Memory& srcMem, const Memory& ds
     srcAgent = srcMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
     dstAgent = dstMem.isHostMemDirectAccess() ? dev().getCpuAgent() : dev().getBackendDevice();
 
-    // IPC buffers: the runtime doesn't know the real owning agent, query pointer_info
-    if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared()) {
+    // IPC/VMM-imported buffers: the runtime doesn't know the real owning agent,
+    // so query pointer_info to resolve the true agent.
+    if (static_cast<const amd::Memory*>(srcMem.owner())->ipcShared() ||
+        static_cast<const amd::Memory*>(srcMem.owner())->vmmImported()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
       if (HSA_STATUS_SUCCESS ==
           Hsa::pointer_info(const_cast<address>(srcAddr), &info, nullptr, nullptr, nullptr)) {
         srcAgent = info.agentOwner;
       }
     }
-    if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared()) {
+    if (static_cast<const amd::Memory*>(dstMem.owner())->ipcShared() ||
+        static_cast<const amd::Memory*>(dstMem.owner())->vmmImported()) {
       hsa_amd_pointer_info_t info = {sizeof(hsa_amd_pointer_info_t)};
       if (HSA_STATUS_SUCCESS == Hsa::pointer_info(dstAddr, &info, nullptr, nullptr, nullptr)) {
         dstAgent = info.agentOwner;
@@ -2700,7 +2703,8 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   uint32_t blitWg = dev().settings().limit_blit_wg_;
 
   bool isP2pOrIpc = (&gpuMem(srcMemory).dev() != &gpuMem(dstMemory).dev()) ||
-                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
+                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
+                    srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
 
   // Use SDMA for large P2P/IPC transfers, shader for small ones
   if (isP2pOrIpc && sizeIn[0] <= dev().settings().sdma_p2p_threshold_) {

@@ -8,6 +8,7 @@ Handles test execution, build processes, and result tracking
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -236,7 +237,7 @@ class TestExecutor:
         if not os.path.isdir(rocm_path):
             errors.append(f"ROCm not found at {rocm_path}")
 
-        # Check MPI (unless skip flag is set)
+        # Check MPI (unless --skip-mpi-check is set)
         if not self.args.skip_mpi_check:
             mpi_path = self.paths.get("mpi_path")
             if mpi_path:
@@ -245,7 +246,7 @@ class TestExecutor:
                 elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
                     print(f"WARNING: mpirun not found in {mpi_path}/bin/")
         elif self.args.verbose:
-            print("SKIP: MPI installation check skipped (--skip-mpi-check)")
+            print("SKIP: MPI check skipped (--skip-mpi-check)")
 
         # Check RCCL library (if not building or using custom lib)
         if self.args.no_build or self.using_custom_lib:
@@ -297,14 +298,24 @@ class TestExecutor:
         rocm_path = self.paths.get("rocm_path", "/opt/rocm")
         mpi_path = self.paths.get("mpi_path", "")
 
-        install_flags = self.build_config.get("install_flags", [])
+        install_flags = list(self.build_config.get("install_flags", []))
         cmake_options = self.build_config.get("cmake_options", "")
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
+        if self.args.skip_mpi_check:
+            if "--enable-mpi-tests" in install_flags:
+                install_flags.remove("--enable-mpi-tests")
+            # Explicitly disable to override any cached CMake value from prior builds
+            if cmake_options:
+                cmake_options += " -DENABLE_MPI_TESTS=OFF"
+            else:
+                cmake_options = "-DENABLE_MPI_TESTS=OFF"
+            print("NOTE: MPI tests disabled in build (--skip-mpi-check)")
+
         # Build install.sh command
         install_script = os.path.join(workdir, "install.sh")
-        cmd = [install_script] + list(install_flags)
+        cmd = [install_script] + install_flags
 
         if parallel_jobs:
             cmd.extend(["-j", str(parallel_jobs)])
@@ -484,6 +495,14 @@ class TestExecutor:
             print(f"  Binary path: {test_binary_path}")
 
         if not os.path.isfile(test_binary_path):
+            if num_ranks > 1:
+                print(f"SKIP: MPI test binary not found: {test_binary_path} (build may not have --enable-mpi-tests)")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": f"MPI binary not found: {test_binary_path}"
+                }
             print(f"ERROR: Test binary not found: {test_binary_path}")
             return {
                 "name": test_name,
@@ -491,6 +510,21 @@ class TestExecutor:
                 "duration": 0,
                 "error": f"Binary not found: {test_binary_path}"
             }
+
+        # For MPI tests, verify mpirun is available
+        if num_ranks > 1:
+            mpi_path = self.paths.get("mpi_path", "")
+            mpirun = os.path.join(mpi_path, "bin", "mpirun") if mpi_path else shutil.which("mpirun")
+            if mpi_path and not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
+                mpirun = None
+            if not mpirun:
+                print(f"SKIP: mpirun not found, cannot run MPI test '{test_name}'")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": "mpirun not available"
+                }
 
         # Setup environment
         env = os.environ.copy()
@@ -719,6 +753,14 @@ class TestExecutor:
                 skipped_count += 1
                 continue
 
+            # Skip MPI tests when --skip-mpi-check is set
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            if self.args.skip_mpi_check and test_ranks > 1:
+                skipped_count += 1
+                if self.args.verbose:
+                    print(f"  SKIP: '{test_name}' requires {test_ranks} ranks (--skip-mpi-check)")
+                continue
+
             result = self.run_test(test, suite_config)
             results.append(result)
 
@@ -782,7 +824,7 @@ class TestExecutor:
                         print(f"SKIP: No rerun_env_variables defined for failed test '{test_name}'")
 
         if self.args.verbose and skipped_count > 0:
-            print(f"  Skipped {skipped_count} test(s) due to --test-name filter")
+            print(f"  Skipped {skipped_count} test(s) due to filters")
 
         return results
 
@@ -814,6 +856,7 @@ class TestExecutor:
         passed = self.test_results.count(TestResult.RESULT_PASSED.value)
         failed = self.test_results.count(TestResult.RESULT_FAILED.value)
         timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
+        skipped = self.test_results.count(TestResult.RESULT_SKIPPED.value)
 
         # Calculate total test time
         total_time_seconds = sum(self.test_durations) if self.test_durations else 0
@@ -838,6 +881,8 @@ class TestExecutor:
             print(f"Passed:        {passed}")
             print(f"Failed:        {failed}")
             print(f"Timeout:       {timeout}")
+            if skipped > 0:
+                print(f"Skipped:       {skipped}")
             print(f"Total Time:    {self._format_duration(total_time_seconds)}")
             print("="*120)
 

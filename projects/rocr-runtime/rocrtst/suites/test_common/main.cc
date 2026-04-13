@@ -530,6 +530,16 @@ TEST(rocrtstFunc, SvmMemory_Basic_Test) {
     RunCustomTestProlog(&smt);
     smt.TestCreateDestroy();
     smt.TestSVMPrefetch();
+    smt.TestSVMBatchDiscard();
+    RunCustomTestEpilog(&smt);
+  );
+}
+
+TEST(rocrtstFunc, SvmMemory_Negative_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    SvmMemoryTestBasic smt;
+    RunCustomTestProlog(&smt);
+    smt.TestSVMDiscardNegative();
     RunCustomTestEpilog(&smt);
   );
 }
@@ -564,6 +574,16 @@ TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
 
     RunCustomTestProlog(&vmt);
     vmt.MemoryAccountingTest();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
+TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.TestVirtAddressAlias();
     RunCustomTestEpilog(&vmt);
   );
 }

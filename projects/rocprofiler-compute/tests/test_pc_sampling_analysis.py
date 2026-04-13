@@ -810,17 +810,16 @@ def test_pc_sampling_analyze_list_stats(
     and verify exit code 0.
     """
     workload_dir = test_utils.setup_workload_dir(PC_SAMPLING_WORKLOAD)
-    assert True
-    return
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--list-stats",
-    ])
-    assert code == 0
-    captured = capsys.readouterr()
-    assert "Detected Kernels" in captured.out
-    assert "Dispatch list" in captured.out
-
-    test_utils.clean_output_dir(True, workload_dir)
+    try:
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-stats",
+        ])
+        assert code == 0
+        captured = capsys.readouterr()
+        assert "Detected Kernels" in captured.out
+        assert "Dispatch list" in captured.out
+    finally:
+        test_utils.clean_output_dir(True, workload_dir)

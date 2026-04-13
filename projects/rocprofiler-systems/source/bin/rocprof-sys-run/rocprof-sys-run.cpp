@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocprof-sys-run.hpp"
+
+#include "common/common_utils.hpp"
 #include "common/environment.hpp"
 #include "common/output.hpp"
 #include "core/mproc.hpp"
@@ -45,7 +47,13 @@ main(int argc, char** argv)
 
     auto _parse_data = parser_data_t{};
     auto _fork_exec  = false;
-    parse_args(argc, argv, _parse_data, _fork_exec);
+    try
+    {
+        parse_args(argc, argv, _parse_data, _fork_exec);
+    } catch(const rocprofsys::common_utils::cli_done& e)
+    {
+        return e.exit_code;
+    }
     prepare_command_for_run(argv[0], _parse_data);
     prepare_environment_for_run(_parse_data);
 
