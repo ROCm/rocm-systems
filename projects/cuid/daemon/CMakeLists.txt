@@ -40,12 +40,31 @@ install(TARGETS amdcuid_daemon DESTINATION bin COMPONENT daemon)
 
 # Platform-specific config directory
 if(WIN32)
-    set(CONFIG_INSTALL_DIR "etc")  # Relative to prefix
+    set(CONFIG_INSTALL_DIR "etc") # Relative to prefix
 else()
     set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_SYSCONFDIR}")
 endif()
 
-install(FILES amdcuid_daemon.conf DESTINATION ${CONFIG_INSTALL_DIR} COMPONENT daemon)
+install(
+    FILES amdcuid_daemon.conf
+    DESTINATION ${CONFIG_INSTALL_DIR}
+    COMPONENT daemon
+)
+# create hmac key file in same directory as config file with 600 permissions
+install(
+    CODE
+        "
+    execute_process(
+        COMMAND openssl rand -base64 32
+        OUTPUT_VARIABLE HMAC_KEY
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    set(KEY_FILE \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CONFIG_INSTALL_DIR}/amdcuid.key\")
+    file(WRITE \"\${KEY_FILE}\" \"\${HMAC_KEY}\")
+    execute_process(COMMAND chmod 600 \"\${KEY_FILE}\")
+"
+    COMPONENT daemon
+)
 
 # udev rules for Linux; TODO: need to figure out Windows service/driver registration for device event handling
 if(UNIX AND NOT APPLE)
@@ -56,30 +75,44 @@ if(UNIX AND NOT APPLE)
     set(CONFIG_DAEMONIZE_DEFAULT "${CMAKE_MATCH_1}")
 
     # Create CMake option with config file default
-    option(ENABLE_DAEMONIZE "Enable daemon mode with udev rules" ${CONFIG_DAEMONIZE_DEFAULT})
+    option(
+        ENABLE_DAEMONIZE
+        "Enable daemon mode with udev rules"
+        ${CONFIG_DAEMONIZE_DEFAULT}
+    )
 
-    if (ENABLE_DAEMONIZE)
-        file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/90-amdcuid.rules
-        "# AMD CUID daemon udev rules
+    if(ENABLE_DAEMONIZE)
+        file(
+            WRITE ${CMAKE_CURRENT_BINARY_DIR}/90-amdcuid.rules
+            "# AMD CUID daemon udev rules
         SUBSYSTEM==\"drm\", ACTION==\"add|remove|change\", RUN+=\"${CMAKE_INSTALL_PREFIX}/bin/amdcuid_tool --notify-daemon\"
         SUBSYSTEM==\"net\", ACTION==\"add|remove|change\", RUN+=\"${CMAKE_INSTALL_PREFIX}/bin/amdcuid_tool --notify-daemon\"
-        ")
-        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/90-amdcuid.rules
-        DESTINATION /etc/udev/rules.d
-        COMPONENT daemon)
+        "
+        )
+        install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/90-amdcuid.rules
+            DESTINATION /etc/udev/rules.d
+            COMPONENT daemon
+        )
 
         # Custom target to reload rules (must run as root)
-        add_custom_target(reload-udev
-        COMMAND udevadm control --reload-rules
-        COMMAND udevadm trigger
-        COMMENT "Reloading udev rules..."
-        VERBATIM)
+        add_custom_target(
+            reload-udev
+            COMMAND udevadm control --reload-rules
+            COMMAND udevadm trigger
+            COMMENT "Reloading udev rules..."
+            VERBATIM
+        )
     else()
         # if not in daemon mode, create a cron job instead to start daemon at reboot
-        file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_cron
-        "@reboot root ${CMAKE_INSTALL_PREFIX}/bin/amdcuid_daemon" )
-        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_cron
-        DESTINATION /etc/cron.d
-        COMPONENT daemon)
+        file(
+            WRITE ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_cron
+            "@reboot root ${CMAKE_INSTALL_PREFIX}/bin/amdcuid_daemon"
+        )
+        install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_cron
+            DESTINATION /etc/cron.d
+            COMPONENT daemon
+        )
     endif()
 endif()
