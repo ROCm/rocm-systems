@@ -952,14 +952,11 @@ class OmniSoC_Base:
             )
             if not roofline_csv.is_file():
                 try:
-                    run_roofline_benchmark(
-                        self.get_args().device, roofline_csv
-                    )
+                    run_roofline_benchmark(self.get_args().device, roofline_csv)
                 except Exception as e:
                     console_error(
                         "roofline",
-                        f"Benchmark execution failed: {e}."
-                        " Skipping roofline.",
+                        f"Benchmark execution failed: {e}. Skipping roofline.",
                         exit=False,
                     )
                     return

@@ -542,12 +542,8 @@ class RocProfCompute:
                 " Please use only one of them."
             )
 
-        if getattr(args, "bench_only", False) and getattr(
-            args, "no_roof", False
-        ):
-            console_error(
-                "--bench-only cannot be used with --no-roof."
-            )
+        if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
+            console_error("--bench-only cannot be used with --no-roof.")
 
     @demarcate
     def _run_bench_only(self) -> None:
@@ -565,23 +561,16 @@ class RocProfCompute:
         existing_roofline = roofline_csv.is_file()
         console_log(
             "roofline",
-            "Running roofline microbenchmark"
-            f" on device {self.__args.device}",
+            f"Running roofline microbenchmark on device {self.__args.device}",
         )
         try:
-            run_roofline_benchmark(
-                self.__args.device, roofline_csv
-            )
+            run_roofline_benchmark(self.__args.device, roofline_csv)
         except Exception as e:
             console_error(f"Benchmark execution failed: {e}")
         if existing_roofline:
-            console_warning(
-                f"Overwrote existing {roofline_csv}"
-            )
+            console_warning(f"Overwrote existing {roofline_csv}")
 
-        is_valid, error_message = validate_roofline_csv(
-            str(output_dir)
-        )
+        is_valid, error_message = validate_roofline_csv(str(output_dir))
         if not is_valid:
             console_error(
                 f"Invalid roofline.csv: {error_message}",
