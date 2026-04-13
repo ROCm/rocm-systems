@@ -96,7 +96,7 @@ Memory chart - TCP Cache (Vector L0):
     rst: 'Definition: Percentage of TCP (L0 vector cache) requests that hit in cache. Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum'
     unit: Percent
   TCP Total Requests:
-    rst: Total TCP (vector L0) requests per normalization unit (reads, writes, and related traffic aggregated in TCP_REQ_sum).
+    rst: Total TCP (vector data cache) requests per normalization unit (reads, writes, and related traffic aggregated in TCP_REQ_sum).
     unit: Requests per Normalization Unit
   TCP Read Requests:
     rst: TCP read requests per normalization unit (TCP_REQ_READ_sum).
