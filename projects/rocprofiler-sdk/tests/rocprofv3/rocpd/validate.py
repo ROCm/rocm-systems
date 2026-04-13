@@ -124,16 +124,22 @@ def test_summary_region_category_none(summary_none_dir):
     )
 
 
-def test_truncated_kernel_names(csv_kernels_truncated, csv_kernels_full, json_data):
+#########################################################################################
+#
+# ROCPD Summary Validation
+#
+#########################################################################################
+
+
+def test_summary_truncate_kernels(csv_kernels_truncated, csv_kernels_full, json_data):
     """
-    Test that --truncate-kernels flag produces kernel names without template parameters.
+    Test that --truncate-kernels flag only affects kernel names, not statistics.
 
     This test verifies:
-    1. The truncated summary exists and has kernel data
-    2. The full summary exists and has kernel data
-    3. Kernel names in truncated summary don't contain template parameters
-    4. Kernel names in full summary may contain template parameters
-    5. Both summaries have the same number of kernel entries (same kernels, different names)
+    1. Full kernel names contain template parameters
+    2. Truncated kernel names don't contain template parameters
+    3. Both summaries have the same number of kernel entries
+    4. All statistics (calls, duration) are preserved between truncated and full summaries
     """
     truncated_kernels = csv_kernels_truncated
     full_kernels = csv_kernels_full
@@ -147,15 +153,23 @@ def test_truncated_kernel_names(csv_kernels_truncated, csv_kernels_full, json_da
         full_kernels
     ), f"Mismatch in number of kernels: truncated={len(truncated_kernels)}, full={len(full_kernels)}"
 
-    # Check that truncated names don't have template parameters
+    # Verify full kernel names have template parameters
+    assert any(
+        "(" in str(row["Name"]) or "<" in str(row["Name"])
+        for idx, row in full_kernels.iterrows()
+    ), (
+        "No kernels with template parameters found. "
+        "Expected full kernel names to contain template parameters like '(unsigned int)' or '<T>'"
+    )
+
+    # Verify truncated kernel names don't have template parameters
     for idx, row in truncated_kernels.iterrows():
         kernel_name = row["Name"]
         assert (
             "(" not in kernel_name and "<" not in kernel_name
         ), f"Truncated kernel name still contains template parameters: {kernel_name}"
 
-    # Verify both summaries have matching call counts and durations
-    # (same kernels, just different naming)
+    # Verify statistics are preserved (calls and duration)
     total_calls_truncated = truncated_kernels["Calls"].sum()
     total_calls_full = full_kernels["Calls"].sum()
     assert total_calls_truncated == total_calls_full, (
@@ -163,44 +177,8 @@ def test_truncated_kernel_names(csv_kernels_truncated, csv_kernels_full, json_da
         f"truncated={total_calls_truncated}, full={total_calls_full}"
     )
 
-
-def test_kernel_names_have_expected_format(csv_kernels_full):
-    """
-    Test that full kernel names contain expected template parameter patterns.
-    """
-    full_kernels = csv_kernels_full
-    assert len(full_kernels) > 0, "No kernels found in full summary"
-
-    # At least some kernel names should have template parameters
-    # (this may not be true for all kernels, but typically HIP kernels do)
-    has_templates = any(
-        "(" in str(row["Name"]) or "<" in str(row["Name"])
-        for idx, row in full_kernels.iterrows()
-    )
-
-    # This is a soft assertion - if all kernels are simple, that's ok too
-    # but we document the expectation
-    if not has_templates:
-        print(
-            "Warning: No kernels with template parameters found. "
-            "This may be expected for simple kernels."
-        )
-
-
-def test_summary_statistics_match(csv_kernels_truncated, csv_kernels_full):
-    """
-    Verify that summary statistics are preserved regardless of name truncation.
-
-    The --truncate-kernels flag should only affect the displayed name,
-    not the underlying statistics.
-    """
-    truncated_kernels = csv_kernels_truncated
-    full_kernels = csv_kernels_full
-
-    # Total duration should be the same
     total_duration_truncated = truncated_kernels["Duration (Nsec)"].sum()
     total_duration_full = full_kernels["Duration (Nsec)"].sum()
-
     assert total_duration_truncated == total_duration_full, (
         f"Total duration mismatch: "
         f"truncated={total_duration_truncated}, full={total_duration_full}"
