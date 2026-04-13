@@ -32,7 +32,7 @@ extern "C" {
 }
 
 #include "rocdecode/rocdecode.h"
-#include "../src/commons.h"
+#include "commons.h"
 
 /*!
  * \file
