@@ -85,6 +85,13 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
     verify_ssl = verify_ssl_env not in ("0", "false", "no")
     http_client = None
     if not verify_ssl:
+        warnings.warn(
+            "[LLMConversation] SSL certificate verification is DISABLED via "
+            "ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL — LLM traffic is exposed to "
+            "MITM. Only use this for trusted private endpoints with self-"
+            "signed certs.",
+            stacklevel=3,
+        )
         try:
             import httpx as _httpx
 
