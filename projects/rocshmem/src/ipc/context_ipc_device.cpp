@@ -39,6 +39,9 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
   IPCBackend *backend{static_cast<IPCBackend *>(b)};
   ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
   ipcImpl_.shm_size = b->ipcImpl.shm_size;
+#if defined(USE_SDMA)
+  ipcImpl_.sdmaImpl_ = b->ipcImpl.sdmaImpl_;
+#endif
 
   barrier_sync = backend->barrier_sync;
   fence_pool = backend->fence_pool;
@@ -65,7 +68,11 @@ __device__ void IPCContext::getmem(void *dest, const void *source, size_t nelems
 __device__ void IPCContext::putmem_nbi(void *dest, const void *source,
                                       size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+#if defined(USE_SDMA)
+  ipcImpl_.ipcCopyWithSdma(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
+#else
   ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems);
+#endif
 }
 
 __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
@@ -123,7 +130,11 @@ __device__ void IPCContext::getmem_wg(void *dest, const void *source,
 __device__ void IPCContext::putmem_nbi_wg(void *dest, const void *source,
                                          size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+#if defined(USE_SDMA)
+  ipcImpl_.ipcCopyWithSdma_wg(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
+#else
   ipcImpl_.ipcCopy_wg(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems);
+#endif
 }
 
 __device__ void IPCContext::getmem_nbi_wg(void *dest, const void *source,
@@ -150,7 +161,11 @@ __device__ void IPCContext::getmem_wave(void *dest, const void *source,
 __device__ void IPCContext::putmem_nbi_wave(void *dest, const void *source,
                                            size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+#if defined(USE_SDMA)
+  ipcImpl_.ipcCopyWithSdma_wave(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
+#else
   ipcImpl_.ipcCopy_wave(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems);
+#endif
 }
 
 __device__ void IPCContext::getmem_nbi_wave(void *dest, const void *source,
