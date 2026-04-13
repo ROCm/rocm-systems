@@ -18,7 +18,7 @@ System Speed-of-Light:
     rst: 'GL2C/EA read bandwidth from sized request counters (gl2c_perf_sel_ea_rdreq_32b/64B/96B/128B): 32·GL2C_EA_RDREQ_32B_sum + 64·GL2C_EA_RDREQ_64B_sum + 96·GL2C_EA_RDREQ_96B_sum + 128·GL2C_EA_RDREQ_128B_sum, divided by kernel wall time. Sums over GL2C instances. Peak / % of peak are N/A (no sysinfo memory BW).'
     unit: Bytes/s
   L2-Fabric Write BW:
-    rst: 'GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; the spec names this path MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time. Peak / % of peak are N/A (no sysinfo memory BW).'
+    rst: 'GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per transaction; the spec names this path MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time. Peak / % of peak are N/A (no sysinfo memory BW).'
     unit: Bytes/s
   LDS Bank Conflicts:
     rst: Number of LDS bank conflicts. Peak / % of Peak are N/A for raw counts.
