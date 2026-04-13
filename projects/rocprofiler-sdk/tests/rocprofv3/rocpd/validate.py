@@ -131,7 +131,7 @@ def test_summary_region_category_none(summary_none_dir):
 #########################################################################################
 
 
-def test_summary_truncate_kernels(csv_kernels_truncated, csv_kernels_full, json_data):
+def test_summary_truncate_kernels(csv_kernels_truncated, csv_kernels_full):
     """
     Test that --truncate-kernels flag only affects kernel names, not statistics.
 
@@ -139,7 +139,7 @@ def test_summary_truncate_kernels(csv_kernels_truncated, csv_kernels_full, json_
     1. Full kernel names contain template parameters
     2. Truncated kernel names don't contain template parameters
     3. Both summaries have the same number of kernel entries
-    4. All statistics (calls, duration) are preserved between truncated and full summaries
+    4. Statistics (calls, duration) are preserved between truncated and full summaries
     """
     truncated_kernels = csv_kernels_truncated
     full_kernels = csv_kernels_full
