@@ -111,7 +111,7 @@ Selective rank profiling
 
 When running large-scale MPI jobs, collecting profiling data from all ranks is not always desired.
 The ``--rank-filter-output`` option allows you to specify which MPI ranks should provide profile and trace output.
-Below is an example using `rocpprof-sys-sample` to profile using a variety of rank specification syntax.
+Below is an example using ``rocprof-sys-sample`` to profile using a variety of rank specification syntax.
 
 .. code-block:: bash
 
@@ -138,18 +138,22 @@ Supported rank identification variables:
 - **MV2_COMM_WORLD_RANK**
 - **OMPI_COMM_WORLD_RANK**
 
+If rank detection fails, data is collected from all ranks.
+
 Custom MPI environment variables
 ----------------------------------
 
 For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection.
 When using custom environment variables, both ``--rank-filter-output`` and ``--rank-filter-id`` must be specified.
 The ``--rank-filter-id`` will take precedence over automatic detection.
-Below is an example using the ``MY_CUSTOM_RANK`` environment variable with `rocpprof-sys-sample` to profile ranks 0-3 and 8:
+Below is an example using the ``MY_CUSTOM_RANK`` environment variable with ``rocprof-sys-sample`` to profile ranks 0-3 and 8:
 
 .. code-block:: bash
 
     # Use custom environment variables for rank detection
     mpirun -n 16 rocprof-sys-sample --rank-filter-output 0-3,8 --rank-filter-id MY_CUSTOM_RANK -- <application_path>
+
+If rank detection using the custom variable fails, the above-listed supported variables are used instead.
 
 Profiling RCCL
 ==============
