@@ -330,8 +330,7 @@ You should also test the executables to confirm ROCm Systems Profiler is correct
 Configure the environment
 -----------------------------------
 
-If environment modules are available and preferred, then add them using these commands,
- replacing ``1.0.0`` with the desired version number to load:
+If environment modules are available and preferred, then add them using these commands, replacing ``1.0.0`` with the desired version number to load:
 
 .. code-block:: shell
 
