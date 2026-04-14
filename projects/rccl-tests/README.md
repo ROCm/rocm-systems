@@ -2,6 +2,17 @@
 
 These tests check both the performance and the correctness of RCCL operations. They can be compiled against [RCCL](https://github.com/ROCm/rccl).
 
+## Contents
+
+- [Build](#build)
+- [Usage](#usage)
+  - [Quick examples](#quick-examples)
+  - [Performance](#performance)
+  - [Arguments](#arguments)
+  - [Running multiple operations in parallel](#running-multiple-operations-in-parallel)
+- [Unit Tests](#unit-tests)
+- [Copyright](#copyright)
+
 ## Build
 
 To build the tests, just type `make` or `make -j`
@@ -188,16 +199,22 @@ Here are a few examples:
 
 Note that the reported bandwidth is per group, hence to get the total bandwidth used by all groups, one must multiply by the number of groups.
 
-## Unit tests
+## Unit Tests
 
-Unit tests for rccl-tests are implemented with pytest (python3 is also required). Several notes for the unit tests:
+See [test/README.md](test/README.md) for full documentation on running and configuring the pytest-based unit test suite, including test structure, markers, regression coverage policy, and CI integration.
 
-1. The `LD_LIBRARY_PATH` environment variable will need to be set to include `/path/to/rccl-install/lib/` in order to run the unit tests.
-2. The `HSA_FORCE_FINE_GRAIN_PCIE` environment variable will need to be set to 1 in order to run the unit tests which use fine-grained memory type.
+Quick start — precheckin (standalone + MPI, requires `mpirun` on `PATH`):
 
-The unit tests can be invoked within the rccl-tests root, or in the test subfolder. An example call to the unit tests:
 ```shell
-$ LD_LIBRARY_PATH=/path/to/rccl-install/lib/ HSA_FORCE_FINE_GRAIN_PCIE=1 python3 -m pytest
+export LD_LIBRARY_PATH=/path/to/rccl-install/lib:$LD_LIBRARY_PATH
+export PATH=/path/to/mpi-install/bin:$PATH
+export LD_LIBRARY_PATH=/path/to/mpi-install/lib:$LD_LIBRARY_PATH
+
+cd test
+pip install -r requirements.txt
+
+python3 -m pytest -m "not regression"
+# (or) python3 -m pytest -m "not mpi and not regression" (if you want to skip MPI-based tests)
 ```
 
 ## Copyright
