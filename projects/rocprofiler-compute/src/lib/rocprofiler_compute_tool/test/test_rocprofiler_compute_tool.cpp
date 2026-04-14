@@ -18,6 +18,10 @@ protected:
         test_knobs::set_sdk_callbacks(m_sdk_callbacks);
         test_knobs::set_sdk_wrapper(m_sdk_wrapper);
     }
+    void TearDown() override
+    {
+        test_knobs::reset_cfg();
+    }
 
     static tool_data_t* get_tool_data(const rocprofiler_tool_configure_result_t* cfg)
     {
@@ -29,6 +33,7 @@ protected:
     std::shared_ptr<MockSdkCallbacks>    m_sdk_callbacks;
     std::shared_ptr<MockSdkWrapper>      m_sdk_wrapper;
 };
+
 
 TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_Throws)
 {

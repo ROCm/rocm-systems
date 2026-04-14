@@ -17,6 +17,7 @@ using namespace rocprofiler_compute_tool;
 static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
 static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
 static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
+static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -31,6 +32,11 @@ void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacks>& sdk_call
 void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
 {
     g_sdk_wrapper = sdk_wrapper;
+}
+
+void test_knobs::reset_cfg()
+{
+    g_cfg.reset();
 }
 
 namespace rocprofiler_compute_tool
@@ -256,12 +262,12 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
     auto tool_data = create_tool_data(id);
 
     // create configure data
-    static auto cfg = rocprofiler_tool_configure_result_t{
-        sizeof(rocprofiler_tool_configure_result_t),
-        &tool_init,
-        &tool_fini,
-        static_cast<void*>(new std::unique_ptr<tool_data_t>(std::move(tool_data)))};
+    if (!g_cfg)
+        g_cfg = std::make_shared<rocprofiler_tool_configure_result_t>(
+            rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
+             &tool_init,
+             &tool_fini,
+             static_cast<void*>(new std::unique_ptr<tool_data_t>(std::move(tool_data)))});
 
-    // return pointer to configure data
-    return &cfg;
+    return g_cfg.get();
 }

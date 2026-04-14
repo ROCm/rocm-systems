@@ -17,4 +17,5 @@ namespace rocprofiler_compute_tool::test_knobs
 void set_input_parameters(const std::shared_ptr<InputParameters>& parameters);
 void set_sdk_callbacks(const std::shared_ptr<SdkCallbacks>& sdk_callbacks);
 void set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper);
+void reset_cfg();
 }
