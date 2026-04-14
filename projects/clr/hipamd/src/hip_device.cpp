@@ -65,7 +65,8 @@ bool Device::Create() {
 
   current_mem_pool_ = default_mem_pool_;
 
-  // Create managed memory pool
+  // Create managed memory pool only on devices with HMM support.
+  if (devices()[0]->info().hmmSupported_) {
   const hipMemPoolProps props = {.allocType = hipMemAllocationTypeManaged,
                                  .handleTypes = hipMemHandleTypeNone,
                                  .location = {.type = hipMemLocationTypeDevice,
@@ -74,7 +75,7 @@ bool Device::Create() {
   if (default_managed_mem_pool_ == nullptr) {
     return false;
   }
-  current_managed_mem_pool_ = default_managed_mem_pool_;
+
 
   return true;
 }

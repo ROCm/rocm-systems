@@ -308,6 +308,10 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
   auto device = g_devices[pool_props->location.id];
+  if (pool_props->allocType == hipMemAllocationTypeManaged &&
+      !device->devices()[0]->info().hmmSupported_) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
   auto pool = new hip::MemoryPool(device, pool_props);
   *mem_pool = reinterpret_cast<hipMemPool_t>(pool);
   HIP_RETURN(hipSuccess);
