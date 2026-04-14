@@ -432,7 +432,7 @@ configure_settings(bool _init)
         0.0, "trace", "profile", "perfetto", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_TRACE_REGION",
+        std::string, "ROCPROFSYS_SELECTED_REGIONS",
         "Comma-separated list of roctx region names. When set, only "
         "activity inside roctx regions matching one of these names "
         "(matched against roctxRangeStartA message). Uses process-wide "
@@ -2437,7 +2437,7 @@ get_trace_thread_join()
 std::string
 get_trace_region()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_TRACE_REGION");
+    static auto _v = get_config()->find("ROCPROFSYS_SELECTED_REGIONS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 

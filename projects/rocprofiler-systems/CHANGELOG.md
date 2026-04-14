@@ -4,6 +4,16 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
+
+### Changed
+
+- Renamed environment variable `ROCPROFSYS_TRACE_REGION` to `ROCPROFSYS_SELECTED_REGIONS` for selective region tracing.
+
+### Added
+
+- `--selected-regions` CLI argument to `rocprof-sys-sample`, `rocprof-sys-run`, and `rocprof-sys-instrument` for specifying selective region tracing from the command line.
+
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
 ### Added
