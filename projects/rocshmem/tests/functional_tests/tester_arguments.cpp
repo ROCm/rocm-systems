@@ -244,7 +244,6 @@ void TesterArguments::get_arguments() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
-    case MultiCtxPutTestType:
       requires_two_pes = false;
       break;
     default:

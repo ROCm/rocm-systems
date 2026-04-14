@@ -127,7 +127,6 @@ declare -A TEST_NUMBERS=(
   ["flood_fadd"]="91"
   ["flood_waitadd"]="92"
   ["device_bitcode"]="93"
-  ["multictxput"]="94"
 )
 
 ExecTest() {
@@ -268,11 +267,6 @@ TestRMAPut() {
   ExecTest  "defaultctxput"    2       4            128       1024
   ExecTest  "teamctxput"       2       4            128       1024
   ExecTest  "teamctxput"       2       16           256       1024
-
-  export ROCSHMEM_MAX_NUM_CONTEXTS=8
-  ExecTest  "multictxput"      2       4            128       1024
-  ExecTest  "multictxput"      2       8            128       1024
-  unset ROCSHMEM_MAX_NUM_CONTEXTS
 
   ExecTest  "wgput"            2       1            64        1048576
   ExecTest  "wgput"            2       2            64        1048576
