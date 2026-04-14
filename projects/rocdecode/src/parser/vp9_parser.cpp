@@ -145,7 +145,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     return ret;
                 }
                 if ((ret = SendPicForDecode()) != PARSER_OK) {
-                    ErrorLog(g_rocdec_logger, STR("Failed to decode!"));
+                    ErrorLog(g_rocdec_logger, ROCDEC_STR("Failed to decode!"));
                     return ret;
                 }
         #if DBGINFO
@@ -544,7 +544,7 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
         }
     }
     if (p_uncomp_header->frame_size.frame_width == 0 && p_uncomp_header->frame_size.frame_height == 0) {
-        ErrorLog(g_rocdec_logger, "Invalid picture size: width = " + TOSTR(p_uncomp_header->frame_size.frame_width) + ", height = " + TOSTR(p_uncomp_header->frame_size.frame_height) + ".");
+        ErrorLog(g_rocdec_logger, "Invalid picture size: width = " + ROCDEC_TOSTR(p_uncomp_header->frame_size.frame_width) + ", height = " + ROCDEC_TOSTR(p_uncomp_header->frame_size.frame_height) + ".");
         return PARSER_WRONG_STATE;
     }
 
@@ -601,11 +601,11 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     }
     uncomp_header_size_ = (offset + 7) >> 3;
     if (uncomp_header_size_ > size) {
-        ErrorLog(g_rocdec_logger, "Uncompressed header size (" + TOSTR(uncomp_header_size_) + ") exceeds frame data size (" + TOSTR(size) + ")");
+        ErrorLog(g_rocdec_logger, "Uncompressed header size (" + ROCDEC_TOSTR(uncomp_header_size_) + ") exceeds frame data size (" + ROCDEC_TOSTR(size) + ")");
         return PARSER_WRONG_STATE;
     }
     if (p_uncomp_header->header_size_in_bytes > (size - uncomp_header_size_)) {
-        ErrorLog(g_rocdec_logger, "header_size_in_bytes (" + TOSTR(p_uncomp_header->header_size_in_bytes) + ") exceeds allowed size (" + TOSTR(size - uncomp_header_size_) + ")");
+        ErrorLog(g_rocdec_logger, "header_size_in_bytes (" + ROCDEC_TOSTR(p_uncomp_header->header_size_in_bytes) + ") exceeds allowed size (" + ROCDEC_TOSTR(size - uncomp_header_size_) + ")");
         return PARSER_WRONG_STATE;
     }
     return PARSER_OK;
@@ -614,17 +614,17 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
 ParserResult Vp9VideoParser::FrameSyncCode(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
     p_uncomp_header->frame_sync_code.frame_sync_byte_0 = Parser::ReadBits(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_0 != 0x49) {
-        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_0 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_0) + " but shall be equal to 0x49.");
+        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_0 is " + ROCDEC_TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_0) + " but shall be equal to 0x49.");
         return PARSER_INVALID_ARG;
     }
     p_uncomp_header->frame_sync_code.frame_sync_byte_1 = Parser::ReadBits(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_1 != 0x83) {
-        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_1 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_1) + " but shall be equal to 0x83.");
+        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_1 is " + ROCDEC_TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_1) + " but shall be equal to 0x83.");
         return PARSER_INVALID_ARG;
     }
     p_uncomp_header->frame_sync_code.frame_sync_byte_2 = Parser::ReadBits(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_2 != 0x42) {
-        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_2 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_2) + " but shall be equal to 0x42.");
+        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_2 is " + ROCDEC_TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_2) + " but shall be equal to 0x42.");
         return PARSER_INVALID_ARG;
     }
     return PARSER_OK;

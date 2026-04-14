@@ -71,7 +71,7 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
-            ErrorLog(g_rocdec_logger, STR("Parser failed!"));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Parser failed!"));
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -110,7 +110,7 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Decode the picture
         if (SendPicForDecode() != PARSER_OK) {
-            ErrorLog(g_rocdec_logger, STR("Failed to decode!"));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Failed to decode!"));
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
@@ -168,7 +168,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     do {
         ret = GetNalUnit();
         if (ret == PARSER_NOT_FOUND) {
-            ErrorLog(g_rocdec_logger, STR("Error: no start code found in the frame data."));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: no start code found in the frame data."));
             return ret;
         }
 
@@ -364,7 +364,7 @@ ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
             break;
         }
         default:
-            ErrorLog(g_rocdec_logger, STR("Error: Sequence Callback function - Chroma Format is not supported"));
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: Sequence Callback function - Chroma Format is not supported"));
             return PARSER_FAIL;
     }
     int chroma_array_type = p_sps->separate_colour_plane_flag ? 0 : p_sps->chroma_format_idc;

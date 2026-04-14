@@ -55,7 +55,7 @@ public:
         hipError_t hip_status = hipSuccess;
         hip_status = hipMemcpyDtoH((void *)hstPtr, data_buf, buf_size);
         if (hip_status != hipSuccess) {
-            CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + TOSTR(hip_status) + ")");
+            CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + ROCDEC_TOSTR(hip_status) + ")");
             delete [] hstPtr;
             return;
         }
@@ -80,7 +80,7 @@ public:
             hipError_t hip_status = hipSuccess;
             hip_status = hipMemcpyDtoH((void *)hst_ptr, surf_mem, output_image_size);
             if (hip_status != hipSuccess) {
-                CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + TOSTR(hip_status) + ")");
+                CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + ROCDEC_TOSTR(hip_status) + ")");
                 delete [] hst_ptr;
                 return;
             }

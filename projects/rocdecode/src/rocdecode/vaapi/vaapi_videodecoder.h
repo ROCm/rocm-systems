@@ -45,7 +45,7 @@ THE SOFTWARE.
 #define CHECK_HIP(call) {\
     hipError_t hip_status = call;\
     if (hip_status != hipSuccess) {\
-        CriticalLog(g_rocdec_logger, STR("HIP failure: ") + #call + " failed with 'status: " + STR(hipGetErrorName(hip_status)) + "' at " + __FILE__ + ":" + TOSTR(__LINE__));\
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("HIP failure: ") + #call + " failed with 'status: " + ROCDEC_STR(hipGetErrorName(hip_status)) + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }
@@ -53,7 +53,7 @@ THE SOFTWARE.
 #define CHECK_VAAPI(call) {\
     VAStatus va_status = call;\
     if (va_status != VA_STATUS_SUCCESS) {\
-        CriticalLog(g_rocdec_logger, STR("VAAPI failure: ") + #call + " failed with 'status: " + TOSTR(va_status) + ": " + STR(vaErrorStr(va_status)) + "' at " + __FILE__ + ":" + TOSTR(__LINE__));\
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("VAAPI failure: ") + #call + " failed with 'status: " + ROCDEC_TOSTR(va_status) + ": " + ROCDEC_STR(vaErrorStr(va_status)) + "' at " + __FILE__ + ":" + ROCDEC_TOSTR(__LINE__));\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }

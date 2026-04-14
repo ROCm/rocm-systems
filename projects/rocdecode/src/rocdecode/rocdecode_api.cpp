@@ -43,7 +43,7 @@ rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *d
         handle = new DecHandle(*decoder_create_info);
     }
     catch(const std::exception& e) {
-        CriticalLog(g_rocdec_logger, "Error: Failed to init the rocDecode handle, " + STR(e.what()));
+        CriticalLog(g_rocdec_logger, "Error: Failed to init the rocDecode handle, " + ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }
@@ -114,7 +114,7 @@ rocDecDecodeFrame(rocDecDecoderHandle decoder_handle, RocdecPicParams *pic_param
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        CriticalLog(g_rocdec_logger, STR(e.what()));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -143,7 +143,7 @@ rocDecGetDecodeStatus(rocDecDecoderHandle decoder_handle, int pic_idx, RocdecDec
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        CriticalLog(g_rocdec_logger, STR(e.what()));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -170,7 +170,7 @@ rocDecReconfigureDecoder(rocDecDecoderHandle decoder_handle, RocdecReconfigureDe
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        CriticalLog(g_rocdec_logger, STR(e.what()));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }
@@ -201,7 +201,7 @@ rocDecGetVideoFrame(rocDecDecoderHandle decoder_handle, int pic_idx,
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        CriticalLog(g_rocdec_logger, STR(e.what()));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR(e.what()));
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_RUNTIME_ERROR;
     }

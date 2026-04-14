@@ -87,13 +87,13 @@ RocVideoDecoder::~RocVideoDecoder() {
               if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                   hipError_t hip_status = hipFree(p_frame.frame_ptr);
                   if (hip_status != hipSuccess) {
-                      CriticalLog(g_rocdec_logger, "hipFree failed! (" + TOSTR(hip_status) + ")");
+                      CriticalLog(g_rocdec_logger, "hipFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
                   }
               }
               else {
                   hipError_t hip_status = hipHostFree(p_frame.frame_ptr);
                   if (hip_status != hipSuccess) {
-                      CriticalLog(g_rocdec_logger, "hipHostFree failed! (" + TOSTR(hip_status) + ")");
+                      CriticalLog(g_rocdec_logger, "hipHostFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
                   }
               }
               p_frame.frame_ptr = nullptr;
@@ -104,7 +104,7 @@ RocVideoDecoder::~RocVideoDecoder() {
         hipError_t hip_status = hipSuccess;
         hip_status = hipStreamDestroy(hip_stream_);
         if (hip_status != hipSuccess) {
-            CriticalLog(g_rocdec_logger, "hipStreamDestroy failed! (" + TOSTR(hip_status) + ")");
+            CriticalLog(g_rocdec_logger, "hipStreamDestroy failed! (" + ROCDEC_TOSTR(hip_status) + ")");
         }
     }
 
@@ -422,7 +422,6 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
         << videoDecodeCreateInfo.display_rect.right << ", " << videoDecodeCreateInfo.display_rect.bottom << "]" << std::endl
         << "\tResize       : " << videoDecodeCreateInfo.target_width << "x" << videoDecodeCreateInfo.target_height << std::endl
     ;
-    input_video_info_str_ << std::endl;
     g_rocdec_logger.AlwaysLog(input_video_info_str_.str());
 
     ROCDEC_API_CALL(rocDecCreateDecoder(&roc_decoder_, &videoDecodeCreateInfo));
@@ -513,11 +512,11 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
             if (p_frame->frame_ptr) {
               if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                   hipError_t hip_status = hipFree(p_frame->frame_ptr);
-                  if (hip_status != hipSuccess) CriticalLog(g_rocdec_logger, "hipFree failed! (" + TOSTR(hip_status) + ")");
+                  if (hip_status != hipSuccess) CriticalLog(g_rocdec_logger, "hipFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
               }
               else {
                   hipError_t hip_status = hipHostFree(p_frame->frame_ptr);
-                  if (hip_status != hipSuccess) CriticalLog(g_rocdec_logger, "hipHostFree failed! (" + TOSTR(hip_status) + ")");
+                  if (hip_status != hipSuccess) CriticalLog(g_rocdec_logger, "hipHostFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
               }
             }
             // pop decoded frame
@@ -675,7 +674,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
  */
 int RocVideoDecoder::HandlePictureDecode(RocdecPicParams *pPicParams) {
     if (!roc_decoder_) {
-        ROCDEC_THROW("RocDecoder not initialized: failed with ErrCode: " +  TOSTR(ROCDEC_NOT_INITIALIZED), ROCDEC_NOT_INITIALIZED);
+        ROCDEC_THROW("RocDecoder not initialized: failed with ErrCode: " +  ROCDEC_TOSTR(ROCDEC_NOT_INITIALIZED), ROCDEC_NOT_INITIALIZED);
     }
     pic_num_in_dec_order_[pPicParams->curr_pic_idx] = decode_poc_++;
     ROCDEC_API_CALL(rocDecDecodeFrame(roc_decoder_, pPicParams));
@@ -829,7 +828,7 @@ int RocVideoDecoder::GetSEIMessage(RocdecSeiMessageInfo *pSEIMessageInfo) {
       RocdecSeiMessage *p_sei_msg_info = pSEIMessageInfo->sei_message;
       size_t total_SEI_buff_size = 0;
       if ((pSEIMessageInfo->picIdx < 0) || (pSEIMessageInfo->picIdx >= MAX_FRAME_NUM)) {
-          CriticalLog(g_rocdec_logger, "Invalid picture index for SEI message: " + TOSTR(pSEIMessageInfo->picIdx));
+          CriticalLog(g_rocdec_logger, "Invalid picture index for SEI message: " + ROCDEC_TOSTR(pSEIMessageInfo->picIdx));
           return 0;
       }
       for (uint32_t i = 0; i < sei_num_mesages; i++) {
@@ -965,7 +964,7 @@ void RocVideoDecoder::SaveFrameToFile(std::string output_file_name, void *surf_m
         hipError_t hip_status = hipSuccess;
         hip_status = hipMemcpyDtoH((void *)hst_ptr, surf_mem, output_image_size);
         if (hip_status != hipSuccess) {
-            CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + STR(hipGetErrorName(hip_status)) + ")");
+            CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + ROCDEC_STR(hipGetErrorName(hip_status)) + ")");
             delete [] hst_ptr;
             return;
         }
@@ -1124,7 +1123,7 @@ void RocVideoDecoder::WaitForDecodeCompletion() {
     do {
         rocDecStatus result = rocDecGetDecodeStatus(roc_decoder_, last_decode_surf_idx_, &dec_status);
         if (result != ROCDEC_SUCCESS) {
-            CriticalLog(g_rocdec_logger, "rocDecGetDecodeStatus failed for picture_index: " + TOSTR(last_decode_surf_idx_));
+            CriticalLog(g_rocdec_logger, "rocDecGetDecodeStatus failed for picture_index: " + ROCDEC_TOSTR(last_decode_surf_idx_));
             return;
         }
     } while (dec_status.decode_status == rocDecodeStatus_InProgress);
