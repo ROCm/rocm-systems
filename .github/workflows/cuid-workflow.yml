@@ -131,6 +131,9 @@ jobs:
           mkdir -p $OUTPUT_DIR
           TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
 
+          # set up environment for test execution
+          /opt/amdcuid/bin/amdcuid_daemon &
+
           # Run the test binary
           if /opt/amdcuid/share/amd_cuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
              echo "CUID tests passed"
