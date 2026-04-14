@@ -195,8 +195,10 @@ amdgpu_regnum_to_dwarf_register (amdgpu_regnum_t regnum)
 }
 
 std::optional<amdgpu_regnum_t>
-dwarf_register_to_amdgpu_regnum (uint64_t dwarf_register)
+dwarf_register_to_amdgpu_regnum (uint64_t dwarf_register_)
 {
+  auto dwarf_register = utils::narrow<int> (dwarf_register_);
+
   /* See https://llvm.org/docs/AMDGPUUsage.html#register-mapping.  */
   if (dwarf_register == 1)
     {

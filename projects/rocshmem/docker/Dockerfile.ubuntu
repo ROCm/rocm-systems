@@ -1,0 +1,226 @@
+FROM rocm/dev-ubuntu-24.04:latest
+# You can also pick a specific rocm version, Ubuntu version
+#FROM rocm/dev-ubuntu-24.04:7.2.1
+#FROM rocm/dev-ubuntu-22.04:7.2.1
+# If you plan on testing VLLM/DeepEP this is a good base
+#FROM rocm/pytorch:rocm7.2_ubuntu24.04_py3.12_pytorch_release_2.9.1
+
+LABEL org.opencontainers.image.title="ROCm rocSHMEM Container"
+LABEL org.opencontainers.image.description="Container for rocSHMEM development with MPI support"
+LABEL org.opencontainers.image.authors="rocshmem-maintainers@amd.com"
+LABEL org.opencontainers.image.documentation="https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/docker"
+LABEL org.opencontainers.image.source="https://github.com/ROCm/rocm-systems/projects/rocshmem"
+
+WORKDIR /app
+# OPTIONAL: Add a help command
+COPY --chmod=+x <<-'EOT' /app/help
+#!/bin/bash
+cat /app/README.md
+EOT
+ENV PATH="${PATH}:/app/"
+COPY <<-'EOT' README.md
+Container for rocSHMEM development with MPI support
+===================================================
+
+* Source: https://github.com/ROCm/rocm-systems/projects/rocshmem
+* Documentation: https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/docker
+* Contact: rocshmem-maintainers@amd.com
+
+Building the container
+----------------------
+
+```bash
+docker build --tag $USER/rocshmem .
+```
+
+Build parameters:
+
+* Build a PR branch AND devel in the container: `docker build --build-arg PR_NUM=4574 --tag $USER/rocshmem-pr4574 .`
+* Use a different SSH port: `docker build --build-arg SSH_PORT=2223 --tag $USER/rocshmem .`
+
+Moving the image to compute nodes:
+
+`for node in node01 node02; do docker save $USER/rocshmem | ssh $node docker load; done`
+
+Adding DeepEP/VLLM
+------------------
+
+This dockerfile does not contain, but can easily be adapted to build DeepEP/VLLM.
+However, we recommend following up-to-date instructions from https://github.com/ROCm/DeepEP?tab=readme-ov-file#development.
+
+If you still want to adapt this dockerfile:
+1. Change the FROM to use a rocm/pytorch base, and uncomment OPTIONAL dependencies.
+2. ADD rocm/deepep and RUN setup.py to build it in the docker.
+
+How to run examples
+-------------------
+
+1. Sanity check: print IB/RoCE info, notably firmware version
+
+```bash
+docker run -it --rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
+  # Broadcom Thor2 specific options to import the host bnxt driver libraries (note: Thor2 bnxt GDA requires specific firmware version)
+    -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so \
+  # Pensando AMD Pollara specific options to import host ionic driver libraries (note: Pollara ionic GDA requires specific firmware version)
+    -v /sys/class/infiniband:/sys/class/infiniband -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1 -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so \
+    -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so \
+    -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver \
+  $USER/rocshmem ibv_devinfo
+```
+
+2. Sanity checks, print hardware as seen by rocSHMEM
+
+```bash
+docker run -it --rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
+  # Broadcom Thor2 options to import host driver libraries (note: Thor2 bnxt GDA requires specific firmware version)
+    -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so \
+  # Pensando AMD Pollara options to import host driver libraries (note: Pollara ionic GDA requires specific firmware version)
+    -v /sys/class/infiniband:/sys/class/infiniband -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1 -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so \
+    -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so \
+    -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver \
+  $USER/rocshmem tools/rocshmem_info
+```
+
+3. Launch persistent containers (you can use srun, pdsh, ssh, kubernetes, etc to deploy the containers, we show an example with srun here)
+
+```bash
+srun -N2 --ntasks-per-node=1 --gpus=8 \
+  docker run -d --rm \
+    --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged
+    # Broadcom Thor2 options to import host driver libraries (note: Thor2 bnxt GDA requires specific firmware version)
+      -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so  -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so \
+    # Pensando AMD Pollara options to import host driver libraries (note: Pollara ionic GDA requires specific firmware version)
+      -v /sys/class/infiniband:/sys/class/infiniband -v /usr/lib/x86_64-linux-gnu/libionic.so.1:/usr/lib/x86_64-linux-gnu/libionic.so.1 -v /usr/lib/x86_64-linux-gnu/libionic.so:/usr/lib/x86_64-linux-gnu/libionic.so \
+      -v /usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libionic-rdmav34.so \
+      -v /etc/libibverbs.d/ionic.driver:/etc/libibverbs.d/ionic.driver \
+    --name $USER-rocshmem $USER/rocshmem \
+# Default command will run rocshmem_info, then launch SSHD, lets print the outcome.
+&& sleep 5 && srun -N 2 --ntasks-per-node=1 -l docker logs $USER-rocshmem
+```
+
+4. Run a simple rocshmem_waveput_nbi test with 16 Workgroups, 256 threads per WG in the persistent containers
+
+`srun -n1 docker exec -it -e ROCSHMEM_DEBUG_LEVEL=ENV $USER-rocshmem mpiexec --report-bindings -n 2 tests/functional_tests/rocshmem_functional_tests -a 31 -w 16 -z 256`
+
+5. Run the full rocSHMEM testsuite in the persistent containers
+
+`srun -n1 docker exec -it $USER-rocshmem bash tests/rocshmem_functional_driver.sh /app/build/tests/functional_tests/rocshmem_functional_tests gda logs`
+
+Important directories
+---------------------
+
+1. `/app/build1234`: if `--build-arg PR_NUM=1234` is provided, this is a build of the selected PR branch. This is the default working directory.
+2. `/app/build`: this is a build of the _develop_ branch.
+3. `/app/rocm-systems/projects/rocshmem`: source directory, it is a git repo, you may fetch, checkout and created new build directories as needed.
+4. `/root/rocshmem`: the default install directory, if you build DeepEP it will pull rocshmem from that location.
+5. `/app/ompi`: build of Open MPI with UCX support as required to run RO backend.
+
+EOT
+
+# Enable CRB and install system dependencies
+RUN apt-get update \
+ && apt-get install -y software-properties-common \
+ && apt-get update \
+ && apt-get install -y \
+      build-essential autoconf libtool flex bison pkg-config cmake git wget curl ca-certificates \
+      libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
+# OPTIONAL: reqired to use mpirun launcher
+      openssh-server \
+# OPTIONAL: required to build VLLM/DeepEP
+#      libsqlite3-dev libfmt-dev libmsgpack-dev libsuitesparse-dev \
+#      libboost-all-dev \
+#      libgrpc++-dev protobuf-compiler-grpc protobuf-compiler libprotobuf-dev \
+#      libaio-dev liburing-dev pybind11-dev ninja-build libgflags-dev \
+# OPTIONAL: devel tooling to modify code and tweak inside the image
+#      vim cmake-curses-gui \
+# Cleanup
+ && apt-get autoremove -y \
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+# Optional: remove sccache if present
+ && (rm -f "$(which sccache)" 2>/dev/null || true) \
+ && (python3 -m pip uninstall -y sccache || true)
+# Install Python dependencies for VLLM/DeepEP
+#RUN pip3 install --upgrade pip && \
+#    pip3 install "pybind11[global]" meson==0.64.0 && \
+#    pip install setuptools==75.1.0 &&
+
+# OPTIONAL: Setup ssh (only needed to use mpirun launch method, e.g., rocshmem functional tests)
+# The following block is OPTIONAL and can be commented out if you only want to run 1-node testing
+# Note: all deployed containers must share the SAME KEY!
+#   Same docker image build must be deployed on all nodes (docker save, docker load)
+ARG SSH_PORT=2222
+RUN ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+# Alternative: comment line above, uncomment lines below:
+#   import an invariant ssh-key from outside the docker (so you can build the docker on each nodes)
+#COPY id_ed25519 /root/.ssh/id_ed25519
+#COPY id_ed25519.pub /root/.ssh/id_ed25519.pub
+RUN cat ~/.ssh/id_ed25519.pub >~/.ssh/authorized_keys && \
+    sed -i "s/#Port 22/Port $SSH_PORT/" /etc/ssh/sshd_config && \
+    mkdir -p /run/sshd && ssh-keygen -A && \
+    echo " StrictHostKeyChecking=accept-new" >>/root/.ssh/config
+CMD ["sh", "-c", "\
+        set -e; \
+        src/tools/rocshmem_info \
+     && echo \"Starting SSH server for mpiexec with OMPI_MCA_plm_rsh_arg=$OMPI_MCA_plm_rsh_args\" \
+     && exec /usr/sbin/sshd -D"]
+# End of ssh setup
+
+# OPTIONAL: Install rocm-enabled IB perftest (used to validate if network config is sane)
+# The following block is OPTIONAL and can be commented out if you only want to run rocSHMEM
+WORKDIR /app
+RUN git clone https://github.com/ROCm/rdma-perftest
+WORKDIR /app/rdma-perftest/
+RUN ./autogen.sh \
+ && ./configure --enable-rocm --with-rocm=/opt/rocm \
+ && make -j 8 #install
+
+# Clone rocSHMEM
+WORKDIR /app
+RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && cd rocm-systems \
+ && git sparse-checkout set --cone projects/rocshmem \
+ && git checkout develop
+
+# Install dependencies
+# OPTIONAL: install UCX/MPI to test RO (MPI with host-proxy) conduit
+RUN INSTALL_DIR=/app/ompi bash /app/rocm-systems/projects/rocshmem/scripts/install_dependencies.sh
+ENV PATH="/app/ompi/bin:${PATH}"
+
+# Build rocSHMEM develop
+WORKDIR /app/rocm-systems/projects/rocshmem
+RUN mkdir -p /app/build
+WORKDIR /app/build
+RUN /app/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
+      -DUSE_EXTERNAL_MPI=OFF \
+      -DMPI_ROOT=/app/ompi
+
+# OPTIONAL: Build a rocSHMEM PR for easy comparison with develop
+ARG PR_NUM
+WORKDIR /app/rocm-systems/projects/rocshmem
+RUN test -n "$PR_NUM" \
+ && git fetch origin pull/$PR_NUM/head \
+ && git checkout FETCH_HEAD \
+#&& git rebase develop \
+ || test -z "$PR_NUM"
+RUN test -n "$PR_NUM" \
+ && mkdir -p /app/build$PR_NUM && cd /app/build$PR_NUM \
+ && /app/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
+      -DUSE_EXTERNAL_MPI=OFF \
+      -DMPI_ROOT=/app/ompi \
+ || test -z "$PR_NUM"
+# WORKDIR defaults to the PR build, or develop build if PR not built
+WORKDIR /app/build${PR_NUM}
+
+# Add environment for running, tune as needed
+ENV ROCSHMEM_TEST_UUID=1 ROCSHMEM_HEAP_SIZE=6442450944
+# FOR One node GDA testing
+#ENV ROCSHMEM_DISABLE_MIXED_IPC=1
+ENV OMPI_MCA_plm_rsh_args=-p$SSH_PORT \
+    OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+# System dependent: you may need to select a different PML on some network types, note RO should not be used in this configuration
+#ENV OMPI_MCA_pml=ob1 OMPI_MCA_osc=rdma
+# System dependent: you may need to force the bootstrap TCP interface if autodetection picks a non-routable iface
+#ENV OMPI_MCA_oob_tcp_if_include=
+#ENV ROCSHMEM_BOOTSTRAP_SOCKET_IFNAME=
+# System dependent: Ignore service/backend RoCE ifaces
+#ENV ROCSHMEM_HCA_LIST=^mlx5_6
+

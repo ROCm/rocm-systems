@@ -11,7 +11,6 @@
 #endif
 
 #include "rccl_metadata.h"
-#include "msccl/msccl_struct.h"
 #include "network/unpack/unpack.h"
 #include <cassert>
 
@@ -453,50 +452,6 @@ private:
     }
   }
 
-  template <int REDUCE, int COPY, int MULTISRCS, int MULTIDSTS>
-  __device__ __forceinline__ void mscclGenericOp(T** srcs, int nsrcs, T** dsts, int ndsts, int nelem) {
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    nelem = nelem < 0 ? 0 : nelem;
-    if (tid < nworkers) {
-      if (REDUCE){
-        srcs[nsrcs] = dsts[0];
-        nsrcs++;
-        if (MULTISRCS){
-          reduceCopy<Unroll, useAcc, RedOp, T, 0, 3, MSCCL_MAX_REDUCE_FUSION, 0, 1, 1, 0, Pipeline>
-            (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, nsrcs, (void **)srcs, 1, (void **)dsts, nelem);
-        } else {
-          reduceCopy<Unroll, useAcc, RedOp, T, 0, 2, 2, 0, 1, 1, 0, Pipeline>
-            (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, 2, (void **)srcs, 1, (void **)dsts, nelem);
-        }
-      }
-      if (COPY){
-        reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, 0>
-          (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, 1, (void **)srcs, 1, (void **)dsts, nelem);
-        if (MULTISRCS) {
-          for (int i = 1; i < nsrcs; i++){
-            reduceCopy<Unroll, useAcc, RedOp, T, 0, 1, 1, 0, 1, 1, 0>
-              (tid, nworkers, ncclShmem.redOpArgs[0], ncclShmem.redOpArgs, false, 1, (void **)&srcs[i], 1, (void **)&dsts[i], nelem);
-          }
-        }
-      }
-    }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    barrier();
-  }
-
 public:
   static inline __device__ void sendPeerNotify(int peer, int connIndex, int steps) {
 #ifdef ENABLE_WARP_SPEED
@@ -785,7 +740,7 @@ public:
     barriers_pat = &ncclShmem.barrier_pat;
     this->nworkers = nthreads;
 #ifdef ENABLE_WARP_SPEED
-    auto *channel = isMsccl(Metadata) ? &ncclShmem.channel : &ncclShmem.warpChannel[tidInBlock/WARP_SIZE];
+    auto *channel = &ncclShmem.warpChannel[tidInBlock/WARP_SIZE];
 #else
     auto *channel = &ncclShmem.channel;
 #endif
@@ -1074,7 +1029,6 @@ public:
     }
   }
 
-  // Set MSCCL data pointers
   __device__ __forceinline__ void setDataPtrs(void const *inputBuf, void *outputBuf = nullptr) {
     if (tid==0) {
       ncclShmem.groups[group].userInput = (T*)inputBuf;
@@ -1371,11 +1325,4 @@ public:
     }
   }
 
-  // MSCCL primitives
-  __device__ __forceinline__ void sendWithBarrier(intptr_t inpIx, int eltN) {
-    send(inpIx, eltN);
-  }
-  __device__ __forceinline__ void localCopy(T* srcs, T* dsts, int eltN) {
-    return mscclGenericOp<0,1,0,0>(&srcs, 1, &dsts, 1, eltN);
-  }
 };

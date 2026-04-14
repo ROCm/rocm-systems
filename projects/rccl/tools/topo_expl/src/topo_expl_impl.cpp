@@ -798,8 +798,6 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
   comm->topo->pivotA2ANumBiRings = 0;
   // LL128
   comm->topo->ll128Enabled = false;
-  // Topology hint for MSCCL internal scheduler about whether to enable MSCCL
-  comm->topo->mscclEnabled = false;
   // Topology hint if tree has been defined by model or User
   comm->topo->treeDefined = false;
   // Compute paths between GPUs and NICs
@@ -955,7 +953,6 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
-  allGather3Data[rank].mscclEnabled = comm->topo->mscclEnabled;
 
   for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
     allGather3Data[rank].graphInfo[a].pattern = graphs[a]->pattern;
@@ -1057,7 +1054,6 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
     // Make sure we align all ranks so that the tuning is consistent across ranks
     comm->topo->pivotA2AEnabled = comm->topo->pivotA2AEnabled && allGather3Data[i].pivotA2AEnabled;
     comm->topo->ll128Enabled = comm->topo->ll128Enabled && allGather3Data[i].ll128Enabled;
-    comm->topo->mscclEnabled = comm->topo->mscclEnabled && allGather3Data[i].mscclEnabled;
     for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
       graphs[a]->nChannels = std::min(allGather3Data[i].graphInfo[a].nChannels, graphs[a]->nChannels);
       graphs[a]->sameChannels = std::min(allGather3Data[i].graphInfo[a].sameChannels, graphs[a]->sameChannels);

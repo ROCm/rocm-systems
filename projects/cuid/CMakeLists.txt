@@ -77,6 +77,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # When cmake -DBUILD_TESTS=off, it will not build CUID tests.
 option(BUILD_TESTS "Build test suite" OFF)
+# When cmake -DBUILD_EXAMPLES=off, it will not build CUID examples
+option(BUILD_EXAMPLES "Build examples" OFF)
 
 # Version-independent directory shared by all installed versions.
 # The HMAC key and daemon config file are stored here so that multi-version
@@ -94,9 +96,6 @@ else()
         CACHE PATH "Version-independent directory for the HMAC key and daemon config."
     )
 endif()
-
-# When cmake -DBUILD_EXAMPLES=off, it will not build CUID examples
-option(BUILD_EXAMPLES "Build examples" OFF)
 
 if(WIN32)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -128,6 +127,12 @@ set(TESTS_COMPONENT "tests")
 add_subdirectory(lib)
 add_subdirectory(cli)
 add_subdirectory(daemon)
+if(BUILD_EXAMPLES)
+    add_subdirectory(example)
+endif()
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
 
 # Uninstall target
 # NOTE: /etc/amdcuid/ (HMAC key + config) is intentionally left in place by
@@ -143,12 +148,4 @@ if(NOT TARGET uninstall)
         COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
         COMMENT "Uninstalling ${AMDCUID} ..."
     )
-endif()
-
-if(BUILD_EXAMPLES)
-    add_subdirectory(example)
-endif()
-
-if(BUILD_TESTS)
-    add_subdirectory(tests)
 endif()

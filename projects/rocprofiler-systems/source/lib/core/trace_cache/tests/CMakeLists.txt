@@ -28,6 +28,7 @@ set(trace_cache_tests_sources
     test_flush_worker.cpp
     test_cache_integration.cpp
     test_sample_type.cpp
+    test_kfd_args.cpp
     test_rocpd_xcp_output.cpp
 )
 

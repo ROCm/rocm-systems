@@ -296,7 +296,7 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ void mlx5_quiet(ActiveWFInfo &wf_info);
+  __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
 #if defined(GDA_BNXT)
@@ -317,7 +317,7 @@ class QueuePair {
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ void bnxt_quiet(ActiveWFInfo &wf_info);
+  __device__ void bnxt_quiet();
   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)

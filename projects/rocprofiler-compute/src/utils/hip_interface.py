@@ -253,9 +253,12 @@ class HIPError(Exception):
 class HIPDeviceMemory:
     def __init__(self, ptr: POINTER) -> None:
         self.ptr = ptr
+        self._freed = False
 
     def __del__(self) -> None:
-        _lib.hipFree(self.ptr)
+        if not self._freed and self.ptr and getattr(self.ptr, "value", 0):
+            _lib.hipFree(self.ptr)
+            self._freed = True
 
 
 class HIPEvent:

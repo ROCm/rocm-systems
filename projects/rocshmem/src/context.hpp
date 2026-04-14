@@ -115,10 +115,6 @@ class Context {
 
   __device__ void threadfence_system();
 
-  __device__ void ctx_create();
-
-  __device__ void ctx_destroy();
-
   __device__ void putmem(void* dest, const void* source, size_t nelems, int pe);
 
   __device__ void getmem(void* dest, const void* source, size_t nelems, int pe);

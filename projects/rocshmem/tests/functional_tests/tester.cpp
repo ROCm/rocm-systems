@@ -783,7 +783,7 @@ void Tester::print(uint64_t size) {
   }
 
   /**
-   * Calculate total amount of data transfered
+   * Calculate total amount of data transferred
    */
   size_t total_size = size_factor * size * num_timed_msgs;
   size_t volume = total_size / num_loops;

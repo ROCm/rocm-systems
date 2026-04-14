@@ -294,6 +294,9 @@ namespace envvar {
         NONE,
         VERSION,
         WARN,
+        ENV,
+        ENV_ALL,
+        ENV_FULL,
         INFO,
         TRACE,
       };
@@ -523,6 +526,61 @@ namespace envvar {
     // Number of QPs to create per PE for each user context
     extern const var<size_t> num_qps_per_pe_usr_ctx;
   }  // namespace gda
+
+  /**
+   * @brief Print mode for environment variables
+   */
+  enum class print_mode {
+    /**
+     * Print only modified variables (name=value)
+     * Example: ROCSHMEM_HEAP_SIZE=2147483648
+     */
+    MODIFIED,
+
+    /**
+     * Print all variables with name and value
+     * Example: ROCSHMEM_HEAP_SIZE=1073741824
+     */
+    ALL_VALUES,
+
+    /**
+     * Print all variables with full documentation (name, description, default, current)
+     * Example:
+     *   ROCSHMEM_HEAP_SIZE
+     *     Description: Size of symmetric heap...
+     *     Default: 1073741824
+     *     Current: 1073741824 (using default)
+     */
+    FULL_DOCUMENTATION
+  };
+
+  /**
+   * @brief Print rocSHMEM environment variables
+   *
+   * This function prints rocSHMEM environment variables in different formats
+   * depending on the mode parameter.
+   *
+   * @param mode Print mode (MODIFIED, ALL_VALUES, or FULL_DOCUMENTATION)
+   * @param os Output stream to write to (defaults to std::cout)
+   *
+   * Example usage:
+   * @code
+   *   // Print only modified variables
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::MODIFIED);
+   *
+   *   // Print all variables with values
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::ALL_VALUES);
+   *
+   *   // Print full documentation
+   *   rocshmem::envvar::print_envvars(rocshmem::envvar::print_mode::FULL_DOCUMENTATION);
+   * @endcode
+   *
+   * @note This function is thread-safe and acquires a lock on the internal
+   *       environment variable map.
+   */
+  void print_envvars(print_mode mode = print_mode::MODIFIED,
+                     std::ostream& os = std::cout);
+
 }  // namespace envvar
 }  // namespace rocshmem
 

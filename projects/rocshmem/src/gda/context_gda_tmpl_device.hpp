@@ -957,7 +957,7 @@ GDA_CONTEXT_PUT_SIGNAL_DEF()
 GDA_CONTEXT_PUT_SIGNAL_DEF(_wg)
 GDA_CONTEXT_PUT_SIGNAL_DEF(_wave)
 
-// Internal functions used by collective and singnal operations
+// Internal functions used by collective and signal operations
 template <typename T>
 __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {

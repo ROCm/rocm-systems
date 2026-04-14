@@ -23,7 +23,10 @@ from utils.logger import (
     setup_logging_priority,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.specs import MachineSpecs, generate_machine_specs
+from utils.specs import (
+    MachineSpecs,
+    generate_machine_specs,
+)
 from utils.utils_common import (
     build_metric_list,
     detect_rocprof,
@@ -38,6 +41,7 @@ from utils.utils_common import (
     resolve_rocm_library_path,
     set_locale_encoding,
 )
+from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
 
 
@@ -497,7 +501,10 @@ class RocProfCompute:
 
         # instantiate desired profiler
         profiler = self.create_profiler()
-        profiler.sanitize()
+        try:
+            profiler.sanitize()
+        except WorkloadCommandError as e:
+            console_error(str(e))
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)
@@ -511,6 +518,7 @@ class RocProfCompute:
         setup_file_handler(self.__args.loglevel, self.__args.path)
 
         profiler.pre_processing()
+
         console_debug('starting "run_profiling" and about to start rocprof\'s workload')
 
         time_start_prof = time.time()
