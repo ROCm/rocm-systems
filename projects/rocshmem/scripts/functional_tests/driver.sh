@@ -112,21 +112,22 @@ declare -A TEST_NUMBERS=(
   ["alltoallmem_on_stream"]="76"
   ["barrier_all_on_stream"]="77"
   ["broadcastmem_on_stream"]="78"
-  ["getmem_on_stream"]="79"
-  ["putmem_on_stream"]="80"
-  ["putmem_signal_on_stream"]="81"
-  ["signal_wait_until_on_stream"]="82"
-  ["flood_put"]="83"
-  ["flood_putnbi"]="84"
-  ["flood_p"]="85"
-  ["flood_get"]="86"
-  ["flood_getnbi"]="87"
-  ["flood_g"]="88"
-  ["hipmodule_init"]="89"
-  ["flood_add"]="90"
-  ["flood_fadd"]="91"
-  ["flood_waitadd"]="92"
-  ["device_bitcode"]="93"
+  ["quiet_on_stream"]="79"
+  ["getmem_on_stream"]="80"
+  ["putmem_on_stream"]="81"
+  ["putmem_signal_on_stream"]="82"
+  ["signal_wait_until_on_stream"]="83"
+  ["flood_put"]="84"
+  ["flood_putnbi"]="85"
+  ["flood_p"]="86"
+  ["flood_get"]="87"
+  ["flood_getnbi"]="88"
+  ["flood_g"]="89"
+  ["hipmodule_init"]="90"
+  ["flood_add"]="91"
+  ["flood_fadd"]="92"
+  ["flood_waitadd"]="93"
+  ["device_bitcode"]="94"
 )
 
 ExecTest() {
@@ -504,6 +505,7 @@ TestOnStream() {
   else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
+  ExecTest  "quiet_on_stream"        2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
 }
