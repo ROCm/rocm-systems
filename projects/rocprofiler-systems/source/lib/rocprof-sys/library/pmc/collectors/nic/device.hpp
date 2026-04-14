@@ -113,7 +113,11 @@ public:
                            { "rx_rdma_ucast_pkts", &metrics::rx_rdma_ucast_pkts },
                            { "tx_rdma_ucast_pkts", &metrics::tx_rdma_ucast_pkts },
                            { "rx_rdma_cnp_pkts", &metrics::rx_rdma_cnp_pkts },
-                           { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts } };
+                           { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts },
+                           { "tx_rdma_ack_timeout", &metrics::tx_rdma_ack_timeout },
+                           { "resp_tx_pkt_seq_err", &metrics::resp_tx_pkt_seq_err },
+                           { "req_rx_pkt_seq_err", &metrics::req_rx_pkt_seq_err },
+                           { "req_rx_impl_nak_seq_err", &metrics::req_rx_impl_nak_seq_err } };
 
         for(const auto& stat : stats)
         {
@@ -197,12 +201,16 @@ private:
         }
 
         // All 6 metrics are assumed supported if we can query stats
-        m_supported_metrics.bits.rx_rdma_ucast_bytes = 1;
-        m_supported_metrics.bits.tx_rdma_ucast_bytes = 1;
-        m_supported_metrics.bits.rx_rdma_ucast_pkts  = 1;
-        m_supported_metrics.bits.tx_rdma_ucast_pkts  = 1;
-        m_supported_metrics.bits.rx_rdma_cnp_pkts    = 1;
-        m_supported_metrics.bits.tx_rdma_cnp_pkts    = 1;
+        m_supported_metrics.bits.rx_rdma_ucast_bytes     = 1;
+        m_supported_metrics.bits.tx_rdma_ucast_bytes     = 1;
+        m_supported_metrics.bits.rx_rdma_ucast_pkts      = 1;
+        m_supported_metrics.bits.tx_rdma_ucast_pkts      = 1;
+        m_supported_metrics.bits.rx_rdma_cnp_pkts        = 1;
+        m_supported_metrics.bits.tx_rdma_cnp_pkts        = 1;
+        m_supported_metrics.bits.tx_rdma_ack_timeout     = 1;
+        m_supported_metrics.bits.resp_tx_pkt_seq_err     = 1;
+        m_supported_metrics.bits.req_rx_pkt_seq_err      = 1;
+        m_supported_metrics.bits.req_rx_impl_nak_seq_err = 1;
 
         LOG_DEBUG("NIC device [{}] ({}) initialized with {} RDMA port(s)", m_index,
                   m_device_name, m_rdma_port_count);

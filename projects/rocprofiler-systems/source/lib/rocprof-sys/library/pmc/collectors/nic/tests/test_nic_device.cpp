@@ -133,6 +133,22 @@ protected:
                              sizeof(stats[5].name) - 1);
                 stats[5].value = 200;
 
+                std::strncpy(stats[6].name, "tx_rdma_ack_timeout",
+                             sizeof(stats[6].name) - 1);
+                stats[6].value = 50;
+
+                std::strncpy(stats[7].name, "resp_tx_pkt_seq_err",
+                             sizeof(stats[7].name) - 1);
+                stats[7].value = 150;
+
+                std::strncpy(stats[8].name, "req_rx_pkt_seq_err",
+                             sizeof(stats[8].name) - 1);
+                stats[8].value = 250;
+
+                std::strncpy(stats[9].name, "req_rx_impl_nak_seq_err",
+                             sizeof(stats[9].name) - 1);
+                stats[9].value = 350;
+
                 return AMDSMI_STATUS_SUCCESS;
             });
     }
@@ -206,6 +222,10 @@ TEST_F(NicDeviceTest, GetSupportedMetrics_AllEnabled)
     EXPECT_TRUE(supported.bits.tx_rdma_ucast_pkts);
     EXPECT_TRUE(supported.bits.rx_rdma_cnp_pkts);
     EXPECT_TRUE(supported.bits.tx_rdma_cnp_pkts);
+    EXPECT_TRUE(supported.bits.tx_rdma_ack_timeout);
+    EXPECT_TRUE(supported.bits.resp_tx_pkt_seq_err);
+    EXPECT_TRUE(supported.bits.req_rx_pkt_seq_err);
+    EXPECT_TRUE(supported.bits.req_rx_impl_nak_seq_err);
 }
 
 TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
@@ -221,6 +241,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
     EXPECT_EQ(m.tx_rdma_ucast_pkts, 6000ULL);
     EXPECT_EQ(m.rx_rdma_cnp_pkts, 100ULL);
     EXPECT_EQ(m.tx_rdma_cnp_pkts, 200ULL);
+    EXPECT_EQ(m.tx_rdma_ack_timeout, 50ULL);
+    EXPECT_EQ(m.resp_tx_pkt_seq_err, 150ULL);
+    EXPECT_EQ(m.req_rx_pkt_seq_err, 250ULL);
+    EXPECT_EQ(m.req_rx_impl_nak_seq_err, 350ULL);
 }
 
 TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
