@@ -93,7 +93,7 @@ class TestJacobi(RocprofsysTest):
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_usm(self, mode, hpc_openmp_environment, gpu_info, kfd_rules):
         env = hpc_openmp_environment.copy()
-        env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy,kfd_events"
+        env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy"
         env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["HSA_XNACK"] = "1"
         env["ROCPROFSYS_USE_AMD_SMI"] = "OFF"
@@ -138,25 +138,8 @@ class TestJacobi(RocprofsysTest):
                 result,
                 subtest_name="Perfetto USM Zero-Copy validation (Non-APU)",
                 categories=["rocm_ompt_api"],
-                labels=["omp_target_data_op_emi"],
-                counts=[1],
-                depths=[1],
+                pass_regex=[r"omp_target_data_op_emi\s*\|\s*1\s*\|\s*1\s*\|"],
             )
-        # Validate KFD events in perfetto trace
-        self.assert_perfetto(
-            result,
-            subtest_name="Perfetto KFD event validation",
-            categories=["rocm_kfd_page_fault", "rocm_kfd_page_migrate", "rocm_kfd_queue"],
-            label_substrings=["PAGE_FAULT", "PAGE_MIGRATE", "QUEUE_EVICT"],
-            print_output=True,
-        )
-
-        # Validate KFD events in rocpd database
-        self.assert_rocpd(
-            result,
-            subtest_name="ROCpd KFD event validation",
-            rules_files=kfd_rules,
-        )
 
     @pytest.mark.rocm
     @pytest.mark.openmp

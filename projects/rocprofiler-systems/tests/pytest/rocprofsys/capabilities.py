@@ -25,6 +25,7 @@ class SystemCapabilities:
     rocprofsys_tests_dir: Path
     rocprofsys_examples_dir: Path
     rocprofsys_avail: Path
+    is_installed: bool
     rocm_path: Optional[Path]
     rocprofsys_site_packages: Optional[Path]
     _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
@@ -49,6 +50,7 @@ class SystemCapabilities:
             rocprofsys_site_packages=config.rocprofsys_site_packages,
             _python_versions_hint=config._python_versions_hint,
             _python_root_dirs_hint=config._python_root_dirs_hint,
+            is_installed=config.is_installed,
         )
 
     @cached_property
@@ -354,6 +356,27 @@ class SystemCapabilities:
             return None
 
     @cached_property
+    def rocprofiler_sdk_version(self) -> Optional[tuple[int, int, int]]:
+        """Return rocprofiler-sdk (major, minor, patch) from ``version.h`` under ROCm.
+
+        ROCm root resolution: configured ``rocm_path`` when set, else the
+        ``ROCM_PATH`` environment variable if set, else ``/opt/rocm``. Parses
+        ``ROCPROFILER_SDK_VERSION_STRING`` from
+        ``<root>/include/rocprofiler-sdk/version.h``.
+
+        Returns:
+            ``(major, minor, patch)`` or ``None`` if the file is missing or unparsable.
+        """
+        if self.rocm_path is not None:
+            root = self.rocm_path
+        else:
+            env_root = os.environ.get("ROCM_PATH")
+            root = Path(env_root) if env_root else Path("/opt/rocm")
+        return _rocprofiler_sdk_version_from_version_h(
+            root / "include" / "rocprofiler-sdk" / "version.h"
+        )
+
+    @cached_property
     def julia_exec(self) -> Optional[Path]:
         """Get the path to the Julia executable."""
         path = shutil.which("julia")
@@ -387,6 +410,25 @@ class SystemCapabilities:
             return "mpi" in result.stdout.lower()
         except (subprocess.SubprocessError, OSError):
             return False
+
+
+_ROCPROFILER_SDK_VERSION_H_RE = re.compile(
+    r'^#define\s+ROCPROFILER_SDK_VERSION_STRING\s+"(\d+)\.(\d+)\.(\d+)"',
+    re.MULTILINE,
+)
+
+
+def _rocprofiler_sdk_version_from_version_h(path: Path) -> Optional[tuple[int, int, int]]:
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    m = _ROCPROFILER_SDK_VERSION_H_RE.search(text)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
 def _get_python_version(executable: Path) -> Optional[str]:

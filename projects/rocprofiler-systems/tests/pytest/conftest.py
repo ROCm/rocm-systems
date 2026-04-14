@@ -436,6 +436,12 @@ def pytest_collection_modifyitems(config, items) -> None:
         rocprof_config.capabilities.papi_nic_events is not None
         and rocprof_config.capabilities.perf_event_paranoid <= 2
     )
+    # rocprofiler-sdk < 1.2.2 can abort on undefined KFD node IDs; product disables KFD domains.
+    _kfd_min_sdk = (1, 2, 2)
+    kfd_available = lambda: (
+        (_sdk := rocprof_config.capabilities.rocprofiler_sdk_version) is not None
+        and _sdk >= _kfd_min_sdk
+    )
     # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     mpi_available = lambda: (
         rocprof_config.capabilities.mpiexec_exec is not None
@@ -562,6 +568,18 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(
                 pytest.mark.skip(
                     reason="Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+                )
+            )
+        if "kfd" in item.keywords and not kfd_available():
+            _req = ".".join(map(str, _kfd_min_sdk))
+            _sdk = rocprof_config.capabilities.rocprofiler_sdk_version
+            _found = ".".join(map(str, _sdk)) if _sdk is not None else "not found"
+            item.add_marker(
+                pytest.mark.skip(
+                    reason=(
+                        f"Requires rocprofiler-sdk minimum {_req}, "
+                        f"but system detected version {_found}"
+                    )
                 )
             )
         if "rocm_min_version" in item.keywords:
@@ -1108,6 +1126,13 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
     else:
         oshrun_version_str = "Not found"
 
+    # Rocprofiler SDK version
+    rocprofiler_sdk_version_str = (
+        f"{cap.rocprofiler_sdk_version[0]}.{cap.rocprofiler_sdk_version[1]}.{cap.rocprofiler_sdk_version[2]}"
+        if cap.rocprofiler_sdk_version
+        else "Not found"
+    )
+
     W = 22  # label width for alignment
 
     def _row(label: str, value) -> str:
@@ -1122,6 +1147,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         "Test Configuration:",
         "=" * 70,
         _row("ROCm version:", rocm_version),
+        _row("ROCprof-SDK version:", rocprofiler_sdk_version_str),
         _row("ROCm path:", rocprof_config.rocm_path),
         _row("Is installed:", rocprof_config.is_installed),
         _row("Output dir:", rocprof_config.test_output_dir),
