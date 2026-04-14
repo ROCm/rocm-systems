@@ -345,8 +345,8 @@ set(ATT_MARKER_TRACE_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-marker-trace-out")
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-marker-trace
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_MARKER_TRACE_OUT_DIR}
-        --att --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_MARKER_TRACE_OUT_DIR} --att
+        --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
         env -o out -- $<TARGET_FILE:att-marker-trace>
     DEPENDS att-marker-trace
     LABELS "integration-tests;thread-trace"
