@@ -24,10 +24,30 @@
 from __future__ import absolute_import
 
 import itertools
+import os
 import sys
 import pytest
 import numpy as np
 import pandas as pd
+
+
+def _get_num_expected_agents(num_total_gpu_agents):
+    """Determine the expected number of sampled agents based on device visibility
+    environment variables.
+
+    ROCProfiler reports all physical agents in agent_info.csv, but applications
+    only dispatch kernels on devices visible through ROCR_VISIBLE_DEVICES,
+    HIP_VISIBLE_DEVICES, or CUDA_VISIBLE_DEVICES. When these env vars restrict
+    visibility, the expected number of sampled agents is reduced accordingly.
+    """
+    counts = [num_total_gpu_agents]
+    for env_var in ("ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        value = os.environ.get(env_var)
+        if value is not None:
+            devices = set(d.strip() for d in value.split(",") if d.strip())
+            if devices:
+                counts.append(len(devices))
+    return min(counts)
 
 
 def validate_all_agents_are_sampled(
@@ -47,6 +67,8 @@ def validate_all_agents_are_sampled(
         )
     ]
 
+    num_expected_agents = _get_num_expected_agents(len(gfx9_gfx12_agents_df))
+
     # Extract samples that originates from know code object it
     samples_df = input_samples_csv[input_samples_csv["Dispatch_Id"] != 0].copy()
 
@@ -65,8 +87,8 @@ def validate_all_agents_are_sampled(
     )
     sampled_agents = samples_df["Agent_Id"].unique()
     sampled_agents_num = len(sampled_agents)
-    # all agents must be sampled
-    assert sampled_agents_num == len(gfx9_gfx12_agents_df)
+    # all visible agents must be sampled
+    assert sampled_agents_num == num_expected_agents
 
     # separate samples per agents
     grouped_samples_per_agent = samples_df.groupby("Agent_Id")
