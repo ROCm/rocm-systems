@@ -49,24 +49,18 @@ Panel Config:
           unit: Gbps
         HBM Read Traffic:
           avg: SUM(100 * TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
-          min: MIN((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
-            != 0) else None))
-          max: MAX((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
-            != 0) else None))
+          min: MIN(100 * TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum)
+          max: MAX(100 * TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum)
           unit: Percent
         Remote Read Traffic:
           avg: SUM(100 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum)) / SUM(TCC_EA_RDREQ_sum)
-          min: MIN((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-            if (TCC_EA_RDREQ_sum != 0) else None))
-          max: MAX((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-            if (TCC_EA_RDREQ_sum != 0) else None))
+          min: MIN(100 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
+          max: MAX(100 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
           unit: Percent
         Uncached Read Traffic:
           avg: SUM(100 * TCC_EA_RD_UNCACHED_32B_sum) / SUM(TCC_EA_RDREQ_sum)
-          min: MIN((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
-            != 0) else None))
-          max: MAX((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
-            != 0) else None))
+          min: MIN(100 * TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum)
+          max: MAX(100 * TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum)
           unit: Percent
         Write and Atomic BW:
           avg: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM($denom)
@@ -77,52 +71,38 @@ Panel Config:
           unit: (Bytes + $normUnit)
         HBM Write and Atomic Traffic:
           avg: SUM(100 * TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
-          min: MIN((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
-          max: MAX((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
+          min: MIN(100 * TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum)
+          max: MAX(100 * TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum)
           unit: Percent
         Remote Write and Atomic Traffic:
           avg: SUM(100 * (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum)) / SUM(TCC_EA_WRREQ_sum)
-          min: MIN((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-            if (TCC_EA_WRREQ_sum != 0) else None))
-          max: MAX((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-            if (TCC_EA_WRREQ_sum != 0) else None))
+          min: MIN(100 * (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
+          max: MAX(100 * (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
           unit: Percent
         Atomic Traffic:
           avg: SUM(100 * TCC_EA_ATOMIC_sum) / SUM(TCC_EA_WRREQ_sum)
-          min: MIN((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
-          max: MAX((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
+          min: MIN(100 * TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum)
+          max: MAX(100 * TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum)
           unit: Percent
         Uncached Write and Atomic Traffic:
           avg: SUM(100 * TCC_EA_WR_UNCACHED_32B_sum) / SUM(TCC_EA_WRREQ_sum)
-          min: MIN((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
-          max: MAX((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
+          min: MIN(100 * TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum)
+          max: MAX(100 * TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum)
           unit: Percent
         Read Latency:
           avg: SUM(TCC_EA_RDREQ_LEVEL_sum) / SUM(TCC_EA_RDREQ_sum)
-          min: MIN(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
-            != 0) else None))
-          max: MAX(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
-            != 0) else None))
+          min: MIN(TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum)
+          max: MAX(TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum)
           unit: Cycles
         Write and Atomic Latency:
           avg: SUM(TCC_EA_WRREQ_LEVEL_sum) / SUM(TCC_EA_WRREQ_sum)
-          min: MIN(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
-          max: MAX(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
-            != 0) else None))
+          min: MIN(TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum)
+          max: MAX(TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum)
           unit: Cycles
         Atomic Latency:
           avg: SUM(TCC_EA_ATOMIC_LEVEL_sum) / SUM(TCC_EA_ATOMIC_sum)
-          min: MIN(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
-            != 0) else None))
-          max: MAX(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
-            != 0) else None))
+          min: MIN(TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum)
+          max: MAX(TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum)
           unit: Cycles
   - metric_table:
       id: 1703
@@ -171,10 +151,8 @@ Panel Config:
           unit: (Req + $normUnit)
         Cache Hit:
           avg: SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
-          min: MIN((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
-            + TCC_MISS_sum) != 0) else None))
-          max: MAX((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
-            + TCC_MISS_sum) != 0) else None))
+          min: MIN(100 * TCC_HIT_sum / (TCC_HIT_sum + TCC_MISS_sum))
+          max: MAX(100 * TCC_HIT_sum / (TCC_HIT_sum + TCC_MISS_sum))
           unit: Percent
         Hits:
           avg: SUM(TCC_HIT_sum) / SUM($denom)
@@ -259,10 +237,8 @@ Panel Config:
           type: Credit Starvation
           transaction: Write
           avg: SUM(100 * TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)
-          min: MIN(((100 * (TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum
-            != 0) else None))
-          max: MAX(((100 * (TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum
-            != 0) else None))
+          min: MIN(100 * TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)
+          max: MAX(100 * TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)
           unit: Percent
   - metric_table:
       id: 1706

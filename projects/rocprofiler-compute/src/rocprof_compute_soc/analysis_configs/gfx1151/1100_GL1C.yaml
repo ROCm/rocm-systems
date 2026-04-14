@@ -24,13 +24,13 @@ Panel Config:
       metric:
         GL1C Busy:
           avg: SUM(100 * GL1C_BUSY) / SUM(GL1C_CYCLE)
-          min: MIN((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
-          max: MAX((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          min: MIN(100 * GL1C_BUSY / GL1C_CYCLE)
+          max: MAX(100 * GL1C_BUSY / GL1C_CYCLE)
           unit: Percent
         GL1C Starve:
           avg: SUM(100 * GL1C_STARVE) / SUM(GL1C_CYCLE)
-          min: MIN((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
-          max: MAX((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
+          max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
           unit: Percent
 
   # =========================================================================
@@ -82,8 +82,8 @@ Panel Config:
       metric:
         Hit Rate:
           avg: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
-          min: MIN((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
-          max: MAX((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
+          min: MIN(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
+          max: MAX(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
           unit: Percent
 
   # =========================================================================

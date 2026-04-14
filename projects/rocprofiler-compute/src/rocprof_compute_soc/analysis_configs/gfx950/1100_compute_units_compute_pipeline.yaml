@@ -117,10 +117,8 @@ Panel Config:
           unit: Percent
         VALU Active Threads:
           avg: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
-          min: MIN(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
-            != 0) else None))
-          max: MAX(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
-            != 0) else None))
+          min: MIN(SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU)
+          max: MAX(SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU)
           unit: Work-items
         MFMA Utilization:
           avg: SUM(100 * SQ_VALU_MFMA_BUSY_CYCLES) / SUM(4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD)
@@ -129,25 +127,19 @@ Panel Config:
           unit: Percent
         MFMA Instruction Cycles:
           avg: SUM(SQ_VALU_MFMA_BUSY_CYCLES) / SUM(SQ_INSTS_MFMA)
-          min: MIN(((SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA) if (SQ_INSTS_MFMA !=
-            0) else None))
-          max: MAX(((SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA) if (SQ_INSTS_MFMA !=
-            0) else None))
+          min: MIN(SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA)
+          max: MAX(SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA)
           unit: Cycles per Instruction
         VMEM Latency:
           avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_VMEM)
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
-            else None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
-            else None))
+          min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM)
+          max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM)
           unit: Cycles
           coll_level: SQ_INST_LEVEL_VMEM
         SMEM Latency:
           avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_SMEM)
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
-            else None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
-            else None))
+          min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM)
+          max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM)
           unit: Cycles
           coll_level: SQ_INST_LEVEL_SMEM
   - metric_table:

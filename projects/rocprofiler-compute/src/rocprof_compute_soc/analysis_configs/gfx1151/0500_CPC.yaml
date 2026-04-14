@@ -23,18 +23,18 @@ Panel Config:
       metric:
         CPC Busy:
           avg: SUM(100 * CPC_STAT_BUSY) / SUM(CPC_ALWAYS_COUNT)
-          min: MIN((100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
           unit: Percent
         CPC Idle:
           avg: SUM(100 * CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
-          min: MIN((100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
           unit: Percent
         CPC Stalled:
           avg: SUM(100 * CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
-          min: MIN((100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
           unit: Percent
 
   # =========================================================================
@@ -52,18 +52,18 @@ Panel Config:
       metric:
         TCIU Busy:
           avg: SUM(100 * CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-          min: MIN((100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
           unit: Percent
         UTCL2 Busy:
           avg: SUM(100 * CPC_UTCL2IU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-          min: MIN((100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
           unit: Percent
         GCRIU Busy:
           avg: SUM(100 * CPC_GCRIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-          min: MIN((100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT) if (CPC_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
           unit: Percent
 
   # =========================================================================
@@ -159,8 +159,8 @@ Panel Config:
           unit: (Count + $normUnit)
         Instruction Cache Hit Rate:
           avg: SUM(100 * CPC_MEC_INSTR_CACHE_HIT_sum) / SUM(CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)
-          min: MIN((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
-          max: MAX((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
+          min: MIN(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
+          max: MAX(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
           unit: Percent
 
   metrics_description:
