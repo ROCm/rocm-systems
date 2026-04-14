@@ -103,7 +103,7 @@ test_perf_stat() {
 
     local events=(
         "${PMU_NAME}/sq_waves/"
-        "${PMU_NAME}/sq_instructions/"
+        "${PMU_NAME}/sq_insts_valu/"
         "${PMU_NAME}/gl2c_miss/"
         "${PMU_NAME}/gl2c_hit/"
     )
@@ -129,7 +129,7 @@ test_perf_stat() {
 test_multiple_events() {
     log_info "Testing multiple events simultaneously..."
 
-    local event_list="${PMU_NAME}/sq_waves/,${PMU_NAME}/sq_instructions/,${PMU_NAME}/gl2c_miss/"
+    local event_list="${PMU_NAME}/sq_waves/,${PMU_NAME}/sq_insts_valu/,${PMU_NAME}/gl2c_miss/"
 
     local output=$(timeout 15 perf stat -e "$event_list" sleep $TEST_DURATION 2>&1 || true)
 
