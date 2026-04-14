@@ -58,42 +58,34 @@ def hip_graph_bubbles_rules(validation_rules_dir: Path) -> list[Path]:
 class TestHipGraphBubbles(RocprofsysTest):
     """Exercise hip-graph-bubbles under rocprofiler-systems (no binary rewrite / runtime)."""
 
-    @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
-    def test(self, mode: str, hip_graph_bubbles_env: dict[str, str]):
-        result = self.run_test(
-            mode,
-            "hip-graph-bubbles",
-            env=hip_graph_bubbles_env,
-            run_args=[_HIP_GRAPH_BUBBLES_NUM_KERNELS, _HIP_GRAPH_BUBBLES_NUM_ITERATIONS],
-            check_target_arch=True,
-            timeout=300,
-        )
-        self.assert_regex(
-            result,
-            mode,
-            pass_regex=[r"Test completed successfully"],
-            fail_regex=[r"HIP error"],
-        )
-
+    @pytest.mark.ci_disable("assert_rocpd")
     @pytest.mark.rocpd("hip_graph_bubbles_rocpd_env")
-    def test_sampling_rocpd(
+    @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
+    def test(
         self,
+        mode: str,
+        hip_graph_bubbles_env: dict[str, str],
         hip_graph_bubbles_rocpd_env: dict[str, str],
         hip_graph_bubbles_rules: list[Path],
     ):
-        """ROCPD checks: kernel count, markers, and SDK-style PMC total % kernel count (validate.py test_counter_records; see graph-bubbles-rules.json)."""
+        """Baseline / sampling / sys_run; sampling also validates ROCPD (graph-bubbles-rules.json)."""
         result = self.run_test(
-            "sampling",
+            mode,
             "hip-graph-bubbles",
-            env=hip_graph_bubbles_rocpd_env,
+            env=(
+                hip_graph_bubbles_rocpd_env
+                if mode == "sampling"
+                else hip_graph_bubbles_env
+            ),
             run_args=[_HIP_GRAPH_BUBBLES_NUM_KERNELS, _HIP_GRAPH_BUBBLES_NUM_ITERATIONS],
             check_target_arch=True,
             timeout=300,
         )
         self.assert_regex(
             result,
-            "sampling",
+            mode,
             pass_regex=[r"Test completed successfully"],
             fail_regex=[r"HIP error"],
         )
-        self.assert_rocpd(result, rules_files=hip_graph_bubbles_rules)
+        if mode == "sampling":
+            self.assert_rocpd(result, rules_files=hip_graph_bubbles_rules)
