@@ -413,6 +413,7 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   out("\n")
 
   index = {val: None for val in all_unrolls}
+  out("#ifndef RCCL_DEVICE_TABLE_OMIT\n")
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
@@ -454,6 +455,8 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{\n")
       out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex);\n")
       out("}\n\n")
+
+  out("#endif // RCCL_DEVICE_TABLE_OMIT\n")
 
 # Generate <gensrc>/device_table.cpp
 if is_colltrace:
@@ -638,6 +641,7 @@ for fn in primary_funcs:
 
   with open(filepath, "w") as f:
     out = f.write
+    out('#define RCCL_DEVICE_TABLE_OMIT\n')
     out('#include "common.h"\n')
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:

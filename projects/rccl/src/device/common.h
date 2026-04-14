@@ -682,6 +682,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
+#ifndef RCCL_DEVICE_TABLE_OMIT
 #ifdef USE_INDIRECT_FUNCTION_CALL
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
@@ -696,6 +697,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
+#endif
 #endif
     }
 
