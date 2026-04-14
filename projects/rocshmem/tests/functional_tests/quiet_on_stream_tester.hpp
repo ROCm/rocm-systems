@@ -61,8 +61,9 @@ class QuietOnStreamTester : public Tester {
   std::vector<hipEvent_t> stop_events_timed;
 
   // Buffers for testing RMA operations before quiet
-  uint64_t *source_buf;
-  uint64_t *dest_buf;
+  char *source_buf;
+  char *dest_buf;
+  size_t buf_size;  // Size in bytes
 };
 
 #include "quiet_on_stream_tester.cpp"

@@ -68,13 +68,14 @@ QuietOnStreamTester::QuietOnStreamTester(TesterArguments args)
     CHECK_HIP(hipEventCreate(&stop_events_timed[i]));
   }
 
-  // Allocate symmetric heap buffers for testing RMA operations
-  source_buf = (uint64_t *)rocshmem_malloc(sizeof(uint64_t) * 1024);
-  dest_buf = (uint64_t *)rocshmem_malloc(sizeof(uint64_t) * 1024);
+  // Allocate symmetric heap buffers based on max message size
+  buf_size = args.max_msg_size;
+  source_buf = (char *)rocshmem_malloc(buf_size);
+  dest_buf = (char *)rocshmem_malloc(buf_size);
 
-  // Initialize source buffer
-  for (int i = 0; i < 1024; i++) {
-    source_buf[i] = my_pe * 1000 + i;
+  if (source_buf == nullptr || dest_buf == nullptr) {
+    fprintf(stderr, "Error allocating memory from symmetric heap\n");
+    rocshmem_global_exit(1);
   }
 }
 
@@ -93,8 +94,8 @@ QuietOnStreamTester::~QuietOnStreamTester() {
 }
 
 void QuietOnStreamTester::preLaunchKernel() {
-  // Reset destination buffer before each test
-  memset(dest_buf, 0, sizeof(uint64_t) * 1024);
+  // This is called once before all tests, not per-test
+  // Buffer initialization happens in resetBuffers()
 }
 
 void QuietOnStreamTester::postLaunchKernel() {
@@ -128,10 +129,26 @@ void QuietOnStreamTester::postLaunchKernel() {
   }
 }
 
-void QuietOnStreamTester::resetBuffers([[maybe_unused]] size_t size) {}
+void QuietOnStreamTester::resetBuffers(size_t size) {
+  // Validate that size doesn't exceed allocated buffer size
+  if (size > buf_size) {
+    fprintf(stderr, "PE %d: Error - requested size %zu exceeds allocated buf_size %zu\n",
+            my_pe, size, buf_size);
+    rocshmem_global_exit(1);
+  }
+  // Initialize source buffer with test pattern using host buffer and hipMemcpy
+  std::vector<char> host_data(size);
+  for (size_t i = 0; i < size; i++) {
+    host_data[i] = static_cast<char>((my_pe * 100 + i) % 256);
+  }
+  CHECK_HIP(hipMemcpy(source_buf, host_data.data(), size, hipMemcpyHostToDevice));
+
+  // Clear destination buffer (device memory)
+  CHECK_HIP(hipMemset(dest_buf, 0, size));
+}
 
 void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
-                                            int loop, [[maybe_unused]] size_t size) {
+                                            int loop, size_t size) {
   // Calculate target PE (next PE in ring)
   int target_pe = (my_pe + 1) % n_pes;
 
@@ -139,7 +156,7 @@ void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_u
   for (int i = 0; i < args.skip; i++) {
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
       // Do some RMA operations before quiet
-      rocshmem_putmem_on_stream(dest_buf, source_buf, sizeof(uint64_t) * 1024,
+      rocshmem_putmem_on_stream(dest_buf, source_buf, size,
                                 target_pe, streams[stream_id]);
       rocshmem_quiet_on_stream(streams[stream_id]);
     }
@@ -154,7 +171,7 @@ void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_u
       }
 
       // Do some RMA operations before quiet to make the test meaningful
-      rocshmem_putmem_on_stream(dest_buf, source_buf, sizeof(uint64_t) * 1024,
+      rocshmem_putmem_on_stream(dest_buf, source_buf, size,
                                 target_pe, streams[stream_id]);
       rocshmem_quiet_on_stream(streams[stream_id]);
 
@@ -170,16 +187,21 @@ void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_u
   num_timed_msgs = loop * num_streams;
 }
 
-void QuietOnStreamTester::verifyResults([[maybe_unused]] size_t size) {
+void QuietOnStreamTester::verifyResults(size_t size) {
   // Verify that quiet completed all RMA operations
   // The dest_buf should contain data from the previous PE
   int source_pe = (my_pe - 1 + n_pes) % n_pes;
-  for (int i = 0; i < 1024; i++) {
-    uint64_t expected = source_pe * 1000 + i;
-    if (dest_buf[i] != expected) {
-      fprintf(stderr, "PE %d: Verification failed at index %d: expected %lu, got %lu\n",
-              my_pe, i, expected, dest_buf[i]);
-      exit(1);
+
+  // Copy dest_buf from device to host for verification
+  std::vector<char> host_dest(size);
+  CHECK_HIP(hipMemcpy(host_dest.data(), dest_buf, size, hipMemcpyDeviceToHost));
+
+  for (size_t i = 0; i < size; i++) {
+    char expected = static_cast<char>((source_pe * 100 + i) % 256);
+    if (host_dest[i] != expected) {
+      fprintf(stderr, "PE %d: Verification failed at byte %zu: expected %d, got %d\n",
+              my_pe, i, static_cast<int>(expected), static_cast<int>(host_dest[i]));
+      rocshmem_global_exit(1);
     }
   }
 }
