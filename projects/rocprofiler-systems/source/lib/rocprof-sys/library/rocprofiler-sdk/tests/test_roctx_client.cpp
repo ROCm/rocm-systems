@@ -83,16 +83,19 @@ struct mock_marker_policy
 
 }  // namespace
 
-// ============================================================================
-// roctx_client construction tests
-// ============================================================================
-
-class roctx_client_test : public ::testing::Test
+class mock_cleanup_base : public ::testing::Test
 {
 protected:
     void SetUp() override { mock_marker_policy::reset(); }
     void TearDown() override { mock_marker_policy::api.reset(); }
 };
+
+// ============================================================================
+// roctx_client construction tests
+// ============================================================================
+
+class roctx_client_test : public mock_cleanup_base
+{};
 
 TEST_F(roctx_client_test, constructor_creates_controller)
 {
@@ -150,14 +153,11 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 // and that start/stop callbacks fire at the right times.
 // ============================================================================
 
-class roctx_client_control_test : public ::testing::Test
+class roctx_client_control_test : public mock_cleanup_base
 {
 protected:
     using roctx_client_t = rocprofsys::rocprofiler_sdk::roctx_client<mock_marker_policy>;
     using roctx_config_t = rocprofsys::rocprofiler_sdk::roctx_client_config;
-
-    void SetUp() override { mock_marker_policy::reset(); }
-    void TearDown() override { mock_marker_policy::api.reset(); }
 
     int start_count = 0;
     int stop_count  = 0;
@@ -578,12 +578,8 @@ make_record(uint64_t thread_id, uint64_t corr_internal, uint64_t corr_external)
 
 }  // namespace
 
-class marker_write_test : public ::testing::Test
-{
-protected:
-    void SetUp() override { mock_marker_policy::reset(); }
-    void TearDown() override { mock_marker_policy::api.reset(); }
-};
+class marker_write_test : public mock_cleanup_base
+{};
 
 TEST_F(marker_write_test, all_backends_with_annotations)
 {

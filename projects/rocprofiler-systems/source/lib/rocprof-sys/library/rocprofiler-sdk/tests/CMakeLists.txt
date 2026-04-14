@@ -7,6 +7,8 @@ set(rocprofiler_sdk_components_unit_tests_sources
     ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/rocprofiler-sdk/trace_control.cpp
 )
 
+# TODO: Fix include of trace_control.cpp not to be included directly, but via static library or object library.
+
 add_library(
     rocprofiler-sdk-components-unit-tests
     OBJECT

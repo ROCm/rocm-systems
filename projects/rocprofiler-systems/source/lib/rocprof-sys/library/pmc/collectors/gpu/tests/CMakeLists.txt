@@ -12,3 +12,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems::rocprofiler-systems-timemory
 )
+
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(pmc-gpu-collector-tests PUBLIC ROCPROFSYS_BUILD_AINIC=1)
+endif()

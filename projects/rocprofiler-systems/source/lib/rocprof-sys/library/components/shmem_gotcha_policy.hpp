@@ -8,6 +8,7 @@
 #include "library/components/comm_data.hpp"
 #include "library/components/shmem_gotcha.hpp"
 
+#include <timemory/components/gotcha/backends.hpp>
 #include <timemory/components/gotcha/components.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
 #include <timemory/variadic/types.hpp>

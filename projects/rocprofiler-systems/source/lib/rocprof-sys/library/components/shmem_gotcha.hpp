@@ -3,15 +3,20 @@
 
 #pragma once
 
-#include <timemory/components/base.hpp>
-#include <timemory/components/gotcha/backends.hpp>
+#include <timemory/components/base/declaration.hpp>
 #include <timemory/utility/types.hpp>
+
+#include "common/delimit.hpp"
+#include "common/environment.hpp"
 
 #include <cstddef>
 #include <cstdlib>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
+#include <string_view>
+#include <type_traits>
 
 namespace rocprofsys
 {
@@ -182,11 +187,12 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
 
     static constexpr size_t gotcha_capacity = 120;
 
-    shmem_gotcha<SHMEMPolicy>()                                            = default;
-    shmem_gotcha<SHMEMPolicy>(const shmem_gotcha<SHMEMPolicy>&)            = default;
-    shmem_gotcha<SHMEMPolicy>& operator=(const shmem_gotcha<SHMEMPolicy>&) = default;
-    shmem_gotcha<SHMEMPolicy>(shmem_gotcha<SHMEMPolicy>&&)                 = default;
-    shmem_gotcha<SHMEMPolicy>& operator=(shmem_gotcha<SHMEMPolicy>&&)      = default;
+    shmem_gotcha<SHMEMPolicy>()                                                = default;
+    shmem_gotcha<SHMEMPolicy>(const shmem_gotcha<SHMEMPolicy>&)                = default;
+    shmem_gotcha<SHMEMPolicy>& operator=(const shmem_gotcha<SHMEMPolicy>&)     = default;
+    shmem_gotcha<SHMEMPolicy>(shmem_gotcha<SHMEMPolicy>&&) noexcept            = default;
+    shmem_gotcha<SHMEMPolicy>& operator=(shmem_gotcha<SHMEMPolicy>&&) noexcept = default;
+    ~shmem_gotcha<SHMEMPolicy>() noexcept                                      = default;
 
     static std::string label() { return "shmem_gotcha"; }
 
@@ -467,8 +473,8 @@ shmem_gotcha<SHMEMPolicy>::configure()
     shmem_gotcha_t::get_reject_list() = []() {
         std::set<std::string> tokens;
         auto                  reject_list =
-            tim::get_env<std::string>(TIMEMORY_SETTINGS_PREFIX "SHMEM_REJECT_LIST", "");
-        for(const auto& itr : tim::delimit(reject_list))
+            rocprofsys::common::get_env<std::string>("ROCPROFSYS_SHMEM_REJECT_LIST", "");
+        for(const auto& itr : rocprofsys::common::delimit(reject_list))
             tokens.insert(itr);
         return shmem_categories::expand_tokens_to_apis(tokens);
     };
@@ -479,9 +485,9 @@ shmem_gotcha<SHMEMPolicy>::configure()
     // Set to "all" to permit every bound API; or list categories/APIs to trace.
     shmem_gotcha_t::get_permit_list() = []() {
         auto permit_list =
-            tim::get_env<std::string>(TIMEMORY_SETTINGS_PREFIX "SHMEM_PERMIT_LIST", "");
+            rocprofsys::common::get_env<std::string>("ROCPROFSYS_SHMEM_PERMIT_LIST", "");
         std::set<std::string> tokens;
-        for(const auto& itr : tim::delimit(permit_list))
+        for(const auto& itr : rocprofsys::common::delimit(permit_list))
             tokens.insert(itr);
         if(tokens.empty()) return shmem_categories::get_default_permit();
         if(tokens.count("all"))
