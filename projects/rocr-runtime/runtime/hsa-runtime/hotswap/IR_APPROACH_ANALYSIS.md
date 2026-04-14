@@ -336,29 +336,22 @@ modeling these implicit operands required per-instruction special cases.
 | Wait counter infrastructure | Destroyed | Decoded fields | **Path to SIInsertWaitcnts pass** |
 | $mode tracking | No | No | **Automatic** |
 
-**Architectural gap: MIR is inspection-only.**
-The prototype generates MIR for analysis and demonstration, but the HSACO is
-produced via a separate MCInstPrinter round-trip path. The MIR is not connected
-to the assembly generation because:
-1. `llc` cannot process our MIR — it requires a non-`declare` IR function body
-2. Using LLVM's `AsmPrinter` in-process requires private AMDGPU headers
-   (`GCNPassConfig`, `GCNTargetMachine`) not in the public install
-3. Building a custom `MachineInstr` → `MCInst` lowering is feasible but
-   requires understanding AMDGPU's `MCInstLowering` internals
+**MIR is now in the codegen path (resolved).**
+The live `MachineFunction` is kept in memory after lifting. Assembly is generated
+by walking each `MachineInstr`, lowering it to `MCInst` via explicit operand
+copying, and printing through `MCInstPrinter`. This means modifications to
+`MachineInstr` opcodes or operands are reflected in the output HSACO.
 
-This is the single biggest limitation — until the MIR feeds into the codegen
-path, cross-ISA translation through MIR is not possible. The MIR currently
-serves as a high-quality analysis artifact, not a production IR.
-
-**Possible paths forward for the AsmPrinter gap:**
-1. Build LLVM from source with AMDGPU private headers accessible
-2. Contribute a public API for MIR → assembly lowering to upstream LLVM
-3. Serialize MIR, create a minimal IR function body, and run `llc`
-4. Use the MIR for analysis only and use Aster for the actual codegen path
+The approach implements option #3 from the original gap analysis (custom
+`MachineInstr` → `MCInst` lowering). While this doesn't provide access to
+LLVM's late passes (`SIInsertWaitcnts`, scheduling), it makes the MIR the
+single source of truth for the instruction stream. Late passes could be run
+by fixing liveness info and MachineFunction property flags.
 
 **Best for.** Analysis of implicit operands, register pressure, wait counter
-placement. Potential future use as the "ground truth" representation that other
-IRs can be validated against. Not yet suitable as a production codegen path.
+placement. The MIR is now viable as a codegen path (assembly comes from MIR),
+though LLVM IR remains the recommended primary target because `llc` provides
+automatic metadata generation, wait counters, and register allocation.
 
 ## Option G: LLVM IR (Level 2 — typed SSA, prototype complete)
 
@@ -567,10 +560,12 @@ where the generated HSACO is **fully correct by construction** rather than
 requiring hand-tuned assembly patching.
 
 **Key finding from LLVM MIR prototype:** Implicit operands (VCC, SCC, EXEC,
-$mode) are free from TableGen via `BuildMI()`. LLVM MIR is the right
-representation for analysis tasks. However, the MIR is not connected to the
-codegen path — using LLVM MIR for analysis while targeting LLVM IR for codegen
-is the recommended layered approach.
+$mode) are free from TableGen via `BuildMI()`. The MIR is now in the codegen
+path — the live `MachineFunction` is walked to produce assembly via
+`MachineInstr` → `MCInst` → `MCInstPrinter`. LLVM IR remains the recommended
+primary codegen target because `llc` provides automatic metadata, wait counters,
+and register allocation, but LLVM MIR is viable for same-ISA transformations
+and as the analysis layer in a layered approach.
 
 **Updated recommendation: LLVM IR as the target representation.**
 
@@ -624,12 +619,12 @@ recognize yet).
 | Criterion                     | waveasm (L1) | Aster (L1.5) | LLVM MIR (L1.75) | **LLVM IR (L2)** | SPIR-V (L2) | TileIR (L3) | Layered  |
 |-------------------------------|:------------:|:------------:|:-----------------:|:----------------:|:------------:|:------------:|:--------:|
 | Lift from binary              | Mechanical   | Mostly mech. | Mechanical        | **Pattern-match** | Hard        | Research     | Staged   |
-| AMD → AMD retarget            | Demonstrated | Demo (same)  | Analysis only     | **Via -mcpu flag** | Overkill   | Overkill     | L2       |
+| AMD → AMD retarget            | Demonstrated | Demo (same)  | Via MIR transform | **Via -mcpu flag** | Overkill   | Overkill     | L2       |
 | AMD → NVIDIA retarget         | No           | No           | No                | **No (AMD only)** | Yes        | Yes          | L2 path  |
 | Optimization potential        | Low          | Medium       | High (backend)    | **Highest (LLVM opt)** | Medium | High         | All      |
 | Correctness risk at lift      | Minimal      | Low          | Minimal           | **Medium (patterns)** | Moderate | High         | Varies   |
 | Engineering effort to here    | Done         | Done         | Done              | **Done (prototype)** | 6-12 mo  | Research     | Staged   |
-| Remaining to production       | Medium       | Medium       | High (AsmPrinter) | **High (raiser)** | High      | Very high    | Staged   |
+| Remaining to production       | Medium       | Medium       | High (late passes)| **High (raiser)** | High      | Very high    | Staged   |
 | Round-trip fidelity           | High         | High         | High              | **Low (recompiled)** | Low      | None         | High     |
 | Manual metadata patching      | **Yes**      | **Yes**      | **Yes**           | **No (automatic)** | No       | No           | Varies   |
 | Implicit operands modeled     | No           | Partial      | Yes (automatic)   | **N/A (eliminated)** | Yes     | N/A          | Yes      |
