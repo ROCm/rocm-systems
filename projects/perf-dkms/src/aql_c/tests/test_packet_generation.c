@@ -59,7 +59,7 @@ static pm4_buffer_t *create_test_buffer(void)
 	if (!buffer)
 		return NULL;
 
-	buffer->data = malloc(1024); /* 1024 DWORDs buffer */
+	buffer->data = malloc(1024 * sizeof(uint32_t)); /* 1024 DWORDs buffer */
 	if (!buffer->data) {
 		free(buffer);
 		return NULL;

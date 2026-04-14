@@ -33,20 +33,20 @@ void test_lookup_counter_by_name(void)
 	printf("\n=== Testing lookup_counter_by_name ===\n");
 
 	/* Test valid counter names */
-	const counter_def_t *counter = lookup_counter_by_name("SQ_WAVES");
-	TEST_ASSERT(counter != NULL, "lookup_counter_by_name: SQ_WAVES found");
-	TEST_ASSERT(counter->id == COUNTER_SQ_WAVES, "SQ_WAVES has correct ID");
-	TEST_ASSERT(counter->hw_block == HW_IP_BLOCK_SQ, "SQ_WAVES has correct hw_block");
+	const counter_def_t *counter = lookup_counter_by_name("sq_waves");
+	TEST_ASSERT(counter != NULL, "lookup_counter_by_name: sq_waves found");
+	TEST_ASSERT(counter != NULL && counter->id == COUNTER_SQ_WAVES, "sq_waves has correct ID");
+	TEST_ASSERT(counter != NULL && counter->hw_block == HW_IP_BLOCK_SQ, "sq_waves has correct hw_block");
 
-	counter = lookup_counter_by_name("GL2C_HIT");
-	TEST_ASSERT(counter != NULL, "lookup_counter_by_name: GL2C_HIT found");
-	TEST_ASSERT(counter->id == COUNTER_GL2C_HIT, "GL2C_HIT has correct ID");
-	TEST_ASSERT(counter->hw_block == HW_IP_BLOCK_GL2C, "GL2C_HIT has correct hw_block");
+	counter = lookup_counter_by_name("gl2c_hit");
+	TEST_ASSERT(counter != NULL, "lookup_counter_by_name: gl2c_hit found");
+	TEST_ASSERT(counter != NULL && counter->id == COUNTER_GL2C_HIT, "gl2c_hit has correct ID");
+	TEST_ASSERT(counter != NULL && counter->hw_block == HW_IP_BLOCK_GL2C, "gl2c_hit has correct hw_block");
 
-	counter = lookup_counter_by_name("TA_TA_BUSY");
-	TEST_ASSERT(counter != NULL, "lookup_counter_by_name: TA_TA_BUSY found");
-	TEST_ASSERT(counter->id == COUNTER_TA_TA_BUSY, "TA_TA_BUSY has correct ID");
-	TEST_ASSERT(counter->hw_block == HW_IP_BLOCK_TA, "TA_TA_BUSY has correct hw_block");
+	counter = lookup_counter_by_name("ta_ta_busy");
+	TEST_ASSERT(counter != NULL, "lookup_counter_by_name: ta_ta_busy found");
+	TEST_ASSERT(counter != NULL && counter->id == COUNTER_TA_TA_BUSY, "ta_ta_busy has correct ID");
+	TEST_ASSERT(counter != NULL && counter->hw_block == HW_IP_BLOCK_TA, "ta_ta_busy has correct hw_block");
 
 	/* Test invalid counter names */
 	counter = lookup_counter_by_name("INVALID_COUNTER");
@@ -67,11 +67,11 @@ void test_lookup_counter_by_id(void)
 	/* Test valid counter IDs */
 	const counter_def_t *counter = lookup_counter_by_id(COUNTER_SQ_WAVES);
 	TEST_ASSERT(counter != NULL, "lookup_counter_by_id: SQ_WAVES found");
-	TEST_ASSERT(strcmp(counter->name, "SQ_WAVES") == 0, "SQ_WAVES has correct name");
+	TEST_ASSERT(strcmp(counter->name, "sq_waves") == 0, "SQ_WAVES has correct name");
 
 	counter = lookup_counter_by_id(COUNTER_GL2C_HIT);
 	TEST_ASSERT(counter != NULL, "lookup_counter_by_id: GL2C_HIT found");
-	TEST_ASSERT(strcmp(counter->name, "GL2C_HIT") == 0, "GL2C_HIT has correct name");
+	TEST_ASSERT(strcmp(counter->name, "gl2c_hit") == 0, "GL2C_HIT has correct name");
 
 	/* Test invalid counter IDs */
 	counter = lookup_counter_by_id(0);
@@ -161,7 +161,7 @@ void test_get_all_counters(void)
 
 	/* Verify first and last counters */
 	TEST_ASSERT(counters[0].id == COUNTER_GL2C_EA_RDREQ, "First counter has correct ID");
-	TEST_ASSERT(strcmp(counters[0].name, "GL2C_EA_RDREQ") == 0,
+	TEST_ASSERT(strcmp(counters[0].name, "gl2c_ea_rdreq") == 0,
 		    "First counter has correct name");
 
 	/* Verify some counters in the middle */
@@ -172,17 +172,17 @@ void test_get_all_counters(void)
 	for (size_t i = 0; i < count; i++) {
 		if (counters[i].id == COUNTER_SQ_WAVES) {
 			found_sq_waves = 1;
-			TEST_ASSERT(strcmp(counters[i].name, "SQ_WAVES") == 0,
+			TEST_ASSERT(strcmp(counters[i].name, "sq_waves") == 0,
 				    "SQ_WAVES counter has correct name in array");
 		}
 		if (counters[i].id == COUNTER_GL2C_HIT) {
 			found_gl2c_hit = 1;
-			TEST_ASSERT(strcmp(counters[i].name, "GL2C_HIT") == 0,
+			TEST_ASSERT(strcmp(counters[i].name, "gl2c_hit") == 0,
 				    "GL2C_HIT counter has correct name in array");
 		}
 		if (counters[i].id == COUNTER_TA_TA_BUSY) {
 			found_ta_busy = 1;
-			TEST_ASSERT(strcmp(counters[i].name, "TA_TA_BUSY") == 0,
+			TEST_ASSERT(strcmp(counters[i].name, "ta_ta_busy") == 0,
 				    "TA_TA_BUSY counter has correct name in array");
 		}
 	}
