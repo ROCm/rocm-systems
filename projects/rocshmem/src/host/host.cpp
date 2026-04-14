@@ -330,6 +330,11 @@ __host__ void HostInterface::barrier_all_on_stream(hipStream_t stream) {
   rocshmem_barrier_all_kernel<<<1, 1, 0, stream>>>();
 }
 
+__host__ void HostInterface::quiet_on_stream(hipStream_t stream) {
+  // Launch kernel to do quiet with given stream
+  rocshmem_quiet_kernel<<<1, 1, 0, stream>>>();
+}
+
 __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
                                                    void *dest,
                                                    const void *source,

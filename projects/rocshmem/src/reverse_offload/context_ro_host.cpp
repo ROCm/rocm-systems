@@ -129,6 +129,12 @@ __host__ void ROHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
 }
 
+__host__ void ROHostContext::quiet_on_stream(hipStream_t stream) {
+  DPRINTF("Function: ro_net_host_quiet_on_stream\n");
+
+  host_interface->quiet_on_stream(stream);
+}
+
 __host__ void ROHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,

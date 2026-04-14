@@ -117,6 +117,10 @@ __host__ void GDAHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
 }
 
+__host__ void GDAHostContext::quiet_on_stream(hipStream_t stream) {
+  host_interface->quiet_on_stream(stream);
+}
+
 __host__ void GDAHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,
