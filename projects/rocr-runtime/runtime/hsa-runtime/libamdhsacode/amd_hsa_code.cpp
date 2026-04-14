@@ -653,6 +653,8 @@ inline bool IsNoteStringSizeWithinRoom(size_t room, size_t offset, uint16_t clai
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1151: MI.Name = "gfx1151"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1152: MI.Name = "gfx1152"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1153: MI.Name = "gfx1153"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1170: MI.Name = "gfx1170"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1171: MI.Name = "gfx1171"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1200: MI.Name = "gfx1200"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1201: MI.Name = "gfx1201"; MI.XnackSupported = false; MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1250: MI.Name = "gfx1250"; MI.XnackSupported = true; MI.SrameccSupported = true; break;
