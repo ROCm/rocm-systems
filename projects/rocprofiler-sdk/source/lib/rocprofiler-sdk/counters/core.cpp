@@ -215,7 +215,25 @@ stop_context(const context::context* ctx)
         enabled = false;
     });
 
-    if(controller) controller->disable_serialization();
+    if(controller)
+    {
+        // When roctxProfilerPause or context stop is called, there may be instrumented kernels
+        // still executing on the GPU. The profiler serializer maintains state (block_signal,
+        // ready_signal, _dispatch_queue) that tracks which queue is currently executing.
+        //
+        // Calling queue_controller_sync() first, we wait for all in-flight kernels to complete
+        // and their completion handlers to run. This ensures the serializer state is properly
+        // cleaned up before we disable serialization.
+        hsa::queue_controller_sync();
+        controller->disable_serialization();
+
+        for(auto& cb : ctx->dispatch_counter_collection->callbacks)
+        {
+            if(cb->queue_id == rocprofiler::hsa::ClientID{-1}) continue;
+            controller->remove_callback(cb->queue_id);
+            cb->queue_id = rocprofiler::hsa::ClientID{-1};
+        }
+    }
 }
 
 rocprofiler_status_t
