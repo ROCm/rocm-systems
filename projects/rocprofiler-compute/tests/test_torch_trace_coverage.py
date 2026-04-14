@@ -25,12 +25,14 @@ Capture stdout and attach the log to the PR when changing ``inject_roctx.py`` or
 marker matching, for example (from ``rocprofiler-compute/tests``)::
 
     pytest test_torch_trace_coverage.py -m torch_trace \\
-        --coverage-seed=0 --coverage-n=10000 -s 2>&1 | tee torch_trace_coverage_report.txt
+        --coverage-seed=0 --coverage-n=10000 \\
+        -s 2>&1 | tee torch_trace_coverage_report.txt
 
 Or from the ``rocprofiler-compute`` project root::
 
     pytest tests/test_torch_trace_coverage.py -m torch_trace \\
-        --coverage-seed=0 --coverage-n=10000 -s 2>&1 | tee torch_trace_coverage_report.txt
+        --coverage-seed=0 --coverage-n=10000 \\
+        -s 2>&1 | tee torch_trace_coverage_report.txt
 """
 
 import json
@@ -110,10 +112,7 @@ def unique_get_output_param_id(prefix: str) -> str:
     concurrent threads each get distinct directory names under a shared CWD.
     """
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    return (
-        f"{prefix}_{worker}_{os.getpid()}_"
-        f"{threading.get_ident()}_{uuid.uuid4().hex}"
-    )
+    return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
 
 
 class OpEntry(NamedTuple):
@@ -547,7 +546,8 @@ def emit_structural_preamble(
             [
                 "import torch.nn as nn",
                 f"_m_{safe_var} = nn.Linear(4, 4).cuda()",
-                f"_opt_{safe_var} = torch.optim.SGD(_m_{safe_var}.parameters(), lr=0.01)",
+                f"_opt_{safe_var} = torch.optim.SGD("
+                f"_m_{safe_var}.parameters(), lr=0.01)",
                 f"_m_{safe_var}(torch.randn(2, 4, device=device)).sum().backward()",
             ],
             f"_opt_{safe_var}.step",
@@ -836,7 +836,7 @@ def test_random_operator_kernel_coverage(
     binary_handler_profile_rocprof_compute,
     torch_trace_coverage_sampling,
 ):
-    """End-to-end check that ``--torch-trace`` ROCTX output matches profiler ground truth.
+    """Verify ``--torch-trace`` ROCTX output matches profiler ground truth.
 
     Steps: sample ops → emit ``coverage_workload.py`` + run it for JSON → run
     rocprof-compute on that script → parse CSVs → compare per op. Uses
