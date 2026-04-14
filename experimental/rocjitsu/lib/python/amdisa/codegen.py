@@ -1126,7 +1126,7 @@ class CodeGenerator:
             return self._gen_flat_store(dst_ops, src_ops, sem)
 
         if cls in ('buffer_load', 'tbuffer_load'):
-            return self._gen_buffer_load(dst_ops, src_ops, sem, cls)
+            return self._gen_buffer_load(dst_ops, src_ops, sem, cls, inst)
 
         if cls in ('buffer_store', 'tbuffer_store'):
             return self._gen_buffer_store(dst_ops, src_ops, sem, cls)
@@ -4173,11 +4173,36 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
-    def _gen_buffer_load(self, dst: list[str], src: list[str], sem: InstructionSemantics, cls: str = 'buffer_load') -> str:
+    def _gen_buffer_load(self, dst: list[str], src: list[str], sem: InstructionSemantics,
+                         cls: str = 'buffer_load', inst: 'Instruction | None' = None) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         sc0, sc1, nt = self._coherency_exprs()
         addr_fn = 'mtbuf_calculate_addresses' if cls == 'tbuffer_load' else 'mubuf_calculate_addresses'
+        # Check if this encoding has an 'lds' field in the machine instruction.
+        has_lds_field = False
+        if inst is not None:
+            enc = self.isa_spec.encoding_map.get(inst.enc_name)
+            if enc is not None:
+                has_lds_field = any(f.name == 'lds' for f in enc.ucode_fields)
+        # When the LDS bit is set, the buffer load reads from global memory but
+        # writes the result to LDS at M0 + lane_offset instead of to VGPRs.
+        # Route through the global memory pipeline for the load, then let the
+        # pipeline writeback path detect lds_dst and scatter to LDS.
+        if has_lds_field:
+            L.append('  if (inst_.lds) {')
+            L.append('    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
+            L.append(f'    d->elem_size = {esz};')
+            L.append(f'    d->num_elems = {ne};')
+            L.append('    d->is_load = true;')
+            L.append('    d->lds_dst = true;')
+            L.append('    d->lds_base = wf.m0();')
+            L.append(f'    d->mtype = {self._mtype_expr()};')
+            L.append(f'    d->non_temporal = {nt};')
+            L.append(f'    {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
+            L.append('    set_data(std::move(d));')
+            L.append('    return;')
+            L.append('  }')
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;')
         L.append(f'  d->elem_size = {esz};')
