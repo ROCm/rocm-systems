@@ -14,8 +14,8 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "util/debug_print.h"
 #include "util/except.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <cassert>
@@ -162,16 +162,15 @@ void ComputeUnitCore::reset_all_wf() {
 void ComputeUnitCore::retire_halted_wfs() {
   for (auto &w : wfs_) {
     if (w->is_halted() && w->sgpr_alloc().count > 0) {
-      if (util::trace::enabled()) {
+      util::Logger::vm([&](auto &os) {
         static thread_local uint64_t retire_count = 0;
         static thread_local uint32_t max_wg = 0;
-        ++retire_count;
         if (w->wg_id() > max_wg)
           max_wg = w->wg_id();
-        if (retire_count <= 5 || (retire_count % 40) == 0)
-          util::trace::print("CU ", this->name(), ": retire #", retire_count, " wg=", w->wg_id(),
-                             " insts=", w->trace_inst_count_, " max_wg_seen=", max_wg);
-      }
+        if (++retire_count <= 5 || (retire_count % 40) == 0)
+          os << std::format("CU {}: retire #{} wg={} insts={} max_wg_seen={}", this->name(),
+                            retire_count, w->wg_id(), w->trace_inst_count_, max_wg);
+      });
       sgpr_file_.free(w->sgpr_alloc().base);
       free_vgprs(w->vgpr_alloc().base);
       w->trace_inst_count_ = 0;
@@ -187,24 +186,24 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs) const {
     if (w->is_halted())
       ++free_slots;
   if (free_slots < num_wfs) {
-    util::trace::print("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_slots,
-                       " < num_wfs=", num_wfs);
+    util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_slots,
+                     " < num_wfs=", num_wfs);
     return false;
   }
 
   // Check SGPR register blocks.
   uint32_t free_sgpr = sgpr_file_.free_block_count();
   if (free_sgpr < num_wfs) {
-    util::trace::print("CU ", this->name(), " can_accept_wg: REJECT free_sgpr=", free_sgpr,
-                       " < num_wfs=", num_wfs);
+    util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_sgpr=", free_sgpr,
+                     " < num_wfs=", num_wfs);
     return false;
   }
 
   // Check VGPR register blocks.
   uint32_t free_vgpr = free_vgpr_blocks();
   if (free_vgpr < num_wfs) {
-    util::trace::print("CU ", this->name(), " can_accept_wg: REJECT free_vgpr=", free_vgpr,
-                       " < num_wfs=", num_wfs);
+    util::Logger::vm("CU ", this->name(), " can_accept_wg: REJECT free_vgpr=", free_vgpr,
+                     " < num_wfs=", num_wfs);
     return false;
   }
 
@@ -283,7 +282,7 @@ bool ComputeUnitCore::step() {
 
   if (active == nullptr) {
     // Log wavefront states when no RUNNING wf found.
-    if (util::trace::enabled()) {
+    util::Logger::vm([&](auto &os) {
       static thread_local uint64_t no_run_count = 0;
       if (++no_run_count <= 5) {
         uint32_t n_halt = 0, n_wait = 0, n_bar = 0;
@@ -295,11 +294,10 @@ bool ComputeUnitCore::step() {
           else if (w->state() == WfState::BARRIER)
             ++n_bar;
         }
-        util::trace::print("CU ", this->name(), ": no RUNNING wf. halted=", n_halt,
-                           " waitcnt=", n_wait, " barrier=", n_bar,
-                           " has_active=", has_active_wfs());
+        os << std::format("CU {}: no RUNNING wf. halted={} waitcnt={} barrier={} has_active={}",
+                          this->name(), n_halt, n_wait, n_bar, has_active_wfs());
       }
-    }
+    });
     // Check for barrier resolution: if all non-halted wavefronts in a
     // workgroup are at BARRIER, resume them all to RUNNING.
     for (auto &w : wfs_) {
@@ -328,61 +326,52 @@ bool ComputeUnitCore::step() {
   for (int i = 0; i < 4; ++i)
     words[i] = memory_->fetch32(active->pc + i * 4);
 
-  // Trace: log wf instruction count when it halts (end of program).
-  if (util::trace::enabled())
-    active->trace_inst_count_++;
+  active->trace_inst_count_++;
 
-  // PC sampler: log every 5000th instruction for non-trivial kernels.
-  // (Mnemonic printed after decode below.)
-
-  // Trace v4 and instruction words at key PCs in the fill kernel
-  if (util::trace::enabled() && active->pc == 0x4d00249258ULL) {
-    // At the v_or_b32 (+058): log words and v4 BEFORE execute
-    uint32_t vbase = active->vgpr_alloc().base;
-    uint32_t v4_0 = read_vgpr(vbase + 4, 0);
-    uint32_t v0_0 = read_vgpr(vbase + 0, 0);
-    util::trace::print("VOR_BEFORE pc=0x", std::hex, active->pc, " w0=0x", words[0], " w1(lit)=0x",
-                       words[1], std::dec, " v4[0]=", v4_0, " v0[0]=", v0_0,
-                       " wf=", active->wf_id());
-  }
-  if (util::trace::enabled() && active->pc == 0x4d00249260ULL) {
-    // After v_or (+060): log v4 AFTER execute
-    uint32_t vbase = active->vgpr_alloc().base;
-    uint32_t v4_0 = read_vgpr(vbase + 4, 0);
-    util::trace::print("VOR_AFTER pc=0x", std::hex, active->pc, std::dec, " v4[0]=", v4_0,
-                       " wf=", active->wf_id());
+  // Safety valve: halt wavefronts stuck in infinite loops.
+  if (active->trace_inst_count_ > 50000) {
+    active->halt();
+    return has_active_wfs();
   }
 
-  // One-time dump of the fill kernel code (after blit has copied it)
-  if (util::trace::enabled() && active->pc == 0x4d00249200ULL) {
-    static bool dumped = false;
-    if (!dumped) {
-      dumped = true;
-      util::trace::print("FILL_RUNTIME_CODE at 0x", std::hex, active->pc, std::dec);
-      for (int i = 0; i < 128; i += 4) {
-        uint32_t w0 = memory_->fetch32(active->pc + i * 4);
-        uint32_t w1 = memory_->fetch32(active->pc + i * 4 + 4);
-        uint32_t w2 = memory_->fetch32(active->pc + i * 4 + 8);
-        uint32_t w3 = memory_->fetch32(active->pc + i * 4 + 12);
-        util::trace::print("  +", std::hex, i * 4, ": ", w0, " ", w1, " ", w2, " ", w3, std::dec);
+  // Trace v4 and instruction words at key PCs in the fill kernel.
+  util::Logger::vm([&](auto &os) {
+    uint32_t vbase = active->vgpr_alloc().base;
+    if (active->pc == 0x4d00249258ULL) {
+      os << std::format("VOR_BEFORE pc={:#x} w0={:#x} w1(lit)={:#x} v4[0]={} v0[0]={} wf={}",
+                        active->pc, words[0], words[1], read_vgpr(vbase + 4, 0),
+                        read_vgpr(vbase + 0, 0), active->wf_id());
+    } else if (active->pc == 0x4d00249260ULL) {
+      os << std::format("VOR_AFTER pc={:#x} v4[0]={} wf={}", active->pc, read_vgpr(vbase + 4, 0),
+                        active->wf_id());
+    } else if (active->pc == 0x4d00249200ULL) {
+      static bool dumped = false;
+      if (!dumped) {
+        dumped = true;
+        os << std::format("FILL_RUNTIME_CODE at {:#x}", active->pc);
+        for (int i = 0; i < 128; i += 4)
+          os << std::format(
+              "\n[rj trace VM]   +{:#x}: {:08x} {:08x} {:08x} {:08x}", i * 4,
+              memory_->fetch32(active->pc + i * 4), memory_->fetch32(active->pc + i * 4 + 4),
+              memory_->fetch32(active->pc + i * 4 + 8), memory_->fetch32(active->pc + i * 4 + 12));
       }
     }
-  }
+  });
 
   Instruction *inst = nullptr;
   try {
     inst = decoder_->decode(words);
   } catch (const util::InvalidInst &e) {
-    util::trace::print("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
-                       std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x",
-                       words[2], ",0x", words[3], "]", std::dec, " what=", e.what());
+    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
+                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
+                     ",0x", words[3], "]", std::dec, " what=", e.what());
     active->halt();
     return has_active_wfs();
   }
   if (!inst) {
-    util::trace::print("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
-                       std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x",
-                       words[2], ",0x", words[3], "]", std::dec);
+    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
+                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
+                     ",0x", words[3], "]", std::dec);
     active->halt();
     return has_active_wfs();
   }
@@ -391,23 +380,40 @@ bool ComputeUnitCore::step() {
   assert(inst_size_signed > 0 && "instruction size must be positive");
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
 
-  // Trace: dump instruction at PCs that produce the zero-fill stores
-  if (util::trace::enabled() && (active->pc == 0x4d0024938cULL || active->pc == 0x4d00249304ULL ||
-                                 active->pc == 0x4d00249324ULL || active->pc == 0x4d00249358ULL)) {
-    util::trace::print("FILL_INST pc=0x", std::hex, active->pc, std::dec,
-                       " mnem=", inst->mnemonic(), " exec=0x", std::hex, active->exec(), std::dec,
-                       " wf=", active->wf_id());
-  }
+  util::Logger::vm([&](auto &os) {
+    if (active->pc == 0x4d0024938cULL || active->pc == 0x4d00249304ULL ||
+        active->pc == 0x4d00249324ULL || active->pc == 0x4d00249358ULL)
+      os << std::format("FILL_INST pc={:#x} mnem={} exec={:#x} wf={}", active->pc, inst->mnemonic(),
+                        active->exec(), active->wf_id());
+  });
 
-  // PC sampler: log every 5000th instruction for non-trivial kernels.
-  if (util::trace::enabled() && active->num_vgprs() >= 16 &&
-      (active->trace_inst_count_ % 5000) == 1) {
-    util::trace::print("PC_SAMPLE cu=", this->name(), " wf=", active->wf_id(),
-                       " inst#=", active->trace_inst_count_, " pc=0x", std::hex, active->pc,
-                       std::dec, " vgprs=", active->num_vgprs(), " mnem=", inst->mnemonic());
+  // Per-instruction trace with operand values (zone 0).
+  if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
+    if (active->wf_id() == 0 && active->trace_inst_count_ <= 100) {
+      uint32_t sb = active->sgpr_alloc().base;
+      uint32_t vb = active->vgpr_alloc().base;
+      util::Logger::vm("BEFORE #", active->trace_inst_count_, " pc=0x", std::hex, active->pc, " ",
+                       inst->mnemonic(), " s[0:3]=[", read_sgpr(sb), ",", read_sgpr(sb + 1), ",",
+                       read_sgpr(sb + 2), ",", read_sgpr(sb + 3), "] v[0:3][0]=[", read_vgpr(vb, 0),
+                       ",", read_vgpr(vb + 1, 0), ",", read_vgpr(vb + 2, 0), ",",
+                       read_vgpr(vb + 3, 0), "] vcc=", active->vcc(), " exec=", active->exec(),
+                       std::dec);
+    }
   }
 
   execute_instruction(inst, *active);
+
+  if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
+    if (active->wf_id() == 0 && active->trace_inst_count_ <= 100) {
+      uint32_t sb = active->sgpr_alloc().base;
+      uint32_t vb = active->vgpr_alloc().base;
+      util::Logger::vm("AFTER  #", active->trace_inst_count_, " s[0:3]=[", std::hex, read_sgpr(sb),
+                       ",", read_sgpr(sb + 1), ",", read_sgpr(sb + 2), ",", read_sgpr(sb + 3),
+                       "] v[0:3][0]=[", read_vgpr(vb, 0), ",", read_vgpr(vb + 1, 0), ",",
+                       read_vgpr(vb + 2, 0), ",", read_vgpr(vb + 3, 0), "] vcc=", active->vcc(),
+                       std::dec);
+    }
+  }
 
   if (inst->is_memory_op()) {
     // Tag store with issue PC for debugging.

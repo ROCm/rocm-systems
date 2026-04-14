@@ -56,6 +56,7 @@ struct HwQueue {
   uint64_t doorbell_va = 0;
   uint64_t last_doorbell = 0;   ///< Last-seen doorbell value (for change detection).
   bool host_accessible = false; ///< True if pointers are host VAs (KFD queues).
+  bool is_sdma = false;         ///< True for SDMA queues (DMA packet format, not AQL).
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
@@ -95,7 +96,7 @@ public:
   /// @details Models the hardware interrupt fired by the CP after writing to a
   /// completion signal's event mailbox. The driver registers this to wake any
   /// threads blocked in WAIT_EVENTS without the 100ms polling delay.
-  using InterruptCallback = std::function<void()>;
+  using InterruptCallback = std::function<void(uint32_t event_id)>;
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
 
   /// @brief Register a hardware AQL queue for doorbell monitoring and packet fetching.
@@ -173,6 +174,9 @@ private:
     uint32_t vgprs_per_wf = 256;
     uint64_t kernarg_addr = 0;
     uint32_t num_user_sgprs = 2;
+    uint32_t kernel_code_properties = 0; ///< AMDHSA kernel_code_properties bitfield.
+    uint64_t dispatch_ptr = 0;           ///< Host address of the AQL dispatch packet.
+    uint64_t queue_ptr = 0;              ///< Host address of the amd_queue_t struct.
     uint32_t workgroup_id_offset = 0;
     uint64_t completion_signal = 0;    ///< AQL completion signal handle (0 = none).
     uint64_t scratch_backing_addr = 0; ///< GPU VA of scratch backing memory (from amd_queue_t).
@@ -195,9 +199,15 @@ private:
   /// @brief Fetch AQL packets from a single HW queue.
   void fetch_from_queue(HwQueue &queue);
 
+  /// @brief Process SDMA packets from an SDMA queue's ring buffer.
+  /// Handles COPY_LINEAR (memcpy), FENCE (write), TRAP (interrupt),
+  /// POLL_REGMEM (spin-wait), ATOMIC (fetch-add), and CONST_FILL.
+  void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
+
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and enqueue an
   /// InternalDispatch.
-  void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue);
+  void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
+                          uint64_t pkt_addr);
 
   /// @brief Read a kernel descriptor from memory.
   rocr::llvm::amdhsa::kernel_descriptor_t read_kernel_descriptor(uint64_t kernel_object,

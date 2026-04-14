@@ -29,6 +29,8 @@ set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/../../shared/headers")
 
 option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
 
+include(rj_trace)
+
 # Sanitizer and static analysis options.
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)

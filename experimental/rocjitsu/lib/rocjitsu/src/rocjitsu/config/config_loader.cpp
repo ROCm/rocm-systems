@@ -411,8 +411,10 @@ std::unordered_map<std::string, FactoryFn> &factories() {
     };
 
     f["l2_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode, rj_code_arch_t,
-                       amdgpu::GpuMemory *) -> std::unique_ptr<simdojo::Component> {
-      return std::make_unique<amdgpu::L2Cache>(n);
+                       amdgpu::GpuMemory *mem) -> std::unique_ptr<simdojo::Component> {
+      auto l2 = std::make_unique<amdgpu::L2Cache>(n);
+      l2->set_backing_memory(mem);
+      return l2;
     };
 
     f["memory_side_cache"] = [](const std::string &n, const CfgMap &, simdojo::ExecMode,

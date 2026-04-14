@@ -241,6 +241,11 @@ public:
       host_page_map_[(gpu_va + off) >> PAGE_SHIFT] = hp + off;
   }
 
+  bool is_host_mapped(uint64_t gpu_va) const {
+    std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
+    return host_page_map_.count(gpu_va >> PAGE_SHIFT) > 0;
+  }
+
   void unmap_host_pages(uint64_t gpu_va, size_t size) {
     std::lock_guard<std::shared_mutex> lock(host_range_mutex_);
     for (uint64_t off = 0; off < size; off += PAGE_SIZE)
