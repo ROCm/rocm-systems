@@ -36,7 +36,7 @@ RocVideoDecoder::RocVideoDecoder(int device_id, OutputSurfaceMemoryType out_mem_
     // derived class can skip the following initialization by setting skip_init flag
     if (!skip_init) {
         if (!InitHIP(device_id_)) {
-            ROCDEC_THROW("Failed to initilize the HIP", ROCDEC_DEVICE_INVALID);
+            ROCDEC_THROW("Failed to initialize the HIP", ROCDEC_DEVICE_INVALID);
         }
         // create rocdec videoparser
         RocdecParserParams parser_params = {};

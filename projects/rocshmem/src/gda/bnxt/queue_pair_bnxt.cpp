@@ -186,7 +186,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 
     /* Update the SQ head
      * This param provides us the wqe_idx but we need to convert to the slot idx.
-     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multipy by this value */
+     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multiply by this value */
     sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
     bnxt_sq.head = sq_head;
 
@@ -197,7 +197,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
   } while (available_slots < requested_available_slots);
 }
 
-__device__ void QueuePair::bnxt_quiet(ActiveWFInfo &wf_info) {
+__device__ void QueuePair::bnxt_quiet() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
@@ -395,7 +395,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
   }
 
   if (fetching) {
-    bnxt_quiet(wf_info);
+    bnxt_quiet();
     return fetching_atomic[atomic_idx];
   }
 

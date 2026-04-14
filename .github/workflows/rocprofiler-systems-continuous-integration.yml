@@ -110,7 +110,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: projects/rocprofiler-systems/
+          sparse-checkout: |
+            projects/rocprofiler-systems/
+            .gitmodules
 
       - name: Setup Environment
         id: setup_env

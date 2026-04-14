@@ -49,10 +49,8 @@ Panel Config:
           unit: Percent
         VALU Active Threads:
           avg: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
-          min: MIN(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
-            != 0) else None))
-          max: MAX(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
-            != 0) else None))
+          min: MIN(SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU)
+          max: MAX(SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU)
           unit: Work-items
   - metric_table:
       id: 1103

@@ -92,18 +92,18 @@ Panel Config:
       metric:
         SARB Busy:
           avg: SUM(100 * GCEA_SARB_BUSY) / SUM(GCEA_ALWAYS_COUNT)
-          min: MIN((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT)
+          max: MAX(100 * GCEA_SARB_BUSY / GCEA_ALWAYS_COUNT)
           unit: Percent
         SARB Stalled:
           avg: SUM(100 * GCEA_SARB_STALLED) / SUM(GCEA_ALWAYS_COUNT)
-          min: MIN((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT)
+          max: MAX(100 * GCEA_SARB_STALLED / GCEA_ALWAYS_COUNT)
           unit: Percent
         SARB Starving:
           avg: SUM(100 * GCEA_SARB_STARVING) / SUM(GCEA_ALWAYS_COUNT)
-          min: MIN((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
-          max: MAX((100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT) if (GCEA_ALWAYS_COUNT != 0) else None)
+          min: MIN(100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT)
+          max: MAX(100 * GCEA_SARB_STARVING / GCEA_ALWAYS_COUNT)
           unit: Percent
         SARB Total Requests:
           avg: SUM(GCEA_SARB_REQ_PER_VC_sum) / SUM($denom)

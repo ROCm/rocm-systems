@@ -1977,8 +1977,10 @@ typedef struct {
 typedef struct {
   amdsmi_range_t curr_sclk_range;   //!< The current SCLK frequency range in MHz
   amdsmi_range_t curr_mclk_range;   //!< The current MCLK frequency range, upper bound only in MHz
+  amdsmi_range_t curr_fclk_range;   //!< The current FCLK frequency range in MHz
   amdsmi_range_t sclk_freq_limits;  //!< The range possible of SCLK values in MHz
   amdsmi_range_t mclk_freq_limits;  //!< The range possible of MCLK values in MHz
+  amdsmi_range_t fclk_freq_limits;  //!< The range possible of FCLK values in MHz
   amdsmi_od_volt_curve_t curve;     //!< The current voltage curve
   uint32_t num_regions;             //!< The number of voltage curve regions
 } amdsmi_od_volt_freq_data_t;

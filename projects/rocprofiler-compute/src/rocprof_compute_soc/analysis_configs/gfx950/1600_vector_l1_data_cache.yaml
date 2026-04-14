@@ -34,35 +34,25 @@ Panel Config:
         expr: Expression
       metric:
         Stalled on L2 Data:
-          expr: (((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-            != 0) else None)
+          expr: 100 * TCP_PENDING_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Stalled on L2 Req:
-          expr: (((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-            != 0) else None)
+          expr: 100 * TCP_TCR_TCP_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Stalled on Address:
-          expr: (((100 * TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if
-            (TCP_GATE_EN1_sum != 0) else None)
+          expr: 100 * TCP_TCP_TA_ADDR_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Stalled on Data:
-          expr: (((100 * TCP_TCP_TA_DATA_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if
-            (TCP_GATE_EN1_sum != 0) else None)
+          expr: 100 * TCP_TCP_TA_DATA_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Stalled on Latency FIFO:
-          expr: (((100 * TCP_LFIFO_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-            != 0) else None)
+          expr: 100 * TCP_LFIFO_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Stalled on Request FIFO:
-          expr: (((100 * TCP_RFIFO_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-            != 0) else None)
+          expr: 100 * TCP_RFIFO_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Stalled on Read Return:
-          expr: (((100 * TCP_TCR_RDRET_STALL_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-            != 0) else None)
+          expr: 100 * TCP_TCR_RDRET_STALL_sum / TCP_GATE_EN1_sum
         Tag RAM Stall (Read):
-          expr: (((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-            if (TCP_GATE_EN1_sum != 0) else None)
+          expr: 100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Tag RAM Stall (Write):
-          expr: (((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-            if (TCP_GATE_EN1_sum != 0) else None)
+          expr: 100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
         Tag RAM Stall (Atomic):
-          expr: (((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-            if (TCP_GATE_EN1_sum != 0) else None)
+          expr: 100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
       cli_style: simple_box
       tui_style: simple_box
   - metric_table:
@@ -104,14 +94,8 @@ Panel Config:
           unit: Gbps
         Cache Hit Rate:
           avg: 100 - SUM(100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
-          min: MIN(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
-            + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-            / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
-            else None))
-          max: MAX(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
-            + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-            / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
-            else None))
+          min: MIN(100 - 100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / TCP_TOTAL_CACHE_ACCESSES_sum)
+          max: MAX(100 - 100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / TCP_TOTAL_CACHE_ACCESSES_sum)
           unit: Percent
         Cache Accesses:
           avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
@@ -309,10 +293,8 @@ Panel Config:
           units: (Requests + $normUnit)
         Hit Ratio:
           avg: SUM(100 * TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
-          min: MIN((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
-            if (TCP_UTCL1_REQUEST_sum != 0) else None))
-          max: MAX((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
-            if (TCP_UTCL1_REQUEST_sum != 0) else None))
+          min: MIN(100 * TCP_UTCL1_TRANSLATION_HIT_sum / TCP_UTCL1_REQUEST_sum)
+          max: MAX(100 * TCP_UTCL1_TRANSLATION_HIT_sum / TCP_UTCL1_REQUEST_sum)
           units: Percent
         Hits:
           avg: SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM($denom)

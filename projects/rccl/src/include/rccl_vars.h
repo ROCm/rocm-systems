@@ -27,7 +27,10 @@ THE SOFTWARE.
 
 RCCL_PARAM_DECLARE(EnableHipGraph);  // Opt-in environment variable for enabling hipGraph
 
-#define RCCL_EXPOSE_STATIC // Expose needed static functions for rccl-tests (or unit-testing in future)
+/* Expose needed static functions for rccl-tests (or unit-testing in future). */
+#ifndef RCCL_EXPOSE_STATIC
+#define RCCL_EXPOSE_STATIC
+#endif
 #ifdef RCCL_EXPOSE_STATIC
 #define rccl_static
 #define rccl_static_inline inline

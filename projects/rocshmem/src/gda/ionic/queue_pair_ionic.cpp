@@ -32,7 +32,6 @@ namespace rocshmem {
 __device__ uint32_t QueuePair::reserve_sq(ActiveWFInfo &wf_info,
     uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
-  uint64_t activemask = wf_info.pe_group_mask;
 
   // reserve space for wqes in sq
   if (wf_info.is_pe_group_leader) {
