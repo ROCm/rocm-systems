@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cctype>
 #include <string_view>
 
 namespace rocprofsys
@@ -146,6 +147,23 @@ constexpr std::string_view DEBUG                 = "ROCPROFSYS_DEBUG";
 constexpr int              debug_verbose_boost = 8;
 constexpr std::string_view TIMEMORY_COMPONENTS = "ROCPROFSYS_TIMEMORY_COMPONENTS";
 constexpr std::string_view NETWORK_INTERFACE   = "ROCPROFSYS_NETWORK_INTERFACE";
+
+[[nodiscard]] inline int
+log_level_to_verbose(std::string_view level) noexcept
+{
+    auto eq = [](std::string_view a, std::string_view b) noexcept {
+        if(a.size() != b.size()) return false;
+        for(std::size_t i = 0; i < a.size(); ++i)
+            if(std::tolower(static_cast<unsigned char>(a[i])) !=
+               std::tolower(static_cast<unsigned char>(b[i])))
+                return false;
+        return true;
+    };
+    if(eq(level, "trace")) return 2;
+    if(eq(level, "debug")) return 1;
+    if(eq(level, "info")) return 0;
+    return -1;
+}
 
 }  // namespace env_vars
 }  // namespace rocprofsys

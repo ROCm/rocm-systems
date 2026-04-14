@@ -18,6 +18,7 @@
 #include <timemory/utility/join.hpp>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -85,9 +86,8 @@ get_updated_envs()
 int
 get_verbose_level()
 {
-    verbose           = get_env<int>(std::string{ env::VERBOSE }, verbose, false);
-    const auto _debug = get_env<bool>(std::string{ env::DEBUG }, false, false);
-    if(_debug) verbose += env::debug_verbose_boost;
+    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
+    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
     return verbose;
 }
 

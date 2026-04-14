@@ -66,7 +66,6 @@ namespace rocprofsys
 {
 inline namespace common
 {
-
 namespace
 {
 

@@ -93,11 +93,8 @@ forward_signal(int sig)
 int
 get_verbose()
 {
-    verbose           = get_env(std::string{ env::CAUSAL_VERBOSE },
-                                get_env<int>(std::string{ env::VERBOSE }, verbose, false));
-    const auto _debug = get_env(std::string{ env::CAUSAL_DEBUG },
-                                get_env<bool>(std::string{ env::DEBUG }, false, false));
-    if(_debug) verbose += env::debug_verbose_boost;
+    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
+    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
     return verbose;
 }
 
