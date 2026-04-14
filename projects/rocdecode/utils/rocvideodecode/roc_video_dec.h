@@ -147,9 +147,11 @@ private:
     while (0)
 
 #define CHECK_ZERO(str, value)              \
-    if (value == 0) {                      \
-        CriticalLog(g_rocdec_logger, ROCDEC_STR(str) + " is 0.");    \
-    }
+    do {                                   \
+        if (value == 0) {                  \
+            CriticalLog(g_rocdec_logger, ROCDEC_STR(str) + " is 0.");    \
+        }                                  \
+    } while (0)
 
 struct Rect {
     int left;
