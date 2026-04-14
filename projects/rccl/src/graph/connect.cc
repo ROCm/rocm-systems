@@ -13,7 +13,6 @@
 #include "rings.h"
 #include "topo.h"
 
-#include "msccl/msccl_lifecycle.h"
 
 /******************************************************************/
 /********************* Internode connection ***********************/
@@ -933,14 +932,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   if (minNchannels > maxChannels) {
     minNchannels = 2;
     WARN("NCCL_MIN_NCHANNELS set by environment is ignored due to greater than max allowed %d channels.", maxChannels);
-  }
-
-  if (mscclEnabled() && (comm->topo->mscclEnabled || mscclForceEnabled())) {
-    int mscclNumChannelsRequired = maxNchannels;
-    mscclSchedulerInit(comm, &mscclNumChannelsRequired);
-    if (comm->mscclCompatible) {
-      minNchannels = std::max(minNchannels, mscclNumChannelsRequired);
-    }
   }
 
   // Honor NCCL_MIN_NRINGS/NCCL_MAX_NRINGS.

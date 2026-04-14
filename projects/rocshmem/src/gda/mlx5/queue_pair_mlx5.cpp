@@ -245,7 +245,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ void QueuePair::mlx5_quiet(ActiveWFInfo &wf_info) {
+__device__ void QueuePair::mlx5_quiet() {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }
 
@@ -265,7 +265,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr,
    * doorbell register, it's easier if the LAST thread is the leader; does this
    * have any performance implications?
    */
-  // TODO: change the leader to first active lane-id, since leader is already calcualted
+  // TODO: change the leader to first active lane-id, since leader is already calculated
   bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
 
   if (is_leader) {
@@ -340,9 +340,9 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
   /**
    * since the leader needs to write the first 8 bytes of the LAST WQE to the
    * doorbell register, it's easier if the LAST thread is the leader; does this
-   * have any performance implications? 
+   * have any performance implications?
    */
-  // TODO: change the leader to first active lane-id, since leader is already calcualted
+  // TODO: change the leader to first active lane-id, since leader is already calculated
   bool is_leader = (wf_info.pe_group_logical_lane_id == wf_info.num_pe_group_lanes - 1);
   if (is_leader) {
     // get SQ lock
@@ -385,7 +385,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo([[maybe_unused]] int32_t length
   }
 
   if (fetching) {
-    mlx5_quiet(wf_info);
+    mlx5_quiet();
   }
 
   return fetching ? *atomic_laddr : 0;
