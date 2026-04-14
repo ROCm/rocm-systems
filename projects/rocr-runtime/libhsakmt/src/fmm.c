@@ -1739,11 +1739,11 @@ static void* udmabuf_allocation(HsaKFDContext *ctx,
 		goto error_release_aperture;
 
 	node_size = numa_node_size64(numa_node_id, &free_size);
-	pr_debug("udmabuf_allocation: numa_node_id %d, node_size %lld, free_size %lld\n",
+	pr_debug("udmabuf_allocation: numa_node_id %u, node_size %lld, free_size %lld\n",
 		numa_node_id, node_size, free_size);
 	/* compare free size at numa_node_id with size */
 	if ((uint64_t)free_size < size) {
-		pr_debug("udmabuf_allocation: has no enough ram on numa_node_id %d, node_size %lld, free_size %lld\n",
+		pr_debug("udmabuf_allocation: has no enough ram on numa_node_id %u, node_size %lld, free_size %lld\n",
 			numa_node_id, node_size, free_size);
 		goto error_release_aperture;
 	}
@@ -1997,7 +1997,7 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 	int num_node;
 	long r;
 
-	pr_debug("%s mem %p flags 0x%x size 0x%lx node_id %d\n", __func__,
+	pr_debug("%s mem %p flags 0x%x size 0x%lx node_id %u\n", __func__,
 		mem, mflags.Value, SizeInBytes, numa_node_id);
 
 	if (mflags.ui32.NoNUMABind || numa_available() == -1) {
@@ -2012,7 +2012,7 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 
 	/* Ignore binding requests to invalid nodes IDs */
 	if (numa_node_id >= (unsigned)num_node || numa_node_id == INVALID_NODEID || num_node <= 1) {
-		pr_warn("numa_node_id is out range: numa_node_id %d, num_node %d\n", numa_node_id, num_node);
+		pr_warn("numa_node_id is out range: numa_node_id %u, num_node %d\n", numa_node_id, num_node);
 		if (mflags.ui32.NoSubstitute)
 			return -EFAULT;
 		else
@@ -2904,7 +2904,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			}
 		}
 	}
-	pr_info("SVM alignment default order is %d.", svm_alignment_order);
+	pr_info("SVM alignment default order is %u.", svm_alignment_order);
 
 	/* Trade off - NumNodes includes GPU nodes + CPU Node. So in
 	 * systems with CPU node, slightly more memory is allocated than
@@ -3526,7 +3526,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 			nodes_to_map = fmm_ctx->all_gpu_id_array;
 			nodes_array_size = fmm_ctx->all_gpu_id_array_size;
 		}
-		pr_debug("%s Mapping Address %p size aligned: %ld offset: %x\n",
+		pr_debug("%s Mapping Address %p size aligned: %lu offset: %x\n",
 			__func__, svm_addr, PAGE_ALIGN_UP(page_offset + size), page_offset);
 		ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
@@ -3612,10 +3612,10 @@ static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_
 #ifdef DEBUG_PRINT_APERTURE
 	device_id_array_size /= sizeof(uint32_t);
 
-	pr_info("device id array size %d\n", device_id_array_size);
+	pr_info("device id array size %u\n", device_id_array_size);
 
 	for (uint32_t i = 0 ; i < device_id_array_size; i++)
-		pr_info("%d . 0x%x\n", (i+1), device_id_array[i]);
+		pr_info("%u . 0x%x\n", (i+1), device_id_array[i]);
 #endif
 }
 
