@@ -16,6 +16,10 @@ option(BUILD_ICD "Enable building OpenCL ICD Loader" OFF)
 option(EMU_ENV "Enable building for emulation environment" OFF)
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 
+# find amdocl lib and OpenCL ICD lib
+set(CMAKE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/opencl;$ORIGIN/../lib")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # Address sanitizer options
 if(ENABLE_ADDRESS_SANITIZER)
   message(STATUS "Building ocltst tests with Address Sanitizer options")
