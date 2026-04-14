@@ -72,7 +72,14 @@ process_callback_data(completed_cb_params_t&& params)
 
     if(info->buffer)
     {
-        buf = CHECK_NOTNULL(buffer::get_buffer(info->buffer->handle));
+        // Buffer may be destroyed before callbacks complete during abnormal teardown.
+        buf = buffer::get_buffer(info->buffer->handle);
+        if(!buf)
+        {
+            ROCP_WARNING << fmt::format(
+                "Buffer {} destroyed before sample was processed (skipping)", info->buffer->handle);
+            return;
+        }
     }
 
     auto _corr_id_v =

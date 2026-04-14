@@ -192,8 +192,9 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     auto* buf = buffer::get_buffer(callback_data.buffer.handle);
     if(!buf && callback_data.buffer != rocprofiler_buffer_id_t{.handle = 0})
     {
-        ROCP_FATAL << fmt::format("Buffer {} destroyed before record was written",
-                                  callback_data.buffer.handle);
+        // Buffer may be destroyed before callbacks complete during abnormal teardown.
+        ROCP_WARNING << fmt::format("Buffer {} destroyed before record was written (skipping)",
+                                    callback_data.buffer.handle);
         return false;
     }
 
