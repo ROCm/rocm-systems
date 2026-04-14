@@ -150,7 +150,7 @@ jobs:
         append-tagname ${{ matrix.hidden }} hidden-viz
         python3 ./scripts/run-ci.py -B build \
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG} \
-          --build-jobs 2 \
+          --build-jobs $(nproc) \
           --site GitHub \
           -- \
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
@@ -203,7 +203,7 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        cmake --build build --target install --parallel 2
+        cmake --build build --target install --parallel $(nproc)
         rm -fr /opt/rocprofiler-systems-dev/
 
     - name: CPack and Install
@@ -320,7 +320,7 @@ jobs:
         echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_*=OFF)"
         python3 ./scripts/run-ci.py -B build \
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-system-deps \
-          --build-jobs 2 \
+          --build-jobs $(nproc) \
           --site GitHub \
           -- \
           -DCMAKE_C_COMPILER=gcc \
@@ -454,7 +454,7 @@ jobs:
         echo "Compiler version: $(gcc --version | head -n 1)"
         python3 ./scripts/run-ci.py -B build \
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-codecov-mpi-python-ompt-papi \
-          --build-jobs 2 \
+          --build-jobs $(nproc) \
           --site GitHub \
           --coverage \
           -- \
