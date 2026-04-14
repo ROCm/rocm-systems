@@ -29,7 +29,7 @@ deviceLib:
     tags: [bitops]
   Unit_threadfence_system:
     <<: *level_2
-    tags: [multigpu]
+    tags: []
   Unit_syncthreads_and:
     <<: *level_2
     tags: [synchronization]

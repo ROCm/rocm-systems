@@ -197,7 +197,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
   } while (available_slots < requested_available_slots);
 }
 
-__device__ void QueuePair::bnxt_quiet(ActiveWFInfo &wf_info) {
+__device__ void QueuePair::bnxt_quiet() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
@@ -395,7 +395,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
   }
 
   if (fetching) {
-    bnxt_quiet(wf_info);
+    bnxt_quiet();
     return fetching_atomic[atomic_idx];
   }
 

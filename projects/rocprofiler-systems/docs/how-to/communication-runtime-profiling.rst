@@ -106,6 +106,55 @@ ROCm Systems Profiler provides automatic output labeling based on MPI rank IDs:
 
 For detailed information on building rocprofiler-systems with MPI support, see the :doc:`installation guide <../install/install>`.
 
+Selective rank profiling
+-------------------------
+
+When running large-scale MPI jobs, collecting profiling data from all ranks is not always desired.
+The ``--rank-filter-output`` option allows you to specify which MPI ranks should provide profile and trace output files.
+Below are examples using ``rocprof-sys-sample`` to profile an appliction using a variety of rank selection syntaxes.
+
+.. code-block:: bash
+
+    # Profile only rank 0
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output 0 -- <application_path>
+
+    # Profile ranks 0-3 and rank 8
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output 0-3,8 -- <application_path>
+
+    # Profile ranks 0, 4, 8, and 12
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output 0,4,8,12 -- <application_path>
+
+Supported rank specification syntax:
+
+- **Individual ranks**: Comma-separated integers (e.g., ``0,1,2,8``)
+- **Ranges**: Hyphen-separated start and end values (e.g., ``0-7`` for ranks 0 through 7)
+- **Combined**: Mix of individual ranks and ranges (e.g., ``0-3,8,10-15``)
+
+Supported rank identification variables:
+
+- **MPI_RANK**
+- **MPI_LOCALRANKID**
+- **MPI_RANKID**
+- **MV2_COMM_WORLD_RANK**
+- **OMPI_COMM_WORLD_RANK**
+
+If rank detection fails, data is collected from all ranks.
+
+Custom MPI environment variables
+----------------------------------
+
+For mixed environments or non-standard MPI configurations, you can specify custom environment variables for rank detection.
+When using custom environment variables, both ``--rank-filter-output`` and ``--rank-filter-id`` must be specified.
+The ``--rank-filter-id`` will take precedence over automatic detection.
+Below is an example using the ``MY_CUSTOM_RANK`` environment variable with ``rocprof-sys-sample`` to profile ranks 0-3 and 8:
+
+.. code-block:: bash
+
+    # Use custom environment variables for rank detection
+    mpirun -n 16 rocprof-sys-sample --rank-filter-output 0-3,8 --rank-filter-id MY_CUSTOM_RANK -- <application_path>
+
+If rank detection using the custom variable fails, the above-listed supported variables are used instead.
+
 Profiling RCCL
 ==============
 

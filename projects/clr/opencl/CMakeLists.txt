@@ -16,6 +16,10 @@ option(BUILD_ICD "Enable building OpenCL ICD Loader" OFF)
 option(EMU_ENV "Enable building for emulation environment" OFF)
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 
+# find amdocl lib and OpenCL ICD lib
+set(CMAKE_INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/opencl;$ORIGIN/../lib")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # Add flags to generate PDB files with full symbolic information
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")

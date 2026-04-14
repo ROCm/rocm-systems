@@ -47,16 +47,6 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
   orders_.store = detail::atomic::rocshmem_memory_order::memory_order_seq_cst;
 }
 
-__device__ void IPCContext::threadfence_system() {
-  __threadfence_system();
-}
-
-__device__ void IPCContext::ctx_create() {
-}
-
-__device__ void IPCContext::ctx_destroy(){
-}
-
 __device__ void IPCContext::putmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
   putmem_nbi(dest, source, nelems, pe);

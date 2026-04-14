@@ -237,6 +237,10 @@ if (NOT BUILD_TESTS_ONLY)
     ${PROJECT_NAME}
     PUBLIC
       -fgpu-rdc
+    PRIVATE
+      -Wall
+      -Wextra
+      -Werror
   )
 
   target_include_directories(
