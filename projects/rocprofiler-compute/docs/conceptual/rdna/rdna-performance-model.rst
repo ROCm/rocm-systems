@@ -33,7 +33,7 @@ processors.
 .. rubric:: Memory hierarchy in the tool
 
 For gfx1151, the Memory Chart panel walks the path from instruction and scalar
-paths, TCP (GL0), LDS, interfaces to GL1C (L1), GL2C (L2), and GCEA toward
+paths, TCP (GL0), LDS, interfaces to GL1C, GL2C, and GCEA toward
 system memory.
 
 .. rubric:: Workgroups and execution
@@ -61,7 +61,7 @@ and embed the RDNA3.5 (gfx1151) metric tables under each block:
 
 * :doc:`tcp-cache` — TCP (GL0): panel tables and Memory Chart rows through TCP-GL1.
 
-* :doc:`gl1-cache` — GL1C (L1): panel tables and Memory Chart GL1C Cache (L1).
+* :doc:`gl1-cache` — GL1C: panel tables and Memory Chart GL1C Cache.
 
 * :doc:`gl2-cache` — GL2C, GCEA / DRAM / arbiter, and related panel metrics.
 

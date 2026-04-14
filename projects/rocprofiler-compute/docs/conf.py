@@ -151,11 +151,11 @@ rdna_gfx1151_section_map = {
     "rdna1151-memory-chart-tcp-gl1-interface-gfx1151": (
         "Memory chart - TCP-GL1 Interface"
     ),
-    "rdna1151-memory-chart-gl1c-cache-l1-gfx1151": ("Memory chart - GL1C Cache (L1)"),
+    "rdna1151-memory-chart-gl1c-cache-l1-gfx1151": ("Memory chart - GL1C Cache"),
     "rdna1151-memory-chart-gl1c-gl2-interface-gfx1151": (
         "Memory chart - GL1C-GL2 Interface"
     ),
-    "rdna1151-memory-chart-gl2c-cache-l2-gfx1151": ("Memory chart - GL2C Cache (L2)"),
+    "rdna1151-memory-chart-gl2c-cache-l2-gfx1151": ("Memory chart - GL2C Cache"),
     "rdna1151-memory-chart-gcea-to-system-memory-gfx1151": (
         "Memory chart - GCEA to System Memory"
     ),

@@ -129,7 +129,7 @@ Memory chart - LDS (Local Data Share):
   LDS Wait Cycles:
     rst: Cycles waves spent waiting on LDS (wait-state attribution), per normalization unit (SQ_WAIT_INST_LDS_sum).
     unit: Cycles per Normalization Unit
-Memory chart - GL1C Cache (L1):
+Memory chart - GL1C Cache:
   GL1C Utilization:
     rst: 'Definition: Percentage of cycles the GL1C (L1 cache) is busy. Formula: 100 * GL1C_BUSY_sum / GL1C_CYCLE_sum'
     unit: Percent
@@ -154,7 +154,7 @@ Memory chart - GL1C Cache (L1):
   GL1C Stall GL2 Backpressure:
     rst: 'Percent of GL1C busy cycles spent stalled on GL2 backpressure. Formula: 100 * GL1C_STALL_GL2_GL1_sum / GL1C_BUSY_sum.'
     unit: Percent
-Memory chart - GL2C Cache (L2):
+Memory chart - GL2C Cache:
   GL2C Hit Rate:
     rst: 'Definition: Percentage of GL2C (L2 cache) requests that hit. Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)'
     unit: Percent

@@ -1,5 +1,5 @@
 .. meta::
-   :description: Learn about the GL1C (L1) metrics in ROCm Compute Profiler, including utilization, request statistics, cache performance, and stalls on RDNA 3.5 (gfx1151).
+   :description: Learn about the GL1C metrics in ROCm Compute Profiler, including utilization, request statistics, cache performance, and stalls on RDNA 3.5 (gfx1151).
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, GL1C, GL1
 
 .. _rdna-gl1:
@@ -62,7 +62,7 @@ GL1C stalls
 Memory Chart
 =======================
 
-Memory chart - GL1C Cache (L1)
+Memory chart - GL1C Cache
 -------------------------------
 
 .. tab-set::

@@ -8,7 +8,7 @@
 GL0
 ===
 
-On gfx1151, TCP is the vector L1 data cache (RDNA GL0) in front of GL1C. For GL1C (L1)
+On gfx1151, TCP is the vector L1 data cache (RDNA GL0) in front of GL1C. For GL1C
 panels and the GL1C Memory Chart table, see :doc:`gl1-cache`. The handoff toward
 GL2C is under :doc:`gl2-cache`.
 
