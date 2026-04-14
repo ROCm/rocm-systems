@@ -172,10 +172,10 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice:
     <<: *level_2
-    tags: [node, multigpu]
+    tags: [multigpu, node]
   Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice:
     <<: *level_2
-    tags: [node, multigpu]
+    tags: [multigpu, node]
   Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel:
     <<: *level_2
     tags: [node]
@@ -220,10 +220,10 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice:
     <<: *level_2
-    tags: [node, multigpu]
+    tags: [multigpu, node]
   Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice:
     <<: *level_2
-    tags: [node, multigpu]
+    tags: [multigpu, node]
   Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel:
     <<: *level_2
     tags: [node]
@@ -388,7 +388,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU:
     <<: *level_2
-    tags: [node, multigpu]
+    tags: [multigpu, node]
   Unit_hipGraphNodeGetType_Negative:
     <<: *level_2
     tags: [query]
@@ -1633,7 +1633,7 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemcpyNode_MulitDevice:
     <<: *level_2
-    tags: [node, multigpu]
+    tags: [multigpu, node]
   Unit_hipDrvGraphAddMemcpyNode_Positive_Basic:
     <<: *level_2
     tags: [node]

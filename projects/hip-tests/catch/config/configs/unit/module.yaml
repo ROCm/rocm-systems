@@ -245,7 +245,7 @@ module:
     tags: [resource]
   Unit_hipModuleGetGlobal_DiffDevice:
     <<: *level_2
-    tags: [resource, multigpu]
+    tags: [multigpu, resource]
   Unit_hipModule_Functional:
     <<: *level_2
     tags: [load]

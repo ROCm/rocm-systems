@@ -31,7 +31,7 @@ event:
     tags: [synchronization]
   Unit_hipEventElapsedTime_DifferentDevices:
     <<: *level_2
-    tags: [synchronization, multigpu]
+    tags: [multigpu, synchronization]
   Unit_hipEventElapsedTime_NotReady_Negative:
     <<: *level_2
     # SWDEV-411303 fails in WSL. Profiling not support in WSL

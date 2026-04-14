@@ -74,7 +74,7 @@ device:
     tags: [query]
   Unit_hipDeviceTotalMem_NonSelectedDevice:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipGetDeviceAttribute_CheckAttrValues:
     <<: *level_2
     tags: [query]
@@ -89,7 +89,7 @@ device:
     tags: [query]
   Unit_hipGetDeviceCount_HideDevices:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
     tags: [query]
@@ -131,7 +131,7 @@ device:
     tags: [query]
   Unit_hipSetGetDevice_Positive_Threaded_Basic:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipSetGetDevice_Negative:
     <<: *level_2
     tags: [query]

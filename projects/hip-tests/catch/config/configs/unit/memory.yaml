@@ -17,10 +17,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2DToArrayAsync_Positive_Default:
     <<: *level_2
     tags: [transfer]
@@ -40,10 +40,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy3D_Positive_Basic:
     <<: *level_2
     tags: [transfer]
@@ -134,7 +134,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2D_Positive_Basic:
     <<: *level_2
     tags: [transfer]
@@ -207,10 +207,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2DFromArray_multiDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2DFromArrayAsync_Positive_Default:
     <<: *level_2
     tags: [transfer]
@@ -227,10 +227,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy2DFromArrayAsync_Capture:
     <<: *level_2
     tags: [transfer]
@@ -267,7 +267,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyHtoA_Positive_Default:
     <<: *level_2
     tags: [transfer]
@@ -303,7 +303,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy_Negative:
     <<: *level_2
     tags: [transfer]
@@ -565,10 +565,10 @@ memory:
     tags: [alloc]
   Unit_hipMemPrefetchAsyncAdviseFlgTst:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipMemPrefetchAsyncAccsdByTst:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipMemPrefetchAsyncNegativeTst:
     <<: *level_2
     tags: [query]
@@ -627,7 +627,7 @@ memory:
     tags: [query]
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipMemRangeGetAttribute_Negative_Parameters:
     <<: *level_2
     tags: [query]
@@ -785,7 +785,7 @@ memory:
     tags: [memset]
   Unit_hipMemcpy3DPeer_BasicFunctional:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy3DPeer_NegativeTsts:
     <<: *level_2
     tags: [transfer]
@@ -793,7 +793,7 @@ memory:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpy3DPeerAsync_NegativeTsts:
     <<: *level_2
     tags: [transfer]
@@ -1203,38 +1203,38 @@ memory:
     tags: [alloc]
   Unit_hipMemcpyPeer_Positive_Default:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeer_Positive_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeer_Positive_ZeroSize:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
     # Disabling test tracked SWDEV-391555
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemcpyPeer_Negative_Parameters:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeerAsync_Positive_Default:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeerAsync_Positive_ZeroSize:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
     # Disabling test tracked SWDEV-391555
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemcpyPeerAsync_Negative_Parameters:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeerAsync_Capture:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyPeerAsync_StreamOnDiffDevice:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyWithStream_TestwithTwoStream:
     <<: *level_2
     tags: [transfer]
@@ -1246,16 +1246,16 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyWithStream_TestkindDtoD:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyWithStream_TestkindDefault:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyWithStream_TestkindDefaultForDtoD:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyWithStream_TestDtoDonSameDevice:
     <<: *level_2
     tags: [transfer]
@@ -1287,13 +1287,13 @@ memory:
     tags: [memset]
   Unit_hipMemcpyDtoD_Basic:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyDtoDAsync_Basic:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyDtoDAsync_Capture:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipHostMalloc_Basic:
     <<: *level_2
     tags: [alloc]
@@ -1656,10 +1656,10 @@ memory:
     tags: [transfer]
   Unit_hipDrvMemcpy3D_H2DDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test:
     <<: *level_2
     tags: [transfer]
@@ -1685,10 +1685,10 @@ memory:
     tags: [transfer]
   Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange:
     <<: *level_2
-    tags: [transfer, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test:
     <<: *level_2
     tags: [transfer]
@@ -1700,7 +1700,7 @@ memory:
     tags: [query]
   Unit_hipPointerGetAttribute_PeerGPU:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipPointerGetAttribute_BufferID:
     <<: *level_2
     tags: [query]
@@ -1857,7 +1857,7 @@ memory:
     tags: [memset]
   Unit_hipMemAdvise_TstAccessedByPeer:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
   Unit_hipMemAdvise_TstAccessedByFlg2:
     <<: *level_2
     tags: [query]
@@ -1879,7 +1879,7 @@ memory:
     tags: [query]
   Unit_hipMemAdvise_ReadMosltyMgpuTst:
     <<: *level_2
-    tags: [query, multigpu]
+    tags: [multigpu, query]
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemAdvise_Set_Unset_Basic:
