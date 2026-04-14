@@ -9,8 +9,7 @@ GL2
 ===
 
 On gfx1151, GL2C (RDNA naming for what Instinct documentation refers to as L2/TCC) is the last-level on-chip cache for most clients.
- Traffic leaving GL2
-heads toward GCEA and DRAM through the DRAM read/write, SARB, and
+Traffic leaving GL2 heads toward GCEA and DRAM through the DRAM read/write, SARB, and
 return interfaces in the panel YAMLs.
 
 For Instinct L2 (TCC) coherence, channel hashing, and fabric metrics on CDNA architecture across MI-series GPUs, see

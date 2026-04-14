@@ -67,7 +67,7 @@ and embed the RDNA3.5 (gfx1151) metric tables under each block:
 
 * :doc:`shader-engine` — GRBM GPU/SE utilization and SPI dispatch statistics.
 
-* :doc:`command-processor` — CPC / ME(Micro Engine) metrics (same role as CDNA CP, different tab layout in gfx1151).
+* :doc:`command-processor` — CPC / Micro Engine (ME) metrics (same role as CDNA CP, different tab layout in gfx1151).
 
 * :doc:`references` — public references and link to Instinct citations.
 

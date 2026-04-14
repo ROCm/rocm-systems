@@ -43,8 +43,8 @@ CPC interface utilization
       .. jinja:: rdna1151-cpc-interface-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-ME(Micro Engine) stall cycles
-----------------
+Micro Engine (ME) stall cycles
+-------------------------------
 
 .. tab-set::
 
@@ -65,8 +65,8 @@ CPC memory requests
       .. jinja:: rdna1151-cpc-memory-requests-gfx1151
          :file: _templates/metrics_table.j2
 
-ME(Micro Engine) instruction cache
------------------------
+Micro Engine (ME) instruction cache
+------------------------------------
 
 .. tab-set::
 
