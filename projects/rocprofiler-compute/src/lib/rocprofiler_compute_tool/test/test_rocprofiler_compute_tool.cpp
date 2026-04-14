@@ -69,6 +69,13 @@ TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
 }
 
+TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->requested_counters, m_input_parameters->get_requested_counters());
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
