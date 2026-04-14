@@ -1531,7 +1531,7 @@ def amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor_handle: processor_handl
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    power = ctypes.c_uint32()
+    power = ctypes.c_double()
     _check_res(
         amdsmi_wrapper.amdsmi_get_cpu_pwr_svi_telemetry_all_rails(
             processor_handle, ctypes.byref(power)
@@ -1541,22 +1541,22 @@ def amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor_handle: processor_handl
     return f"{power.value} mW"
 
 
-def amdsmi_set_cpu_socket_power_cap(processor_handle: processor_handle_t, power_cap: int):
+def amdsmi_set_cpu_socket_power_cap(processor_handle: processor_handle_t, power_cap: float):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    if not isinstance(power_cap, int):
-        raise AmdSmiParameterException(power_cap, int)
+    if not isinstance(power_cap, float):
+        raise AmdSmiParameterException(power_cap, float)
 
-    power_cap_32 = ctypes.c_uint32(power_cap)
+    power_cap_double = ctypes.c_double(power_cap)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_socket_power_cap(processor_handle, power_cap_32))
+    _check_res(amdsmi_wrapper.amdsmi_set_cpu_socket_power_cap(processor_handle, power_cap_double))
 
 
 def amdsmi_set_cpu_pwr_efficiency_mode(
     processor_handle: processor_handle_t,
     mode: int,
     util: int = AMDSMI_MAX_UTIL,
-    ppt_limit: int = AMDSMI_MAX_PPT_LIMIT,
+    ppt_limit: float = AMDSMI_MAX_PPT_LIMIT,
 ) -> tuple:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -1564,20 +1564,20 @@ def amdsmi_set_cpu_pwr_efficiency_mode(
         raise AmdSmiParameterException(mode, int)
     if not isinstance(util, int):
         raise AmdSmiParameterException(util, int)
-    if not isinstance(ppt_limit, int):
-        raise AmdSmiParameterException(ppt_limit, int)
+    if not isinstance(ppt_limit, float):
+        raise AmdSmiParameterException(ppt_limit, float)
 
     mode_8 = ctypes.c_uint8(mode)
     util_32 = ctypes.c_uint32(util)
-    ppt_limit_32 = ctypes.c_uint32(ppt_limit)
+    ppt_limit_double = ctypes.c_double(ppt_limit)
 
     _check_res(
         amdsmi_wrapper.amdsmi_set_cpu_pwr_efficiency_mode(
-            processor_handle, mode_8, ctypes.byref(util_32), ctypes.byref(ppt_limit_32)
+            processor_handle, mode_8, ctypes.byref(util_32), ctypes.byref(ppt_limit_double)
         )
     )
 
-    return (util_32.value, ppt_limit_32.value)
+    return (util_32.value, ppt_limit_double.value)
 
 
 def amdsmi_get_cpu_pwr_efficiency_mode(processor_handle: processor_handle_t) -> tuple:
@@ -5148,7 +5148,7 @@ def amdsmi_set_gpu_clk_limit(
         clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_DF
     else:
         raise AmdSmiParameterException(f"Unsupported clock type: {clk_type}", str)
-    
+
     if limit_type.lower() == "min":
         limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MIN
     elif limit_type.lower() == "max":

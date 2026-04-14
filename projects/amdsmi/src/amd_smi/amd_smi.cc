@@ -6562,7 +6562,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle proc
 }
 
 amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_handle processor_handle,
-                                                           uint32_t* power) {
+                                                           double* power) {
   amdsmi_status_t status;
   uint32_t pow;
   uint8_t sock_ind;
@@ -6579,15 +6579,16 @@ amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_hand
   status = static_cast<amdsmi_status_t>(esmi_pwr_svi_telemetry_all_rails_get(sock_ind, &pow));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
-  *power = pow;
+  *power = static_cast<double>(pow);
 
   return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                uint32_t pcap) {
+                                                double _pcap) {
   amdsmi_status_t status;
   uint8_t sock_ind;
+  uint32_t pcap = static_cast<uint32_t>(_pcap);
 
   AMDSMI_CHECK_INIT();
 
@@ -6607,7 +6608,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
 
 amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
                                                    uint8_t power_efficiency_mode,
-                                                   uint32_t* utilization, uint32_t* ppt_limit) {
+                                                   uint32_t* utilization, double* ppt_limit) {
   amdsmi_status_t status;
   uint8_t sock_ind;
   uint32_t pwreffmode_util = 0;
@@ -6620,7 +6621,7 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
     return AMDSMI_STATUS_INVAL;
 
   pwreffmode_util = *utilization;
-  pwreffmode_pptlimit = *ppt_limit;
+  pwreffmode_pptlimit = static_cast<uint32_t>(*ppt_limit);
 
   if ((power_efficiency_mode == POWER_EFFICIENCY_MODE_4) ||
       (power_efficiency_mode == POWER_EFFICIENCY_MODE_5)) {
@@ -6662,7 +6663,7 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
   *utilization = pwreffmode_util;
-  *ppt_limit = pwreffmode_pptlimit;
+  *ppt_limit = static_cast<double>(pwreffmode_pptlimit);
   return AMDSMI_STATUS_SUCCESS;
 }
 

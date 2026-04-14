@@ -2080,8 +2080,10 @@ struct_amdsmi_od_volt_freq_data_t._pack_ = 1 # source:False
 struct_amdsmi_od_volt_freq_data_t._fields_ = [
     ('curr_sclk_range', amdsmi_range_t),
     ('curr_mclk_range', amdsmi_range_t),
+    ('curr_fclk_range', amdsmi_range_t),
     ('sclk_freq_limits', amdsmi_range_t),
     ('mclk_freq_limits', amdsmi_range_t),
+    ('fclk_freq_limits', amdsmi_range_t),
     ('curve', amdsmi_od_volt_curve_t),
     ('num_regions', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
@@ -2948,20 +2950,20 @@ except AttributeError:
 try:
     amdsmi_get_cpu_pwr_svi_telemetry_all_rails = _libraries['libamd_smi.so'].amdsmi_get_cpu_pwr_svi_telemetry_all_rails
     amdsmi_get_cpu_pwr_svi_telemetry_all_rails.restype = amdsmi_status_t
-    amdsmi_get_cpu_pwr_svi_telemetry_all_rails.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
+    amdsmi_get_cpu_pwr_svi_telemetry_all_rails.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_double)]
 except AttributeError:
     pass
 try:
     amdsmi_set_cpu_socket_power_cap = _libraries['libamd_smi.so'].amdsmi_set_cpu_socket_power_cap
     amdsmi_set_cpu_socket_power_cap.restype = amdsmi_status_t
-    amdsmi_set_cpu_socket_power_cap.argtypes = [amdsmi_processor_handle, uint32_t]
+    amdsmi_set_cpu_socket_power_cap.argtypes = [amdsmi_processor_handle, ctypes.c_double]
 except AttributeError:
     pass
 uint8_t = ctypes.c_uint8
 try:
     amdsmi_set_cpu_pwr_efficiency_mode = _libraries['libamd_smi.so'].amdsmi_set_cpu_pwr_efficiency_mode
     amdsmi_set_cpu_pwr_efficiency_mode.restype = amdsmi_status_t
-    amdsmi_set_cpu_pwr_efficiency_mode.argtypes = [amdsmi_processor_handle, uint8_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+    amdsmi_set_cpu_pwr_efficiency_mode.argtypes = [amdsmi_processor_handle, uint8_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_double)]
 except AttributeError:
     pass
 try:

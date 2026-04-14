@@ -3736,7 +3736,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle proc
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_handle processor_handle,
-                                                           uint32_t* power);
+                                                           double* power);
 
 /**
  *  @brief Set the power cap value for a given socket.
@@ -3752,7 +3752,7 @@ amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_hand
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                uint32_t pcap);
+                                                double pcap);
 
 /**
  *  @brief Set the power efficiency profile policy.
@@ -3773,7 +3773,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
  */
 amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
                                                    uint8_t power_efficiency_mode,
-                                                   uint32_t* utilization, uint32_t* ppt_limit);
+                                                   uint32_t* utilization, double* ppt_limit);
 
 /**
  *  @brief Get the power efficiency profile policy
