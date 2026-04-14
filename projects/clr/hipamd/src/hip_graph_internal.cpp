@@ -922,6 +922,9 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Creating %u parallel streams for device %d",
     max_streams, devId);
   parallel_streams_[devId].reserve(max_streams);
+  // Track queue IDs already assigned to earlier internal streams so each new
+  // stream avoids colliding with them at creation time.
+  std::unordered_set<uint64_t> used_qids;
   for (uint32_t i = 0; i < max_streams; ++i) {
     auto stream = new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal,
                                   hipStreamNonBlocking);
@@ -930,13 +933,22 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create stream %u for device %d",
               i, devId);
       hip::Stream::Destroy(stream);
-      // Clean up any previously created streams for this device
       for (auto& created_stream : parallel_streams_[devId]) {
+        created_stream->vdev()->UnpinQueue();
         hip::Stream::Destroy(created_stream);
       }
       parallel_streams_[devId].clear();
       return hipErrorOutOfMemory;
     }
+
+    // Pin the queue so dynamic queue management won't release it between launches
+    stream->vdev()->PinQueue();
+    // Acquire a queue that doesn't collide with previously created internal streams.
+    // On the first stream (used_qids empty) this is a normal acquisition.
+    if (!used_qids.empty()) {
+      stream->vdev()->ReacquireQueueExcluding(used_qids);
+    }
+    used_qids.insert(stream->getQueueID());
 
     parallel_streams_[devId].push_back(stream);
   }
@@ -1918,31 +1930,34 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 // ================================================================================================
 void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   int devId = launch_stream->vdev()->device().index();
-  // Clear any previous stream assignments
   streams_.clear();
-  // Current stream is the default in the assignment
   streams_.push_back(launch_stream);
   if (parallel_streams_.find(devId) == parallel_streams_.end()) {
     LogPrintfError("UpdateStreams failed for device id:%d", devId);
     return;
   }
-  auto parallel_streams = parallel_streams_[devId];
-  std::unordered_map<int, int> unique_stream_ids;
-  unique_stream_ids[launch_stream->getQueueID()] = 1;
-  std::vector<hip::Stream*> collided_streams;
-  // Assign streams that are unique in parallel_streams and doesnt collide with launch stream
-  for (uint32_t i = 0; i < parallel_streams.size(); i++) {
-    auto qid = parallel_streams[i]->getQueueID();
-    if (unique_stream_ids[qid] == 0) {
-      streams_.push_back(parallel_streams[i]);
-    } else {
-      collided_streams.push_back(parallel_streams[i]);
+  auto& parallel_streams = parallel_streams_[devId];
+
+  // Collect queue IDs already in use, starting with the launch stream
+  std::unordered_set<uint64_t> used_qids;
+  used_qids.insert(launch_stream->getQueueID());
+
+  for (auto stream : parallel_streams) {
+    uint64_t qid = stream->getQueueID();
+    if (used_qids.count(qid) > 0) {
+      // Collision: this stream shares a HW queue with the launch stream or another
+      // internal stream. Re-acquire a different queue, avoiding all used ones.
+      if (stream->vdev()->ReacquireQueueExcluding(used_qids)) {
+        qid = stream->getQueueID();
+        ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+                "[hipGraph] Resolved queue collision: stream reassigned to queueID %lu", qid);
+      } else {
+        ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+                "[hipGraph] Could not resolve queue collision for stream (best-effort)");
+      }
     }
-    unique_stream_ids[qid]++;
-  }
-  // Assign the remaining streams for execution.
-  for (int i = streams_.size(), j = 0; i < max_streams_ && j < collided_streams.size(); i++, j++) {
-    streams_.push_back(collided_streams[j]);
+    used_qids.insert(qid);
+    streams_.push_back(stream);
   }
 }
 
@@ -2170,6 +2185,14 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "GraphExec::Run max_streams: %d, on device: %d",
           max_streams_, launch_stream->DeviceId());
 
+  // If the launch stream lost its HW queue due to dynamic queue management,
+  // try to re-acquire the same one it used last time.
+  // Then run collision detection to ensure graph-internal streams don't share
+  // a HW queue with the launch stream.
+  launch_stream->vdev()->SetPreferredQueue();
+  launch_stream->vdev()->AcquireQueueWithPreference();
+  UpdateStreams(launch_stream);
+
   if (use_segment_scheduling_ && instantiateDeviceId_ == launch_stream->DeviceId()) {
     // If the graph has kernels that does device side allocation,  during packet capture, heap is
     // allocated because heap pointer has to be added to the AQL packet, and initialized during
@@ -2179,11 +2202,6 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     if (!initialized && HasHiddenHeap()) {
       launch_stream->vdev()->HiddenHeapInit();
       initialized = true;
-    }
-    // Update streams for the graph execution only if launch stream changed
-    if (lastLaunchStream_ != launch_stream) {
-      UpdateStreams(launch_stream);
-      lastLaunchStream_ = launch_stream;
     }
     amd::Command* last_cmd = nullptr;
     if (max_streams_dev_.size() == 1) {
@@ -2205,11 +2223,6 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       topoOrder_[i]->EnqueueCommands(launch_stream);
     }
   } else {
-    // Update streams for the graph execution only if launch stream changed
-    if (lastLaunchStream_ != launch_stream) {
-      UpdateStreams(launch_stream);
-      lastLaunchStream_ = launch_stream;
-    }
     // Execute all nodes in the graph
     if (!RunNodes()) {
       LogError("Failed to launch nodes!");
