@@ -32,7 +32,7 @@ jobs:
     strategy:
       max-parallel: 10
       matrix:
-        os: 
+        os:
           - Ubuntu20
           - Ubuntu22
           - Debian10
@@ -54,12 +54,12 @@ jobs:
           # Find the directory containing the main CMakeLists.txt for CUID
           # Prioritize finding it in projects/cuid
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
-          
+
           if [ -z "$TARGET_DIR" ]; then
             echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
             TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
           fi
-          
+
           if [ -z "$TARGET_DIR" ]; then
              echo "Could not find CMakeLists.txt for CUID."
              exit 1
@@ -71,13 +71,13 @@ jobs:
         id: openssl
         run: |
           set -e
-          
+
           # Check OpenSSL version
           OPENSSL_VER=$(openssl version | awk '{print $2}')
           echo "Current OpenSSL version: $OPENSSL_VER"
           if [[ "$OPENSSL_VER" != 3.* ]]; then
              echo "Installing OpenSSL 3.0..."
-             
+
              # Install build tools
              if command -v apt-get &> /dev/null; then
                  apt-get update
@@ -105,19 +105,19 @@ jobs:
         run: |
           set -e
           echo 'Building on ${{ matrix.os }}'
-          
+
           # Ensure build directory exists
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           rm -rf $BUILD_FOLDER
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
-          
+
           # Configure
-          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }}
-          
+          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }} -DBUILD_TESTS=ON
+
           # Build
           make -j $(nproc)
-          
+
           # Install
           # This requires sudo or root, container runs as root
           make install
@@ -126,11 +126,11 @@ jobs:
         run: |
           set -e
           echo 'Running CUID tests on ${{ matrix.os }}'
-          
+
           OUTPUT_DIR="/tmp/test-results-${{ matrix.os }}"
           mkdir -p $OUTPUT_DIR
           TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
-          
+
           # Run the test binary
           if /opt/amdcuid/share/amd_cuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
              echo "CUID tests passed"
