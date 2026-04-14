@@ -233,9 +233,6 @@ set(ATT_PLUS_PCS_DISABLE ${IS_DISABLED})
 if(${IS_PC_SAMPLING_STOCHASTIC_DISABLED})
     set(ATT_PLUS_PCS_DISABLE ON)
 endif()
-if(${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
-    set(ATT_PLUS_PCS_DISABLE ON)
-endif()
 set(PCS_ARGS --pc-sampling-beta-enabled 1 --pc-sampling-unit cycles
              --pc-sampling-interval 16384 --pc-sampling-method stochastic)
 

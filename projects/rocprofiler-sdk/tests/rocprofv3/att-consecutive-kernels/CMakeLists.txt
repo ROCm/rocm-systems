@@ -61,10 +61,6 @@ if(attdecoder_FOUND)
     set(ATT_LIB --att-library-path ${attdecoder_LIB_DIR})
 endif()
 
-if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
-    set(IS_DISABLED ON)
-endif()
-
 # consecutive kernel test
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-consecutive-kernels
