@@ -160,7 +160,6 @@ struct config : output_config
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
     bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
-    bool     att_marker_trace        = get_env("ROCPROF_ATT_MARKER_TRACE", false);
 
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
@@ -222,7 +221,6 @@ config::get_attach_invariants() const
                            att_library_path,
                            att_param_perfcounters,
                            att_param_perf_ctrl,
-                           att_marker_trace,
                            pc_sampling_method,
                            pc_sampling_unit,
                            kernel_filter_include,
@@ -322,7 +320,6 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(att_param_perfcounters);
     CFG_SERIALIZE_MEMBER(att_param_perf_ctrl);
     CFG_SERIALIZE_MEMBER(att_consecutive_kernels);
-    CFG_SERIALIZE_MEMBER(att_marker_trace);
 
     // serialize the base class
     static_cast<const base_type*>(this)->save(ar);

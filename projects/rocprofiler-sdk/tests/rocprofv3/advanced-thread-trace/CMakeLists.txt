@@ -346,7 +346,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-marker-trace
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_MARKER_TRACE_OUT_DIR}
-        --att-marker-trace --att-shader-engine-mask 0xF --output-format json --log-level
+        --att --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
         env -o out -- $<TARGET_FILE:att-marker-trace>
     DEPENDS att-marker-trace
     LABELS "integration-tests;thread-trace"
@@ -370,10 +370,10 @@ rocprofiler_add_integration_validate_test(
          ${ATT_MARKER_TRACE_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
-# Conflict: att-marker-trace + att-consecutive-kernels should fail
+# Conflict: att selected-regions + att-consecutive-kernels should fail
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-marker-trace-conflict-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att-marker-trace
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --selected-regions
             --att-consecutive-kernels 5 -- $<TARGET_FILE:att-marker-trace>
     DEPENDS att-marker-trace
     TIMEOUT 45

@@ -293,6 +293,9 @@ The ``--selected-regions`` option works with all tracing and profiling options:
 .. note::
    The ``--selected-regions`` option cannot be used together with ``--collection-period``. These are mutually exclusive profiling control mechanisms. Use ``--selected-regions`` for code-based control and ``--collection-period`` for time-based control.
 
+.. note::
+   For thread trace (ATT) profiling, ``--att --selected-regions`` can be used together to control exactly which GPU kernel dispatches are thread-traced via ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)``. See :ref:`using-thread-trace` for details.
+
 **Comparison summary:**
 
 .. list-table:: roctxProfilerPause/Resume behavior comparison
