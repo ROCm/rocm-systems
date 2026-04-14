@@ -56,7 +56,7 @@ void MockInputParameters::set_kernel_filter_range(const std::string& range)
 // MockSdkWrapper
 void MockSdkWrapper::create_context(rocprofiler_context_id_t* context_id)
 {
-    m_created_contexts.push_back(*context_id);
+    m_created_contexts.push_back(context_id->handle);
 }
 
 void MockSdkWrapper::configure_callback_dispatch_counting_service(
@@ -66,6 +66,7 @@ void MockSdkWrapper::configure_callback_dispatch_counting_service(
     rocprofiler_dispatch_counting_record_cb_t  record_callback,
     void*                                      record_callback_args)
 {
+
 }
 
 void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
@@ -79,7 +80,7 @@ void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t
 
 void MockSdkWrapper::start_context(rocprofiler_context_id_t context_id)
 {
-    m_started_contexts.push_back(context_id);
+    m_started_contexts.push_back(context_id.handle);
 }
 
 void MockSdkWrapper::iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
@@ -106,12 +107,12 @@ void MockSdkWrapper::query_record_counter_id(rocprofiler_counter_instance_id_t i
 {
 }
 
-const std::vector<rocprofiler_context_id_t>& MockSdkWrapper::get_created_contexts() const
+const std::vector<uint64_t>& MockSdkWrapper::get_created_contexts() const
 {
     return m_created_contexts;
 }
 
-const std::vector<rocprofiler_context_id_t>& MockSdkWrapper::get_started_contexts() const
+const std::vector<uint64_t>& MockSdkWrapper::get_started_contexts() const
 {
     return m_started_contexts;
 }

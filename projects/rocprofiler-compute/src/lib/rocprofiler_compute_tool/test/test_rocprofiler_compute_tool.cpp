@@ -28,13 +28,13 @@ protected:
         return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
     }
 
-    static void compare_counter_config_ids(const std::vector<rocprofiler_context_id_t>& expected,
-                                           const std::vector<rocprofiler_context_id_t>& actual)
+    static void compare_counter_config_ids(const std::vector<uint64_t>& expected,
+                                           const std::vector<uint64_t>& actual)
     {
         EXPECT_EQ(expected.size(), actual.size());
         for (size_t i = 0; i < expected.size(); ++i)
         {
-            EXPECT_EQ(expected[i].handle, actual[i].handle) << "Counter config ID at index " << i << " does not match";
+            EXPECT_EQ(expected[i], actual[i]) << "Counter config ID at index " << i << " does not match";
         }
     }
 

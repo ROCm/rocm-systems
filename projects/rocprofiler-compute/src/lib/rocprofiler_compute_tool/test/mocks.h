@@ -84,10 +84,10 @@ public:
     void query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                  rocprofiler_counter_id_t*         counter_id) override;
 
-    const std::vector<rocprofiler_context_id_t>& get_created_contexts() const;
-    const std::vector<rocprofiler_context_id_t>& get_started_contexts() const;
+    const std::vector<uint64_t>& get_created_contexts() const;
+    const std::vector<uint64_t>& get_started_contexts() const;
 
 private:
-    std::vector<rocprofiler_context_id_t> m_created_contexts;
-    std::vector<rocprofiler_context_id_t> m_started_contexts;
+    std::vector<uint64_t> m_created_contexts;
+    std::vector<uint64_t> m_started_contexts;
 };
