@@ -26,8 +26,8 @@ Panel Config:
           # can exceed GRBM_GUI_ACTIVE when multiple SEs are busy in the same cycle. GRBM counts
           # "any SPI busy" vs GUI active.
           avg: SUM(100 * GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          max: MAX((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+          max: MAX(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
           unit: Percent
 
   # =========================================================================
@@ -53,8 +53,8 @@ Panel Config:
           unit: (Count + $normUnit)
         Wave Dispatch Rate:
           avg: SUM(SPI_CSN_WAVE) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          max: MAX((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
+          max: MAX(SPI_CSN_WAVE / GRBM_GUI_ACTIVE)
           unit: Waves/cycle
 
   metrics_description:

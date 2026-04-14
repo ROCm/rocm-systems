@@ -80,18 +80,14 @@ Panel Config:
           unit: Gbps
         LDS Latency:
           avg: SUM(SQ_ACCUM_PREV_HIRES) / SUM(SQ_INSTS_LDS)
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
+          min: MIN(SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS)
+          max: MAX(SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS)
           unit: Cycles
           coll_level: SQ_INST_LEVEL_LDS
         Bank Conflicts/Access:
           avg: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
-          min: MIN(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          max: MAX(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
+          min: MIN(SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+          max: MAX(SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
           unit: Conflicts per Access
         Index Accesses:
           avg: SUM(SQ_LDS_IDX_ACTIVE) / SUM($denom)
