@@ -109,6 +109,10 @@ __host__ void IPCHostContext::quiet_on_stream(hipStream_t stream) {
   host_interface->quiet_on_stream(stream);
 }
 
+__host__ void IPCHostContext::sync_all_on_stream(hipStream_t stream) {
+  host_interface->sync_all_on_stream(stream);
+}
+
 __host__ void IPCHostContext::alltoallmem_on_stream(rocshmem_team_t team,
                                                     void *dest,
                                                     const void *source,

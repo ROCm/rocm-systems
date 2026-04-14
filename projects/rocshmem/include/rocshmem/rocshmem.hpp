@@ -384,6 +384,15 @@ __host__ void rocshmem_barrier_all();
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
 
 /**
+ * @brief enqueues a sync_all operation on given stream.
+ *
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
+
+/**
  * @brief enqueues an alltoall collective operation on given stream.
  *
  * @param[in] team    The team participating in the collective.
