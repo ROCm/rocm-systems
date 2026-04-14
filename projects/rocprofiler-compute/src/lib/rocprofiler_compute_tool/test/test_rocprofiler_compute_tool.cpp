@@ -1,3 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
 
@@ -24,6 +26,16 @@ protected:
     static tool_data_t* get_tool_data(const rocprofiler_tool_configure_result_t* cfg)
     {
         return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
+    }
+
+    static void compare_counter_config_ids(const std::vector<rocprofiler_context_id_t>& expected,
+                                           const std::vector<rocprofiler_context_id_t>& actual)
+    {
+        EXPECT_EQ(expected.size(), actual.size());
+        for (size_t i = 0; i < expected.size(); ++i)
+        {
+            EXPECT_EQ(expected[i].handle, actual[i].handle) << "Counter config ID at index " << i << " does not match";
+        }
     }
 
     rocprofiler_client_id_t              m_client_id{};
@@ -165,6 +177,8 @@ TEST_F(TestRocprofilerComputeTool, DISABLED_ProvidedIncompleteRange_Throws)
 {
     m_input_parameters->set_kernel_filter_range("-5");
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
+    m_input_parameters->set_kernel_filter_range("5-");
+    EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
 }
 
 TEST_F(TestRocprofilerComputeTool, DISABLED_ProvidedIntersectingRanges_Throws)
@@ -173,6 +187,13 @@ TEST_F(TestRocprofilerComputeTool, DISABLED_ProvidedIntersectingRanges_Throws)
     EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
 }
 
+TEST_F(TestRocprofilerComputeTool, OnToolInit_CreatesAndStartsContext)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    cfg->initialize(nullptr, cfg->tool_data);
+
+    compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(), m_sdk_wrapper->get_started_contexts());
+}
 
 int main(int argc, char** argv)
 {
