@@ -93,6 +93,7 @@ virtualMemoryManagement:
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccess_MultDevSetGet:
     <<: *level_2
+    tags: [multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]

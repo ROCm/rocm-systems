@@ -174,12 +174,12 @@ def test_rule2_overhead_boundary_does_not_fire():
 
 
 def test_rule3_dominant_kernel_fires():
-    """Rule 3: single kernel > 50% triggers 'Compute Bottleneck' HIGH recommendation."""
+    """Rule 3: single kernel > 50% triggers 'Kernel Hotspot' HIGH recommendation."""
     from rocinsight.analyze import generate_recommendations
 
     hotspots = [_make_hotspot(name="dominant_kernel", pct=60.0)]
     recs = generate_recommendations(_empty_breakdown(), hotspots, {})
-    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    matches = [r for r in recs if r["category"] == "Kernel Hotspot"]
     assert len(matches) == 1
     assert matches[0]["priority"] == "HIGH"
     assert "dominant_kernel" in matches[0]["issue"]
@@ -191,23 +191,24 @@ def test_rule3_dominant_kernel_boundary_does_not_fire():
 
     hotspots = [_make_hotspot(pct=50.0)]
     recs = generate_recommendations(_empty_breakdown(), hotspots, {})
-    assert not any(r["category"] == "Compute Bottleneck" for r in recs)
+    _rule3_cats = {"Kernel Hotspot", "Compute-Bound Kernel", "Mixed Bottleneck Kernel", "Memory-Bound Kernel"}
+    assert not any(r["category"] in _rule3_cats for r in recs)
 
 
 def test_rule3_uses_hotspot_name_in_commands():
-    """Rule 3: the kernel name appears in the rocprofv3 command's full_command."""
+    """Rule 3: the kernel name appears in the command's full_command."""
     from rocinsight.analyze import generate_recommendations
 
     hotspots = [_make_hotspot(name="my_matmul", pct=75.0)]
     recs = generate_recommendations(_empty_breakdown(), hotspots, {})
-    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    matches = [r for r in recs if r["category"] == "Kernel Hotspot"]
     assert matches
     cmds = matches[0].get("commands", [])
     assert any("my_matmul" in c.get("full_command", "") for c in cmds)
 
 
 def test_rule3_counter_aware_high_util():
-    """Rule 3 + counters: GPU util > 90% → 'compute-bound' suggestion, not 'collect counters'."""
+    """Rule 3 + counters: GPU util > 90% → 'Compute-Bound Kernel' category."""
     from rocinsight.analyze import generate_recommendations
 
     hotspots = [_make_hotspot(name="my_kernel", pct=75.0)]
@@ -216,7 +217,7 @@ def test_rule3_counter_aware_high_util():
         "metrics": {"gpu_utilization_percent": 95.0, "avg_waves": 480.0},
     }
     recs = generate_recommendations(_empty_breakdown(), hotspots, {}, hardware_counters=hw)
-    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    matches = [r for r in recs if r["category"] == "Compute-Bound Kernel"]
     assert len(matches) == 1
     assert "compute-bound" in matches[0]["suggestion"]
     assert "95.0%" in matches[0]["suggestion"]
@@ -225,7 +226,7 @@ def test_rule3_counter_aware_high_util():
 
 
 def test_rule3_counter_aware_low_util():
-    """Rule 3 + counters: GPU util < 70% → 'significant room for improvement'."""
+    """Rule 3 + counters: GPU util < 70% → 'Memory-Bound Kernel' category."""
     from rocinsight.analyze import generate_recommendations
 
     hotspots = [_make_hotspot(name="my_kernel", pct=75.0)]
@@ -234,18 +235,18 @@ def test_rule3_counter_aware_low_util():
         "metrics": {"gpu_utilization_percent": 45.0, "avg_waves": 100.0},
     }
     recs = generate_recommendations(_empty_breakdown(), hotspots, {}, hardware_counters=hw)
-    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    matches = [r for r in recs if r["category"] == "Memory-Bound Kernel"]
     assert len(matches) == 1
     assert "significant room" in matches[0]["suggestion"].lower()
 
 
 def test_rule3_no_counters_asks_to_collect():
-    """Rule 3 without counters: falls back to 'collect hardware counters'."""
+    """Rule 3 without counters: 'Kernel Hotspot' falls back to 'collect hardware counters'."""
     from rocinsight.analyze import generate_recommendations
 
     hotspots = [_make_hotspot(name="my_kernel", pct=75.0)]
     recs = generate_recommendations(_empty_breakdown(), hotspots, {})
-    matches = [r for r in recs if r["category"] == "Compute Bottleneck"]
+    matches = [r for r in recs if r["category"] == "Kernel Hotspot"]
     assert len(matches) == 1
     assert "hardware counters" in matches[0]["suggestion"].lower()
 
@@ -482,7 +483,8 @@ def test_hotspot_recommendation():
 
     hotspots = [_make_hotspot(name="test_kernel", pct=60)]
     recs = generate_recommendations(_empty_breakdown(), hotspots, {})
-    compute_recs = [r for r in recs if "Compute Bottleneck" in r.get("category", "")]
+    _rule3_cats = {"Kernel Hotspot", "Compute-Bound Kernel", "Mixed Bottleneck Kernel", "Memory-Bound Kernel"}
+    compute_recs = [r for r in recs if r.get("category", "") in _rule3_cats]
     assert len(compute_recs) > 0
     assert "test_kernel" in compute_recs[0]["issue"]
 
@@ -721,6 +723,9 @@ def test_recs_json_stable_ids_for_known_categories():
         "Memory Transfer": "ROCPD-MEMCPY-001",
         "API Overhead": "ROCPD-API-001",
         "Compute Bottleneck": "ROCPD-COMPUTE-001",
+        "Kernel Hotspot": "ROCPD-HOTSPOT-001",
+        "Compute-Bound Kernel": "ROCPD-COMPUTE-BOUND-001",
+        "Memory-Bound Kernel": "ROCPD-MEMORY-BOUND-001",
         "Launch Overhead": "ROCPD-LAUNCH-001",
         "Memory Bandwidth": "ROCPD-MEMBW-001",
         "Performance": "ROCPD-INFO-001",
@@ -1701,7 +1706,7 @@ def test_editor_not_found_skips_subprocess():
     from rocinsight.analyze import _apply_code_change_interactive
 
     rec = {
-        "category": "Compute Bottleneck",
+        "category": "Kernel Hotspot",
         "issue": "Kernel is slow",
         "suggestion": "Optimize it",
         "actions": ["Do something"],

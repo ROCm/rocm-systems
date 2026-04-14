@@ -1032,11 +1032,13 @@ bool Device::populateOCLDeviceConstants() {
                          unique_id)) {
     // ROCr gives the UUID info in the format GPU-XXXX with length 20 bytes
     // Strip the first 4 bytes and store only the 16 bytes representing UUID
-    for (size_t i = 0; i < 16; i++) {
-      info_.uuid_[i] = unique_id[i + 4];
-    }
+    std::memcpy(info_.uuid_, unique_id + 4, sizeof(info_.uuid_));
   }
-
+  if (HSA_STATUS_SUCCESS ==
+      Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CUID),
+                         unique_id)) {
+    std::memcpy(info_.cuid_, unique_id, sizeof(info_.cuid_));
+  }
   hsa_luid_t localUID = {0};
   if (HSA_STATUS_SUCCESS ==
       Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
@@ -3604,6 +3606,66 @@ void Device::ReleaseGlobalSignal(void* signal) const {
 void Device::RetainGlobalSignal(void* signal) const {
   if (signal != nullptr) {
     reinterpret_cast<ProfilingSignal*>(signal)->retain();
+  }
+}
+
+// ================================================================================================
+bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
+  hw_events.resize(count, nullptr);
+  for (int i = 0; i < count; ++i) {
+    ProfilingSignal* ps = new ProfilingSignal();
+    if (HSA_STATUS_SUCCESS !=
+        Hsa::signal_create(1, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY, &ps->signal_)) {
+      delete ps;
+      for (int j = 0; j < i; ++j) {
+        reinterpret_cast<ProfilingSignal*>(hw_events[j])->release();
+        hw_events[j] = nullptr;
+      }
+      return false;
+    }
+    hw_events[i] = ps;
+  }
+  return true;
+}
+
+// ================================================================================================
+void Device::DestroyHwEvent(void* hw_event) const {
+  ReleaseGlobalSignal(hw_event);
+}
+
+// ================================================================================================
+uint8_t* Device::CreateBarrierPacket() const {
+  static constexpr uint16_t kBarrierNopHeader =
+      (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+
+  static_assert(sizeof(hsa_barrier_and_packet_t) == 64, "AQL packet size must be 64 bytes");
+  auto* raw = new uint8_t[64]();
+  auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
+  pkt->header = kBarrierNopHeader;
+  return raw;
+}
+
+// ================================================================================================
+void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
+                                 const std::vector<void*>& hw_events) const {
+  for (const auto& patch : patches) {
+    auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
+    hsa_signal_t sig = ps->signal_;
+
+    // Patch the flat buffer copy (dispatched to GPU) directly.
+    // The original dispatchPackets pointer is retained for UpdateAQLPacket matching.
+    auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(
+        patch.flat_packet ? patch.flat_packet : patch.packet);
+    if (patch.dep_slot < 0) {
+      // dep_slot == -1: patch the packet's completion signal (segment completion)
+      pkt->completion_signal = sig;
+    } else {
+      // dep_slot >= 0: patch a dependency signal slot (cross-segment wait)
+      pkt->dep_signal[patch.dep_slot] = sig;
+    }
   }
 }
 

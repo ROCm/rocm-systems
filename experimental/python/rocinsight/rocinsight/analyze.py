@@ -65,6 +65,7 @@ from .analysis import (  # noqa: F401 -- re-exports for backward compat
     identify_hotspots,
     analyze_memory_copies,
     analyze_hardware_counters,
+    detect_warmup_issues,
     analyze_thread_trace,
     generate_recommendations,
     _split_pmc_into_passes,
@@ -279,6 +280,7 @@ def analyze_performance(
         )
         memory_analysis = analyze_memory_copies(connection)
         hardware_counters = analyze_hardware_counters(connection)  # Tier 2
+        warmup_issues = detect_warmup_issues(connection, hotspots)
         already_collected = _detect_already_collected(connection)
         # Tier 3: ATT thread trace (optional — only when --att-dir is provided)
         att_analysis: Dict[str, Any] = {}
@@ -305,6 +307,7 @@ def analyze_performance(
             short_kernels=short_kernels_data,
             interval_timeline=interval_timeline,
             att_analysis=att_analysis if att_dir else None,
+            warmup_issues=warmup_issues,
         )
     else:
         time_breakdown = {}
@@ -316,6 +319,7 @@ def analyze_performance(
         interval_timeline = {}
         kernel_categories = []
         short_kernels_data = {}
+        warmup_issues = None
         recommendations = tier0_result.recommendations if tier0_result else []
 
     # Format output
