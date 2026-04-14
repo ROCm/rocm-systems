@@ -28,6 +28,7 @@ The documentation is structured as follows:
   .. grid-item-card:: How to
 
     * :ref:`cuid-cli-tool`
+    * `Sample program using CUID API <https://github.com/ROCm/rocm-systems/blob/develop/projects/cuid/example/main.cc>`_
 
   .. grid-item-card:: Conceptual
 

@@ -12,6 +12,8 @@ subtrees:
 - caption: How to
   entries:
   - file: how-to/cuid-cli-tool
+  - url: https://github.com/ROCm/rocm-systems/blob/develop/projects/cuid/example/main.cc
+    title: Sample program using CUID API
 
 - caption: Conceptual
   entries:
