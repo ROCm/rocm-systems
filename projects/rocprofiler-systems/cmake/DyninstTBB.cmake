@@ -6,7 +6,7 @@
 #
 # Configure Threading Building Blocks (TBB) for Dyninst.
 #
-# ROCPROFSYS_BUILD_TBB=ON  → build oneTBB 2022.3.0 from external/onetbb submodule
+# ROCPROFSYS_BUILD_TBB=ON  → build oneTBB 2022.3.0 from external/onetbb submodule (always build Release)
 # ROCPROFSYS_BUILD_TBB=OFF → use system TBB (e.g. libtbb-dev)
 #
 # Outputs (both paths):
@@ -42,7 +42,11 @@ if(ROCPROFSYS_BUILD_TBB)
         REPO_BRANCH "v2022.3.0"
     )
 
-    rocprofiler_systems_message(STATUS "Building TBB from external/onetbb submodule")
+    rocprofiler_systems_message(STATUS "Building TBB from external/onetbb submodule (Release)")
+
+    # Always build/install bundled oneTBB as Release, independent of the main project's
+    # CMAKE_BUILD_TYPE (preserves previous behavior).
+    set(_tbb_bundled_build_type "Release")
 
     set(TBB_ROOT_DIR "${TPL_STAGING_PREFIX}/tbb" CACHE PATH "TBB root directory" FORCE)
     file(MAKE_DIRECTORY "${TBB_ROOT_DIR}/include" "${TBB_ROOT_DIR}/lib")
@@ -69,16 +73,17 @@ if(ROCPROFSYS_BUILD_TBB)
         BUILD_BYPRODUCTS ${_tbb_build_byproducts}
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -S <SOURCE_DIR> -B <BINARY_DIR>
-            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_BUILD_TYPE=${_tbb_bundled_build_type}
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
             -DCMAKE_INSTALL_PREFIX=${TBB_ROOT_DIR} -DCMAKE_INSTALL_LIBDIR=lib
             -DCMAKE_BUILD_RPATH=\$ORIGIN -DCMAKE_INSTALL_RPATH=\$ORIGIN -DTBB_TEST=OFF
             -DTBB_STRICT=OFF -DTBB_DISABLE_HWLOC_AUTOMATIC_SEARCH=ON
         BUILD_COMMAND
-            ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${CMAKE_BUILD_TYPE} --target
-            tbb tbbmalloc tbbmalloc_proxy
+            ${CMAKE_COMMAND} --build <BINARY_DIR> --config ${_tbb_bundled_build_type}
+            --target tbb tbbmalloc tbbmalloc_proxy
         INSTALL_COMMAND
-            ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${CMAKE_BUILD_TYPE}
+            ${CMAKE_COMMAND} --install <BINARY_DIR> --config ${_tbb_bundled_build_type}
     )
 
     install(
