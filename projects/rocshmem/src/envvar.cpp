@@ -276,8 +276,6 @@ namespace envvar {
       for (const auto& var_ref : var_list) {
         // Visit the variant to extract information from the var
         std::visit([&os, mode](const auto& v) {
-          using T = typename std::decay_t<decltype(v.get())>::value_type;
-
           // For MODIFIED mode, skip variables using default values
           if (mode == print_mode::MODIFIED && v.get().is_default()) {
             return;

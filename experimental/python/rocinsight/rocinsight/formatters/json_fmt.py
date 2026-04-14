@@ -272,6 +272,7 @@ def _build_recommendations_json(
                 "suggestion": rec.get("suggestion", ""),
                 "actions": rec.get("actions", []),
                 "estimated_impact": rec.get("estimated_impact", ""),
+                "confidence": rec.get("confidence"),
                 "commands": rec.get("commands", []),
             }
         )
