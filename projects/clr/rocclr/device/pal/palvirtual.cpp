@@ -3942,7 +3942,7 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to allocate occupied bitfield for hostcall buffer");
     if (occupiedBuf) occupiedBuf->release();
-    dev().svmFree(dev().context(), hostcallBuffer_);
+    dev().svmFree(hostcallBuffer_);
     hostcallBuffer_ = nullptr;
     return nullptr;
   }
@@ -3952,7 +3952,7 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to get device memory for occupied bitfield");
     occupiedBuf->release();
-    dev().svmFree(dev().context(), hostcallBuffer_);
+    dev().svmFree(hostcallBuffer_);
     hostcallBuffer_ = nullptr;
     return nullptr;
   }
@@ -3972,7 +3972,7 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
     occupiedBuf->release();
-    dev().svmFree(dev().context(), hostcallBuffer_);
+    dev().svmFree(hostcallBuffer_);
     hostcallBuffer_ = nullptr;
     return nullptr;
   }
