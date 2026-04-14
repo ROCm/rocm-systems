@@ -75,7 +75,6 @@ class TestHipGraphBubbles(RocprofsysTest):
             fail_regex=[r"HIP error"],
         )
 
-    @pytest.mark.ci_disable("assert_rocpd")
     @pytest.mark.rocpd("hip_graph_bubbles_rocpd_env")
     def test_sampling_rocpd(
         self,
