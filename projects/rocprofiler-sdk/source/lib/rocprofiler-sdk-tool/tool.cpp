@@ -658,7 +658,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             // only resume if there are no active contexts and the ref count was zero
             if(_active_contexts == 0 && _ref_count == 0)
             {
-                if(tool::get_config().att_marker_trace) att_device_trace_id++;
+                if(tool::get_config().selected_regions) att_device_trace_id++;
                 set_contexts_active(*ctxs, true);
             }
             else if(_ref_count < 0)
@@ -2452,11 +2452,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         // Use device_thread_trace_service when handling consecutive kernels or marker trace
         const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels >= 1;
-        const auto handle_marker_trace        = tool::get_config().att_marker_trace;
+        const auto handle_marker_trace        = tool::get_config().selected_regions;
         rocprofiler_user_data_t user{.value = 0};
 
         ROCP_FATAL_IF(handle_consecutive_kernels && handle_marker_trace)
-            << "ATT marker trace and consecutive kernels modes are mutually exclusive";
+            << "ATT selected-regions and consecutive kernels modes are mutually exclusive";
 
         if(handle_marker_trace)
         {
