@@ -120,7 +120,7 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
   uint32_t result = amdgpu::mfma::resolve_acc<amdgpu::mfma::AccMode::Unified>(
       /*vb=*/100, /*dst=*/200, /*src2_ev=*/770, const_acc, [&]() -> uint32_t { return 99u; });
   EXPECT_EQ(const_acc, amdgpu::mfma::ACC_FROM_VGPR);
-  EXPECT_EQ(result, 100u + 2u); // vb + (770 - 768)
+  EXPECT_EQ(result, 100u + 256u + 2u); // vb + ACC_VGPR_OFFSET + (770 - 768)
 }
 
 // ---------------------------------------------------------------------------

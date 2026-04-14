@@ -5189,12 +5189,21 @@ class CodeGenerator:
             '  return ' + ' ||\n         '.join(_imm_parts) + ';\n'
             '}'
         )
+        # AccVGPR offset within the unified VGPR block.  On CDNA3/4, AccVGPRs
+        # live at indices 256-511 within each wavefront's VGPR allocation.  The
+        # encoding values differ between destination (512-767) and source
+        # (768-1023), but both map to the same physical offset range.
+        _ACC_OFFSET = 256
+
         _vgpr_index_lines = ['uint32_t vgpr_index(OperandType opr_type, int ev) {']
         if 'OPR_VGPR_OR_ACCVGPR' in _opr:
             _vgpr_index_lines.append(
                 '  if (opr_type == OperandType::OPR_VGPR || '
-                'opr_type == OperandType::OPR_VGPR_OR_ACCVGPR)\n'
-                '    return static_cast<uint32_t>(ev);'
+                'opr_type == OperandType::OPR_VGPR_OR_ACCVGPR) {\n'
+                f'    if (ev >= OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)\n'
+                f'      return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);\n'
+                '    return static_cast<uint32_t>(ev);\n'
+                '  }'
             )
         else:
             _vgpr_index_lines.append(
@@ -5204,18 +5213,18 @@ class CodeGenerator:
         if 'OPR_ACCVGPR' in _opr:
             _vgpr_index_lines.append(
                 '  if (opr_type == OperandType::OPR_ACCVGPR)\n'
-                '    return static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);'
+                f'    return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);'
             )
         if 'OPR_SRC_ACCVGPR' in _opr:
             _vgpr_index_lines.append(
                 '  if (opr_type == OperandType::OPR_SRC_ACCVGPR)\n'
-                '    return static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);'
+                f'    return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);'
             )
         if 'OPR_SRC_VGPR_OR_ACCVGPR' in _opr:
             _vgpr_index_lines.append(
                 '  if (opr_type == OperandType::OPR_SRC_VGPR_OR_ACCVGPR) {\n'
                 '    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN)\n'
-                '      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN);\n'
+                f'      return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_ACC_MIN);\n'
                 '    if (ev >= OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN)\n'
                 '      return static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgpr::OPR_SRC_VGPR_OR_ACCVGPR_VGPR_MIN);\n'
                 '    return static_cast<uint32_t>(ev);\n'
@@ -5232,8 +5241,8 @@ class CodeGenerator:
                 '  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&\n'
                 '      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&\n'
                 '      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {\n'
-                '    return wf.cu().read_vgpr(\n'
-                '        wf.vgpr_alloc().base + static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN),\n'
+                f'    return wf.cu().read_vgpr(\n'
+                f'        wf.vgpr_alloc().base + {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN),\n'
                 '        lane);\n'
                 '  }\n'
             )
@@ -5241,7 +5250,7 @@ class CodeGenerator:
                 '  if (opr_type_ == OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST &&\n'
                 '      ev >= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN &&\n'
                 '      ev <= OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MAX) {\n'
-                '    uint32_t idx = wf.vgpr_alloc().base +\n'
+                f'    uint32_t idx = wf.vgpr_alloc().base + {_ACC_OFFSET} +\n'
                 '        static_cast<uint32_t>(ev - OpSelSrcVgprOrAccvgprOrConst::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST_ACC_MIN);\n'
                 '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
                 '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
