@@ -243,7 +243,8 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 90
     LABELS "integration-tests;thread-trace;pc-sampling"
-    DISABLED ${ATT_PLUS_PCS_DISABLE})
+    DISABLED ${ATT_PLUS_PCS_DISABLE}
+    SKIP_REGULAR_EXPRESSION "PC sampling unavailable|configuration is not supported")
 
 # Trace two GPUs
 rocprofiler_add_integration_execute_test(
