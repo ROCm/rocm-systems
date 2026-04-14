@@ -426,7 +426,7 @@ __device__ uint64_t GDAContext::signal_fetch_wg(const uint64_t *sig_addr) {
     wg_signal_scratch = internal_amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0,
                                                          my_pe, qp_index, wf_info);
   }
-  __threadfence_block();
+  __syncthreads();
   return wg_signal_scratch;
 }
 

@@ -296,7 +296,7 @@ __device__ uint64_t IPCContext::signal_fetch_wg(const uint64_t *sig_addr) {
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
     wg_signal_scratch = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
   }
-  __threadfence_block();
+  __syncthreads();
   return wg_signal_scratch;
 }
 
