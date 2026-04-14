@@ -53,16 +53,23 @@ struct OutputLoc {
   uint32_t lane;
 };
 
+/// AccVGPR offset within a unified VGPR block. On CDNA3/4, AccVGPRs occupy
+/// the second half of the 512-register block: acc0 = vgpr_base + 256.
+constexpr uint32_t ACC_VGPR_OFFSET = 256;
+
 /// Resolve VGPR base for an MFMA destination operand (OPR_VGPR_OR_ACCVGPR).
-/// The encoding value is a direct VGPR index.
-inline uint32_t dst_base(uint32_t vb, int ev) { return vb + static_cast<uint32_t>(ev); }
+/// Encoding: 0-255 = ArchVGPR, 512-767 = AccVGPR (acc0-acc255).
+inline uint32_t dst_base(uint32_t vb, int ev) {
+  if (ev >= 512)
+    return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 512);
+  return vb + static_cast<uint32_t>(ev);
+}
 
 /// Resolve VGPR base for an MFMA source operand (OPR_SRC_VGPR_OR_ACCVGPR).
-/// VGPRs are encoded at ev >= 256; ACCVGPRs at ev >= 768 (unified on CDNA3/4).
-/// Only use for src0/src1 which are always VGPRs. For src2, use resolve_acc.
+/// Encoding: 256-511 = ArchVGPR (v0-v255), 768-1023 = AccVGPR (acc0-acc255).
 inline uint32_t src_base(uint32_t vb, int ev) {
   if (ev >= 768)
-    return vb + static_cast<uint32_t>(ev - 768);
+    return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 768);
   return (ev >= 256) ? vb + static_cast<uint32_t>(ev - 256) : vb + static_cast<uint32_t>(ev);
 }
 
@@ -89,7 +96,7 @@ inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &co
   if constexpr (Mode == AccMode::Unified || Mode == AccMode::Separate) {
     if (src2_ev >= 768 && src2_ev <= 1023) {
       const_acc = ACC_FROM_VGPR;
-      return vb + static_cast<uint32_t>(src2_ev - 768);
+      return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(src2_ev - 768);
     }
     if (src2_ev >= 256 && src2_ev <= 511) {
       const_acc = ACC_FROM_VGPR;
