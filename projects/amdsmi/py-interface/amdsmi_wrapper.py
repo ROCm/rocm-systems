@@ -4191,7 +4191,8 @@ try:
     amdsmi_get_nic_rdma_port_statistics.restype = amdsmi_status_t
     amdsmi_get_nic_rdma_port_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
 except AttributeError:
-    passclass struct_amdsmi_uma_carveout_option_t(Structure):
+    pass
+class struct_amdsmi_uma_carveout_option_t(Structure):
     pass
 
 struct_amdsmi_uma_carveout_option_t._pack_ = 1 # source:False
