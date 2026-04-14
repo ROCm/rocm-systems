@@ -24,20 +24,14 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <cctype>
-#include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <regex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/wait.h>
 #include <unistd.h>
-#include <vector>
 
 namespace color    = ::tim::log::color;
 namespace filepath = ::tim::filepath;  // NOLINT
@@ -51,23 +45,20 @@ using namespace ::timemory::join;
 using ::tim::get_env;
 using ::tim::log::stream;
 
+int
+get_verbose(parser_data_t& _data)
+{
+    auto&       verbose    = _data.verbose;
+    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
+    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
+    return verbose;
+}
+
 namespace
 {
 using rocprofsys::common::update_mode;
 
 auto original_envs = std::unordered_set<std::string>{};
-
-int
-get_verbose(parser_data_t& _data)
-{
-    auto& verbose = _data.verbose;
-    verbose       = get_env(std::string{ env::CAUSAL_VERBOSE },
-                            get_env<int>(std::string{ env::VERBOSE }, verbose, false));
-    auto _debug   = get_env(std::string{ env::CAUSAL_DEBUG },
-                            get_env<bool>(std::string{ env::DEBUG }, false, false));
-    if(_debug) verbose += 8;
-    return verbose;
-}
 
 // Export configuration to JSON file or stdout
 void
@@ -130,18 +121,6 @@ auto initial_suppression = toggle_suppression({ true, true });
 }  // namespace
 
 void
-print_command(const parser_data_t& _data, std::string_view _prefix)
-{
-    auto        verbose = _data.verbose;
-    const auto& _argv   = _data.command;
-    if(verbose >= 1)
-        stream(std::cout, color::info())
-            << _prefix << "Executing '" << join(array_config{ " " }, _argv) << "'...\n";
-
-    std::cerr << color::end() << std::flush;
-}
-
-void
 prepare_command_for_run(char* _exe, parser_data_t& _data)
 {
     if(!_data.launcher.empty())
@@ -183,58 +162,6 @@ prepare_environment_for_run(parser_data_t& _data)
     rocprofsys::argparse::add_torch_library_path(_data, _data.verbose > 0);
 
     rocprofsys::common::consolidate_env_entries(_data.current);
-}
-
-void
-print_updated_environment(parser_data_t& _data, std::string_view _prefix)
-{
-    auto _verbose = get_verbose(_data);
-
-    if(_verbose < 0) return;
-
-    auto        _env          = _data.current;
-    const auto& _updated_envs = _data.updated;
-
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    std::vector<std::string_view> _updates = {};
-    std::vector<std::string_view> _general = {};
-
-    for(auto* itr : _env)
-    {
-        if(itr == nullptr) continue;
-
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : _updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
-
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(_verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
-    }
-
-    if(_general.size() + _updates.size() == 0 || _verbose < 0) return;
-
-    std::cerr << std::endl;
-
-    for(auto& itr : _general)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-    for(auto& itr : _updates)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-
-    std::cerr << color::end() << std::flush;
 }
 
 parser_data_t&

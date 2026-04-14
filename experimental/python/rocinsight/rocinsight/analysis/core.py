@@ -28,7 +28,7 @@ analysis, and hardware counter analysis.
 """
 
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..connection import RocinsightConnection as RocpdImportData, execute_statement
 
@@ -347,3 +347,48 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
     except Exception as e:
         print(f"Warning: Could not analyze hardware counters: {e}", file=sys.stderr)
         return {"has_counters": False, "reason": str(e)}
+
+
+def detect_warmup_issues(
+    connection: RocpdImportData,
+    hotspots: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """
+    Detect first-dispatch latency outliers suggesting missing warmup.
+
+    Compares first dispatch duration of each hotspot kernel to its average.
+    Returns warmup issue info if any kernel's first dispatch is >2x average.
+
+    Args:
+        connection: RocpdImportData database connection
+        hotspots: Top kernel hotspots from identify_hotspots()
+
+    Returns:
+        Dictionary with ``has_warmup_issues`` bool and ``outliers`` list.
+    """
+    outliers: List[Dict[str, Any]] = []
+    for kernel in hotspots[:5]:  # Top 5 only to limit queries
+        kernel_name = kernel.get("name", "")
+        avg_duration = kernel.get("avg_duration", 0)
+        calls = kernel.get("calls", 0)
+        if not kernel_name or calls <= 1 or avg_duration <= 0:
+            continue
+        safe_name = kernel_name.replace("'", "''")
+        query = f"SELECT duration FROM kernels WHERE name = '{safe_name}' ORDER BY start ASC LIMIT 1"
+        try:
+            row = execute_statement(connection, query).fetchone()
+            if not row:
+                continue
+            first_duration = row[0] or 0
+            if first_duration > 0 and avg_duration > 0:
+                ratio = first_duration / avg_duration
+                if ratio > 2.0:
+                    outliers.append({
+                        "kernel_name": kernel_name,
+                        "first_duration_ns": first_duration,
+                        "avg_duration_ns": avg_duration,
+                        "ratio": ratio,
+                    })
+        except Exception:
+            continue
+    return {"has_warmup_issues": len(outliers) > 0, "outliers": outliers}

@@ -433,6 +433,7 @@ class TestInteractiveDispatchClaudeCode(unittest.TestCase):
             session._llm_provider = "claude-code"
             session._llm_api_key = None
             session._llm_model = "sonnet"
+            session._conv = None
             session._source_paths = [tmp.parent]
 
             with patch(
@@ -466,6 +467,7 @@ class TestInteractiveDispatchClaudeCode(unittest.TestCase):
             session._llm_provider = "claude-code"
             session._llm_api_key = None
             session._llm_model = "sonnet"
+            session._conv = None
             session._source_paths = [tmp.parent]
 
             with patch(
