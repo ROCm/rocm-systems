@@ -8,12 +8,13 @@ Uses llvm-mc to validate that:
 3. The translation rules produce valid gfx950 assembly
 """
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-LLVM_MC = "/home/nod/github/TheRock/therock-build/dist/rocm/lib/llvm/bin/llvm-mc"
+LLVM_MC = os.environ.get("LLVM_MC", "/opt/rocm/lib/llvm/bin/llvm-mc")
 
 @dataclass
 class TranslationTest:

@@ -4,13 +4,14 @@ End-to-end transpiler test: compile gfx1250 assembly, translate to gfx950,
 assemble for gfx950, and verify all instructions round-trip correctly.
 """
 
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-LLVM_MC = "/home/nod/github/TheRock/therock-build/dist/rocm/lib/llvm/bin/llvm-mc"
-LLVM_OBJDUMP = "/home/nod/github/TheRock/therock-build/dist/rocm/lib/llvm/bin/llvm-objdump"
+LLVM_MC = os.environ.get("LLVM_MC", "/opt/rocm/lib/llvm/bin/llvm-mc")
+LLVM_OBJDUMP = os.environ.get("LLVM_OBJDUMP", "/opt/rocm/lib/llvm/bin/llvm-objdump")
 
 # Translation rules (subset matching transpiler.cpp)
 MNEMONIC_MAP = {
