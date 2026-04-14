@@ -38,5 +38,5 @@ GPU specifications.
    * - AMD Instinct MI50, MI60 (Vega 20)
      - No support ❌
 
-   * - AMD RDNA3.5 (gfx1151), e.g. AMD Ryzen™ AI Max+ / Strix Halo integrated graphics
+   * - AMD RDNA3.5 (gfx1151), e.g. AMD Ryzen™ AI Max Series / Strix Halo integrated graphics
      - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)

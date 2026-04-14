@@ -243,12 +243,12 @@ Memory chart - GCEA to System Memory:
     rst: 'Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy. SARB handles arbitration between the GPU and the system memory interface. Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum'
     unit: Percent
   DRAM Read Bandwidth:
-    plain: 'Definition: Bandwidth for read requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time'
-    rst: 'Bandwidth for read requests to system memory (DRAM). RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time'
+    plain: 'Definition: Bandwidth for read requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5X system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time'
+    rst: 'Bandwidth for read requests to system memory (DRAM). RDNA3.5 is an APU using DDR5/LPDDR5X system memory instead of HBM. Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time'
     unit: Bytes/s
   DRAM Write Bandwidth:
-    plain: 'Definition: Bandwidth for write requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time'
-    rst: 'Definition: Bandwidth for write requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM. Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time'
+    plain: 'Definition: Bandwidth for write requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5X system memory instead of HBM. Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time'
+    rst: 'Definition: Bandwidth for write requests to system memory (DRAM). Description: RDNA3.5 is an APU using DDR5/LPDDR5X system memory instead of HBM. Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time'
     unit: Bytes/s
   SARB Stall Rate:
     plain: 'Percent of GCEA sample cycles the System Arbiter (SARB) was stalled. Formula: 100 * GCEA_SARB_STALLED_sum / GCEA_ALWAYS_COUNT_sum.'
@@ -641,8 +641,8 @@ GL2C Bandwidth:
     unit: Bytes/s
 DRAM Read Interface:
   DRAM Read Requests:
-    plain: 'Number of read requests sent to system memory (DRAM) per client group. RDNA3.5 uses DDR5/LPDDR5 system memory instead of HBM.'
-    rst: 'Number of read requests sent to system memory (DRAM) per client group. RDNA3.5 uses DDR5/LPDDR5 system memory instead of HBM.'
+    plain: 'Number of read requests sent to system memory (DRAM) per client group. RDNA3.5 uses DDR5/LPDDR5X system memory instead of HBM.'
+    rst: 'Number of read requests sent to system memory (DRAM) per client group. RDNA3.5 uses DDR5/LPDDR5X system memory instead of HBM.'
     unit: Count per Normalization Unit
   DRAM Read Chained Requests:
     plain: 'Number of chained (sequential) read request chains sent to DRAM. Chained requests improve memory efficiency for sequential access patterns.'
