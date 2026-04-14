@@ -31,9 +31,12 @@ set(DEVICE_BUILD_DIR "${PROJECT_BINARY_DIR}/device_build")
 set(ASM_EXTRACT_DIR  "${PROJECT_SOURCE_DIR}/tools/asm_extract")
 set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 
-set(DL_CLANG "${ROCM_PATH}/bin/amdclang++")
-set(DL_LLD "${ROCM_PATH}/llvm/bin/ld.lld")
-set(DL_BUNDLER "${ROCM_PATH}/llvm/bin/clang-offload-bundler")
+# Derive tool paths from the C++ compiler cmake already resolved.
+# ROCM_PATH may be empty in super-project builds (e.g. TheRock).
+get_filename_component(_dl_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(DL_CLANG NAMES amdclang++ clang++ HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
+find_program(DL_LLD   NAMES ld.lld             HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin" "${ROCM_PATH}/llvm/bin" REQUIRED)
+find_program(DL_BUNDLER NAMES clang-offload-bundler HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin" "${ROCM_PATH}/llvm/bin" REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Parse GPU_TARGETS: strip target features, build offload-arch flag list
