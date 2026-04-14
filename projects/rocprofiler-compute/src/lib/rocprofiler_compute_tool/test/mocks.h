@@ -56,6 +56,15 @@ public:
 class MockSdkWrapper : public rocprofiler_compute_tool::SdkWrapper
 {
 public:
+    struct dispatch_counting_service_args
+    {
+        uint64_t context                = 0;
+        void*    dispatch_callback      = nullptr;
+        void*    dispatch_callback_args = nullptr;
+        void*    record_callback        = nullptr;
+        void*    record_callback_args   = nullptr;
+    };
+
     ~MockSdkWrapper() override = default;
     void create_context(rocprofiler_context_id_t* context_id) override;
     void configure_callback_dispatch_counting_service(
@@ -84,10 +93,12 @@ public:
     void query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                  rocprofiler_counter_id_t*         counter_id) override;
 
-    const std::vector<uint64_t>& get_created_contexts() const;
-    const std::vector<uint64_t>& get_started_contexts() const;
+    const std::vector<uint64_t>&                       get_created_contexts() const;
+    const std::vector<uint64_t>&                       get_started_contexts() const;
+    const std::vector<dispatch_counting_service_args>& get_dispatch_counting_service_args() const;
 
 private:
-    std::vector<uint64_t> m_created_contexts;
-    std::vector<uint64_t> m_started_contexts;
+    std::vector<uint64_t>                       m_created_contexts;
+    std::vector<uint64_t>                       m_started_contexts;
+    std::vector<dispatch_counting_service_args> m_dispatch_counting_service_args;
 };

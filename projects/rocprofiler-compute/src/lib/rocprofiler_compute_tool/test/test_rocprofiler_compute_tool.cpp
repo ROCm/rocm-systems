@@ -191,9 +191,23 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_CreatesAndStartsContext)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     cfg->initialize(nullptr, cfg->tool_data);
-
     compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(), m_sdk_wrapper->get_started_contexts());
 }
+
+TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    cfg->initialize(nullptr, cfg->tool_data);
+    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_args().size(), 1);
+    const auto& args = m_sdk_wrapper->get_dispatch_counting_service_args()[0];
+    EXPECT_EQ(args.context, m_sdk_wrapper->get_created_contexts()[0]);
+    EXPECT_TRUE(args.dispatch_callback != nullptr);
+    EXPECT_TRUE(args.dispatch_callback_args != nullptr);
+    EXPECT_TRUE(args.record_callback != nullptr);
+    EXPECT_TRUE(args.record_callback_args != nullptr);
+
+}
+
 
 int main(int argc, char** argv)
 {
