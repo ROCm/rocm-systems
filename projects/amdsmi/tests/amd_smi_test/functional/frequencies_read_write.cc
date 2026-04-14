@@ -64,7 +64,7 @@ void TestFrequenciesReadWrite::Close() {
 void TestFrequenciesReadWrite::Run(void) {
   amdsmi_status_t ret;
   amdsmi_frequencies_t f;
-  uint32_t freq_bitmask;
+  uint64_t freq_bitmask;
   amdsmi_clk_type_t amdsmi_clk;
   const std::map<amdsmi_clk_type_t, std::string> clk_type_map = {
       {AMDSMI_CLK_TYPE_SYS, "SYS"},     {AMDSMI_CLK_TYPE_GFX, "GFX"},
@@ -150,7 +150,7 @@ void TestFrequenciesReadWrite::Run(void) {
         }
 
         // Pick two valid DPM levels: the second-to-last and the last.
-        freq_bitmask = (1u << (dpm_levels - 2)) | (1u << (dpm_levels - 1));
+        freq_bitmask = (1ULL << (dpm_levels - 2)) | (1ULL << (dpm_levels - 1));
 
         std::string freq_bm_str = std::bitset<AMDSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
 

@@ -2136,7 +2136,10 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
   // If the sysfs node is read-only, force DPM level is not supported
   std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
   bool read_only = false;
-  amd::smi::isReadOnlyForAll(sysfs_path, &read_only);
+  int ro_ret = amd::smi::isReadOnlyForAll(sysfs_path, &read_only);
+  if (ro_ret != 0) {
+    return amd::smi::ErrnoToRsmiStatus(ro_ret);
+  }
   if (read_only) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
