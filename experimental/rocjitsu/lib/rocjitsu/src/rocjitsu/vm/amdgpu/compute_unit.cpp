@@ -45,6 +45,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 
   wfs_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
+  sgpr_to_wave_.resize(config.num_wf_slots * config.sgprs_per_wf, nullptr);
 
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
@@ -141,6 +142,12 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   wf->vcc_ = 0;
   wf->m0_ = 0;
   wf->state_ = WfState::RUNNING;
+
+  // Update physical-register-to-wavefront mappings for race detection.
+  std::fill(sgpr_to_wave_.begin() + sgpr_base,
+            sgpr_to_wave_.begin() + sgpr_base + sgprs, wf);
+  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgprs, wf);
+
   return wf;
 }
 
@@ -174,6 +181,9 @@ void ComputeUnitCore::retire_halted_wfs() {
           os << std::format("CU {}: retire #{} wg={} insts={} max_wg_seen={}", this->name(),
                             retire_count, w->wg_id(), w->trace_inst_count_, max_wg);
       });
+      update_register_wave_mappings(w->sgpr_alloc().base, w->sgpr_alloc().count,
+                                    w->vgpr_alloc().base, w->vgpr_alloc().count,
+                                    nullptr);
       sgpr_file_.free(w->sgpr_alloc().base);
       free_vgprs(w->vgpr_alloc().base);
       w->trace_inst_count_ = 0;
@@ -488,7 +498,6 @@ bool ComputeUnitCore::step() {
     }
   }
 
-  current_wf_ = active;
   execute_instruction(inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
@@ -512,7 +521,6 @@ bool ComputeUnitCore::step() {
     route_memory_inst(inst, *active);
   } else
     delete inst;
-  current_wf_ = nullptr;
 
   // Advance PC past the current instruction. Branch execute() methods are required
   // to account for this by computing: wf.pc = target - inst_size, so the net result

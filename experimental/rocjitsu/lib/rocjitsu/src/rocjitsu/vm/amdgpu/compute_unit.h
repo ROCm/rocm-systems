@@ -286,10 +286,11 @@ public:
   /// @param reg_idx Physical register index.
   /// @returns Register value.
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (current_wf_) {
-      if (auto *rs = current_wf_->race_state()) {
-        uint32_t logical_reg = reg_idx - current_wf_->sgpr_alloc().base;
-        rs->checkSgprRead(static_cast<int>(logical_reg));
+    if (reg_idx < sgpr_to_wave_.size()) {
+      if (auto *wf = sgpr_to_wave_[reg_idx]) {
+        if (auto *rs = wf->race_state()) {
+          rs->checkSgprRead(static_cast<int>(reg_idx - wf->sgpr_alloc().base));
+        }
       }
     }
     return sgpr_file_[reg_idx];
@@ -371,6 +372,11 @@ protected:
   /// @param base Base index returned by allocate_vgprs().
   virtual void free_vgprs(uint32_t base) = 0;
 
+  /// @brief Update physical-VGPR-to-wavefront mapping for race detection.
+  virtual void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) {
+    (void)base; (void)count; (void)wf;
+  }
+
   /// @brief Count the number of free VGPR allocation blocks.
   virtual uint32_t free_vgpr_blocks() const = 0;
 
@@ -404,7 +410,7 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
-  Wavefront *current_wf_ = nullptr; ///< Wavefront being executed in step().
+  std::vector<Wavefront *> sgpr_to_wave_; ///< Physical SGPR index -> owning wavefront.
   simdojo::Port *cpl_ = nullptr;  ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr;  ///< Requester port: L2 cache request (structural).
 };
@@ -511,17 +517,19 @@ public:
                      L2Cache *l2)
       : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE) {
     vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
+    vgpr_to_wave_.resize(config.num_wf_slots * config.vgprs_per_wf, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
   }
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (this->current_wf_) {
-      if (auto *rs = this->current_wf_->race_state()) {
-        uint32_t logical_reg = reg_idx - this->current_wf_->vgpr_alloc().base;
-        rs->checkVgprRead(static_cast<int>(logical_reg),
-                          static_cast<int>(lane), 0xF);
+    if (reg_idx < vgpr_to_wave_.size()) {
+      if (auto *wf = vgpr_to_wave_[reg_idx]) {
+        if (auto *rs = wf->race_state()) {
+          rs->checkVgprRead(static_cast<int>(reg_idx - wf->vgpr_alloc().base),
+                            static_cast<int>(lane), 0xF);
+        }
       }
     }
     return vgpr_file_[reg_idx][lane];
@@ -557,6 +565,11 @@ protected:
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
 
+  void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
+    std::fill(vgpr_to_wave_.begin() + base,
+              vgpr_to_wave_.begin() + base + count, wf);
+  }
+
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
   /// @brief Execute one instruction on the given wavefront.
@@ -566,6 +579,7 @@ protected:
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
+  std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR index -> owning wavefront.
 };
 
 } // namespace amdgpu
