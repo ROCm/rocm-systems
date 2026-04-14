@@ -39,7 +39,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
-#include "commons.h"
+#include "logger.h"
 
 /*!
  * \file
@@ -148,7 +148,7 @@ private:
 
 #define CHECK_ZERO(str, value)              \
     if (value == 0) {                      \
-        CriticalLog(g_rocdec_logger, STR(str) + " is 0.");    \
+        CriticalLog(g_rocdec_logger, ROCDEC_STR(str) + " is 0.");    \
     }
 
 struct Rect {

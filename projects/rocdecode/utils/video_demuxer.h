@@ -32,7 +32,7 @@ extern "C" {
 }
 
 #include "rocdecode/rocdecode.h"
-#include "commons.h"
+#include "logger.h"
 
 /*!
  * \file
@@ -258,7 +258,7 @@ class VideoDemuxer {
                         ret = av_seek_frame(av_fmt_input_ctx_, av_stream_, timestamp, seek_backward ? AVSEEK_FLAG_BACKWARD | flags : flags);
                         break;
                     default:
-                        CriticalLog(g_rocdec_logger, "Invalid seek mode");
+                        CriticalLog(g_rocdec_logger, "Invalid seek criteria");
                         ret = -1;
                 }
 

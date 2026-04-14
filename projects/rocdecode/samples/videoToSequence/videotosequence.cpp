@@ -397,7 +397,7 @@ int main(int argc, char **argv) {
         }
 
         if (hipSuccess != hipGetDeviceProperties(&hip_dev_prop, device_id)) {
-            std::cerr << "ERROR: hipGetDeviceProperties for device (" +TOSTR(device_id) + " ) failed! (" + hipGetErrorName(hip_status) + ")"  << std::endl;
+            std::cerr << "ERROR: hipGetDeviceProperties for device (" +ROCDEC_TOSTR(device_id) + " ) failed! (" + hipGetErrorName(hip_status) + ")"  << std::endl;
             return -1;
         }
 

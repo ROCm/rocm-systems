@@ -103,7 +103,7 @@ FFMpegVideoDecoder::~FFMpegVideoDecoder() {
             if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                 hipError_t hip_status = hipFree(p_frame.frame_ptr);
                 if (hip_status != hipSuccess) {
-                    CriticalLog(g_rocdec_logger, "hipFree failed! (" + TOSTR(hip_status) + ")");
+                    CriticalLog(g_rocdec_logger, "hipFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
                 }
             } else {
                 delete[] p_frame.frame_ptr;
@@ -215,7 +215,6 @@ int FFMpegVideoDecoder::HandleVideoSequence(RocdecVideoFormatHost *format_host) 
         << disp_rect_.right << ", " << disp_rect_.bottom << "]" << std::endl
         << "\tResize       : " << target_width_ << "x" << target_height_ << std::endl
     ;
-    input_video_info_str_ << std::endl;
     g_rocdec_logger.AlwaysLog(input_video_info_str_.str());
     double elapsed_time = StopTimer(start_time);
     AddDecoderSessionOverHead(std::this_thread::get_id(), elapsed_time);
@@ -271,7 +270,7 @@ int FFMpegVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         if (p_frame->frame_ptr) {
             if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                 hipError_t hip_status = hipFree(p_frame->frame_ptr);
-                if (hip_status != hipSuccess) CriticalLog(g_rocdec_logger, "hipFree failed! (" + TOSTR(hip_status) + ")");
+                if (hip_status != hipSuccess) CriticalLog(g_rocdec_logger, "hipFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
             } else {
                 delete[] p_frame->frame_ptr;
             }
@@ -556,7 +555,7 @@ void FFMpegVideoDecoder::SaveFrameToFile(std::string output_file_name, void *sur
         hipError_t hip_status = hipSuccess;
         hip_status = hipMemcpyDtoH((void *)hst_ptr, surf_mem, output_image_size);
         if (hip_status != hipSuccess) {
-            CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + STR(hipGetErrorName(hip_status)) + ")");
+            CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + ROCDEC_STR(hipGetErrorName(hip_status)) + ")");
             delete [] hst_ptr;
             return;
         }
