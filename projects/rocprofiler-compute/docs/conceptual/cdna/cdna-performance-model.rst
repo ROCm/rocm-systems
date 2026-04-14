@@ -64,7 +64,7 @@ The table provides key details and support available for the different CDNA arch
         - INT8 GEMM
         - Packed FP32
         - TF32 GEMM
-        - FP8/BF8
+        - FP8/BF8 GEMM
       *
         - CDNA
         - ✅
