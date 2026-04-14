@@ -17,4 +17,22 @@ enum ionicdv_reg_udma_mask {
     IONIC_UDMA_MASK_HIGH   = 2
 };
 
+enum ionic_qp_init_attr_mask {
+  IONIC_QP_INIT_ATTR_MASK_FLAGS   = 1 << 0,
+};
+
+enum ionic_qp_init_attr_flags {
+  IONIC_CREATE_QP_TYPE_RCCL       = 1 << 16,
+  IONIC_CREATE_QP_RCCL_DATA       = 1 << 17,
+  IONIC_CREATE_QP_RCCL_RDFENCE    = 1 << 18,
+  IONIC_CREATE_QP_RCCL_RX_OFFLOAD = 1 << 19,
+};
+
+struct ionic_qp_init_attr_ex {
+  /* One or more flags of enum ionic_qp_init_attr_mask */
+  uint32_t comp_mask;
+  /* One or more flags of enum ionic_qp_init_attr_flags */
+  uint32_t ionic_flags;
+};
+
 #endif  // NCCL_IONICDV_CORE_H_
