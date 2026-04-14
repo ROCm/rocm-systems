@@ -420,14 +420,21 @@ int SimulatedDriver::ioctl(unsigned long request, void *arg) {
     return runtime_enable_ioctl(arg);
   }
   // Scratch backing VA: ROCR stores the flat-scratch base here so the CP can
-  // program the SH_STATIC_MEM_CONFIG register. No-op in simulation — kernels
-  // use private segment memory allocated at dispatch time instead.
-  case AMDKFD_IOC_SET_SCRATCH_BACKING_VA:
+  // program SH_STATIC_MEM_CONFIG. Store the value for diagnostic use; the CU
+  // reads scratch_backing_memory_location from amd_queue_t at dispatch time.
+  case AMDKFD_IOC_SET_SCRATCH_BACKING_VA: {
+    auto *a = static_cast<kfd_ioctl_set_scratch_backing_va_args *>(arg);
+    scratch_backing_va_ = a->va_addr;
     return 0;
-  // Trap handler: ROCR provides TBA/TMA so the CP can install the trap handler.
-  // No-op in simulation — we do not emulate the trap handler mechanism.
-  case AMDKFD_IOC_SET_TRAP_HANDLER:
+  }
+  // Trap handler: ROCR provides TBA/TMA addresses for the trap handler.
+  // Store them for future trap support; no effect on execution currently.
+  case AMDKFD_IOC_SET_TRAP_HANDLER: {
+    auto *a = static_cast<kfd_ioctl_set_trap_handler_args *>(arg);
+    trap_tba_addr_ = a->tba_addr;
+    trap_tma_addr_ = a->tma_addr;
     return 0;
+  }
   case AMDKFD_IOC_GET_DMABUF_INFO:
     return get_dmabuf_info_ioctl(arg);
   case AMDKFD_IOC_IMPORT_DMABUF:

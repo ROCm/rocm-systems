@@ -203,53 +203,39 @@ bool CommandProcessor::step() {
   const InternalDispatch &pkt = dispatch_queue_[dispatched_++];
 
   // Activate wavefront slots for each workgroup, distributing across CUs.
-  // If a CU is full, try all other CUs in round-robin before giving up.
-  // If ALL CUs are full, re-enqueue remaining workgroups for retry on next doorbell.
+  // Entire workgroups must land on a single CU (programming model requirement:
+  // LDS is per-CU and s_barrier synchronises within a CU). Query each CU for
+  // capacity before dispatching to guarantee all-or-nothing placement.
   for (uint32_t wg = 0; wg < pkt.workgroup_count; ++wg) {
     uint32_t global_wg_id = wg + pkt.workgroup_id_offset;
-    bool wg_dispatched = true;
-    for (uint32_t w = 0; w < pkt.wfs_per_workgroup; ++w) {
-      Wavefront *wf = nullptr;
-      ComputeUnitCore *chosen_cu = nullptr;
+    bool wg_dispatched = false;
 
-      // Try all CUs in round-robin starting from next_cu_.
-      for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
-        size_t cu_idx = (next_cu_ + attempt) % cus_.size();
-        ComputeUnitCore *cu = cus_[cu_idx];
-        wf = cu->dispatch_wf(wg, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
-        if (!wf) {
-          // CU full or out of registers - retire halted wfs and retry this CU once.
-          cu->retire_halted_wfs();
-          wf = cu->dispatch_wf(wg, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
-        }
-        if (wf) {
-          chosen_cu = cu;
-          // Advance round-robin past this CU for the next wavefront.
-          next_cu_ = (cu_idx + 1) % cus_.size();
-          break;
-        }
+    for (size_t attempt = 0; attempt < cus_.size() && !wg_dispatched; ++attempt) {
+      size_t cu_idx = (next_cu_ + attempt) % cus_.size();
+      ComputeUnitCore *cu = cus_[cu_idx];
+      cu->retire_halted_wfs();
+      if (!cu->can_accept_workgroup(pkt.wfs_per_workgroup))
+        continue;
+      for (uint32_t w = 0; w < pkt.wfs_per_workgroup; ++w) {
+        Wavefront *wf =
+            cu->dispatch_wf(wg, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
+        assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
+        init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
       }
-
-      if (wf && chosen_cu) {
-        init_wavefront_regs(chosen_cu, wf, pkt, global_wg_id, w);
-      } else {
-        // ALL CUs are full. Re-enqueue remaining workgroups for retry.
-        util::trace::print("CP step: all CUs full at wg=", wg, " global_wg=", global_wg_id,
-                           " total=", pkt.workgroup_count, " offset=", pkt.workgroup_id_offset);
-        InternalDispatch retry_pkt = pkt;
-        retry_pkt.workgroup_count = pkt.workgroup_count - wg;
-        retry_pkt.workgroup_id_offset = pkt.workgroup_id_offset + wg;
-        // Transfer the completion signal to the retry entry so it fires only
-        // after the LAST fragment of this dispatch completes. Clear the
-        // original to prevent double-decrement.
-        dispatch_queue_[dispatched_ - 1].completion_signal = 0;
-        retry_queue_.push_back(std::move(retry_pkt));
-        wg_dispatched = false;
-        break;
-      }
+      next_cu_ = (cu_idx + 1) % cus_.size();
+      wg_dispatched = true;
     }
-    if (!wg_dispatched)
+
+    if (!wg_dispatched) {
+      util::trace::print("CP step: all CUs full at wg=", wg, " global_wg=", global_wg_id,
+                         " total=", pkt.workgroup_count, " offset=", pkt.workgroup_id_offset);
+      InternalDispatch retry_pkt = pkt;
+      retry_pkt.workgroup_count = pkt.workgroup_count - wg;
+      retry_pkt.workgroup_id_offset = pkt.workgroup_id_offset + wg;
+      dispatch_queue_[dispatched_ - 1].completion_signal = 0;
+      retry_queue_.push_back(std::move(retry_pkt));
       break;
+    }
   }
 
   return dispatched_ < dispatch_queue_.size();

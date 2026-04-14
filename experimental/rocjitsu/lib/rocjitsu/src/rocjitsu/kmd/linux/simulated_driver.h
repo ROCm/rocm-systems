@@ -213,6 +213,10 @@ private:
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
 
+  uint64_t scratch_backing_va_ = 0; ///< Flat-scratch base from ROCR (SET_SCRATCH_BACKING_VA).
+  uint64_t trap_tba_addr_ = 0;      ///< Trap Base Address from ROCR (SET_TRAP_HANDLER).
+  uint64_t trap_tma_addr_ = 0;      ///< Trap Meta Address from ROCR (SET_TRAP_HANDLER).
+
   Sysfs topology_;
 };
 
