@@ -26,7 +26,9 @@ THE SOFTWARE.
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <ctime>
+#include <time.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <sys/syscall.h>
