@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Compute Profiler documentation and reference
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD
+   :keywords: Omniperf, ROCm, profiler, tool, Instinct, GPUs, accelerator, AMD
 
 ***********************************
 ROCm Compute Profiler documentation

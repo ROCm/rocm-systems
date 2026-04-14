@@ -34,7 +34,7 @@ subtrees:
     - file: conceptual/performance-model.rst
       entries:
       - file: conceptual/cdna/cdna-performance-model.rst
-        title: CDNA 2/3/4
+        title: CDNA-CDNA4
         entries:
         - file: conceptual/cdna/system-speed-of-light.rst
           title: System Speed-of-Light
