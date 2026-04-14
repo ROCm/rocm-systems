@@ -137,10 +137,10 @@ public:
     void handle(const memory_copy_sample&) {}
     void handle(const memory_allocate_sample&) {}
     void handle(const scratch_memory_sample&) {}
-    void handle(const amd_smi_sample&) {}
+    void handle(const gpu_pmc_sample&) {}
+    void handle(const ainic_pmc_sample&) {}
     void handle(const cpu_freq_sample&) {}
     void handle(const backtrace_region_sample&) {}
-    void handle(const ainic_sample&) {}
 
 private:
     enum class migration_direction

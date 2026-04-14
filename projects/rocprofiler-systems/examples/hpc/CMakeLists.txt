@@ -33,6 +33,3 @@ add_subdirectory(matrix-exponential-streams-sync-hip)
 
 # HPCtrainingExamples/HIP/Stream_Overlap/1-split-copy-compute-hq-queues
 add_subdirectory(split-copy-compute-hw-queues)
-
-# Unified memory test (requires XNACK support)
-add_subdirectory(unified-memory)

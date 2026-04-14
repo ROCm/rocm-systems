@@ -175,7 +175,7 @@ unified_memory_processor_t::finalize_processing()
 void
 unified_memory_processor_t::handle(const kfd_sample& sample)
 {
-    if(sample.category == "kfd_page_migrate")
+    if(sample.category == "rocm_kfd_page_migrate")
     {
         auto agent_ids = parse_agent_ids_from_args(sample.args_str);
         if(!agent_ids.has_value())
@@ -241,7 +241,7 @@ unified_memory_processor_t::handle(const kfd_sample& sample)
             case migration_trigger::UNKNOWN: m_data.triggers.unknown++; break;
         }
     }
-    else if(sample.category == "kfd_page_fault")
+    else if(sample.category == "rocm_kfd_page_fault")
     {
         uint32_t agent_id = sample.device_id;
         bool     is_read  = is_read_fault(sample.name);

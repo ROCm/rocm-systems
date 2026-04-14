@@ -18,42 +18,42 @@
                     "description": "Check that KFD page migration events exist",
                     "error_message": "No KFD page migration events found in regions",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'kfd_page_migrate'"
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_kfd_page_migrate'"
                 },
                 {
                     "comparison": "greater_than_or_equal",
                     "description": "Check that migration events have valid timestamps",
                     "error_message": "No migration events with valid timestamps found",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'kfd_page_migrate' AND start > 0"
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_kfd_page_migrate' AND start > 0"
                 },
                 {
                     "comparison": "greater_than_or_equal",
                     "description": "Check that migration events have positive duration",
                     "error_message": "No migration events with positive duration found",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'kfd_page_migrate' AND duration > 0"
+                    "query": "SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_kfd_page_migrate' AND duration > 0"
                 },
                 {
                     "comparison": "greater_than_or_equal",
                     "description": "Check that migration events have src_agent args",
                     "error_message": "Migration events missing src_agent in args",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(DISTINCT ra.id) FROM region_args ra WHERE ra.name = 'src_agent' AND ra.id IN (SELECT r.id FROM {table_name} r WHERE r.category = 'kfd_page_migrate')"
+                    "query": "SELECT COUNT(DISTINCT ra.id) FROM region_args ra WHERE ra.name = 'src_agent' AND ra.id IN (SELECT r.id FROM {table_name} r WHERE r.category = 'rocm_kfd_page_migrate')"
                 },
                 {
                     "comparison": "greater_than_or_equal",
                     "description": "Check that migration events have dst_agent args",
                     "error_message": "Migration events missing dst_agent in args",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(DISTINCT ra.id) FROM region_args ra WHERE ra.name = 'dst_agent' AND ra.id IN (SELECT r.id FROM {table_name} r WHERE r.category = 'kfd_page_migrate')"
+                    "query": "SELECT COUNT(DISTINCT ra.id) FROM region_args ra WHERE ra.name = 'dst_agent' AND ra.id IN (SELECT r.id FROM {table_name} r WHERE r.category = 'rocm_kfd_page_migrate')"
                 },
                 {
                     "comparison": "greater_than_or_equal",
                     "description": "If page faults exist, check they have valid timestamps",
                     "error_message": "Page fault events found but with invalid timestamps",
                     "expected_result": 1,
-                    "query": "SELECT CASE WHEN (SELECT COUNT(*) FROM {table_name} WHERE category = 'kfd_page_fault') = 0 THEN 1 ELSE (SELECT COUNT(*) FROM {table_name} WHERE category = 'kfd_page_fault' AND start > 0) END"
+                    "query": "SELECT CASE WHEN (SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_kfd_page_fault') = 0 THEN 1 ELSE (SELECT COUNT(*) FROM {table_name} WHERE category = 'rocm_kfd_page_fault' AND start > 0) END"
                 }
             ]
         }
