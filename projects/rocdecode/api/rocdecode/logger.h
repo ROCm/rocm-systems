@@ -121,29 +121,39 @@ private:
 };
 
 #define CriticalLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogCritical) { \
-        OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogCritical) + ", Critical] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogCritical) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogCritical) + ", Critical] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define ErrorLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogError) { \
-        OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogError) + ", Error] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogError) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogError) + ", Error] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define WarningLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogWarning) { \
-        OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogWarning) + ", Warning] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogWarning) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogWarning) + ", Warning] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define InfoLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogInfo) { \
-        OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogInfo) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define DebugLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogDebug) { \
-        OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogDebug) + ", Debug] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogDebug) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogDebug) + ", Debug] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define FunctionEntryLog(logger) \
     RocDecFuncScopeLog _rocdec_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__)
