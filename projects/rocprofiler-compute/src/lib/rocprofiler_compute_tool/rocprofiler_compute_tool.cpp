@@ -153,27 +153,25 @@ void tool_fini(void* user_data)
 
 }  // namespace rocprofiler_compute_tool
 
+static std::string generate_output_filename(const char* output_path)
+{
+    if (!output_path || !*output_path)
+    {
+        throw std::runtime_error("Output path is empty");
+    }
+    std::string filename = output_path;
+    if (filename.back() != '/')
+        filename += '/';
+
+    std::string base_filename = std::to_string(getpid()) + "_native_counter_collection.csv";
+    return filename + base_filename;
+}
+
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
 
-    // Generate a unique output filename using the process ID
-    std::string base_filename = std::to_string(getpid()) + "_native_counter_collection.csv";
-
-    // Require ROCPROF_OUTPUT_PATH to be set, otherwise error out
-    std::string filename;
-    const char* output_path = g_input_parameters->get_output_path();
-    if (!output_path || !*output_path)
-    {
-        throw std::runtime_error("ROCPROF_OUTPUT_PATH environment variable must be set");
-    }
-    filename = output_path;
-    if (filename.back() != '/')
-        filename += '/';
-    // Use the generated base filename along with ROCPROF_OUTPUT_PATH
-    filename += base_filename;
-
-    tool_data->output_filename = filename;
+    tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
 
     // Store ROCPROF env. vars. in tool_data
 
