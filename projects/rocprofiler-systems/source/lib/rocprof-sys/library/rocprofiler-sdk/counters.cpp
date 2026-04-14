@@ -129,14 +129,24 @@ counter_storage::counter_storage(const client_data* _tool_data, uint64_t _devid,
     _metric_name =
         std::regex_replace(_metric_name, std::regex{ "(.*)\\[([0-9]+)\\]" }, "$1_$2");
     storage_name = fmt::format("rocprof-device-{}-{}", device_id, _metric_name);
+    manager      = tim::manager::instance();
     storage = std::make_unique<counter_storage_type>(tim::standalone_storage{}, index,
                                                      storage_name);
-    tim::manager::instance()->add_cleanup(
-        storage_name + "cleanup", [storage_ptr = storage.get(), metric_name = metric_name,
-                                   metric_description = metric_description]() {
-            if(storage_ptr)
-                counter_storage::write(storage_ptr, metric_name, metric_description);
-        });
+    if(manager)
+    {
+        manager->add_cleanup(storage_name + "cleanup",
+                             [storage_ptr = storage.get(), metric_name = metric_name,
+                              metric_description = metric_description]() {
+                                 if(storage_ptr)
+                                     counter_storage::write(storage_ptr, metric_name,
+                                                            metric_description);
+                             });
+    }
+    else
+    {
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't add cleanup.",
+                    metric_name);
+    }
 
     {
         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
@@ -160,6 +170,23 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 {
     operation::set_storage<counter_data_tracker>{}(storage.get());
     _event(tool_data, track.get(), track_name, _timing, _scope);
+}
+
+void
+counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
+{
+    if(!track || timestamp == 0) return;
+
+    // Write zero to Perfetto trace (for legacy Perfetto)
+    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
+                  timestamp, 0);
+
+    // Write zero to cache (for rocpd database)
+    trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
+        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",
+        static_cast<uint32_t>(device_id), static_cast<uint8_t>(agent_type::GPU),
+        track_name.c_str(), 0.0, std::nullopt });
 }
 
 void

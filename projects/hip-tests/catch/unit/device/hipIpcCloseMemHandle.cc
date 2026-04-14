@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-
 #include <hip_test_common.hh>
-#include <hip/hip_runtime_api.h>
+#include <hip_test_process.hh>
 
 /**
  * @addtogroup hipIpcCloseMemHandle hipIpcCloseMemHandle
@@ -24,6 +20,7 @@
  *  - @ref Unit_hipIpcMemAccess_ParameterValidation
  */
 
+#if HT_LINUX
 /**
  * Test Description
  * ------------------------
@@ -37,7 +34,7 @@
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
+HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
   int fd[2];
   REQUIRE(pipe(fd) == 0);
 
@@ -89,6 +86,7 @@ TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
     HIP_CHECK(hipFree(ptr));
   }
 }
+#endif
 
 /**
  * Test Description
@@ -99,10 +97,10 @@ TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
  *  - unit/device/hipIpcCloseMemHandle.cc
  * Test requirements
  * ------------------------
- *  - Host specific (LINUX)
+ *  - Host specific
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process) {
+HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process) {
   void* ptr;
   hipIpcMemHandle_t handle;
   HIP_CHECK(hipMalloc(&ptr, 1024));

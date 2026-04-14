@@ -30,7 +30,7 @@ void unsafeAdd_d(double *p, double v)
 )"};
 
 
-TEST_CASE(Unit_unsafeAtomicAdd) {
+HIP_TEST_CASE(Unit_unsafeAtomicAdd) {
   using namespace std;
   int device = 0;
   hipDeviceProp_t props;
@@ -114,5 +114,7 @@ TEST_CASE(Unit_unsafeAtomicAdd) {
 
     REQUIRE(fabs((res_f / 1000) - f_val) <= 0.2f);
     REQUIRE(fabs((res_d / 1000) - d_val) <= 0.2);
+  } else {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }

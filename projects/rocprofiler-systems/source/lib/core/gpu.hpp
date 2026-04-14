@@ -86,6 +86,9 @@ device_count();
 bool
 initialize_amdsmi();
 
+bool
+reinitialize_amdsmi();
+
 void
 add_device_metadata();
 }  // namespace gpu

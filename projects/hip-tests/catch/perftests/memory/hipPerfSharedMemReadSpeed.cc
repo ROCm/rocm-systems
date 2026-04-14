@@ -233,14 +233,12 @@ static bool hipPerfSharedMemReadSpeed_test() {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfSharedMemReadSpeed_test) {
+HIP_TEST_CASE(Perf_hipPerfSharedMemReadSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    SUCCEED(
-        "Skipped testcase hipPerfSharedMemReadSpeed as"
-        "there is no device to test.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {
     REQUIRE(true == hipPerfSharedMemReadSpeed_test());
   }

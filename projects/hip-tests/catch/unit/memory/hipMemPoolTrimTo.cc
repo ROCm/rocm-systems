@@ -31,7 +31,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) size_t trim_size = 1024;
@@ -53,14 +53,14 @@ TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
   *notified = 0;
 
-  const size_t allocation_size1 = kPageSize * kPageSize * 2;
+  const size_t allocation_size1 = kPageSize * kPageSize * 16;
   const size_t allocation_size2 = kPageSize / 2;
   MemPoolGuard mempool(MemPools::created, device_id);
 
@@ -78,8 +78,8 @@ TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
 
   hipMemPoolAttr attr;
   attr = hipMemPoolAttrReleaseThreshold;
-  // The pool must hold 128MB
-  std::uint64_t threshold = 128 * 1024 * 1024;
+  // The pool must hold 512MB
+  std::uint64_t threshold = 512 * 1024 * 1024ULL;
   HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &threshold));
 
   // Not a real free, since kernel isn't done
@@ -185,7 +185,7 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N, int dev = 0) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
   checkMempoolSupported(0)
       // create a stream
       hipStream_t stream;
@@ -205,21 +205,21 @@ TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
   constexpr int N = 1 << 20;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    WARN("Number of GPUs insufficient for test");
-  } else {
-    for (int dev = 0; dev < numDevices; dev++) {
-      checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
-      // create a stream
-      hipStream_t stream;
-      HIP_CHECK(hipStreamCreate(&stream));
-      REQUIRE(true == checkhipMemPoolTrimTo(stream, N, dev));
-      HIP_CHECK(hipStreamDestroy(stream));
-    }
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
+  }
+  for (int dev = 0; dev < numDevices; dev++) {
+    checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
+    // create a stream
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    REQUIRE(true == checkhipMemPoolTrimTo(stream, N, dev));
+    HIP_CHECK(hipStreamDestroy(stream));
   }
 }
 
@@ -273,7 +273,7 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Multithreaded) {
   checkMempoolSupported(0);
   constexpr int N = 1 << 10;
 

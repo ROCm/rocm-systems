@@ -26,7 +26,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipArrayGetInfo_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipArrayGetInfo_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   ArrayAllocGuard<float> array(make_hipExtent(1024, 4, 2));
@@ -62,7 +62,7 @@ TEST_CASE(Unit_hipArrayGetInfo_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipArrayGetInfo_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipArrayGetInfo_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
   ArrayAllocGuard<float> array(make_hipExtent(1024, 4, 4));
 

@@ -82,6 +82,10 @@ get_thread_state() ROCPROFSYS_HOT;
 /// returns old state
 State set_state(State) ROCPROFSYS_COLD;  // does not change often
 
+/// Reset state to PreInit (for re-attach scenarios). Bypasses state validation.
+State
+reset_state() ROCPROFSYS_COLD;
+
 /// returns old state
 ThreadState set_thread_state(ThreadState) ROCPROFSYS_HOT;  // changes often
 

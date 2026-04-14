@@ -1,0 +1,201 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file l2_cache.h
+/// @brief L2 cache component shared per XCD.
+
+#ifndef ROCJITSU_VM_AMDGPU_L2_CACHE_H_
+#define ROCJITSU_VM_AMDGPU_L2_CACHE_H_
+
+#include "rocjitsu/vm/amdgpu/mtype.h"
+#include "simdojo/components/cache.h"
+#include "simdojo/sim/component.h"
+#include "simdojo/sim/message.h"
+
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
+
+namespace rocjitsu {
+namespace amdgpu {
+
+/// @brief L2 cache component shared per Accelerator Complex Die (XCD).
+///
+/// 128-byte lines, 2048 sets, 16-way set-associative = 4MB (default).
+/// Write-back to the backing store (HBM controller or memory-side cache)
+/// via the requester port.
+///
+/// Mtype-aware behavior:
+///   - UC: Bypass L2, forward directly to backing store.
+///   - CC: Allocate in L2, MOESI coherence state tracking for CPU-GPU
+///         shared memory. Write-through on CC stores.
+///   - RW/WB: Allocate in L2, write-back on eviction.
+///   - NT: Allocate in L2 (L1 is bypassed, but L2 still caches).
+///
+/// Serves as the backing store for both L1 Scalar (K$) and L1 Vector (V$).
+///
+/// Provides structural ports for the topology graph (IN for CU L1 miss
+/// requests, OUT for HBM/fabric traffic).
+///
+/// THREAD SAFETY: The L2's read(), write(), fetch_line(), writeback_line(),
+/// ensure_line(), and flush_line() methods are NOT thread-safe. They operate on
+/// the underlying CacheStore without locking. Only atomic_rmw() is protected
+/// (via striped mutexes for cross-CU atomics to the same L2).
+///
+/// All CUs sharing an L2 instance MUST be assigned to the same simulation
+/// partition. This invariant ensures that only one worker thread accesses the
+/// L2's non-atomic paths at any given time. Violating this constraint (e.g.,
+/// placing CUs connected to the same L2 in different partitions) will cause
+/// data races on the cache data structure. The partitioner must enforce this
+/// constraint.
+class L2Cache : public simdojo::Component {
+public:
+  static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
+  static constexpr uint32_t NUM_SETS = 2048;
+  static constexpr uint32_t ASSOCIATIVITY = 16;
+
+  using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
+  static constexpr uint32_t LINE_SIZE = CacheStore::LINE_SIZE;
+
+  /// @brief Construct an L2Cache component.
+  /// @param name Human-readable name (e.g., "xcd0.l2").
+  explicit L2Cache(std::string name) : simdojo::Component(std::move(name)) {
+    req_port_ = add_port(std::make_unique<simdojo::Port>(
+        "req", 0, this, simdojo::PortDirection::OUT, simdojo::PortProtocol::MEMORY));
+  }
+
+  /// @brief Set the requester port used to reach the backing store.
+  /// @param port The OUT port connected to the MSC or HBM controller.
+  void set_req_port(simdojo::Port *port) { req_port_ = port; }
+
+  /// @brief Read a cache line worth of data (or partial line).
+  ///
+  /// Used by L1 controllers to fetch on miss. Always checks L2 first,
+  /// then falls through to HBM on L2 miss.
+  /// @param addr The starting address (line-aligned or not).
+  /// @param dst Destination buffer.
+  /// @param size Number of bytes to read.
+  /// @param mtype Memory type for caching policy.
+  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW);
+
+  /// @brief Write data to L2 (and possibly through to HBM).
+  ///
+  /// Used by L1 for write-through (CC) and write-back evictions.
+  /// @param addr The starting address.
+  /// @param src Source data.
+  /// @param size Number of bytes to write.
+  /// @param mtype Memory type for caching policy.
+  void write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype = Mtype::RW);
+
+  /// @brief Fetch an entire cache line into the given buffer.
+  ///
+  /// Convenience method for L1 fills. Returns a full LINE_SIZE-byte line
+  /// at the line-aligned address containing addr.
+  /// @param addr Any address within the desired cache line.
+  /// @param[out] line_buf Buffer of at least LINE_SIZE bytes.
+  void fetch_line(uint64_t addr, uint8_t *line_buf);
+
+  /// @brief Write back a full cache line from L1 eviction.
+  /// @param line_addr Line-aligned address.
+  /// @param[in] data Full cache line data (LINE_SIZE bytes).
+  /// @param mtype Memory type for caching policy.
+  void writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype = Mtype::RW);
+
+  /// @brief Perform an atomic read-modify-write on a cache line.
+  ///
+  /// @details Ensures the line is present in L2, then calls the provided
+  /// function with a pointer to the line data and the byte offset within
+  /// the line. The entire operation is serialized under a mutex so that
+  /// concurrent atomic RMWs (from different simulation threads in
+  /// multi-threaded mode) are correctly ordered, matching real hardware
+  /// L2 arbitration.
+  ///
+  /// @param addr The memory address of the atomic target.
+  /// @param size Access size in bytes (4 or 8).
+  /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
+  ///           old value, compute the new value, and write it in place.
+  template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn) {
+    // Stripe by cache line address for parallelism across different lines.
+    uint32_t stripe = (addr >> LINE_SIZE_BITS) & (ATOMIC_STRIPE_COUNT - 1);
+    std::lock_guard<std::mutex> lock(atomic_stripes_[stripe]);
+    ensure_line(addr);
+
+    // Operate directly on the cache line data.
+    uint32_t offset = CacheStore::line_offset(addr);
+    uint8_t *line = cache_.line_data_for_write(addr);
+    assert(line != nullptr && "ensure_line must guarantee hit");
+
+    fn(line, offset);
+
+    // Atomic stores write through to backing (same as CC mtype).
+    send_backing(addr, line + offset, size, simdojo::MessageOp::WRITE);
+
+    simdojo::CacheTag *ctag = nullptr;
+    cache_.lookup(addr, &ctag);
+    if (ctag) {
+      ctag->coherence = simdojo::CoherenceState::MODIFIED;
+      ctag->dirty = false; // Written through to backing.
+    }
+  }
+
+  /// @brief Flush a single L2 line (writeback if dirty, then invalidate).
+  ///
+  /// Used by CC reads to ensure cross-XCD coherence: dirty data is
+  /// written back to the backing store before the line is invalidated,
+  /// so a subsequent ensure_line() refetch gets the latest data.
+  /// @param addr Any address within the target cache line.
+  void flush_line(uint64_t addr);
+
+  /// @brief Invalidate all L2 lines.
+  void invalidate_all() { cache_.invalidate_all(); }
+
+  /// @brief Flush all dirty L2 lines to HBM and invalidate.
+  void flush_all();
+
+  /// @brief Create a completer port for a CU connection (one per CU).
+  /// @param name Name suffix for the port (used for port naming).
+  /// @returns Pointer to the newly created completer port.
+  simdojo::Port *create_cpl_port(const std::string &name) {
+    auto port_id = static_cast<simdojo::PortID>(cpl_ports_.size() + 1);
+    auto port = std::make_unique<simdojo::Port>(
+        "cpl_" + name, port_id, this, simdojo::PortDirection::IN, simdojo::PortProtocol::MEMORY);
+    auto *raw = add_port(std::move(port));
+    cpl_ports_.push_back(raw);
+    return raw;
+  }
+
+  /// @brief Return the requester port (for topology wiring to HBM/fabric).
+  /// @returns Pointer to the requester port.
+  simdojo::Port *req_port() { return req_port_; }
+
+  /// @brief Return all completer ports (CU-facing).
+  /// @returns Const reference to the vector of completer ports.
+  const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
+
+private:
+  /// @brief Ensure the L2 line for addr is present, fetching from HBM on miss.
+  /// @param addr Any address within the desired cache line.
+  void ensure_line(uint64_t addr);
+
+  /// @brief Send a read or write request to the backing store via the req port.
+  void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op);
+
+  static constexpr uint32_t ATOMIC_STRIPE_COUNT = 64;
+
+  CacheStore cache_;
+  simdojo::Port *req_port_ = nullptr;
+  /// @brief Striped locks for atomic RMW serialization. Each stripe covers
+  /// a range of cache lines, allowing atomics to different lines to proceed
+  /// in parallel (matching real L2 arbitration behavior).
+  std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
+  std::vector<simdojo::Port *> cpl_ports_;
+};
+
+} // namespace amdgpu
+} // namespace rocjitsu
+
+#endif // ROCJITSU_VM_AMDGPU_L2_CACHE_H_

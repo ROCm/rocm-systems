@@ -46,7 +46,7 @@ __global__ void mathFuntn(float *res) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE(Unit_Rtc_MathFunctions_header) {
+HIP_TEST_CASE(Unit_Rtc_MathFunctions_header) {
   std::string kernel_name = "mathFuntn";
   const char* kername = kernel_name.c_str();
   float* result_h;

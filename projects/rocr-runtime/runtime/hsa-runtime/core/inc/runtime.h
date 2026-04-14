@@ -52,6 +52,8 @@
 #include <utility>
 #include <thread>
 #include <shared_mutex>
+#include <random>
+#include <cinttypes>
 #if defined(__linux__)
 #include <sys/un.h>
 #include <xf86drm.h>
@@ -381,6 +383,10 @@ class Runtime {
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
+  hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
+                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                        hsa_signal_t completion_signal);
+
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset, uint64_t flags);
 
@@ -513,7 +519,6 @@ class Runtime {
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
-  bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
 
   Driver &AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
@@ -912,8 +917,8 @@ class Runtime {
 
   std::unique_ptr<AMD::SvmProfileControl> svm_profile_;
 
-  // IPC DMA buf unix domain socket server dmabuf FD passing
-  int ipc_sock_server_fd_;
+  // IPC DMA buf socket server for dmabuf FD passing
+  os::IPCSocket ipc_sock_server_fd_;
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
@@ -925,8 +930,6 @@ class Runtime {
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
-
-  os::LibHandle aqlprofile_lib_;
 
   typedef void* ThunkHandle;
 

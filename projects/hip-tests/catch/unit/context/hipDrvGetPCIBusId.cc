@@ -6,7 +6,7 @@
 
 #include <hip_test_common.hh>
 
-TEST_CASE(Unit_hipDeviceGetPCIBusId_Functional) {
+HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Functional) {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));

@@ -29,7 +29,7 @@ void checkData_(void* ptr, unsigned int size, char value) {
 }
 
 bool extraWarmup_ = true;
-TEST_CASE(Perf_hipPerfMemsetAsyncSpeed_test) {
+HIP_TEST_CASE(Perf_hipPerfMemsetAsyncSpeed_test) {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
   CONSOLE_PRINT("Set device to %d : %s", 0, props.name);

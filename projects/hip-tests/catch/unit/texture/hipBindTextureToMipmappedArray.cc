@@ -121,7 +121,7 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
  *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
+HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
   CHECK_IMAGE_SUPPORT
 
   // Height Width Vector
@@ -136,9 +136,7 @@ TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
     }
   }
 #else
-  SUCCEED(
-      "Mipmaps are Supported only on windows on devices with image support,"
-      " skipping the test.");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
 #endif
 }
 
@@ -161,7 +159,7 @@ TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
  *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
 #if defined(_WIN32)
@@ -198,9 +196,7 @@ TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
 
   HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
 #else
-  SUCCEED(
-      "Mipmaps are Supported only on windows on devices with image support,"
-      " skipping the test.");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
 #endif
 }
 #endif

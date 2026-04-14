@@ -32,7 +32,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipFreeAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipFreeAsync_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -70,7 +70,7 @@ TEST_CASE(Unit_hipFreeAsync_Negative_Parameters) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipFreeAsync_capturehipFreeAsync) {
+HIP_TEST_CASE(Unit_hipFreeAsync_capturehipFreeAsync) {
   HIP_CHECK(hipSetDevice(0));
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};

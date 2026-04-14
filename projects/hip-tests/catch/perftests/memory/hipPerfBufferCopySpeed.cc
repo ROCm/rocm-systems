@@ -369,13 +369,11 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfBufferCopySpeed_test) {
+HIP_TEST_CASE(Perf_hipPerfBufferCopySpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices <= 0) {
-    SUCCEED(
-        "Skipped testcase hipPerfBufferCopySpeed as"
-        "there is no device to test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
   } else {
     int deviceId = 0;
     HIP_CHECK(hipSetDevice(deviceId));

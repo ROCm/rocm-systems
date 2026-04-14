@@ -135,14 +135,14 @@ void KFDSVMRangeTest::SetGetAttributesTest(int gpuNode) {
                                              0,
                                          };
     HSAint32 enable = -1;
-    EXPECT_SUCCESS_GPU(hsaKmtGetXNACKMode(&enable), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &enable), gpuNode);
     expectedDefaultResults[4] = (enable) ?
                                  HSA_SVM_ATTR_ACCESS : HSA_SVM_ATTR_NO_ACCESS;
     char *pBuf = sysBuffer->As<char *>();
 
     LOG() << "Get default atrributes" << std::endl;
     memcpy(outputAttributes, inputAttributes, nAttributes * sizeof(HSA_SVM_ATTRIBUTE));
-    EXPECT_SUCCESS_GPU(hsaKmtSVMGetAttr(pBuf, BufSize,
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, BufSize,
                                     nAttributes, outputAttributes), gpuNode);
 
     for (i = 0; i < nAttributes; i++) {
@@ -161,9 +161,9 @@ void KFDSVMRangeTest::SetGetAttributesTest(int gpuNode) {
     }
     LOG() << "Setting/Getting atrributes" << std::endl;
     memcpy(outputAttributes, inputAttributes, nAttributes * sizeof(HSA_SVM_ATTRIBUTE));
-    EXPECT_SUCCESS_GPU(hsaKmtSVMSetAttr(pBuf, BufSize,
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx, pBuf, BufSize,
                                     nAttributes, inputAttributes), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtSVMGetAttr(pBuf, BufSize,
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, BufSize,
                                     nAttributes, outputAttributes), gpuNode);
     for (i = 0; i < nAttributes; i++) {
         if (outputAttributes[i].type == HSA_SVM_ATTR_ACCESS ||
@@ -203,10 +203,10 @@ TEST_P(KFDSVMRangeTest, XNACKModeTest) {
     HSAint32 enable = 0;
     const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
 
-    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&enable));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetXNACKMode, g_baseTest->m_hsakmt_current_ctx, &enable));
     for (i = 0; i < 2; i++) {
         enable = !enable;
-        r = hsaKmtSetXNACKMode(enable);
+        r = HSAKMT_CALL(hsaKmtSetXNACKMode, g_baseTest->m_hsakmt_current_ctx, enable);
         if (r == HSAKMT_STATUS_SUCCESS) {
             LOG() << "XNACK mode: " << std::boolalpha << enable <<
                      " supported" << std::endl;
@@ -216,7 +216,7 @@ TEST_P(KFDSVMRangeTest, XNACKModeTest) {
                       << gpuNodes.at(j) << std::endl;
                 ASSERT_SUCCESS(queue.Create(gpuNodes.at(j)));
                 EXPECT_EQ(HSAKMT_STATUS_ERROR,
-                        hsaKmtSetXNACKMode(enable));
+                        HSAKMT_CALL(hsaKmtSetXNACKMode, g_baseTest->m_hsakmt_current_ctx, enable));
                 EXPECT_SUCCESS(queue.Destroy());
             }
         } else if (r == HSAKMT_STATUS_NOT_SUPPORTED) {
@@ -634,7 +634,7 @@ void KFDSVMRangeTest::PrefetchTest(int gpuNode) {
     /* hsaKmtSVMGetAttr for HSA_SVM_ATTR_ACCESS is either fail or
      * returned attr.value not equal gpuNode
      */
-    if (hsaKmtSVMGetAttr(pBuf, BufSize, 1, &attr) == HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, BufSize, 1, &attr) == HSAKMT_STATUS_SUCCESS)
         EXPECT_NE_GPU(attr.value, gpuNode, gpuNode);
 
     sysBuffer = new HsaSVMRange(BufSize, gpuNode);
@@ -1480,7 +1480,7 @@ TEST_P(KFDSVMRangeTest, ReadOnlyRangeTest) {
     eventDesc.SyncVar.SyncVar.UserData = NULL;
     eventDesc.SyncVar.SyncVarSize = 0;
 
-    ret = hsaKmtCreateEvent(&eventDesc, true, false, &vmFaultEvent);
+    ret = HSAKMT_CALL(hsaKmtCreateEvent, g_baseTest->m_hsakmt_current_ctx, &eventDesc, true, false, &vmFaultEvent);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Event create failed" << std::endl;
         exit(ret);
@@ -1510,7 +1510,7 @@ TEST_P(KFDSVMRangeTest, ReadOnlyRangeTest) {
     sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
                     pinBuf, reinterpret_cast<void *>(pBuf), PAGE_SIZE));
 
-    ret = hsaKmtWaitOnEvent(vmFaultEvent, g_TestTimeOut);
+    ret = HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, vmFaultEvent, g_TestTimeOut);
     if (ret != HSAKMT_STATUS_SUCCESS) {
         WARN() << "Wait failed. No Exception triggered" << std::endl;
         goto event_fail;
@@ -1530,7 +1530,7 @@ TEST_P(KFDSVMRangeTest, ReadOnlyRangeTest) {
 event_fail:
     EXPECT_SUCCESS(sdmaQueue.Destroy());
 queue_fail:
-    hsaKmtDestroyEvent(vmFaultEvent);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, vmFaultEvent);
     /* Child process exit, otherwise it will continue to run remaining tests */
     exit(ret);
 
@@ -1555,7 +1555,7 @@ unsigned int ReadSMIEventThread(void* p) {
     HSAuint64 events;
     int fd;
 
-    EXPECT_SUCCESS_GPU(hsaKmtOpenSMI(pArgs->nodeid, &fd), pArgs->nodeid);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtOpenSMI, g_baseTest->m_hsakmt_current_ctx, pArgs->nodeid, &fd), pArgs->nodeid);
 
     events = HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_INDEX_MAX) - 1;
     EXPECT_EQ_GPU(write(fd, &events, sizeof(events)), sizeof(events), pArgs->nodeid);

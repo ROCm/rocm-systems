@@ -21,3 +21,4 @@ channelDescriptor:
     <<: *level_2
     # (amd_wsl) Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [texture]

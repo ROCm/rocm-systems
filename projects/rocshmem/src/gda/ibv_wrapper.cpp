@@ -25,6 +25,7 @@
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
 #include "util.hpp"
+#include "memory/default_allocator.hpp"
 
 #include "rocshmem/rocshmem.hpp"
 #include <dlfcn.h>
@@ -149,6 +150,8 @@ int IBVWrapper::init_function_table() {
   DLSYM_HELPER(ibv, ibv_, ibv_handle, create_qp);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, modify_qp);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, destroy_qp);
+  DLSYM_HELPER(ibv, ibv_, ibv_handle, create_ah);
+  DLSYM_HELPER(ibv, ibv_, ibv_handle, destroy_ah);
   return ROCSHMEM_SUCCESS;
 }
 
@@ -220,7 +223,7 @@ int IBVWrapper::dealloc_pd(struct ibv_pd *pd) {
   return ibv.dealloc_pd(pd);
 }
 
-struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access) {
+struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access, HIPAllocator *allocator) {
   if (is_dmabuf_supported()) {
     struct ibv_mr *mr;
     uint64_t offset = 0;
@@ -228,7 +231,13 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 
     DPRINTF("Using ibv_reg_dmabuf_mr()\n");
 
-    CHECK_HSA(hsa_amd_portable_export_dmabuf(addr, length, &fd, &offset));
+    // Use provided allocator or fall back to default allocator
+    HIPAllocator* alloc = (allocator != nullptr) ? allocator : get_default_allocator();
+    hipError_t err = alloc->GetDmabufHandle(addr, length, &fd, &offset);
+    if (err != hipSuccess) {
+      fprintf(stderr, "Failed to get dmabuf handle: %s\n", hipGetErrorString(err));
+      return nullptr;
+    }
 
     mr = ibv.reg_dmabuf_mr(pd, offset, length, (uint64_t) addr, fd, access);
 
@@ -294,6 +303,19 @@ int IBVWrapper::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_
 
 int IBVWrapper::destroy_qp(struct ibv_qp *qp) {
   return ibv.destroy_qp(qp);
+}
+
+uint16_t IBVWrapper::flow_label_to_udp_sport(uint32_t fl) {
+  // Passthrough function for ibv_flow_label_to_udp_sport inline function in verbs.h
+  return ibv_flow_label_to_udp_sport(fl);
+}
+
+struct ibv_ah* IBVWrapper::create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr) {
+  return ibv.create_ah(pd, attr);
+}
+
+int IBVWrapper::destroy_ah(struct ibv_ah *ah) {
+  return ibv.destroy_ah(ah);
 }
 
 } // namespace rocshmem
