@@ -56,7 +56,7 @@ jobs:
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
-            --config-preset "github-oss-presubmit" \
+            --config-preset "github-oss-dev" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
 
