@@ -67,7 +67,7 @@ GPU metrics
   
   .. note::
   
-  The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support and system topology. If unsupported, values will be reported as ``N/A`` in the output of ``amd-smi metric --usage``.
+    The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support and system topology. If unsupported, values will be reported as ``N/A`` in the output of ``amd-smi metric --usage``.
 
 CPU metrics
 ========================================
