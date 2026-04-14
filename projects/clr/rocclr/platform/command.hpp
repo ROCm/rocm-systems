@@ -1499,12 +1499,14 @@ class AccumulateCommand : public Command {
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
 
-  //! Add HW event to the list for later cleanup
+  //! Add HW event to the list for later cleanup.
+  //! Does not retain — caller owns the reference. Attached events are
+  //! released via ReleaseGlobalSignal in ~AccumulateCommand when the
+  //! profiling signals are destroyed after graph completion.
   void addHwEvent(void* hw_event, Device* device = nullptr) {
     if (hw_event != nullptr) {
       Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
       if (dev != nullptr) {
-        dev->RetainGlobalSignal(hw_event);
         hw_events_[dev].push_back(hw_event);
       }
     }
