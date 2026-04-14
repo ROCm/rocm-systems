@@ -610,3 +610,76 @@ for name in name_to_funcs.keys():
       if guard: 
         out("#endif\n")
 
+################################################################################
+# Generate per-function specialized kernel .cpp files for the parallel build.
+# Each file contains one device function + a kernel wrapper that calls it,
+# enabling the compiler to optimize the device function in kernel context
+# (LDS allocation, barriers, etc.) while keeping it as a separate linkable symbol.
+
+specialized_dir = os.path.join(gensrc, "specialized")
+if not os.path.exists(specialized_dir):
+  os.makedirs(specialized_dir)
+else:
+  for name in os.listdir(specialized_dir):
+    os.remove(os.path.join(specialized_dir, name))
+
+specialized_filelist = []
+for fn in primary_funcs:
+  if fn.coll == "Nop":
+    continue
+  sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+  func_name = "ncclDevFunc_" + sym
+  lower_coll = coll_camel_to_lower[fn.coll]
+  guard = get_arch_guard(fn)
+
+  filename = "specialized_%s.cpp" % sym.lower()
+  filepath = os.path.join(specialized_dir, filename)
+  specialized_filelist.append((filename, func_name, guard, fn))
+
+  with open(filepath, "w") as f:
+    out = f.write
+    out('#include "common.h"\n')
+    out('#include "%s.h"\n\n' % lower_coll)
+    if guard:
+      out("#if %s\n" % guard)
+    out(
+      "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, "
+      "NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n\n"
+      "__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n"
+      "__global__ void ncclDevKernel_{sym}_Specialized(\n"
+      "    ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n"
+      "  ncclShmemPerWarp[0].x = 0;\n"
+      "  {func_name}();\n"
+      "}}\n"
+      .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop],
+              ty_cxx=ty_to_cxx[fn.ty], algo=(fn.algo or "RING"),
+              proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline,
+              unroll=fn.unroll, func_name=func_name)
+    )
+    if guard:
+      out("#endif\n")
+
+# Sort specialized files so the heaviest kernels appear first in build.ninja.
+# Ninja breaks scheduling ties by edge ID (= rule order in the manifest), so
+# putting slow kernels first ensures they start early and don't form a long tail.
+_ty_cost  = {t: (0 if t in ("f8e4m3", "f8e5m2") else 1) for t in all_tys}
+_proto_cost = {"SIMPLE": 0, "LL": 1, "LL128": 2}
+_algo_cost  = {"TREE": 0, "RING": 1, "PAT": 2}
+
+def _compile_cost_key(entry):
+  fn = entry[3]  # Fn object stashed as 4th element
+  return (
+    _ty_cost.get(fn.ty, 1),
+    _proto_cost.get(fn.proto, 1),
+    _algo_cost.get(fn.algo, 1),
+    -int(fn.unroll),
+  )
+
+specialized_filelist.sort(key=_compile_cost_key)
+
+# Write the list of specialized files for CMake consumption
+with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
+  for filename, func_name, guard, _ in specialized_filelist:
+    f.write("%s %s %s\n" % (filename, func_name, guard or ""))
+
+print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))
