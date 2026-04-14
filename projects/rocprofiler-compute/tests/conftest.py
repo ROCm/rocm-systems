@@ -180,6 +180,36 @@ def pytest_addoption(parser):
         help="Path to the rocprofiler-sdk tool",
     )
 
+    parser.addoption(
+        "--coverage-seed",
+        type=int,
+        default=None,
+        help=(
+            "RNG seed for test_torch_trace_coverage operator sampling "
+            "(default: random 32-bit seed)"
+        ),
+    )
+    parser.addoption(
+        "--coverage-n",
+        type=int,
+        default=50,
+        help="Number of operators to sample in test_torch_trace_coverage",
+    )
+
+
+@pytest.fixture
+def torch_trace_coverage_sampling(request):
+    """Return ``(seed, sample_budget)`` for ``test_random_operator_kernel_coverage``."""
+    import random
+
+    seed = request.config.getoption("--coverage-seed")
+    if seed is None:
+        seed = random.randrange(2**32)
+    n = request.config.getoption("--coverage-n")
+    if n < 0:
+        pytest.fail("--coverage-n must be non-negative")
+    return seed, n
+
 
 @pytest.fixture(autouse=True)
 def skip_monkeypatch_with_binary(request):
