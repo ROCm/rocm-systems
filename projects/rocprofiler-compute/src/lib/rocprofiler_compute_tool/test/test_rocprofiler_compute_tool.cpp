@@ -18,14 +18,12 @@ protected:
         test_knobs::set_sdk_callbacks(m_sdk_callbacks);
         test_knobs::set_sdk_wrapper(m_sdk_wrapper);
     }
-    void TearDown() override
-    {
-        test_knobs::reset_cfg();
-    }
+
+    void TearDown() override { test_knobs::reset_cfg(); }
 
     static tool_data_t* get_tool_data(const rocprofiler_tool_configure_result_t* cfg)
     {
-        return  (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
+        return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
     }
 
     rocprofiler_client_id_t              m_client_id{};
@@ -33,7 +31,6 @@ protected:
     std::shared_ptr<MockSdkCallbacks>    m_sdk_callbacks;
     std::shared_ptr<MockSdkWrapper>      m_sdk_wrapper;
 };
-
 
 TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_Throws)
 {
@@ -67,18 +64,51 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyKernelFilterRange_DoesntThrow)
 
 TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
 {
-    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto tool_data = get_tool_data(cfg);
-    EXPECT_TRUE(tool_data->output_filename.find(m_input_parameters->get_output_path()) != std::string::npos);
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    auto       tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->output_filename.find(m_input_parameters->get_output_path()) !=
+                std::string::npos);
     EXPECT_TRUE(tool_data->output_filename.find(
                     std::to_string(getpid()) + "_native_counter_collection.csv") != std::string::npos);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)
 {
-    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto tool_data = get_tool_data(cfg);
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    auto       tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->requested_counters, m_input_parameters->get_requested_counters());
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectIterationMultiplexingMode_ReturnsDisabled)
+{
+    m_input_parameters->set_iteration_multiplexing_mode("incorrect");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    auto       tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::DISABLED);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedKernelIterationMultiplexingMode_ReturnsIt)
+{
+    m_input_parameters->set_iteration_multiplexing_mode("kernel");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    auto       tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::KERNEL);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedKernelLauncParamsIterationMultiplexingMode_ReturnsIt)
+{
+    m_input_parameters->set_iteration_multiplexing_mode("kernel_launch_params");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    auto       tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::LAUNCH);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedKernelFilterIncludeRegex_ReturnsIt)
+{
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    auto       tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->kernel_filter_include_regex,
+              m_input_parameters->get_kernel_filter_include_regex());
 }
 
 int main(int argc, char** argv)
