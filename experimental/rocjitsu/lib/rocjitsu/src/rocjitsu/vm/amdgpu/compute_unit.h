@@ -101,6 +101,15 @@ public:
   /// @brief Clear all halted wavefront slots and free their register allocations.
   void retire_halted_wfs();
 
+  /// @brief Check whether this CU can accept an entire workgroup.
+  ///
+  /// @details Queries the number of free wavefront slots and register file
+  /// blocks without modifying any state. The command processor calls this
+  /// before dispatching to guarantee all-or-nothing workgroup placement.
+  /// @param num_wfs Number of wavefronts in the workgroup.
+  /// @returns true if the CU has enough free slots and registers.
+  bool can_accept_workgroup(uint32_t num_wfs) const;
+
   /// @brief Execute work until the next scheduling boundary.
   ///
   /// @details In FUNCTIONAL mode, executes up to `functional_quantum`
@@ -351,6 +360,9 @@ protected:
   /// @param base Base index returned by allocate_vgprs().
   virtual void free_vgprs(uint32_t base) = 0;
 
+  /// @brief Count the number of free VGPR allocation blocks.
+  virtual uint32_t free_vgpr_blocks() const = 0;
+
   /// @brief Tick all memory pipelines (called at the start of step).
   void tick_pipelines();
 
@@ -525,6 +537,8 @@ protected:
 
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
+
+  uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
   /// @brief Execute one instruction on the given wavefront.
   ///

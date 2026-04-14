@@ -180,6 +180,37 @@ void ComputeUnitCore::retire_halted_wfs() {
   }
 }
 
+bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs) const {
+  // Count free wavefront slots.
+  uint32_t free_slots = 0;
+  for (const auto &w : wfs_)
+    if (w->is_halted())
+      ++free_slots;
+  if (free_slots < num_wfs) {
+    util::trace::print("CU ", this->name(), " can_accept_wg: REJECT free_slots=", free_slots,
+                       " < num_wfs=", num_wfs);
+    return false;
+  }
+
+  // Check SGPR register blocks.
+  uint32_t free_sgpr = sgpr_file_.free_block_count();
+  if (free_sgpr < num_wfs) {
+    util::trace::print("CU ", this->name(), " can_accept_wg: REJECT free_sgpr=", free_sgpr,
+                       " < num_wfs=", num_wfs);
+    return false;
+  }
+
+  // Check VGPR register blocks.
+  uint32_t free_vgpr = free_vgpr_blocks();
+  if (free_vgpr < num_wfs) {
+    util::trace::print("CU ", this->name(), " can_accept_wg: REJECT free_vgpr=", free_vgpr,
+                       " < num_wfs=", num_wfs);
+    return false;
+  }
+
+  return true;
+}
+
 void ComputeUnitCore::tick_pipelines() {
   scalar_mem_pipeline_.tick();
   global_mem_pipeline_.tick();
