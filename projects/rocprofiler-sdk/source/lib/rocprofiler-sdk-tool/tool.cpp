@@ -2455,8 +2455,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         const auto handle_marker_trace        = tool::get_config().selected_regions;
         rocprofiler_user_data_t user{.value = 0};
 
-        ROCP_FATAL_IF(handle_consecutive_kernels && handle_marker_trace)
-            << "ATT selected-regions and consecutive kernels modes are mutually exclusive";
+        ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
+            << "selected-regions and att-consecutive-kernels options are mutually exclusive";
 
         if(handle_marker_trace)
         {
