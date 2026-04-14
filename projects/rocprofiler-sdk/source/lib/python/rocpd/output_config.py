@@ -110,11 +110,17 @@ def check_file_exists(filename):
     if any(char in filename for char in ["*", "?", "["]):
         expanded_files = glob.glob(filename)
         if not expanded_files:
-            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
+            # provide list of files in folder subpath of filename
+            files = glob.glob(os.path.dirname(filename) + "/*.db")
+            print(f"list of files in folder subpath of filename: {files}")
+            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist YYH1.")
         return sanitize_input_list(expanded_files)
     else:
         if not os.path.exists(filename):
-            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
+            # provide list of files in folder subpath of filename
+            files = glob.glob(os.path.dirname(filename) + "/*.db")
+            print(f"list of files in folder subpath of filename: {files}")
+            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist YYH2.")
         return filename
 
 
