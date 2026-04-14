@@ -578,10 +578,6 @@ module_function::is_routine_constrained() const
         "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
         regex_opts);
 
-    static std::regex exclude_fortran(
-        "(log2visit|Log2VisitHelper)",  // From LLVM's libFortranRuntime.a library
-        regex_opts);
-
     static std::regex leading(
         "^(\\.|frame_dummy|transaction clone|virtual thunk|non-virtual thunk|"
         "\\(|targ|kmp_threadprivate_|Kokkos::Profiling::|_IO_|___|"
@@ -602,8 +598,7 @@ module_function::is_routine_constrained() const
 
     // don't instrument the functions when key is found anywhere in function name
     if(std::regex_search(function_name, exclude) ||
-       std::regex_search(function_name, exclude_cxx) ||
-       std::regex_search(function_name, exclude_fortran))
+       std::regex_search(function_name, exclude_cxx))
     {
         return _report("Excluding", "critical", 3);
     }
