@@ -188,8 +188,10 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 
 #ifdef BUILD_DEBUG_DEVICE
     {
-      struct bnxt_re_bcqe *hdr = (struct bnxt_re_bcqe*) ((char*)cqe + sizeof(struct bnxt_re_req_cqe));
-      uint32_t flg_val = __hip_atomic_load(&hdr->flg_st_typ_ph, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      uint32_t flg_val = __hip_atomic_load(
+          static_cast<uint32_t*>(__builtin_assume_aligned(
+              (char*)cqe + sizeof(struct bnxt_re_req_cqe) + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph), 4)),
+          __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
       uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
       if (status != BNXT_RE_REQ_ST_OK)
         bnxt_check_cqe_error(cqe, status);
