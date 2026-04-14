@@ -111,6 +111,50 @@ TEST_F(TestRocprofilerComputeTool, ProvidedKernelFilterIncludeRegex_ReturnsIt)
               m_input_parameters->get_kernel_filter_include_regex());
 }
 
+TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectKernelFilterRange_ReturnsEmpty)
+{
+    m_input_parameters->set_kernel_filter_range("invalid");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_TRUE(tool_data->kernel_filter_ranges.empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedSingleRangeWithSquareBrackets_ReturnsRangeWithoutBrackets)
+{
+    m_input_parameters->set_kernel_filter_range("[4]");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->kernel_filter_ranges.size(), 1);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[0].first, 4);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[0].second, 4);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedSingleRangeWithoutSquareBrackets_ReturnsRange)
+{
+    m_input_parameters->set_kernel_filter_range("4");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->kernel_filter_ranges.size(), 1);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[0].first, 4);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[0].second, 4);
+}
+
+TEST_F(TestRocprofilerComputeTool, ProvidedMixOfRanges_ReturnsThem)
+{
+    m_input_parameters->set_kernel_filter_range("4, 10-11, 12-23, 5");
+    const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto tool_data = get_tool_data(cfg);
+    EXPECT_EQ(tool_data->kernel_filter_ranges.size(), 4);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[0].first, 4);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[0].second, 4);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[1].first, 10);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[1].second, 11);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[2].first, 12);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[2].second, 23);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[3].first, 5);
+    EXPECT_EQ(tool_data->kernel_filter_ranges[3].second, 5);
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
