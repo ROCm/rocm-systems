@@ -15,8 +15,8 @@ GL2C is under :doc:`gl2-cache`.
 **GL0 is the same as TCP on current architecture. We keep using the name "TCP" on this
 page for consistency with the counters' names.**
 
-TCP cache (panel)
-=================
+TCP cache panels
+================
 
 TCP Utilization
 ---------------

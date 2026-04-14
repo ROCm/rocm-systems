@@ -1,5 +1,5 @@
 .. meta::
-   :description: Learn about GL2C metrics in ROCm Compute Profiler, including the GL1C–GL2 interface, cache performance, bandwidth, GCEA, and DRAM interfaces on RDNA 3.5 (gfx1151).
+   :description: Learn about GL2C metrics in ROCm Compute Profiler, including cache performance, bandwidth, GCEA, and DRAM interfaces on RDNA 3.5 (gfx1151).
    :keywords: ROCm Compute Profiler, RDNA, gfx1151, GL2C, GL2, GCEA
 
 .. _rdna-gl2:
@@ -9,25 +9,16 @@ GL2
 ===
 
 On gfx1151, GL2C (RDNA naming for what Instinct documentation refers to as L2/TCC) is the last-level on-chip cache for most clients.
-Traffic leaving GL2 heads toward GCEA and DRAM through the DRAM read/write, SARB, and
+
+Traffic leaving GL2
+heads toward GCEA and DRAM through the DRAM read/write, SARB, and
 return interfaces in the panel YAMLs.
 
 For Instinct L2 (TCC) coherence, channel hashing, and fabric metrics on CDNA architecture across MI-series GPUs, see
 :doc:`../cdna/l2-cache` under CDNA-CDNA4.
 
-GL1C to GL2C and GL2C panels
-=============================
-
-GL1C-GL2 interface (panel)
----------------------------------
-
-.. tab-set::
-
-   .. tab-item:: RDNA 3.5 (gfx1151)
-      :selected:
-
-      .. jinja:: rdna1151-gl1c-gl1c-gl2-interface-gfx1151
-         :file: _templates/metrics_table.j2
+GL2C panels
+===========
 
 GL2C cache performance
 ----------------------

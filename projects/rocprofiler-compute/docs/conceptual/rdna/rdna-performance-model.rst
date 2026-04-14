@@ -71,6 +71,11 @@ and embed the RDNA3.5 (gfx1151) metric tables under each block:
 
 * :doc:`references` — public references and link to Instinct citations.
 
+Note
+====
+
+rocprof-compute currently has limited support for WMMA on Strix Halo.
+
 Related
 =======
 

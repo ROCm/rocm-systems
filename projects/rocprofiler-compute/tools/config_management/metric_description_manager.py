@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Union
 
 import yaml
+from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -48,6 +49,56 @@ def normalize_unit_for_docs(unit: str) -> str:
         return f"{prefix} per Normalization Unit"
 
     return unit
+
+
+def format_yaml_scalar(value: str):
+    """Serialize descriptions like gfx942: inline scalars without block markers."""
+    if isinstance(value, str) and "\n" in value:
+        return re.sub(r"\s*\n\s*", " ", value).strip()
+    return value
+
+
+def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
+    """Apply docs-only section name cleanup for selected architectures."""
+    if arch_name != "gfx1151":
+        return section_name
+
+    replacements = {
+        "Memory chart - TCP Cache (Vector L0)": "Memory chart - TCP Cache",
+        "Memory chart - GL1C Cache (L1)": "Memory chart - GL1C Cache",
+    }
+    return replacements.get(section_name, section_name)
+
+
+def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
+    """Apply docs-only metric name cleanup for selected architectures."""
+    if arch_name != "gfx1151":
+        return metric_name
+
+    replacements = {
+        "TCP (L0) Cache Bandwidth": "TCP Cache Bandwidth",
+    }
+    return replacements.get(metric_name, metric_name)
+
+
+def normalize_docs_rst(arch_name: str, rst_text: str) -> str:
+    """Apply docs-only wording cleanup for selected architectures."""
+    if arch_name != "gfx1151" or not isinstance(rst_text, str):
+        return rst_text
+
+    replacements = {
+        "TCP (L0 vector cache)": "TCP cache",
+        "TCP (vector L0)": "TCP",
+        "GL1C (L1 cache)": "GL1C cache",
+        "TCP (L0)": "TCP",
+        "TCP (L0 Cache)": "TCP cache",
+        "GL1C (L1 Cache)": "GL1C cache",
+    }
+
+    for old_text, new_text in replacements.items():
+        rst_text = rst_text.replace(old_text, new_text)
+
+    return rst_text
 
 
 # All CDNA architectures share the same panel ID mapping.
@@ -131,7 +182,7 @@ RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
         1101: "GL1C Utilization",
         1102: "GL1C Request Statistics",
         1103: "GL1C Cache Performance",
-        1104: "GL1C GL1C-GL2 Interface",
+        1104: "GL1C-GL2 Interface",
         1105: "GL1C Stalls",
         1301: "GL2C Cache Performance",
         1302: "GL2C Request Statistics",
@@ -142,6 +193,13 @@ RDNA_PANEL_ID_TO_SECTION_BY_ARCH: dict[str, dict[int, str]] = {
         1505: "Return Interface",
         1701: "GPU Utilization",
         1702: "Shader Engine Utilization",
+    },
+}
+
+
+LEGACY_SECTION_ALIASES_BY_ARCH: dict[str, dict[str, str]] = {
+    "gfx1151": {
+        "GL1C GL1C-GL2 Interface": "GL1C-GL2 Interface",
     },
 }
 
@@ -284,8 +342,8 @@ def update_per_arch_metrics_file(
         per_arch_descriptions[section] = {}
         for metric_name, desc_data in metrics.items():
             entry = {
-                "plain": desc_data.get("plain", ""),
-                "rst": desc_data.get("rst", ""),
+                "plain": format_yaml_scalar(desc_data.get("plain", "")),
+                "rst": format_yaml_scalar(desc_data.get("rst", "")),
             }
             if "unit" in desc_data:
                 entry["unit"] = desc_data["unit"]
@@ -300,8 +358,31 @@ def load_existing_per_arch(arch_name: str, per_arch_dir: Union[str, Path]) -> di
     per_arch_file = Path(per_arch_dir) / f"{arch_name}_metrics_description.yaml"
     if per_arch_file.exists():
         with open(per_arch_file, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+            return canonicalize_section_aliases(
+                arch_name, yaml.safe_load(f) or {}
+            )
     return {}
+
+
+def canonicalize_section_aliases(arch_name: str, descriptions: dict) -> dict:
+    """Merge legacy section names into their canonical names."""
+    aliases = LEGACY_SECTION_ALIASES_BY_ARCH.get(arch_name)
+    if not aliases or not descriptions:
+        return descriptions
+
+    canonicalized: dict = {}
+    for section, metrics in descriptions.items():
+        canonical_section = aliases.get(section, section)
+
+        if canonical_section not in canonicalized:
+            canonicalized[canonical_section] = {}
+
+        existing_metrics = canonicalized[canonical_section]
+        for metric_name, metric_data in metrics.items():
+            if metric_name not in existing_metrics:
+                existing_metrics[metric_name] = metric_data
+
+    return canonicalized
 
 
 def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -> dict:
@@ -400,15 +481,22 @@ def generate_docs_from_per_arch(
         # Transform: Keep only RST and unit fields for documentation
         docs_data = {}
         for section, metrics in per_arch_data.items():
-            docs_data[section] = {}
+            docs_section = normalize_docs_section_name(arch, section)
+            docs_data[docs_section] = {}
             for metric_name, metric_info in metrics.items():
+                docs_metric_name = normalize_docs_metric_name(arch, metric_name)
                 # Extract only RST and unit (drop 'plain' text)
                 entry = {}
                 if "rst" in metric_info:
-                    entry["rst"] = metric_info["rst"]
+                    entry["rst"] = SingleQuotedScalarString(
+                        normalize_docs_rst(
+                            arch,
+                            format_yaml_scalar(metric_info["rst"]),
+                        )
+                    )
                 if "unit" in metric_info:
                     entry["unit"] = metric_info["unit"]
-                docs_data[section][metric_name] = entry
+                docs_data[docs_section][docs_metric_name] = entry
 
         cm_utils.save_yaml(docs_data, dst_file)
         print(f"Generated: {dst_file}")

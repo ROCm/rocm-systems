@@ -128,7 +128,7 @@ rdna_gfx1151_section_map = {
     "rdna1151-gl1c-request-statistics-gfx1151": "GL1C Request Statistics",
     "rdna1151-gl1c-cache-performance-gfx1151": "GL1C Cache Performance",
     "rdna1151-gl1c-stalls-gfx1151": "GL1C Stalls",
-    "rdna1151-gl1c-gl1c-gl2-interface-gfx1151": "GL1C GL1C-GL2 Interface",
+    "rdna1151-gl1c-gl1c-gl2-interface-gfx1151": "GL1C-GL2 Interface",
     "rdna1151-gl2c-cache-performance-gfx1151": "GL2C Cache Performance",
     "rdna1151-gl2c-request-statistics-gfx1151": "GL2C Request Statistics",
     "rdna1151-gl2c-bandwidth-gfx1151": "GL2C Bandwidth",
