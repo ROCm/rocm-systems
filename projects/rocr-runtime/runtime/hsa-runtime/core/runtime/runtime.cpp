@@ -110,8 +110,10 @@ bool g_use_interrupt_wait;
 bool g_use_mwaitx;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
+std::mutex Runtime::bootstrap_lock_;
+
 hsa_status_t Runtime::Acquire() {
-  std::lock_guard<std::mutex> boot(bootstrap_lock());
+  std::lock_guard<std::mutex> boot(bootstrap_lock_);
 
   if (runtime_singleton_ == NULL) {
     memset(log_flags, 0, sizeof(log_flags));
@@ -138,7 +140,7 @@ hsa_status_t Runtime::Acquire() {
 }
 
 hsa_status_t Runtime::Release() {
-  std::lock_guard<std::mutex> boot(bootstrap_lock());
+  std::lock_guard<std::mutex> boot(bootstrap_lock_);
 
   if (runtime_singleton_ == nullptr) return HSA_STATUS_ERROR_NOT_INITIALIZED;
 
