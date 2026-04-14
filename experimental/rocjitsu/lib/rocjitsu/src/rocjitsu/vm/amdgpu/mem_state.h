@@ -77,6 +77,8 @@ struct VectorMemState : DynamicInstState {
   bool non_temporal = false;
   bool sign_extend = false;
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
+  bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  uint32_t lds_base = 0;               ///< M0 value for LDS-destination buffer loads.
   uint64_t issue_pc = 0;               ///< PC at which the instruction was issued (debug).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;

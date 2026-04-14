@@ -30,6 +30,22 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
   if (!d.is_load)
     return;
 
+  // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
+  // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
+  if (d.lds_dst) {
+    auto &lds = cu.lds();
+    uint32_t per_lane_bytes = d.num_elems * d.elem_size;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      if (!(d.lane_mask & (1ULL << lane)))
+        continue;
+      uint32_t lds_addr = d.lds_base + lane * per_lane_bytes;
+      uint32_t data_offset = lane * per_lane_bytes;
+      for (uint32_t b = 0; b < per_lane_bytes; ++b)
+        lds.write8(lds_addr + b, d.response_data[data_offset + b]);
+    }
+    return;
+  }
+
   // Atomics: response layout is [lane * elem_size], regular loads are
   // [lane * (num_elems * elem_size) + elem * elem_size].
   bool is_atomic = (d.atomic_op != AtomicOp::NONE);

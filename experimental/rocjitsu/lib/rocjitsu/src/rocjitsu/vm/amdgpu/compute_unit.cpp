@@ -332,6 +332,9 @@ bool ComputeUnitCore::step() {
   if (util::trace::enabled())
     active->trace_inst_count_++;
 
+  // PC sampler: log every 5000th instruction for non-trivial kernels.
+  // (Mnemonic printed after decode below.)
+
   // Trace v4 and instruction words at key PCs in the fill kernel
   if (util::trace::enabled() && active->pc == 0x4d00249258ULL) {
     // At the v_or_b32 (+058): log words and v4 BEFORE execute
@@ -394,6 +397,14 @@ bool ComputeUnitCore::step() {
     util::trace::print("FILL_INST pc=0x", std::hex, active->pc, std::dec,
                        " mnem=", inst->mnemonic(), " exec=0x", std::hex, active->exec(), std::dec,
                        " wf=", active->wf_id());
+  }
+
+  // PC sampler: log every 5000th instruction for non-trivial kernels.
+  if (util::trace::enabled() && active->num_vgprs() >= 16 &&
+      (active->trace_inst_count_ % 5000) == 1) {
+    util::trace::print("PC_SAMPLE cu=", this->name(), " wf=", active->wf_id(),
+                       " inst#=", active->trace_inst_count_, " pc=0x", std::hex, active->pc,
+                       std::dec, " vgprs=", active->num_vgprs(), " mnem=", inst->mnemonic());
   }
 
   execute_instruction(inst, *active);
