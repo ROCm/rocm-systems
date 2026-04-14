@@ -65,7 +65,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedEmptyKernelFilterRange_DoesntThrow)
 TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto       tool_data = get_tool_data(cfg);
+    const auto tool_data = get_tool_data(cfg);
     EXPECT_TRUE(tool_data->output_filename.find(m_input_parameters->get_output_path()) !=
                 std::string::npos);
     EXPECT_TRUE(tool_data->output_filename.find(
@@ -75,7 +75,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedNonEmptyOutputPath_ReturnsItExtended)
 TEST_F(TestRocprofilerComputeTool, ProvidedRequestedCounters_ReturnsIt)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto       tool_data = get_tool_data(cfg);
+    const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->requested_counters, m_input_parameters->get_requested_counters());
 }
 
@@ -83,7 +83,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedIncorrectIterationMultiplexingMode_Re
 {
     m_input_parameters->set_iteration_multiplexing_mode("incorrect");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto       tool_data = get_tool_data(cfg);
+    const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::DISABLED);
 }
 
@@ -91,7 +91,7 @@ TEST_F(TestRocprofilerComputeTool, ProvidedKernelIterationMultiplexingMode_Retur
 {
     m_input_parameters->set_iteration_multiplexing_mode("kernel");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto       tool_data = get_tool_data(cfg);
+    const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::KERNEL);
 }
 
@@ -99,14 +99,14 @@ TEST_F(TestRocprofilerComputeTool, ProvidedKernelLauncParamsIterationMultiplexin
 {
     m_input_parameters->set_iteration_multiplexing_mode("kernel_launch_params");
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto       tool_data = get_tool_data(cfg);
+    const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->iteration_multiplexing_mode, iteration_multiplexing_mode_t::LAUNCH);
 }
 
 TEST_F(TestRocprofilerComputeTool, ProvidedKernelFilterIncludeRegex_ReturnsIt)
 {
     const auto cfg       = rocprofiler_configure(1, "", 1, &m_client_id);
-    auto       tool_data = get_tool_data(cfg);
+    const auto tool_data = get_tool_data(cfg);
     EXPECT_EQ(tool_data->kernel_filter_include_regex,
               m_input_parameters->get_kernel_filter_include_regex());
 }
