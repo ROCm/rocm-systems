@@ -8,7 +8,7 @@ For information on available features, installation steps, API reference materia
 documentation at [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/)
 
 >[!NOTE]
->This project is a successor to [rocm_smi_lib](https://github.com/ROCm/rocm_smi_lib)
+>This project is a successor to [rocm-smi-lib](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib)
 >and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
 >This project is applicable to Linux Baremetal and Linux VM(Guest). To use AMD SMI for Virtualization, please refer to [AMD-SMI Virtualization](https://github.com/amd/MxGPU-Virtualization/tree/mainline/smi-lib).
 
