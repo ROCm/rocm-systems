@@ -110,8 +110,8 @@ Selective rank profiling
 -------------------------
 
 When running large-scale MPI jobs, collecting profiling data from all ranks is not always desired.
-The ``--rank-filter-output`` option allows you to specify which MPI ranks should provide profile and trace output.
-Below is an example using ``rocprof-sys-sample`` to profile using a variety of rank specification syntax.
+The ``--rank-filter-output`` option allows you to specify which MPI ranks should provide profile and trace output files.
+Below are examples using ``rocprof-sys-sample`` to profile an appliction using a variety of rank selection syntaxes.
 
 .. code-block:: bash
 
