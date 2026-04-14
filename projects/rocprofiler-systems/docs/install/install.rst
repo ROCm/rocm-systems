@@ -302,8 +302,8 @@ and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
 be the same size.
 
 .. code-block:: shell
+   
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
-
 
 ROCm Systems Profiler without ROCm
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

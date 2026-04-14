@@ -67,7 +67,7 @@ GPU metrics
   
   .. note::
   
-  The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support and system topology. If unsupported, values will be reported as ``N/A`` in the output of ``amd-smi metric --usage``.
+    The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support and system topology. If unsupported, values will be reported as ``N/A`` in the output of ``amd-smi metric --usage``.
 
 CPU metrics
 ========================================
@@ -122,8 +122,7 @@ broad picture.
 
 .. note::
 
-   For insight into the execution of individual kernels on the GPU,
-   use `ROCm Compute Profiler <https://github.com/rocm/rocprofiler-compute>`_.
+  For insight into the execution of individual kernels on the GPU, use `ROCm Compute Profiler <https://github.com/rocm/rocprofiler-compute>`_.
 
 In terms of CPU analysis, ROCm Systems Profiler does not target any specific vendor.
 It works just as well on AMD and non-AMD CPUs.
