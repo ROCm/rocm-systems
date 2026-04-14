@@ -360,6 +360,20 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                             error_df.to_csv(baseline_dir + "/metric_error_log.csv")
 
 
+def _load_profiling_counter_data(workload_dir):
+    """Load counter data from .db files or results_*.csv, returning a DataFrame."""
+    workload_path = Path(workload_dir)
+    db_files = sorted(workload_path.glob("*.db"))
+    if db_files:
+        from utils.rocpd_data import query_counters_to_dataframe
+
+        return query_counters_to_dataframe([str(f) for f in db_files])
+    results_files = list(workload_path.glob("results_*.csv"))
+    return pd.concat(
+        [pd.read_csv(f) for f in results_files], ignore_index=True
+    )
+
+
 def validate(test_name, workload_dir, file_dict, args=[]):
     if config["METRIC_COMPARE"]:
         baseline_compare_metric(test_name, workload_dir, args)
@@ -634,7 +648,7 @@ def test_path_rocpd(
     options = ["--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
-    # Validate profile outputs (results_*.csv for rocpd format)
+    # Validate profile outputs (.db or results_*.csv for rocpd format)
     test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     assert test_utils.check_file_pattern(
         "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
@@ -1742,9 +1756,8 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         f"- '{lds_block}'", f"{workload_dir}/profiling_config.yaml"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        test_utils.check_file_pattern("SQ_INSTS_LDS", str(f)) for f in results_files
+    assert test_utils.check_profiling_output_has_counter(
+        workload_dir, "SQ_INSTS_LDS"
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1771,15 +1784,14 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         "- '3'", f"{workload_dir}/profiling_config.yaml"
     )
-    instmix_counter = "SQ_INSTS_FLAT" if is_strix_halo_soc() else "TA_FLAT_WAVEFRONTS"
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        test_utils.check_file_pattern(instmix_counter, str(f)) for f in results_files
+    instmix_counter = (
+        "SQ_INSTS_FLAT" if is_strix_halo_soc() else "TA_FLAT_WAVEFRONTS"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        test_utils.check_file_pattern("SQC_TC_DATA_READ_REQ", str(f))
-        for f in results_files
+    assert test_utils.check_profiling_output_has_counter(
+        workload_dir, instmix_counter
+    )
+    assert test_utils.check_profiling_output_has_counter(
+        workload_dir, "SQC_TC_DATA_READ_REQ"
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1806,9 +1818,8 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
     lds_sol_counter = (
         "SQC_LDS_IDX_ACTIVE" if is_strix_halo_soc() else "SQ_ACTIVE_INST_LDS"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        test_utils.check_file_pattern(lds_sol_counter, str(f)) for f in results_files
+    assert test_utils.check_profiling_output_has_counter(
+        workload_dir, lds_sol_counter
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1843,17 +1854,14 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     kernel_counter = (
         "SQ_INSTS_FLAT_STORE" if is_strix_halo_soc() else "TA_FLAT_WAVEFRONTS"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        test_utils.check_file_pattern(kernel_counter, str(f)) for f in results_files
+    assert test_utils.check_profiling_output_has_counter(
+        workload_dir, kernel_counter
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert any(
-        test_utils.check_file_pattern("global_write", str(f)) for f in results_files
+    assert test_utils.check_profiling_output_has_pattern(
+        workload_dir, "global_write"
     )
-    results_files = Path(workload_dir).glob("results_*.csv")
-    assert not any(
-        test_utils.check_file_pattern("global_read", str(f)) for f in results_files
+    assert test_utils.check_profiling_output_lacks_pattern(
+        workload_dir, "global_read"
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -3064,11 +3072,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     baseline_time = time.time() - start_baseline
     assert returncode_baseline == 0, "Baseline profiling failed"
 
-    # Read baseline timestamps
-    baseline_results_files = list(Path(workload_dir_baseline).glob("results_*.csv"))
-    baseline_df = pd.concat(
-        [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
-    )
+    baseline_df = _load_profiling_counter_data(workload_dir_baseline)
     baseline_kernel_duration_total = (
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
@@ -3086,11 +3090,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     )
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
-    # Read with-flag timestamps
-    with_flag_results_files = list(Path(workload_dir_with_flag).glob("results_*.csv"))
-    with_flag_df = pd.concat(
-        [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
-    )
+    with_flag_df = _load_profiling_counter_data(workload_dir_with_flag)
     with_flag_kernel_duration_total = (
         with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
     )

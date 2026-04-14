@@ -15,7 +15,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
+from utils import file_io, parser, rocpd_data, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -63,6 +63,19 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
 # ------------------------------------
 # Helper functions for join_prof()
 # ------------------------------------
+
+
+def _describe_profiling_sources(
+    db_files: list[Path],
+    pmc_perf_files: list[Path],
+    results_files: list[Path],
+) -> str:
+    """Return a human-readable label for the profiling source files."""
+    if db_files:
+        return "*.db"
+    if pmc_perf_files:
+        return "pmc_perf_*.csv"
+    return "results_*.csv"
 
 
 def test_df_column_equality(df: pd.DataFrame) -> bool:
@@ -427,6 +440,36 @@ class OmniAnalyze_Base:
                 ),
             )
 
+    @staticmethod
+    def _join_rocpd_from_dbs(
+        db_files: list[Path],
+        output_file: str,
+    ) -> None:
+        """Build pmc_perf.csv by querying rocpd .db files directly."""
+        db_paths = [str(db_file) for db_file in db_files]
+        counter_df = rocpd_data.query_counters_to_dataframe(db_paths)
+        counter_df.to_csv(output_file, index=False)
+        console_debug(f"Created file from DBs: {output_file}")
+
+    @staticmethod
+    def _join_rocpd_from_csvs(
+        result_files: list[Path],
+        output_file: str,
+    ) -> None:
+        """Build pmc_perf.csv by concatenating results_*.csv files."""
+        with open(output_file, "w", newline="") as outfile:
+            writer = None
+            for csv_file in result_files:
+                with open(csv_file, newline="") as infile:
+                    reader = csv.reader(infile)
+                    header = next(reader)
+                    if writer is None:
+                        writer = csv.writer(outfile)
+                        writer.writerow(header)
+                    for row in reader:
+                        writer.writerow(row)
+        console_debug(f"Created file from CSVs: {output_file}")
+
     @demarcate
     def join_prof(
         self, workload_dir: Path, out: Optional[str] = None
@@ -451,27 +494,32 @@ class OmniAnalyze_Base:
 
         # handle rocpd format
         if format_rocprof == "rocpd":
-            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = list(workload_dir.glob("results_*.csv"))
+            db_files = sorted(workload_dir.glob("*.db"))
 
-            with open(output_file, "w", newline="") as outfile:
-                writer = None
-                for file in result_files:
-                    with open(file, newline="") as infile:
-                        reader = csv.reader(infile)
-                        header = next(reader)
-                        # Write header only once
-                        if writer is None:
-                            writer = csv.writer(outfile)
-                            writer.writerow(header)
-                        for row in reader:
-                            writer.writerow(row)
-
-            console_debug(f"Created file: {output_file}")
+            if db_files:
+                self._join_rocpd_from_dbs(
+                    db_files,
+                    output_file,
+                )
+            else:
+                result_files = list(workload_dir.glob("results_*.csv"))
+                if result_files:
+                    console_warning(
+                        "Found results_*.csv (legacy format). "
+                        "Re-profile for better performance."
+                    )
+                self._join_rocpd_from_csvs(
+                    result_files,
+                    output_file,
+                )
 
             if iteration_multiplexing is not None:
-                df = pd.read_csv(output_file)
-                detect_missing_counters(df, workload_dir, join_type)
+                merged_df = pd.read_csv(output_file)
+                detect_missing_counters(
+                    merged_df,
+                    workload_dir,
+                    join_type,
+                )
 
             return None
 
@@ -671,23 +719,28 @@ class OmniAnalyze_Base:
         """
         args = self.get_args()
 
-        # Helper to process and join CSV files in a single directory
         def process_and_join_directory(directory: Path) -> None:
             pmc_perf = directory / "pmc_perf.csv"
             pmc_perf_files = list(directory.glob("pmc_perf_*.csv"))
             results_files = list(directory.glob("results_*.csv"))
+            db_files = list(directory.glob("*.db"))
 
             if pmc_perf.exists():
                 console_debug(f"Using existing {pmc_perf}")
-            elif pmc_perf_files or results_files:
-                files_desc = "pmc_perf_*.csv" if pmc_perf_files else "results_*.csv"
+            elif db_files or pmc_perf_files or results_files:
+                files_desc = _describe_profiling_sources(
+                    db_files,
+                    pmc_perf_files,
+                    results_files,
+                )
                 console_log(f"Joining {files_desc} for {directory}...")
                 self.join_prof(directory, out=str(pmc_perf))
                 console_log(f"Created {pmc_perf}")
             else:
                 console_error(
                     f"No profiling data found in {directory}.\n"
-                    f"Expected: pmc_perf.csv or pmc_perf_*.csv or results_*.csv\n"
+                    f"Expected: pmc_perf.csv, pmc_perf_*.csv, "
+                    f"results_*.csv, or *.db\n"
                     f"Please run 'rocprof-compute profile' first."
                 )
 

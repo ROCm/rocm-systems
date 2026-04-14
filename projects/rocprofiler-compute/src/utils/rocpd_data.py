@@ -5,6 +5,8 @@ import csv
 import sqlite3
 from contextlib import ExitStack, closing
 
+import pandas as pd
+
 from utils.logger import console_error
 
 # From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql
@@ -55,6 +57,36 @@ TABLE_NAME_PREFIX_QUERY = (
     "AND name LIKE '{table_name_prefix}%'"
 )
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+
+
+COUNTERS_COLLECTION_COUNT_QUERY = "SELECT COUNT(*) FROM counters_collection"
+
+
+def query_counters_to_dataframe(
+    db_paths: list[str],
+) -> pd.DataFrame:
+    """Query counters_collection from rocpd databases into a DataFrame.
+
+    Reads the counters_collection view from each database and returns
+    a single concatenated long-format DataFrame with one row per
+    counter measurement per dispatch.
+    """
+    frames: list[pd.DataFrame] = []
+    for db_path in db_paths:
+        with closing(sqlite3.connect(db_path)) as conn:
+            frame = pd.read_sql_query(COUNTERS_COLLECTION_QUERY, conn)
+            if not frame.empty:
+                frames.append(frame)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def has_counter_data(db_path: str) -> bool:
+    """Check whether a rocpd database contains any counter rows."""
+    with closing(sqlite3.connect(db_path)) as conn:
+        row = conn.execute(COUNTERS_COLLECTION_COUNT_QUERY).fetchone()
+    return row is not None and row[0] > 0
 
 
 def convert_dbs_to_csv(

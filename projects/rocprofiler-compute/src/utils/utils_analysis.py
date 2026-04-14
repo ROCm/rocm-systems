@@ -374,31 +374,52 @@ def process_torch_trace_output(
 
 
 def is_workload_empty(path: str) -> None:
-    """Peek workload directory to verify valid profiling output"""
+    """Peek workload directory to verify valid profiling output."""
     workload_dir = Path(path)
     pmc_perf_path = workload_dir / "pmc_perf.csv"
 
-    # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
-        files_to_check = [pmc_perf_path]
-    else:
-        pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
-        results_files = list(workload_dir.glob("results_*.csv"))
-        files_to_check = pmc_files if pmc_files else results_files
+        _validate_csv_not_empty(pmc_perf_path)
+        return
 
-    if not files_to_check:
+    pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
+    results_files = list(workload_dir.glob("results_*.csv"))
+    db_files = list(workload_dir.glob("*.db"))
+    csv_files_to_check = pmc_files if pmc_files else results_files
+
+    if not csv_files_to_check and not db_files:
         console_error("analysis", "No profiling data found.")
         return
 
-    # Validate files are not empty
-    for file_path in files_to_check:
-        temp_df = pd.read_csv(file_path)
-        if temp_df.dropna().empty:
-            console_error(
-                "profiling",
-                f"Found empty cells in {file_path}.\nProfiling data could be corrupt.",
-            )
-            break
+    if db_files:
+        _validate_dbs_not_empty(db_files)
+        return
+
+    for file_path in csv_files_to_check:
+        _validate_csv_not_empty(file_path)
+
+
+def _validate_csv_not_empty(csv_path: Path) -> None:
+    """Raise an error if a CSV file has no non-null data rows."""
+    temp_df = pd.read_csv(csv_path)
+    if temp_df.dropna().empty:
+        console_error(
+            "profiling",
+            f"Found empty cells in {csv_path}.\nProfiling data could be corrupt.",
+        )
+
+
+def _validate_dbs_not_empty(db_files: list[Path]) -> None:
+    """Raise an error if all rocpd databases lack counter data."""
+    from utils.rocpd_data import has_counter_data
+
+    for db_file in db_files:
+        if has_counter_data(str(db_file)):
+            return
+    console_error(
+        "profiling",
+        "All rocpd databases are empty.\nProfiling data could be corrupt.",
+    )
 
 
 def reverse_multi_index_df_pmc(

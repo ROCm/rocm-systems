@@ -12,6 +12,8 @@ from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
     convert_dbs_to_csv,
+    has_counter_data,
+    query_counters_to_dataframe,
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
@@ -420,3 +422,161 @@ def test_torch_trace_output_same_for_rocpd_and_csv():
 
     test_utils.clean_output_dir(True, rocpd_dir)
     test_utils.clean_output_dir(True, csv_dir)
+
+
+# ---- DB-direct query tests ----
+
+
+def test_query_counters_to_dataframe_returns_long_format():
+    """query_counters_to_dataframe returns a long-format DataFrame
+    with Counter_Name / Counter_Value columns matching the DB content."""
+    workload_dir = test_utils.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    db_path = create_rocpd_test_db(workload_dir)
+    counter_df = query_counters_to_dataframe([db_path])
+
+    assert not counter_df.empty
+    assert "Counter_Name" in counter_df.columns
+    assert "Counter_Value" in counter_df.columns
+    assert "GPU_ID" in counter_df.columns
+    assert "Kernel_Name" in counter_df.columns
+    assert len(counter_df) == len(COUNTER_ROWS)
+
+    test_utils.clean_output_dir(True, workload_dir)
+
+
+def test_query_counters_to_dataframe_concat_multiple_dbs():
+    """query_counters_to_dataframe concatenates rows from multiple DBs."""
+    workload_dir = test_utils.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    db_path_1 = create_rocpd_test_db(workload_dir)
+    db_path_2 = str(Path(workload_dir) / "test2.db")
+    conn = sqlite3.connect(db_path_2)
+    conn.execute(
+        """CREATE TABLE counters_collection (
+            agent_id INTEGER, guid TEXT, stack_id INTEGER,
+            dispatch_id INTEGER, pid INTEGER, grid_size INTEGER,
+            workgroup_size INTEGER, lds_block_size INTEGER,
+            scratch_size INTEGER, vgpr_count INTEGER,
+            accum_vgpr_count INTEGER, sgpr_count INTEGER,
+            kernel_name TEXT, start INTEGER, end INTEGER,
+            kernel_id INTEGER, counter_name TEXT, value REAL
+        )"""
+    )
+    second_rows = [
+        (1, GUID, 2000, 3, 101, 128, 512, 0, 0, 64, 0, 32,
+         "kernel_add", 7000, 7800, 1, "SQ_WAVES", 99),
+    ]
+    conn.executemany(
+        "INSERT INTO counters_collection VALUES "
+        "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        second_rows,
+    )
+    conn.commit()
+    conn.close()
+
+    combined_df = query_counters_to_dataframe([db_path_1, db_path_2])
+    assert len(combined_df) == len(COUNTER_ROWS) + len(second_rows)
+
+    test_utils.clean_output_dir(True, workload_dir)
+
+
+def test_query_counters_to_dataframe_empty_db():
+    """query_counters_to_dataframe returns empty DataFrame for empty DB."""
+    workload_dir = test_utils.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    empty_db = str(Path(workload_dir) / "empty.db")
+    conn = sqlite3.connect(empty_db)
+    conn.execute(
+        """CREATE TABLE counters_collection (
+            agent_id INTEGER, guid TEXT, stack_id INTEGER,
+            dispatch_id INTEGER, pid INTEGER, grid_size INTEGER,
+            workgroup_size INTEGER, lds_block_size INTEGER,
+            scratch_size INTEGER, vgpr_count INTEGER,
+            accum_vgpr_count INTEGER, sgpr_count INTEGER,
+            kernel_name TEXT, start INTEGER, end INTEGER,
+            kernel_id INTEGER, counter_name TEXT, value REAL
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+    empty_df = query_counters_to_dataframe([empty_db])
+    assert empty_df.empty
+
+    test_utils.clean_output_dir(True, workload_dir)
+
+
+def test_has_counter_data_true_for_populated_db():
+    """has_counter_data returns True when DB has counter rows."""
+    workload_dir = test_utils.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    db_path = create_rocpd_test_db(workload_dir)
+    assert has_counter_data(db_path) is True
+
+    test_utils.clean_output_dir(True, workload_dir)
+
+
+def test_has_counter_data_false_for_empty_db():
+    """has_counter_data returns False when DB has no counter rows."""
+    workload_dir = test_utils.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    empty_db = str(Path(workload_dir) / "empty.db")
+    conn = sqlite3.connect(empty_db)
+    conn.execute(
+        """CREATE TABLE counters_collection (
+            agent_id INTEGER, guid TEXT, stack_id INTEGER,
+            dispatch_id INTEGER, pid INTEGER, grid_size INTEGER,
+            workgroup_size INTEGER, lds_block_size INTEGER,
+            scratch_size INTEGER, vgpr_count INTEGER,
+            accum_vgpr_count INTEGER, sgpr_count INTEGER,
+            kernel_name TEXT, start INTEGER, end INTEGER,
+            kernel_id INTEGER, counter_name TEXT, value REAL
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+    assert has_counter_data(empty_db) is False
+
+    test_utils.clean_output_dir(True, workload_dir)
+
+
+def test_db_direct_matches_csv_path():
+    """DataFrame from DB-direct path matches DataFrame from CSV path
+    after process_rocpd_csv pivot."""
+    from utils.utils_analysis import process_rocpd_csv
+
+    workload_dir = test_utils.get_output_dir()
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+
+    db_path = create_rocpd_test_db(workload_dir)
+
+    # CSV path: convert_dbs_to_csv -> read CSV -> process_rocpd_csv
+    counter_csv = str(Path(workload_dir) / "counter_collection.csv")
+    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv")
+    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    csv_df = pd.read_csv(counter_csv)
+    csv_wide = process_rocpd_csv(csv_df)
+
+    # DB-direct path: query_counters_to_dataframe -> process_rocpd_csv
+    db_df = query_counters_to_dataframe([db_path])
+    db_wide = process_rocpd_csv(db_df)
+
+    # Both should produce identical wide DataFrames
+    assert set(csv_wide.columns) == set(db_wide.columns)
+    assert len(csv_wide) == len(db_wide)
+
+    shared_columns = sorted(csv_wide.columns)
+    pd.testing.assert_frame_equal(
+        csv_wide[shared_columns].reset_index(drop=True),
+        db_wide[shared_columns].reset_index(drop=True),
+        check_dtype=False,
+    )
+
+    test_utils.clean_output_dir(True, workload_dir)

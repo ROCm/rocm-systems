@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 from pathlib import Path
@@ -93,6 +94,67 @@ def check_file_pattern(pattern, file_path):
     with open(file_path) as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
+
+
+def check_profiling_output_has_counter(workload_dir, counter_name):
+    """Check if a counter name exists in profiling output (.db or results_*.csv)."""
+    workload_path = Path(workload_dir)
+    db_files = list(workload_path.glob("*.db"))
+    if db_files:
+        for db_file in db_files:
+            conn = sqlite3.connect(str(db_file))
+            try:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM counters_collection "
+                    "WHERE counter_name = ?",
+                    (counter_name,),
+                )
+                if cursor.fetchone()[0] > 0:
+                    conn.close()
+                    return True
+            except Exception:
+                pass
+            finally:
+                conn.close()
+        return False
+
+    results_files = list(workload_path.glob("results_*.csv"))
+    return any(
+        check_file_pattern(counter_name, str(f)) for f in results_files
+    )
+
+
+def check_profiling_output_has_pattern(workload_dir, pattern):
+    """Check if a pattern exists in profiling output (.db or results_*.csv)."""
+    workload_path = Path(workload_dir)
+    db_files = list(workload_path.glob("*.db"))
+    if db_files:
+        for db_file in db_files:
+            conn = sqlite3.connect(str(db_file))
+            try:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM counters_collection "
+                    "WHERE counter_name LIKE ? OR kernel_name LIKE ?",
+                    (f"%{pattern}%", f"%{pattern}%"),
+                )
+                if cursor.fetchone()[0] > 0:
+                    conn.close()
+                    return True
+            except Exception:
+                pass
+            finally:
+                conn.close()
+        return False
+
+    results_files = list(workload_path.glob("results_*.csv"))
+    return any(
+        check_file_pattern(pattern, str(f)) for f in results_files
+    )
+
+
+def check_profiling_output_lacks_pattern(workload_dir, pattern):
+    """Check that a pattern does NOT exist in profiling output."""
+    return not check_profiling_output_has_pattern(workload_dir, pattern)
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
@@ -191,19 +253,18 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     files_in_workload = os.listdir(output_dir)
 
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
     has_separate = any(
         f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
     )
     has_results = any(
         f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
     )
+    has_dbs = any(f.endswith(".db") for f in files_in_workload)
 
-    assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
+    assert has_separate or has_results or has_dbs, (
+        "Expected pmc_perf_*.csv, results_*.csv, or *.db from profile mode"
     )
 
-    # Validate row counts for PMC files (but don't add to return dict)
     for file in files_in_workload:
         is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
         if is_pmc and file.endswith(".csv"):
