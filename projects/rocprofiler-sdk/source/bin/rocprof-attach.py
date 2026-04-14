@@ -148,6 +148,8 @@ def attach(
         c_lib.rocattach_attach_tree.argtypes = [ctypes.c_int]
         c_lib.rocattach_detach.restype = ctypes.c_int
         c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+        c_lib.rocattach_detach_tree.restype = ctypes.c_int
+        c_lib.rocattach_detach_tree.argtypes = [ctypes.c_int]
         if attach_children:
             attach_status = c_lib.rocattach_attach_tree(pid)
         else:
@@ -166,7 +168,10 @@ def attach(
         print("Detaching. Please wait, this can take up to 1-2 minutes")
         sys.stdout.flush()
         try:
-            detach_status = c_lib.rocattach_detach(int(pid))
+            if attach_children:
+                detach_status = c_lib.rocattach_detach_tree(int(pid))
+            else:
+                detach_status = c_lib.rocattach_detach(int(pid))
         except Exception as e:
             print(f"Exception during detachment: {e}")
 

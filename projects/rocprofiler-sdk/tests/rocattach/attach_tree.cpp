@@ -174,6 +174,10 @@ main(int argc, char** argv)
     if(!is_library_loaded(child_pid, tool_library))
     {
         std::cout << "error: tool library not found in child pid " << child_pid << " maps\n";
+        kill(grandchild_pid, SIGKILL);
+        kill(child_pid, SIGKILL);
+        waitpid(grandchild_pid, nullptr, 0);
+        waitpid(child_pid, nullptr, 0);
         return 1;
     }
     std::cout << "verified: child pid " << child_pid << " loaded the tool library\n";
@@ -182,6 +186,10 @@ main(int argc, char** argv)
     {
         std::cout << "error: tool library not found in grandchild pid " << grandchild_pid
                   << " maps\n";
+        kill(grandchild_pid, SIGKILL);
+        kill(child_pid, SIGKILL);
+        waitpid(grandchild_pid, nullptr, 0);
+        waitpid(child_pid, nullptr, 0);
         return 1;
     }
     std::cout << "verified: grandchild pid " << grandchild_pid << " loaded the tool library\n";
@@ -192,8 +200,18 @@ main(int argc, char** argv)
     // Detach from the process tree symmetrically with how we attached.
     ROCATTACH_CALL(rocattach_detach_tree(child_pid));
 
+    int grandchild_status = 0;
+    waitpid(grandchild_pid, &grandchild_status, 0);
+
     int child_status = 0;
     waitpid(child_pid, &child_status, 0);
+
+    if(grandchild_status != 0)
+    {
+        std::cout << "error: grandchild process returned non-zero status: " << grandchild_status
+                  << std::endl;
+        return 1;
+    }
 
     if(child_status != 0)
     {

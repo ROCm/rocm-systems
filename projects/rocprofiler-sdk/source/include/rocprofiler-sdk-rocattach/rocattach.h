@@ -113,16 +113,16 @@ rocattach_status_t
 rocattach_attach(int pid) ROCATTACH_API;
 
 /**
- * @brief Detach from a process ID and all of its descendant processes
+ * @brief Detach from the process tree previously attached via rocattach_attach_tree()
  *
- * Enumerates the process tree rooted at `pid` (via /proc) and detaches from each process that
- * has an active attachment session. Detachment proceeds breadth-first from the root. Processes
- * in the tree that were never attached are silently skipped. If any individual detach fails, the
- * error is logged and detachment continues with the remaining processes; the return status
- * reflects the last error seen. This function is reentrant: each teardown call acquires and
- * releases the sessions lock internally and does not hold it across the /proc traversal.
+ * Detaches from exactly the set of processes that were successfully attached by the corresponding
+ * rocattach_attach_tree() call for the same `pid`. The PID list is recorded at attach time and
+ * consumed here, so this function does not re-enumerate /proc. If any individual detach fails,
+ * the error is logged and detachment continues with the remaining processes; the return status
+ * reflects the last error seen. Returns ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT if no tree
+ * attachment session exists for `pid`.
  *
- * @param [in] pid Root process ID to detach from
+ * @param [in] pid Root process ID passed to the corresponding rocattach_attach_tree() call
  * @return ::rocattach_status_t
  * @retval ::ROCATTACH_STATUS_SUCCESS All attached processes detached successfully
  */

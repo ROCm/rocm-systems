@@ -45,8 +45,21 @@ namespace rocattach
 {
 namespace
 {
-using session_t      = rocprofiler::rocattach::PTraceSession;
-using session_list_t = std::map<int, session_t>;
+using session_t = rocprofiler::rocattach::PTraceSession;
+
+struct pid_entry_t
+{
+    explicit pid_entry_t(pid_t tid)
+    : session(tid)
+    {}
+    session_t session;
+    // Non-empty only for tree-attach root PIDs. Holds the ordered list of PIDs
+    // successfully attached by rocattach_attach_tree() for this root. Consumed
+    // (and cleared) by the corresponding rocattach_detach_tree() call.
+    std::vector<pid_t> tree_pids;
+};
+
+using session_list_t = std::map<int, pid_entry_t>;
 
 #define ROCATTACH_STATUS_STRING(CODE, MSG)                                                         \
     template <>                                                                                    \
@@ -239,7 +252,7 @@ setup(int pid)
         ROCP_INFO << "[rocprofiler-sdk-rocattach] Attaching to PID " << pid
                   << " via background thread TID " << target_tid;
         sessions->emplace(pid, target_tid);
-        session = &(sessions->at(pid));
+        session = &(sessions->at(pid).session);
     }
     auto status = ROCATTACH_STATUS_SUCCESS;
 
@@ -382,7 +395,7 @@ teardown(int pid)
             return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
         }
 
-        session = &(sessions->at(pid));
+        session = &(sessions->at(pid).session);
     }
     auto status = ROCATTACH_STATUS_SUCCESS;
 
@@ -445,7 +458,8 @@ rocattach_attach_tree(int root_pid)
     ROCP_INFO << "[rocprofiler-sdk-rocattach] Found " << pids.size()
               << " process(es) in tree rooted at pid " << root_pid;
 
-    auto last_status = ROCATTACH_STATUS_SUCCESS;
+    std::vector<pid_t> attached_pids;
+    auto               last_status = ROCATTACH_STATUS_SUCCESS;
     for(pid_t pid : pids)
     {
         auto status = rocprofiler::rocattach::setup(pid);
@@ -455,7 +469,28 @@ rocattach_attach_tree(int root_pid)
                        << " with error code " << status << ", continuing with remaining processes";
             last_status = status;
         }
+        else
+        {
+            attached_pids.push_back(pid);
+        }
     }
+
+    {
+        auto  lg       = rocprofiler::rocattach::get_sessions_lock_guard();
+        auto* sessions = CHECK_NOTNULL(rocprofiler::rocattach::get_sessions());
+        auto  it       = sessions->find(root_pid);
+        if(it != sessions->end())
+        {
+            it->second.tree_pids = std::move(attached_pids);
+        }
+        else
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_attach_tree could not record tree "
+                          "session for root pid "
+                       << root_pid;
+        }
+    }
+
     return last_status;
 }
 
@@ -485,22 +520,33 @@ rocattach_detach_tree(int root_pid)
 {
     rocprofiler::rocattach::initialize_logging();
 
-    // Enumerate the process tree at detach time and tear down every PID that
-    // has an active session. collect_process_tree reads only /proc (no locks),
-    // and teardown acquires and releases the sessions lock internally, so
-    // concurrent calls from multiple threads are safe.
-    auto pids = rocprofiler::rocattach::collect_process_tree(root_pid);
-    ROCP_INFO << "[rocprofiler-sdk-rocattach] rocattach_detach_tree found " << pids.size()
-              << " process(es) in tree rooted at pid " << root_pid;
+    // Retrieve the PID list recorded by rocattach_attach_tree() from the root's map entry.
+    // Using the recorded list (rather than re-enumerating /proc) ensures we detach exactly
+    // the processes that were attached, no more and no less.
+    std::vector<pid_t> pids;
+    {
+        auto  lg       = rocprofiler::rocattach::get_sessions_lock_guard();
+        auto* sessions = CHECK_NOTNULL(rocprofiler::rocattach::get_sessions());
+        auto  it       = sessions->find(root_pid);
+        if(it == sessions->end() || it->second.tree_pids.empty())
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach_tree called for root pid "
+                       << root_pid << " which has no recorded tree attachment session.";
+            return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        pids = std::move(it->second.tree_pids);
+        // If root_pid was not successfully attached it won't be in pids, meaning teardown()
+        // won't erase its entry. Remove it here to avoid leaving an orphan in the map.
+        if(pids.empty() || pids.front() != root_pid) sessions->erase(it);
+    }
+
+    ROCP_INFO << "[rocprofiler-sdk-rocattach] rocattach_detach_tree detaching " << pids.size()
+              << " process(es) for root pid " << root_pid;
 
     auto last_status = ROCATTACH_STATUS_SUCCESS;
     for(pid_t pid : pids)
     {
         auto status = rocprofiler::rocattach::teardown(pid);
-        // teardown returns ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT when there is no active session
-        // for the given PID. This is expected for processes in the tree that were never attached,
-        // so silently skip them rather than propagating the error.
-        if(status == ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT) continue;
         if(status != ROCATTACH_STATUS_SUCCESS)
         {
             ROCP_ERROR << "[rocprofiler-sdk-rocattach] rocattach_detach_tree failed for pid " << pid
