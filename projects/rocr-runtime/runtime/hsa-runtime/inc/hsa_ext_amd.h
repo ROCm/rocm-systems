@@ -126,6 +126,8 @@ typedef enum {
 
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
+  /* HSA_AMD_PACKET_TYPE_AIE_ERT packet was never released so value may change in the future */
+  HSA_AMD_PACKET_TYPE_AIE_ERT = 200,
 } hsa_amd_packet_type_t;
 
 /**
