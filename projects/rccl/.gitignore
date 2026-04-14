@@ -1,8 +1,13 @@
 # Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
+# Modifications Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 *.gcov
 /coverage/
 build/
+install*/
 ext/
 src/transport/net_ib_rocm.cc
+ext-profiler/inspector/librccl-profiler-inspector.so
+ext-profiler/inspector/version.cc
+
 # Visual Studio Code
 .vscode

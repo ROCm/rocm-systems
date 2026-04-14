@@ -1055,6 +1055,9 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
 
   // PacketBatch structure
   struct PacketBatch {
+    // Size of one AQL packet
+    static constexpr size_t kAqlPktSize = 64;
+
     // Main dispatch vectors - always ready for batch dispatch
     std::vector<uint8_t*> dispatchPackets;
     std::vector<const std::string*> dispatchKernelNames;
@@ -1062,6 +1065,15 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     // Cached filtered lists - built on-demand when nodes are disabled
     std::vector<uint8_t*> enabledPackets;
     std::vector<const std::string*> enabledKernelNames;
+
+    // Pre-built flat packet buffer for fast bulk dispatch (all nodes enabled).
+    std::vector<uint8_t> flatPacketData;
+    std::vector<uint32_t> validPacketFullHeaders;
+
+    // Filtered flat buffer - built alongside enabledPackets when some nodes are disabled.
+    // Allows the fast flat-dispatch path even in the partially-disabled case.
+    std::vector<uint8_t> filteredFlatPacketData;
+    std::vector<uint32_t> filteredValidPacketFullHeaders;
 
     // Node tracking
     struct NodeRange {
@@ -1077,6 +1089,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale
     void rebuildFilteredLists();
+    // Rebuild the flat buffer from the current dispatchPackets contents.
+    // Called immediately after any packet update (hipGraphExecSetParams family).
+    void rebuildFlatBuffer();
+    // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the
+    // full_header dword, and invalidates the header + completion_signal in the copy.
+    static void appendPacketToFlatBuffer(const uint8_t* pkt_raw,
+                                         std::vector<uint8_t>& flatData,
+                                         std::vector<uint32_t>& fullHeaders);
   };
 
   //! Structure linking packet batches to segments

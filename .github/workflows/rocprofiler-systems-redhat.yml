@@ -90,7 +90,7 @@ jobs:
           fi
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
+          python3 -m pip install 'cmake==3.25' &&
           for i in 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install Python Test Dependencies
