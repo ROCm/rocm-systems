@@ -202,7 +202,7 @@ public:
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
-  void *ring;
+  void *ring; //!< AQL queue, allocated in ROCR and points to the AQL packets
   uint64_t ring_size;
 
   // ib_start_addr is the current ib start address
