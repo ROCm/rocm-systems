@@ -14,7 +14,7 @@ threadfence:
     tags: [fence, synchronization]
   Unit___threadfence_block_Positive_Basic_Peer:
     <<: *level_2
-    tags: [fence, multigpu, synchronization]
+    tags: [fence, synchronization, multigpu]
   Unit___threadfence_Positive_Basic_Shared:
     <<: *level_2
     tags: [fence, synchronization]
@@ -29,10 +29,10 @@ threadfence:
     tags: [fence, synchronization]
   Unit___threadfence_Positive_Basic_Peer:
     <<: *level_2
-    tags: [fence, multigpu, synchronization]
+    tags: [fence, synchronization, multigpu]
   Unit___threadfence_system_Positive_Basic_Peer:
     <<: *level_2
-    tags: [fence, multigpu, synchronization]
+    tags: [fence, synchronization, multigpu]
   Unit___threadfence_system_Positive_Basic_Host:
     <<: *level_2
     tags: [fence, synchronization]
