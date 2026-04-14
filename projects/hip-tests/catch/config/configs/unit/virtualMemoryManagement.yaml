@@ -195,7 +195,7 @@ virtualMemoryManagement:
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemMap_PhysicalMemoryReuse_MultiDev:
     <<: *level_2
-    tags: []
+    tags: [multigpu]
     # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
@@ -205,7 +205,7 @@ virtualMemoryManagement:
     disabled: [amd_wsl]
   Unit_hipMemMap_VMMMemoryReuse_MultiGPU:
     <<: *level_2
-    tags: []
+    tags: [multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]

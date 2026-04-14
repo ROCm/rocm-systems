@@ -8,4 +8,4 @@ synchronization:
     tags: [coherency]
   Unit_cache_coherency_gpu_gpu:
     <<: *level_2
-    tags: [coherency]
+    tags: [coherency, multigpu]

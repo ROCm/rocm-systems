@@ -492,7 +492,7 @@ graph:
     tags: [exec]
   Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed:
     <<: *level_2
-    tags: [exec]
+    tags: [exec, multigpu]
     # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
     disabled: [amd_windows]
   Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed:

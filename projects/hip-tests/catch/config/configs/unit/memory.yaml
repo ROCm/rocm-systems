@@ -1045,7 +1045,7 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolSetAccess_SetAccess:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, multigpu]
   Unit_hipMemPoolSetAccess_NegTst:
     <<: *level_2
     tags: [alloc]
@@ -1056,7 +1056,7 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolGetAccess_SetGet:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, multigpu]
   Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice:
     <<: *level_2
     tags: [alloc]
@@ -1116,7 +1116,7 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolCreate_DeviceTest:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, multigpu]
   Unit_hipMemPoolDestroy_Negative_Parameter:
     <<: *level_2
     tags: [alloc]
@@ -1165,10 +1165,10 @@ memory:
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_Multidevice_Concurrent:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, multigpu]
   Unit_hipMallocFromPoolAsync_Multidevice_MultiStream:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, multigpu]
   Unit_hipMallocFromPoolAsync_MThread_DefaultThresh:
     <<: *level_2
     tags: [alloc]
@@ -1246,16 +1246,16 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyWithStream_TestkindDtoD:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, multigpu]
   Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, multigpu]
   Unit_hipMemcpyWithStream_TestkindDefault:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyWithStream_TestkindDefaultForDtoD:
     <<: *level_2
-    tags: [transfer]
+    tags: [transfer, multigpu]
   Unit_hipMemcpyWithStream_TestDtoDonSameDevice:
     <<: *level_2
     tags: [transfer]
@@ -1287,10 +1287,10 @@ memory:
     tags: [memset]
   Unit_hipMemcpyDtoD_Basic:
     <<: *level_2
-    tags: []
+    tags: [transfer, multigpu]
   Unit_hipMemcpyDtoDAsync_Basic:
     <<: *level_2
-    tags: []
+    tags: [transfer, multigpu]
   Unit_hipMemcpyDtoDAsync_Capture:
     <<: *level_2
     tags: [transfer, multigpu]
@@ -1963,10 +1963,10 @@ memory:
     tags: [alloc]
   Unit_hipMallocAsync_Multidevice_Concurrent:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, multigpu]
   Unit_hipMallocAsync_Multidevice_MultiStream:
     <<: *level_2
-    tags: [alloc]
+    tags: [alloc, multigpu]
   Unit_hipMallocAsync_ByUsinghipMalloc:
     <<: *level_2
     tags: [alloc]
