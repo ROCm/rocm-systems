@@ -102,7 +102,7 @@ static void validateMemcpyNode1DArray(bool peerAccess,
  * For Peer device test: Memory allocations happen on device(0) and memcpy operations
  * are performed from device(1).
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
+TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
   SECTION("Memcpy with 1D array on default device") { validateMemcpyNode1DArray(false); }
   SECTION("Memcpy with 1D array using DeviceToDeviceNoCU") {
     validateMemcpyNode1DArray(false, hipMemcpyDeviceToDeviceNoCU);
@@ -115,7 +115,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
     }
 
     if (!peerAccess) {
-      WARN("Skipping peer memcpy section: peer access is not available between devices.");
+      WARN("Skipping test as peer device access is not found!");
       return;
     }
     validateMemcpyNode1DArray(true);
@@ -126,7 +126,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
 /**
  * Negative Test for API hipGraphAddMemcpyNode1D
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
+TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *A_h;
@@ -192,7 +192,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
  * hipGraphAddMemcpyNode1D with data transfer kind hipMemcpyHostToHost.
  * Validate the output.
  */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_HostToHost) {
+TEST_CASE(Unit_hipGraphAddMemcpyNode1D_HostToHost) {
   constexpr size_t size = 1024;
   size_t numBytes{size * sizeof(int)};
 

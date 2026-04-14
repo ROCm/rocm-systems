@@ -48,10 +48,7 @@ target_include_directories(
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${BOOTSTRAP_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${BOOTSTRAP_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
-set_target_properties(
-    ${BOOTSTRAP_LIB}
-    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/rdc" THEROCK_NO_INSTALL_RPATH TRUE
-)
+set_target_properties(${BOOTSTRAP_LIB} PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/rdc")
 
 # If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)

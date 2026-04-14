@@ -153,7 +153,7 @@ template <typename T> bool atomictestnoret_simple(const T& initial_val) {
   return true;
 }
 
-HIP_TEST_CASE(Unit_hipTestAtomicAdd) {
+TEST_CASE(Unit_hipTestAtomicAdd) {
   bool TestPassed = true;
 
   SECTION("atomic tests with many waves") {

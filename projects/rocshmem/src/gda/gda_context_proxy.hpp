@@ -46,7 +46,7 @@ class GDADefaultContextProxy {
   explicit GDADefaultContextProxy(GDABackend* backend, TeamInfo *tinfo,
                                   int gda_provider,
                                   size_t num_elems = 1)
-  : proxy_{num_elems}, constructed_{true} {
+  : constructed_{true}, proxy_{num_elems} {
     auto ctx{proxy_.get()};
     new (ctx) GDAContext(reinterpret_cast<Backend*>(backend), 0, gda_provider);
     ctx->tinfo = tinfo;

@@ -323,7 +323,7 @@ static void test_group_partition_nested(unsigned int outer_tile_size,
   }
 }
 
-HIP_TEST_CASE(Unit_hipCGThreadBlockTileType) {
+TEST_CASE(Unit_hipCGThreadBlockTileType) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
@@ -331,7 +331,7 @@ HIP_TEST_CASE(Unit_hipCGThreadBlockTileType) {
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.cooperativeLaunch) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support cooperative launch!");
     return;
   }
 

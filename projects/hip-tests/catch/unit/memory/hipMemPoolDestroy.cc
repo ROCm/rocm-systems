@@ -29,7 +29,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipMemPoolDestroy_Negative_Parameter) {
+TEST_CASE(Unit_hipMemPoolDestroy_Negative_Parameter) {
   checkMempoolSupported(0)
 
       hipMemPool_t mem_pool = nullptr;

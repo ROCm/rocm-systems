@@ -20,17 +20,17 @@ static hipError_t hipModuleLaunchKernelWrapper(hipFunction_t f, uint32_t gridX, 
                                hStream, kernelParams, extra);
 }
 
-HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Basic) {
+TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Basic) {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelPositiveBasic<hipModuleLaunchKernelWrapper>();
 }
 
-HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Parameters) {
+TEST_CASE(Unit_hipModuleLaunchKernel_Positive_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelPositiveParameters<hipModuleLaunchKernelWrapper>();
 }
 
-HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Negative_Parameters) {
+TEST_CASE(Unit_hipModuleLaunchKernel_Negative_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelNegativeParameters<hipModuleLaunchKernelWrapper>();
 }
@@ -291,7 +291,7 @@ bool Module_WorkGroup_Test() {
   return testStatus;
 }
 
-HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Fntl) {
+TEST_CASE(Unit_hipModuleLaunchKernel_Fntl) {
   bool testStatus = false;
   SECTION("Negative test scenarios") {
     testStatus = Module_Negative_tests();
@@ -307,7 +307,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Fntl) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Verify_Capture) {
+TEST_CASE(Unit_hipModuleLaunchKernel_Verify_Capture) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 

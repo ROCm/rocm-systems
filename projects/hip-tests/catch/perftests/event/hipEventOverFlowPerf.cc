@@ -91,7 +91,7 @@ void thread_job(int dev, int virt) {
  * ------------------------
  * - HIP_VERSION >= 6.5
  */
-HIP_TEST_CASE(Unit_hipEventOverFlow_PerfTest) {
+TEST_CASE(Unit_hipEventOverFlow_PerfTest) {
   int mgpu = 0;
   HIP_CHECK_PERF(hipGetDeviceCount(&mgpu));
   stream_pool.resize(mgpu);

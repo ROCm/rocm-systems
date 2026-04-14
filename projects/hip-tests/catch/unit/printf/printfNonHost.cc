@@ -53,11 +53,11 @@ __global__ void kernel_printf_thread(int* count) {
  * - HIP_VERSION >= 5.7
  */
 
-HIP_TEST_CASE(Unit_NonHost_Printf_basic) {
+TEST_CASE(Unit_NonHost_Printf_basic) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
   int *count{nullptr}, *count_d{nullptr};
@@ -88,11 +88,11 @@ HIP_TEST_CASE(Unit_NonHost_Printf_basic) {
  * - HIP_VERSION >= 5.7
  */
 
-HIP_TEST_CASE(Unit_NonHost_Printf_loop) {
+TEST_CASE(Unit_NonHost_Printf_loop) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
   int *count{nullptr}, *count_d{nullptr};
@@ -130,11 +130,11 @@ HIP_TEST_CASE(Unit_NonHost_Printf_loop) {
  * - HIP_VERSION >= 5.7
  */
 
-HIP_TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
+TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
   int *count{nullptr}, *count_d{nullptr};
@@ -175,11 +175,11 @@ HIP_TEST_CASE(Unit_NonHost_Printf_multiple_Threads) {
  * - HIP_VERSION >= 5.7
  */
 
-HIP_TEST_CASE(Unit_NonHost_Printf_BufferAvailability) {
+TEST_CASE(Unit_NonHost_Printf_BufferAvailability) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
   int *count{nullptr}, *count_d{nullptr};

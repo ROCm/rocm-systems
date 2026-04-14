@@ -23,13 +23,15 @@
     This testcase verifies HIP Mem VMM API basic scenario - supported on all devices
  */
 
-HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
+TEST_CASE(Unit_hipMemVmm_Basic) {
   int vmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeVirtualMemoryManagement "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
 
@@ -81,13 +83,15 @@ HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
  */
 
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipMemVmm_Uncached) {
+TEST_CASE(Unit_hipMemVmm_Uncached) {
   int vmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeVirtualMemoryManagement "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
 

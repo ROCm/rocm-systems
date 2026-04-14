@@ -42,6 +42,10 @@
 
 #include "core/commandbuffermgr.hpp"
 #include "memorymanager.hpp"
+
+#define PUBLIC_API __attribute__((visibility("default")))
+#define CONSTRUCTOR_API __attribute__((constructor))
+#define DESTRUCTOR_API __attribute__((destructor))
 #define ERR_CHECK(cond, err, msg) \
   {                               \
     if (cond) {                   \

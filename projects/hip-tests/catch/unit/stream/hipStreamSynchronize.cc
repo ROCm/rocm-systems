@@ -13,7 +13,7 @@ namespace hipStreamSynchronizeTest {
  * @brief Check that hipStreamSynchronize handles empty streams properly.
  *
  */
-HIP_TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
+TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -27,7 +27,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
  * hipStreamSynchronize.
  *
  */
-HIP_TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
+TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
   const hipStream_t explicitStream = reinterpret_cast<hipStream_t>(-1);
   hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream, hip::streamPerThread);
 
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
 /**
  * @brief Check that synchronizing the nullStream implicitly synchronizes all executing streams.
  */
-HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
+TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
   int totalStreams = 10;
 
   std::vector<hipStream_t> streams{};
@@ -86,9 +86,9 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
  *        Check that submiting work to the nullStream does not affect synchronization of other
  * streams. Check that querying the nullStream does not affect synchronization of other streams.
  */
-HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
+TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-22.");
+  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-22");
 #else
 
   hipStream_t stream1;
@@ -130,7 +130,7 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
  * special stream.
  *
  */
-HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamAndStreamPerThread) {
+TEST_CASE(Unit_hipStreamSynchronize_NullStreamAndStreamPerThread) {
   LaunchDelayKernel(std::chrono::milliseconds(500), hip::streamPerThread);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
   HIP_CHECK_ERROR(hipStreamQuery(hip::streamPerThread), hipErrorNotReady);

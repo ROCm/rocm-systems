@@ -14,7 +14,6 @@ This testcase works only on gfx90a, gfx942, gfx950.
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
 #include <hip_test_features.hh>
-#include <string>
 
 #define INC_VAL 10
 #define INITIAL_VAL 5
@@ -31,7 +30,7 @@ Output: unsafeAtomicAdd API would work and the 0/P is INITIAL_VAL + INC_VAL
         global_atomic_add instruction is generated
         or not */
 
-HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag, float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -39,7 +38,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag, floa
   std::string gfxName(prop.gcnArchName);
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
     if (prop.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      SUCCEED("Does not support HostPinned Memory");
     } else {
       TestType *A_h{nullptr}, *result{nullptr};
       TestType *A_d{nullptr}, *result_d{nullptr};
@@ -72,6 +71,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag, floa
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950, "
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }

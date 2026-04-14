@@ -41,7 +41,7 @@ class Global {
    * @return
    */
   template <typename T>
-  __host__ T fetch_incr([[maybe_unused]] T *out_ptr) {abort();}
+  __host__ T fetch_incr(T *out_ptr) {}
 };
 
 class Grid {
@@ -54,7 +54,7 @@ class Grid {
    * @return
    */
   template <typename T>
-  __device__ T fetch_incr([[maybe_unused]] T *out_ptr) {abort();}
+  __device__ T fetch_incr(T *out_ptr) {}
 };
 
 class Block {

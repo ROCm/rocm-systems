@@ -24,7 +24,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   void* hipMalloc_ptr = nullptr;
   void* hipFree_ptr = nullptr;
   void* hipExtMallocWithFlags_ptr = nullptr;
@@ -340,7 +340,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisRegisterUnReg) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisRegisterUnReg) {
   void* hipHostRegister_ptr = nullptr;
   void* hipHostUnregister_ptr = nullptr;
 
@@ -395,7 +395,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisRegisterUnReg) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   CHECK_IMAGE_SUPPORT
 
   void* hipMallocArray_ptr = nullptr;
@@ -817,7 +817,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
   void* hipPointerGetAttribute_ptr = nullptr;
   void* hipPointerGetAttributes_ptr = nullptr;
   void* hipDrvPointerGetAttributes_ptr = nullptr;
@@ -1171,7 +1171,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
   void* hipMemcpyHtoD_ptr = nullptr;
   void* hipMemcpyDtoH_ptr = nullptr;
   void* hipMemcpyDtoD_ptr = nullptr;
@@ -1401,7 +1401,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
   void* hipMemcpyHtoDAsync_ptr = nullptr;
   void* hipMemcpyDtoHAsync_ptr = nullptr;
   void* hipMemcpyDtoDAsync_ptr = nullptr;
@@ -2179,7 +2179,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
   void* hipMemsetD8_ptr = nullptr;
   void* hipMemsetD16_ptr = nullptr;
   void* hipMemsetD32_ptr = nullptr;
@@ -2472,7 +2472,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
+  CHECK_IMAGE_SUPPORT
+
   void* hipMemset2D_ptr = nullptr;
   void* hipMemset2DAsync_ptr = nullptr;
   void* hipMemset3D_ptr = nullptr;
@@ -2648,7 +2650,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
   void* hipMemGetInfo_ptr = nullptr;
   void* hipMemPtrGetInfo_ptr = nullptr;
 
@@ -2699,8 +2701,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
   CHECK_IMAGE_SUPPORT
+
   void* hipMemcpy2D_ptr = nullptr;
   void* hipMemcpy2DAsync_ptr = nullptr;
   void* hipMemcpyParam2D_ptr = nullptr;
@@ -4475,7 +4478,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
+  CHECK_IMAGE_SUPPORT
+
   void* hipMemcpy3D_ptr = nullptr;
   void* hipMemcpy3DAsync_ptr = nullptr;
   void* hipDrvMemcpy3D_ptr = nullptr;
@@ -5329,7 +5334,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
@@ -5371,9 +5376,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
   if (HmmAttrPrint() != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Skipping test since managed memory not supported");
     return;
   }
 
@@ -5660,14 +5665,14 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   HIP_CHECK(hipSetDevice(0));
   int mem_pool_support = 0;
 
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
 
   if (mem_pool_support != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
+    HipTest::HIP_SKIP_TEST("Skipping test since Memory Pool is not supported");
     return;
   }
 
@@ -6006,12 +6011,12 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
     return;
   }
 
@@ -6043,7 +6048,9 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int canAccessPeer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId));
   if (!canAccessPeer) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    std::string msg = "Skipped as peer access cannot be enabled between devices " +
+                      std::to_string(deviceId) + " " + std::to_string(peerDeviceId);
+    HipTest::HIP_SKIP_TEST(msg.c_str());
     return;
   }
 

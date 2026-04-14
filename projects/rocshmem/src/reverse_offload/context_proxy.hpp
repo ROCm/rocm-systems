@@ -46,7 +46,7 @@ class DefaultContextProxy {
    */
   explicit DefaultContextProxy(ROBackend* backend, TeamInfo *tinfo,
                                size_t num_elems = 1)
-  : proxy_{num_elems}, constructed_{true} {
+  : constructed_{true}, proxy_{num_elems} {
     auto ctx{proxy_.get()};
     new (ctx) ROContext(reinterpret_cast<Backend*>(backend), -1, true);
     rocshmem_ctx_t local{ctx, tinfo};

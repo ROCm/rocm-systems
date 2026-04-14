@@ -22,11 +22,8 @@ def find_source_test_cases(source_root, group, is_unit):
         return set()
 
     test_names = set()
-    # NOTE: This regex does not skip commented-out test cases (// or /* */).
-    # A commented-out HIP_TEST_CASE will still be detected as a source test
-    # and flagged as missing if it has no YAML entry.
     pattern = re.compile(
-        r'(?:HIP_TEST_CASE|HIP_TEMPLATE_TEST_CASE)\(\s*(\w+)\s*[,)]'
+        r'(?:TEST_CASE|TEMPLATE_TEST_CASE)\(\s*(?:"([^"]+)"|([A-Za-z_]\w*))\s*[,)]'
     )
     for root, _, files in os.walk(source_dir):
         for filename in files:
@@ -36,7 +33,7 @@ def find_source_test_cases(source_root, group, is_unit):
             with open(filepath, errors="replace") as f:
                 content = f.read()
             for match in pattern.finditer(content):
-                test_names.add(match.group(1))
+                test_names.add(match.group(1) or match.group(2))
 
     return test_names
 

@@ -21,9 +21,9 @@ Testcase Scenarios :
 /**
  * Performs argument validation of hipHostMalloc api.
  */
-HIP_TEST_CASE(Unit_hipHostMalloc_ArgValidation) {
+TEST_CASE(Unit_hipHostMalloc_ArgValidation) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("host malloc test path pending debug.");
+  HipTest::HIP_SKIP_TEST("TODO: Need to debug");
 #endif
   constexpr size_t allocSize = 1000;
   char* ptr;

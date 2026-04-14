@@ -100,7 +100,7 @@ template <typename TestType> static void runAtomicExchSystemHostAndPeerGPUsTest(
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs) {
+TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs) {
   SECTION("int") { runAtomicExchSystemPeerGPUsTest<int>(); }
   SECTION("unsigned int") { runAtomicExchSystemPeerGPUsTest<unsigned int>(); }
 #ifndef HT_NVIDIA
@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_GPU) {
+TEST_CASE(Unit_atomicExch_system_Positive_Host_And_GPU) {
   SECTION("int") { runAtomicExchSystemHostAndGPUTest<int>(); }
   SECTION("unsigned int") { runAtomicExchSystemHostAndGPUTest<unsigned int>(); }
 #ifndef HT_NVIDIA
@@ -180,7 +180,7 @@ HIP_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_GPU) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_Peer_GPUs) {
+TEST_CASE(Unit_atomicExch_system_Positive_Host_And_Peer_GPUs) {
   SECTION("int") { runAtomicExchSystemHostAndPeerGPUsTest<int>(); }
   SECTION("unsigned int") { runAtomicExchSystemHostAndPeerGPUsTest<unsigned int>(); }
 #ifndef HT_NVIDIA
@@ -205,7 +205,7 @@ HIP_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_Peer_GPUs) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_atomicExch_system_Negative_Parameters_RTC) {
+TEST_CASE(Unit_atomicExch_system_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source =

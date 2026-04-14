@@ -32,7 +32,9 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys::tracing
+namespace rocprofsys
+{
+namespace tracing
 {
 namespace
 {
@@ -65,15 +67,8 @@ bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_de
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids()
 {
-    static auto _v = std::unordered_map<hash_value_t, std::string>{};
+    static thread_local auto _v = std::unordered_map<hash_value_t, std::string>{};
     return _v;
-}
-
-std::mutex&
-get_perfetto_track_uuids_mutex()
-{
-    static auto _mtx = std::mutex{};
-    return _mtx;
 }
 
 void
@@ -99,42 +94,21 @@ copy_timemory_hash_ids()
         std::exit(1);
     }
 
-    // Access underlying storage directly to avoid construct_on_thread which
-    // throws when peak_num_threads grew beyond the thread_data capacity
-    // (e.g., during re-attach where grow functors weren't registered yet)
-    using hash_thread_data_t  = thread_data<identity<tim::hash_map_ptr_t>>;
-    using alias_thread_data_t = thread_data<identity<tim::hash_alias_ptr_t>>;
-
-    const auto& hash_storage  = hash_thread_data_t::instance();
-    const auto& alias_storage = alias_thread_data_t::instance();
-
-    const auto peak_threads = thread_info::get_peak_num_threads();
-
-    if(hash_storage)
+    // combine all the hash and alias info into one container
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
-        const auto num_entries = std::min(peak_threads, hash_storage->size());
-        for(size_t i = 0; i < num_entries; ++i)
+        auto& _hitr = get_timemory_hash_ids(i);
+        auto& _aitr = get_timemory_hash_aliases(i);
+
+        if(_hitr)
         {
-            const auto& _hitr = (*hash_storage)[i];
-            if(_hitr)
-            {
-                for(const auto& itr : *_hitr)
-                    _hmain->emplace(itr.first, itr.second);
-            }
+            for(const auto& itr : *_hitr)
+                _hmain->emplace(itr.first, itr.second);
         }
-    }
-
-    if(alias_storage)
-    {
-        const auto num_entries = std::min(peak_threads, alias_storage->size());
-        for(size_t i = 0; i < num_entries; ++i)
+        if(_aitr)
         {
-            const auto& _aitr = (*alias_storage)[i];
-            if(_aitr)
-            {
-                for(const auto& itr : *_aitr)
-                    _amain->emplace(itr.first, itr.second);
-            }
+            for(auto itr : *_aitr)
+                _amain->emplace(itr.first, itr.second);
         }
     }
 
@@ -142,24 +116,13 @@ copy_timemory_hash_ids()
     // container before finalizing
     if(get_state() == State::Finalized)
     {
-        if(hash_storage)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         {
-            const auto num_entries = std::min(peak_threads, hash_storage->size());
-            for(size_t i = 0; i < num_entries; ++i)
-            {
-                auto& _hitr = (*hash_storage)[i];
-                if(_hitr) *_hitr = *_hmain;
-            }
-        }
+            auto& _hitr = get_timemory_hash_ids(i);
+            auto& _aitr = get_timemory_hash_aliases(i);
 
-        if(alias_storage)
-        {
-            const auto num_entries = std::min(peak_threads, alias_storage->size());
-            for(size_t i = 0; i < num_entries; ++i)
-            {
-                auto& _aitr = (*alias_storage)[i];
-                if(_aitr) *_aitr = *_amain;
-            }
+            if(_hitr) *_hitr = *_hmain;
+            if(_aitr) *_aitr = *_amain;
         }
     }
 }
@@ -265,4 +228,5 @@ thread_init()
     (void) _thread_setup;
     (void) _sample_setup;
 }
-}  // namespace rocprofsys::tracing
+}  // namespace tracing
+}  // namespace rocprofsys

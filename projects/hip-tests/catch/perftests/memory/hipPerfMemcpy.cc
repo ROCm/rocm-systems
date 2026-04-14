@@ -195,12 +195,12 @@ bool hipPerfMemcpy::run_d2d_nocu(unsigned int numTests) {
  *  - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Perf_hipPerfMemcpy_test) {
+TEST_CASE(Perf_hipPerfMemcpy_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    SUCCEED("Skipped testcase hipPerfMemcpy as there is no device to test.");
   } else {
     int deviceId = 0;
     HIP_CHECK(hipSetDevice(deviceId));

@@ -7,7 +7,7 @@
 #include <hip_test_common.hh>
 #include <utils.hh>
 
-HIP_TEST_CASE(Unit_hipHostGetDevicePointer_Negative) {
+TEST_CASE(Unit_hipHostGetDevicePointer_Negative) {
   int* hPtr{nullptr};
   int* dPtr{nullptr};
   HIP_CHECK(hipHostMalloc(&hPtr, sizeof(int)));
@@ -45,9 +45,9 @@ HIP_TEST_CASE(Unit_hipHostGetDevicePointer_Negative) {
 
 template <typename T> __global__ void set(T* ptr, T val) { *ptr = val; }
 
-HIP_TEST_CASE(Unit_hipHostGetDevicePointer_UseCase) {
+TEST_CASE(Unit_hipHostGetDevicePointer_UseCase) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory");
     return;
   }
 
@@ -85,9 +85,9 @@ HIP_TEST_CASE(Unit_hipHostGetDevicePointer_UseCase) {
   HIP_CHECK(hipHostFree(hPtr));
 }
 
-HIP_TEST_CASE(Unit_hipHostGetDevicePointer_Capture) {
+TEST_CASE(Unit_hipHostGetDevicePointer_Capture) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory");
     return;
   }
 

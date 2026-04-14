@@ -309,13 +309,17 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
         # is needed for bigger binding projects due to the limit to 64k addressable
         # sections
         target_compile_options(${target_name} PRIVATE /bigobj)
-        # Only set these options for C++ files.  This is important so that, for
-        # instance, projects that include other types of source files like CUDA .cu
-        # files don't get these options propagated to nvcc since that would cause the
-        # build to fail.
-        target_compile_options(
-            ${target_name}
-            PRIVATE $<$<NOT:$<CONFIG:Debug>>:$<$<COMPILE_LANGUAGE:CXX>:/MP>>
-        )
+        if(CMAKE_VERSION VERSION_LESS 3.11)
+            target_compile_options(${target_name} PRIVATE $<$<NOT:$<CONFIG:Debug>>:/MP>)
+        else()
+            # Only set these options for C++ files.  This is important so that, for
+            # instance, projects that include other types of source files like CUDA .cu
+            # files don't get these options propagated to nvcc since that would cause the
+            # build to fail.
+            target_compile_options(
+                ${target_name}
+                PRIVATE $<$<NOT:$<CONFIG:Debug>>:$<$<COMPILE_LANGUAGE:CXX>:/MP>>
+            )
+        endif()
     endif()
 endfunction()

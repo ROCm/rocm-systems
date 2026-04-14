@@ -33,7 +33,7 @@
 
 namespace rocshmem {
 
-__host__ ROHostContext::ROHostContext(Backend *backend, [[maybe_unused]] long options)
+__host__ ROHostContext::ROHostContext(Backend *backend, long options)
     : Context(backend) {
   ROBackend *b{static_cast<ROBackend *>(backend)};
 

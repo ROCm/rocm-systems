@@ -182,40 +182,29 @@ enum class amdgpu_regnum_t : uint32_t
   last_regnum = last_pseudo
 };
 
-/* Distance between two amdgpu_regnum_t.  A difference between two
-   enumerators is not an enumerator, it's the distance between them.
-   This is signed following the std::distance /
-   iterator_traits<It>::difference_type / ptrdiff_t model: distance
-   can be negative if rhs > lhs.  */
-using amdgpu_regdiff_t
-  = std::make_signed_t<std::underlying_type_t<amdgpu_regnum_t>>;
-
-constexpr amdgpu_regdiff_t
+constexpr size_t
 operator- (amdgpu_regnum_t lhs, amdgpu_regnum_t rhs)
 {
-  using u = std::underlying_type_t<decltype (lhs)>;
-  /* Use static_cast, not utils::narrow, so 'u(0) - u(1) = u(-1)'
-     becomes -1 instead of an error.  */
-  return static_cast<amdgpu_regdiff_t> (static_cast<u> (lhs)
-                                        - static_cast<u> (rhs));
+  return static_cast<std::underlying_type_t<decltype (lhs)>> (lhs)
+         - static_cast<std::underlying_type_t<decltype (rhs)>> (rhs);
 }
 
 constexpr amdgpu_regnum_t
-operator+ (amdgpu_regnum_t lhs, amdgpu_regdiff_t rhs)
+operator+ (amdgpu_regnum_t lhs, int rhs)
 {
-  return static_cast<amdgpu_regnum_t> (static_cast<amdgpu_regdiff_t> (lhs)
-                                       + rhs);
+  return static_cast<amdgpu_regnum_t> (
+    static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) + rhs);
 }
 
 constexpr amdgpu_regnum_t
-operator- (amdgpu_regnum_t lhs, amdgpu_regdiff_t rhs)
+operator- (amdgpu_regnum_t lhs, int rhs)
 {
-  return static_cast<amdgpu_regnum_t> (static_cast<amdgpu_regdiff_t> (lhs)
-                                       - rhs);
+  return static_cast<amdgpu_regnum_t> (
+    static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) - rhs);
 }
 
 constexpr std::underlying_type_t<amdgpu_regnum_t>
-operator& (amdgpu_regnum_t lhs, std::underlying_type_t<amdgpu_regnum_t> rhs)
+operator& (amdgpu_regnum_t lhs, int rhs)
 {
   return static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) & rhs;
 }

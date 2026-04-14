@@ -39,7 +39,7 @@ namespace data_storage
 class database
 {
 public:
-    explicit database(int pid, int ppid, std::string output_path);
+    explicit database(int pid, int ppid);
     database()                      = delete;
     database(database&)             = delete;
     database& operator=(database&)  = delete;
@@ -227,7 +227,6 @@ private:
     sqlite3*    _sqlite3_db_temp{ nullptr };
     std::string m_tag;
     std::string m_upid;
-    std::string m_path;
 };
 
 }  // namespace data_storage

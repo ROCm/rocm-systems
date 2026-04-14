@@ -28,9 +28,7 @@ const unsigned long long Every5thBit = 0x1084210842108421;
 const unsigned long long Every9thBit = 0x8040201008040201;
 const unsigned long long Every5thBut9th = Every5thBit & ~Every9thBit;
 const unsigned long long AllThreads = ~0;
-// number of warps to reduce. Both when testing warp intrinsics and cooperative groups
-// must be a multiple of warpSize
-static constexpr int kNumReduces = 78 * 32;
+static constexpr int kNumReduces = 5000;
 
 inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
   const auto warp =
@@ -42,19 +40,19 @@ inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
   return !(active_masks[idx] & (static_cast<uint64_t>(1) << warp.thread_rank()));
 }
 
-inline std::mt19937& GetRandomGen() {
+inline std::mt19937& GetRandomGenerator() {
   static std::mt19937 mt(std::random_device{}());
   return mt;
 }
 
-template <typename T> inline T GenRandomInteger(const T min, const T max) {
+template <typename T> inline T GenerateRandomInteger(const T min, const T max) {
   std::uniform_int_distribution<T> dist(min, max);
-  return dist(GetRandomGen());
+  return dist(GetRandomGenerator());
 }
 
-template <typename T> inline T GenRandomReal(const T min, const T max) {
+template <typename T> inline T GenerateRandomReal(const T min, const T max) {
   std::uniform_real_distribution<T> dist(min, max);
-  return dist(GetRandomGen());
+  return dist(GetRandomGenerator());
 }
 
 inline int generate_width(int warp_size) {
@@ -201,7 +199,7 @@ struct DistributionType<double> {
 
 template <class T>
 struct MinOp {
-  T operator()(T lhs, T rhs) const
+  T operator()(const T& lhs, const T& rhs) const
   {
     return std::min(lhs, rhs);
   }
@@ -209,7 +207,7 @@ struct MinOp {
 
 template <class T>
 struct MaxOp {
-  T operator()(T lhs, T rhs) const
+  T operator()(const T& lhs, const T& rhs) const
   {
     return std::max(lhs, rhs);
   }
@@ -217,7 +215,7 @@ struct MaxOp {
 
 template <class T>
 struct XorOp {
-  __host__ __device__ T operator()(T lhs, T rhs)
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
   {
     return lhs ^ rhs;
   }
@@ -225,7 +223,7 @@ struct XorOp {
 
 template <class T>
 struct AndOp {
-  __host__ __device__ T operator()(T lhs, T rhs)
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
   {
     return lhs & rhs;
   }
@@ -233,17 +231,9 @@ struct AndOp {
 
 template <class T>
 struct OrOp {
-  __host__ __device__ T operator()(T lhs, T rhs)
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
   {
     return lhs | rhs;
-  }
-};
-
-template <class T>
-struct MaxOfAbsolute {
-  T __host__ __device__ operator()(T i, T j)
-  {
-    return std::max(std::abs(i), std::abs(j));
   }
 };
 
@@ -271,37 +261,24 @@ const char* typeToString()
   return "";
 }
 
-template<class T, class Op>
+template<class T, template <typename> class Op>
 const char* opToString()
 {
-  if constexpr (std::is_same<Op, std::plus<T>>::value)
+  if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
     return "add";
-  else if constexpr (std::is_same<Op, MinOp<T>>::value)
+  else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
     return "min";
-  else if constexpr (std::is_same<Op, MaxOp<T>>::value)
+  else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
     return "max";
-  else if constexpr (std::is_same<Op, AndOp<T>>::value)
+  else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
     return "logical_and";
-  else if constexpr (std::is_same<Op, OrOp<T>>::value)
+  else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
     return "logical_or";
-  else if constexpr (std::is_same<Op, XorOp<T>>::value)
+  else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
     return "logical_xor";
-  else if constexpr (std::is_same<Op, cooperative_groups::plus<T>>::value)
-    return "cooperative_groups::plus";
-  else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value)
-    return "cooperative_groups::less";
-  else if constexpr (std::is_same<Op, cooperative_groups::greater<T>>::value)
-    return "cooperative_groups::greater";
-  else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value)
-    return "cooperative_groups::bit_and";
-  else if constexpr (std::is_same<Op, cooperative_groups::bit_or<T>>::value)
-    return "cooperative_groups::bit_or";
-  else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value)
-    return "cooperative_groups::bit_xor";
-  else if constexpr (std::is_same<Op, MaxOfAbsolute<T>>::value)
-    return "MaxOfAbsolute";
   else {
-    return "unknown operator";
+    static_assert(std::is_void<T>::value, "Unsupported operator");
+    return "";
   }
 }
 
@@ -312,8 +289,7 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
                     int numItems)
 {
   // masks must be != 0, hence passing 1 as the 'a' distribution parameter
-  int wavefrontSize = getWarpSize();
-  std::uniform_int_distribution<unsigned long long> dist(1, wavefrontSize == 64? ~0ull : (1ul << 32) - 1);
+  std::uniform_int_distribution<unsigned long long> dist(1);
   std::uniform_int_distribution<unsigned long long> distNoHoles(1, getWarpSize() - 2);
   int numBytes = numItems * sizeof(T);
   LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
@@ -328,10 +304,13 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
     if (i % 5 == 0) {
       // every five masks, create a mask that starts in position zero and has "no holes",
       // because those take a different code path, where DPP instructions are used
-      mask = 1ull << distNoHoles(gen);
+      mask = 1 << distNoHoles(gen);
       mask--;
     } else {
       mask = dist(gen);
+
+      if (getWarpSize() == 32)
+        mask &= 0xFFFFFFFF;
     }
 
     buf.ptr()[i] = mask;
@@ -389,15 +368,15 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
   HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
 }
 
-// given an operation produces the expected result of the warp-wide reduction
+// given an operation produces the expected result of the reduction
 // @mask indicates the lanes that will participate in the computation
 template <class T, class Op>
-T calculateExpected(const T* input, Op& op, unsigned long long mask)
+T calculateExpected(const T* input, Op op, unsigned long long mask)
 {
   T result;
   int wavefrontSize = getWarpSize();
 
-  if constexpr (std::is_same<Op, std::plus<T>>::value || std::is_same<Op, cooperative_groups::plus<T>>::value) {
+  if (std::is_same<Op, std::plus<T>>::value) {
     T tmp[64] = { 0 };
 
     for (int i = 0; i < wavefrontSize; i++) {
@@ -415,21 +394,6 @@ T calculateExpected(const T* input, Op& op, unsigned long long mask)
       }
     }
     result = tmp[0];
-  } else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
-    MinOp<T> minOp;
-    return calculateExpected(input, minOp, mask);
-  } else if constexpr (std::is_same<Op, cooperative_groups::greater<T>>::value) {
-    MaxOp<T> maxOp;
-    return calculateExpected(input, maxOp, mask);
-  } else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value) {
-    std::bit_xor<T> xorOp;
-    return calculateExpected(input, xorOp, mask);
-  } else if constexpr (std::is_same<Op, cooperative_groups::bit_or<T>>::value) {
-    std::bit_or<T> orOp;
-    return calculateExpected(input, orOp, mask);
-  } else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value) {
-    std::bit_and<T> andOp;
-    return calculateExpected(input, andOp, mask);
   } else {
     bool initialized = false;
 
@@ -558,8 +522,7 @@ void runTestReduce(int iteration, Reduce reduce)
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
 
   while (numReduce < kNumReduces) {
-    T* waveInput = &input.ptr()[numReduce * wavefrontSize];
-    T expected = calculateExpected<T>(waveInput, op, masks.ptr()[numReduce]);
+    T expected = calculateExpected<T>(input.ptr(), op, masks.ptr()[numReduce]);
     int lane = 0;
 
     while (lane < wavefrontSize) {
@@ -574,12 +537,12 @@ void runTestReduce(int iteration, Reduce reduce)
             REQUIRE(__half2float(result) == __half2float(expected));
           else {
             if (result != expected) {
-              printMismatch(result, expected, waveInput, mask);
+              printMismatch(result, expected, input.ptr(), mask);
               REQUIRE(result == expected);
             }
           }
         } else
-          compareFloatingPoint(result, expected, mask, waveInput);
+          compareFloatingPoint(result, expected, mask, input.ptr());
 
       }
       lane++;
@@ -587,3 +550,5 @@ void runTestReduce(int iteration, Reduce reduce)
     numReduce++;
   }
 }
+
+inline double GetTestReductionFactor() { return cmd_options.warp_reduction_factor * 0.01; }

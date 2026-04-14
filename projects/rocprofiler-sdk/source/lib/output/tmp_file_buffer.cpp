@@ -22,7 +22,6 @@
 
 #include "tmp_file_buffer.hpp"
 #include "domain_type.hpp"
-#include "lib/common/filesystem.hpp"
 
 #include <fmt/format.h>
 
@@ -32,17 +31,13 @@ namespace rocprofiler
 {
 namespace tool
 {
-namespace fs = common::filesystem;
-
 std::string
 compose_tmp_file_name(const output_config& cfg, domain_type buffer_type)
 {
-    auto tmp_directory = fs::path{rocprofiler::tool::format_path(cfg.tmp_directory)};
-    auto filename =
-        tmp_directory / ".rocprofv3" /
-        fmt::format("{}-{}.dat", "%ppid%-%pid%", get_domain_trace_file_name(buffer_type));
-
-    return rocprofiler::tool::format_path(filename.string());
+    return rocprofiler::tool::format_path(fmt::format("{}/.rocprofv3/{}-{}.dat",
+                                                      cfg.tmp_directory,
+                                                      "%ppid%-%pid%",
+                                                      get_domain_trace_file_name(buffer_type)));
 }
 
 tmp_file_name_callback_t&

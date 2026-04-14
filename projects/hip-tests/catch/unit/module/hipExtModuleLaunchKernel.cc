@@ -81,7 +81,7 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
+TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
   // Open copyKernel.s and read the file
   const std::regex regexp("uniform_work_group_size\\s*:\\s*[0-1]");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
@@ -102,11 +102,11 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
+TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
   // first check if uniform_work_group_size = 1.
   const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
   if (false == searchRegExpr(regexp, "copyKernel.s")) {
-    HipTest::HIP_SKIP_TEST("test requires uniform work group size 1.");
+    HipTest::HIP_SKIP_TEST("uniform_work_group_size != 1. Skipping test ...");
     return;
   }
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
@@ -172,7 +172,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
+TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   size_t arraylength = totalWorkGroups * localWorkSize;
   size_t sizeBytes{arraylength * sizeof(int)};
   // Get module and function from module
@@ -182,14 +182,14 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   SECTION("compressed fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed)); }
   SECTION("generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
-      WARN("Skipping section: generic target is not supported on this device.");
+      fprintf(stderr, "Generic target test is skipped\n");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget));
   }
   SECTION("generic target in compressed fatbin") {
     if (!isGenericTargetSupported()) {
-      WARN("Skipping section: generic target is not supported on this device.");
+      fprintf(stderr, "Generic target test is skipped\n");
       return;
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTargetCompressed));
@@ -238,7 +238,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   HIP_CHECK(hipModuleUnload(Module));
 }
 
-HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
+TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
   ModuleLaunchKernelPositiveParameters<hipExtModuleLaunchKernel>();
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   SECTION("Pass only start event") {
@@ -264,7 +264,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Negative_Parameters) {
+TEST_CASE(Unit_hipExtModuleLaunchKernel_Negative_Parameters) {
   ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>(true);
 }
 /**
@@ -731,7 +731,7 @@ bool ModuleLaunchKernel::Module_WorkGroup_Test() {
   return testStatus;
 }
 
-HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Functional) {
+TEST_CASE(Unit_hipExtModuleLaunchKernel_Functional) {
   bool testStatus = true;
   ModuleLaunchKernel kernelLaunch;
   testStatus &= kernelLaunch.ExtModule_Negative_tests();

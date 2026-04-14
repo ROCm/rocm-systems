@@ -77,9 +77,6 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
     static void shutdown();
     static void shutdown(int64_t);
 
-    static void pause();
-    static void resume();
-
     // pthread_create
     int operator()(pthread_t* thread, const pthread_attr_t* attr,
                    void* (*start_routine)(void*), void*     arg) const;
@@ -91,8 +88,7 @@ private:
 
     static std::set<native_handle_t> get_native_handles();
 
-    wrappee_t         m_wrappee = &pthread_create;
-    static std::mutex s_mutex;
+    wrappee_t m_wrappee = &pthread_create;
 };
 
 using pthread_create_gotcha_t =

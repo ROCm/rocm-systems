@@ -49,7 +49,7 @@ except ImportError as exc:
 from amdsmi import (
     amdsmi_init,
     amdsmi_shut_down,
-    amdsmi_get_cpu_handles,
+    amdsmi_get_cpusocket_handles,
     amdsmi_get_cpu_hsmp_driver_version,
     AmdSmiInitFlags,
     AmdSmiException,
@@ -476,8 +476,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         # Use pstate=0 from original test
         pstate = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
         else:
@@ -504,8 +503,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_cpu_apb_enable(self):
         self._print_func_name("Starting performance test for amdsmi_cpu_apb_enable")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -537,8 +535,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             "Starting performance test for amdsmi_first_online_core_on_cpu_socket"
         )
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -575,8 +572,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_cclk_limit(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_cclk_limit")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -610,8 +606,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             "Starting performance test for amdsmi_get_cpu_core_current_freq_limit"
         )
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -647,8 +642,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_core_energy(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_core_energy")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -682,8 +676,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_current_io_bandwidth(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_current_io_bandwidth")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -723,8 +716,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_ddr_bw(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_ddr_bw")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -755,8 +747,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_dimm_power_consumption")
         i = 0
         dimm_addr = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -796,8 +787,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         )
         dimm_addr = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -840,8 +830,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_dimm_thermal_sensor")
         dimm_addr = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -895,8 +884,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_fclk_mclk(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_fclk_mclk")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -945,8 +933,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_hsmp_driver_version(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_hsmp_driver_version")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -980,8 +967,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_hsmp_proto_ver(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_hsmp_proto_ver")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1032,8 +1018,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_prochot_status(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_prochot_status")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1069,8 +1054,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             "Starting performance test for amdsmi_get_cpu_pwr_svi_telemetry_all_rails"
         )
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1104,8 +1088,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_smu_fw_version(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_smu_fw_version")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1139,8 +1122,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_socket_c0_residency(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_c0_residency")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1176,8 +1158,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
             "Starting performance test for amdsmi_get_cpu_socket_current_active_freq_limit"
         )
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1215,8 +1196,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_socket_energy(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_energy")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1250,8 +1230,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_socket_freq_range(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_freq_range")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1286,8 +1265,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_lclk_dpm_level")
         nbio_id = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1324,8 +1302,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_socket_power(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_power")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1358,8 +1335,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_socket_power_cap_max(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_power_cap_max")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1392,8 +1368,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_cpu_socket_temperature(self):
         self._print_func_name("Starting performance test for amdsmi_get_cpu_socket_temperature")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1451,8 +1426,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_hsmp_metrics_table(self):
         self._print_func_name("Starting performance test for amdsmi_get_hsmp_metrics_table")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1484,8 +1458,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_hsmp_metrics_table_version(self):
         self._print_func_name("Starting performance test for amdsmi_get_hsmp_metrics_table_version")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1539,8 +1512,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         # Test with different rate_ctrl values
         rate_ctrls = [0]  # Starting with 0 as in original test
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1608,8 +1580,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_processor_handle_from_bdf(self):
         self._print_func_name("Starting performance test for amdsmi_get_processor_handle_from_bdf")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1721,8 +1692,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_processor_info(self):
         self._print_func_name("Starting performance test for amdsmi_get_processor_info")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1751,8 +1721,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_processor_type(self):
         self._print_func_name("Starting performance test for amdsmi_get_processor_type")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1829,8 +1798,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_get_temp_metric(self):
         self._print_func_name("Starting performance test for amdsmi_get_temp_metric")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -1950,8 +1918,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_cpu_core_boostlimit(self):
         self._print_func_name("Starting performance test for CPU core boostlimit workflow")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -2009,8 +1976,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         max_pstate = 0
         min_pstate = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -2055,8 +2021,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         min_link_width = 0
         max_link_width = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -2100,8 +2065,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         # Use modes from original test
         modes = [0, 1, 2]
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -2144,8 +2108,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         # Use TODO placeholder value like original test
         boost_limit = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -2186,8 +2149,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         min_val = 0
         max_val = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -2230,8 +2192,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
     def test_performance_cpu_socket_power_cap(self):
         self._print_func_name("Starting performance test for CPU socket power cap workflow")
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")
@@ -2285,8 +2246,7 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
         min_width = 0
         max_width = 0
         i = 0
-        ret = amdsmi.amdsmi_get_cpu_handles()
-        processor_handles = ret["processor_handles"]
+        processor_handles = amdsmi.amdsmi_get_cpusocket_handles()
 
         if len(processor_handles) == 0:
             print("No CPU sockets on machine")

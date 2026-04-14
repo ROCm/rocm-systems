@@ -24,7 +24,7 @@
 #ifndef SRC_CORE_AMD_AQL_PM4_IB_PACKET_H_
 #define SRC_CORE_AMD_AQL_PM4_IB_PACKET_H_
 
-#include "hsa_includes.h"
+#include <hsa/hsa.h>
 
 // Value of 'pm4_ib_format' field of amd_aql_pm4_ib_packet_t packet
 static const uint32_t AMD_AQL_PM4_IB_FORMAT = 1;

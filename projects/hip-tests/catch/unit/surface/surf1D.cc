@@ -226,7 +226,7 @@ template <typename T> static void runTestRW(const int width) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEMPLATE_TEST_CASE(Unit_surf1Dread_Positive_Basic, char, unsigned char, short, unsigned short, int,
+TEMPLATE_TEST_CASE(Unit_surf1Dread_Positive_Basic, char, unsigned char, short, unsigned short, int,
                    unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -249,7 +249,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_surf1Dread_Positive_Basic, char, unsigned char, shor
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEMPLATE_TEST_CASE(Unit_surf1Dwrite_Positive_Basic, char, unsigned char, short, unsigned short, int,
+TEMPLATE_TEST_CASE(Unit_surf1Dwrite_Positive_Basic, char, unsigned char, short, unsigned short, int,
                    unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -272,7 +272,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_surf1Dwrite_Positive_Basic, char, unsigned char, sho
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEMPLATE_TEST_CASE(Unit_surf1D_Positive_ReadWrite, char, unsigned char, short, unsigned short, int,
+TEMPLATE_TEST_CASE(Unit_surf1D_Positive_ReadWrite, char, unsigned char, short, unsigned short, int,
                    unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 

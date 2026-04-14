@@ -172,7 +172,7 @@ bool KernelTimeExecution() {
   return testStatus;
 }
 
-HIP_TEST_CASE(Unit_hipExtLaunchKernelGGL_Functional) {
+TEST_CASE(Unit_hipExtLaunchKernelGGL_Functional) {
   bool testStatus = true;
 // Disabled the concurency test as the firmware does not support concurrency
 //   in the same stream

@@ -1,3 +1,5 @@
+# THIS FILE IS GENERATED FROM .clangd!
+# Run .update-clang-tidy.sh to regenerate.
 Checks:
   bugprone*,
   clang-analyzer*,
@@ -21,4 +23,3 @@ Checks:
   -modernize-use-using,
   -performance*,
   -readability*,
-  readability-delete-null-pointer,

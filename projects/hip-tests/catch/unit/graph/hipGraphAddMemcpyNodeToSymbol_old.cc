@@ -49,7 +49,7 @@ __global__ void MemcpyToSymbolKernel(int* B_d) {
 
 /* This testcase verifies negative scenarios of
    hipGraphAddMemcpyNodeToSymbol API */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_Negative) {
+TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_Negative) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int* A_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -205,7 +205,7 @@ This testcase verifies allocating global symbol memory,
 add the MemcpyNodeToSymbol node to the graph and
 erifying the result
 */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemory) {
+TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemory) {
   hipGraphAddMemcpyNodeToSymbol_GlobalMemory(false, false);
 }
 
@@ -214,7 +214,7 @@ This testcase verifies allocating global const symbol memory,
 add the MemcpyNodeToSymbol node to the graph and
 verifying the result
 */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemory) {
+TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemory) {
   hipGraphAddMemcpyNodeToSymbol_GlobalMemory(false, true);
 }
 
@@ -224,7 +224,7 @@ This testcase verifies allocating global symbol memory and device variables
 in GPU-0 and add the MemcpyNodeToSymbol node to the graph and
 verifying the result in GPU-1
 */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice) {
+TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice) {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -233,11 +233,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice) {
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Machine does not seem to have P2P");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
 }
 /*
@@ -245,7 +244,7 @@ This testcase verifies allocating global const symbol memory and device variable
 in GPU-0 and add the MemcpyNodeToSymbol node to the graph and
 verifying the result in GPU-1
 */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice) {
+TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice) {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -254,11 +253,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice) {
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, true);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Machine does not seem to have P2P");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
 }
 #endif
@@ -267,7 +265,7 @@ This testcaser verifies allocating global memory,
 Add MemcpyToSymbolNode,KernelNode and memcpynode and validating
 the behaviour
 */
-HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel) {
+TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

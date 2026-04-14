@@ -28,7 +28,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Shared) {
+TEST_CASE(Unit___threadfence_block_Positive_Basic_Shared) {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Shared) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Global) {
+TEST_CASE(Unit___threadfence_block_Positive_Basic_Global) {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Global) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Pinned) {
+TEST_CASE(Unit___threadfence_block_Positive_Basic_Pinned) {
   LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
@@ -120,7 +120,7 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Pinned) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Managed) {
+TEST_CASE(Unit___threadfence_block_Positive_Basic_Managed) {
   LinearAllocGuard<int> in_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
 
@@ -148,17 +148,18 @@ HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Managed) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit___threadfence_block_Positive_Basic_Peer) {
+TEST_CASE(Unit___threadfence_block_Positive_Basic_Peer) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("At least 2 devices are required");
     return;
   }
 
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
   if (!can_access_peer) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    std::string msg = "Skipped as peer access cannot be enabled between devices";
+    HipTest::HIP_SKIP_TEST(msg.c_str());
     return;
   }
 

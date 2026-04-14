@@ -45,7 +45,7 @@ class IPCDefaultContextProxy {
    */
   explicit IPCDefaultContextProxy(IPCBackend* backend, TeamInfo *tinfo,
                                   size_t num_elems = 1)
-  : proxy_{num_elems}, constructed_{true} {
+  : constructed_{true}, proxy_{num_elems} {
     auto ctx{proxy_.get()};
     new (ctx) IPCContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;

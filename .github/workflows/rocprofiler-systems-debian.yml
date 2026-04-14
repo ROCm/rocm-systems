@@ -65,11 +65,9 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
       with:
-        sparse-checkout: |
-          projects/rocprofiler-systems/
-          .gitmodules
+        sparse-checkout: projects/rocprofiler-systems/
 
     - name: Install Packages
       timeout-minutes: 25
@@ -199,7 +197,7 @@ jobs:
     - name: CTest Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
         name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
@@ -208,7 +206,7 @@ jobs:
     - name: Data Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@v4
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |

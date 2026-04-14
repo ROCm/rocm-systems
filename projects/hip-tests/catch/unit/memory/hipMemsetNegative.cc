@@ -41,7 +41,7 @@ inline void testHipMemset3DApis(hipPitchedPtr& pitchedDevPtr, int value, const h
   HIP_CHECK_ERROR(hipMemset3DAsync(pitchedDevPtr, value, extent, nullStream), expectedReturn);
 }
 
-HIP_TEST_CASE(Unit_hipMemset_Negative_InvalidPtr) {
+TEST_CASE(Unit_hipMemset_Negative_InvalidPtr) {
   void* dst;
 
   SECTION("Uninitialized Dst") {}
@@ -57,7 +57,7 @@ HIP_TEST_CASE(Unit_hipMemset_Negative_InvalidPtr) {
 }
 
 
-HIP_TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsSize) {
+TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsSize) {
 #if !HT_AMD
   void* dst;
   constexpr size_t outOfBoundsSize{width + 1};
@@ -68,7 +68,7 @@ HIP_TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsSize) {
 #endif
 }
 
-HIP_TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsPtr) {
+TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsPtr) {
   void* dst;
   HIP_CHECK(hipMalloc(&dst, width));
   void* outOfBoundsPtr{reinterpret_cast<char*>(dst) + width + 1};
@@ -76,7 +76,9 @@ HIP_TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsPtr) {
   HIP_CHECK(hipFree(dst));
 }
 
-HIP_TEST_CASE(Unit_hipMemset2D_Negative_InvalidPtr) {
+TEST_CASE(Unit_hipMemset2D_Negative_InvalidPtr) {
+  CHECK_IMAGE_SUPPORT
+
   void* dst;
   SECTION("Uninitialized Dst") {}
   SECTION("Nullptr as Dst") { dst = nullptr; }
@@ -94,7 +96,9 @@ HIP_TEST_CASE(Unit_hipMemset2D_Negative_InvalidPtr) {
   HIP_CHECK(hipFree(A_d));
 }
 
-HIP_TEST_CASE(Unit_hipMemset2D_Negative_InvalidSizes) {
+TEST_CASE(Unit_hipMemset2D_Negative_InvalidSizes) {
+  CHECK_IMAGE_SUPPORT
+
   void* dst;
   size_t realPitch;
   HIP_CHECK(hipMallocPitch(&dst, &realPitch, width, height));
@@ -118,7 +122,9 @@ HIP_TEST_CASE(Unit_hipMemset2D_Negative_InvalidSizes) {
   HIP_CHECK(hipFree(dst));
 }
 
-HIP_TEST_CASE(Unit_hipMemset2D_Negative_OutOfBoundsPtr) {
+TEST_CASE(Unit_hipMemset2D_Negative_OutOfBoundsPtr) {
+  CHECK_IMAGE_SUPPORT
+
   void* dst;
   size_t realPitch;
 
@@ -129,7 +135,9 @@ HIP_TEST_CASE(Unit_hipMemset2D_Negative_OutOfBoundsPtr) {
 }
 
 
-HIP_TEST_CASE(Unit_hipMemset3D_Negative_InvalidPtr) {
+TEST_CASE(Unit_hipMemset3D_Negative_InvalidPtr) {
+  CHECK_IMAGE_SUPPORT
+
   hipPitchedPtr pitchedDevPtr;
 
   SECTION("Uninitialized PitchedDevPtr") {}
@@ -138,7 +146,9 @@ HIP_TEST_CASE(Unit_hipMemset3D_Negative_InvalidPtr) {
   testHipMemset3DApis(pitchedDevPtr, memsetVal, validExtent);
 }
 
-HIP_TEST_CASE(Unit_hipMemset3D_Negative_ModifiedPtr) {
+TEST_CASE(Unit_hipMemset3D_Negative_ModifiedPtr) {
+  CHECK_IMAGE_SUPPORT
+
   hipPitchedPtr pitchedDevPtr;
 
   HIP_CHECK(hipMalloc3D(&pitchedDevPtr, validExtent));
@@ -159,7 +169,9 @@ HIP_TEST_CASE(Unit_hipMemset3D_Negative_ModifiedPtr) {
   HIP_CHECK(hipFree(allocatedMemory));
 }
 
-HIP_TEST_CASE(Unit_hipMemset3D_Negative_InvalidSizes) {
+TEST_CASE(Unit_hipMemset3D_Negative_InvalidSizes) {
+  CHECK_IMAGE_SUPPORT
+
   hipPitchedPtr pitchedDevPtr;
   HIP_CHECK(hipMalloc3D(&pitchedDevPtr, validExtent));
   hipExtent invalidExtent{validExtent};
@@ -185,7 +197,9 @@ HIP_TEST_CASE(Unit_hipMemset3D_Negative_InvalidSizes) {
   HIP_CHECK(hipFree(pitchedDevPtr.ptr));
 }
 
-HIP_TEST_CASE(Unit_hipMemset3D_Negative_OutOfBounds) {
+TEST_CASE(Unit_hipMemset3D_Negative_OutOfBounds) {
+  CHECK_IMAGE_SUPPORT
+
   hipPitchedPtr pitchedDevPtr;
 
   HIP_CHECK(hipMalloc3D(&pitchedDevPtr, validExtent));

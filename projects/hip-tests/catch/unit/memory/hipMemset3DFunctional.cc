@@ -387,7 +387,8 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
  * Test Memset3D with different combinations of extent
  * taking zero and non-zero fields.
  */
-HIP_TEST_CASE(Unit_hipMemset3D_MemsetWithExtent) {
+TEST_CASE(Unit_hipMemset3D_MemsetWithExtent) {
+  CHECK_IMAGE_SUPPORT
 
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
@@ -422,7 +423,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_MemsetWithExtent) {
  * Test Memset3DAsync with different combinations of extent
  * taking zero and non-zero fields.
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetWithExtent) {
+TEST_CASE(Unit_hipMemset3DAsync_MemsetWithExtent) {
+  CHECK_IMAGE_SUPPORT
 
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
@@ -455,7 +457,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetWithExtent) {
 /**
  * Memset3D with max unsigned char and verify memset operation is success
  */
-HIP_TEST_CASE(Unit_hipMemset3D_MemsetMaxValue) {
+TEST_CASE(Unit_hipMemset3D_MemsetMaxValue) {
+  CHECK_IMAGE_SUPPORT
 
   testMemsetMaxValue(0);
 }
@@ -463,7 +466,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_MemsetMaxValue) {
 /**
  * Memset3DAsync with max unsigned char and verify memset operation is success
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetMaxValue) {
+TEST_CASE(Unit_hipMemset3DAsync_MemsetMaxValue) {
+  CHECK_IMAGE_SUPPORT
 
   testMemsetMaxValue(1);
 }
@@ -471,7 +475,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_MemsetMaxValue) {
 /**
  * Seek and set random slice of 3d array, verify memset is success
  */
-HIP_TEST_CASE(Unit_hipMemset3D_SeekSetSlice) {
+TEST_CASE(Unit_hipMemset3D_SeekSetSlice) {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArraySlice(0);
 }
@@ -479,7 +484,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_SeekSetSlice) {
 /**
  * Seek and set random slice of 3d array with async, verify memset is success
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetSlice) {
+TEST_CASE(Unit_hipMemset3DAsync_SeekSetSlice) {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArraySlice(1);
 }
@@ -487,7 +493,8 @@ HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetSlice) {
 /**
  * Memset3D selected portion of 3d array
  */
-HIP_TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
+TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArrayPortion(0);
 }
@@ -495,7 +502,8 @@ HIP_TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
 /**
  * Memset3DAsync selected portion of 3d array
  */
-HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetArrayPortion) {
+TEST_CASE(Unit_hipMemset3DAsync_SeekSetArrayPortion) {
+  CHECK_IMAGE_SUPPORT
 
   seekAndSet3DArrayPortion(1);
 }

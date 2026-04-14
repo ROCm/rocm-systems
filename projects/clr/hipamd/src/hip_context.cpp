@@ -61,11 +61,21 @@ void init(bool* status) {
     amd::RuntimeTearDown::RegisterObject(device);
   }
 
-  // Register tool dispatch table to profiler v3.
-  // If app is attached by profiler, __hipTriggerReportDevices_fn() will be called
-  // by profiler.
+  // Report devices to HIP tools layer if available
   const auto* tools_dispatch_table = hip::GetHipToolsDispatchTable();
-  tools_dispatch_table->__hipTriggerReportDevices_fn();
+  if (tools_dispatch_table->__hipReportDevices_fn) {
+    std::vector<hipUUID> uuids;
+    uuids.reserve(device_count);
+
+    for (const auto* dev : g_devices) {
+      const auto& info = dev->devices()[0]->info();
+      static_assert(sizeof(info.uuid_) == sizeof(hipUUID::bytes), "UUID size mismatch");
+      uuids.emplace_back();
+      std::copy(std::begin(info.uuid_), std::end(info.uuid_), std::begin(uuids.back().bytes));
+    }
+
+    tools_dispatch_table->__hipReportDevices_fn(device_count, uuids.data());
+  }
 
   // Create and initialize host context
   host_context = new amd::Context(devices, amd::Context::Info());
@@ -378,23 +388,6 @@ hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags) {
     HIP_RETURN(hipErrorInvalidDevice);
   } else {
     HIP_RETURN(hipErrorContextAlreadyInUse);
-  }
-}
-
-void __hipTriggerReportDevices() {
-  const auto* tools_dispatch_table = hip::GetHipToolsDispatchTable();
-  if (tools_dispatch_table->__hipReportDevices_fn) {
-    // If app is started or attached by profiler, __hipReportDevices_fn must be valid
-    std::vector<hipUUID> uuids;
-    uuids.reserve(g_devices.size());
-
-    for (const auto* dev : g_devices) {
-      const auto& info = dev->devices()[0]->info();
-      static_assert(sizeof(info.cuid_) == sizeof(hipUUID::bytes), "UUID size mismatch");
-      uuids.emplace_back();
-      std::copy(std::begin(info.cuid_), std::end(info.cuid_), std::begin(uuids.back().bytes));
-    }
-    tools_dispatch_table->__hipReportDevices_fn(g_devices.size(), uuids.data());
   }
 }
 }  // namespace hip

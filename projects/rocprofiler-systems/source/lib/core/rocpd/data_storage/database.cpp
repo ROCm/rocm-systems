@@ -163,15 +163,17 @@ namespace rocpd
 {
 namespace data_storage
 {
-database::database(int pid, int ppid, std::string output_path)
-: m_path(std::move(output_path))
+database::database(int pid, int ppid)
 {
-    create_directory_for_database_file(m_path);
-    LOG_INFO("Database: {}", m_path);
+    auto _tag        = std::to_string(pid);
+    auto db_name     = std::string{ "rocpd" };
+    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name, _tag);
+    create_directory_for_database_file(abs_db_path);
+    LOG_INFO("Database: {}", abs_db_path);
 
     validate_sqlite3_result(sqlite3_open(":memory:", &_sqlite3_db_temp), "",
                             "database open failed!");
-    validate_sqlite3_result(sqlite3_open(m_path.c_str(), &_sqlite3_db), "",
+    validate_sqlite3_result(sqlite3_open(abs_db_path.c_str(), &_sqlite3_db), "",
                             "database open failed!");
     m_upid = generate_upid(pid, ppid);
 }

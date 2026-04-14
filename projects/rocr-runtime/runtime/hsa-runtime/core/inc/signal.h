@@ -105,14 +105,10 @@ inline void CheckAbortTimeout(const timer::fast_clock::time_point& start_time,
   }
 }
 
-inline void DoMwaitx(int64_t* addr, int64_t val_on_last_check, uint32_t timeout, bool timer_enable) {
+inline void DoMwaitx(int64_t* addr, uint32_t timeout, bool timer_enable = false) {
 #if defined(__i386__) || defined(__x86_64__)
   _mm_monitorx(addr, 0, 0);
-  if (atomic::Load(addr, std::memory_order_relaxed) != val_on_last_check) {
-    return;
-  }
-  // args are extensions (ecx), hints (eax), clock (ebx)
-  _mm_mwaitx(timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0, 0, timeout);
+  _mm_mwaitx(0, timeout, timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0);
 #endif
 }
 } // namespace timer

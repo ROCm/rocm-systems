@@ -10,7 +10,7 @@
 
 #define N 32
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoA_Basic, char, int, float) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoA_Basic, char, int, float) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
@@ -40,7 +40,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoA_Basic, char, int, float) {
   HIP_CHECK(hipFree(reinterpret_cast<void*>(src_device)));
 }
 
-HIP_TEST_CASE(Unit_hipMemcpyDtoA_Negative) {
+TEST_CASE(Unit_hipMemcpyDtoA_Negative) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
@@ -81,7 +81,7 @@ HIP_TEST_CASE(Unit_hipMemcpyDtoA_Negative) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipMemcpyDtoA_BasicPositive) {
+TEST_CASE(Unit_hipMemcpyDtoA_BasicPositive) {
   CHECK_IMAGE_SUPPORT
 
   const size_t width = 1024;

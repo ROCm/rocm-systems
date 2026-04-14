@@ -54,13 +54,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          sparse-checkout: |
-            projects/rocprofiler-compute
-            shared/ctest
-          set-safe-directory: true
-
-      - name: Configure git safe directory
-        run: git config --global --add safe.directory '*'
+          sparse-checkout: projects/rocprofiler-compute
 
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute

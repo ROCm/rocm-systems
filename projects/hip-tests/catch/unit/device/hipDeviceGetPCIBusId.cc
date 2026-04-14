@@ -43,7 +43,7 @@ void getPciBusId(int deviceCount, char** hipDeviceList) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr) {
+TEST_CASE(Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE_FALSE(deviceCount == 0);
@@ -89,7 +89,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Negative_PartialFill) {
+TEST_CASE(Unit_hipDeviceGetPCIBusId_Negative_PartialFill) {
   std::array<char, MAX_DEVICE_LENGTH> busID;
 
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -134,7 +134,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_Negative_PartialFill) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetPCIBusId_NegTst) {
+TEST_CASE(Unit_hipDeviceGetPCIBusId_NegTst) {
   char pciBusId[MAX_DEVICE_LENGTH];
   int device;
   HIP_CHECK(hipGetDevice(&device));

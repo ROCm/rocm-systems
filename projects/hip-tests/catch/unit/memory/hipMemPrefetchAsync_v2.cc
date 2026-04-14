@@ -55,10 +55,11 @@ static std::vector<int> getSupportedDevices() {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
+TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
     return;
   }
 
@@ -167,14 +168,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
  *  - HIP_VERSION >= 7.1
  */
 #if __linux__
-HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
+TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
   auto supportedDevices = getSupportedDevices();
-  if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedNoConcurrentAccess);
-    return;
-  }
-  if (numa_available() < 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostNumaUnavailable);
+  if (supportedDevices.empty() || numa_available() < 0) {
+    HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
+                           "supported devices or No Numa nodes in system");
     return;
   }
 
@@ -290,10 +288,11 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
+TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
     return;
   }
 

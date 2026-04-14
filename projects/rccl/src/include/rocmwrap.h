@@ -27,19 +27,8 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     if( err != HSA_STATUS_SUCCESS ) {				      \
       const char *errStr;				      \
       pfn_hsa_status_string(err, &errStr);	      \
-      WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
+      WARN("HIP failure '%s'", errStr);		      \
       return ncclUnhandledCudaError;			      \
-    }							      \
-} while(false)
-
-#define HSACHECKGOTO(cmd, res, label) do {		      \
-    hsa_status_t err = pfn_##cmd;				      \
-    if( err != HSA_STATUS_SUCCESS ) {				      \
-      const char *errStr;				      \
-      pfn_hsa_status_string(err, &errStr);	      \
-      WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
-      res = ncclUnhandledCudaError;			      \
-      goto label;					      \
     }							      \
 } while(false)
 
@@ -48,7 +37,6 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     hipError_t err = cmd;				      \
     if( err != hipSuccess ) {				      \
       WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__);		      \
-      (void)hipGetLastError(); /* clear sticky HIP error state */   \
       return ncclUnhandledCudaError;			      \
     }							      \
 } while(false)
@@ -57,7 +45,6 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     hipError_t err = cmd;				      \
     if( err != hipSuccess ) {				      \
       WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__);		      \
-      (void)hipGetLastError(); /* clear sticky HIP error state */   \
       res = ncclUnhandledCudaError;			      \
       goto label;					      \
     }							      \
@@ -92,7 +79,6 @@ DECLARE_ROCM_PFN_EXTERN(hsa_status_string);
 extern int ncclCuMemEnable();
 extern int ncclCuMemHostEnable();
 extern int64_t rcclParamForceEnableDMABUF();
-extern int64_t ncclParamDmaBufEnable();
 
 // Handle type used for cuMemCreate()
 extern CUmemAllocationHandleType ncclCuMemHandleType;

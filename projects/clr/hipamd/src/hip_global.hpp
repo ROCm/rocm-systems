@@ -15,21 +15,50 @@
 #include "hip_internal.hpp"
 #include "hip_fatbin.hpp"
 #include "platform/program.hpp"
-#include "platform/kernel.hpp"
-#include "platform/memory.hpp"
 
 namespace hip {
 
 // Forward Declaration
 class CodeObject;
 
-// Cast helpers replacing the old DeviceFunc/DeviceVar wrappers
-inline amd::Kernel* asKernel(hipFunction_t f) { return reinterpret_cast<amd::Kernel*>(f); }
-inline amd::Kernel* asKernel(hipKernel_t k)   { return reinterpret_cast<amd::Kernel*>(k); }
-inline hipFunction_t asHipFunction(amd::Kernel* k) { return reinterpret_cast<hipFunction_t>(k); }
-inline hipDeviceptr_t memDevPtr(const amd::Memory* m) {
-  return reinterpret_cast<hipDeviceptr_t>(m->getSvmPtr());
-}
+// Device Structures
+class DeviceVar {
+ public:
+  DeviceVar(const std::string &name, hipModule_t hmod, int deviceId);
+  ~DeviceVar();
+
+  // Accessors for device ptr and size, populated during constructor.
+  hipDeviceptr_t device_ptr() const { return device_ptr_; }
+  size_t size() const { return size_; }
+  const std::string& name() const { return name_; }
+  void* shadowVptr;
+
+ private:
+  std::string name_;           // Name of the var
+  amd::Memory* amd_mem_obj_;   // amd_mem_obj abstraction
+  hipDeviceptr_t device_ptr_;  // Device Pointer
+  size_t size_;                // Size of the var
+};
+
+class DeviceFunc {
+ public:
+  DeviceFunc(const std::string &name, hipModule_t hmod);
+  ~DeviceFunc();
+
+  std::recursive_mutex dflock_;
+
+  // Converts DeviceFunc to hipFunction_t(used by app) and vice versa.
+  hipFunction_t asHipFunction() { return reinterpret_cast<hipFunction_t>(this); }
+  static DeviceFunc* asFunction(hipFunction_t f) { return reinterpret_cast<DeviceFunc*>(f); }
+  static DeviceFunc* asFunction(hipKernel_t k) { return reinterpret_cast<DeviceFunc*>(k); }
+
+  // Accessor for kernel_ and name_ populated during constructor.
+  const std::string &name() const { return kernel_->name(); }
+  amd::Kernel* kernel() const { return kernel_; }
+
+ private:
+  amd::Kernel* kernel_;  // Kernel ptr referencing to ROCclr Symbol
+};
 
 // Abstract Structures
 class Function {
@@ -37,20 +66,20 @@ class Function {
   Function(const std::string& name, FatBinaryInfo** modules = nullptr);
   ~Function();
 
-  hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod);
-  bool IsValidDynFunc(const void* hfunc);
-  hipError_t GetStatFunc(hipFunction_t* hfunc, int deviceId);
-  hipError_t GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId);
-  void ResizeDFunc(size_t size) { dFunc_.resize(size); }
-  FatBinaryInfo** ModuleInfo() { return modules_; }
-  const std::string& GetName() const { return name_; }
+  // Return DeviceFunc for this this dynamically loaded module
+  hipError_t getDynFunc(hipFunction_t* hfunc, hipModule_t hmod);
+  bool isValidDynFunc(const void* hfunc);
+  // Return Device Func & attr . Generate/build if not already done so.
+  hipError_t getStatFunc(hipFunction_t* hfunc, int deviceId);
+  hipError_t getStatFuncAttr(hipFuncAttributes* func_attr, int deviceId);
+  void resize_dFunc(size_t size) { dFunc_.resize(size); }
+  FatBinaryInfo** moduleInfo() { return modules_; }
+  const std::string& name() const { return name_; }
 
  private:
-  amd::Kernel* BuildKernel(hipModule_t hmod) const;
-
-  std::vector<amd::Kernel*> dFunc_;  //!< Per-device kernel objects; index matches g_devices
-  std::string name_;                 //!< Symbol name for kernel lookup in the program
-  FatBinaryInfo** modules_;          //!< Owning fat binary; nullptr for dynamic COs
+  std::vector<DeviceFunc*> dFunc_;  //!< DeviceFuncObj per Device
+  std::string name_;                //!< name of the func(not unique identifier)
+  FatBinaryInfo** modules_;         //!< static module where it is referenced
 };
 
 class Var {
@@ -66,42 +95,46 @@ class Var {
 
   ~Var();
 
-  hipError_t GetDeviceVar(amd::Memory** mem, int deviceId, hipModule_t hmod);
-  hipError_t GetStatDeviceVar(amd::Memory** mem, int deviceId);
-  hipError_t GetDeviceVarPtr(amd::Memory** mem, int deviceId);
+  // Return DeviceVar for this dynamically loaded module
+  hipError_t getDeviceVar(DeviceVar** dvar, int deviceId, hipModule_t hmod);
 
-  hipError_t AllocateManagedVarPtr();
+  // Return DeviceVar for module Generate/build if not already done so.
+  hipError_t getStatDeviceVar(DeviceVar** dvar, int deviceId);
 
-  void ResizeDVar(size_t size) { dMem_.resize(size); }
+  hipError_t getDeviceVarPtr(DeviceVar** dvar, int deviceId);
 
-  FatBinaryInfo** ModuleInfo() { return modules_; }
-  DeviceVarKind GetVarKind() const { return dVarKind_; }
-  size_t GetSize() const { return size_; }
-  size_t GetAlignment() const { return align_; }
-  const std::string& GetName() const { return name_; }
+  hipError_t allocateManagedVarPtr();
 
-  void* shadowVptr = nullptr;  //!< Host-side textureReference shadow; device-independent
+  void resize_dVar(size_t size) { dVar_.resize(size); }
+  // bool isEmpty_dVar() const { return dVar_.empty(); }
 
-  void* GetManagedVarPtr() const { return managedVarPtr_; }
-  void SetManagedVarInfo(void* pointer, size_t size) {
+
+  FatBinaryInfo** moduleInfo() { return modules_; };
+  DeviceVarKind getVarKind() const { return dVarKind_; }
+  size_t getSize() const { return size_; }
+  size_t getAlignment() const { return align_; }
+  const std::string& getName() const { return name_; }
+
+  void* getManagedVarPtr() const { return managedVarPtr_; }
+  void setManagedVarInfo(void* pointer, size_t size) {
     managedVarPtr_ = pointer;
     size_ = size;
     dVarKind_ = DVK_Managed;
   }
-  bool GetAllocFlag() const { return allocFlag_; }
-  void SetAllocFlag(bool val) { allocFlag_ = val; }
+  bool getAllocFlag() const { return allocFlag_; }
+  void setAllocFlag(bool val) { allocFlag_ = val; }
 
  private:
-  std::vector<amd::Memory*> dMem_;  //!< Per-device memory objects; index matches g_devices
-  std::string name_;                //!< Symbol name for code-object lookup (not a unique key)
-  DeviceVarKind dVarKind_;          //!< Classification: regular, surface, texture, or managed
-  size_t size_;                     //!< Size of the variable in bytes
-  int type_;                        //!< Channel type (textures/surfaces only)
-  int norm_;                        //!< Normalisation flag (textures/surfaces only)
-  FatBinaryInfo** modules_;         //!< Owning fat binary; nullptr for dynamic COs
-  void* managedVarPtr_;             //!< Host pointer to managed-memory allocation (DVK_Managed)
-  size_t align_;                    //!< Alignment of the managed allocation in bytes
-  bool allocFlag_;                  //!< false = host alloc; true = ihipMallocManaged alloc
+  std::vector<DeviceVar*> dVar_;  // DeviceVarObj per Device
+  std::string name_;              // Variable name (not unique identifier)
+  DeviceVarKind dVarKind_;        // Variable kind
+  size_t size_;                   // Size of the variable
+  int type_;                      // Type(Textures/Surfaces only)
+  int norm_;                      // Type(Textures/Surfaces only)
+  FatBinaryInfo** modules_;       // static module where it is referenced
+  void* managedVarPtr_;           // Managed memory pointer with size_ & align_
+  size_t align_;                  // Managed memory alignment
+  bool allocFlag_;                // 0 : host alloc, 1: managed alloc
 };
 
 };  // namespace hip

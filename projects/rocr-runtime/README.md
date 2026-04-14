@@ -51,7 +51,6 @@ Ensure you have the following installed:
 - `pkg-config`
 - `rocm-core`
 - `rocm-llvm-dev`
-- `xxd`
 
 ### ROCr & ROCt Build Instructions
 1. **Clone this repository and cd into its root**

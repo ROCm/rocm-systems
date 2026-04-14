@@ -27,7 +27,7 @@
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Threaded_Basic) {
+TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Threaded_Basic) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(id));
 
@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Threaded_Basic) {
  *  - Platform specific (AMD)
  *  - Multithreaded GPU
  */
-HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic) {
+TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic) {
   const unsigned int max_threads = std::thread::hardware_concurrency();
   const int device_count = HipTest::getDeviceCount();
 
@@ -86,7 +86,7 @@ HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic) {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-HIP_TEST_CASE(Unit_hipGetStreamDeviceId_Negative_Parameters) {
+TEST_CASE(Unit_hipGetStreamDeviceId_Negative_Parameters) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(id));
 

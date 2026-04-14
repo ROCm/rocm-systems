@@ -1,5 +1,3 @@
 ---
 c_compilation:
-  Unit_hipGetDeviceProp_ctest:
-    <<: *level_2
-    tags: [integration, rtc]
+  Unit_hipGetDeviceProp_ctest: *level_2

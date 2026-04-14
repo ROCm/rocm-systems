@@ -120,12 +120,14 @@ static bool hipPerfDevMemWriteSpeed_test() {
  *  - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Perf_hipPerfDevMemWriteSpeed_test) {
+TEST_CASE(Perf_hipPerfDevMemWriteSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    SUCCEED(
+        "Skipped testcase hipPerfDevMemWriteSpeed as"
+        "there is no device to test.");
   } else {
     REQUIRE(true == hipPerfDevMemWriteSpeed_test());
   }

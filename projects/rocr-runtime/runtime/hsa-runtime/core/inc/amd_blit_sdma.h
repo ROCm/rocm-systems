@@ -103,12 +103,6 @@ class BlitSdmaBase : public core::Blit {
   virtual hsa_status_t SubmitLinearCopyBody(void* dst, const void* src, size_t size,
                                             core::Signal& prologue_signal,
                                             core::Signal& body_signal) = 0;
-
-  virtual hsa_status_t SubmitLinearSwapBody(void* addr_a, void* addr_b, size_t size,
-                                            core::Signal& prologue_signal,
-                                            core::Signal& body_signal) = 0;
-
-  virtual bool SwapSupported() const = 0;
 };
 
 template <bool useGCR> class BlitSdma : public BlitSdmaBase {
@@ -213,12 +207,6 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
                                     core::Signal& prologue_signal,
                                     core::Signal& body_signal) override;
 
-  hsa_status_t SubmitLinearSwapBody(void* addr_a, void* addr_b, size_t size,
-                                    core::Signal& prologue_signal,
-                                    core::Signal& body_signal) override;
-
-  bool SwapSupported() const override { return swap_supported_; }
-
  private:
   /// @brief Acquires the address into queue buffer where a new command
   /// packet of specified size could be written. The address that is
@@ -272,9 +260,6 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   void BuildBroadcastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                  void* dst1, void* dst2, const void* src, size_t size);
-
-  void BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
-                            void* addr_a, void* addr_b, size_t size);
 
   void BuildCopyRectCommand(const std::function<void*(size_t)>& append,
                             const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
@@ -349,8 +334,6 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   static const uint32_t broadcast_copy_command_size_;
 
-  static const uint32_t swap_copy_command_size_;
-
   static const uint32_t fill_command_size_;
 
   static const uint32_t fence_command_size_;
@@ -409,9 +392,6 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   /// True if SDMA supports multicast copy  (one src -> multiple dst).
   bool multicast_supported_;
-
-  /// True if SDMA supports linear swap copy (gfx94X+).
-  bool swap_supported_;
 };
 
 

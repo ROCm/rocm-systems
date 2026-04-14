@@ -58,7 +58,7 @@ static bool checkMallocAsync() {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Basic) {
+TEST_CASE(Unit_hipDeviceSetMemPool_Basic) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int dev = 0; dev < num_devices; dev++) {
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSetMemPool_DestroyCurrentMempool) {
+TEST_CASE(Unit_hipDeviceSetMemPool_DestroyCurrentMempool) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int dev = 0; dev < num_devices; dev++) {
@@ -128,7 +128,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_DestroyCurrentMempool) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSetMemPool_functional) {
+TEST_CASE(Unit_hipDeviceSetMemPool_functional) {
   checkMempoolSupported(0) hipMemPool_t mem_pool = nullptr;
   // create explicit mem pool
   hipMemPoolProps PoolProps{};
@@ -155,7 +155,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetMemPool_functional) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSetMemPool_functionalAttribute) {
+TEST_CASE(Unit_hipDeviceSetMemPool_functionalAttribute) {
   checkMempoolSupported(0) hipMemPool_t mem_pool = nullptr;
   // create explicit mem pool
   hipMemPoolProps PoolProps{};

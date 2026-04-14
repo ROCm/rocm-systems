@@ -275,7 +275,7 @@ static void runTestShflXor_4() {
  *    - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Unit_hipShflSync_Xor) {
+TEST_CASE(Unit_hipShflSync_Xor) {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   SECTION("run test for short") {

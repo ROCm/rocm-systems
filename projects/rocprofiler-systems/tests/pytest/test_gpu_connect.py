@@ -47,7 +47,6 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-@pytest.mark.multi_gpu(2)
 @pytest.mark.run_if_gpu_category("not apu or instinct")
 class TestGPUConnect(RocprofsysTest):
     """Tests for GPU connectivity tests."""

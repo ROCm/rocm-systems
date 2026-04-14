@@ -37,6 +37,12 @@ class IPCContext : public Context {
 
   __device__ IPCContext(Backend *b, unsigned int ctx_id);
 
+  __device__ void threadfence_system();
+
+  __device__ void ctx_create();
+
+  __device__ void ctx_destroy();
+
   __device__ void putmem(void *dest, const void *source, size_t nelems, int pe);
 
   __device__ void getmem(void *dest, const void *source, size_t nelems, int pe);

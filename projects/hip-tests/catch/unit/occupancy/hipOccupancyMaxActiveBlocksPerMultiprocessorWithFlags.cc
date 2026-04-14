@@ -34,7 +34,7 @@ static __global__ void kern1(int* t) { *t = 1; }
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs) {
+TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs) {
   hipError_t err;
 
   SECTION("hipOccupancyDefault no shared memory") {
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidAr
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_InvalidArgs) {
+TEST_CASE(Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_InvalidArgs) {
   hipError_t err;
 
   SECTION("Zero block size") {

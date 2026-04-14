@@ -82,19 +82,8 @@ to_string (T v)
     if (v == nullptr)
       return "nullptr";
 
-  /* Handle function pointers explicitly to avoid
-
-       error: implicit conversion between pointer-to-function and
-       pointer-to-object is a Microsoft extension
-       [-Werror,-Wmicrosoft-cast]
-
-     with clang++.
-  */
   std::ostringstream ss;
-  if constexpr (std::is_function_v<std::remove_pointer_t<T>>)
-    ss << reinterpret_cast<const void *> (v);
-  else
-    ss << v;
+  ss << v;
   return ss.str ();
 }
 

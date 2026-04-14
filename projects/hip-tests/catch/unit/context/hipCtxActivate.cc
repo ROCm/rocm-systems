@@ -18,7 +18,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-HIP_TEST_CASE(Unit_hipSetDevice_CheckPrimaryCtxState) {
+TEST_CASE("Unit_hipSetDevice_CheckPrimaryCtxState") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -28,3 +28,4 @@ HIP_TEST_CASE(Unit_hipSetDevice_CheckPrimaryCtxState) {
 
   REQUIRE(is_active == 1);
 }
+

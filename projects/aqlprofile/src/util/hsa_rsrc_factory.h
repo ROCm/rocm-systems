@@ -24,7 +24,11 @@
 #ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
-#include "hsa_includes.h"
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ext_finalize.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
+#include <hsa/hsa_ven_amd_loader.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

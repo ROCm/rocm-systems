@@ -108,7 +108,7 @@ static int HmmAttrPrint() {
 // The following function tests if peers can set hipMemAdviseSetAccessedBy flag
 // on HMM memory prefetched on each of the other gpus
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -118,8 +118,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
 
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
     if (NumDevs < 2) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-      return;
+      SUCCEED(
+          "Test TestSetAccessedByPeer() need atleast two Gpus to test"
+          " the scenario. This system has GPUs less than 2");
     }
     HIP_CHECK(hipMallocManaged(&Hmm, MEM_SIZE, hipMemAttachGlobal));
     for (int i = 0; i < NumDevs; ++i) {
@@ -154,7 +155,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
     HIP_CHECK(hipFree(Hmm));
     REQUIRE(IfTestPassed);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 #endif
@@ -162,7 +165,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
 /* Set AccessedBy flag to device 0 on Hmm memory and prefetch the memory to
    device 1, then probe for AccessedBy flag using hipMemRangeGetAttribute()
    we should still see the said flag is set for device 0*/
-HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -184,7 +187,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
       HIP_CHECK(hipFree(Hmm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
@@ -196,7 +201,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
    PreferredLocation to device 1, check for AccessedBy flag using
    hipMemRangeGetAttribute() it should return 1*/
 
-HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -223,7 +228,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
       HIP_CHECK(hipFree(Hmm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
@@ -231,10 +238,10 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
 /* Set AccessedBy flag to HMM memory launch a kernel and then unset
    AccessedBy, launch kernel. We should not have any access issues*/
 
-HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
-    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
+    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 1024;
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
@@ -268,7 +275,9 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
     HIP_CHECK(hipFree(Hmm));
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
@@ -276,7 +285,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
    the allocated memory and launch a kernel. Kernel should get executed
    successfully without hang or segfault*/
 #if __linux__ && HT_AMD
-HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
+TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
   // The following code block checks for xnack+
   // so as to skip if the device is not xnack+
   hipDeviceProp_t prop;
@@ -318,13 +327,13 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
       HIP_CHECK(hipStreamDestroy(strm));
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test");
   }
 }
 
-HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
+TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
-    HipTest::HIP_SKIP_TEST("cannot set XNACK via environment.");
+    HipTest::HIP_SKIP_TEST("Unable to set xnack on environment variable.");
     return;
   }
 
@@ -338,7 +347,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
     hip::SpawnProc proc("hipMemAdviseTstAlignedAllocMem", true);
     REQUIRE(proc.run() == 0);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test");
   }
 }
 #endif
@@ -349,14 +358,15 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   access denial case arising due to setting ReadMostly only to a particular
   gpu*/
 
-HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
+TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0;
     HIP_CHECK(hipGetDeviceCount(&Ngpus));
     if (Ngpus < 2) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-      return;
+      SUCCEED(
+          "This test needs atleast two gpus to run."
+          "Hence skipping the test.\n");
     }
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     int *Hmm1 = NULL, DataMismatch = 0;
@@ -418,6 +428,8 @@ HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
     HIP_CHECK(hipFree(Hmm));
 
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }

@@ -10,7 +10,7 @@
 
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
-HIP_TEST_CASE(Unit_hipTexRefGetFlags_Negative_Parameters) {
+TEST_CASE(Unit_hipTexRefGetFlags_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   hipCtx_t ctx;
@@ -42,7 +42,7 @@ HIP_TEST_CASE(Unit_hipTexRefGetFlags_Negative_Parameters) {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-HIP_TEST_CASE(Unit_hipTexRefGetFlags_Positive) {
+TEST_CASE(Unit_hipTexRefGetFlags_Positive) {
   CHECK_IMAGE_SUPPORT
 
   hipCtx_t ctx;

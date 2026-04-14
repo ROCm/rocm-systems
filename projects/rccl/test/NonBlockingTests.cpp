@@ -41,7 +41,7 @@ namespace RcclUnitTesting
       for (auto funcType : funcTypes)
       {
         if (testBed.ev.showNames)
-          TEST_INFO("%s %d-ranks Non-Blocking %s",
+          TEST_INFO("%s %d-ranks Non-Blocking %s\n",
                isMultiProcess ? "MP" : "SP", totalRanks, ncclFuncNames[funcType]);
 
         int numInputElements;

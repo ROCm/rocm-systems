@@ -32,10 +32,10 @@
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic) {
+TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
   }
 
@@ -90,10 +90,10 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
+TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
   }
 
@@ -208,17 +208,17 @@ HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Paramete
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-HIP_TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice) {
+TEST_CASE(Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice) {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
   }
 
   int device_count;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("Test requires more than one device");
     return;
   }
   std::vector<hipFunctionLaunchParams> params_list(device_count);

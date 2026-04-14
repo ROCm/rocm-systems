@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "platform/command_utils.hpp"
 #include "platform/perfctr.hpp"
 #include "platform/threadtrace.hpp"
 #include "platform/kernel.hpp"
@@ -2294,26 +2293,9 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result;
-    switch (flags) {
-      case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
-        result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
-        break;
-      }
-      case ROCCLR_STREAM_WRITE_VALUE_INCREMENT: {
-        result = blitMgr().streamOpsIncrement(*memory, value, offset, sizeBytes);
-        break;
-      }
-      case ROCCLR_STREAM_WRITE_VALUE_DECREMENT: {
-        result = blitMgr().streamOpsDecrement(*memory, value, offset, sizeBytes);
-        break;
-      }
-      default: {
-        ShouldNotReachHere();
-        break;
-      }
-    }
-
+    bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWrite(*memory, value, offset,
+                                                                            sizeBytes);
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }

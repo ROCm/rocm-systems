@@ -32,7 +32,7 @@
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-HIP_TEST_CASE(Unit_hipModuleLoad_MultProcess_MultGPU) {
+TEST_CASE(Unit_hipModuleLoad_MultProcess_MultGPU) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount != 0);

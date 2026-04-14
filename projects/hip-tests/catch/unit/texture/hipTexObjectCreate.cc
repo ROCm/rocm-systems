@@ -8,7 +8,7 @@
 
 #define N 256
 
-HIP_TEST_CASE(Unit_TexObjectCreate_NullptrParams) {
+TEST_CASE(Unit_TexObjectCreate_NullptrParams) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -35,7 +35,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_NullptrParams) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear) {
+TEST_CASE(Unit_TexObjectCreate_TypeLinear) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -73,7 +73,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_IncompleteInit) {
+TEST_CASE(Unit_TexObjectCreate_TypeLinear_IncompleteInit) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_IncompleteInit) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_EdgeCases) {
+TEST_CASE(Unit_TexObjectCreate_TypeLinear_EdgeCases) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -187,7 +187,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeLinear_EdgeCases) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray) {
+TEST_CASE(Unit_TexObjectCreate_TypeArray) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -214,7 +214,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray_NullptrArray) {
+TEST_CASE(Unit_TexObjectCreate_TypeArray_NullptrArray) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -232,7 +232,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeArray_NullptrArray) {
 }
 
 #if 0
-HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmapped) {
+TEST_CASE(Unit_TexObjectCreate_TypeMipmapped) {
   CHECK_IMAGE_SUPPORT
 
   hipMipmappedArray_t mipmapped_array;
@@ -259,7 +259,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmapped) {
   HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmaped_IncompleteInit) {
+TEST_CASE(Unit_TexObjectCreate_TypeMipmaped_IncompleteInit) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -293,7 +293,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypeMipmaped_IncompleteInit) {
 }
 #endif
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D) {
+TEST_CASE(Unit_TexObjectCreate_TypePitch2D) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -336,7 +336,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_IncompleteInit) {
+TEST_CASE(Unit_TexObjectCreate_TypePitch2D_IncompleteInit) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -402,7 +402,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_IncompleteInit) {
   CTX_DESTROY();
 }
 
-HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_EdgeCases) {
+TEST_CASE(Unit_TexObjectCreate_TypePitch2D_EdgeCases) {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 

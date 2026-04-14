@@ -272,11 +272,13 @@ bool TestOnDevice(int deviceId) {
   return true;
 }
 
-HIP_TEST_CASE(Perf_hipPerfVMMAllocSpeed_test) {
+TEST_CASE(Perf_hipPerfVMMAllocSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices <= 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    SUCCEED(
+        "Skipped testcase hipPerfBufferCopySpeed as"
+        "there is no device to test.");
   } else {
     // Test on Primary Device first
     int deviceId = 0;

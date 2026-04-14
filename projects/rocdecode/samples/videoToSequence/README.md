@@ -4,13 +4,17 @@ The VideoToSequence sample illustrates decoding a single packetized video stream
 
 ## Prerequisites:
 
-* Install [rocDecode](https://rocm.docs.amd.com/projects/rocDecode/en/latest/install/rocDecode-build-and-install.html)
+* Install [rocDecode](../../README.md#build-and-install-instructions)
 
 * [FFMPEG](https://ffmpeg.org/about.html)
+
+    * On `Ubuntu`
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
+  
+    * On `RHEL`/`SLES` - install ffmpeg development packages manually or use [rocDecode-setup.py](../../rocDecode-setup.py) script
 
 ## Build
 

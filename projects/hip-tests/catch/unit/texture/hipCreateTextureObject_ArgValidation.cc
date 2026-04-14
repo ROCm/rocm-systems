@@ -37,7 +37,7 @@
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
+TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
   CHECK_IMAGE_SUPPORT
 
   float* texBuf;
@@ -80,7 +80,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
       // API expected to return failure. Test skipped
       // on nvidia as api returns success and would lead
       // to unexpected behavior with app.
-      WARN("Skipping section: " << HipTest::SkipReason::kApiUnsupportedOnNvidia);
+      WARN("Texture Desc(nullptr) skipped on nvidia");
     }
   }
 

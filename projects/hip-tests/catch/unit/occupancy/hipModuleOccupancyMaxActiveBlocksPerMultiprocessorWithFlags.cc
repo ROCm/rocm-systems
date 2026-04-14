@@ -15,7 +15,7 @@ parameters are invalid
 */
 #include "occupancy_common.hh"
 
-HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters) {
+TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters) {
   hipModule_t module;
   hipFunction_t function;
   int numBlocks = 0;
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_N
   HIP_CHECK(hipModuleUnload(module));
 }
 
-HIP_TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Positive_RangeValidation) {
+TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Positive_RangeValidation) {
   hipDeviceProp_t devProp;
   hipModule_t module;
   hipFunction_t function;

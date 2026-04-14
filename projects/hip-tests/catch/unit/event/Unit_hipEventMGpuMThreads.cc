@@ -191,7 +191,7 @@ void testEventMGpuMThreads(int nThreads = 1) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
+TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
 
 /**
  * Test Description
@@ -204,13 +204,13 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
+TEST_CASE(Unit_hipEventMGpuMThreads_2) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
     testEventMGpuMThreads(numDevices);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as number of devices is less than 2");
   }
 }
 
@@ -225,7 +225,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_2) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventMGpuMThreads_3) {
+TEST_CASE(Unit_hipEventMGpuMThreads_3) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -234,7 +234,7 @@ HIP_TEST_CASE(Unit_hipEventMGpuMThreads_3) {
     fprintf(stderr, "Second round\n");
     testEventMGpuMThreads(numDevices);
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("skipped the testcase as number of devices is less than 2");
   }
 }
 

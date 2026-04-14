@@ -26,7 +26,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipStreamQuery_spt_WithNoWork) {
+TEST_CASE(Unit_hipStreamQuery_spt_WithNoWork) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") { HIP_CHECK(hipStreamQuery_spt(stream)); }
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipStreamQuery_spt_WithNoWork) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipStreamQuery_spt_WithFinishedWork) {
+TEST_CASE(Unit_hipStreamQuery_spt_WithFinishedWork) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") {
@@ -79,7 +79,7 @@ HIP_TEST_CASE(Unit_hipStreamQuery_spt_WithFinishedWork) {
  *  - HIP_VERSION >= 6.2
  */
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipStreamQuery_spt_NegativeCases) {
+TEST_CASE(Unit_hipStreamQuery_spt_NegativeCases) {
   SECTION("Submit Work On Stream And Query Null Stream") {
     hipStream_t ValidStream;
     HIP_CHECK(hipStreamCreate(&ValidStream));
@@ -108,7 +108,7 @@ HIP_TEST_CASE(Unit_hipStreamQuery_spt_NegativeCases) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipStreamQuery_spt_WithPendingWork) {
+TEST_CASE(Unit_hipStreamQuery_spt_WithPendingWork) {
   hipStream_t waitingStream{nullptr};
   HIP_CHECK(hipStreamCreate(&waitingStream));
   LaunchDelayKernel(std::chrono::milliseconds(500), waitingStream);

@@ -32,7 +32,7 @@ static __global__ void squareKernel(int* arr) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations) {
+TEST_CASE(Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations) {
   DISABLE_CORE_DUMPS();
 
   int* devMem = nullptr;
@@ -91,11 +91,11 @@ HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoDevices) {
+TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoDevices) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
     return;
   }
 
@@ -159,7 +159,7 @@ HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoDevices) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoStreams) {
+TEST_CASE(Unit_hipGetLastError_KernelFailure_TwoStreams) {
   DISABLE_CORE_DUMPS();
 
   int* devMem = nullptr;

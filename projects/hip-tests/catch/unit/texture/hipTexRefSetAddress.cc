@@ -10,7 +10,7 @@
 
 texture<float, 1, hipReadModeElementType> tex;
 
-HIP_TEST_CASE(Unit_hipTexRefSetAddress_Basic) {
+TEST_CASE(Unit_hipTexRefSetAddress_Basic) {
   CHECK_IMAGE_SUPPORT
   hipDeviceptr_t device_ptr;
   hipModule_t module = nullptr;
@@ -31,7 +31,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress_Basic) {
   HIP_CHECK(hipFree(tex_buffer));
 }
 
-HIP_TEST_CASE(Unit_hipTexRefSetAddress_Positive) {
+TEST_CASE(Unit_hipTexRefSetAddress_Positive) {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
@@ -57,7 +57,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress_Positive) {
   HIP_CHECK(hipFree(tex_buffer));
 }
 
-HIP_TEST_CASE(Unit_hipTexRefSetAddress_Negative) {
+TEST_CASE(Unit_hipTexRefSetAddress_Negative) {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;

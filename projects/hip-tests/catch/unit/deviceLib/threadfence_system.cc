@@ -35,25 +35,22 @@ __global__ void gpu_round_robin(const int id, const int num_dev, const int num_i
   round_robin(id, num_dev, num_iter, data, flag);
 }
 
-HIP_TEST_CASE(Unit_threadfence_system) {
+TEST_CASE(Unit_threadfence_system) {
   int num_gpus = 0;
   HIP_CHECK(hipGetDeviceCount(&num_gpus));
   REQUIRE(num_gpus > 0);
 
-  volatile int* data = nullptr;
+  volatile int* data;
   if (hipHostMalloc(&data, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
-    return;
+    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
   }
 
   constexpr int init_data = 1000;
   *data = init_data;
 
-  volatile int* flag = nullptr;
+  volatile int* flag;
   if (hipHostMalloc(&flag, sizeof(int), hipHostMallocCoherent) != hipSuccess) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
-    HIP_CHECK(hipHostFree((void*)data));
-    return;
+    SUCCEED("Memory allocation failed. Skip test. Is SVM atomic supported?");
   }
   *flag = 0;
 

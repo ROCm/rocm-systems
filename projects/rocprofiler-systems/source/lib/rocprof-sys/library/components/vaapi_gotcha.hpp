@@ -71,9 +71,6 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
     static void start();
     static void stop();
 
-    static void pause();
-    static void resume();
-
     static void audit(const gotcha_data&, audit::incoming, VADisplay dpy,
                       VAContextID context, VASurfaceID render_target);
     static void audit(const gotcha_data&, audit::incoming, VADisplay dpy,
@@ -133,9 +130,6 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy);
 
     static void audit(const gotcha_data&, audit::outgoing, VAStatus);
-
-private:
-    static std::mutex s_mutex;
 };
 }  // namespace component
 

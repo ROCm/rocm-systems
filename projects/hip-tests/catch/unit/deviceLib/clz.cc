@@ -72,7 +72,7 @@ __global__ void clz_HIP_kernel(unsigned int* a, unsigned int* b, unsigned int* c
   }
 }
 
-HIP_TEST_CASE(Unit_clz) {
+TEST_CASE(Unit_clz) {
   using namespace std;
 
   unsigned int* hostA;

@@ -23,7 +23,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Parameters) {
+TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT;
 
   SECTION("array is nullptr") {
@@ -31,7 +31,7 @@ HIP_TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Parameters) {
   }
 
   SECTION("double free") {
-    WARN("Skipping section: double-free checking isn't supported.");
+    INFO("Double free cheching isn't supported. Skipped.");
     return;
     hipMipmappedArray_t array;
     hipChannelFormatDesc desc = hipCreateChannelDesc<float>();

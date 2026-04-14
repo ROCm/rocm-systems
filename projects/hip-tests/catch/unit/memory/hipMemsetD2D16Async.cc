@@ -30,7 +30,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemsetD2D16Async_BasicFunctional) {
+TEST_CASE(Unit_hipMemsetD2D16Async_BasicFunctional) {
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -71,7 +71,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16Async_BasicFunctional) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemsetD2D16Async_UnEvenRowsCols) {
+TEST_CASE(Unit_hipMemsetD2D16Async_UnEvenRowsCols) {
   hipDeviceptr_t A_d;
   int rows, cols;
   constexpr int memsetval = 5;
@@ -111,7 +111,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16Async_UnEvenRowsCols) {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemsetD2D16Async_NegTsts) {
+TEST_CASE(Unit_hipMemsetD2D16Async_NegTsts) {
   hipDeviceptr_t A_d;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;

@@ -109,7 +109,7 @@ using hipExtStreamCreateWithCUMaskTest::N;
 /**
  * Scenario: Validates functionality of hipStreamAddCallback with created stream.
  */
-HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc) {
+TEST_CASE(Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc) {
   float *A_d, *C_d;
   size_t Nbytes = N * sizeof(float);
   cbDone = false;
@@ -156,7 +156,7 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc) {
 /**
  * Scenario: Validates functionality of stream with cu mask.
  */
-HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
+TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
   const int KNumPartition = NUM_CU_PARTITIONS;
   float *dA[KNumPartition], *dC[KNumPartition];
   float *hA, *hC;
@@ -169,7 +169,7 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    WARN("Didn't find any GPU! skipping the test!");
     return;
   }
 
@@ -288,7 +288,7 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
  * Scenario: Create a stream with all CU masks disabled (0x00000000).
  * Verify that default CU mask is set for the stream.
  */
-HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_AllCUsMasked) {
+TEST_CASE(Unit_hipExtStreamCreateWithCUMask_AllCUsMasked) {
   HIP_CHECK(hipSetDevice(0));
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
@@ -312,7 +312,7 @@ HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_AllCUsMasked) {
 /**
  * Scenario: Negative Testing of hipExtStreamCreateWithCUMask.
  */
-HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_NegTst) {
+TEST_CASE(Unit_hipExtStreamCreateWithCUMask_NegTst) {
   std::vector<uint32_t> defaultCUMask;
   REQUIRE(hipSuccess == hipSetDevice(0));
   hipDeviceProp_t props;

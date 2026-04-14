@@ -30,7 +30,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetChannelDesc_CreateAndGet) {
+TEST_CASE(Unit_hipGetChannelDesc_CreateAndGet) {
   CHECK_IMAGE_SUPPORT;
 
   hipChannelFormatDesc chan_test, chan_desc;
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipGetChannelDesc_CreateAndGet) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipGetChannelDesc_Negative_Parameters) {
+TEST_CASE(Unit_hipGetChannelDesc_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT;
 
   hipChannelFormatDesc chan_test, chan_desc;

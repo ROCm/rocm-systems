@@ -12,7 +12,9 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Basic) {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Basic) {
+  CHECK_IMAGE_SUPPORT
+
   constexpr bool async = false;
 
 #if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
@@ -35,7 +37,9 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Basic) {
 #endif
 }
 
-HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior) {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior) {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Host to Device") { Memcpy3DHtoDSyncBehavior(DrvMemcpy3DWrapper<>, true); }
@@ -51,13 +55,15 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior) {
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(DrvMemcpy3DWrapper<>, true); }
 }
 
-HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Parameters) {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
   constexpr bool async = false;
   Memcpy3DZeroWidthHeightDepth<async>(DrvMemcpy3DWrapper<>);
 }
 
 // Disabled on AMD due to defect - EXSWHTEC-238
-HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Array) {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -65,7 +71,9 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Array) {
   SECTION("Array from/to Device") { DrvMemcpy3DArrayDeviceShell<async>(DrvMemcpy3DWrapper<>); }
 }
 
-HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
+TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 
   constexpr auto NegativeTests = [](hipPitchedPtr dst_ptr, hipPos dst_pos, hipPitchedPtr src_ptr,
@@ -202,7 +210,9 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Capture) {
+TEST_CASE(Unit_hipDrvMemcpy3D_Capture) {
+  CHECK_IMAGE_SUPPORT
+
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
   LinearAllocGuard3D<int> device_alloc(extent);
   LinearAllocGuard<int> host_alloc(

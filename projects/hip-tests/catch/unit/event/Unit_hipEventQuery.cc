@@ -28,7 +28,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventQuery_DifferentDevice) {
+TEST_CASE(Unit_hipEventQuery_DifferentDevice) {
   hipEvent_t event1{}, event2{};
   HIP_CHECK(hipEventCreate(&event1));
   HIP_CHECK(hipEventCreate(&event2));

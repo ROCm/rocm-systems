@@ -42,7 +42,7 @@ void getGranularity(size_t* granularity, hipMemAllocationGranularity_flags optio
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_AllGPUs) {
+TEST_CASE(Unit_hipMemGetAllocationGranularity_AllGPUs) {
   HIP_CHECK(hipFree(0));
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -75,7 +75,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_AllGPUs) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_NegativeTests) {
+TEST_CASE(Unit_hipMemGetAllocationGranularity_NegativeTests) {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   hipDevice_t device;
@@ -127,7 +127,7 @@ HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_NegativeTests) {
 #endif
 }
 
-HIP_TEST_CASE(Unit_hipMemGetAllocationGranularity_Capture) {
+TEST_CASE(Unit_hipMemGetAllocationGranularity_Capture) {
   CTX_CREATE();
 
   size_t granularity = 0;

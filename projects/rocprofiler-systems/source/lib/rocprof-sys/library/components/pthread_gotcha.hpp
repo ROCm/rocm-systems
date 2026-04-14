@@ -48,9 +48,6 @@ struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
     static void start();
     static void stop();
 
-    static void pause();
-    static void resume();
-
     static std::set<native_handle_t> get_native_handles();
 };
 }  // namespace rocprofsys

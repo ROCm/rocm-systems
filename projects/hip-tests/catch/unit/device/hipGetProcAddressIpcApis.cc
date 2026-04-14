@@ -27,7 +27,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
+TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
   int N = 40;
   int Nbytes = N * sizeof(int);
 
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
+TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
   int fd[2];
   REQUIRE(pipe(fd) == 0);
 

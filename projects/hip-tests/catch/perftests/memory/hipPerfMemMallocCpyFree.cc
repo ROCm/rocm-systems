@@ -118,12 +118,14 @@ static bool hipPerfMemMallocCpyFree_test() {
  *  - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Perf_hipPerfMemMallocCpyFree_test) {
+TEST_CASE(Perf_hipPerfMemMallocCpyFree_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
+    SUCCEED(
+        "Skipped testcase hipPerfDevMemReadSpeed as"
+        "there is no device to test.");
   } else {
     REQUIRE(true == hipPerfMemMallocCpyFree_test());
   }

@@ -1,10 +1,8 @@
 """
-This script determines which build flags and tests to run based on the
-GitHub event type and configured subtrees/projects.
+This script determines which build flag and tests to run based on SUBTREES
 
-For push and pull_request events, SUBTREES is used to decide which parts
-of the repository changed and which projects to run. Nightly (schedule)
-and some workflow_dispatch invocations do not require SUBTREES.
+Required environment variables:
+  - SUBTREES
 """
 
 import fnmatch
@@ -150,21 +148,6 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
 
 
 def retrieve_projects(args):
-    # Nightly (schedule): use same test coverage as TheRock submodule bump PRs —
-    # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
-    if args.get("is_nightly"):
-        nightly_config = project_map.get("nightly")
-        if not nightly_config:
-            logging.warning("No 'nightly' entry in project_map, nightly will have no jobs")
-            return []
-        # Run full coverage on both Linux and Windows (no path-based skip).
-        return [
-            {
-                "cmake_options": nightly_config.get("cmake_options", ""),
-                "projects_to_test": nightly_config.get("projects_to_test", ""),
-            }
-        ]
-
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
     base_ref = args.get("base_ref")
@@ -207,6 +190,10 @@ def retrieve_projects(args):
                 subtrees = args.get("input_subtrees").split()
             else:
                 subtrees = list(matched_subtrees)
+
+        # Scheduled run (nightly runs) → evaluate all subtrees
+        elif args.get("is_nightly"):
+            subtrees = list(subtree_to_project_map.keys())
 
         # Default case
         else:
@@ -254,12 +241,7 @@ def retrieve_projects(args):
         config = project_map.get(project)
         if not config:
             continue
-        cmake_options = config.get("cmake_options", [])
-        # Handle both array and string formats for backwards compatibility
-        if isinstance(cmake_options, str):
-            flags = [f.strip() for f in cmake_options.split()]
-        else:
-            flags = cmake_options
+        flags = [f.strip() for f in config.get("cmake_options", "").split()]
         if "-DTHEROCK_ENABLE_ALL=ON" in flags:
             enable_all = True
         merged_flags.update(flags)
@@ -267,14 +249,9 @@ def retrieve_projects(args):
         if tests:
             merged_tests.update(t.strip() for t in tests.split(","))
     if enable_all:
-        final_flags_list = ["-DTHEROCK_ENABLE_ALL=ON"]
+        final_flags = "-DTHEROCK_ENABLE_ALL=ON"
     else:
-        final_flags_list = sorted(merged_flags)
-    # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
-    final_flags_list.append("-DTHEROCK_ENABLE_CORE=ON")
-    # Removing duplicates
-    final_flags_list = list(set(final_flags_list))
-    final_flags = " ".join(final_flags_list)
+        final_flags = " ".join(sorted(merged_flags))
 
     return [
         {

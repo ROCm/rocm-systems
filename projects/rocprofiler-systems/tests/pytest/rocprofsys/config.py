@@ -243,7 +243,6 @@ class RocprofsysConfig:
             "ROCPROFSYS_LOG_LEVEL": "trace",
             "ROCPROFSYS_SAMPLING_FREQ": "300",
             "ROCPROFSYS_SAMPLING_DELAY": "0.05",
-            "ROCPROFSYS_SAMPLING_GPUS": "all",
             "OMP_PROC_BIND": "spread",
             "OMP_PLACES": "threads",
             "OMP_NUM_THREADS": "2",

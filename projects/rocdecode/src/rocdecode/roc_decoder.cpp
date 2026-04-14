@@ -32,24 +32,24 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
         if (hip_interop_[i].hip_mapped_device_mem != nullptr) {
             hipError_t hip_status = hipFree(hip_interop_[i].hip_mapped_device_mem);
             if (hip_status != hipSuccess) {
-                CriticalLog(g_rocdec_logger, "hipFree failed for picture idx = " + TOSTR(i));
+                logger_.CriticalLog(MakeMsg("hipFree failed for picture idx = " + TOSTR(i)));
             }
         }
         if (hip_interop_[i].hip_ext_mem != nullptr) {
             hipError_t hip_status = hipDestroyExternalMemory(hip_interop_[i].hip_ext_mem);
             if (hip_status != hipSuccess) {
-                CriticalLog(g_rocdec_logger, "hipDestroyExternalMemory failed for picture idx = " + TOSTR(i));
+                logger_.CriticalLog(MakeMsg("hipDestroyExternalMemory failed for picture idx = " + TOSTR(i)));
             }
         }
     }
 }
 
  rocDecStatus RocDecoder::InitializeDecoder() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLog(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     if (decoder_create_info_.num_decode_surfaces < 1) {
-        CriticalLog(g_rocdec_logger, "Invalid number of decode surfaces.");
-        FunctionExitLog(g_rocdec_logger);
+        logger_.CriticalLog(MakeMsg("Invalid number of decode surfaces."));
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     hip_interop_.resize(decoder_create_info_.num_decode_surfaces);
@@ -58,49 +58,49 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
     }
     rocdec_status = va_video_decoder_.InitializeDecoder();
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(g_rocdec_logger, "Failed to initialize the VAAPI Video decoder.");
-        FunctionExitLog(g_rocdec_logger);
+        logger_.CriticalLog(MakeMsg("Failed to initilize the VAAPI Video decoder."));
+        FunctionExitLog(logger_);
         return rocdec_status;
     }
-    FunctionExitLog(g_rocdec_logger);
+    FunctionExitLog(logger_);
     return rocdec_status;
  }
 
 rocDecStatus RocDecoder::DecodeFrame(RocdecPicParams *pic_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLog(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = va_video_decoder_.SubmitDecode(pic_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        ErrorLog(g_rocdec_logger, "Decode submission is not successful.");
+        logger_.ErrorLog(MakeMsg("Decode submission is not successful."));
     }
-    FunctionExitLog(g_rocdec_logger);
+    FunctionExitLog(logger_);
     return rocdec_status;
 }
 
 rocDecStatus RocDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLog(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = va_video_decoder_.GetDecodeStatus(pic_idx, decode_status);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        ErrorLog(g_rocdec_logger, "Failed to query the decode status.");
+        logger_.ErrorLog(MakeMsg("Failed to query the decode status."));
     }
-    FunctionExitLog(g_rocdec_logger);
+    FunctionExitLog(logger_);
     return rocdec_status;
 }
 
 rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLog(logger_);
     if (reconfig_params == nullptr || reconfig_params->width == 0 || reconfig_params->height == 0 ||
         reconfig_params->num_decode_surfaces < 1 || reconfig_params->bit_depth_minus_8 > 2) {
-        FunctionExitLog(g_rocdec_logger);
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecStatus rocdec_status;
     for (int pic_idx = 0; pic_idx < hip_interop_.size(); pic_idx++) {
         rocdec_status = FreeVideoFrame(pic_idx);
         if (rocdec_status != ROCDEC_SUCCESS) {
-            ErrorLog(g_rocdec_logger, "Releasing the video frame for picture idx = " + TOSTR(pic_idx) + " failed during reconfiguration.");
-            FunctionExitLog(g_rocdec_logger);
+            logger_.ErrorLog(MakeMsg("Releasing the video frame for picture idx = " + TOSTR(pic_idx) + " failed during reconfiguration."));
+            FunctionExitLog(logger_);
             return rocdec_status;
         }
     }
@@ -109,19 +109,19 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
     }
     rocdec_status = va_video_decoder_.ReconfigureDecoder(reconfig_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        CriticalLog(g_rocdec_logger, "Reconfiguration of the decoder failed.");
-        FunctionExitLog(g_rocdec_logger);
+        logger_.CriticalLog(MakeMsg("Reconfiguration of the decoder failed."));
+        FunctionExitLog(logger_);
         return rocdec_status;
     }
-    FunctionExitLog(g_rocdec_logger);
+    FunctionExitLog(logger_);
     return rocdec_status;
 }
 
 rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32_t horizontal_pitch[3], RocdecProcParams *vid_postproc_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLog(logger_);
     if (pic_idx >= hip_interop_.size() || dev_mem_ptr == nullptr || vid_postproc_params == nullptr) {
-        CriticalLog(g_rocdec_logger, "Invalid parameters.");
-        FunctionExitLog(g_rocdec_logger);
+        logger_.CriticalLog(MakeMsg("Invalid parameters."));
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
@@ -129,8 +129,8 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     // wait on current surface to make sure that it is ready for the HIP interop
     rocdec_status = va_video_decoder_.SyncSurface(pic_idx);
     if (rocdec_status != ROCDEC_SUCCESS) {
-        ErrorLog(g_rocdec_logger, "Failed to export surface for picture idx = " + TOSTR(pic_idx));
-        FunctionExitLog(g_rocdec_logger);
+        logger_.ErrorLog(MakeMsg("Failed to export surface for picture idx = " + TOSTR(pic_idx)));
+        FunctionExitLog(logger_);
         return rocdec_status;
     }
 
@@ -142,8 +142,8 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
 
         rocdec_status = va_video_decoder_.ExportSurface(pic_idx, va_drm_prime_surface_desc);
         if (rocdec_status != ROCDEC_SUCCESS) {
-            ErrorLog(g_rocdec_logger, "Failed to export surface for picture idx = " + TOSTR(pic_idx));
-            FunctionExitLog(g_rocdec_logger);
+            logger_.ErrorLog(MakeMsg("Failed to export surface for picture idx = " + TOSTR(pic_idx)));
+            FunctionExitLog(logger_);
             return rocdec_status;
         }
 
@@ -183,14 +183,14 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         *&dev_mem_ptr[2] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[2];
         horizontal_pitch[2] = hip_interop_[pic_idx].pitch[2];
     }
-    FunctionExitLog(g_rocdec_logger);
+    FunctionExitLog(logger_);
     return rocdec_status;
 }
 
 rocDecStatus RocDecoder::FreeVideoFrame(int pic_idx) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLog(logger_);
     if (pic_idx >= hip_interop_.size()) {
-        FunctionExitLog(g_rocdec_logger);
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
 
@@ -200,6 +200,6 @@ rocDecStatus RocDecoder::FreeVideoFrame(int pic_idx) {
         CHECK_HIP(hipDestroyExternalMemory(hip_interop_[pic_idx].hip_ext_mem));
 
     memset((void *)&hip_interop_[pic_idx], 0, sizeof(hip_interop_[pic_idx]));
-    FunctionExitLog(g_rocdec_logger);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }

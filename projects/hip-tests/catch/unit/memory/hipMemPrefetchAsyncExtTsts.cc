@@ -55,7 +55,7 @@ static int HmmAttrPrint() {
    call hipMemAdvise() on the memory and apply the flags ReadMostly,
    AccessedBy, and PreferredLocation for gpus other than gpu 0 and verify
    the flags using hipMemGetAttribute()*/
-HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
+TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
@@ -104,10 +104,14 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
       HIP_CHECK(hipFree(Hmm));
       REQUIRE(IfTestPassed);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+      SUCCEED(
+          "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+          "attribute. Hence skipping the testing with Pass result.\n");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED(
+        "This test needs atleast 2 gpus, but the system has less than"
+        " 2 gpus hence skipping the test");
   }
 }
 
@@ -116,7 +120,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
     AccessedBy using hipMemGetAttribute() and validate if AccessedBy is still
     set to gpu1. Similar tests are done with ReadMostly and PreferredLocation
     flags */
-HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
+TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
@@ -195,15 +199,19 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
       HIP_CHECK(hipStreamDestroy(strm));
       REQUIRE(IfTestPassed);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+      SUCCEED(
+          "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+          "attribute. Hence skipping the testing with Pass result.\n");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED(
+        "This test needs atleast 2 gpus, but the system has less than"
+        " 2 gpus hence skipping the test");
   }
 }
 
 /*Test Case description: Negative testing with hipMemPrefetchAsync() api*/
-HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
+TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     int *Hmm = nullptr, MemSz = 4096 * 4, NumElms = MemSz / 4, InitVal = 123;
@@ -294,7 +302,9 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
     REQUIRE(IfTestPassed);
 
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
@@ -302,7 +312,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
 /* Test Case description: In this test case I am trying to allocate HMM memory
    which is not multiple of page Size, but still trying to launch kernel and
    see if we are getting values as expected.*/
-HIP_TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
+TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
   int *Hmm = nullptr, NumElms = 4096 * 2, InitVal = 123;
   hipStream_t strm;
   bool IfTestPassed = true;

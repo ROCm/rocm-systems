@@ -30,6 +30,13 @@ std::vector<std::string> syncMsg = {"event", "stream", "device"};
 static constexpr int numElements{1024 * 16};
 static constexpr size_t sizeBytes{numElements * sizeof(int)};
 
+#if HT_AMD
+static __global__ void kerTestMemAccess(char* buf) {
+  size_t myId = threadIdx.x + blockDim.x * blockIdx.x;
+  buf[myId] = VALUE;
+}
+#endif
+
 void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags, int syncMethod,
                       std::string msg) {
   std::cerr << "test: CheckHostPointer " << msg << " eventFlags = " << std::hex << eventFlags
@@ -86,7 +93,7 @@ Allocates the memory using hipHostMalloc API
 Launches the kernel and performs vector addition.
 validates thes result.
 */
-HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
+TEST_CASE(Unit_hipHostMalloc_Basic) {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -95,7 +102,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    SUCCEED("Does support HostPinned Memory");
   } else {
     float *A_h, *B_h, *C_h;
     float *A_d, *B_d, *C_d;
@@ -140,7 +147,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
 This testcase verifies the hipHostMalloc API by passing nullptr
 to the pointer variable
 */
-HIP_TEST_CASE(Unit_hipHostMalloc_Negative) {
+TEST_CASE(Unit_hipHostMalloc_Negative) {
 #if HT_AMD
   {
     // Stimulate error condition:
@@ -159,7 +166,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-HIP_TEST_CASE(Unit_hipHostMalloc_NonCoherent) {
+TEST_CASE(Unit_hipHostMalloc_NonCoherent) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent));
   const char* ptrType = "non-coherent";
@@ -177,7 +184,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-HIP_TEST_CASE(Unit_hipHostMalloc_Coherent) {
+TEST_CASE(Unit_hipHostMalloc_Coherent) {
   int* A = nullptr;
   if (hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocCoherent) == hipSuccess) {
     const char* ptrType = "coherent";
@@ -191,7 +198,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Coherent) {
 
     HIP_CHECK(hipFreeHost(A));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCoherentHostAllocFailed);
+    SUCCEED("Coherence memory allocation failed. Is SVM atomic supported?");
   }
 }
 
@@ -203,7 +210,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-HIP_TEST_CASE(Unit_hipHostMalloc_Default) {
+TEST_CASE(Unit_hipHostMalloc_Default) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes));
   const char* ptrType = "default";
@@ -217,11 +224,11 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Default) {
 This testcase verifies the hipHostMalloc API by
 1. Allocating more memory than total system RAM. Should return hipErrorOutOfMemory.
 */
-HIP_TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
+TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   char* host_ptr = nullptr;
   const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
   if (total_ram_mb == 0) {
-    HipTest::HIP_SKIP_TEST("total system memory could not be queried.");
+    WARN("Skipping test as total system memory could not be queried");
     return;
   }
 
@@ -232,7 +239,7 @@ HIP_TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   REQUIRE(host_ptr == nullptr);
 }
 
-HIP_TEST_CASE(Unit_hipHostMalloc_Capture) {
+TEST_CASE(Unit_hipHostMalloc_Capture) {
   int* host_ptr = nullptr;
   hipError_t capture_error = hipSuccess;
 

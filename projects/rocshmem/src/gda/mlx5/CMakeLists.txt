@@ -25,7 +25,6 @@ target_sources(
   ${PROJECT_NAME}
   PRIVATE
     backend_gda_mlx5.cpp
-    provider_gda_mlx5.cpp
 )
 
 if(GDA_MLX5)

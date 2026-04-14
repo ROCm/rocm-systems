@@ -23,7 +23,6 @@
 #pragma once
 
 #include "lib/common/static_object.hpp"
-#include "lib/rocprofiler-sdk-attach/table.h"
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
 #include <hsa/hsa_api_trace.h>
@@ -120,9 +119,6 @@ private:
 
 void
 initialize(HsaApiTable* table);
-
-void
-initialize(RocAttachDispatchTable* table);
 
 void
 finalize();

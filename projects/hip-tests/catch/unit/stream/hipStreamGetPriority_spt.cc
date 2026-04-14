@@ -26,7 +26,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_BasicTst) {
+TEST_CASE(Unit_hipStreamGetPriority_spt_BasicTst) {
   int priority_low = 0;
   int priority_high = 0;
   int devID = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_BasicTst) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_NegativeCases) {
+TEST_CASE(Unit_hipStreamGetPriority_spt_NegativeCases) {
   // stream as nullptr and priority as nullptr
   auto res = hipStreamGetPriority_spt(nullptr, nullptr);
   REQUIRE(res == hipErrorInvalidValue);
@@ -112,7 +112,7 @@ HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_NegativeCases) {
  */
 
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipStreamGetPriority_spt_StreamsWithCUMask) {
+TEST_CASE(Unit_hipStreamGetPriority_spt_StreamsWithCUMask) {
   hipStream_t stream{};
   int priority = 0;
   int priority_normal = 0;

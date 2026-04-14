@@ -35,7 +35,7 @@ void testInvalidDescription(HIP_ARRAY3D_DESCRIPTOR desc) {
 }
 }  // namespace
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_happy, char, uchar2, uint2, int4, short4, float,
+TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_happy, char, uchar2, uint2, int4, short4, float,
                    float2, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -75,7 +75,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_happy, char, uchar2, uint2, int4, s
   }
 }
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, ushort2,
+TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, ushort2,
                    unsigned char, float, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -91,7 +91,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, usho
 #else
   desc.Flags = GENERATE(0, hipArraySurfaceLoadStore);
   if (desc.Flags == hipArraySurfaceLoadStore) {
-    HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-58.");
+    HipTest::HIP_SKIP_TEST("EXSWCPHIPT-58");
     return;
   }
 #endif
@@ -197,7 +197,7 @@ constexpr HIP_ARRAY3D_DESCRIPTOR defaultDescriptor(unsigned int flags, size_t si
 }
 
 // Providing the array pointer as nullptr should return an error
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullArrayPtr) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_NullArrayPtr) {
   CHECK_IMAGE_SUPPORT
 
   auto desc = defaultDescriptor(0, 64);
@@ -207,7 +207,7 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullArrayPtr) {
 }
 
 // Providing the description pointer as nullptr should return an error
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullDescPtr) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_NullDescPtr) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -217,7 +217,7 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullDescPtr) {
 
 
 // Zero width arrays are not allowed
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroWidth) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroWidth) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -231,7 +231,7 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroWidth) {
 }
 
 // Zero height arrays are only allowed for 1D arrays and layered arrays
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroHeight) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroHeight) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -253,7 +253,7 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroHeight) {
 }
 
 // Arrays must be created with a valid data format
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFormat) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFormat) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -269,7 +269,7 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFormat) {
 }
 
 // An array must have either 1,2, or 4 channels
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumChannels) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_NumChannels) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -281,7 +281,7 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumChannels) {
 }
 
 // Using invalid flags should result in an error
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFlags) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFlags) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -308,7 +308,7 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFlags) {
 
 
 // hipArray3DCreate should handle the max numeric value gracefully.
-HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumericLimit) {
+TEST_CASE(Unit_hipArray3DCreate_Negative_NumericLimit) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -320,12 +320,12 @@ HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumericLimit) {
 }
 
 // texture gather arrays may only be 2D
-HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_Negative_Non2DTextureGather, char, uint2, int4,
+TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_Negative_Non2DTextureGather, char, uint2, int4,
                    float2, float4) {
   CHECK_IMAGE_SUPPORT
 
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
+  HipTest::HIP_SKIP_TEST("Texture Gather arrays not supported using AMD backend");
   return;
 #endif
   using vec_info = vector_info<TestType>;

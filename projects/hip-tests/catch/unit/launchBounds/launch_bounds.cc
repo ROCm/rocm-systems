@@ -83,7 +83,7 @@ template <bool out_of_bounds> void LaunchBoundsWrapper(const int threads_per_blo
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Kernel_Launch_bounds_Positive_Basic) {
+TEST_CASE(Unit_Kernel_Launch_bounds_Positive_Basic) {
   auto threads_per_block = GENERATE(1, kMaxThreadsPerBlock / 2, kMaxThreadsPerBlock);
   LaunchBoundsWrapper<false>(threads_per_block);
 }
@@ -103,7 +103,7 @@ HIP_TEST_CASE(Unit_Kernel_Launch_bounds_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Kernel_Launch_bounds_Negative_OutOfBounds) {
+TEST_CASE(Unit_Kernel_Launch_bounds_Negative_OutOfBounds) {
   auto threads_per_block =
       GENERATE(-1 * kMaxThreadsPerBlock, -1, kMaxThreadsPerBlock + 1, 2 * kMaxThreadsPerBlock);
   LaunchBoundsWrapper<true>(threads_per_block);
@@ -125,7 +125,7 @@ HIP_TEST_CASE(Unit_Kernel_Launch_bounds_Negative_OutOfBounds) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Kernel_Launch_bounds_Negative_Parameters_RTC) {
+TEST_CASE(Unit_Kernel_Launch_bounds_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kMaxThreadsNotInt, kMinWarpsNotInt);

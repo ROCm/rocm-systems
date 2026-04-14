@@ -783,9 +783,8 @@ bool Buffer::create(bool alloc_local) {
         return false;
       }
     } else {
-      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(),
-                                          memFlags & ROCCLR_MEM_HSA_UNCACHED
-                                          ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0);
+      // If this is physical memory request, then get an handle and store it in user data
+      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(), 0);
     }
 
     if (owner()->getUserData().hsa_handle == 0) {

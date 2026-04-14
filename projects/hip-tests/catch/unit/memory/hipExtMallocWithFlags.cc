@@ -8,7 +8,7 @@
 #include <hip/hip_runtime_api.h>
 #include <utils.hh>
 
-HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Basic) {
+TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Basic) {
   void* ptr = nullptr;
 
   SECTION("hipDeviceMallocDefault") {
@@ -22,7 +22,7 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Basic) {
 
   SECTION("hipDeviceMallocFinegrained") {
     if (!DeviceAttributesSupport(0, hipDeviceAttributeFineGrainSupport)) {
-      WARN("Skipping section: " << HipTest::SkipReason::kFineGrainHwUnsupported);
+      HipTest::HIP_SKIP_TEST("Device does not support fine-grained memory allocations");
       return;
     }
     const auto alloc_size =
@@ -40,19 +40,19 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Basic) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Zero_Size) {
+TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Zero_Size) {
   void* ptr = reinterpret_cast<void*>(0x1);
   const auto flag = GENERATE(hipDeviceMallocDefault, hipDeviceMallocFinegrained);
   HIP_CHECK(hipExtMallocWithFlags(&ptr, 0, flag));
   REQUIRE(ptr == nullptr);
 }
 
-HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Alignment) {
+TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Alignment) {
   void *ptr1 = nullptr, *ptr2 = nullptr;
   const auto flag = GENERATE(hipDeviceMallocDefault, hipDeviceMallocFinegrained);
   if (flag == hipDeviceMallocFinegrained &&
       !DeviceAttributesSupport(0, hipDeviceAttributeFineGrainSupport)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    HipTest::HIP_SKIP_TEST("Device does not support fine-grained memory allocations");
     return;
   }
   HIP_CHECK(hipExtMallocWithFlags(&ptr1, 1, flag));
@@ -63,7 +63,7 @@ HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Positive_Alignment) {
   HIP_CHECK(hipFree(ptr2));
 }
 
-HIP_TEST_CASE(Unit_hipExtMallocWithFlags_Negative_Parameters) {
+TEST_CASE(Unit_hipExtMallocWithFlags_Negative_Parameters) {
   SECTION("Invalid flags") {
     void* ptr = nullptr;
     HIP_CHECK_ERROR(

@@ -274,7 +274,7 @@ void hipPerfSampleRate::checkData(uint* ptr) {
  *  - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Perf_hipPerfSampleRate_test) {
+TEST_CASE(Perf_hipPerfSampleRate_test) {
   hipPerfSampleRate sampleTypes;
 
   REQUIRE(true == sampleTypes.open());

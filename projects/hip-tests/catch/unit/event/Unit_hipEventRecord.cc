@@ -37,7 +37,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventRecord) {
+TEST_CASE(Unit_hipEventRecord) {
   constexpr size_t N = 1024;
   constexpr int iterations = 1;
 
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_hipEventRecord) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventRecord_Negative) {
+TEST_CASE(Unit_hipEventRecord_Negative) {
   SECTION("Nullptr event") {
     HIP_CHECK_ERROR(hipEventRecord(nullptr, nullptr), hipErrorInvalidResourceHandle);
   }

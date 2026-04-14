@@ -147,14 +147,10 @@ bool WDDMDevice::QuerySegmentInfo()
 
     SegmentInfo info;
     info.segment_id = i;
-
-    if (seg.Aperture) {
-      info.kind = SegmentKind::kAperture;
-    } else {
-      info.kind = seg.SegmentProperties.SystemMemory
-                      ? SegmentKind::kSystemMemory
-                      : SegmentKind::kLocalMemory;
-    }
+    info.segment_type = seg.SegmentProperties.SegmentType;
+    info.system_memory = seg.SegmentProperties.SystemMemory;
+    info.aperture = seg.Aperture;
+    info.commit_limit = seg.CommitLimit;
 
     segment_infos_.push_back(info);
   }
@@ -162,22 +158,23 @@ bool WDDMDevice::QuerySegmentInfo()
   return true;
 }
 
-bool WDDMDevice::FindSegmentId(SegmentKind segment_kind, uint32_t* segment_id)
+bool WDDMDevice::GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE segment_type,
+                              uint32_t &segment_id)
 {
   for (const auto& seg_info : segment_infos_) {
-    if (seg_info.kind == segment_kind) {
-      *segment_id = seg_info.segment_id;
+    if (seg_info.segment_type == segment_type) {
+      segment_id = seg_info.segment_id;
       return true;
     }
   }
-
+  pr_err("Failed to get segment id for type %u\n", segment_type);
   return false;
 }
 
-/*Local heap(dedicated GPU memory) includes visible heap and invisible heap.
- *Non local heap refers to shared GPU memory and it is system memory.
+/*Local heap(dedicated GPU memory) includes visiable heap and invisiable heap.
+ *Non local heap refers to shared GPU memory and it is sytem memory.
  */
-hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
+uint64_t WDDMDevice::VramAvail(void) {
   D3DKMT_QUERYSTATISTICS stats;
   NTSTATUS ret;
   uint64_t usedVis = 0;
@@ -185,16 +182,14 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
   uint64_t usedNonLocal = 0;
   uint32_t segmentId = 0;
 
-  *available_bytes = 0;
-
   // wait fence complete
   uint64_t value = page_fence_value_.load();
-  if (!CpuWait(&page_syncobj_, &value, 1, false))
+  if(!CpuWait(&page_syncobj_, &value, 1, false))
     return HSA_STATUS_ERROR;
 
   if (IsDgpu()) {
     // local cpu-visible memory
-    if (!FindSegmentId(SegmentKind::kLocalMemory, &segmentId))
+    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_MEMORY, segmentId))
       return HSA_STATUS_ERROR;
 
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
@@ -207,35 +202,21 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
 
     // local invisible memory
     if (device_info_.local_invisible_heap_size) {
-      uint32_t invisibleSegmentId = 0;
-      bool foundInvisible = false;
-      // Use the next local-memory segment after visible FB as invisible FB.
-      for (const auto& seg_info : segment_infos_) {
-        if (seg_info.kind == SegmentKind::kLocalMemory &&
-            seg_info.segment_id > segmentId) {
-          invisibleSegmentId = seg_info.segment_id;
-          foundInvisible = true;
-          break;
-        }
-      }
-
-      if (!foundInvisible) {
-        return HSA_STATUS_ERROR;
-      }
+      segmentId++;
       memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
       stats.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
       stats.AdapterLuid = adapter_luid_;
-      stats.QuerySegment.SegmentId = invisibleSegmentId;
+      stats.QuerySegment.SegmentId = 1;
 
       ret = DXCORE_CALL(D3DKMTQueryStatistics(&stats));
       if (ret == 0)
         usedInv = stats.QueryResult.SegmentInformation.BytesResident;
     }
 
-    *available_bytes = LocalHeapSize() - usedVis - usedInv;
+    return LocalHeapSize() - usedVis - usedInv;
   } else {
     // APU - NonLocal memory
-    if (!FindSegmentId(SegmentKind::kSystemMemory, &segmentId))
+    if(!GetSegmentId(D3DKMT_QUERYSTATISTICS_SEGMENT_TYPE_SYSMEM, segmentId))
       return HSA_STATUS_ERROR;
 
     memset(&stats, 0, sizeof(D3DKMT_QUERYSTATISTICS));
@@ -246,10 +227,8 @@ hsa_status_t WDDMDevice::VramAvail(uint64_t* available_bytes) {
     if (ret == 0)
       usedNonLocal = stats.QueryResult.SegmentInformation.BytesResident;
 
-    *available_bytes = NonLocalHeapSize() - usedNonLocal;
+    return NonLocalHeapSize() - usedNonLocal;
   }
-
-  return HSA_STATUS_SUCCESS;
 }
 
 bool WDDMDevice::CreateDevice(void) {

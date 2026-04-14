@@ -53,6 +53,7 @@ jobs:
       - name: Determine Linux projects to run
         id: linux_projects
         env:
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "linux"
         run: |
@@ -61,6 +62,7 @@ jobs:
       - name: Determine Windows projects to run
         id: windows_projects
         env:
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "windows"
         run: |

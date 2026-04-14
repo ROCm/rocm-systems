@@ -15,7 +15,6 @@ unsafeAtomicAdd Scenarios with hipRTC:
 */
 
 #include <hip_test_checkers.hh>
-#include <string>
 #include <hip_test_common.hh>
 #include <hip_test_features.hh>
 #include <hip/hiprtc.h>
@@ -46,7 +45,7 @@ __global__ void AtomicCheck(double* Ad, double *result) {
    Output: unsafeAtomicAdd API will not work and returns 0 so
    the initial value will be intact. expected O/P is 5
 */
-HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -89,7 +88,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
     HIP_CHECK(hipModuleLoadData(&module, code.data()));
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      SUCCEED("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -121,7 +120,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }
 
@@ -134,7 +136,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float
    Output: unsafeAtomicAdd API will not work and r`eturns 0 so
    the initial value will be intact. expected O/P is 5
 */
-HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -179,7 +181,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      SUCCEED("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -211,7 +213,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }
 
@@ -221,7 +226,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, 
    Output: unsafeAtomicAdd API will not work and returns 0 so
    the initial value will be intact. expected O/P is 5*/
 
-HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -266,7 +271,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      SUCCEED("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -298,7 +303,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }
 
@@ -307,7 +315,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, doubl
    is compiled using hipRTC and with compilation flag -mno-unsafe-fp-atomics
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: Expected O/P is 15 */
-HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -351,7 +359,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
     HIP_CHECK(hipModuleLoadData(&module, code.data()));
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      SUCCEED("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -377,7 +385,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }
 
@@ -387,7 +398,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, fl
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: Expected O/P is 15 */
 
-HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -432,7 +443,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      SUCCEED("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -458,7 +469,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }
 
@@ -468,7 +482,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, floa
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: O/P is 15 */
 
-HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -513,7 +527,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
     HIP_CHECK(hipModuleGetFunction(&f_kernel, module, "AtomicCheck"));
 
     if (props.canMapHostMemory != 1) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+      SUCCEED("Does not support HostPinned Memory");
     } else {
       TestType *A_h, *result;
       TestType *A_d, *result_d;
@@ -539,6 +553,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
     }
     HIP_CHECK(hipModuleUnload(module));
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }

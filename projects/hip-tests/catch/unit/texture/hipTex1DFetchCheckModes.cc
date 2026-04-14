@@ -90,7 +90,7 @@ static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filt
 }
 
 
-HIP_TEST_CASE(Unit_tex1Dfetch_CheckModes) {
+TEST_CASE(Unit_tex1Dfetch_CheckModes) {
   CHECK_IMAGE_SUPPORT
   (void) hipGetLastError();  // Prevent negative tests affecting this
 

@@ -32,7 +32,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_tex2DLayered_Positive_ReadModeElementType, char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_tex2DLayered_Positive_ReadModeElementType, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -104,7 +104,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2DLayered_Positive_ReadModeElementType, char, uns
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_tex2DLayered_Positive_ReadModeNormalizedFloat, char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_tex2DLayered_Positive_ReadModeNormalizedFloat, char, unsigned char,
                    short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
 

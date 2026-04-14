@@ -83,7 +83,7 @@ void runTestGlobalArray() {
   HIP_CHECK(hipFree(Ad));
 }
 
-HIP_TEST_CASE(Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn) {
+TEST_CASE(Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn) {
   runTestConstantGlobalVar();
   runTestGlobalArray();
 }

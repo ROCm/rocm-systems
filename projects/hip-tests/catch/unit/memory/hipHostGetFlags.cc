@@ -69,7 +69,7 @@ inline void checkFlags(unsigned int expected, unsigned int obtained) {
   REQUIRE(expected == obtained);
 }
 
-HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
+TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
@@ -85,7 +85,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Device Property canMapHostMemory is not set");
     return;
   } else {
     // Allocate using the generated flags combos
@@ -102,7 +102,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_flagCombos) {
 }
 
 // Test Allocation with flags and getting flags in another thread
-HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
+TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&prop, device));
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Device Property canMapHostMemory is not set");
     return;
   } else {
     // Make sure we allocate before trying to get the flags
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_DifferentThreads) {
 }
 
 // Test behaviour of hipHostGetFlags with invalid args
-HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
+TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
   constexpr auto SIZE{LEN * sizeof(int)};
   int* A_h{nullptr};
 
@@ -146,7 +146,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
 
   // Skip test if device does not support the property canMapHostMemory
   if (prop.canMapHostMemory != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Device Property canMapHostMemory is not set");
     return;
   } else {
     SECTION("Invalid flag ptr being passed to hipHostGetFlags") {
@@ -205,7 +205,7 @@ HIP_TEST_CASE(Unit_hipHostGetFlags_InvalidArgs) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipHostGetFlags_Capture) {
+TEST_CASE(Unit_hipHostGetFlags_Capture) {
   unsigned int host_flags = 0;
   void* host_ptr = nullptr;
   constexpr size_t kAllocSize = 1024;

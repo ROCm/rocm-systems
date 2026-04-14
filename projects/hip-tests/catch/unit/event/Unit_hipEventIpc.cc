@@ -28,7 +28,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipEventIpc) {
+TEST_CASE(Unit_hipEventIpc) {
   size_t N = 4 * 1024 * 1024;
   unsigned threadsPerBlock = 256;
   int iterations = 1;

@@ -37,11 +37,11 @@ static constexpr int nIters = 10;                     // interation number for t
  * ------------------------
  * - HIP_VERSION >= 7.0
  */
-HIP_TEST_CASE(Perf_PerfBufferCopySpeedAll2All_Inter_GPU) {
+TEST_CASE(Perf_PerfBufferCopySpeedAll2All_Inter_GPU) {
   int nGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    fprintf(stderr, "Need at least 2 GPUs, skipped!\n");
     return;
   }
   int** ArrayOfDevicePointers = reinterpret_cast<int**>(malloc(nGpus * sizeof(int*)));

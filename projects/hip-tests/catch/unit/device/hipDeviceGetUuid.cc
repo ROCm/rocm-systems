@@ -53,7 +53,7 @@ std::atomic<int> tState{1};  // 0:fail, 1:pass, 2:skip
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetUuid_Positive) {
+TEST_CASE(Unit_hipDeviceGetUuid_Positive) {
   hipDevice_t device;
   hipUUID uuid{0};
   bool uuidValid = false;
@@ -91,7 +91,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_Positive) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetUuid_Negative) {
+TEST_CASE(Unit_hipDeviceGetUuid_Negative) {
   int numDevices = 0;
   hipDevice_t device;
   hipUUID uuid;
@@ -137,7 +137,7 @@ static inline std::vector<int> parseVisibleDevices() {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-HIP_TEST_CASE(Unit_hipDeviceGetUuid_From_RocmInfo) {
+TEST_CASE(Unit_hipDeviceGetUuid_From_RocmInfo) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   assert(deviceCount > 0);
@@ -211,7 +211,7 @@ HIP_TEST_CASE(Unit_hipDeviceGetUuid_From_RocmInfo) {
  */
 // Guarding it against NVIDIA as this test is faling on it.
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties) {
+TEST_CASE(Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties) {
   int deviceCount = 0;
   hipDevice_t device;
   hipDeviceProp_t prop;
@@ -300,7 +300,7 @@ auto getUUIDlistWithoutRocmInfo() {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
+TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
   std::map<int, std::string> uuid_map;
   auto getNthElem = [&uuid_map](int pos) {
      return std::next(uuid_map.begin(), pos)->second;
@@ -343,7 +343,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run()== 1);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
       }
     }
 #endif
@@ -360,7 +360,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
       }
     }
 #ifdef __linux__
@@ -425,7 +425,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
       }
     }
     SECTION("Set Same UUID/Device ordinal more than once ") {
@@ -442,7 +442,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
         REQUIRE(proc.run() == 2);
         unsetenv("HIP_VISIBLE_DEVICES");
       } else {
-        WARN("Skipping section: " << HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+        HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
       }
     }
     SECTION("Set Env Variable in child process") {
@@ -467,7 +467,7 @@ HIP_TEST_CASE(Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES) {
     }
 #endif
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);  // NOLINT
+    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 1");  // NOLINT
   }
 }
 
@@ -521,7 +521,7 @@ void setEnv() {
     setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
   } else {
     tState = 2;
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // NOLINT
+    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
   }
 }
 /**
@@ -538,7 +538,7 @@ void setEnv() {
  *  - HIP_VERSION >= 6.2
  */
 
-HIP_TEST_CASE(Unit_UUID_setEnv_Thread) {
+TEST_CASE(Unit_UUID_setEnv_Thread) {
   // Create Thread one
   std::thread t1(setEnv);
   t1.join();

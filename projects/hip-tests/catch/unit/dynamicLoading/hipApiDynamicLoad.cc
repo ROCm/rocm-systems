@@ -144,9 +144,7 @@ void test_dynamicLoading(void* sym_hipGetDevice, void* sym_hipMalloc, void* sym_
   free(A_h);
   free(C_h);
 }
-
-#if HT_AMD
-HIP_TEST_CASE(Unit_hipApiDynamicLoad_hipGetProcAddress) {
+TEST_CASE(Unit_hipApiDynamicLoad_hipGetProcAddress) {
   void* sym_hipGetDevice;
   void* sym_hipMalloc;
   void* sym_hipMemcpyHtoD;
@@ -179,7 +177,7 @@ HIP_TEST_CASE(Unit_hipApiDynamicLoad_hipGetProcAddress) {
 }
 
 
-HIP_TEST_CASE(Unit_hipApiDynamicLoad) {
+TEST_CASE(Unit_hipApiDynamicLoad) {
   void* handle = dlopen("libamdhip64.so", RTLD_LAZY);
   REQUIRE(handle != NULL);
 
@@ -199,7 +197,6 @@ HIP_TEST_CASE(Unit_hipApiDynamicLoad) {
                       sym_hipModuleLoad, sym_hipModuleUnload, sym_hipGetDeviceProperties,
                       sym_hipModuleGetFunction, sym_hipModuleLaunchKernel);
 }
-#endif
 
 /**
  * End doxygen group DynamicLoading.

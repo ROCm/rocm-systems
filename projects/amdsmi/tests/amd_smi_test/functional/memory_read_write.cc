@@ -32,7 +32,6 @@
 #include <string>
 #include <vector>
 
-#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 
 /**
@@ -96,7 +95,6 @@ void TestMemoryReadWrite::Run(void) {
   amdsmi_status_t err;
 
   TestBase::Run();
-  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -111,11 +109,7 @@ void TestMemoryReadWrite::Run(void) {
     amdsmi_uma_carveout_info_t uma_info;
     memset(&uma_info, 0, sizeof(uma_info));
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_uma_carveout_info", "gpu=" + std::to_string(i),
-                       VERB(STANDARD));
     err = amdsmi_get_gpu_uma_carveout_info(processor_handles_[i], &uma_info);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
-                          AMDSMI_STATUS_NOT_SUPPORTED);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**UMA Carveout not supported on this device." << std::endl;
@@ -165,12 +159,7 @@ void TestMemoryReadWrite::Run(void) {
       ScopedEnvVar dry_run("AMDSMI_DRY_RUN", "1");
 
       // Test setting to current value (should succeed)
-      DISPLAY_AMDSMI_API(
-          "amdsmi_set_gpu_uma_carveout",
-          "gpu=" + std::to_string(i) + ", index=" + std::to_string(uma_info.current_index),
-          VERB(STANDARD));
       err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], uma_info.current_index);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
         std::cout << "\t  Set to current index succeeded (DRY_RUN)" << std::endl;
@@ -180,11 +169,7 @@ void TestMemoryReadWrite::Run(void) {
       if (valid_count > 1) {
         for (uint32_t j = 0; j < uma_info.num_options; ++j) {
           if (j != uma_info.current_index && strlen(uma_info.options[j].description) > 0) {
-            DISPLAY_AMDSMI_API("amdsmi_set_gpu_uma_carveout",
-                               "gpu=" + std::to_string(i) + ", index=" + std::to_string(j),
-                               VERB(STANDARD));
             err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], j);
-            DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
             CHK_ERR_ASRT(err)
             IF_VERB(STANDARD) {
               std::cout << "\t  Set to different index " << j << " succeeded (DRY_RUN)"
@@ -196,12 +181,7 @@ void TestMemoryReadWrite::Run(void) {
       }
 
       // Test setting to invalid index (should fail with AMDSMI_STATUS_INVAL)
-      DISPLAY_AMDSMI_API("amdsmi_set_gpu_uma_carveout",
-                         "gpu=" + std::to_string(i) +
-                             ", index=" + std::to_string(uma_info.num_options + 10) + " (invalid)",
-                         VERB(STANDARD));
       err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], uma_info.num_options + 10);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       IF_VERB(STANDARD) {
         std::cout << "\t  Invalid index correctly rejected (DRY_RUN)" << std::endl;
@@ -217,10 +197,7 @@ void TestMemoryReadWrite::Run(void) {
   amdsmi_ttm_info_t ttm_info;
   memset(&ttm_info, 0, sizeof(ttm_info));
 
-  DISPLAY_AMDSMI_API("amdsmi_get_ttm_info", "", VERB(STANDARD));
   err = amdsmi_get_ttm_info(&ttm_info);
-  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
   if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
     IF_VERB(STANDARD) {
       std::cout << "\t**TTM pages_limit not supported on this system." << std::endl;
@@ -253,11 +230,7 @@ void TestMemoryReadWrite::Run(void) {
       ScopedEnvVar dry_run("AMDSMI_DRY_RUN", "1");
 
       // Test setting TTM pages limit to current value
-      DISPLAY_AMDSMI_API("amdsmi_set_ttm_pages_limit",
-                         std::to_string(ttm_info.current_pages) + " pages (current)",
-                         VERB(STANDARD));
       err = amdsmi_set_ttm_pages_limit(ttm_info.current_pages);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
         std::cout << "\t  Set TTM to current value succeeded (DRY_RUN)" << std::endl;
@@ -266,10 +239,7 @@ void TestMemoryReadWrite::Run(void) {
       // Test setting TTM to a different value
       uint64_t test_pages = ttm_info.current_pages / 2;
       if (test_pages > 0) {
-        DISPLAY_AMDSMI_API("amdsmi_set_ttm_pages_limit",
-                           std::to_string(test_pages) + " pages (half of current)", VERB(STANDARD));
         err = amdsmi_set_ttm_pages_limit(test_pages);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
           std::cout << "\t  Set TTM to different value succeeded (DRY_RUN)" << std::endl;
@@ -277,18 +247,14 @@ void TestMemoryReadWrite::Run(void) {
       }
 
       // Test setting TTM to 0 (should fail with AMDSMI_STATUS_INVAL)
-      DISPLAY_AMDSMI_API("amdsmi_set_ttm_pages_limit", "0 pages (invalid)", VERB(STANDARD));
       err = amdsmi_set_ttm_pages_limit(0);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       IF_VERB(STANDARD) {
         std::cout << "\t  Invalid pages value (0) correctly rejected (DRY_RUN)" << std::endl;
       }
 
       // Test resetting TTM pages limit
-      DISPLAY_AMDSMI_API("amdsmi_reset_ttm_pages_limit", "", VERB(STANDARD));
       err = amdsmi_reset_ttm_pages_limit();
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) { std::cout << "\t  Reset TTM succeeded (DRY_RUN)" << std::endl; }
     }

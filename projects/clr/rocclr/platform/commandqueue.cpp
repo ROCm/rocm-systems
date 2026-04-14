@@ -128,16 +128,6 @@ bool HostQueue::terminate() {
   return true;
 }
 
-void HostQueue::FlushSubmissionBatch() {
-  if (size_ > DEBUG_CLR_MAX_BATCH_SIZE) {
-    auto marker = new Marker(*this, false);
-    if (marker != nullptr) {
-      marker->enqueue();
-      marker->release();
-    }
-  }
-}
-
 void HostQueue::finishCommand(Command* command) {
   if (command == nullptr) {
     command = getLastQueuedCommand(true);

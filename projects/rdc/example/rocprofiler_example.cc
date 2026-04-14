@@ -88,7 +88,7 @@ int run() {
     return cleanup();
   }
   if (count == 0) {
-    std::cout << "No GPUs find on the system ";
+    std::cout << "No GPUs find on the sytem ";
     return cleanup();
   } else {
     std::cout << count << " GPUs found in the system.\n";
@@ -159,7 +159,7 @@ int run() {
   }
   std::cout << "Start to watch group:" << group_id << ", field_group:" << field_group_id
             << std::endl;
-  std::cout << "Sleep a few seconds before retrieve the data ...\n";
+  std::cout << "Sleep a few seconds before retreive the data ...\n";
 
   // Since we are running the RDC_OPERATION_MODE_AUTO mode, the rdc_update_
   // all_fields() will be called periodically at background. If running as
@@ -167,7 +167,7 @@ int run() {
   // periodically to take samples.
   usleep(5 * 10 * 1000);  // sleep 0.05 seconds before fetch the stats
 
-  // Retrieve the field and group information from RDC
+  // Retreive the field and group information from RDC
   rdc_group_info_t group_info;
   rdc_field_group_info_t field_info;
   result = rdc_group_gpu_get_info(rdc_handle, group_id, &group_info);

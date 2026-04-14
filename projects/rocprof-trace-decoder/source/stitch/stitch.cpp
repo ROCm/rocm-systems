@@ -30,7 +30,11 @@
 
 #define MAX_FAILED_STTICHES 1000
 
-inline bool skippable(InstCategory line) { return line != InstCategory::SALU && line <= InstCategory::IMMED; };
+inline bool skippable(InstCategory line)
+{
+    return line == InstCategory::VALU || line == InstCategory::VMEM || line == InstCategory::FLAT ||
+           line == InstCategory::IMMED || line == InstCategory::LDS;
+};
 
 inline bool is_trivial_match(int wave, InstCategory line)
 {

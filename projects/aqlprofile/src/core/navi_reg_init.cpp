@@ -29,6 +29,8 @@
 #include <shared_mutex>
 #include "ip_discovery.h"
 
+#define __maybe_unused __attribute__((__unused__))
+
 #include "linux/registers/sienna_cichlid_ip_offset.h"
 #include "util/reg_offsets.h"
 

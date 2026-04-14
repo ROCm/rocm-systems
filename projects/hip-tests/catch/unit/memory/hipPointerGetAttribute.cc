@@ -37,7 +37,7 @@ behaviour
   hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
   HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
   if (value == 0) {                                                                              \
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                  \
+    printf("Machine does not support VMM. Skipping this test..");                                \
     return;                                                                                      \
   }                                                                                              \
 }
@@ -57,8 +57,9 @@ static __global__ void var_update(int* data) {
 
 /* Allocate memory using different Allocation APIs and check whether
    correct memory type and device oridinal are returned */
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
+TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
   CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipSetDevice(0));
   size_t pitch_A;
   size_t width{NUM_W * sizeof(char)};
@@ -108,7 +109,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
  * Validates the device variable to check whether the
  * data is updated or not.
  */
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
+TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -137,7 +138,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
  * from peer GPU device.It validates the memory type and
  * device ordinal in peer GPU
  */
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
+TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -160,12 +161,10 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
                                        reinterpret_cast<hipDeviceptr_t>(A_d)));
       REQUIRE(data == 0);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Machine does not seem to have P2P");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    HIP_CHECK(hipFree(A_d));
-    return;
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
   HIP_CHECK(hipFree(A_d));
 }
@@ -174,7 +173,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
    hipPointerGetAttribute API with HIP_POINTER_ATTRIBUTE_BUFFER_ID,
    DeAllocate and Allocate the memory again and
    ensure that the buffer ID is unique */
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_BufferID) {
+TEST_CASE(Unit_hipPointerGetAttribute_BufferID) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -196,7 +195,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_BufferID) {
    and ensure that it matches with CUDA result
 */
 #if HT_AMD
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_HostDeviceOrdinal) {
+TEST_CASE(Unit_hipPointerGetAttribute_HostDeviceOrdinal) {
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
   int* A_h;
@@ -216,7 +215,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_HostDeviceOrdinal) {
 /* Allocate managed memory with different flags and trigger
    hipPointerGetAttribute with the following flags HIP_POINTER_ATTRIBUTE_MAPPED
    and verify the behaviour */
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
+TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -245,7 +244,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
 }
 
 /* This testcase verifies negative scenarios of hipPointerGetAttribute API */
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
+TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   constexpr size_t N{100};
@@ -323,7 +322,8 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
 
 /* Allocate memory using different Allocation APIs and check whether
    IPC CAPABLE attribute returns correctly */
-HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
+TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
+
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = N * sizeof(int);
   unsigned int datatype;
@@ -340,6 +340,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
   size_t pitch_A;
   size_t width{NUM_W * sizeof(char)};
   SECTION("Malloc Pitch Allocation") {
+    CHECK_IMAGE_SUPPORT
     char* A_d;
     HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
     HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,

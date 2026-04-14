@@ -19,12 +19,12 @@ template <typename T> static __global__ void vector_square_generic(T* C_d, const
 }
 
 #ifdef GENERIC_COMPRESSED
-HIP_TEST_CASE(Unit_test_generic_target_in_compressed_fatbin) {
+TEST_CASE(Unit_test_generic_target_in_compressed_fatbin) {
 #else
-HIP_TEST_CASE(Unit_test_generic_target_in_regular_fatbin) {
+TEST_CASE(Unit_test_generic_target_in_regular_fatbin) {
 #endif
   if (!isGenericTargetSupported()) {
-    HipTest::HIP_SKIP_TEST("generic target is not supported on this device.");
+    fprintf(stderr, "Generic target test is skipped\n");
     return;
   }
   float *A_d, *C_d;
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Unit_test_generic_target_in_regular_fatbin) {
 
 #ifndef NO_GENERIC_TARGET_ONLY_TEST
 #ifdef GENERIC_COMPRESSED
-HIP_TEST_CASE(Unit_test_generic_target_only_in_compressed_fatbin) {
+TEST_CASE(Unit_test_generic_target_only_in_compressed_fatbin) {
 #ifdef __linux__
   const char* cmd =
       "chmod  u+x ./hipSquareGenericTargetOnlyCompressed && ./hipSquareGenericTargetOnlyCompressed";
@@ -90,7 +90,7 @@ HIP_TEST_CASE(Unit_test_generic_target_only_in_compressed_fatbin) {
   const char* cmd = "hipSquareGenericTargetOnlyCompressed.exe";
 #endif
 #else  // else GENERIC_COMPRESSED
-HIP_TEST_CASE(Unit_test_generic_target_only_in_regular_fatbin) {
+TEST_CASE(Unit_test_generic_target_only_in_regular_fatbin) {
 #ifdef __linux__
   const char* cmd = "chmod  u+x ./hipSquareGenericTargetOnly && ./hipSquareGenericTargetOnly";
 #else

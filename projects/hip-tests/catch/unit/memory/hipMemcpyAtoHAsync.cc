@@ -29,9 +29,9 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_hipMemcpyAtoHAsync_Basic) {
+TEST_CASE(Unit_hipMemcpyAtoHAsync_Basic) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
+  HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
 #else
   HIP_CHECK(hipSetDevice(0));
@@ -60,7 +60,7 @@ HIP_TEST_CASE(Unit_hipMemcpyAtoHAsync_Basic) {
 #endif
 }
 
-HIP_TEST_CASE(Unit_hipMemcpyAtoHAsync_Capture) {
+TEST_CASE(Unit_hipMemcpyAtoHAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int kRows = 1;

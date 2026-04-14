@@ -19,7 +19,7 @@ static constexpr auto NUM_H{10};
            then A_d-->E_h  in GPU1
  * OUTPUT: validating the result by comparing A_h and E_h
  */
-HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
+TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -60,11 +60,10 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
       HIP_CHECK(hipStreamDestroy(stream));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, nullptr, nullptr, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Device Does not have P2P capability");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    SUCCEED("Number of devices are < 2");
   }
 }
 
@@ -79,7 +78,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
+TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -115,11 +114,10 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
       HIP_CHECK(hipStreamDestroy(stream));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Device Does not have P2P capability");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    SUCCEED("Number of devices are < 2");
   }
 }
 
@@ -136,7 +134,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
 * ------------------------
 *  - HIP_VERSION >= 6.0
 */
-HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
+TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int kTestSizes[] = {3, 4, 100};
@@ -179,3 +177,4 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFreeArray(device_array));
 }
+

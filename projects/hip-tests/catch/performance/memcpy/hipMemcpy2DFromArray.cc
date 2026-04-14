@@ -65,7 +65,7 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToHost) {
+TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToHost) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);
@@ -87,7 +87,7 @@ HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess) {
+TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);
@@ -111,11 +111,11 @@ HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_DisablePeerAccess)
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess) {
+TEST_CASE(Performance_hipMemcpy2DFromArray_DeviceToDevice_EnablePeerAccess) {
   CHECK_IMAGE_SUPPORT
 
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
     return;
   }
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);

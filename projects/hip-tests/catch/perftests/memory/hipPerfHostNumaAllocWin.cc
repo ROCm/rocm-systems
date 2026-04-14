@@ -277,7 +277,7 @@ static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, u
 }
 
 /* Test memory allocation on preferred host numa node on each CPU */
-HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU) {
+TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU) {
   std::vector<NumaNodeInfo> nodes;
   enumerateNumaNodes(nodes);
   if (nodes.empty()) {
@@ -292,7 +292,7 @@ HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GP
   int numaNode = -1;
   HIP_CHECK(hipDeviceGetAttribute(&numaNode, hipDeviceAttributeHostNumaId, 0));
   if (numaNode == -1) {
-    HipTest::HIP_SKIP_TEST("host NUMA is not supported.");
+    HipTest::HIP_SKIP_TEST("Host NUMA isn't supported hence skipping the test...\n");
     return;
   }
   HIP_CHECK(hipSetDevice(0));

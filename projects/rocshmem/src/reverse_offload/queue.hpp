@@ -70,7 +70,7 @@ class Queue {
 
   HdpProxy<HIPHostAllocator> hdp_proxy_{};
 
-  [[maybe_unused]] size_t max_queues_{};
+  size_t max_queues_{};
 
   size_t queue_size_{};
 };

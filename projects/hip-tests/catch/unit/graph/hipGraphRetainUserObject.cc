@@ -31,7 +31,7 @@ static void hipGraphRetainUserObject_Functional_1(void* object, void destroyObj(
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
+TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -56,7 +56,7 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
 
 /* 2) Create UserObject and GraphUserObject and retain using custom reference
       count and release it by calling hipGraphReleaseUserObject with count. */
-HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
+TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
  5) Pass flag as 0
  6) Pass flag as INT_MAX
  */
-HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
+TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
@@ -171,7 +171,7 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
+TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

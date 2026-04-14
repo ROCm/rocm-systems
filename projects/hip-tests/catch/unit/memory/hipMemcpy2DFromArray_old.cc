@@ -19,7 +19,7 @@ static constexpr auto NUM_H{10};
  *         --> E_h host variable
  *         and verifying A_h with E_h
  */
-HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
+TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -54,11 +54,10 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
       HIP_CHECK(hipHostFree(E_h));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, nullptr, nullptr, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Device Does not have P2P capability");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    SUCCEED("Number of devices are < 2");
   }
 }
 
@@ -73,7 +72,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
+TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -104,10 +103,9 @@ HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
       HIP_CHECK(hipFreeArray(A_d));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Device Does not have P2P capability");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    SUCCEED("Number of devices are < 2");
   }
 }

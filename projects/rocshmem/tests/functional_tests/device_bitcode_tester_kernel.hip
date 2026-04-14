@@ -180,23 +180,13 @@ extern "C" __global__ void test_typed_int_put_get_wave(
     int my_pe, int n_pes, int count)
 {
   if (blockIdx.x == 0) {
-    int wf_id = threadIdx.x / warpSize;
     int next_pe = (my_pe + 1) % n_pes;
     int prev_pe = (my_pe - 1 + n_pes) % n_pes;
 
-    // Restrict wave barrier participation to a single wave in the block.
-    // This avoids pSync protocol contention if launch geometry regresses to
-    // multi-wave blocks in the future.
-    if (wf_id == 0) {
-      rocshmem_int_put_wave(sym_dst, sym_src, count, next_pe);
-      rocshmem_barrier_all_wave();
-    }
-    // Keep sync outside conditionals so all block threads converge.
-    __syncthreads();
+    rocshmem_int_put_wave(sym_dst, sym_src, count, next_pe);
+    rocshmem_barrier_all_wave();
 
-    if (wf_id == 0) {
-      rocshmem_int_get_wave(local_result, sym_src, count, prev_pe);
-    }
+    rocshmem_int_get_wave(local_result, sym_src, count, prev_pe);
   }
 }
 

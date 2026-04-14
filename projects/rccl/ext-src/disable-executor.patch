@@ -1,0 +1,368 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a94b634..fee3bb2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -22,6 +22,7 @@ option(MSCCLPP_USE_CUDA "Use NVIDIA/CUDA." OFF)
+ option(MSCCLPP_USE_ROCM "Use AMD/ROCm." OFF)
+ option(MSCCLPP_BYPASS_GPU_CHECK "Bypass GPU check." OFF)
+ option(MSCCLPP_NPKIT_FLAGS "Enable NPKIT" OFF)
++option(MSCCLPP_ENABLE_EXECUTOR "Enable JSON Executor" OFF)
+ 
+ if(MSCCLPP_BYPASS_GPU_CHECK)
+     if(MSCCLPP_USE_CUDA)
+@@ -100,15 +101,21 @@ find_package(NUMA REQUIRED)
+ find_package(Threads REQUIRED)
+ 
+ include(FetchContent)
+-FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+-FetchContent_MakeAvailable(json)
++if(MSCCLPP_ENABLE_EXECUTOR)
++  FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
++  FetchContent_MakeAvailable(json)
++endif()
+ 
+ add_library(mscclpp_obj OBJECT)
+ target_include_directories(mscclpp_obj
+     SYSTEM PRIVATE
+     ${GPU_INCLUDE_DIRS}
+     ${NUMA_INCLUDE_DIRS})
+-target_link_libraries(mscclpp_obj PRIVATE ${GPU_LIBRARIES} ${NUMA_LIBRARIES} nlohmann_json::nlohmann_json Threads::Threads dl)
++if(MSCCLPP_ENABLE_EXECUTOR)
++  target_link_libraries(mscclpp_obj PRIVATE ${GPU_LIBRARIES} ${NUMA_LIBRARIES} nlohmann_json::nlohmann_json Threads::Threads dl)
++else()
++  target_link_libraries(mscclpp_obj PRIVATE ${GPU_LIBRARIES} ${NUMA_LIBRARIES} Threads::Threads dl)
++endif()
+ if(IBVERBS_FOUND)
+     target_include_directories(mscclpp_obj SYSTEM PRIVATE ${IBVERBS_INCLUDE_DIRS})
+     target_link_libraries(mscclpp_obj PRIVATE ${IBVERBS_LIBRARIES})
+diff --git a/apps/nccl/src/nccl.cu b/apps/nccl/src/nccl.cu
+index f91d15e..d11f4e5 100644
+--- a/apps/nccl/src/nccl.cu
++++ b/apps/nccl/src/nccl.cu
+@@ -6,7 +6,9 @@
+ #include <mscclpp/concurrency_device.hpp>
+ #include <mscclpp/core.hpp>
+ #include <mscclpp/env.hpp>
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+ #include <mscclpp/executor.hpp>
++#endif
+ #include <mscclpp/sm_channel.hpp>
+ #include <mscclpp/sm_channel_device.hpp>
+ #include <mscclpp/utils.hpp>
+@@ -54,10 +56,12 @@ struct planKey {
+   bool isInPlace;
+ };
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+ struct executionPlanInstance {
+   planKey key;
+   std::shared_ptr<mscclpp::ExecutionPlan> plan;
+ };
++#endif
+ 
+ namespace std {
+ template <>
+@@ -77,8 +81,10 @@ struct ncclComm {
+   std::shared_ptr<mscclpp::Communicator> comm;
+   std::vector<std::shared_ptr<mscclpp::Connection>> connections;
+   std::vector<std::shared_ptr<mscclpp::SmDevice2DeviceSemaphore>> smSemaphores;
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   std::shared_ptr<mscclpp::Executor> executor;
+   std::unordered_map<std::string, std::vector<executionPlanInstance>> executionPlans;
++#endif
+ 
+   std::unordered_map<channelKey, ChannelInfo> channelInInfos;
+   std::unordered_map<channelKey, ChannelInfo> channelOutInfos;
+@@ -164,12 +170,14 @@ static std::vector<mscclpp::SmChannel> setupSmChannels(ncclComm_t comm,
+   return channels;
+ }
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+ static std::pair<std::string, executionPlanInstance> loadExecutionPlan(const std::string& filename) {
+   std::shared_ptr<mscclpp::ExecutionPlan> plan = std::make_shared<mscclpp::ExecutionPlan>(filename);
+   std::string collective = plan->collective();
+   planKey key{plan->minMessageSize(), plan->maxMessageSize(), plan->isInPlace()};
+   return std::make_pair(collective, executionPlanInstance{key, plan});
+ }
++#endif
+ 
+ static std::shared_ptr<mscclpp::DeviceHandle<mscclpp::SmChannel>> setupSmChannelDeviceHandles(
+     const std::vector<mscclpp::SmChannel>& smChannels) {
+@@ -409,12 +417,15 @@ NCCL_API ncclResult_t ncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueI
+   ncclComm* commPtr = new ncclComm();
+ 
+   commPtr->comm = mscclppComm;
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   commPtr->executor = std::make_shared<mscclpp::Executor>(mscclppComm);
++#endif
+ 
+   // FallBack for single node
+   if (mscclppComm->bootstrap()->getNranks() == mscclppComm->bootstrap()->getNranksPerNode())
+     ncclCommInitRankFallbackSingleNode(commPtr, mscclppComm, rank);
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   const std::string& collectiveDir = mscclpp::env()->executionPlanDir;
+   if (collectiveDir != "") {
+     if (!std::filesystem::is_directory(collectiveDir)) {
+@@ -428,6 +439,7 @@ NCCL_API ncclResult_t ncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueI
+       }
+     }
+   }
++#endif
+ 
+   *comm = commPtr;
+ #if defined(ENABLE_NPKIT)
+@@ -623,6 +635,7 @@ NCCL_API ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t
+     return ncclInvalidArgument;
+   }
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   int rank = comm->comm->bootstrap()->getRank();
+ 
+   std::vector<executionPlanInstance>& plans = comm->executionPlans["broadcast"];
+@@ -663,6 +676,9 @@ NCCL_API ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t
+   }
+ 
+   return ncclSuccess;
++#endif
++
++  return ncclBroadcastFallback(sendbuff, recvbuff, count, datatype, root, comm, stream);
+ }
+ 
+ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+@@ -675,6 +691,7 @@ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t
+     return ncclInvalidArgument;
+   }
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   // Declarating variables
+   size_t bytes = count * ncclTypeSize(datatype);
+   int rank = comm->comm->bootstrap()->getRank();
+@@ -716,6 +733,9 @@ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t
+   }
+ 
+   return ncclSuccess;
++#endif
++
++  return ncclAllReduceFallback(sendbuff, recvbuff, count, datatype, reductionOperation, comm, stream);
+ }
+ 
+ NCCL_API ncclResult_t ncclReduceScatter(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm_t,
+@@ -735,6 +755,7 @@ NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t
+     return ncclInvalidArgument;
+   }
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   int rank = comm->comm->bootstrap()->getRank();
+   int nRank = comm->comm->bootstrap()->getNranks();
+ 
+@@ -775,6 +796,9 @@ NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t
+   }
+ 
+   return ncclSuccess;
++#endif
++
++  return ncclAllGatherFallback(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+ }
+ 
+ NCCL_API ncclResult_t ncclSend(const void*, size_t, ncclDataType_t, int, ncclComm_t, cudaStream_t) {
+diff --git a/include/mscclpp/env.hpp b/include/mscclpp/env.hpp
+index 6708628..3460102 100644
+--- a/include/mscclpp/env.hpp
++++ b/include/mscclpp/env.hpp
+@@ -27,7 +27,9 @@ class Env {
+   const std::string socketFamily;
+   const std::string socketIfname;
+   const std::string commId;
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   const std::string executionPlanDir;
++#endif
+   const std::string npkitDumpDir;
+   const bool cudaIpcUseDefaultStream;
+ 
+diff --git a/include/mscclpp/errors.hpp b/include/mscclpp/errors.hpp
+index 8d3fde4..a797460 100644
+--- a/include/mscclpp/errors.hpp
++++ b/include/mscclpp/errors.hpp
+@@ -16,7 +16,9 @@ enum class ErrorCode {
+   InvalidUsage,   // The function was used incorrectly.
+   Timeout,        // The operation timed out.
+   Aborted,        // The operation was aborted.
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+   ExecutorError,  // An error occurred in the MSCCL++ executor.
++#endif
+ };
+ 
+ /// Convert an error code to a string.
+diff --git a/include/mscclpp/executor.hpp b/include/mscclpp/executor.hpp
+index 6848688..84d4d90 100644
+--- a/include/mscclpp/executor.hpp
++++ b/include/mscclpp/executor.hpp
+@@ -1,6 +1,8 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
++
+ #ifndef MSCCLPP_EXECUTOR_HPP_
+ #define MSCCLPP_EXECUTOR_HPP_
+ 
+@@ -59,3 +61,5 @@ class Executor {
+ }  // namespace mscclpp
+ 
+ #endif  // MSCCLPP_EXECUTOR_HPP_
++
++#endif
+diff --git a/src/env.cpp b/src/env.cpp
+index 625de0a..5d6bae0 100644
+--- a/src/env.cpp
++++ b/src/env.cpp
+@@ -59,7 +59,9 @@ Env::Env()
+       socketFamily(readEnv<std::string>("MSCCLPP_SOCKET_FAMILY", "")),
+       socketIfname(readEnv<std::string>("MSCCLPP_SOCKET_IFNAME", "")),
+       commId(readEnv<std::string>("MSCCLPP_COMM_ID", "")),
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+       executionPlanDir(readEnv<std::string>("MSCCLPP_EXECUTION_PLAN_DIR", "")),
++#endif
+       npkitDumpDir(readEnv<std::string>("MSCCLPP_NPKIT_DUMP_DIR", "")),
+       cudaIpcUseDefaultStream(readEnv<bool>("MSCCLPP_CUDAIPC_USE_DEFAULT_STREAM", false)) {}
+ 
+@@ -77,7 +79,9 @@ std::shared_ptr<Env> env() {
+     logEnv("MSCCLPP_SOCKET_FAMILY", globalEnv->socketFamily);
+     logEnv("MSCCLPP_SOCKET_IFNAME", globalEnv->socketIfname);
+     logEnv("MSCCLPP_COMM_ID", globalEnv->commId);
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+     logEnv("MSCCLPP_EXECUTION_PLAN_DIR", globalEnv->executionPlanDir);
++#endif
+     logEnv("MSCCLPP_NPKIT_DUMP_DIR", globalEnv->npkitDumpDir);
+     logEnv("MSCCLPP_CUDAIPC_USE_DEFAULT_STREAM", globalEnv->cudaIpcUseDefaultStream);
+   }
+diff --git a/src/errors.cc b/src/errors.cc
+index fbc7a57..afdb181 100644
+--- a/src/errors.cc
++++ b/src/errors.cc
+@@ -21,8 +21,10 @@ std::string errorToString(enum ErrorCode error) {
+       return "Timeout";
+     case ErrorCode::Aborted:
+       return "Aborted";
++#ifdef MSCCLPP_ENABLE_EXECUTOR
+     case ErrorCode::ExecutorError:
+       return "ExecutorError";
++#endif
+     default:
+       return "UnknownError";
+   }
+diff --git a/src/executor/execution_kernel.cu b/src/executor/execution_kernel.cu
+index a60317c..0ae77b8 100644
+--- a/src/executor/execution_kernel.cu
++++ b/src/executor/execution_kernel.cu
+@@ -1,6 +1,8 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
++
+ #include "execution_kernel.hpp"
+ 
+ #if defined(MSCCLPP_DEVICE_CUDA)
+@@ -74,3 +76,5 @@ template void ExecutionKernel::launchKernel<LL8Packet>(int rank, int nthreadbloc
+                                                        cudaStream_t stream, uint32_t flag);
+ }  // namespace mscclpp
+ #endif
++
++#endif
+diff --git a/src/executor/execution_plan.cc b/src/executor/execution_plan.cc
+index 56c881b..4c9bc16 100644
+--- a/src/executor/execution_plan.cc
++++ b/src/executor/execution_plan.cc
+@@ -1,6 +1,8 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
++
+ #include "execution_plan.hpp"
+ 
+ #include <cassert>
+@@ -610,3 +612,5 @@ size_t ExecutionPlan::maxMessageSize() const { return this->impl_->maxMessageSiz
+ bool ExecutionPlan::isInPlace() const { return this->impl_->isInPlace; }
+ 
+ }  // namespace mscclpp
++
++#endif
+diff --git a/src/executor/executor.cc b/src/executor/executor.cc
+index 944ddb2..191be60 100644
+--- a/src/executor/executor.cc
++++ b/src/executor/executor.cc
+@@ -1,6 +1,8 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
++
+ #include <mscclpp/executor.hpp>
+ #include <mscclpp/nvls.hpp>
+ #include <mscclpp/proxy_channel.hpp>
+@@ -451,3 +453,5 @@ void Executor::execute(int rank, void* sendbuff, void* recvbuff, size_t sendBuff
+ Executor::~Executor() = default;
+ 
+ }  // namespace mscclpp
++
++#endif
+diff --git a/src/include/execution_common.hpp b/src/include/execution_common.hpp
+index f6ed215..0bfb613 100644
+--- a/src/include/execution_common.hpp
++++ b/src/include/execution_common.hpp
+@@ -1,6 +1,8 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
++
+ #ifndef MSCCLPP_EXECUTION_COMMON_HPP_
+ #define MSCCLPP_EXECUTION_COMMON_HPP_
+ 
+@@ -107,3 +109,5 @@ struct __attribute__((aligned(16))) DeviceExecutionPlan {
+ }  // namespace mscclpp
+ 
+ #endif  // MSCCLPP_EXECUTION_COMMON_HPP_
++
++#endif
+diff --git a/src/include/execution_kernel.hpp b/src/include/execution_kernel.hpp
+index 98bed37..b724dba 100644
+--- a/src/include/execution_kernel.hpp
++++ b/src/include/execution_kernel.hpp
+@@ -1,6 +1,8 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
++
+ #ifndef MSCCLPP_EXECUTION_KERNEL_HPP_
+ #define MSCCLPP_EXECUTION_KERNEL_HPP_
+ 
+@@ -687,3 +689,5 @@ class ExecutionKernel {
+ }  // namespace mscclpp
+ 
+ #endif  // MSCCLPP_EXECUTION_KERNEL_HPP_
++
++#endif
+diff --git a/src/include/execution_plan.hpp b/src/include/execution_plan.hpp
+index 080a768..ee36ad9 100644
+--- a/src/include/execution_plan.hpp
++++ b/src/include/execution_plan.hpp
+@@ -1,6 +1,8 @@
+ // Copyright (c) Microsoft Corporation.
+ // Licensed under the MIT license.
+ 
++#ifdef MSCCLPP_ENABLE_EXECUTOR
++
+ #ifndef MSCCLPP_EXECUTOR_PLAN_HPP_
+ #define MSCCLPP_EXECUTOR_PLAN_HPP_
+ 
+@@ -129,3 +131,5 @@ struct ExecutionPlan::Impl {
+ }  // namespace mscclpp
+ 
+ #endif  // MSCCLPP_EXECUTOR_PLAN_HPP_
++
++#endif

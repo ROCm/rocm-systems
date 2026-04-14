@@ -42,7 +42,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Host, char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Host, char, unsigned char, short,
                    unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   {
@@ -96,7 +96,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Host, char, unsigned c
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Device, char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Device, char, unsigned char, short,
                    unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   {
@@ -140,7 +140,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Device, char, unsigned
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Host, char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Host, char, unsigned char,
                    short, unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   const VectorOperation operations[] = {
@@ -219,7 +219,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Host, ch
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host, char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host, char, unsigned char,
                    short, unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   const VectorOperation operations[] = {
@@ -292,7 +292,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Device, char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Device, char, unsigned char,
                    short, unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   const VectorOperation operations[] = {
@@ -371,7 +371,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Device, 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device, char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device, char, unsigned char,
                    short, unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   const VectorOperation operations[] = {
@@ -442,7 +442,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Devic
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_VectorStructuredBindings_SanityCheck_Basic_host, float3, double3) {
+TEMPLATE_TEST_CASE(Unit_VectorStructuredBindings_SanityCheck_Basic_host, float3, double3) {
   auto value = GetTestValue<decltype(TestType().x)>(0);
 
   TestType vec3 = {value, value, value};
@@ -472,7 +472,7 @@ __global__ void generate_my_kernel() { static_assert(func()); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_VectorConstexpr_SanityCheck_Basic_host_device) {
+TEST_CASE(Unit_VectorConstexpr_SanityCheck_Basic_host_device) {
   generate_my_kernel<<<1, 1>>>();
   static_assert(func());
 }
@@ -564,7 +564,7 @@ __global__ void check_alignment_device() { check_alignment(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Vector_alignment_check) {
+TEST_CASE(Unit_Vector_alignment_check) {
   check_alignment_device<<<1, 1>>>();
   check_alignment();
 }
@@ -657,7 +657,7 @@ __global__ void check_size_device() { check_size(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_Vector_size_check) {
+TEST_CASE(Unit_Vector_size_check) {
   check_size_device<<<1, 1>>>();
   check_size();
 }

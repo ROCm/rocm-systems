@@ -32,7 +32,6 @@
 #include "SDMAQueue.hpp"
 #include "Dispatch.hpp"
 #include "SDMAPacket.hpp"
-#include "KFDBaseComponentTest.hpp"
 
 void WaitUntilInput() {
     char dummy;
@@ -130,7 +129,7 @@ HSAKMT_STATUS CreateQueueTypeEvent(
     Descriptor.SyncVar.SyncVar.UserData = (void*)0xABCDABCD;
     Descriptor.NodeId = NodeId;
 
-    return HSAKMT_CALL(hsaKmtCreateEvent, g_baseTest->m_hsakmt_current_ctx, &Descriptor, ManualReset, IsSignaled, Event);
+    return hsaKmtCreateEvent(&Descriptor, ManualReset, IsSignaled, Event);
 }
 
 HSAKMT_STATUS CreateHWExceptionEvent(
@@ -145,7 +144,7 @@ HSAKMT_STATUS CreateHWExceptionEvent(
     Descriptor.SyncVar.SyncVar.UserData = (void*)0xABCDABCD;
     Descriptor.NodeId = NodeId;
 
-    return HSAKMT_CALL(hsaKmtCreateEvent, g_baseTest->m_hsakmt_current_ctx, &Descriptor, ManualReset, IsSignaled, Event);
+    return hsaKmtCreateEvent(&Descriptor, ManualReset, IsSignaled, Event);
 }
 
 static bool hsakmt_is_dgpu_dev = false;
@@ -157,7 +156,7 @@ bool hsakmt_is_dgpu() {
 bool hasPciAtomicsSupport(int node) {
     /* If we can't get Node Properties, assume a lack of Atomics support */
     HsaNodeProperties *pNodeProperties = new HsaNodeProperties();
-    if (HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, node, pNodeProperties)) {
+    if (hsaKmtGetNodeProperties(node, pNodeProperties)) {
         LOG() << "Unable to get Node Properties for node " << node << std::endl;
         return false;
     }
@@ -167,7 +166,7 @@ bool hasPciAtomicsSupport(int node) {
         return true;
 
     HsaIoLinkProperties *IolinkProperties = new HsaIoLinkProperties[pNodeProperties->NumIOLinks];
-    if (HSAKMT_CALL(hsaKmtGetNodeIoLinkProperties, g_baseTest->m_hsakmt_current_ctx, node, pNodeProperties->NumIOLinks, IolinkProperties)) {
+    if (hsaKmtGetNodeIoLinkProperties(node, pNodeProperties->NumIOLinks, IolinkProperties)) {
         LOG() << "Unable to get Node IO Link Information for node " << node << std::endl;
         return false;
     }
@@ -176,7 +175,7 @@ bool hasPciAtomicsSupport(int node) {
     for (int linkId = 0; linkId < pNodeProperties->NumIOLinks; linkId++) {
         /* Make sure it's a CPU */
         HsaNodeProperties *linkProps = new HsaNodeProperties();
-        if (HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, IolinkProperties[linkId].NodeTo, linkProps)) {
+        if (hsaKmtGetNodeProperties(IolinkProperties[linkId].NodeTo, linkProps)) {
             LOG() << "Unable to get connected device's IO Link information" << std::endl;
             return false;
         }
@@ -292,7 +291,7 @@ bool GPUMemCopy(void* dst, void* src, size_t size, unsigned int node, bool useSd
             return false;
 
         HsaNodeProperties nodeProperties;
-        if (HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, node, &nodeProperties) != HSAKMT_STATUS_SUCCESS)
+        if (hsaKmtGetNodeProperties(node, &nodeProperties) != HSAKMT_STATUS_SUCCESS)
             return false;
         Assembler pAsm(GetGfxVersion(&nodeProperties));
 
@@ -361,12 +360,12 @@ HsaMemoryBuffer::HsaMemoryBuffer(HSAuint64 size, unsigned int node, bool zero, b
     if (zero)
         EXPECT_EQ(m_Flags.ui32.HostAccess, 1);
 
-    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, m_Node, m_Size, m_Flags, &m_pBuf));
+    EXPECT_SUCCESS(hsaKmtAllocMemory(m_Node, m_Size, m_Flags, &m_pBuf));
     if (hsakmt_is_dgpu()) {
         if (map_specific_gpu)
-            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL, mapFlags, 1, &m_Node));
+            EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(m_pBuf, m_Size, NULL, mapFlags, 1, &m_Node));
         else
-            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL));
+            EXPECT_SUCCESS(hsaKmtMapMemoryToGPU(m_pBuf, m_Size, NULL));
         m_MappedNodes = 1 << m_Node;
     }
 
@@ -381,8 +380,8 @@ HsaMemoryBuffer::HsaMemoryBuffer(void *addr, HSAuint64 size):
     m_Local(false),
     m_Node(0) {
     HSAuint64 gpuva = 0;
-    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterMemory, g_baseTest->m_hsakmt_current_ctx, m_pUser, m_Size));
-    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, m_pUser, m_Size, &gpuva));
+    EXPECT_SUCCESS(hsaKmtRegisterMemory(m_pUser, m_Size));
+    EXPECT_SUCCESS(hsaKmtMapMemoryToGPU(m_pUser, m_Size, &gpuva));
     m_pBuf = gpuva ? (void *)gpuva : m_pUser;
 }
 
@@ -445,9 +444,9 @@ void HsaMemoryBuffer::Fill(HSAuint32 value, BaseQueue& baseQueue, HSAuint64 offs
     baseQueue.PlacePacket(SDMAFencePacket(baseQueue.GetFamilyId(),
                                 reinterpret_cast<void*>(event->EventData.HWData2), event->EventId));
     baseQueue.PlaceAndSubmitPacket(SDMATrapPacket(event->EventId));
-    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, event, g_TestTimeOut));
+    EXPECT_SUCCESS(hsaKmtWaitOnEvent(event, g_TestTimeOut));
 
-    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+    hsaKmtDestroyEvent(event);
 }
 
 /* Check if HsaMemoryBuffer[location] has the pattern specified.
@@ -503,8 +502,8 @@ bool HsaMemoryBuffer::IsPattern(HSAuint64 location, HSAuint32 pattern, BaseQueue
             event->EventId));
     baseQueue.PlaceAndSubmitPacket(SDMATrapPacket(event->EventId));
 
-    ret = HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, event, g_TestTimeOut);
-    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+    ret = hsaKmtWaitOnEvent(event, g_TestTimeOut);
+    hsaKmtDestroyEvent(event);
     if (ret)
         return false;
 
@@ -527,7 +526,7 @@ int HsaMemoryBuffer::MapMemToNodes(unsigned int *nodes, unsigned int nodes_num) 
     HsaMemMapFlags mapFlags = {0};
     int ret, bit;
 
-    ret = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL, mapFlags, nodes_num, nodes);
+    ret = hsaKmtMapMemoryToGPUNodes(m_pBuf, m_Size, NULL, mapFlags, nodes_num, nodes);
     if (ret != 0) {
         return ret;
     }
@@ -543,7 +542,7 @@ int HsaMemoryBuffer::MapMemToNodes(unsigned int *nodes, unsigned int nodes_num) 
 int HsaMemoryBuffer::UnmapMemToNodes(unsigned int *nodes, unsigned int nodes_num) {
     int ret, bit;
 
-    ret = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, m_pBuf);
+    ret = hsaKmtUnmapMemoryToGPU(m_pBuf);
     if (ret)
         return ret;
 
@@ -579,7 +578,7 @@ void HsaMemoryBuffer::UnmapAllNodes() {
     /*
      * TODO: When thunk is updated, use hsaKmtRegisterToNodes. Then nodes will be used
      */
-    HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, m_pBuf);
+    hsaKmtUnmapMemoryToGPU(m_pBuf);
 
     m_MappedNodes = 0;
 
@@ -588,15 +587,15 @@ void HsaMemoryBuffer::UnmapAllNodes() {
 
 HsaMemoryBuffer::~HsaMemoryBuffer() {
     if (m_pUser != NULL) {
-        HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, m_pUser);
-        HSAKMT_CALL(hsaKmtDeregisterMemory, g_baseTest->m_hsakmt_current_ctx, m_pUser);
+        hsaKmtUnmapMemoryToGPU(m_pUser);
+        hsaKmtDeregisterMemory(m_pUser);
     } else if (m_pBuf != NULL) {
         if (hsakmt_is_dgpu()) {
             if (m_MappedNodes) {
-                HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, m_pBuf);
+                hsaKmtUnmapMemoryToGPU(m_pBuf);
             }
         }
-        HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size);
+        hsaKmtFreeMemory(m_pBuf, m_Size);
     }
     m_pBuf = NULL;
 }
@@ -613,7 +612,7 @@ HsaInteropMemoryBuffer::HsaInteropMemoryBuffer(HSAuint64 device_handle, HSAuint6
 }
 
 HsaInteropMemoryBuffer::~HsaInteropMemoryBuffer() {
-    HSAKMT_CALL(hsaKmtUnmapGraphicHandle, g_baseTest->m_hsakmt_current_ctx, m_Node, (HSAuint64)m_pBuf, m_Size);
+    hsaKmtUnmapGraphicHandle(m_Node, (HSAuint64)m_pBuf, m_Size);
 }
 
 
@@ -632,7 +631,7 @@ bool HsaNodeInfo::Init(int NumOfNodes) {
     for (int i = 0; i < NumOfNodes; i++) {
         nodeProperties = new HsaNodeProperties();
 
-        status = HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, i, nodeProperties);
+        status = hsaKmtGetNodeProperties(i, nodeProperties);
         /* This is not a fatal test (not using assert), since even when it fails for one node
          * we want to get information regarding others.
          */
@@ -737,8 +736,8 @@ const bool HsaNodeInfo::IsGPUNodeLargeBar(int node) const {
     if (pNodeProperties) {
         HsaMemoryProperties *memoryProperties =
                 new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, g_baseTest->m_hsakmt_current_ctx,
-                                        node, pNodeProperties->NumMemoryBanks, memoryProperties));
+        EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(node,
+                       pNodeProperties->NumMemoryBanks, memoryProperties));
         for (unsigned bank = 0; bank < pNodeProperties->NumMemoryBanks; bank++)
             if (memoryProperties[bank].HeapType ==
                                 HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC) {
@@ -759,7 +758,7 @@ const bool HsaNodeInfo::IsAppAPU(int node) const {
         return false;
 
     HsaIoLinkProperties *IolinkProperties = new HsaIoLinkProperties[pNodeProperties->NumIOLinks];
-    if (HSAKMT_CALL(hsaKmtGetNodeIoLinkProperties, g_baseTest->m_hsakmt_current_ctx, node, pNodeProperties->NumIOLinks, IolinkProperties)) {
+    if (hsaKmtGetNodeIoLinkProperties(node, pNodeProperties->NumIOLinks, IolinkProperties)) {
         LOG() << "Unable to get Node IO Link Information for node " << node << std::endl;
         delete [] IolinkProperties;
         return false;
@@ -769,7 +768,7 @@ const bool HsaNodeInfo::IsAppAPU(int node) const {
     for (int linkId = 0; linkId < pNodeProperties->NumIOLinks; linkId++) {
         HsaNodeProperties linkProps;
 
-        if (HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, IolinkProperties[linkId].NodeTo, &linkProps)) {
+        if (hsaKmtGetNodeProperties(IolinkProperties[linkId].NodeTo, &linkProps)) {
             LOG() << "Unable to get connected device's IO Link information" << std::endl;
             break;
         }
@@ -790,8 +789,8 @@ const bool HsaNodeInfo::IsPeerAccessibleByNode(int peer, int node) const {
     pNodeProperties = GetNodeProperties(node);
     if (pNodeProperties) {
         HsaIoLinkProperties p2pLinksProperties[pNodeProperties->NumIOLinks];
-        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeIoLinkProperties, g_baseTest->m_hsakmt_current_ctx,
-                                        node, pNodeProperties->NumIOLinks, p2pLinksProperties));
+        EXPECT_SUCCESS(hsaKmtGetNodeIoLinkProperties(node,
+					pNodeProperties->NumIOLinks, p2pLinksProperties));
 
         for (unsigned link = 0; link < pNodeProperties->NumIOLinks; link++)
             if (p2pLinksProperties[link].NodeTo == peer)
@@ -843,8 +842,7 @@ const bool HsaNodeInfo::IsNodeXGMItoCPU(int node) const {
     pNodeProperties = GetNodeProperties(node);
     if (pNodeProperties && pNodeProperties->NumIOLinks) {
         HsaIoLinkProperties  *IolinkProperties =  new HsaIoLinkProperties[pNodeProperties->NumIOLinks];
-        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeIoLinkProperties, g_baseTest->m_hsakmt_current_ctx,
-                                        node, pNodeProperties->NumIOLinks, IolinkProperties));
+        EXPECT_SUCCESS(hsaKmtGetNodeIoLinkProperties(node, pNodeProperties->NumIOLinks, IolinkProperties));
 
         for (int linkId = 0; linkId < pNodeProperties->NumIOLinks; linkId++) {
             EXPECT_EQ(node, IolinkProperties[linkId].NodeFrom);
@@ -881,7 +879,7 @@ HSAKMT_STATUS RegisterSVMRange(HSAuint32 GPUNode, void *MemoryAddress,
     attrs[3].type = HSA_SVM_ATTR_ACCESS;
     attrs[3].value = GPUNode;
 
-    r = HSAKMT_CALL(hsaKmtSVMSetAttr, g_baseTest->m_hsakmt_current_ctx, MemoryAddress, SizeInBytes, nattr, attrs);
+    r = hsaKmtSVMSetAttr(MemoryAddress, SizeInBytes, nattr, attrs);
     if (r)
         return HSAKMT_STATUS_ERROR;
 
@@ -896,7 +894,7 @@ HSAKMT_STATUS SVMRangeGetPrefetchNode(void *MemoryAddress, HSAuint64 SizeInBytes
     attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
     attr.value = 0;
 
-    r = HSAKMT_CALL(hsaKmtSVMGetAttr, g_baseTest->m_hsakmt_current_ctx, MemoryAddress, SizeInBytes, 1, &attr);
+    r = hsaKmtSVMGetAttr(MemoryAddress, SizeInBytes, 1, &attr);
     if (r)
         return HSAKMT_STATUS_ERROR;
 
@@ -913,7 +911,7 @@ HSAKMT_STATUS SVMRangePrefetchToNode(void *MemoryAddress, HSAuint64 SizeInBytes,
     attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
     attr.value = PrefetchNode;
 
-    r = HSAKMT_CALL(hsaKmtSVMSetAttr, g_baseTest->m_hsakmt_current_ctx, MemoryAddress, SizeInBytes, 1, &attr);
+    r = hsaKmtSVMSetAttr(MemoryAddress, SizeInBytes, 1, &attr);
     if (r)
         return HSAKMT_STATUS_ERROR;
 
@@ -928,7 +926,7 @@ HSAKMT_STATUS SVMRangeMapToNode(void *MemoryAddress, HSAuint64 SizeInBytes,
     attr.type = HSA_SVM_ATTR_ACCESS;
     attr.value = NodeID;
 
-    r = HSAKMT_CALL(hsaKmtSVMSetAttr, g_baseTest->m_hsakmt_current_ctx, MemoryAddress, SizeInBytes, 1, &attr);
+    r = hsaKmtSVMSetAttr(MemoryAddress, SizeInBytes, 1, &attr);
     if (r)
         return HSAKMT_STATUS_ERROR;
 
@@ -943,7 +941,7 @@ HSAKMT_STATUS SVMRangeMapInPlaceToNode(void *MemoryAddress, HSAuint64 SizeInByte
     attr.type = HSA_SVM_ATTR_ACCESS_IN_PLACE;
     attr.value = NodeID;
 
-    r = HSAKMT_CALL(hsaKmtSVMSetAttr, g_baseTest->m_hsakmt_current_ctx, MemoryAddress, SizeInBytes, 1, &attr);
+    r = hsaKmtSVMSetAttr(MemoryAddress, SizeInBytes, 1, &attr);
     if (r)
         return HSAKMT_STATUS_ERROR;
 
@@ -958,7 +956,7 @@ HSAKMT_STATUS SVMRangSetGranularity(void *MemoryAddress, HSAuint64 SizeInBytes,
     attr.type = HSA_SVM_ATTR_GRANULARITY;
     attr.value = Granularity;
 
-    r = HSAKMT_CALL(hsaKmtSVMSetAttr, g_baseTest->m_hsakmt_current_ctx, MemoryAddress, SizeInBytes, 1, &attr);
+    r = hsaKmtSVMSetAttr(MemoryAddress, SizeInBytes, 1, &attr);
     if (r)
         return HSAKMT_STATUS_ERROR;
 

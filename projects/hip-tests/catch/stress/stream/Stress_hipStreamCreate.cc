@@ -139,14 +139,14 @@ void testhipStreamCreateFlags(int* stream_sequence, unsigned int flag) {
 }
 }  // namespace hipStreamCreateStressTest
 
-HIP_TEST_CASE(Stress_hipStreamCreate_SyncTest) {
+TEST_CASE(Stress_hipStreamCreate_SyncTest) {
   printf("hipStreamCreate stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
     hipStreamCreateStressTest::testhipStreamCreate(hipStreamCreateStressTest::stream_seq[i]);
   }
 }
 
-HIP_TEST_CASE(Stress_hipStreamCreatePriority_SyncTest) {
+TEST_CASE(Stress_hipStreamCreatePriority_SyncTest) {
   printf("hipStreamCreateWithPriority(hipStreamDefault) stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
     hipStreamCreateStressTest::testhipStreamCreatePriority(hipStreamCreateStressTest::stream_seq[i],
@@ -159,7 +159,7 @@ HIP_TEST_CASE(Stress_hipStreamCreatePriority_SyncTest) {
   }
 }
 
-HIP_TEST_CASE(Stress_hipStreamCreateWithFlags_SyncTest) {
+TEST_CASE(Stress_hipStreamCreateWithFlags_SyncTest) {
   printf("hipStreamCreateWithFlags(hipStreamDefault) stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
     hipStreamCreateStressTest::testhipStreamCreateFlags(hipStreamCreateStressTest::stream_seq[i],

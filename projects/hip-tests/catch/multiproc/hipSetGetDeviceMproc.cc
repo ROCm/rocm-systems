@@ -13,12 +13,12 @@
 
 #include <hip_test_common.hh>
 
-#include <string>
-#include <vector>
-
 #ifdef __linux__
 #include <sys/wait.h>
 #include <unistd.h>
+
+
+#define MAX_SIZE 30
 
 /**
  * Fetches Gpu device count
@@ -82,17 +82,18 @@ static void testInvalidDevice(int numDevices, bool useRocrEnv, int deviceNumber)
   pid_t cPid;
   cPid = fork();
 
-  const std::string visibleDeviceString = std::to_string(deviceNumber);
+  char visibleDeviceString[MAX_SIZE] = {};
+  snprintf(visibleDeviceString, MAX_SIZE, "%d", deviceNumber);
 
   if (cPid == 0) {  // child
     hipError_t err;
 #ifdef __HIP_PLATFORM_NVIDIA__
-    setenv("CUDA_VISIBLE_DEVICES", visibleDeviceString.c_str(), 1);
+    setenv("CUDA_VISIBLE_DEVICES", visibleDeviceString, 1);
 #else
     if (true == useRocrEnv) {
-      setenv("ROCR_VISIBLE_DEVICES", visibleDeviceString.c_str(), 1);
+      setenv("ROCR_VISIBLE_DEVICES", visibleDeviceString, 1);
     } else {
-      setenv("HIP_VISIBLE_DEVICES", visibleDeviceString.c_str(), 1);
+      setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
     }
 #endif
     err = hipGetDeviceCount(&tempCount);
@@ -156,8 +157,8 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int* deviceList,
   std::string visibleDeviceString;
 
   if ((NULL == deviceList) || ((deviceListLength < 1) || deviceListLength > numDevices)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
-    return;
+    INFO("Invalid argument for number of devices. Skipping current test");
+    REQUIRE(false);
   }
 
   for (int i = 0; i < deviceListLength; i++) {
@@ -383,7 +384,7 @@ static void testMinRvdMaxHvd(int numDevices, int* deviceList, int count) {
 /**
  * Scenario sets Invalid visible device list and checks behavior.
  */
-HIP_TEST_CASE(Unit_hipSetDevice_InvalidVisibleDeviceList) {
+TEST_CASE(Unit_hipSetDevice_InvalidVisibleDeviceList) {
   int numDevices = 0;
 
   getDeviceCount(&numDevices);
@@ -406,7 +407,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_InvalidVisibleDeviceList) {
 /**
  * Scenario sets valid visible device list and checks behavior.
  */
-HIP_TEST_CASE(Unit_hipSetDevice_ValidVisibleDeviceList) {
+TEST_CASE(Unit_hipSetDevice_ValidVisibleDeviceList) {
   int numDevices = 0;
   std::vector<int> deviceList;
 
@@ -431,10 +432,10 @@ HIP_TEST_CASE(Unit_hipSetDevice_ValidVisibleDeviceList) {
 /**
  * Scenario sets subset of available devices and checks behavior.
  */
-HIP_TEST_CASE(Unit_hipSetDevice_SubsetOfAvailableDevices) {
+TEST_CASE(Unit_hipSetDevice_SubsetOfAvailableDevices) {
   int numDevices = 0;
-  const int deviceListLength = 1;
-  std::vector<int> deviceList(deviceListLength);
+  int deviceList[MAX_SIZE];
+  int deviceListLength = 1;
 
   getDeviceCount(&numDevices);
   REQUIRE(numDevices != 0);
@@ -445,9 +446,9 @@ HIP_TEST_CASE(Unit_hipSetDevice_SubsetOfAvailableDevices) {
   }
 
 #ifndef __HIP_PLATFORM_NVIDIA__
-  testValidDevices(numDevices, true, deviceList.data(), deviceListLength);
+  testValidDevices(numDevices, true, deviceList, deviceListLength);
 #endif
-  testValidDevices(numDevices, false, deviceList.data(), deviceListLength);
+  testValidDevices(numDevices, false, deviceList, deviceListLength);
 }
 
 #ifndef __HIP_PLATFORM_NVIDIA__
@@ -457,7 +458,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_SubsetOfAvailableDevices) {
  * Scenario tests getDevice behavior with Minimal Len of RVD
  * and Maximal Len of HVD
  */
-HIP_TEST_CASE(Unit_hipSetDevice_MinRvdMaxHvdDevicesList) {
+TEST_CASE(Unit_hipSetDevice_MinRvdMaxHvdDevicesList) {
   int numDevices = 0;
   std::vector<int> deviceList;
   int count = 0;
@@ -485,7 +486,7 @@ HIP_TEST_CASE(Unit_hipSetDevice_MinRvdMaxHvdDevicesList) {
  * Scenario tests getDevice behavior with Maximal Len of RVD
  * and Minimal Len of HVD
  */
-HIP_TEST_CASE(Unit_hipSetDevice_MaxRvdMinHvdDevicesList) {
+TEST_CASE(Unit_hipSetDevice_MaxRvdMinHvdDevicesList) {
   int numDevices = 0;
   std::vector<int> deviceList;
 
@@ -509,25 +510,28 @@ HIP_TEST_CASE(Unit_hipSetDevice_MaxRvdMinHvdDevicesList) {
 /**
  * Scenario tests getDevice behavior with combination of RVD and CVD
  */
-HIP_TEST_CASE(Unit_hipSetDevice_RvdCvdDevicesList) {
+TEST_CASE(Unit_hipSetDevice_RvdCvdDevicesList) {
   int numDevices = 0;
-  std::vector<int> deviceList;
+  int deviceList[MAX_SIZE];
+  int count = 0;
 
   getDeviceCount(&numDevices);
 
   REQUIRE(numDevices != 0);
 
   if (numDevices == 1) {
-    deviceList.push_back(0);
+    deviceList[0] = 0;
+    count = 1;
   } else {
     for (int i = 0; i < numDevices; i++) {
       if (i % 2 == 0) {
-        deviceList.push_back(i);
+        deviceList[count] = i;
+        count++;
       }
     }
   }
 
-  testRvdCvd(numDevices, deviceList.data(), static_cast<int>(deviceList.size()));
+  testRvdCvd(numDevices, deviceList, count);
 }
 #endif  // __HIP_PLATFORM_NVIDIA__
 

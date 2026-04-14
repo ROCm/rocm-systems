@@ -620,13 +620,12 @@ void IPCTest::Run(void) {
     PrintVerboseMesg();
   }
 
-  // Note: Close() (and hsa_shut_down()) will be called from main() for parent.
-  // Child process must shut down HSA runtime before exiting.
+  // Note: Close() (and hsa_shut_down()) will be called from main()
+  // processOne is true for parent process, false for child process
   if (parentProcess_) {
     ParentProcessImpl();
   } else {
     ChildProcessImpl();
-    hsa_shut_down();
     exit(0);
   }
 

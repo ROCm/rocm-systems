@@ -10,7 +10,7 @@
 
 texture<float, 2, hipReadModeElementType> tex;
 
-HIP_TEST_CASE(Unit_hipGetTextureReference_Positive) {
+TEST_CASE(Unit_hipGetTextureReference_Positive) {
   CHECK_IMAGE_SUPPORT
 
   const textureReference* tex_ref = nullptr;
@@ -18,7 +18,7 @@ HIP_TEST_CASE(Unit_hipGetTextureReference_Positive) {
   REQUIRE(tex_ref != nullptr);
 }
 
-HIP_TEST_CASE(Unit_hipGetTextureReference_Negative) {
+TEST_CASE(Unit_hipGetTextureReference_Negative) {
   CHECK_IMAGE_SUPPORT
 
   const textureReference* tex_ref = nullptr;

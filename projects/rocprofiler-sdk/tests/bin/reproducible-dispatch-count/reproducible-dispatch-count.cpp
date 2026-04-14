@@ -45,12 +45,11 @@
         {                                                                                          \
             auto _hip_api_print_lk = auto_lock_t{print_lock};                                      \
             fprintf(stderr,                                                                        \
-                    "%s:%d :: HIP error %i : %s :: %s\n",                                          \
+                    "%s:%d :: HIP error %i : %s\n",                                                \
                     __FILE__,                                                                      \
                     __LINE__,                                                                      \
                     static_cast<int>(error_),                                                      \
-                    hipGetErrorString(error_),                                                     \
-                    #CALL);                                                                        \
+                    hipGetErrorString(error_));                                                    \
             throw std::runtime_error("hip_api_call");                                              \
         }                                                                                          \
     }

@@ -1,5 +1,4 @@
-// (c) Meta Platforms, Inc. and affiliates.
-// SPDX-License-Identifier: MIT
+// (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 #include "nccl.h"
 #include <cstring>

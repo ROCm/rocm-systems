@@ -2442,12 +2442,11 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
 }
 
 // ================================================================================================
-bool KernelBlitManager::streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value,
-                                        size_t offset, size_t sizeBytes) const {
-  assert(blitType == StreamOpsWrite || blitType == StreamOpsIncrement ||
-         blitType == StreamOpsDecrement);
+bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
+                                       size_t sizeBytes) const {
   std::scoped_lock k(lockXferOps_);
   bool result = false;
+  uint blitType = StreamOpsWrite;
   size_t dim = 1;
   size_t globalWorkOffset[1] = {0};
   size_t globalWorkSize[1] = {1};
@@ -2471,24 +2470,6 @@ bool KernelBlitManager::streamOpsUpdate(uint blitType, device::Memory& memory, u
   result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters);
   synchronize();
   return result;
-}
-
-// ================================================================================================
-bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
-                                       size_t sizeBytes) const {
-  return streamOpsUpdate(StreamOpsWrite, memory, value, offset, sizeBytes);
-}
-
-// ================================================================================================
-bool KernelBlitManager::streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
-                                           size_t sizeBytes) const {
-  return streamOpsUpdate(StreamOpsIncrement, memory, value, offset, sizeBytes);
-}
-
-// ================================================================================================
-bool KernelBlitManager::streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
-                                           size_t sizeBytes) const {
-  return streamOpsUpdate(StreamOpsDecrement, memory, value, offset, sizeBytes);
 }
 
 // ================================================================================================

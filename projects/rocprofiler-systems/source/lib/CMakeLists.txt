@@ -1,6 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
-
 # ----------------------------------------------------------------------------- #
 #
 # rocprofiler-systems: contains all instrumentation functionality
@@ -11,7 +8,9 @@
 #
 # ----------------------------------------------------------------------------- #
 
-cmake_policy(SET CMP0115 NEW)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.20)
+    cmake_policy(SET CMP0115 NEW)
+endif()
 
 set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 
@@ -50,6 +49,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ucx>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-libva>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ptl>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>

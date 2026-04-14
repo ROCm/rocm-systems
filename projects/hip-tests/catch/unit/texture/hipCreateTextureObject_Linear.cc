@@ -38,7 +38,7 @@
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
+TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
   CHECK_IMAGE_SUPPORT
 
   float* texBuf;
@@ -112,7 +112,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
     REQUIRE(ret != hipSuccess);
 #else
     // API expected to return error according to cuda documentation.
-    WARN("Skipping section: " << HipTest::SkipReason::kApiUnsupportedOnNvidia);
+    WARN("Resource view descriptor test skipped on nvidia");
 #endif
   }
 

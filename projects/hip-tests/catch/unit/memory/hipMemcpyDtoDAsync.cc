@@ -27,7 +27,7 @@ This testcase verifies hipMemcpyDtoDAsync API
 7.DtoH copy and validating the result
 */
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
                    double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
@@ -97,18 +97,18 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
+TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count <= 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("Machine doesn't have multiple GPUs; skipping test");
     return;
   }
 
   int peer_access = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&peer_access, 0, 1));
   if (!peer_access) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    SUCCEED("Machine doesn't have P2P support enabled; skipping test");
     return;
   }
 

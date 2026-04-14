@@ -92,7 +92,7 @@ template <typename T> class WarpShflXOR : public WarpShflTest<WarpShflXOR<T>, T>
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp shuffle
  */
-HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_XOR_Positive_Basic, int, unsigned int, long, unsigned long,
+TEMPLATE_TEST_CASE(Unit_Warp_Shfl_XOR_Positive_Basic, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;
@@ -100,7 +100,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_XOR_Positive_Basic, int, unsigned int, lon
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpShuffle) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Shuffle!");
     return;
   }
 

@@ -11,7 +11,7 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Basic) {
+TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Basic) {
   using namespace std::placeholders;
 
   constexpr bool async = true;
@@ -47,7 +47,8 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Basic) {
   }
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior) {
+TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior) {
+  CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -82,13 +83,15 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior) {
 #endif
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Parameters) {
+TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Parameters) {
+  CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
   constexpr bool async = true;
   Memcpy2DZeroWidthHeight<async>(std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr));
 }
 
-HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Negative_Parameters) {
+TEST_CASE(Unit_hipMemcpy2DAsync_Negative_Parameters) {
+  CHECK_IMAGE_SUPPORT
   constexpr size_t cols = 128;
   constexpr size_t rows = 128;
 
@@ -174,7 +177,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Negative_Parameters) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Capture, int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Capture, int, float, double) {
   using ValueType = TestType;
   constexpr int kNumRowsOptions[] = {3, 4, 100};
   constexpr int kNumColsOptions[] = {3, 4, 100};

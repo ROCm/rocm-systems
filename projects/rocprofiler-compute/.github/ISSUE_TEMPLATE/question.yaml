@@ -1,0 +1,23 @@
+name: Question
+description: Clarifying questions and uncertainties
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please complete the following form.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Describe your question
+      description: A clear and concise description of your question and how it came up.
+      placeholder: I was unsure how to ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other context or screenshots about the question here.

@@ -76,7 +76,7 @@ static hipError_t GraphExecSemaphoreSetParamsWaitWrapper(
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Positive_Basic) {
+TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Positive_Basic) {
   WaitExternalSemaphoreCommon(GraphExecSemaphoreSetParamsWaitWrapper);
 }
 
@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Positive_Basi
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Timeline_Semaphore) {
+TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Timeline_Semaphore) {
   WaitExternalTimelineSemaphoreCommon(GraphExecSemaphoreSetParamsWaitWrapper);
 }
 #endif
@@ -116,7 +116,7 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positi
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Multiple_Semaphores) {
+TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Multiple_Semaphores) {
   WaitExternalMultipleSemaphoresCommon(GraphExecSemaphoreSetParamsWaitWrapper);
 }
 
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positi
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_Parameters) {
+TEST_CASE(Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_Parameters) {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

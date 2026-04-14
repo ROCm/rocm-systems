@@ -36,11 +36,11 @@ void devicemalloc(float* x, float* y, float* out, float** px, float** py, size_t
 }
 )"};
 
-HIP_TEST_CASE(Unit_hiprtc_devicemalloc) {
+TEST_CASE(Unit_hiprtc_devicemalloc) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
 

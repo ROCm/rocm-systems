@@ -274,7 +274,7 @@ void DefaultPT2_StrmWaitEvent() {
   int device;
   HIP_CHECK(hipGetDevice(&device));
   if (!DeviceAttributesSupport(device, hipDeviceAttributeManagedMemory)) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
     return;
   }
 
@@ -696,7 +696,7 @@ void DefaultPT2_hipMemcpy3D() {
 }
 
 
-HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
+TEST_CASE(Unit_hipStrmPerThrdDefault) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("Testing hipMemset/Memcpy() and their async version") {
@@ -728,15 +728,16 @@ HIP_TEST_CASE(Unit_hipStrmPerThrdDefault) {
 
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  SECTION("Testing_hipLaunchCooperativeKernel()") {
-    if (!deviceProp.cooperativeLaunch) {
-      WARN("Skipping section: " << HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+  if (deviceProp.cooperativeLaunch) {
+    SECTION("Testing_hipLaunchCooperativeKernel()") {
+      // launching hipLaunchCooperativeKernel() with Null stream
+      DefaultPT2_LaunchCooperativeKernel(1);
+      // launching hipLaunchCooperativeKernel() with user created stream
+      DefaultPT2_LaunchCooperativeKernel(0);
     }
-    // launching hipLaunchCooperativeKernel() with Null stream
-    DefaultPT2_LaunchCooperativeKernel(1);
-    // launching hipLaunchCooperativeKernel() with user created stream
-    DefaultPT2_LaunchCooperativeKernel(0);
+  } else {
+    INFO("Cooperative Launch feature is not supported, therefore skipping");
+    INFO(" the test Testing_hipLaunchCooperativeKernel()");
   }
 
   SECTION("Testing_StrmWaitEvent()") { DefaultPT2_StrmWaitEvent(); }

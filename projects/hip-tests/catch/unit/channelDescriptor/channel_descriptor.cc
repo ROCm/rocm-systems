@@ -32,7 +32,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_1D, char, unsigned char, uchar1,
+TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_1D, char, unsigned char, uchar1,
                    signed char, char1, unsigned short, ushort1, short, signed short, short1, int,
                    unsigned int, uint1, signed int, int1, float, float1, long, unsigned long,
                    ulong1, signed long, long1) {
@@ -58,7 +58,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_1D, char, unsigned 
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_2D, uchar2, char2, ushort2, short2,
+TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_2D, uchar2, char2, ushort2, short2,
                    uint2, int2, float2, ulong2, long2) {
   ChannelDescriptorTest2D<TestType> channel_desc_test;
   channel_desc_test.Run();
@@ -84,7 +84,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_2D, uchar2, char2, 
  *  - HIP_VERSION >= 5.2
  *  - Available for non-GNUC compilers.
  */
-HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_3D, uchar3, char3, ushort3, short3,
+TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_3D, uchar3, char3, ushort3, short3,
                    uint3, int3, float3, ulong3, long3) {
   ChannelDescriptorTest3D<TestType> channel_desc_test;
   channel_desc_test.Run();
@@ -109,7 +109,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_3D, uchar3, char3, 
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_4D, uchar4, char4, ushort4, short4,
+TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_4D, uchar4, char4, ushort4, short4,
                    uint4, int4, float4, ulong4, long4) {
   ChannelDescriptorTest4D<TestType> channel_desc_test;
   channel_desc_test.Run();
@@ -130,7 +130,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_Basic_4D, uchar4, char4, 
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_FormatNone, long long, signed long long,
+TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_FormatNone, long long, signed long long,
                    unsigned long long, longlong1, longlong2, longlong3, longlong4, ulonglong1,
                    ulonglong2, ulonglong3, ulonglong4, double1, double2, double3, double4) {
   ChannelDescriptorTestNone<TestType> channel_desc_test;
@@ -153,7 +153,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_ChannelDescriptor_Positive_FormatNone, long long, si
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_ChannelDescriptor_Positive_16BitFloatingPoint) {
+TEST_CASE(Unit_ChannelDescriptor_Positive_16BitFloatingPoint) {
   int size = static_cast<int>(sizeof(unsigned short) * 8);
   hipChannelFormatKind kind = hipChannelFormatKindFloat;
   hipChannelFormatDesc channel_desc{};

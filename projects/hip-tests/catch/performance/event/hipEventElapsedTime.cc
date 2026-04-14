@@ -49,7 +49,7 @@ class HipEventElapsedTimeBenchmark : public Benchmark<HipEventElapsedTimeBenchma
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipEventElapsedTime) {
+TEST_CASE(Performance_hipEventElapsedTime) {
   HipEventElapsedTimeBenchmark benchmark;
   benchmark.Run();
 }

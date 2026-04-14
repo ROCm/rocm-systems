@@ -64,7 +64,7 @@ bool compare_array_elements(int* array1, int* array2, int width, int height = 1,
   return true;
 }
 
-HIP_TEST_CASE(Unit_hipBindTextureToArray_Negative_Parameters) {
+TEST_CASE(Unit_hipBindTextureToArray_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr unsigned int width = 16;
@@ -132,7 +132,7 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Negative_Parameters) {
   free(data);
 }
 
-HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_1D) {
+TEST_CASE(Unit_hipBindTextureToArray_Positive_1D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr unsigned int width = 1024;
@@ -177,7 +177,7 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_1D) {
   free(data);
 }
 
-HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_2D) {
+TEST_CASE(Unit_hipBindTextureToArray_Positive_2D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr unsigned int width = 256;
@@ -226,7 +226,7 @@ HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_2D) {
   free(data);
 }
 
-HIP_TEST_CASE(Unit_hipBindTextureToArray_Positive_3D) {
+TEST_CASE(Unit_hipBindTextureToArray_Positive_3D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr unsigned int width = 256;

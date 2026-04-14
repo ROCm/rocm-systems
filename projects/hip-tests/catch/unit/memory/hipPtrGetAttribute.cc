@@ -13,7 +13,7 @@
 #include <string>
 
 // Run few simple cases including  host pointer arithmetic:
-HIP_TEST_CASE(Unit_hipPtrGetAttribute_Simple) {
+TEST_CASE(Unit_hipPtrGetAttribute_Simple) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   constexpr size_t N{1000000};

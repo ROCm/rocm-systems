@@ -20,7 +20,8 @@ namespace hip_impl {
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz) {
-  const auto* kernel = hip::asKernel(func);
+  auto* function = hip::DeviceFunc::asFunction(func);
+  const auto* kernel = function->kernel();
 
   const auto* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
   const int maxWorkGroupSize = static_cast<int>(device.info().maxWorkGroupSize_);
@@ -262,7 +263,7 @@ void __hipRegisterManagedVar(
   } else {
     HIP_INIT_VOID();
     status = ihipMallocManaged(pointer, size, align, 0);
-    var_ptr->SetAllocFlag(true);
+    var_ptr->setAllocFlag(true);
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
@@ -321,17 +322,17 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipSt
 // ================================================================================================
 hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                       hipStream_t stream) {
-  HIP_INIT_API_NOLOG(__hipPushCallConfiguration);
+  HIP_INIT_API(__hipPushCallConfiguration, gridDim, blockDim, sharedMem, stream);
 
   PlatformState::Instance().ConfigureCall(gridDim, blockDim, sharedMem, stream);
 
-  HIP_RETURN_NOLOG(hipSuccess);
+  HIP_RETURN(hipSuccess);
 }
 
 // ================================================================================================
 hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
                                      hipStream_t* stream) {
-  HIP_INIT_API_NOLOG(__hipPopCallConfiguration);
+  HIP_INIT_API(__hipPopCallConfiguration, gridDim, blockDim, sharedMem, stream);
 
   ihipExec_t exec;
   PlatformState::Instance().PopExec(exec);
@@ -340,7 +341,7 @@ hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* shar
   *sharedMem = exec.sharedMem_;
   *stream = exec.hStream_;
 
-  HIP_RETURN_NOLOG(hipSuccess);
+  HIP_RETURN(hipSuccess);
 }
 
 // ================================================================================================
@@ -460,8 +461,8 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
-  amd::Kernel* func_kernel = hip::asKernel(func);
-  if (func_kernel == nullptr) {
+  auto* function = hip::DeviceFunc::asFunction(func);
+  if (function == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -473,7 +474,7 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
   }
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[dev_id];
-  const amd::Kernel& kernel = *func_kernel;
+  const amd::Kernel& kernel = *function->kernel();
   const auto* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
 
   const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;
@@ -907,13 +908,13 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
   IHIP_RETURN_ONFAIL(it->second->getManagedVarPointer(hostVar, dev_ptr, size_ptr));
   // if dev_ptr is nullptr, hostvar is not in managed variable list
   if ((dev_ptr && !*dev_ptr) || (size_ptr && *size_ptr == 0)) {
-    amd::Memory* mem = nullptr;
-    IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
+    auto* dvar = static_cast<hip::DeviceVar*>(nullptr);
+    IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, hostVar));
     if (dev_ptr) {
-      *dev_ptr = memDevPtr(mem);
+      *dev_ptr = dvar->device_ptr();
     }
     if (size_ptr) {
-      *size_ptr = mem->getSize();
+      *size_ptr = dvar->size();
     }
   }
   return hipSuccess;
@@ -945,10 +946,10 @@ hipError_t PlatformState::GetDynTexGlobalVar(textureReference* texRef, hipDevice
     return hipErrorNotFound;
   }
 
-  amd::Memory* mem = nullptr;
-  IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, tex_ref_entry.second));
-  *dev_ptr = memDevPtr(mem);
-  *size_ptr = mem->getSize();
+  hip::DeviceVar* dvar;
+  IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, tex_ref_entry.second));
+  *dev_ptr = dvar->device_ptr();
+  *size_ptr = dvar->size();
 
   return hipSuccess;
 }
@@ -964,18 +965,15 @@ hipError_t PlatformState::GetDynTexRef(const char* hostVar, hipModule_t hmod,
     return hipErrorNotFound;
   }
 
-  amd::Memory* mem = nullptr;
-  IHIP_RETURN_ONFAIL(it->second->GetDeviceVar(&mem, hostVar));
+  hip::DeviceVar* dvar;
+  IHIP_RETURN_ONFAIL(it->second->getDeviceVar(&dvar, hostVar));
 
-  if (mem->getSize() != sizeof(textureReference)) {
+  if (dvar->size() != sizeof(textureReference)) {
     return hipErrorNotFound;
   }
 
-  hip::Var* var = it->second->getVar(hostVar);
-  if (var->shadowVptr == nullptr) {
-    var->shadowVptr = new texture<char>();
-  }
-  *texRef = reinterpret_cast<textureReference*>(var->shadowVptr);
+  dvar->shadowVptr = new texture<char>();
+  *texRef = reinterpret_cast<textureReference*>(dvar->shadowVptr);
   return hipSuccess;
 }
 

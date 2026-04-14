@@ -10,7 +10,7 @@
 
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
-HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Negative_Parameters) {
+TEST_CASE(Unit_hipTexRefSetAddress2D_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 256;
@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Negative_Parameters) {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-HIP_TEST_CASE(Unit_hipTexRefSetAddress2D_Positive) {
+TEST_CASE(Unit_hipTexRefSetAddress2D_Positive) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 256;

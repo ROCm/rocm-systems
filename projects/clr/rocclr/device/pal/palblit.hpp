@@ -170,20 +170,6 @@ class DmaBlitManager : public device::HostBlitManager {
     return false;
   }
 
-  //! Stream memory increment operation - Increment memory by a 'value'.
-  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
-    assert(!"Unimplemented");
-    return false;
-  }
-
-  //! Stream memory decrement operation - Decrement memory by a 'value'.
-  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
-    assert(!"Unimplemented");
-    return false;
-  }
-
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(device::Memory& memory,  //!< Memory to compare the 'value' against
                              uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags,
@@ -269,8 +255,6 @@ class KernelBlitManager : public DmaBlitManager {
     StreamOpsWrite,
     StreamOpsWait,
     InitHeap,
-    StreamOpsIncrement,
-    StreamOpsDecrement,
     BlitTotal,
   };
 
@@ -452,14 +436,6 @@ class KernelBlitManager : public DmaBlitManager {
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
                               uint64_t value, size_t offset, size_t sizeBytes) const;
 
-  //! Stream memory increment operation - Increment memory by a 'value'.
-  virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const;
-
-  //! Stream memory decrement operation - Decrement memory by a 'value'.
-  virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const;
-
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(
       device::Memory& memory,  //!< Memory contents to compare the 'value' against
@@ -518,10 +494,6 @@ class KernelBlitManager : public DmaBlitManager {
                      const cl_image_format format  //!< The new format for a view
   ) const;
 
-  //! Atomically updates a memory location (i.e. writes, increments or decrements the memory).
-  bool streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value, size_t offset,
-                       size_t sizeBytes) const;
-
   //! Disable copy constructor
   KernelBlitManager(const KernelBlitManager&);
 
@@ -543,8 +515,7 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_fillBufferAligned", "__amd_rocclr_fillImage",
     "__amd_rocclr_scheduler",         "__amd_rocclr_gwsInit",
     "__amd_rocclr_streamOpsWrite",    "__amd_rocclr_streamOpsWait",
-    "__amd_rocclr_initHeap",          "__amd_rocclr_streamOpsIncrement",
-    "__amd_rocclr_streamOpsDecrement"};
+    "__amd_rocclr_initHeap"};
 
 /*@}*/  // namespace amd::pal
 }  // namespace amd::pal

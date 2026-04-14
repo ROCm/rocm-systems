@@ -554,7 +554,7 @@ static void runTestBallot_3() {
  *    - HIP_VERSION >= 5.6
  */
 
-HIP_TEST_CASE(Unit_hipVoteSync_Any) {
+TEST_CASE(Unit_hipVoteSync_Any) {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   runTestAny_1();
@@ -564,7 +564,7 @@ HIP_TEST_CASE(Unit_hipVoteSync_Any) {
   runTestAny_4();
 }
 
-HIP_TEST_CASE(Unit_hipVoteSync_All) {
+TEST_CASE(Unit_hipVoteSync_All) {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   runTestAll_1_w64();
@@ -574,7 +574,7 @@ HIP_TEST_CASE(Unit_hipVoteSync_All) {
   runTestAll_4();
 }
 
-HIP_TEST_CASE(Unit_hipVoteSync_Ballot) {
+TEST_CASE(Unit_hipVoteSync_Ballot) {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   runTestBallot_1();

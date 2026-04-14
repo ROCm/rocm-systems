@@ -32,7 +32,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEMPLATE_TEST_CASE(Unit_tex3DGrad_Positive_ReadModeElementType, char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_tex3DGrad_Positive_ReadModeElementType, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -109,7 +109,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex3DGrad_Positive_ReadModeElementType, char, unsign
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-HIP_TEMPLATE_TEST_CASE(Unit_tex3DGrad_Positive_ReadModeNormalizedFloat, char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_tex3DGrad_Positive_ReadModeNormalizedFloat, char, unsigned char,
                    short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
 

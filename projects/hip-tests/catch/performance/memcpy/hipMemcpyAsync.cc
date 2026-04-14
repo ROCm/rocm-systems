@@ -69,7 +69,7 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToHost) {
+TEST_CASE(Performance_hipMemcpyAsync_DeviceToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToDevice) {
+TEST_CASE(Performance_hipMemcpyAsync_HostToDevice) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
@@ -119,7 +119,7 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToDevice) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToHost) {
+TEST_CASE(Performance_hipMemcpyAsync_HostToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_HostToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess) {
+TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
@@ -171,9 +171,9 @@ HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess) {
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess) {
+TEST_CASE(Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
     return;
   }
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);

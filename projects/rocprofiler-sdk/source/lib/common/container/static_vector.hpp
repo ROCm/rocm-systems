@@ -204,7 +204,10 @@ static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... _v)
 
     if constexpr(sizeof...(Args) > 0)
     {
-        m_data[_idx] = Tp{std::forward<Args>(_v)...};
+        if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(_v))...>::value)
+            m_data[_idx] = {std::forward<Args>(_v)...};
+        else
+            m_data[_idx] = Tp{std::forward<Args>(_v)...};
     }
     else if constexpr(std::is_move_assignable<Tp>::value || std::is_copy_assignable<Tp>::value)
     {

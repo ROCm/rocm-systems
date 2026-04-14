@@ -25,7 +25,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDeviceGraphMemTrim_Positive_Default) {
+TEST_CASE(Unit_hipDeviceGraphMemTrim_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   // Check for each device
@@ -44,7 +44,7 @@ HIP_TEST_CASE(Unit_hipDeviceGraphMemTrim_Positive_Default) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipDeviceGraphMemTrim_Negative_Parameters) {
+TEST_CASE(Unit_hipDeviceGraphMemTrim_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 

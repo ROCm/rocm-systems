@@ -37,7 +37,7 @@ class HipEventCreateBenchmark : public Benchmark<HipEventCreateBenchmark> {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipEventCreate) {
+TEST_CASE(Performance_hipEventCreate) {
   HipEventCreateBenchmark benchmark;
   benchmark.Run();
 }

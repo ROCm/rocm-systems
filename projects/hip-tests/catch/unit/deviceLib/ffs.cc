@@ -45,7 +45,7 @@ __global__ void ffs_HIP_kernel(unsigned int* a, unsigned int* b, unsigned int* c
   }
 }
 
-HIP_TEST_CASE(Unit_ffs) {
+TEST_CASE(Unit_ffs) {
   using namespace std;
 
   unsigned int* hostA;

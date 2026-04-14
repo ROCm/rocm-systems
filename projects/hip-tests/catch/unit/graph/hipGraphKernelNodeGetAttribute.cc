@@ -9,7 +9,7 @@
 
 #define THREADS_PER_BLOCK 512
 
-HIP_TEST_CASE(Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters) {
+TEST_CASE(Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;

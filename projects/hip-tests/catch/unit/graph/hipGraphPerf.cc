@@ -488,7 +488,7 @@ static void checkGraphEventcontinuousKernelCallIn2Blocks(const unsigned int kNum
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_MemcpyKernelMixCall) {
+TEST_CASE(Unit_hipGraph_PerfCheck_MemcpyKernelMixCall) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -601,7 +601,7 @@ static void hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams(const hipStream_t
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -719,7 +719,7 @@ static void hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams_inLoop(const hipS
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams_inLoop) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams_inLoop) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -768,7 +768,7 @@ HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams_inLoop) {
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -941,7 +941,7 @@ static void hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams_inLoop(const hipS
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams_inLoop) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams_inLoop) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -1057,7 +1057,7 @@ static void hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams1D_inLoop(const hi
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams1D_inLoop) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams1D_inLoop) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -1165,7 +1165,7 @@ static void hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsFrmSymbol(const hi
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsFrmSymbol) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsFrmSymbol) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -1272,7 +1272,7 @@ static void hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsToSymbol(const hip
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsToSymbol) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsToSymbol) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -1425,7 +1425,7 @@ static void hipGraph_PerfCheck_hipGraphExecMemsetNodeSetParams(const hipStream_t
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemsetNodeSetParams) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecMemsetNodeSetParams) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -1858,7 +1858,7 @@ static void hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams_mKernel(
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -2005,7 +2005,7 @@ static void hipGraph_PerfCheck_hipGraphExecEventRecordNodeSetEvent(const hipStre
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecEventRecordNodeSetEvent) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecEventRecordNodeSetEvent) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -2192,7 +2192,7 @@ static void hipGraph_PerfCheck_hipGraphExecEventWaitNodeSetEvent(const hipStream
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecEventWaitNodeSetEvent) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecEventWaitNodeSetEvent) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -2346,7 +2346,7 @@ static void hipGraph_PerfCheck_hipGraphExecHostNodeSetParams(const hipStream_t& 
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecHostNodeSetParams) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecHostNodeSetParams) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -2469,7 +2469,7 @@ static void hipGraph_PerfCheck_hipGraphExecUpdate(const hipStream_t& stream) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecUpdate) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecUpdate) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "
@@ -2613,7 +2613,7 @@ static void hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop(const hipStream_
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-HIP_TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop) {
+TEST_CASE(Unit_hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop) {
   if ((setenv("DEBUG_CLR_GRAPH_PACKET_CAPTURE", "true", 1)) != 0) {
     HipTest::HIP_SKIP_TEST(
         "Unable to turn on "

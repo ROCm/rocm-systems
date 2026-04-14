@@ -16,7 +16,7 @@ hipFreeArray API test scenarios
 #include <hip_array_common.hh>
 
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeArray_DifferentSizes, uchar2, char, ushort, short, short4,
+TEMPLATE_TEST_CASE(Unit_hipFreeArray_DifferentSizes, uchar2, char, ushort, short, short4,
                    uint, int, int4, float, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -33,7 +33,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipFreeArray_DifferentSizes, uchar2, char, ushort, s
   HIP_CHECK(hipFreeArray(arrayPtr));
 }
 
-HIP_TEST_CASE(Unit_hipFreeArray_NegativeArray) {
+TEST_CASE(Unit_hipFreeArray_NegativeArray) {
 #if HT_NVIDIA
   HIP_CHECK(hipFreeArray(nullptr));
 #else
@@ -41,9 +41,9 @@ HIP_TEST_CASE(Unit_hipFreeArray_NegativeArray) {
 #endif
 }
 
-HIP_TEST_CASE(Unit_hipFreeArray_DoubleFree) {
+TEST_CASE(Unit_hipFreeArray_DoubleFree) {
 #if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-120.");
+  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-120");
   return;
 #endif
 
@@ -70,7 +70,7 @@ HIP_TEST_CASE(Unit_hipFreeArray_DoubleFree) {
  *    arrays of different types and size and then call hipFreeArray for each array
  */
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipFreeArray_MultiThreaded, char, int, float2, float4) {
+TEMPLATE_TEST_CASE(Unit_hipFreeArray_MultiThreaded, char, int, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t arr_size = 1024;

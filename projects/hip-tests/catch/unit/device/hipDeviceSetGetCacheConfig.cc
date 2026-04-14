@@ -31,7 +31,7 @@ constexpr std::array<hipFuncCache_t, 4> kCacheConfigs{
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Basic) {
+TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is: " << device);
@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipDeviceGetCacheConfig_Positive_Default) {
+TEST_CASE(Unit_hipDeviceGetCacheConfig_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device is: " << device);

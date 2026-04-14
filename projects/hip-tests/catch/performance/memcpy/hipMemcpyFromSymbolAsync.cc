@@ -51,7 +51,7 @@ static void RunBenchmark(const void* source, void* result, size_t size = 1, size
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyFromSymbolAsync_SingularValue) {
+TEST_CASE(Performance_hipMemcpyFromSymbolAsync_SingularValue) {
   int set{42};
   int result{0};
   RunBenchmark(&set, &result);
@@ -72,7 +72,7 @@ HIP_TEST_CASE(Performance_hipMemcpyFromSymbolAsync_SingularValue) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyFromSymbolAsync_ArrayValue) {
+TEST_CASE(Performance_hipMemcpyFromSymbolAsync_ArrayValue) {
   size_t size = GENERATE(1_KB, 4_KB, 512_KB);
   std::vector<int> array(size);
   std::fill_n(array.data(), size, 42);
@@ -98,7 +98,7 @@ HIP_TEST_CASE(Performance_hipMemcpyFromSymbolAsync_ArrayValue) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyFromSymbolAsync_WithOffset) {
+TEST_CASE(Performance_hipMemcpyFromSymbolAsync_WithOffset) {
   size_t size = GENERATE(1_KB, 4_KB, 512_KB);
   std::vector<int> array(size);
   std::fill_n(array.data(), size, 42);

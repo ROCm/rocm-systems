@@ -17,7 +17,7 @@
  */
 
 
-HIP_TEST_CASE(Unit_hipMemSetMemPool_Negative) {
+TEST_CASE("Unit_hipMemSetMemPool_Negative") {
   int dev;
   HIP_CHECK(hipGetDevice(&dev));
   checkMempoolSupported(dev);
@@ -94,7 +94,7 @@ HIP_TEST_CASE(Unit_hipMemSetMemPool_Negative) {
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
 }
 
-HIP_TEST_CASE(Unit_hipMemSetMemPool_Basic) {
+TEST_CASE("Unit_hipMemSetMemPool_Basic") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 

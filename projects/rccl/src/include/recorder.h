@@ -6,8 +6,6 @@
 #include <mutex>
 #include <chrono>
 
-#include "info.h"
-
 namespace rccl
 {
 // API opcode covered by rccl replayer

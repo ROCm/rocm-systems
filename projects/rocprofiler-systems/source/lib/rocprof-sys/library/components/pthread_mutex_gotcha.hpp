@@ -55,9 +55,6 @@ struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
     static void configure();
     static void shutdown();
 
-    static void pause();
-    static void resume();
-
     int operator()(int (*)(pthread_mutex_t*), pthread_mutex_t*) const;
     int operator()(int (*)(pthread_spinlock_t*), pthread_spinlock_t*) const;
     int operator()(int (*)(pthread_rwlock_t*), pthread_rwlock_t*) const;
@@ -73,7 +70,6 @@ private:
 
     mutable bool         m_protect = false;
     const gotcha_data_t* m_data    = nullptr;
-    static std::mutex    s_mutex;
 };
 
 using pthread_mutex_gotcha_t = comp::gotcha<pthread_mutex_gotcha::gotcha_capacity,

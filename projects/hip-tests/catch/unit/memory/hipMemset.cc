@@ -120,7 +120,7 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
  * Test hipMemset, hipMemsetD8, hipMemsetD16, hipMemsetD32 apis with unique
  * number of elements and memset values.
  */
-HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
+TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
   char memsetval;
   int memsetD32val;
   int16_t memsetD16val;
@@ -162,7 +162,7 @@ HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
  * Test hipMemsetAsync, hipMemsetD8Async, hipMemsetD16Async, hipMemsetD32Async
  * apis with unique number of elements and memset values.
  */
-HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
+TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
   char memsetval;
   int memsetD32val;
   int16_t memsetD16val;
@@ -202,7 +202,7 @@ HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
 /**
  * Test hipMemset small size buffers with unique memset values.
  */
-HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
+TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
   char *A_d, *A_h;
   constexpr int memsetval = 0x24;
 
@@ -230,7 +230,7 @@ HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
 /**
  * Test two memset async operations at the same time.
  */
-HIP_TEST_CASE(Unit_hipMemset_2AsyncOperations) {
+TEST_CASE(Unit_hipMemset_2AsyncOperations) {
   std::vector<float> v;
   v.resize(2048);
   float *p2, *p3;
@@ -268,7 +268,7 @@ HIP_TEST_CASE(Unit_hipMemset_2AsyncOperations) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipMemset_Capture) {
+TEST_CASE("Unit_hipMemset_Capture") {
   const size_t N = 1024;
   void* dst = nullptr;
   HIP_CHECK(hipMalloc(&dst, N));
@@ -292,7 +292,7 @@ HIP_TEST_CASE(Unit_hipMemset_Capture) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-HIP_TEST_CASE(Unit_hipMemsetD8_Capture) {
+TEST_CASE("Unit_hipMemsetD8_Capture") {
   const size_t N = 512;
   void* dst = nullptr;
   HIP_CHECK(hipMalloc(&dst, N * sizeof(uint8_t)));

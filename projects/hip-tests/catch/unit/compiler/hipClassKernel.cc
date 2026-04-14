@@ -18,7 +18,7 @@ __global__ void ovldClassKernel(bool* result_ecd) {
   result_ecd[tid] = (tfo1.func1(10) == 20) && (tfo1.func1(10, 10) == 30);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Overload_Override) {
+TEST_CASE(Unit_hipClassKernel_Overload_Override) {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -44,7 +44,7 @@ __global__ void friendClassKernel(bool* result_ecd) {
   result_ecd[tid] = (tfb1.showA() == 10);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Friend) {
+TEST_CASE(Unit_hipClassKernel_Friend) {
   bool* result_ecd;
   result_ecd = AllocateDeviceMemory();
   hipLaunchKernelGGL(friendClassKernel, dim3(BLOCKS), dim3(THREADS_PER_BLOCK), 0, 0, result_ecd);
@@ -59,7 +59,7 @@ __global__ void emptyClassKernel(bool* result_ecd) {
   result_ecd[tid] = (sizeof(testClassEmpty) == 1) && (&ob1 != &ob2);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Empty) {
+TEST_CASE(Unit_hipClassKernel_Empty) {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -78,7 +78,7 @@ __global__ void sizeClassBKernel(bool* result_ecd) {
                     (sizeof(testSizeP3) == 8);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_BSize) {
+TEST_CASE(Unit_hipClassKernel_BSize) {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -95,7 +95,7 @@ __global__ void sizeClassKernel(bool* result_ecd) {
                     (sizeof(testSizeDerived2) == 20);
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Size) {
+TEST_CASE(Unit_hipClassKernel_Size) {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -115,7 +115,7 @@ __global__ void sizeVirtualClassKernel(bool* result_ecd, refStructSizes structSi
                     (structSizes.sizeOftestSizeDerMulti = sizeof(testSizeDerMulti));
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Virtual) {
+TEST_CASE(Unit_hipClassKernel_Virtual) {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
@@ -140,7 +140,7 @@ __global__ void passByValueKernel(testPassByValue obj, bool* result_ecd) {
   result_ecd[tid] = (obj.exI == 10) && (obj.exC == 'C');
 }
 
-HIP_TEST_CASE(Unit_hipClassKernel_Value) {
+TEST_CASE(Unit_hipClassKernel_Value) {
   bool *result_ecd, *result_ech;
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();

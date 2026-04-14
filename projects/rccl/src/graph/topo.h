@@ -211,6 +211,7 @@ struct ncclTopoSystem {
   bool warpSpeedEnabled;
 #endif
   float baseBw;
+  bool mscclEnabled;
 
   // [RCCL] Track hostIdx to support rail-optimized rings/trees
   int hostIdx;

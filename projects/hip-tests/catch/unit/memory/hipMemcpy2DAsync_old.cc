@@ -44,7 +44,8 @@ static constexpr auto ROWS{6};
  *  - HIP_VERSION >= 6.1
  */
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, double) {
+  CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
   auto memcpy_d2d_type = GENERATE(0, 1);
@@ -119,7 +120,9 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, doubl
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
+                   "[multigpu]", int, float, double) {
+  CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
   int numDevices = 0;
   int canAccessPeer = 0;
@@ -180,11 +183,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int
       HIP_CHECK(hipFree(X_d));
       HIP_CHECK(hipStreamDestroy(stream));
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      SUCCEED("Machine does not seem to have P2P");
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    SUCCEED("skipped the testcase as no of devices is less than 2");
   }
 }
 
@@ -251,7 +253,8 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-HIP_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test) {
+TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test) {
+  CHECK_IMAGE_SUPPORT
   size_t input = 1 << 20;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

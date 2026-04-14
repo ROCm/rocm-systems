@@ -69,7 +69,7 @@ void hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(int block_size_limi
   - for 0 < block_size_limit < attr.maxThreadsPerBlock
   - for block_size_limit > attr.maxThreadsPerBlock
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange) {
+TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange) {
   hipDeviceProp_t devProp;
   // Get current device property
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
@@ -96,12 +96,12 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange) {
   - for 0 < block_size_limit < attr.maxThreadsPerBlock
   - for block_size_limit > attr.maxThreadsPerBlock
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
+TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
   if (devcount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    SUCCEED("Skipping the test as number of Devices found less than 2");
     return;
   }
   // Get current device property
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu) {
   Check the basic functionality of hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
   by passing a functor as 4th parameter.
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor) {
+TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor) {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   functorBlockSizeToDynamicSMemSize testFunc(SHARED_MEM_CONST);
@@ -142,7 +142,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor) {
   Check the basic functionality of hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
   by passing a lambda function as 4th parameter.
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda) {
+TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda) {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   auto testFunc = [](const int blockSize) {
@@ -176,7 +176,7 @@ HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda) {
   - null func
   - Invalid flag
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst) {
+TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst) {
   hipError_t ret;
   int minGridSize = 0, blockSize = 0;
 
@@ -281,7 +281,7 @@ static size_t getMaxDynShMem(int blocksize) {
   Using the derived gridsize and blocksize launch the kernel and validate its
   output.
 */
-HIP_TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional) {
+TEST_CASE(Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional) {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   SECTION("Non Dynamic Shared Kernel") {

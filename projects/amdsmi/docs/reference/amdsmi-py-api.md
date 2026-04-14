@@ -40,7 +40,7 @@ Initialize GPUs only example:
 
 ```python
 try:
-    # by default we initialize with AmdSmiInitFlags.INIT_AMD_GPUS
+    # by default we initalize with AmdSmiInitFlags.INIT_AMD_GPUS
     ret = amdsmi_init()
     # continue with amdsmi
 except AmdSmiException as e:
@@ -902,7 +902,7 @@ try:
             firmware_list = amdsmi_get_fw_info(device)['fw_list']
             for firmware_block in firmware_list:
                 print(firmware_block['fw_name'])
-                # String formatted hex or decimal value ie: 21.00.00.AC or 130
+                # String formated hex or decimal value ie: 21.00.00.AC or 130
                 print(firmware_block['fw_version'])
 except AmdSmiException as e:
     print(e)
@@ -917,7 +917,7 @@ Input parameters:
 
 * `processor_handle` device which to query
 
-Output: Dictionary of activities to their respective usage percentage or 'N/A' if not supported
+Output: Dictionary of activites to their respective usage percentage or 'N/A' if not supported
 
 Field | Description
 ---|---
@@ -2497,9 +2497,7 @@ except AmdSmiException as e:
 ### amdsmi_get_gpu_fan_speed
 
 Description: Get the fan speed for the specified device as a value relative to
-the maximum fan speed. For legacy hwmon GPUs the maximum is AMDSMI_MAX_FAN_SPEED (255).
-For GPUs with the gpu_od sysfs interface, use `amdsmi_get_gpu_fan_speed_max()` to
-query the actual maximum. It is not supported on virtual machine guest
+AMDSMI_MAX_FAN_SPEED. It is not supported on virtual machine guest
 
 Input parameters:
 
@@ -2507,7 +2505,7 @@ Input parameters:
 * `sensor_idx` a 0-based sensor index. Normally, this will be 0. If a device has
 more than one sensor, it could be greater than 0.
 
-Output: Fan speed as integer (relative to per-device maximum)
+Output: Fan speed in relative to MAX
 
 Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed` function:
 
@@ -2540,8 +2538,6 @@ except AmdSmiException as e:
 ### amdsmi_get_gpu_fan_speed_max
 
 Description: Get the max fan speed of the device with provided device handle.
-For legacy hwmon GPUs this returns 255. For GPUs with the gpu_od sysfs interface,
-the maximum is read from the OD_RANGE (e.g. 100).
 It is not supported on virtual machine guest
 
 Input parameters:
@@ -2674,7 +2670,7 @@ Input parameters:
 * `sensor_type` part of device from which temperature should be obtained
 * `metric` enum indicated which temperature value should be retrieved
 
-Output: Temperature as integer in millidegrees Celsius
+Output: Temperature as integer in millidegrees Celcius
 
 Exceptions that can be thrown by `amdsmi_get_temp_metric` function:
 
@@ -2766,7 +2762,7 @@ Output: List containing dictionaries with fields
 
 Field | Description
 ---|---
-`timestamp` | The timestamp when the counter is retrieved - Resolution: 1 ns
+`timestamp` | The timestamp when the counter is retreived - Resolution: 1 ns
 `Dictionary for each counter` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`type`</td><td>Counter that was requested</td></tr><tr><td>`value`</td><td>Value gotten for utilization counter</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_utilization_count` function:
@@ -3144,7 +3140,7 @@ Field | Description
 ---|---
 `curr_sclk_range` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range</td></tr></tbody></table>
 `curr_mclk_range` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range</td></tr></tbody></table>
-`sclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range limit</td></tr></tbody></table>
+`sclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range limt</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range limit</td></tr></tbody></table>
 `mclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range limit</td></tr></tbody></table>
 `curve.vc_points` | List of voltage curve points
 `num_regions` | The number of voltage curve regions
@@ -3277,7 +3273,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_pm_metrics_info
 
-Description: This function will retrieve the name and value for each
+Description: This function will retreive the name and value for each
 item in the pm metrics table with the given processor handle.
 
 Input parameters:
@@ -3769,10 +3765,8 @@ except AmdSmiException as e:
 
 ### amdsmi_set_gpu_fan_speed
 
-Description: Set the fan speed for the specified device with the provided speed.
-For legacy hwmon GPUs the valid range is 0-255. For GPUs with the gpu_od sysfs
-interface, the valid range is determined from the OD_RANGE (e.g. 20-100).
-It is not supported on virtual machine guest
+Description: Set the fan speed for the specified device with the provided speed,
+in RPMs. It is not supported on virtual machine guest
 
 Input parameters:
 
@@ -3809,9 +3803,8 @@ except AmdSmiException as e:
 
 ### amdsmi_reset_gpu_fan
 
-Description: Reset the fan to automatic driver control. For GPUs with the gpu_od
-sysfs interface, this writes the OD_RANGE minimum value and commits the change.
-It is not supported on virtual machine guest
+Description: Reset the fan to automatic driver control. It is not
+supported on virtual machine guest
 
 Input parameters:
 
@@ -4615,13 +4608,13 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_subsystem_name
 
-Description: Get the name string for the device subsystem
+Description: Get the name string for the device subsytem
 
 Input parameters:
 
 * `processor_handle` device which to query
 
-Output: device subsystem
+Output: device subsytem
 
 Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_name` function:
 
@@ -4731,7 +4724,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_minmax_bandwidth_between_processors
 
-Description: Retrieve minimal and maximal io link bandwidth between 2 GPUs.
+Description: Retreive minimal and maximal io link bandwidth between 2 GPUs.
 
 Input parameters:
 
@@ -5483,7 +5476,7 @@ Output: Dictionary holding the following fields.
 Field | Description
 ---|---
 `UNKNOWN` | Virtualization mode not detected
-`BAREMETAL` | Baremetal platform detected
+`BAREMETAL` | Baremetal paltform detected
 `HOST` | Host/Hypervisor platform detected
 `GUEST` | Guest/Virtual Machine detected
 `PASSTHROUGH` | GPU Passthrough mode detected
@@ -5613,10 +5606,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5676,10 +5667,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5711,10 +5700,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5746,10 +5733,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5781,10 +5766,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5818,10 +5801,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5853,10 +5834,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5890,10 +5869,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5960,10 +5937,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -5995,10 +5970,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6030,10 +6003,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6065,10 +6036,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6100,10 +6069,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6146,10 +6113,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -6209,10 +6174,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -6291,10 +6254,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6358,10 +6319,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6392,10 +6351,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6429,10 +6386,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6465,10 +6420,8 @@ Example:
 ```python
 try:
     dimm_addr =0
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6501,10 +6454,8 @@ Example:
 ```python
 try:
     dimm_addr = 0
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6539,10 +6490,8 @@ Example:
 ```python
 try:
     dimm_addr = 0
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6577,10 +6526,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6659,10 +6606,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6693,10 +6638,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6727,10 +6670,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6809,10 +6750,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    socket_handles = amdsmi_get_cpusocket_handles()
+    if len(socket_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for socket in socket_handles:
@@ -6843,10 +6782,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6879,10 +6816,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6913,10 +6848,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -6996,10 +6929,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -7028,10 +6959,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         encoding = 0
@@ -7065,10 +6994,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -7100,10 +7027,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -7141,10 +7066,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
@@ -7229,10 +7152,8 @@ Example:
 
 ```python
 try:
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles: 
@@ -7325,10 +7246,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7375,10 +7294,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7427,10 +7344,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7476,10 +7391,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7526,10 +7439,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7575,10 +7486,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7626,10 +7535,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7675,10 +7582,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7726,10 +7631,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7775,10 +7678,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7830,10 +7731,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7896,10 +7795,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -7989,10 +7886,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8043,10 +7938,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8100,10 +7993,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8236,10 +8127,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8279,10 +8168,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8402,10 +8289,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8452,10 +8337,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8546,10 +8429,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):
@@ -8595,10 +8476,8 @@ Example:
 from amdsmi import *
 try:
     ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
-    cpu_handles = amdsmi_get_cpu_handles()
-    cpu_count = cpu_handles["cpu_count"]
-    processor_handles = cpu_handles["processor_handles"]
-    if cpu_count == 0:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
         print("No CPUs on machine")
     else:
         for i, processor in enumerate(processor_handles):

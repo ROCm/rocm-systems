@@ -7,7 +7,7 @@
 #include <hip_array_common.hh>
 #include <hip_test_common.hh>
 
-HIP_TEST_CASE(Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters) {
+TEST_CASE("Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
 
   const int device_id = 0;

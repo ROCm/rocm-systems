@@ -4,12 +4,8 @@ clock:
     <<: *level_2
     # SWDEV-555665
     disabled: [amd_windows]
-    tags: [deviceLib, timing]
   Unit_hipClock_Positive_Basic:
     <<: *level_2
     # SWDEV-555665
     disabled: [amd_windows]
-    tags: [deviceLib, timing]
-  Unit_hipWallClock64_Positive_Basic:
-    <<: *level_2
-    tags: [deviceLib, timing]
+  Unit_hipWallClock64_Positive_Basic: *level_2

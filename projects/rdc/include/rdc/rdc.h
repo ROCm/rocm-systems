@@ -1707,7 +1707,7 @@ rdc_status_t rdc_config_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_config_setting_t setting);
 
 /**
- *  @brief Get the configurations
+ *  @brief Get the configrations
  *
  *  @details Get all the configurations for all nodes belong to the given group
  *

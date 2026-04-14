@@ -31,7 +31,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Negative_Parameters) {
+TEST_CASE(Unit_hipGraphExecNodeSetParams_Negative_Parameters) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
@@ -82,7 +82,7 @@ HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Negative_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-HIP_TEST_CASE(Unit_hipGraphExecNodeSetParams_Positive) {
+TEST_CASE(Unit_hipGraphExecNodeSetParams_Positive) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;

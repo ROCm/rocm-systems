@@ -79,7 +79,7 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyParam2D_DeviceToHost) {
+TEST_CASE(Performance_hipMemcpyParam2D_DeviceToHost) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyDeviceToHost);
 }
@@ -100,7 +100,7 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2D_DeviceToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyParam2D_HostToDevice) {
+TEST_CASE(Performance_hipMemcpyParam2D_HostToDevice) {
   CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyHostToDevice);
@@ -122,7 +122,7 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2D_HostToDevice) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyParam2D_HostToHost) {
+TEST_CASE(Performance_hipMemcpyParam2D_HostToHost) {
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyHostToHost);
 }
@@ -143,7 +143,7 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2D_HostToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess) {
+TEST_CASE(Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess) {
   CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 32, hipMemcpyDeviceToDevice);
@@ -166,10 +166,10 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess) {
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess) {
+TEST_CASE(Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess) {
   CHECK_IMAGE_SUPPORT
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
     return;
   }
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);

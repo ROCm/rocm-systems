@@ -269,7 +269,7 @@ static void hipGraphDebugDotPrint_Functional(const char* fName, unsigned int fla
    Call hipGraphDebugDotPrint and provice path where to write the DOT file.
    Verify that DOT file get created or not for each flag passed. */
 
-HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Functional) {
+TEST_CASE(Unit_hipGraphDebugDotPrint_Functional) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("Call with hipGraphDebugDotFlagsVerbose flag") {
@@ -330,7 +330,7 @@ HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Functional) {
 
 #define DOT_FILE_PATH_NEG "./graphDotFileNeg.dot"
 
-HIP_TEST_CASE(Unit_hipGraphDebugDotPrint_Argument_Check) {
+TEST_CASE(Unit_hipGraphDebugDotPrint_Argument_Check) {
   hipGraph_t graph;
   hipError_t ret;
 

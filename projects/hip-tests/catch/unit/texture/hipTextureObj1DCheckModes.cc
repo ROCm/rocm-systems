@@ -108,7 +108,7 @@ static void runTest(const int width, const float offsetX) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipTextureObj1DCheckModes) {
+TEST_CASE(Unit_hipTextureObj1DCheckModes) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("hipAddressModeClamp, hipFilterModePoint, regularCoords") {

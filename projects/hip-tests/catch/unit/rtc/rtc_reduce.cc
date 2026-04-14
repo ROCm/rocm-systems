@@ -97,16 +97,13 @@ void opToString(std::string& scalarName, std::string& intrinsicName) {
     scalarName = "MaxOp";
     intrinsicName = "__reduce_max_sync";
   } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
-    scalarName = "std::bit_and";
+    scalarName = "std::logical_and";
     intrinsicName = "__reduce_and_sync";
   } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
-    scalarName = "std::bit_or";
+    scalarName = "std::logical_or";
     intrinsicName = "__reduce_or_sync";
   } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-    scalarName = "std::bit_xor";
-    intrinsicName = "__reduce_xor_sync";
-  } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-    scalarName = "std::bit_xor";
+    scalarName = "LogicalXor";
     intrinsicName = "__reduce_xor_sync";
   } else
     static_assert(std::is_void<T>::value, "Unexpected operator");
@@ -145,15 +142,13 @@ void runAndCompileTest(const std::tuple<Types...> types) {
     __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)
     {
       int tid = threadIdx.x;
-      int laneId = tid % warpSize;
 
       for (int i = 0; i < *numReduces; i++) {
-        int idx = warpSize * i + laneId;
         if (masks[i] & (1ul << tid)) {
           // call the operator only if the lane is mentioned in the mask
-          T& result = output[idx];
+          T& result = output[warpSize * i + tid];
           result = )" +
-              intrinsicName + R"((masks[i], input[idx]);
+              intrinsicName + R"((masks[i], input[tid]);
         }
       }
    })";
@@ -165,7 +160,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-HIP_TEST_CASE(Unit_Rtc_ReduceRandom) {
+TEST_CASE(Unit_Rtc_ReduceRandom) {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 

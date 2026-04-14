@@ -48,7 +48,6 @@ struct instance
     std::function<void()> config       = []() {};
     std::function<void()> sample       = []() {};
     std::function<void()> post_process = []() {};
-    std::function<void()> pause        = []() {};
 };
 //
 struct sampler
@@ -69,8 +68,6 @@ struct sampler
     static void setup();
     static void shutdown();
     static void post_process();
-    static void pause();
-    static void resume();
     static void set_state(state_t);
     static void poll(std::atomic<state_t>* _state, nsec_t _interval, promise_t*);
 };
@@ -100,18 +97,6 @@ inline void
 post_process()
 {
     sampler::post_process();
-}
-
-inline void
-pause()
-{
-    sampler::pause();
-}
-
-inline void
-resume()
-{
-    sampler::resume();
 }
 //
 }  // namespace process_sampler

@@ -7,17 +7,11 @@
 #pragma once
 #include "hip_test_common.hh"
 
-#if HT_LINUX
-#include <sys/sysinfo.h>
+#ifdef __linux__
+  #include <sys/sysinfo.h>
 #else
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <sysinfoapi.h>
+  #include <windows.h>
+  #include <sysinfoapi.h>
 #endif
 
 namespace HipTest {

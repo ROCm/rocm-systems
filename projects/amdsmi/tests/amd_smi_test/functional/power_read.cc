@@ -19,6 +19,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "power_read.h"
 
 #include <gtest/gtest.h>
@@ -28,7 +29,6 @@
 #include <iostream>
 #include <string>
 
-#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 
 TestPowerRead::TestPowerRead() : TestBase() {
@@ -63,7 +63,6 @@ void TestPowerRead::Run(void) {
   amdsmi_status_t err;
 
   TestBase::Run();
-  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -74,10 +73,9 @@ void TestPowerRead::Run(void) {
       PrintDeviceHeader(processor_handles_[i]);
 
       amdsmi_power_cap_info_t info;
-      DISPLAY_AMDSMI_API("amdsmi_get_power_cap_info", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_power_cap_info(processor_handles_[i], 0, &info);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**Power Cap not supported on this device." << std::endl;
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
         continue;
       }

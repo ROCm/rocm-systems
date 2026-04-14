@@ -42,11 +42,11 @@ __global__ void test_kernel_width() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-HIP_TEST_CASE(Unit_Printf_PrintfWidthPrecision) {
+TEST_CASE(Unit_Printf_PrintfWidthPrecision) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
   }
   std::string reference(R"here(              42

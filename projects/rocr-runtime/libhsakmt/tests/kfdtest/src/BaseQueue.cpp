@@ -30,8 +30,7 @@
 
 BaseQueue::BaseQueue()
     :m_QueueBuf(NULL),
-    m_SkipWaitConsumption(true),
-    m_KFDContext(NULL) {
+    m_SkipWaitConsumption(true) {
 }
 
 BaseQueue::~BaseQueue(void) {
@@ -46,7 +45,7 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
         // Queue already exists, one queue per object
         Destroy();
     }
-    m_KFDContext = g_baseTest->m_hsakmt_current_ctx;
+
     memset(&m_Resources, 0, sizeof(m_Resources));
 
     m_QueueBuf = new HsaMemoryBuffer(size, NodeId, true/*zero*/, false/*local*/, true/*exec*/,
@@ -58,26 +57,24 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
     }
 
     if (type == HSA_QUEUE_SDMA_BY_ENG_ID)
-        status = HSAKMT_CALL(hsaKmtCreateQueueExt, m_KFDContext,
-                             NodeId,
-                             type,
-                             DEFAULT_QUEUE_PERCENTAGE,
-                             DEFAULT_PRIORITY,
-                             m_SdmaEngineId,
-                             m_QueueBuf->As<unsigned int*>(),
-                             m_QueueBuf->Size(),
-                             NULL,
-                             &m_Resources);
+        status = hsaKmtCreateQueueExt(NodeId,
+                                      type,
+                                      DEFAULT_QUEUE_PERCENTAGE,
+                                      DEFAULT_PRIORITY,
+                                      m_SdmaEngineId,
+                                      m_QueueBuf->As<unsigned int*>(),
+                                      m_QueueBuf->Size(),
+                                      NULL,
+                                      &m_Resources);
     else
-        status = HSAKMT_CALL(hsaKmtCreateQueue, m_KFDContext,
-                             NodeId,
-                             type,
-                             DEFAULT_QUEUE_PERCENTAGE,
-                             DEFAULT_PRIORITY,
-                             m_QueueBuf->As<unsigned int*>(),
-                             m_QueueBuf->Size(),
-                             NULL,
-                             &m_Resources);
+        status = hsaKmtCreateQueue(NodeId,
+                                   type,
+                                   DEFAULT_QUEUE_PERCENTAGE,
+                                   DEFAULT_PRIORITY,
+                                   m_QueueBuf->As<unsigned int*>(),
+                                   m_QueueBuf->Size(),
+                                   NULL,
+                                   &m_Resources);
 
     if (status != HSAKMT_STATUS_SUCCESS) {
         return status;
@@ -105,20 +102,18 @@ HSAKMT_STATUS BaseQueue::Update(unsigned int percent, HSA_QUEUE_PRIORITY priorit
     void* pNewBuffer = (nullifyBuffer ? NULL : m_QueueBuf->As<void*>());
     HSAuint64 newSize = (nullifyBuffer ? 0 : m_QueueBuf->Size());
 
-    return HSAKMT_CALL(hsaKmtUpdateQueue, m_KFDContext,
-                      m_Resources.QueueId, percent, priority, pNewBuffer, newSize, NULL);
+    return hsaKmtUpdateQueue(m_Resources.QueueId, percent, priority, pNewBuffer, newSize, NULL);
 }
 
 HSAKMT_STATUS BaseQueue::SetCUMask(unsigned int *mask, unsigned int mask_count) {
-    return HSAKMT_CALL(hsaKmtSetQueueCUMask, m_KFDContext,
-                      m_Resources.QueueId, mask_count, mask);
+    return hsaKmtSetQueueCUMask(m_Resources.QueueId, mask_count, mask);
 }
 
 HSAKMT_STATUS BaseQueue::Destroy() {
     HSAKMT_STATUS status =  HSAKMT_STATUS_SUCCESS;
 
     if (m_QueueBuf != NULL) {
-        status = HSAKMT_CALL(hsaKmtDestroyQueue, m_KFDContext, m_Resources.QueueId);
+        status = hsaKmtDestroyQueue(m_Resources.QueueId);
 
         if (status == HSAKMT_STATUS_SUCCESS) {
             delete m_QueueBuf;
