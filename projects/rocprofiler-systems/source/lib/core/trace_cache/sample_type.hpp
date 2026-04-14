@@ -48,6 +48,7 @@ enum class type_identifier_t : uint32_t
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
     ainic_pmc_sample        = 0x000A,
+    kfd_sample              = 0x000B,
     fragmented_space        = 0xFFFF
 };
 
@@ -752,6 +753,91 @@ get_size(const backtrace_region_sample& item)
         std::string_view(item.name), item.start_timestamp, item.end_timestamp,
         std::string_view(item.category), std::string_view(item.call_stack),
         std::string_view(item.line_info), std::string_view(item.extdata));
+}
+
+struct kfd_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier = type_identifier_t::kfd_sample;
+
+    kfd_sample() = default;
+    kfd_sample(uint64_t _thread_id, std::string _name, uint64_t _start_timestamp,
+               uint64_t _end_timestamp, std::string _args_str, std::string _category,
+               std::string _track_name, std::string _event_metadata, uint32_t _device_id,
+               uint8_t _device_type, std::string _pmc_info_name, double _value,
+               std::optional<int64_t> _system_tid)
+    : thread_id(_thread_id)
+    , name(std::move(_name))
+    , start_timestamp(_start_timestamp)
+    , end_timestamp(_end_timestamp)
+    , args_str(std::move(_args_str))
+    , category(std::move(_category))
+    , track_name(std::move(_track_name))
+    , event_metadata(std::move(_event_metadata))
+    , device_id(_device_id)
+    , device_type(_device_type)
+    , pmc_info_name(std::move(_pmc_info_name))
+    , value(_value)
+    , system_tid(_system_tid)
+    {}
+
+    uint64_t               thread_id;
+    std::string            name;
+    uint64_t               start_timestamp;
+    uint64_t               end_timestamp;
+    std::string            args_str;
+    std::string            category;
+    std::string            track_name;
+    std::string            event_metadata;
+    uint32_t               device_id;
+    uint8_t                device_type;
+    std::string            pmc_info_name;
+    double                 value;
+    std::optional<int64_t> system_tid;
+};
+
+template <>
+inline void
+serialize(uint8_t* buffer, const kfd_sample& item)
+{
+    utility::store_value(
+        buffer, item.thread_id, std::string_view(item.name), item.start_timestamp,
+        item.end_timestamp, std::string_view(item.args_str),
+        std::string_view(item.category), std::string_view(item.track_name),
+        std::string_view(item.event_metadata), item.device_id, item.device_type,
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
+}
+
+template <>
+inline kfd_sample
+deserialize(uint8_t*& buffer)
+{
+    kfd_sample       item;
+    std::string_view name_view, args_str_view, category_view, track_name_view,
+        event_metadata_view, pmc_info_name_view;
+    utility::parse_value(buffer, item.thread_id, name_view, item.start_timestamp,
+                         item.end_timestamp, args_str_view, category_view,
+                         track_name_view, event_metadata_view, item.device_id,
+                         item.device_type, pmc_info_name_view, item.value,
+                         item.system_tid);
+    item.name           = std::string(name_view);
+    item.args_str       = std::string(args_str_view);
+    item.category       = std::string(category_view);
+    item.track_name     = std::string(track_name_view);
+    item.event_metadata = std::string(event_metadata_view);
+    item.pmc_info_name  = std::string(pmc_info_name_view);
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const kfd_sample& item)
+{
+    return utility::get_size(
+        item.thread_id, std::string_view(item.name), item.start_timestamp,
+        item.end_timestamp, std::string_view(item.args_str),
+        std::string_view(item.category), std::string_view(item.track_name),
+        std::string_view(item.event_metadata), item.device_id, item.device_type,
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 }  // namespace trace_cache

@@ -235,10 +235,11 @@ class AMDSMIHelpers:
         cpu_choices = {}
         cpu_choices_str = ""
 
+        cpu_handles = []
         try:
-            cpu_handles = []
-            # amdsmi_get_cpusocket_handles() returns the cpu socket handles stored for cpu_id
-            cpu_handles = amdsmi_interface.amdsmi_get_cpusocket_handles()
+            # amdsmi_get_cpu_handles() returns the cpu socket handles stored for cpu_id
+            ret = amdsmi_interface.amdsmi_get_cpu_handles()
+            cpu_handles = ret["processor_handles"]
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
@@ -284,8 +285,8 @@ class AMDSMIHelpers:
         core_choices = {}
         core_choices_str = ""
 
+        core_handles = []
         try:
-            core_handles = []
             # amdsmi_get_cpucore_handles() returns the core handles stored for core_id
             core_handles = amdsmi_interface.amdsmi_get_cpucore_handles()
         except amdsmi_interface.AmdSmiLibraryException as e:
@@ -703,7 +704,9 @@ class AMDSMIHelpers:
             (False, str): Return False, and the first input that failed to be converted
         """
         if "all" in cpu_selections:
-            return True, True, amdsmi_interface.amdsmi_get_cpusocket_handles()
+            ret = amdsmi_interface.amdsmi_get_cpu_handles()
+            cpus = ret["processor_handles"]
+            return True, True, cpus
 
         if isinstance(cpu_selections, str):
             cpu_selections = [cpu_selections]
@@ -1157,9 +1160,10 @@ class AMDSMIHelpers:
 
     def get_cpu_id_from_device_handle(self, input_device_handle):
         """Get the cpu index from the device_handle.
-        amdsmi_interface.amdsmi_get_cpusocket_handles() returns the list of device_handles in order of cpu_index
+        amdsmi_interface.amdsmi_get_cpu_handles() returns the list of device_handles in order of cpu_index
         """
-        device_handles = amdsmi_interface.amdsmi_get_cpusocket_handles()
+        ret = amdsmi_interface.amdsmi_get_cpu_handles()
+        device_handles = ret["processor_handles"]
         for cpu_index, device_handle in enumerate(device_handles):
             if input_device_handle.value == device_handle.value:
                 return cpu_index
@@ -1171,7 +1175,7 @@ class AMDSMIHelpers:
 
     def get_core_id_from_device_handle(self, input_device_handle):
         """Get the core index from the device_handle.
-        amdsmi_interface.amdsmi_get_cpusocket_handles() returns the list of device_handles in order of cpu_index
+        amdsmi_interface.amdsmi_get_cpu_handles() returns the list of device_handles in order of cpu_index
         """
         device_handles = amdsmi_interface.amdsmi_get_cpucore_handles()
         for core_index, device_handle in enumerate(device_handles):
@@ -2246,7 +2250,15 @@ class AMDSMIHelpers:
             print(header)
 
     def dump_cper_entries(
-        self, folder, entries, cper_data, device_handle, file_limit=None, logger=None, emit=True
+        self,
+        folder,
+        entries,
+        cper_data,
+        device_handle,
+        file_limit=None,
+        cper_file=None,
+        logger=None,
+        emit=True,
     ):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
@@ -2641,7 +2653,7 @@ class AMDSMIHelpers:
                             cper_data,
                             device_handle,
                             args.file_limit,
-                            os.path.basename(args.cper_file),
+                            cper_file=os.path.basename(args.cper_file),
                         )
 
             # When a file destination is set, temporarily redirect stdout
@@ -2662,7 +2674,7 @@ class AMDSMIHelpers:
                                 cper_data,
                                 device_handle,
                                 args.file_limit,
-                                logger,
+                                logger=logger,
                                 emit=emit_json,
                             )
                             collected_json_rows.extend(cper_rows)
@@ -2678,7 +2690,7 @@ class AMDSMIHelpers:
                         cper_data,
                         device_handle,
                         args.file_limit,
-                        logger,
+                        logger=logger,
                         emit=emit_json,
                     )
                     collected_json_rows.extend(cper_rows)
@@ -2704,7 +2716,7 @@ class AMDSMIHelpers:
                                 cper_data,
                                 device_handle,
                                 args.file_limit,
-                                logger,
+                                logger=logger,
                                 emit=emit_json,
                             )
                             collected_json_rows.extend(cper_rows)
@@ -2720,7 +2732,7 @@ class AMDSMIHelpers:
                         cper_data,
                         device_handle,
                         args.file_limit,
-                        logger,
+                        logger=logger,
                         emit=emit_json,
                     )
                     collected_json_rows.extend(cper_rows)

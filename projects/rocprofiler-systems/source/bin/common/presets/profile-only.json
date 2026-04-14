@@ -1,0 +1,21 @@
+{
+    "metadata": {
+        "category": "general",
+        "cli_flag": "--profile-only",
+        "description": "Lightweight profiling without tracing: minimal overhead flat profile",
+        "name": "profile-only",
+        "use_case": "Quick performance overview with lowest possible overhead"
+    },
+    "profiling": {
+        "enabled": true,
+        "flat_profile": {
+            "enabled": true
+        }
+    },
+    "sampling": {
+        "enabled": false
+    },
+    "tracing": {
+        "enabled": false
+    }
+}

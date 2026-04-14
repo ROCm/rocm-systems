@@ -17,7 +17,7 @@ LULESH (Livermore Unstructured Lagrangian Explicit Shock Hydrodynamics) is a wid
 
 ## Prerequisites
 
-- CMake 3.21+
+- CMake 3.25+
 - C++17 compiler
 - Kokkos (built from submodule or system installation)
 - (Optional) MPI for distributed execution

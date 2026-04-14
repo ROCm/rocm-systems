@@ -21,6 +21,13 @@
 #include "debug.h"
 #include "logging.h"
 #include "os_driver.h"
+#include "utils_windows.h"
+
+/* Make sure windows.h doesn't define min/max, which conflicts with
+   our use of std::min.  */
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 
 /* Make sure we use the STATUS_XXX constants from ntstatus.h.  Some of
    the constants we use (but not all) are defined in winnt.h too, but
@@ -282,7 +289,7 @@ kmd_wave_launch_traps_mask (os_wave_launch_trap_mask_t mask)
   if (!!(mask & os_wave_launch_trap_mask_t::wave_start))
     kmd_mask |= 1 << 30;
   if (!!(mask & os_wave_launch_trap_mask_t::wave_end))
-    kmd_mask |= 1 << 31;
+    kmd_mask |= 1u << 31;
 
   return kmd_mask;
 }
@@ -1278,7 +1285,8 @@ kmd_driver_t::send_escape (const kmd::agent_t &agent, KMDDBGRIF_DBGR_CMDS &arg,
   static_assert (sizeof (payload)
                  == sizeof (PROXY_ESCAPE_INFO) + sizeof (KMDDBGRIF_DBGR_CMDS));
 
-  payload.proxy_header.gpuOrdinal = agent.handle.chain_ordinal;
+  utils::narrow_assign (payload.proxy_header.gpuOrdinal,
+                        agent.handle.chain_ordinal);
   payload.proxy_header.privateDataLengthBytes = sizeof (KMDDBGRIF_DBGR_CMDS);
   payload.proxy_header.version = PXDRV_HEADER_VERSION;
   payload.proxy_header.adapterDriverId = AdapterProxyDriver;
@@ -1344,28 +1352,17 @@ kmd_driver_t::get_adapter_name (D3DKMT_HANDLE adapter) const
   query_info.pPrivateDriverData = &adapter_reg_info;
   query_info.PrivateDriverDataSize = sizeof (D3DKMT_ADAPTERREGISTRYINFO);
 
-  if (m_d3d.api.query_adapter_info (&query_info) != STATUS_SUCCESS)
-    return "<unknown>";
+  if (m_d3d.api.query_adapter_info (&query_info) == STATUS_SUCCESS)
+    {
+      size_t wide_len = ::wcsnlen (adapter_reg_info.AdapterString,
+                                   std::size (adapter_reg_info.AdapterString));
+      std::wstring_view ws (adapter_reg_info.AdapterString, wide_len);
+      std::string name = utils::convert_to_string (ws);
+      if (!name.empty ())
+        return name;
+    }
 
-  size_t wide_len = ::wcsnlen (adapter_reg_info.AdapterString,
-                               std::size (adapter_reg_info.AdapterString));
-  if (wide_len == 0)
-    return "<unknown>";
-
-  int size_needed
-    = WideCharToMultiByte (CP_ACP, 0, adapter_reg_info.AdapterString,
-                           (int)wide_len, nullptr, 0,
-                           nullptr, nullptr);
-  if (size_needed <= 0)
-    return "<unknown>";
-
-  std::string result (size_needed, '\0');
-  int size
-    = WideCharToMultiByte (CP_ACP, 0, adapter_reg_info.AdapterString,
-                           (int)wide_len, &result[0], size_needed,
-                           "?", nullptr);
-  dbgapi_assert (size == size_needed);
-  return result;
+  return "<unknown>";
 }
 
 amd_dbgapi_status_t
@@ -1403,13 +1400,14 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
         return nt_status_to_dbgapi_status (status);
 
       KMDDBGR_DEVICE_INFO &kmd_snap = cmd.Output.getDeviceInfoOut.deviceInfo;
-      os_agent_info.os_agent_id = std::distance (&m_agents.front (), &agent);
+      utils::narrow_assign (os_agent_info.os_agent_id,
+                            std::distance (&m_agents.front (), &agent));
       os_agent_info.gfxip = { kmd_snap.gfxTargetVersion / 10000,
                               (kmd_snap.gfxTargetVersion / 100) % 100,
                               kmd_snap.gfxTargetVersion % 100 };
 
-      os_agent_info.domain = kmd_snap.pciSegment;
-      os_agent_info.location_id = kmd_snap.locationId;
+      utils::narrow_assign (os_agent_info.domain, kmd_snap.pciSegment);
+      utils::narrow_assign (os_agent_info.location_id, kmd_snap.locationId);
 
       os_agent_info.vendor_id = kmd_snap.vendorId;
       os_agent_info.device_id = kmd_snap.deviceId;
@@ -1426,6 +1424,10 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
 
       os_agent_info.fw_version = kmd_snap.fwVersion;
 
+      os_agent_info.agent_address_base = kmd_snap.gpuvmBase;
+      os_agent_info.agent_address_limit = kmd_snap.gpuvmLimit;
+      if (agent.kmd_version < kmd::version_t {1, 4})
+        os_agent_info.agent_address_limit -= 1;
       os_agent_info.local_address_aperture_base = kmd_snap.ldsBase;
       os_agent_info.local_address_aperture_limit = kmd_snap.ldsLimit;
       os_agent_info.private_address_aperture_base = kmd_snap.scratchBase;
@@ -1436,9 +1438,9 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
       os_agent_info.address_watch_supported
         = kmd_snap.capability & KMD_DBGR_CAP_WATCH_POINTS_SUPPORTED;
       os_agent_info.address_watch_register_count
-        = 1 << ((kmd_snap.capability
-                 & KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_MASK)
-                >> KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_SHIFT);
+        = size_t (1) << ((kmd_snap.capability
+                          & KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_MASK)
+                         >> KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_SHIFT);
       os_agent_info.precise_memory_supported
         = kmd_snap.capability
           & KMD_DBGR_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
@@ -1636,7 +1638,8 @@ kmd_driver_t::query_debug_event (os_exception_mask_t *exceptions_present,
   /* TODO some fairness so we round-robin-ish across all the adapters?  */
   for (const auto &agent : m_agents)
     {
-      os_agent_id_t agent_id = std::distance (&m_agents.front (), &agent);
+      auto distance = std::distance (&m_agents.front (), &agent);
+      auto agent_id = utils::narrow<os_agent_id_t> (distance);
 
       KMDDBGRIF_DBGR_CMDS cmd{};
       cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_EXCEPTIONS;
@@ -1770,7 +1773,8 @@ kmd_driver_t::suspend_queues (const os_queue_id_t *queues, size_t queue_count,
       cmd.Input.suspendQueueIn.exceptionMaskToClear
         = kmd_exception_mask (exceptions_cleared);
       cmd.Input.suspendQueueIn.gracePeriodIn100us = 500;
-      cmd.Input.suspendQueueIn.numQueues = agent_queue_ids.size ();
+      utils::narrow_assign (cmd.Input.suspendQueueIn.numQueues,
+                            agent_queue_ids.size ());
       std::transform (agent_queue_ids.begin (), agent_queue_ids.end (),
                       cmd.Input.suspendQueueIn.queueIds,
                       [this] (auto &&queue_id)
@@ -1821,7 +1825,8 @@ kmd_driver_t::resume_queues (const os_queue_id_t *queues, size_t queue_count,
     {
       KMDDBGRIF_DBGR_CMDS cmd{};
       cmd.Input.cmd = KMD_DBGR_CMD_OP_RESUME_QUEUE;
-      cmd.Input.resumeQueueIn.numQueues = agent_queue_ids.size ();
+      utils::narrow_assign (cmd.Input.resumeQueueIn.numQueues,
+                            agent_queue_ids.size ());
       std::transform (agent_queue_ids.begin (), agent_queue_ids.end (),
                       cmd.Input.resumeQueueIn.queueIds,
                       [this] (auto &&queue_id)
@@ -1975,7 +1980,7 @@ kmd_driver_t::set_address_watch (os_agent_id_t os_agent_id,
 
   /* TODO we should use the number of watchpoints from the agent info snapshot.
    */
-  int id = 0;
+  os_watch_id_t id = 0;
   for (; id < 4; id += 1)
     {
       KMDDBGRIF_DBGR_CMDS cmd{};
@@ -1984,7 +1989,9 @@ kmd_driver_t::set_address_watch (os_agent_id_t os_agent_id,
         = static_cast<KMDDBGRIF_ADDR_WATCH_ID> (id);
       cmd.Input.setAddrWatchIn.mode = kmd_addr_watch_mode (os_watch_mode);
       cmd.Input.setAddrWatchIn.watchAddr = address;
-      cmd.Input.setAddrWatchIn.watchAddrMask = mask;
+      using mask_t = decltype (cmd.Input.setAddrWatchIn.watchAddrMask);
+      utils::narrow_assign (cmd.Input.setAddrWatchIn.watchAddrMask,
+                            mask & mask_t (-1));
 
       NTSTATUS status = send_escape (m_agents[os_agent_id], cmd);
       if (status == STATUS_RESOURCE_IN_USE)
@@ -2181,77 +2188,78 @@ kmd_driver_t::xfer_agent_memory_partial (os_agent_id_t agent_id,
      aligned.  If so, use an intermediate guaranteed-aligned
      buffer.  */
   size_t misalign = (read != nullptr
-		     ? (uintptr_t) read % sizeof (DWORD)
-		     : (uintptr_t) write % sizeof (DWORD));
+                     ? (uintptr_t) read % sizeof (DWORD)
+                     : (uintptr_t) write % sizeof (DWORD));
   if (misalign != 0)
     {
       /* Large enough to fit most xfers in one escape call, and small
-	 enough to not cause stack overflow problems.  */
+         enough to not cause stack overflow problems.  */
       constexpr size_t aligned_buffer_size = 64;
       alignas(DWORD) std::byte aligned_buffer[aligned_buffer_size];
 
       /* If we need a second xfer, read/write enough bytes such that
-	 that xfer will be aligned.  */
+         that xfer will be aligned.  */
       size_t partial_size = (*size > sizeof (aligned_buffer)
-			     ? misalign
-			     : *size);
+                             ? misalign
+                             : *size);
 
       if (write != nullptr)
-	std::memcpy (aligned_buffer, write, partial_size);
+        std::memcpy (aligned_buffer, write, partial_size);
 
       /* Recurse to do the aligned partial xfer.  */
       size_t wanted_partial_size = partial_size;
       amd_dbgapi_status_t status
-	= xfer_agent_memory_partial (agent_id,
-				     address,
-				     (read != nullptr
-				      ? aligned_buffer
-				      : nullptr),
-				     (write != nullptr
-				      ? aligned_buffer
-				      : nullptr),
-				     &partial_size);
+        = xfer_agent_memory_partial (agent_id,
+                                     address,
+                                     (read != nullptr
+                                      ? aligned_buffer
+                                      : nullptr),
+                                     (write != nullptr
+                                      ? aligned_buffer
+                                      : nullptr),
+                                     &partial_size);
       if (status != AMD_DBGAPI_STATUS_SUCCESS)
-	return status;
+        return status;
       if (read != nullptr)
-	std::memcpy (read, aligned_buffer, partial_size);
+        std::memcpy (read, aligned_buffer, partial_size);
 
       /* If we got less than we wanted, then we're already done.  */
       if (wanted_partial_size != partial_size)
-	{
-	  *size = partial_size;
-	  return status;
-	}
+        {
+          *size = partial_size;
+          return status;
+        }
 
       /* Now xfer the remainder.  Several callers don't currently
-	 handle partial xfers, so if this fails, return failure for
-	 the whole xfer.  Once all such callers are fixed, this whole
-	 if block can be removed.  */
+         handle partial xfers, so if this fails, return failure for
+         the whole xfer.  Once all such callers are fixed, this whole
+         if block can be removed.  */
       size_t remaining_size = *size - partial_size;
       if (remaining_size != 0)
-	{
-	  if (read != nullptr)
-	    read = (char *) read + partial_size;
-	  else
-	    write = (char *) write + partial_size;
+        {
+          if (read != nullptr)
+            read = (char *) read + partial_size;
+          else
+            write = (char *) write + partial_size;
 
-	  /* This access is now guaranteed to be word-aligned.  */
-	  size_t new_misalign = (read != nullptr
-				 ? (uintptr_t) read % sizeof (DWORD)
-				 : (uintptr_t) write % sizeof (DWORD));
-	  dbgapi_assert (new_misalign == 0);
+          /* This access is now guaranteed to be word-aligned.  */
+          [[maybe_unused]] size_t new_misalign
+            = (read != nullptr
+               ? (uintptr_t)read % sizeof (DWORD)
+               : (uintptr_t)write % sizeof (DWORD));
+          dbgapi_assert (new_misalign == 0);
 
-	  address += partial_size;
+          address += partial_size;
 
-	  /* Recurse.  */
-	  status
-	    = xfer_agent_memory_partial (agent_id, address,
-					 read, write, &remaining_size);
+          /* Recurse.  */
+          status
+            = xfer_agent_memory_partial (agent_id, address,
+                                         read, write, &remaining_size);
 
-	  /* Don't update SIZE unless we succeeded.  */
-	  if (status != AMD_DBGAPI_STATUS_SUCCESS)
-	    return status;
-	}
+          /* Don't update SIZE unless we succeeded.  */
+          if (status != AMD_DBGAPI_STATUS_SUCCESS)
+            return status;
+        }
 
       *size = partial_size + remaining_size;
       return status;
@@ -2263,14 +2271,14 @@ kmd_driver_t::xfer_agent_memory_partial (os_agent_id_t agent_id,
       cmd.Input.cmd = KMD_DBGR_CMD_OP_WRITE_BUFFER;
       cmd.Input.writeBufferIn.srcCpuVA = reinterpret_cast<uint64_t> (write);
       cmd.Input.writeBufferIn.dstGpuVA = static_cast<uint64_t> (address);
-      cmd.Input.writeBufferIn.size = *size;
+      utils::narrow_assign (cmd.Input.writeBufferIn.size, *size);
     }
   else
     {
       cmd.Input.cmd = KMD_DBGR_CMD_OP_READ_BUFFER;
       cmd.Input.readBufferIn.srcGpuVA = static_cast<uint64_t> (address);
       cmd.Input.readBufferIn.dstCpuVA = reinterpret_cast<uint64_t> (read);
-      cmd.Input.readBufferIn.size = *size;
+      utils::narrow_assign (cmd.Input.readBufferIn.size, *size);
     }
 
   const auto &agent = m_agents[agent_id];

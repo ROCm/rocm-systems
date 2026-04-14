@@ -23,6 +23,7 @@
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
@@ -428,7 +429,7 @@ consume_args(Tp&&...)
 auto
 get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    auto backtrace = nlohmann::json();
+    auto backtrace = nlohmann::json::object();
 
     if(_bt_data && !_bt_data->empty())
     {
@@ -2062,6 +2063,50 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
             }
 #endif
+#if(ROCPROFILER_VERSION >= 10000)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
+                        header->payload);
+                tool_kfd_page_fault_callback(tool_data, record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
+                        header->payload);
+                tool_kfd_page_migrate_callback(tool_data, record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
+                        header->payload);
+                tool_kfd_queue_callback(tool_data, record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
+                        header->payload);
+                tool_kfd_event_queue_callback(tool_data, record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
+            {
+                auto* record = static_cast<
+                    rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
+                    header->payload);
+                tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
+            {
+                auto* record = static_cast<
+                    rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
+                    header->payload);
+                tool_kfd_event_dropped_events_callback(tool_data, record);
+            }
+#endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
             {
@@ -2111,6 +2156,43 @@ get_counter_storage()
 {
     static auto* _v = new agent_counter_storage_map_t{};
     return _v;
+}
+
+void
+flush_counter_storage_outputs()
+{
+    auto* _agent_counter_storage = get_counter_storage();
+    if(!_agent_counter_storage) return;
+
+    auto _cleanup_keys = std::vector<std::pair<std::string, const counter_storage*>>{};
+    for(const auto& [agent_id, counter_map] : *_agent_counter_storage)
+    {
+        static_cast<void>(agent_id);
+        for(const auto& [counter_id, storage] : counter_map)
+        {
+            static_cast<void>(counter_id);
+            _cleanup_keys.emplace_back(storage.storage_name + "cleanup", &storage);
+        }
+    }
+
+    std::sort(_cleanup_keys.begin(), _cleanup_keys.end(),
+              [](const auto& lhs, const auto& rhs) { return *lhs.second < *rhs.second; });
+
+    for(const auto& [cleanup_key, storage] : _cleanup_keys)
+    {
+        if(!storage || !storage->storage) continue;
+        if(storage->manager)
+        {
+            storage->manager->cleanup(cleanup_key);
+        }
+        else
+        {
+            // No tim::manager at construction (add_cleanup was skipped); still flush
+            // timemory storage once at shutdown.
+            counter_storage::write(storage->storage.get(), storage->metric_name,
+                                   storage->metric_description);
+        }
+    }
 }
 
 void
@@ -2512,6 +2594,98 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
+#if(ROCPROFILER_VERSION >= 10000)
+    // Initialize KFD event metadata
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
+       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
+       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
+       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
+       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
+       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    {
+        rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
+    }
+
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->kfd_page_fault_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
+            _data->kfd_page_fault_buffer));
+    }
+
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->kfd_page_migrate_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr, 0,
+            _data->kfd_page_migrate_buffer));
+    }
+
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->kfd_queue_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
+            _data->kfd_queue_buffer));
+    }
+
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->kfd_event_queue_buffer));
+
+        // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
+        // All others are captured within paired KFD_QUEUE operations
+        auto kfd_event_queue_ops = std::array<rocprofiler_tracing_operation_t, 1>{
+            ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
+        };
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+            kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
+            _data->kfd_event_queue_buffer));
+    }
+
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->kfd_event_unmap_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+            nullptr, 0, _data->kfd_event_unmap_buffer));
+    }
+
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->kfd_event_dropped_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+            nullptr, 0, _data->kfd_event_dropped_buffer));
+    }
+#endif
+
     if(!_counter_events.empty())
     {
         for(const auto& itr : _data->gpu_agents)
@@ -2607,6 +2781,7 @@ finalize_sdk_common()
 
     if(get_counter_storage())
     {
+        flush_counter_storage_outputs();
         get_counter_storage()->clear();
         delete get_counter_storage();
         get_counter_storage() = nullptr;

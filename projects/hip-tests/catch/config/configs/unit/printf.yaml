@@ -19,7 +19,7 @@ printf:
   Unit_NonHost_Printf_BufferAvailability: *level_2
   Unit_Printf_ManyDevicesTest:
     <<: *level_2
-    tags: [multigpu]
+    tags: []
   Unit_Printf_PrintfStar: *level_2
   Unit_Printf_PrintfManyWaves: *level_2
   Unit_Printf_PrintfWidthPrecision: *level_2

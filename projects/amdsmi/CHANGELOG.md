@@ -34,6 +34,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi static -C` showing N/A for MEM/DF/SOC/DCEF clocks on gfx1151 when idle**.
   - Root cause: `get_frequencies()` in the rocm_smi layer discards valid frequency data when the kernel driver does not mark a current clock level with `*` in pp_dpm sysfs files (common in auto power management mode). Added a fallback in `amdsmi_get_clk_freq()` to read sysfs directly when the rocm_smi layer returns `AMDSMI_STATUS_UNEXPECTED_DATA`, preserving frequency level data.
+  
+- **Fixed `amd-smi metric` crashing with `TypeError` on MI300A when no CPU flags are specified**.  
+  - When no CPU arguments are passed, `metric_cpu()` sets all boolean CPU args to `True` to display all available data. `--cpu-svi3-vr-controller-temp` takes a TYPE argument (and optional RAIL_INDEX) rather than a boolean flag — setting it to `True` caused a `TypeError` crash when the code tried to subscript it with `[0][0]`. Added `cpu_svi3_vr_controller_temp` to the show-all exclusion list, following the existing pattern for `cpu_lclk_dpm_level`, `cpu_io_bandwidth`, `cpu_dimm_sb_reg`, and similar argument-taking flags.
 
 - **Fixed `amdsmi_get_gpu_accelerator_partition_profile()` returning incorrect `num_partitions` when `num_partition` is unavailable from GPU metrics**.  
   - GPU metrics no longer always provides `num_partition`. The function now derives the partition count from the active partition type when `num_partition` is not available:
