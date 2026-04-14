@@ -159,29 +159,23 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         hip_interop_[pic_idx].width = va_drm_prime_surface_desc.width;
         hip_interop_[pic_idx].height = va_drm_prime_surface_desc.height;
 
-        hip_interop_[pic_idx].offset[0] = va_drm_prime_surface_desc.layers[0].offset[0];
-        hip_interop_[pic_idx].offset[1] = va_drm_prime_surface_desc.layers[1].offset[0];
-        hip_interop_[pic_idx].offset[2] = va_drm_prime_surface_desc.layers[2].offset[0];
-
-        hip_interop_[pic_idx].pitch[0] = va_drm_prime_surface_desc.layers[0].pitch[0];
-        hip_interop_[pic_idx].pitch[1] = va_drm_prime_surface_desc.layers[1].pitch[0];
-        hip_interop_[pic_idx].pitch[2] = va_drm_prime_surface_desc.layers[2].pitch[0];
-
         hip_interop_[pic_idx].num_layers = va_drm_prime_surface_desc.num_layers;
+        for (uint32_t i = 0; i < va_drm_prime_surface_desc.num_layers && i < kMaxVideoLayers; i++) {
+            hip_interop_[pic_idx].offset[i] = va_drm_prime_surface_desc.layers[i].offset[0];
+            hip_interop_[pic_idx].pitch[i] = va_drm_prime_surface_desc.layers[i].pitch[0];
+        }
 
         for (auto i = 0; i < va_drm_prime_surface_desc.num_objects; ++i) {
             close(va_drm_prime_surface_desc.objects[i].fd);
         }
     }
 
-    *&dev_mem_ptr[0] = hip_interop_[pic_idx].hip_mapped_device_mem;
-    horizontal_pitch[0] = hip_interop_[pic_idx].pitch[0];
-    if (hip_interop_[pic_idx].num_layers == 2) {
-        *&dev_mem_ptr[1] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[1];
-        horizontal_pitch[1] = hip_interop_[pic_idx].pitch[1];
-    } else if (hip_interop_[pic_idx].num_layers == 3) {
-        *&dev_mem_ptr[2] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[2];
-        horizontal_pitch[2] = hip_interop_[pic_idx].pitch[2];
+    rocdec_status = static_cast<rocDecStatus>(
+        PopulateLayerPointers(hip_interop_[pic_idx].AsLayerInfo(), dev_mem_ptr, horizontal_pitch));
+    if (rocdec_status != ROCDEC_SUCCESS) {
+        ErrorLog(g_rocdec_logger, "Invalid num_layers=" + TOSTR(hip_interop_[pic_idx].num_layers) + " for picture idx=" + TOSTR(pic_idx));
+        FunctionExitLog(g_rocdec_logger);
+        return rocdec_status;
     }
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;

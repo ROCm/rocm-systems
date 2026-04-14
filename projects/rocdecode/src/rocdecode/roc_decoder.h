@@ -33,15 +33,28 @@ THE SOFTWARE.
 #include "../api/rocdecode/rocdecode.h"
 #include <hip/hip_runtime.h>
 #include "vaapi/vaapi_videodecoder.h"
+#include "video_layer_utils.h"
 
 struct HipInteropDeviceMem {
     hipExternalMemory_t hip_ext_mem; // Interface to the vaapi-hip interop
     uint8_t* hip_mapped_device_mem; // Mapped device memory for the YUV plane
     uint32_t width; // Width of the surface in pixels.
     uint32_t height; // Height of the surface in pixels.
-    uint32_t offset[3]; // Offset of each plane
-    uint32_t pitch[3]; // Pitch of each plane
+    uint32_t offset[kMaxVideoLayers]; // Offset of each plane
+    uint32_t pitch[kMaxVideoLayers]; // Pitch of each plane
     uint32_t num_layers; // Number of layers making up the surface
+
+    // Build a VideoLayerInfo suitable for PopulateLayerPointers().
+    VideoLayerInfo AsLayerInfo() const {
+        VideoLayerInfo info{};
+        info.base_ptr = hip_mapped_device_mem;
+        info.num_layers = num_layers;
+        for (uint32_t i = 0; i < kMaxVideoLayers; i++) {
+            info.offset[i] = offset[i];
+            info.pitch[i] = pitch[i];
+        }
+        return info;
+    }
 };
 
 class RocDecoder {
