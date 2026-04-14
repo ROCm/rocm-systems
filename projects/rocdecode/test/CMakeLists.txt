@@ -315,3 +315,22 @@ if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
 else()
   message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")
 endif(FFMPEG_FOUND AND NOT USING_THE_ROCK)
+
+# ##############################################################################
+# Standalone unit tests (no GPU / VAAPI / HIP runtime required)
+#
+# These tests exercise pure-CPU parsing helpers that are compiled directly
+# from rocdecode/src/. They intentionally link nothing from the rocdecode
+# library itself, so they can run on any dev box — the goal is fast
+# regression coverage for logic that doesn't need a working driver stack.
+# ##############################################################################
+option(ROCDECODE_BUILD_UNIT_TESTS "Build standalone CPU-only unit tests" ON)
+if(ROCDECODE_BUILD_UNIT_TESTS)
+  add_executable(vaapi_parse_visible_devices_test
+                 vaapi_parse_visible_devices_test.cpp)
+  target_include_directories(vaapi_parse_visible_devices_test PRIVATE
+                             "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+  target_compile_features(vaapi_parse_visible_devices_test PRIVATE cxx_std_17)
+  add_test(NAME vaapi_parse_visible_devices_test
+           COMMAND vaapi_parse_visible_devices_test)
+endif()
