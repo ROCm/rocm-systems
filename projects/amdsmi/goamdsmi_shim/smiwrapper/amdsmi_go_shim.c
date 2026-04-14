@@ -462,7 +462,7 @@ uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_index) {
 
 uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index) {
   bool readSuccess = false;
-  double socket_power_watts = 0;
+  uint32_t socket_power_watts = 0;
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_power(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                    &socket_power_watts)))
@@ -477,7 +477,7 @@ uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index) {
 
 uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index) {
   bool readSuccess = false;
-  double socket_power_cap_watts = 0;
+  uint32_t socket_power_cap_watts = 0;
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                        &socket_power_cap_watts)))

@@ -6225,7 +6225,7 @@ try:
                 # Only show utilization and ppt_limit for modes 4 and 5
                 if power_efficiency_mode in [4, 5]:
                     print(f"    	UTIL: {utilization}%")
-                    print(f"    	PPT_LIMIT: {ppt_limit:.3f} Watts")
+                    print(f"    	PPT_LIMIT: {ppt_limit} Watts")
                     print()
                 else:
                     # For modes 0-3, utilization and ppt_limit are not displayed
@@ -7813,7 +7813,7 @@ try:
         power = amdsmi_get_cpu_core_ccd_power(core0)
         print("CPU: 0")
         print("    CCD_POWER:")
-        print(f"        VALUE: {power:.3f} Watts")
+        print(f"        VALUE: {power} Watts")
 except AmdSmiException as e:
     print(e)
 ```
@@ -8431,7 +8431,7 @@ Description: Get the SDPS limit for a CPU socket. This function retrieves the cu
 Input parameters:
 - `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
 
-Output: Double representing the SDPS limit value in Watts
+Output: uint32 representing the SDPS limit value in Watts
 
 Exceptions that can be thrown by `amdsmi_get_cpu_sdps_limit` function:
 

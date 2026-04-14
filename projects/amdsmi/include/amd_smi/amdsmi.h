@@ -3688,7 +3688,7 @@ amdsmi_status_t amdsmi_get_supported_power_cap(amdsmi_processor_handle processor
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle,
-                                            double* ppower);
+                                            uint32_t* ppower);
 
 /**
  *  @brief Get the socket power cap.
@@ -3704,7 +3704,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                double* pcap);
+                                                uint32_t* pcap);
 
 /**
  *  @brief Get the maximum power cap value for a given socket.
@@ -3720,7 +3720,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle,
-                                                    double* pmax);
+                                                    uint32_t* pmax);
 
 /**
  *  @brief Get the SVI based power telemetry for all rails.
@@ -3736,7 +3736,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle proc
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_handle processor_handle,
-                                                           double* power);
+                                                           uint32_t* power);
 
 /**
  *  @brief Set the power cap value for a given socket.
@@ -3752,7 +3752,7 @@ amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_hand
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                double pcap);
+                                                uint32_t pcap);
 
 /**
  *  @brief Set the power efficiency profile policy.
@@ -3773,7 +3773,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
  */
 amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
                                                    uint8_t power_efficiency_mode,
-                                                   uint32_t* utilization, double* ppt_limit);
+                                                   uint32_t* utilization, uint32_t* ppt_limit);
 
 /**
  *  @brief Get the power efficiency profile policy
@@ -3797,7 +3797,7 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  */
 amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
                                                    uint32_t* power_efficiency_mode,
-                                                   uint32_t* utilization, double* ppt_limit);
+                                                   uint32_t* utilization, uint32_t* ppt_limit);
 
 /**
  *  @brief Read CCD (Core Complex Die) power consumption
@@ -3815,7 +3815,7 @@ amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  *           ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
  */
 amdsmi_status_t amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_handle,
-                                              double* power);
+                                              uint32_t* power);
 
 /** @} End tagEsmiPowerControl */
 
@@ -7804,7 +7804,7 @@ amdsmi_status_t amdsmi_set_cpu_sdps_limit(amdsmi_processor_handle processor_hand
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_handle,
-                                          double* sdps_limit);
+                                          uint32_t* sdps_limit);
 
 /** @} End tagEsmiPerfControl */
 
