@@ -657,12 +657,14 @@ void Tester::execute() {
    */
   for (size_t size = args.min_msg_size; size <= max_msg_size;
        size <<= 1) {
-    resetBuffers(size);
-
     /**
      * Restricts the number of iterations of really large messages.
      */
     if (size > args.large_message_size) num_loops = args.loop_large;
+
+    // Reset after num_loops is set so subclasses can size their
+    // buffers to the actual iteration count for this message size.
+    resetBuffers(size);
 
     barrier();
 
@@ -781,7 +783,7 @@ void Tester::print(uint64_t size) {
   }
 
   /**
-   * Calculate total amount of data transfered
+   * Calculate total amount of data transferred
    */
   size_t total_size = size_factor * size * num_timed_msgs;
   size_t volume = total_size / num_loops;

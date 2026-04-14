@@ -330,7 +330,7 @@ int FindInterfaces(char* ifNames, union SocketAddress* ifAddrs, int ifNameMaxSiz
   // User specified interface
   const std::string& socketIfname = envvar::bootstrap::socket_ifname;
   if (inputIfName) {
-    DPRINTF("using iterface %s", inputIfName);
+    DPRINTF("using interface %s", inputIfName);
     nIfs = findInterfaces(inputIfName, ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   } else if (socketIfname != "") {
     // Specified by user : find or fail

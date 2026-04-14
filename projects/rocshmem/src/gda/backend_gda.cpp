@@ -81,6 +81,14 @@ void GDABackend::init() {
 
   select_nic();
 
+  // Determine number of QPs to create per PE
+  num_qps_per_pe = envvar::gda::num_qps_per_pe_default_ctx.get_value() +
+                   envvar::gda::num_qps_per_pe_usr_ctx.get_value() *
+                   envvar::max_num_contexts;
+
+  // Total number of QPs created
+  num_qps = num_qps_per_pe * num_pes;
+
   //TODO setup_host_interface();
   /* Initialize the host interface */
   if (MPI_COMM_NULL != backend_comm)
@@ -242,17 +250,8 @@ __device__ void GDABackend::destroy_ctx(rocshmem_ctx_t *ctx) {
 }
 
 void GDABackend::setup_team_world() {
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  /**
-   * Allocate device-side memory for team_world and construct a
-   * GDA team in it.
-   */
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-
-  new (team_info_wrt_parent) TeamInfo(nullptr, 0, 1, num_pes);
-  new (team_info_wrt_world) TeamInfo(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
   GDATeam *team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(GDATeam)));
@@ -323,9 +322,10 @@ void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
 }
 
 void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
@@ -479,7 +479,7 @@ void GDABackend::setup_collectives() {
 
 void GDABackend::setup_teams() {
   /**
-   * Allocate pools for the teams sync and work arrary from the SHEAP.
+   * Allocate pools for the teams sync and work array from the SHEAP.
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -538,7 +538,7 @@ void GDABackend::setup_teams() {
    * Logical:
    * MSB..........................................................................LSB
    * Physical: MSB...1st least significant 8 bits...LSB  MSB...2nd least
-   * signifant 8 bits...LSB
+   * significant 8 bits...LSB
    *
    * Description shows only a 2-byte long mask but idea extends to any
    * arbitrary size.
@@ -572,7 +572,7 @@ void GDABackend::rte_barrier() {
 }
 
 GDAProvider GDABackend::requested_provider() {
-  /* Check whether the user explicitely requests a particular provider type */
+  /* Check whether the user explicitly requests a particular provider type */
   std::string envstr = envvar::gda::provider;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
@@ -909,7 +909,7 @@ void GDABackend::exchange_qp_dest_info() {
     dest_info[i].gid = gid;
   }
 
-  for (size_t i = 0; i < envvar::max_num_contexts + 1; i++) {
+  for (size_t i = 0; i < num_qps_per_pe; i++) {
     if (backend_comm != MPI_COMM_NULL) {
       mpilib_ftable_.Alltoall(MPI_IN_PLACE, sizeof(dest_info_t), MPI_CHAR, dest_info.data() + i * num_pes, sizeof(dest_info_t), MPI_CHAR, backend_comm);
     } else {
@@ -963,7 +963,7 @@ void GDABackend::setup_gpu_qps() {
   size_t qp_objs_count;
   size_t qp_objs_mem_size;
 
-  qp_objs_count    = (envvar::max_num_contexts + 1) * num_pes;
+  qp_objs_count    = num_qps;
   qp_objs_mem_size = sizeof(QueuePair) * qp_objs_count;
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
@@ -982,7 +982,7 @@ void GDABackend::setup_gpu_qps() {
 void GDABackend::cleanup_gpu_qps() {
   size_t qp_objs_count;
 
-  qp_objs_count = (envvar::max_num_contexts + 1) * num_pes;
+  qp_objs_count = num_qps;
 
   for (size_t i = 0; i < qp_objs_count; i++) {
     host_qps[i].~QueuePair();
@@ -1148,7 +1148,7 @@ void GDABackend::modify_qps_init_to_rtr() {
   if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
     attr.ah_attr.grh.sgid_index = gid_index;
     attr.ah_attr.is_global      = 1;
-    attr.ah_attr.grh.hop_limit  = 1;
+    attr.ah_attr.grh.hop_limit  = 255; // Max possible value
     attr.ah_attr.sl             = 1;
     attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
   }
@@ -1222,7 +1222,6 @@ void GDABackend::modify_qps_rtr_to_rts() {
 
 void GDABackend::create_queues() {
   int ncqes;
-  size_t resize_length;
   uint32_t sq_size = envvar::gda::sq_size;
 
   if (gda_provider == GDAProvider::IONIC) {
@@ -1231,17 +1230,15 @@ void GDABackend::create_queues() {
     ncqes = sq_size;
   }
 
-  resize_length = (envvar::max_num_contexts + 1) * num_pes;
+  dest_info.resize(num_qps);
+  cqs.resize(num_qps);
+  qps.resize(num_qps);
 
-  dest_info.resize(resize_length);
-  cqs.resize(resize_length);
-  qps.resize(resize_length);
+  bnxt_scqs.resize(num_qps);
+  bnxt_rcqs.resize(num_qps);
+  bnxt_qps.resize(num_qps);
 
-  bnxt_scqs.resize(resize_length);
-  bnxt_rcqs.resize(resize_length);
-  bnxt_qps.resize(resize_length);
-
-  mlx5_qps.resize(resize_length);
+  mlx5_qps.resize(num_qps);
 
   if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
@@ -1289,7 +1286,7 @@ void GDABackend::alternate_qp_ports() {
      */
 
     /* Re-Map each context */
-    for (size_t i = 1; i < (envvar::max_num_contexts + 1); i += 2) {
+    for (size_t i = 1; i < num_qps_per_pe; i += 2) {
       for (size_t p = 0; p < static_cast<size_t>(num_pes); p += 2) {
         cur_qp_idx = (i * num_pes) + p;
         new_qp_idx = cur_qp_idx + 1;

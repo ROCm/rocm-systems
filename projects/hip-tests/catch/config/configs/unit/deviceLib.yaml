@@ -594,3 +594,7 @@ deviceLib:
   Unit_MemcpyToSymbolInParallelWithStreamLaunch:
     <<: *level_3
     tags: [misc]
+    # "============================TheRock_Bump_Windows_timeout #4547==========================="
+    # "=== This is newly added test to check ASAN memory errors deduced from rocDecode ==="
+    # "=== during ASAN/memleak detection work on Linux ==="
+    disabled: [amd_linux, amd_windows]

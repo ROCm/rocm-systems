@@ -39,7 +39,6 @@
 #include "profiler.hpp"
 #include "queue.hpp"
 #include "ro_team_proxy.hpp"
-#include "team_info_proxy.hpp"
 #include "window_proxy.hpp"
 
 namespace rocshmem {
@@ -94,8 +93,9 @@ class ROBackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team, TeamInfo *team_info_wrt_parent,
-                       TeamInfo *team_info_wrt_world, int num_pes,
+  void create_new_team(Team *parent_team,
+                       const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes,
                        int my_pe_in_new_team, MPI_Comm team_comm,
                        rocshmem_team_t *new_team) override;
 

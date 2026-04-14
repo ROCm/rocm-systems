@@ -770,7 +770,7 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   switch (isa_->GetMajorVersion()) {
     case 9:
       sdma = new BlitSdmaV4();
-      copy_size_override = (isa_->GetMinorVersion() > 4 ||
+      copy_size_override = (isa_->GetMinorVersion() >= 4 ||
                             (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10)) ?
                             copy_size_overrides[1] : copy_size_overrides[0];
       break;
@@ -1334,7 +1334,8 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::DmaCopyFanOut(
+hsa_status_t GpuAgent::DmaCopyFanOutOp(
+    hsa_amd_memory_copy_op_type_t op,
     core::Signal& out_signal,
     std::vector<core::Signal*>& dep_signals,
     uint16_t num_entries,
@@ -1353,6 +1354,9 @@ hsa_status_t GpuAgent::DmaCopyFanOut(
   if (!coord_blit->isSDMA())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   BlitSdmaBase* coordinator = static_cast<BlitSdmaBase*>((*coord_blit).get());
+
+  if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && !coordinator->SwapSupported())
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   // Resolve per-entry SDMA engines.
   constexpr bool kUseRRBalancing = false;
@@ -1456,11 +1460,14 @@ hsa_status_t GpuAgent::DmaCopyFanOut(
     out_signal.AddRelaxed(num_entries);
   }
 
+  const char* op_name =
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) ? "Swap" : "Copy";
+
   // Prologue: dep polls, HDP flush, GCR invalidate, decrement prologue_signal.
   LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-           "SDMA FanOut Prologue: engine %02u, num_entries=%u, dep_signal=0x%zx, "
+           "SDMA FanOut(%s) Prologue: engine %02u, num_entries=%u, dep_signal=0x%zx, "
            "completion_signal=0x%zx, prologue_signal=0x%zx",
-           BlitHostToDev, num_entries,
+           op_name, BlitHostToDev, num_entries,
            dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
            core::Signal::Convert(&out_signal).handle,
            core::Signal::Convert(prologue_raw).handle);
@@ -1468,27 +1475,37 @@ hsa_status_t GpuAgent::DmaCopyFanOut(
                                                   *prologue_raw);
   if (stat != HSA_STATUS_SUCCESS) return stat;
 
-  // Fan out: one copy body per entry on its resolved engine.
+  // Fan out: one body per entry on its resolved engine.
   for (uint32_t d = 0; d < num_entries; ++d) {
     core::Signal& body_sig = use_body_signals ? *body_raw[d] : out_signal;
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-             "SDMA FanOut Body[%u/%u]: engine %02u, src=%p, dst=%p, size=%zu, "
+             "SDMA FanOut(%s) Body[%u/%u]: engine %02u, src=%p, dst=%p, size=%zu, "
              "prologue_signal=0x%zx, body_signal=0x%zx",
+             op_name,
              d + 1, num_entries, engines[d].idx, src_list[d], dst_list[d],
              size_list[d],
              core::Signal::Convert(prologue_raw).handle,
              core::Signal::Convert(&body_sig).handle);
-    stat = engines[d].blit->SubmitLinearCopyBody(
-        dst_list[d], src_list[d], size_list[d],
-        *prologue_raw, body_sig);
+    switch (op) {
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+      stat = engines[d].blit->SubmitLinearSwapBody(
+          dst_list[d], const_cast<void*>(src_list[d]), size_list[d],
+          *prologue_raw, body_sig);
+      break;
+    default:
+      stat = engines[d].blit->SubmitLinearCopyBody(
+          dst_list[d], src_list[d], size_list[d],
+          *prologue_raw, body_sig);
+      break;
+    }
     if (stat != HSA_STATUS_SUCCESS) return stat;
   }
 
-  // Epilogue: waits for all bodies, GCR writeback, end timestamp, signal → 0.
+  // Epilogue: waits for all bodies, GCR writeback, end timestamp, signal -> 0.
   LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-           "SDMA FanOut Epilogue: engine %02u, completion_signal=0x%zx, "
+           "SDMA FanOut(%s) Epilogue: engine %02u, completion_signal=0x%zx, "
            "num_body_signals=%zu",
-           BlitHostToDev,
+           op_name, BlitHostToDev,
            core::Signal::Convert(&out_signal).handle,
            body_raw.size());
   constexpr hsa_signal_value_t kWaitValue = 1;
@@ -1502,7 +1519,7 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
   core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
   core::Signal& out_signal = *out_signal_obj;
 
-  const uint16_t num_dsts = op.num_dsts;
+  const uint16_t num_entries = op.num_entries;
   constexpr size_t kBroadcastMaxSize = 1024 * 1024;
 
   // Try HW broadcast for small transfers.
@@ -1518,12 +1535,12 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
           out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
         LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "SDMA Broadcast using engine %02u, src=%p, num_dsts=%u, size=%zu, "
+                 "SDMA Broadcast using engine %02u, src=%p, num_entries=%u, size=%zu, "
                  "dep_signal=0x%zx, completion_signal=0x%zx",
-                 BlitHostToDev, op.src, num_dsts, op.size,
+                 BlitHostToDev, op.src, num_entries, op.size,
                  dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
                  out_signal_obj->signal_);
-        std::vector<void*> dsts(op.dst_list, op.dst_list + num_dsts);
+        std::vector<void*> dsts(op.dst_list, op.dst_list + num_entries);
         return sdma_blit->SubmitLinearCopyBroadcastCommand(
             dsts, op.src, op.size, dep_signals, out_signal);
       }
@@ -1531,12 +1548,12 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
   }
 
   // Fall back to fan-out: expand broadcast into per-entry arrays.
-  std::vector<const void*> srcs(num_dsts, op.src);
-  std::vector<size_t> sizes(num_dsts, op.size);
+  std::vector<const void*> srcs(num_entries, op.src);
+  std::vector<size_t> sizes(num_entries, op.size);
 
-  return DmaCopyFanOut(out_signal, dep_signals, num_dsts,
-                       srcs.data(), op.dst_list, op.dst_agent_list,
-                       sizes.data());
+  return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal, dep_signals,
+                         num_entries, srcs.data(), op.dst_list,
+                         op.dst_agent_list, sizes.data());
 }
 
 hsa_status_t GpuAgent::DmaCopyMulti(
@@ -1546,10 +1563,22 @@ hsa_status_t GpuAgent::DmaCopyMulti(
   core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
   core::Signal& out_signal = *out_signal_obj;
 
-  return DmaCopyFanOut(out_signal, dep_signals, op.num_dsts,
-                       const_cast<const void* const*>(op.src_list),
-                       op.dst_list, op.dst_agent_list,
-                       op.size_list);
+  return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal, dep_signals,
+                         op.num_entries, const_cast<const void* const*>(op.src_list),
+                         op.dst_list, op.dst_agent_list, op.size_list);
+}
+
+hsa_status_t GpuAgent::DmaCopySwap(
+    const hsa_amd_memory_copy_op_t& op,
+    std::vector<core::Signal*>& dep_signals) {
+
+  core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
+  core::Signal& out_signal = *out_signal_obj;
+
+  return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
+                         dep_signals, op.num_entries,
+                         const_cast<const void* const*>(op.src_list),
+                         op.dst_list, op.dst_agent_list, op.size_list);
 }
 
 hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
@@ -1568,7 +1597,7 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
 
     switch (op.type) {
     case HSA_AMD_MEMORY_COPY_OP_LINEAR: {
-      if (op.num_dsts > 0) {
+      if (op.num_entries > 0) {
         status = DmaCopyMulti(op, dep_signals);
       } else {
         core::Agent* dst_agent = core::Agent::Convert(op.dst_agent);
@@ -1589,10 +1618,13 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
       status = DmaCopyBroadcast(op, dep_signals);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+      if (op.num_entries == 0)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      status = DmaCopySwap(op, dep_signals);
+      break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-      // Future implementation
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1799,7 +1831,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         setFlag(HSA_EXTENSION_AMD_PC_SAMPLING);
       }
 
-      if (core::Runtime::runtime_singleton_->AqlProfileAvailable()) {
+      if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
+        os::CloseLib(lib);
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
@@ -3044,12 +3077,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
       HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
+  // On error, use device_datahost for signal cleanup since device_data
+  // may not be CPU-accessible on non-large BAR systems
   MAKE_NAMED_SCOPE_GUARD(freeResources, [&]() {
     if (pcs_data->device_data) {
-      if (pcs_data->device_data->done_sig0.handle)
-        HSA::hsa_signal_destroy(pcs_data->device_data->done_sig0);
-      if (pcs_data->device_data->done_sig1.handle)
-        HSA::hsa_signal_destroy(pcs_data->device_data->done_sig1);
+      if (device_datahost->done_sig0.handle) HSA::hsa_signal_destroy(device_datahost->done_sig0);
+      if (device_datahost->done_sig1.handle) HSA::hsa_signal_destroy(device_datahost->done_sig1);
 
       finegrain_deallocator()(pcs_data->device_data);
     }
@@ -3163,6 +3196,13 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     pcs_data->host_buffer_wrap_pos = 0;
     pcs_data->host_write_ptr = pcs_data->host_buffer;
     pcs_data->host_read_ptr = pcs_data->host_write_ptr;
+    pcs_data->which_buffer = 0;
+
+    // Local copies of device_data fields that we cannot read back on
+    // non-large BAR systems
+    pcs_data->done_sig0 = device_datahost->done_sig0;
+    pcs_data->done_sig1 = device_datahost->done_sig1;
+    pcs_data->buf_size = device_datahost->buf_size;
 
     pcs_data->session = &session;
 
@@ -3203,8 +3243,8 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
   free(pcs_data->cmd_data);
   system_deallocator()(pcs_data->old_val);
   HSA::hsa_signal_destroy(pcs_data->exec_pm4_signal);
-  HSA::hsa_signal_destroy(pcs_data->device_data->done_sig0);
-  HSA::hsa_signal_destroy(pcs_data->device_data->done_sig1);
+  HSA::hsa_signal_destroy(pcs_data->done_sig0);
+  HSA::hsa_signal_destroy(pcs_data->done_sig1);
   finegrain_deallocator()(pcs_data->device_data);
   system_deallocator()(pcs_data->host_buffer);
 
@@ -3320,8 +3360,8 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   // Wake up pcs_hosttrap_thread_ if it is waiting for data
-  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig0, -1);
-  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig1, -1);
+  HSA::hsa_signal_store_screlease(pcs_data->done_sig0, -1);
+  HSA::hsa_signal_store_screlease(pcs_data->done_sig1, -1);
 
   // Wait for the thread to finish and clean up
   os::WaitForThread(pcs_data->thread);
@@ -3502,7 +3542,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   buf_write_val = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_write_val);
   buf_written_val[0] = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_written_val0);
   buf_written_val[1] = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_written_val1);
-  buf_size = pcs_data->device_data->buf_size;
+  buf_size = pcs_data->buf_size;
 
   buf_offset =
       offsetof(pcs_sampling_data_t, reserved1) + sizeof(((pcs_sampling_data_t*)0)->reserved1);
@@ -3685,11 +3725,12 @@ void GpuAgent::PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name) {
   try {
     pcs::PcsRuntime::PcSamplingSession& session = *pcs_data.session;
     uint32_t& which_buffer = pcs_data.which_buffer;
+    pcs_data_t* pcs_data_ptr = &pcs_data;
 
     uint8_t* host_buffer_begin = pcs_data.host_buffer;
     uint8_t* host_buffer_end = pcs_data.host_buffer + pcs_data.host_buffer_size;
 
-    hsa_signal_t done_sig[] = {pcs_data.device_data->done_sig0, pcs_data.device_data->done_sig1};
+    hsa_signal_t done_sig[] = {pcs_data_ptr->done_sig0, pcs_data_ptr->done_sig1};
 
     while (pcs_data.session->isActive()) {
       // Wait for the signal to process the buffer

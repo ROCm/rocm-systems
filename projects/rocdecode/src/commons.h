@@ -26,7 +26,10 @@ THE SOFTWARE.
 #include <string>
 #include <iostream>
 #include <algorithm>
+#include <cstring>
+#include <ctime>
 #include <unistd.h>
+#include <stdint.h>
 #include <sys/syscall.h>
 
 #define TOSTR(X) std::to_string(X)
@@ -53,9 +56,10 @@ enum RocDecLogLevel {
     kRocDecLogLevelMax       = 4
 };
 
-#define GET_TIME_NS() ([]() -> long long { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<long long>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
+#define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define MakeMsg(msg) STR(__FILENAME__) + ":" + TOSTR(__LINE__) + ": " + TOSTR(GET_TIME_NS() / 1000ULL) + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") + TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(__func__) + "(): " + msg
+
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
 
@@ -77,42 +81,86 @@ public:
         OutputMsg(msg);
     };
 
-    void CriticalLog(std::string msg) {
-        if (log_level_ >= kRocDecLogCritical) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogCritical) + ", Critical] "  + msg);
-        }
-    };
-
-    void ErrorLog(std::string msg) {
-        if (log_level_ >= kRocDecLogError) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogError) + ", Error] "  + msg);
-        }
-    };
-
-    void WarningLog(std::string msg) {
-        if (log_level_ >= kRocDecLogWarning) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogWarning) + ", Warning] "  + msg);
-        }
-    };
-
-    void InfoLog(std::string msg) {
-        if (log_level_ >= kRocDecLogInfo) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] "  + msg);
-        }
-    };
-
-    void DebugLog(std::string msg) {
-        if (log_level_ >= kRocDecLogDebug) {
-            OutputErrMsg("[" + TOSTR(kRocDecLogDebug) + ", Debug] "  + msg);
-        }
-    };
-
-    
+private:
     int log_level_ = kRocDecLogCritical;
 };
 
-#define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " entry ..."); }
-#define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " exit ..."); }
+// Single global logger instance shared across all components. Log level is
+// controlled via the ROCDEC_LOG_LEVEL environment variable (default: critical).
+// Meyer's singleton: initialized on first use (avoids static init order fiasco),
+// thread-safe by C++11 §6.7.
+inline RocDecLogger& RocDecGetLogger() {
+    static RocDecLogger instance;
+    return instance;
+}
+#define g_rocdec_logger (RocDecGetLogger())
+
+// RAII helper for function-scope entry/exit logging.
+// Keeps the start timestamp per call-scope (stack variable), making it
+// safe for nested calls and concurrent threads sharing the same logger.
+class RocDecFuncScopeLog {
+public:
+    RocDecFuncScopeLog(RocDecLogger& logger, const char* filename, int line, const char* func)
+        : logger_(logger), filename_(filename), line_(line), func_(func), start_time_(0) {
+        if (logger_.GetLogLevel() >= kRocDecLogInfo) {
+            start_time_ = GET_TIME_NS() / 1000ULL;
+            OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + STR(filename_) + ":" + TOSTR(line_) + ": " +
+                      TOSTR(start_time_) + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") +
+                      TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(func_) + "(): entry ...");
+        }
+    }
+    ~RocDecFuncScopeLog() {
+        if (logger_.GetLogLevel() >= kRocDecLogInfo) {
+            uint64_t end_time = GET_TIME_NS() / 1000ULL;
+            OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + STR(filename_) + ":" + TOSTR(line_) + ": " +
+                      TOSTR(end_time) + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") +
+                      TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(func_) + "(): exit (" +
+                      TOSTR(end_time - start_time_) + " us) ...");
+        }
+    }
+    RocDecFuncScopeLog(const RocDecFuncScopeLog&) = delete;
+    RocDecFuncScopeLog& operator=(const RocDecFuncScopeLog&) = delete;
+    RocDecFuncScopeLog(RocDecFuncScopeLog&&) = delete;
+    RocDecFuncScopeLog& operator=(RocDecFuncScopeLog&&) = delete;
+private:
+    RocDecLogger& logger_;
+    const char* filename_;
+    int line_;
+    const char* func_;
+    uint64_t start_time_;
+};
+
+#define CriticalLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogCritical) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogCritical) + ", Critical] " + MakeMsg(msg)); \
+    }
+
+#define ErrorLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogError) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogError) + ", Error] " + MakeMsg(msg)); \
+    }
+
+#define WarningLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogWarning) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogWarning) + ", Warning] " + MakeMsg(msg)); \
+    }
+
+#define InfoLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogInfo) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg(msg)); \
+    }
+
+#define DebugLog(logger, msg) \
+    if (logger.GetLogLevel() >= kRocDecLogDebug) { \
+        OutputErrMsg("[" + TOSTR(kRocDecLogDebug) + ", Debug] " + MakeMsg(msg)); \
+    }
+
+#define FunctionEntryLog(logger) \
+    RocDecFuncScopeLog _rocdec_func_scope_log_(logger, __FILENAME__, __LINE__, __func__)
+
+// FunctionExitLog is a no-op: exit is logged automatically when the
+// RocDecFuncScopeLog RAII object created by FunctionEntryLog goes out of scope.
+#define FunctionExitLog(logger)
 
 class rocDecodeException : public std::exception {
 public:

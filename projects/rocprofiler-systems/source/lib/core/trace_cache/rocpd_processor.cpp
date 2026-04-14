@@ -8,6 +8,7 @@
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -42,6 +43,14 @@ get_handle_from_code_object(
 #else
     return code_object.rocp_agent.handle;
 #endif
+}
+
+std::string
+generate_db_output_path(int pid)
+{
+    auto _tag    = std::to_string(pid);
+    auto db_name = std::string{ "rocpd" };
+    return rocprofsys::get_database_absolute_path(db_name, _tag);
 }
 
 using memory_operation = std::string;
@@ -579,62 +588,6 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
 }
 
 void
-rocpd_processor_t::handle(const ainic_sample& _ainic)
-{
-    const auto* _category_name   = trait::name<category::amd_smi_nic>::value;
-    auto        name_primary_key = m_data_processor->insert_string(_category_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
-
-    const auto& nic_agent =
-        m_agent_manager->get_agent_by_id(_ainic.nic_index, agent_type::NIC);
-
-    const auto  base_id  = nic_agent.base_id;
-    const char* nic_name = nic_agent.name.c_str();
-
-    auto insert_event_and_sample = [&](const char* pmc_descriptor, const char* track_name,
-                                       double value) {
-        m_data_processor->insert_pmc_event(event_id, base_id, pmc_descriptor, value);
-        m_data_processor->insert_sample(track_name, _ainic.timestamp, event_id);
-    };
-
-    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
-                            info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(
-                                nic_name, _ainic.nic_index)
-                                .c_str(),
-                            _ainic.rx_rdma_cnp_pkts);
-
-    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
-                            info::annotate_with_nic<category::amd_smi_nic_tx_cnp_pkts>(
-                                nic_name, _ainic.nic_index)
-                                .c_str(),
-                            _ainic.tx_rdma_cnp_pkts);
-
-    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
-                            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(
-                                nic_name, _ainic.nic_index)
-                                .c_str(),
-                            _ainic.rx_ucast_bytes);
-
-    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
-                            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(
-                                nic_name, _ainic.nic_index)
-                                .c_str(),
-                            _ainic.tx_ucast_bytes);
-
-    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
-                            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(
-                                nic_name, _ainic.nic_index)
-                                .c_str(),
-                            _ainic.rx_ucast_pkts);
-
-    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
-                            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(
-                                nic_name, _ainic.nic_index)
-                                .c_str(),
-                            _ainic.tx_ucast_pkts);
-}
-
-void
 rocpd_processor_t::handle(const kfd_sample& _kfd)
 {
     auto& n_info  = node_info::get_instance();
@@ -650,8 +603,7 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
     size_t correlation_id  = 0;
 
     auto event_primary_key = m_data_processor->insert_event(
-        category_primary_key, stack_id, parent_stack_id, correlation_id, "", "",
-        _kfd.event_metadata.c_str());
+        category_primary_key, stack_id, parent_stack_id, correlation_id);
 
     auto args = process_arguments_string(_kfd.args_str);
     for(const auto& arg : args)
@@ -665,29 +617,37 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
                                     _kfd.start_timestamp, _kfd.end_timestamp,
                                     name_primary_key, event_primary_key);
 
-    m_data_processor->insert_sample(_kfd.track_name.c_str(), _kfd.start_timestamp,
-                                    event_primary_key, "{}");
+    try
+    {
+        auto agent_primary_key =
+            m_agent_manager
+                ->get_agent_by_type_index(_kfd.device_id,
+                                          static_cast<agent_type>(_kfd.device_type))
+                .base_id;
 
-    auto agent_primary_key =
-        m_agent_manager
-            ->get_agent_by_type_index(_kfd.device_id,
-                                      static_cast<agent_type>(_kfd.device_type))
-            .base_id;
-
-    m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
-                                       _kfd.pmc_info_name.c_str(), _kfd.value,
-                                       _kfd.event_metadata.c_str());
+        m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
+                                           _kfd.pmc_info_name.c_str(), _kfd.value, "{}");
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
+                    "device_type={}: {}",
+                    _kfd.device_id, _kfd.device_type, e.what());
+    }
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
-                                     int pid, int ppid)
+                                     int pid, int ppid,
+                                     output_file_registry& output_registry)
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(std::make_shared<rocpd::data_processor>(
-      std::make_shared<rocpd::data_storage::database>(pid, ppid)))
-{}
+, m_output_registry(output_registry)
+, m_db_output_path(generate_db_output_path(pid))
+{
+    m_data_processor = std::make_shared<rocpd::data_processor>(
+        std::make_shared<rocpd::data_storage::database>(pid, ppid, m_db_output_path));
+}
 
 void
 rocpd_processor_t::prepare_for_processing()
@@ -702,6 +662,9 @@ rocpd_processor_t::finalize_processing()
 {
     LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
+
+    m_output_registry.register_file(m_db_output_path, output_format::rocpd);
+
     LOG_INFO("Rocpd processor finalized successfully");
 }
 

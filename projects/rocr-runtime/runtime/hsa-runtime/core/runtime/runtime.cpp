@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <cassert>
 #include <cstring>
 #include <regex>
 #include <string>
@@ -759,7 +760,8 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
         setFlag(HSA_EXTENSION_IMAGES);
       }
 
-      if (aqlprofile_lib_ != nullptr) {
+      if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
+        os::CloseLib(lib);
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
@@ -1397,12 +1399,14 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     hflags.ui32.IPCHandle = 1;
     hflags.ui32.SysMem = handle->handle[3];
     hflags.ui32.UpdateMetadata = 1;
-    HsaHandleImportResult res;
+    HsaHandleImportResult res = {};
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-    if (status == HSAKMT_STATUS_ERROR) {
+    if (status != HSAKMT_STATUS_SUCCESS) {
       runtime_singleton_->DmaBufClose(dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
+    // Reuse token already stored on the BO 
+    if (res.metadata != 0) handle->handle[7] = res.metadata;
     allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
 
@@ -1536,11 +1540,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       len = Min(len, importSize - fragOffset);
     }
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    if (allocation_map_.find(importAddress) == allocation_map_.end()) {
-      allocation_map_[importAddress] =
-          AllocationRegion(nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
-      allocation_map_[importAddress].thunk_bo = thunk_bo;
-    }
+    allocation_map_.try_emplace(
+        importAddress, nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
+    allocation_map_[importAddress].thunk_bo = thunk_bo;
   };
 
   auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
@@ -2336,7 +2338,6 @@ Runtime::Runtime()
       ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
       ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
-  aqlprofile_lib_ = nullptr;
   ipc_dmabuf_supported_ = false;
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
@@ -2400,9 +2401,6 @@ hsa_status_t Runtime::Load() {
   // Load extensions
   LoadExtensions();
 
-  // Probe aqlprofile availability once and cache the result
-  aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
-
   // Initialize per GPU scratch, blits, and trap handler
   for (core::Agent* agent : gpu_agents_) {
     hsa_status_t status =
@@ -2444,16 +2442,6 @@ void Runtime::Unload() {
 
   UnloadTools();
   UnloadExtensions();
-
-  // Close the aqlprofile probe handle. Skip the dlclose when
-  // running under Valgrind due to a Valgrind bug, see below:
-  // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
-  if (aqlprofile_lib_ != nullptr) {
-    if (!flag_.running_valgrind()) {
-      os::CloseLib(aqlprofile_lib_);
-    }
-    aqlprofile_lib_ = nullptr;
-  }
 
   amd::hsa::loader::Loader::Destroy(loader_.get());
   loader_.reset();
@@ -3424,6 +3412,163 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   return agents_by_node_[prefetch_node][0];
 }
 
+hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
+                                      uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                      hsa_signal_t completion_signal) {
+
+#if !defined (__linux__)
+  return HSA_STATUS_ERROR;
+#else
+  const size_t kPageSize = os::PageSize();
+  
+  // Get a CPU agent for migration target
+  if (cpu_agents().empty()) return HSA_STATUS_ERROR;
+
+  // Validate the pointers
+  for (int i = 0; i < count; i++) {
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    hsa_status_t status = PtrInfo(ptrs[i], &ptr_info, nullptr, nullptr, nullptr);
+    if (status != HSA_STATUS_SUCCESS) {
+      debug_warning(false && "Retrieving SVM pointer information failed");
+      return status;
+    }
+    
+    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for discard
+    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+
+  // Discard operation context
+  struct DiscardOp {
+    std::vector<uint32_t> target_cpus;
+    std::vector<std::pair<void*, size_t>> regions;
+    std::atomic<uint32_t> remaining_deps;
+    hsa_signal_t completion;
+  };
+
+  DiscardOp* op = new DiscardOp();
+  MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
+  
+  // Prepare memory regions with page alignment and store target cpu agent for each region
+  op->regions.reserve(count);
+  op->target_cpus.reserve(count);
+  op->completion = completion_signal;
+
+  for (uint32_t i = 0; i < count; i++) {
+    uint8_t* base = AlignDown((uint8_t*)ptrs[i], kPageSize);
+    uint8_t* end = AlignUp((uint8_t*)ptrs[i] + sizes[i], kPageSize);
+    size_t len = end - base;
+
+    op->regions.emplace_back(std::make_pair(reinterpret_cast<void*>(base), len));
+
+    // Query the nearest cpu agent for the region
+    HSA_SVM_ATTRIBUTE attr;
+    attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
+    attr.value = 0;
+
+    AMD::CpuAgent* cpu = nullptr;
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
+
+    if (status == HSAKMT_STATUS_SUCCESS && 
+        (attr.value != 0xFFFFFFFF && attr.value != INVALID_NODEID)) {
+      core::Agent* agent = agents_by_node_[attr.value][0];
+      
+      if (agent->device_type() == core::Agent::kAmdCpuDevice) {
+        // Already on a CPU agent; skip prefetch for this region
+        op->target_cpus.push_back(UINT32_MAX);
+        continue;
+      } else if (agent->device_type() == core::Agent::kAmdGpuDevice) {
+        AMD::GpuAgent* gpu = static_cast<AMD::GpuAgent*>(agent);
+        cpu = static_cast<AMD::CpuAgent*>(gpu->GetNearestCpuAgent());
+      }
+    }
+
+    if (!cpu) {
+      // Fallback to use first available CPU agent when nearest fails
+      cpu = static_cast<AMD::CpuAgent*>(cpu_agents_[0]);
+    }
+    op->target_cpus.push_back(cpu->node_id());
+  }
+
+  // Dependancy signals already at 0 need not be monitored.
+  std::vector<hsa_signal_t> pending_deps;
+  pending_deps.reserve(num_dep_signals);
+  for (int i = 0; i < num_dep_signals; i++) {
+    if (Signal::Convert(dep_signals[i])->LoadRelaxed() != 0) {
+      pending_deps.push_back(dep_signals[i]);
+    }
+  }
+
+  /* Function to discard all memory regions once dependencies are cleared.
+  For every region, prefetch to target cpu (if not already on cpu), then discard pages */
+  static auto discard_all = [](DiscardOp* op) {
+    for (size_t i = 0; i < op->regions.size(); i++) {
+      void* base = op->regions[i].first;
+      size_t size = op->regions[i].second;
+      uint32_t target_cpu = op->target_cpus[i];
+
+      if (target_cpu != UINT32_MAX) {
+        HSA_SVM_ATTRIBUTE attr;
+        attr.type = HSA_SVM_ATTR_PREFETCH_LOC;
+        attr.value = target_cpu;
+
+        HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSVMSetAttr(base, size, 1, &attr));
+        if (err != HSAKMT_STATUS_SUCCESS) {
+          debug_warning(false && "hsaKmtSVMSetAttr prefetch failed in SvmBatchDiscard");
+        }
+      }
+
+      int res = madvise(base, size, MADV_FREE);
+      if (res != 0) {
+        debug_warning(false && "madvise MADV_FREE failed in SvmBatchDiscard");
+      }
+    }
+
+    // Signal completion and cleanup after all regions have been discarded
+    if (op->completion.handle != 0) {
+      Signal::Convert(op->completion)->SubRelaxed(1);
+    }
+    delete op;
+  };
+
+  /* Each pending dep signal calls this handler when it reaches 0. 
+  The last one to decrement remaining_deps to 0 will triggers the discard. */
+  static hsa_amd_signal_handler signal_handler = [](hsa_signal_value_t value, void* arg) {
+    DiscardOp* op = reinterpret_cast<DiscardOp*>(arg);
+
+    if (op->remaining_deps.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      discard_all(op);
+    }
+    return false;
+  };
+
+  // Dispatch discard call directly if there are no pending deps
+  if (pending_deps.empty()) {
+    op->remaining_deps.store(1, std::memory_order_release);
+    auto no_dependencies = [](void* arg) { signal_handler(0, arg); };
+    hsa_status_t err = AMD::hsa_amd_async_function(no_dependencies, op);
+    if (err != HSA_STATUS_SUCCESS) {
+      throw AMD::hsa_exception(err, "Failed to schedule async discard operation");
+    }
+  } else {
+    // Set signal handlers for all pending dependencies
+    op->remaining_deps.store(static_cast<uint32_t>(pending_deps.size()),
+                             std::memory_order_release);
+    for (size_t i = 0; i < pending_deps.size(); i++) {
+      /* SetAsyncSignalHandler currently always returns HSA_STATUS_SUCCESS. If it is modified to 
+      return errors in the future, we need to handle the possibility of use-after-free and double deletion 
+      of op if this call fails midway and leaves some handlers set but not others. */
+      SetAsyncSignalHandler(pending_deps[i], HSA_SIGNAL_CONDITION_EQ, 0, signal_handler, op);
+    }
+  }
+
+  OpGuard.Dismiss();
+  return HSA_STATUS_SUCCESS;  
+#endif
+}
+
 hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
                                    uint64_t flags) {
   std::shared_lock<std::shared_mutex> lock(memory_lock_);
@@ -3764,10 +3909,18 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
-  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
-
-  hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
-  assert(status == HSA_STATUS_SUCCESS);
+  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+#if defined(__linux__)
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
+#endif
+    /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
+    bool result = rocr::os::UncommitMemory(va, size);
+    assert(result && "Failed to remap VA to anonymous");
+  }
+  else {
+    hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
+    assert(status == HSA_STATUS_SUCCESS);
+  }
 }
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
