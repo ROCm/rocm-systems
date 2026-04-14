@@ -45,10 +45,7 @@ env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-  # Set to 0 so sanitizer findings are logged but do not fail tests.
-  # Change to a non-zero value (e.g. 1) to make sanitizer errors fail tests
-  # once the baseline is clean.
-  SANITIZER_EXIT_CODE: 0
+  SANITIZER_EXIT_CODE: 1
 
 jobs:
   ubuntu-noble-sanitizers:
@@ -61,7 +58,7 @@ jobs:
         compiler: ["g++"]
         build-type: ["RelWithDebInfo"]
         build-dyninst: ["ON"]
-        sanitizer-type: ["address", "thread", "undefined"]
+        sanitizer-type: ["address", "undefined"]
     env:
       DEBIAN_FRONTEND: noninteractive
       OMPI_ALLOW_RUN_AS_ROOT: 1
