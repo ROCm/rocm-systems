@@ -155,6 +155,25 @@ TEST_F(TestRocprofilerComputeTool, ProvidedMixOfRanges_ReturnsThem)
     EXPECT_EQ(tool_data->kernel_filter_ranges[3].second, 5);
 }
 
+TEST_F(TestRocprofilerComputeTool, DISABLED_ProvidedInvalidRangeWithEndSmallerStart_Throws)
+{
+    m_input_parameters->set_kernel_filter_range("10-5");
+    EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
+}
+
+TEST_F(TestRocprofilerComputeTool, DISABLED_ProvidedIncompleteRange_Throws)
+{
+    m_input_parameters->set_kernel_filter_range("-5");
+    EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
+}
+
+TEST_F(TestRocprofilerComputeTool, DISABLED_ProvidedIntersectingRanges_Throws)
+{
+    m_input_parameters->set_kernel_filter_range("2-5, 3-6");
+    EXPECT_THROW(rocprofiler_configure(1, "", 1, &m_client_id), std::runtime_error);
+}
+
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
