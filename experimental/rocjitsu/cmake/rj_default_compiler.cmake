@@ -51,9 +51,9 @@ endfunction()
 
 # Auto-detect ROCm LLVM compiler if user hasn't specified one.
 if(NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
-  find_program(_RJ_CC clang
-    PATHS /opt/rocm/lib/llvm/bin /opt/rocm/bin
-    ENV ROCM_PATH PATH_SUFFIXES lib/llvm/bin bin
+  find_program(_RJ_CC NAMES amdclang clang
+    PATHS /opt/rocm/bin /opt/rocm/lib/llvm/bin
+    ENV ROCM_PATH PATH_SUFFIXES bin lib/llvm/bin
     NO_DEFAULT_PATH)
   if(_RJ_CC)
     set(CMAKE_C_COMPILER "${_RJ_CC}" CACHE FILEPATH "C compiler" FORCE)
@@ -63,9 +63,9 @@ if(NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
 endif()
 
 if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
-  find_program(_RJ_CXX clang++
-    PATHS /opt/rocm/lib/llvm/bin /opt/rocm/bin
-    ENV ROCM_PATH PATH_SUFFIXES lib/llvm/bin bin
+  find_program(_RJ_CXX NAMES amdclang++ clang++
+    PATHS /opt/rocm/bin /opt/rocm/lib/llvm/bin
+    ENV ROCM_PATH PATH_SUFFIXES bin lib/llvm/bin
     NO_DEFAULT_PATH)
   if(_RJ_CXX)
     set(CMAKE_CXX_COMPILER "${_RJ_CXX}" CACHE FILEPATH "C++ compiler" FORCE)

@@ -20,7 +20,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
-#include "util/debug_print.h"
+#include "util/log.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -187,11 +187,12 @@ public:
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
   void flush_all() {
-    if (util::trace::enabled() && l1_vector_.store_count() > 0)
-      util::trace::print("CU ", this->name(), "@", reinterpret_cast<uintptr_t>(this),
-                         " L1 stores: total=", l1_vector_.store_count(),
-                         " active=", l1_vector_.store_active_count(),
-                         " l2_writes=", l1_vector_.store_l2_writes());
+    util::Logger::vm([&](auto &os) {
+      if (l1_vector_.store_count() > 0)
+        os << std::format("CU {}@{} L1 stores: total={} active={} l2_writes={}", this->name(),
+                          reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
+                          l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
+    });
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     l2_->flush_all();

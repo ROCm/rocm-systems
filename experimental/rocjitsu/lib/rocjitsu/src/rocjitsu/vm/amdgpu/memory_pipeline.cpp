@@ -8,7 +8,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "util/debug_print.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <bit>
@@ -88,17 +88,18 @@ void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
     cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
   }
   // Trace: log SMEM load values for debugging.
-  if (util::trace::enabled() && wf.wg_id() == 0) {
-    static thread_local uint32_t slw_count = 0;
-    if (++slw_count <= 20)
-      util::trace::print("SMEM complete: addr=0x", std::hex, d.addr, std::dec,
-                         " dst_s=", d.dst_reg_base, " ndw=", d.num_dwords, " data=[0x", std::hex,
-                         d.response_data[0], d.num_dwords > 1 ? ",0x" : "",
-                         d.num_dwords > 1 ? d.response_data[1] : 0, d.num_dwords > 2 ? ",0x" : "",
-                         d.num_dwords > 2 ? d.response_data[2] : 0, d.num_dwords > 3 ? ",0x" : "",
-                         d.num_dwords > 3 ? d.response_data[3] : 0, "]", std::dec,
-                         " wg=", wf.wg_id());
-  }
+  util::Logger::vm([&](auto &os) {
+    if (wf.wg_id() == 0) {
+      static thread_local uint32_t slw_count = 0;
+      if (++slw_count <= 20) {
+        os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
+                          d.dst_reg_base, d.num_dwords, d.response_data[0]);
+        for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)
+          os << std::format(",{:#x}", d.response_data[i]);
+        os << std::format("] wg={}", wf.wg_id());
+      }
+    }
+  });
 }
 
 namespace {
@@ -293,10 +294,11 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, [[maybe_unused]] Wave
               d.mtype, d.non_temporal);
   } else {
     // Trace: dump per-lane values for stores to tensor address range.
-    if (util::trace::enabled() && d.lane_mask != 0) {
-      // Check if ANY active lane targets the tensor range
-      bool hits_tensor = false;
+    util::Logger::vm([&](auto &os) {
+      if (d.lane_mask == 0)
+        return;
       uint64_t rm = d.lane_mask;
+      bool hits_tensor = false;
       while (rm) {
         uint32_t ln = __builtin_ctzll(rm);
         rm &= rm - 1;
@@ -305,26 +307,27 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, [[maybe_unused]] Wave
           break;
         }
       }
-      if (hits_tensor) {
-        uint32_t stride = d.num_elems * d.elem_size;
-        rm = d.lane_mask;
-        int cnt = 0;
-        while (rm && cnt < 6) {
-          uint32_t ln = __builtin_ctzll(rm);
-          rm &= rm - 1;
-          uint64_t a = d.per_lane_addr[ln];
-          if (a < 0x4d00c00000ULL || a >= 0x4d00c00100ULL)
-            continue;
-          uint32_t v = 0;
-          if (stride > 0 && d.store_data.size() >= ln * stride + 4)
-            std::memcpy(&v, &d.store_data[ln * stride], 4);
-          util::trace::print("SLANE L", ln, " @+", std::hex, a - 0x4d00c00000ULL, " =0x", v,
-                             " ipc=0x", d.issue_pc, std::dec, " exec=0x", std::hex, d.lane_mask,
-                             std::dec, " wf=", wf.wf_id(), " wg=", wf.wg_id());
-          ++cnt;
-        }
+      if (!hits_tensor)
+        return;
+      uint32_t stride = d.num_elems * d.elem_size;
+      rm = d.lane_mask;
+      int cnt = 0;
+      while (rm && cnt < 6) {
+        uint32_t ln = __builtin_ctzll(rm);
+        rm &= rm - 1;
+        uint64_t a = d.per_lane_addr[ln];
+        if (a < 0x4d00c00000ULL || a >= 0x4d00c00100ULL)
+          continue;
+        uint32_t v = 0;
+        if (stride > 0 && d.store_data.size() >= ln * stride + 4)
+          std::memcpy(&v, &d.store_data[ln * stride], 4);
+        if (cnt > 0)
+          os << '\n' << std::format("[rj trace VM] ");
+        os << std::format("SLANE L{} @+{:#x} ={:#x} ipc={:#x} exec={:#x} wf={} wg={}", ln,
+                          a - 0x4d00c00000ULL, v, d.issue_pc, d.lane_mask, wf.wf_id(), wf.wg_id());
+        ++cnt;
       }
-    }
+    });
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
                d.mtype, d.non_temporal);
   }

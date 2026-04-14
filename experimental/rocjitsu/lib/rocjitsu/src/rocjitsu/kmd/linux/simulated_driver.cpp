@@ -5,8 +5,8 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "util/debug_print.h"
 #include "util/except.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -91,7 +91,7 @@ SimulatedDriver *SimulatedDriver::get_or_create() {
       driver = create_default();
     } catch (const std::exception &e) {
       g_in_construction = false;
-      util::debug::print("rocjitsu: ", e.what());
+      util::Logger::debug_print("rocjitsu: ", e.what());
       return nullptr;
     }
     g_in_construction = false;
@@ -259,7 +259,14 @@ int SimulatedDriver::open() {
   // Register the interrupt callback here rather than at queue-creation time.
   // The CP calls this after writing to a completion signal's event mailbox,
   // waking any thread blocked in wait_events_ioctl.
-  cp_->set_interrupt_callback([this]() { event_cv_.notify_all(); });
+  cp_->set_interrupt_callback([this](uint32_t event_id) {
+    {
+      std::lock_guard<std::mutex> lock(event_mutex_);
+      if (auto it = events_.find(event_id); it != events_.end())
+        it->second.signaled = true;
+    }
+    event_cv_.notify_all();
+  });
   return fd_;
 }
 
@@ -327,10 +334,10 @@ int SimulatedDriver::close() {
 
   if (trace_enabled) {
     if (leaked_allocations == 0 && leaked_queues == 0) {
-      util::trace::print("kfd.close: no outstanding GPUVM allocations or queues");
+      util::Logger::vm("kfd.close: no outstanding GPUVM allocations or queues");
     } else {
-      util::trace::print("kfd.close: leaked_allocations=", leaked_allocations,
-                         " leaked_bytes=", leaked_bytes, " leaked_queues=", leaked_queues);
+      util::Logger::vm("kfd.close: leaked_allocations=", leaked_allocations,
+                       " leaked_bytes=", leaked_bytes, " leaked_queues=", leaked_queues);
       if (!leaked_handles.empty()) {
         std::ostringstream oss;
         oss << "[";
@@ -340,7 +347,7 @@ int SimulatedDriver::close() {
             oss << ",";
         }
         oss << "]";
-        util::trace::print("kfd.close: leaked_handles=", oss.str());
+        util::Logger::vm("kfd.close: leaked_handles=", oss.str());
       }
     }
   }
@@ -363,9 +370,7 @@ int SimulatedDriver::close() {
 }
 
 int SimulatedDriver::ioctl(unsigned long request, void *arg) {
-  if (util::trace::enabled()) {
-    util::trace::print("ioctl: request=0x", std::hex, request, std::dec);
-  }
+  util::Logger::vm("ioctl: request=0x", std::hex, request, std::dec);
   switch (request) {
   case AMDKFD_IOC_GET_VERSION:
     return get_version_ioctl(arg);
@@ -444,13 +449,15 @@ int SimulatedDriver::ioctl(unsigned long request, void *arg) {
   case AMDKFD_IOC_SVM:
     return svm_ioctl(arg);
   default:
-    util::debug::print("rocjitsu: unhandled ioctl 0x", std::hex, request);
+    util::Logger::debug_print("rocjitsu: unhandled ioctl 0x", std::hex, request);
     return 0;
   }
 }
 
 void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
   uint64_t type = static_cast<uint64_t>(offset) & KFD_MMAP_TYPE_MASK;
+  util::Logger::vm("SimulatedDriver::mmap type=0x", std::hex, type, " offset=0x", offset,
+                   " length=", std::dec, length, " addr=", addr);
 
   if (type == KFD_MMAP_TYPE_DOORBELL) {
     // Doorbell page: use anonymous memory mapped at the GPU VA ROCR requested.
@@ -560,9 +567,9 @@ void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_
 
   alloc.host_ptr = host_ptr;
 
-  util::trace::print("mmap: gpu_va=0x", std::hex, alloc.gpu_va, " host_ptr=0x",
-                     reinterpret_cast<uintptr_t>(host_ptr), std::dec, " size=", length, " flags=0x",
-                     std::hex, alloc.flags, std::dec, " MAP_FIXED=", bool(flags & MAP_FIXED));
+  util::Logger::vm("mmap: gpu_va=0x", std::hex, alloc.gpu_va, " host_ptr=0x",
+                   reinterpret_cast<uintptr_t>(host_ptr), std::dec, " size=", length, " flags=0x",
+                   std::hex, alloc.flags, std::dec, " MAP_FIXED=", bool(flags & MAP_FIXED));
 
   if (auto *mem = soc_.memory())
     mem->map_host_pages(alloc.gpu_va, host_ptr, length);
@@ -681,8 +688,8 @@ int SimulatedDriver::alloc_memory_ioctl(void *arg) {
   else
     args->mmap_offset = alloc.handle << 12;
 
-  util::trace::print("alloc: handle=", alloc.handle, " gpu_va=0x", std::hex, va, " size=", std::dec,
-                     args->size, " flags=0x", std::hex, args->flags, std::dec);
+  util::Logger::vm("alloc: handle=", alloc.handle, " gpu_va=0x", std::hex, va, " size=", std::dec,
+                   args->size, " flags=0x", std::hex, args->flags, std::dec);
 
   return 0;
 }
@@ -757,6 +764,29 @@ int SimulatedDriver::create_queue_ioctl(void *arg) {
   hw.doorbell_offset = db_offset;
   hw.last_doorbell = ~uint64_t(0); // Sentinel matches memset(0xFF) init on the doorbell page.
   hw.host_accessible = true;       // KFD queues use host VAs for pointers.
+  // Detect SDMA queues by queue_type. ROCR creates SDMA queues for memory
+  // copies; the CP processes them as direct memcpy operations.
+  // KFD queue type constants (from kfd_ioctl.h):
+  //   0 = KFD_IOC_QUEUE_TYPE_COMPUTE
+  //   1 = KFD_IOC_QUEUE_TYPE_SDMA
+  //   2 = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL
+  //   3 = KFD_IOC_QUEUE_TYPE_SDMA_XGMI
+  //   4 = KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID
+  hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
+                args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
+                args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+  // Log and zero-init the SDMA queue's write/read pointers.
+  if (hw.is_sdma) {
+    auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
+    auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);
+    util::Logger::vm("SDMA wptr before init: addr=0x", std::hex, args->write_pointer_address,
+                     " val=", std::dec, *wptr, " rptr val=", *rptr);
+    *wptr = 0;
+    *rptr = 0;
+  }
+  util::Logger::vm("create_queue: id=", queue_id, " type=", args->queue_type,
+                   " is_sdma=", hw.is_sdma, " ring=0x", std::hex, args->ring_base_address,
+                   " size=", std::dec, args->ring_size);
   cp_->register_queue(std::move(hw));
 
   args->queue_id = queue_id;
@@ -1048,11 +1078,31 @@ int SimulatedDriver::wait_events_ioctl(void *arg) {
       return true;
     if (event_page_ && id < event_page_size_ / sizeof(uint64_t)) {
       auto *slots = static_cast<uint64_t *>(event_page_);
-      if (std::atomic_ref<uint64_t>(slots[id]).load(std::memory_order_acquire) != 0)
+      auto slot_val = std::atomic_ref<uint64_t>(slots[id]).load(std::memory_order_acquire);
+      if (slot_val != 0)
         return true;
     }
     return false;
   };
+
+  // One-shot trace: log what WAIT_EVENTS is looking for.
+  {
+    static thread_local int wait_trace_count = 0;
+    if (++wait_trace_count <= 3) {
+      for (uint32_t i = 0; i < args->num_events; ++i) {
+        uint32_t id = ev_data[i].event_id;
+        bool in_map = events_.count(id) > 0;
+        bool map_signaled = in_map && events_[id].signaled;
+        uint64_t slot_val = 0;
+        if (event_page_ && id < event_page_size_ / sizeof(uint64_t))
+          slot_val = static_cast<uint64_t *>(event_page_)[id];
+        util::Logger::vm("WAIT_EVENTS[", i, "] event_id=", id, " in_map=", in_map,
+                         " map_signaled=", map_signaled, " slot_val=", slot_val,
+                         " event_page_=", (event_page_ ? 1 : 0), " page_size=", event_page_size_,
+                         " wait_for_all=", args->wait_for_all, " timeout=", args->timeout);
+      }
+    }
+  }
 
   auto pred = [this, args, ev_data, &is_signaled]() -> bool {
     if (closing_)

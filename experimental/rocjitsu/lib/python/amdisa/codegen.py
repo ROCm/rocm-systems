@@ -5237,13 +5237,19 @@ class CodeGenerator:
             )
         if 'OPR_ACCVGPR' in _opr:
             _vgpr_index_lines.append(
-                '  if (opr_type == OperandType::OPR_ACCVGPR)\n'
-                f'    return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);'
+                '  if (opr_type == OperandType::OPR_ACCVGPR) {\n'
+                f'    if (ev >= OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)\n'
+                f'      return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN);\n'
+                f'    return {_ACC_OFFSET} + static_cast<uint32_t>(ev);\n'
+                '  }'
             )
         if 'OPR_SRC_ACCVGPR' in _opr:
             _vgpr_index_lines.append(
-                '  if (opr_type == OperandType::OPR_SRC_ACCVGPR)\n'
-                f'    return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);'
+                '  if (opr_type == OperandType::OPR_SRC_ACCVGPR) {\n'
+                f'    if (ev >= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN)\n'
+                f'      return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);\n'
+                f'    return {_ACC_OFFSET} + static_cast<uint32_t>(ev);\n'
+                '  }'
             )
         if 'OPR_SRC_VGPR_OR_ACCVGPR' in _opr:
             _vgpr_index_lines.append(
