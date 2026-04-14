@@ -24,8 +24,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Threads REQUIRED)
 
-# Shared HSA headers from the ROCr runtime (shared/headers/hsa/).
-set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/../../shared/headers")
+# HSA/KFD headers (local copies from rocr-runtime).
+set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers")
 
 option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
 
