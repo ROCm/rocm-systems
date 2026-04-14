@@ -113,21 +113,22 @@ declare -A TEST_NUMBERS=(
   ["barrier_all_on_stream"]="77"
   ["broadcastmem_on_stream"]="78"
   ["quiet_on_stream"]="79"
-  ["getmem_on_stream"]="80"
-  ["putmem_on_stream"]="81"
-  ["putmem_signal_on_stream"]="82"
-  ["signal_wait_until_on_stream"]="83"
-  ["flood_put"]="84"
-  ["flood_putnbi"]="85"
-  ["flood_p"]="86"
-  ["flood_get"]="87"
-  ["flood_getnbi"]="88"
-  ["flood_g"]="89"
-  ["hipmodule_init"]="90"
-  ["flood_add"]="91"
-  ["flood_fadd"]="92"
-  ["flood_waitadd"]="93"
-  ["device_bitcode"]="94"
+  ["sync_all_on_stream"]="80"
+  ["getmem_on_stream"]="81"
+  ["putmem_on_stream"]="82"
+  ["putmem_signal_on_stream"]="83"
+  ["signal_wait_until_on_stream"]="84"
+  ["flood_put"]="85"
+  ["flood_putnbi"]="86"
+  ["flood_p"]="87"
+  ["flood_get"]="88"
+  ["flood_getnbi"]="89"
+  ["flood_g"]="90"
+  ["hipmodule_init"]="91"
+  ["flood_add"]="92"
+  ["flood_fadd"]="93"
+  ["flood_waitadd"]="94"
+  ["device_bitcode"]="95"
 )
 
 ExecTest() {
@@ -506,6 +507,7 @@ TestOnStream() {
 
   ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "quiet_on_stream"        2  1           1
+  ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
 }

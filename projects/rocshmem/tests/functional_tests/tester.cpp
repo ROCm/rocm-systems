@@ -39,6 +39,7 @@
 #include "barrier_all_tester.hpp"
 #include "barrier_all_on_stream_tester.hpp"
 #include "quiet_on_stream_tester.hpp"
+#include "sync_all_on_stream_tester.hpp"
 #include "empty_tester.hpp"
 #include "getmem_on_stream_tester.hpp"
 #include "putmem_on_stream_tester.hpp"
@@ -314,6 +315,11 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0)
         std::cout << "Quiet_On_Stream ###" << std::endl;
       testers.push_back(new QuietOnStreamTester(args));
+      return testers;
+    case SyncAllOnStreamTestType:
+      if (rank == 0)
+        std::cout << "Sync_All_On_Stream ###" << std::endl;
+      testers.push_back(new SyncAllOnStreamTester(args));
       return testers;
     case TeamBroadcastmemOnStreamTestType:
       if (rank == 0)
@@ -759,6 +765,7 @@ bool Tester::peLaunchesKernel() {
     case TeamAlltoallmemOnStreamTestType:
     case BarrierAllOnStreamTestType:
     case QuietOnStreamTestType:
+    case SyncAllOnStreamTestType:
     case TeamBroadcastmemOnStreamTestType:
     case GetmemOnStreamTestType:
     case PutmemOnStreamTestType:
