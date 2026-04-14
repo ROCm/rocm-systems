@@ -179,8 +179,6 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 
     tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
 
-    // Store ROCPROF env. vars. in tool_data
-
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
     if (const char* v = g_input_parameters->get_requested_counters())
         tool_data->requested_counters = v;
