@@ -92,7 +92,7 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_w
 }
 
 [[maybe_unused]] __attribute__((noinline))
-__device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode) {
+__device__ void QueuePair::mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode) {
   const mlx5_err_cqe* err_cqe = reinterpret_cast<const mlx5_err_cqe*>(cqe);
   uint8_t syndrome = 0x0;
 
@@ -209,7 +209,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
 #if defined(BUILD_DEBUG_DEVICE)
     if (opcode != MLX5_CQE_REQ)
-      mlx5_check_cqe_error(cqe, opcode);
+      mlx5_print_cqe_error(cqe, opcode);
 #endif
 
     /* sq_tail is an index to the next free WQE i.e. counts number of posted WQEs

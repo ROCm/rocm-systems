@@ -132,7 +132,7 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
 }
 
 [[maybe_unused]] __attribute__((noinline))
-__device__ void QueuePair::bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe, uint8_t status) {
+__device__ void QueuePair::bnxt_print_cqe_error(uint8_t status) {
   switch (status) {
   case BNXT_RE_REQ_ST_BAD_RESP:
     LOGD_ERROR_ABORT("CQ error BAD_RESP (%x)", status);
@@ -194,7 +194,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
       uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
       if (status != BNXT_RE_REQ_ST_OK)
-        bnxt_check_cqe_error(cqe, status);
+        bnxt_print_cqe_error(status);
     }
 #endif
 
