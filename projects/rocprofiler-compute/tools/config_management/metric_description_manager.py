@@ -358,9 +358,7 @@ def load_existing_per_arch(arch_name: str, per_arch_dir: Union[str, Path]) -> di
     per_arch_file = Path(per_arch_dir) / f"{arch_name}_metrics_description.yaml"
     if per_arch_file.exists():
         with open(per_arch_file, encoding="utf-8") as f:
-            return canonicalize_section_aliases(
-                arch_name, yaml.safe_load(f) or {}
-            )
+            return canonicalize_section_aliases(arch_name, yaml.safe_load(f) or {})
     return {}
 
 
