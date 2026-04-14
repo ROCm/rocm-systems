@@ -26,14 +26,24 @@
 #
 # ----------------------------------------------------------------------------------------#
 
-function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES SCHEMA_DIR SCHEMA_BINARY_DIR)
+function(
+    ROCPD_CONFIGURE_SCHEMA_VERSION
+    SCHEMA_DIR
+    SCHEMA_BINARY_DIR
+    VERSION_NAME
+    NAMESPACE_NAME
+)
     set(SCHEMA_FILES
         "rocpd_tables.sql"
         "rocpd_views.sql"
         "data_views.sql"
-        "marker_views.sql"
         "summary_views.sql"
     )
+
+    # Add rocpd_metadata.sql only for v4 (it doesn't exist in v3)
+    if(EXISTS "${SCHEMA_DIR}/rocpd_metadata.sql")
+        list(APPEND SCHEMA_FILES "rocpd_metadata.sql")
+    endif()
 
     foreach(SCHEMA_FILE ${SCHEMA_FILES})
         if(NOT EXISTS "${SCHEMA_DIR}/${SCHEMA_FILE}")
@@ -46,7 +56,7 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES SCHEMA_DIR SCHEMA_BINARY_DIR)
 
     set(TEMPLATE_FILE "${SCHEMA_DIR}/rocpd_shema.in")
 
-    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR}/schema)
+    file(MAKE_DIRECTORY "${SCHEMA_BINARY_DIR}/schema/${VERSION_NAME}")
 
     foreach(SCHEMA_FILE ${SCHEMA_FILES})
         file(READ "${SCHEMA_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
@@ -60,10 +70,42 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES SCHEMA_DIR SCHEMA_BINARY_DIR)
 
         configure_file(
             "${TEMPLATE_FILE}"
-            "${SCHEMA_BINARY_DIR}/schema/${SCHEMA_NAME}.hpp"
+            "${SCHEMA_BINARY_DIR}/schema/${VERSION_NAME}/${SCHEMA_NAME}.hpp"
             @ONLY
         )
     endforeach()
+
+    message(
+        STATUS
+        "[rocpdsna] Generated ${VERSION_NAME} schema headers (namespace: ${NAMESPACE_NAME}) in ${SCHEMA_BINARY_DIR}/schema/${VERSION_NAME}"
+    )
+endfunction()
+
+function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES SCHEMA_DIR SCHEMA_BINARY_DIR)
+    # Use PROJECT_SOURCE_DIR to get correct path
+    set(BACKENDS_DIR "${PROJECT_SOURCE_DIR}/source/data_storage/backends")
+
+    # Generate V3 schema headers
+    set(V3_SCHEMA_DIR "${BACKENDS_DIR}/schema/3.0.0")
+    if(EXISTS "${V3_SCHEMA_DIR}")
+        rocpd_configure_schema_version("${V3_SCHEMA_DIR}" "${SCHEMA_BINARY_DIR}" "3.0.0" "schema_v3")
+    else()
+        message(
+            WARNING
+            "[rocpdsna] V3 schema directory not found: ${V3_SCHEMA_DIR}"
+        )
+    endif()
+
+    # Generate V4 schema headers
+    set(V4_SCHEMA_DIR "${BACKENDS_DIR}/schema/4.0.0")
+    if(EXISTS "${V4_SCHEMA_DIR}")
+        rocpd_configure_schema_version("${V4_SCHEMA_DIR}" "${SCHEMA_BINARY_DIR}" "4.0.0" "schema_v4")
+    else()
+        message(
+            WARNING
+            "[rocpdsna] V4 schema directory not found: ${V4_SCHEMA_DIR}"
+        )
+    endif()
 
     message(
         STATUS

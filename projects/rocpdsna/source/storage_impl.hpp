@@ -25,6 +25,7 @@ struct storage_t::impl
     };
 
     explicit impl(std::string database_path, std::string uuid);
+    explicit impl(std::string database_path, std::string uuid, version_t schema_version);
 
     [[nodiscard]] std::string get_database_path() const;
     [[nodiscard]] std::string get_uuid() const;
