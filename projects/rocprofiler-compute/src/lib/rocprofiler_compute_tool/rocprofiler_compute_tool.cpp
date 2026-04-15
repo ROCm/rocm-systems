@@ -26,11 +26,6 @@ void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& in
     g_input_parameters = input_parameters;
 }
 
-void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacks>& sdk_callbacks)
-{
-    g_sdk_callbacks = sdk_callbacks;
-}
-
 void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
 {
     g_sdk_wrapper = sdk_wrapper;

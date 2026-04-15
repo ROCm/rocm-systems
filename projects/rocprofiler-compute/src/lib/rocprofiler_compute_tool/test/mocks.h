@@ -32,28 +32,6 @@ private:
     std::string m_kernel_filter_range         = m_non_empty_str;
 };
 
-class MockSdkCallbacks : public rocprofiler_compute_tool::SdkCallbacks
-{
-public:
-    MOCK_METHOD(void,
-                dispatch_callback,
-                (rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                 rocprofiler_counter_config_id_t*             config,
-                 void*                                        callback_data_args),
-                (override));
-    MOCK_METHOD(void,
-                record_callback,
-                (rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                 rocprofiler_counter_record_t*                record_data,
-                 size_t                                       record_count,
-                 void*                                        callback_data_args),
-                (override));
-    MOCK_METHOD(void,
-                tool_tracing_callback,
-                (rocprofiler_callback_tracing_record_t record, void* callback_data),
-                (override));
-};
-
 class MockSdkWrapper : public rocprofiler_compute_tool::SdkWrapper
 {
 public:

@@ -28,15 +28,15 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
 
     // create static map of kernel_id to number of dispatches (zero indexed) and
     // update it
-    static std::unordered_map<uint64_t, uint64_t> kernel_id_iteration_map{};
+    static std::unordered_map<uint64_t, uint64_t> kernel_dispatch_count_by_kernel_id{};
     static std::shared_mutex                      kernel_id_iteration_mutex;
-    uint64_t                                      kernel_iteration = 0;
+    uint64_t                                      kernel_dispatch_count = 0;
     {
         // Acquire unique lock for update and ensure map is updated correctly
         std::unique_lock<std::shared_mutex> lock(kernel_id_iteration_mutex);
-        auto&                               iter = kernel_id_iteration_map[kernel_id];
-        iter += 1;
-        kernel_iteration = iter;
+        auto&                               count = kernel_dispatch_count_by_kernel_id[kernel_id];
+        count += 1;
+        kernel_dispatch_count = count;
     }
 
     // static cast tool
@@ -48,7 +48,7 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
     }
 
     // kernel filtering
-    if (!is_targeted_dispatch(tool, kernel_id, kernel_iteration))
+    if (!is_targeted_dispatch(tool, kernel_id, kernel_dispatch_count))
     {
         return;
     }

@@ -18,7 +18,6 @@ protected:
 
     rocprofiler_client_id_t              m_client_id{};
     std::shared_ptr<MockInputParameters> m_input_parameters;
-    std::shared_ptr<MockSdkCallbacks>    m_sdk_callbacks;
     std::shared_ptr<MockSdkWrapper>      m_sdk_wrapper;
     std::shared_ptr<MockCountersWriter>  m_counters_writer;
 };
