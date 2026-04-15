@@ -479,6 +479,9 @@ class VirtualGPU : public device::VirtualDevice {
   void ClearAssignedSdmaEngine() {
     assigned_sdma_engine_ = 0;
   }
+  bool hasAssignedSdmaEngine() const {
+    return assigned_sdma_engine_ != 0;
+  }
 
  private:
   //! Dispatches a barrier with blocking HSA signals

@@ -30,6 +30,7 @@
 #include "host_helpers.hpp"
 #include "memory/window_info.hpp"
 #include "util.hpp"
+#include "log.hpp"
 
 #include <cassert>
 
@@ -171,8 +172,7 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
   }
 
 #if defined USE_HDP_FLUSH &&  not defined USE_SINGLE_NODE
-  printf("Non-mpi use-cases only supported with coherent heap at the moment. Aborting.\n");
-  abort();
+  LOG_ERROR_ABORT("Non-mpi use-cases only supported with coherent heap at the moment");
 #endif
 }
 

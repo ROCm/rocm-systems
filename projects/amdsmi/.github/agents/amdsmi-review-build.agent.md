@@ -2,7 +2,7 @@
 name: amdsmi-review-build
 description: "Build system review subagent. Checks CMake, packaging, install targets, dependencies. Use when: build review, CMake check, packaging, RPM/DEB."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, execute/runInTerminal
-model: "Claude Sonnet 4"
+model: "Claude Sonnet 4.6"
 user-invocable: false
 ---
 
