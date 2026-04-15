@@ -205,8 +205,7 @@ if(BUILD_TESTS)
       IpcsocketTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
-      RcclWrapTests.cpp
-      TransportTests.cpp
+      graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
@@ -239,6 +238,21 @@ if(BUILD_TESTS)
       list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
     endif()
+
+    # rccl-UnitTestsMock: Tests that use mock/fake implementations which override
+    # real librccl symbols at link time. Isolated into a separate binary to prevent
+    # mock symbols from colliding with tests that use actual librccl functions.
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMock)
+
+    set(TEST_MOCK_SOURCE_FILES
+      RcclWrapTests.cpp
+      TransportTests.cpp
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+
+    add_executable(rccl-UnitTestsMock ${TEST_MOCK_SOURCE_FILES})
 
     # rccl-UnitTestsAltRsmi: Uses TEST BUILD alt_rsmi.cc (ARSMI_TEST_BUILD)
     # This separate executable compiles alt_rsmi.cc with ARSMI_TEST_BUILD,
