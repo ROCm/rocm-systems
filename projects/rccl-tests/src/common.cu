@@ -1127,6 +1127,52 @@ static void getGPUMemoryInfo(int64_t* ptotalGpuMem, int64_t* pfreeGpuMem) {
 // The full implementation lives in collector.cu / collector.h
 // ============================================================
 
+static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
+  std::vector<std::string> ib_hca = NetCounterParseIbHcaList();
+  if (!ib_hca.empty()) {
+    for (const auto& ib : ib_hca) {
+      ctx.ib_names.push_back(ib);
+      ctx.nic_names.push_back(NetCounterFindNicForIbDevice(ib));
+    }
+    return true;
+  }
+  std::vector<std::string> all_nics;
+  NetCounterGetNetworkInterfaces(all_nics);
+  for (const auto& nic : all_nics) {
+    std::string ib = NetCounterFindIbDeviceForNic(nic);
+    if (ib.empty()) continue;
+    ctx.nic_names.push_back(nic);
+    ctx.ib_names.push_back(ib);
+  }
+  if (ctx.nic_names.empty()) {
+    fprintf(stderr,
+            "# Warning: no RDMA-capable NICs found, disabling net counter collection\n");
+    return false;
+  }
+  return true;
+}
+
+static NicType DetectNicTypeFromIbDevices(const std::vector<std::string>& ib_names,
+                                          bool& mixed) {
+  NicType nic_type = NIC_UNKNOWN;
+  mixed = false;
+  for (size_t i = 0; i < ib_names.size(); i++) {
+    NicType t = NetCounterDetectNicType(ib_names[i]);
+    if (t == NIC_UNKNOWN) continue;
+    if (nic_type == NIC_UNKNOWN) {
+      nic_type = t;
+    } else if (t != nic_type) {
+      mixed = true;
+      break;
+    }
+  }
+  if (mixed) {
+    fprintf(stderr,
+            "# Warning: mixed NIC types detected during counter table selection\n");
+  }
+  return nic_type;
+}
+
 NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
   NetworkCounterContext ctx;
   ctx.enabled = NetCounterIsEnabled();
@@ -1143,30 +1189,13 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
   ctx.nranks = args->nProcs * args->nThreads * args->nGpus;
   ctx.base_rank = args->proc * args->nThreads * args->nGpus;
 
-  // Discover devices: NCCL_IB_HCA (primary) or auto-discover NICs (fallback)
-  std::vector<std::string> ib_hca = NetCounterParseIbHcaList();
-  if (!ib_hca.empty()) {
-    for (const auto& ib : ib_hca) {
-      ctx.ib_names.push_back(ib);
-      ctx.nic_names.push_back(NetCounterFindNicForIbDevice(ib));
-    }
-  } else {
-    std::vector<std::string> all_nics;
-    NetCounterGetNetworkInterfaces(all_nics);
-    for (const auto& nic : all_nics) {
-      std::string ib = NetCounterFindIbDeviceForNic(nic);
-      if (ib.empty()) continue;
-      ctx.nic_names.push_back(nic);
-      ctx.ib_names.push_back(ib);
-    }
-    if (ctx.nic_names.empty()) { ctx.nic_names.push_back("eth0"); ctx.ib_names.push_back(""); }
+  if (!DiscoverRdmaNics(ctx)) {
+    ctx.enabled = false;
+    return ctx;
   }
 
-  // Detect NIC type from the first IB device and select the matching counter table
-  NicType nic_type = NIC_UNKNOWN;
-  for (size_t i = 0; i < ctx.ib_names.size() && nic_type == NIC_UNKNOWN; i++) {
-    nic_type = NetCounterDetectNicType(ctx.ib_names[i]);
-  }
+  bool mixed_detect = false;
+  NicType nic_type = DetectNicTypeFromIbDevices(ctx.ib_names, mixed_detect);
   ctx.selected_counters = NetCounterGetCounterList(nic_type);
 
   size_t ndevs = ctx.nic_names.size();
@@ -1180,7 +1209,8 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname));
   printf("# Network counter collection enabled (RCCL_TESTS_NET_COUNTER_ENABLE=1)\n");
-  if (!ib_hca.empty()) {
+  const char* ib_hca_env = getenv("NCCL_IB_HCA");
+  if (ib_hca_env && strlen(ib_hca_env) > 0) {
     printf("# Device list from NCCL_IB_HCA\n");
   }
   printf("# Node %s: lead rank %d collecting %zu device(s):",
@@ -1193,7 +1223,7 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
-  printf("# NIC type: %s\n", NicTypeStr(nic_type));
+  printf("# NIC type: %s\n", mixed_detect ? "MIXED" : NicTypeStr(nic_type));
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");

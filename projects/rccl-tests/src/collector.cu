@@ -87,7 +87,12 @@ static void GetTable(NicType nic_type,
       size = ionic_table_size;
       break;
     case NIC_BNXT_RE:
-    default:
+      table = bnxt_re_table;
+      size = bnxt_re_table_size;
+      break;
+    case NIC_UNKNOWN:
+      fprintf(stderr,
+              "# Warning: NIC type unknown, defaulting to bnxt_re counter set\n");
       table = bnxt_re_table;
       size = bnxt_re_table_size;
       break;
@@ -112,6 +117,40 @@ static const char* NicPrefix() {
 // Public helpers
 // =====================================================================
 
+static const std::set<std::string>& RequestedCounterFilter() {
+  static std::set<std::string> filter;
+  static bool checked = false;
+  if (!checked) {
+    const char* env = getenv("RCCL_TESTS_NIC_COUNTER_LIST");
+    if (env && strlen(env) > 0) {
+      std::string list(env);
+      size_t pos = 0;
+      while (pos < list.size()) {
+        size_t comma = list.find(',', pos);
+        if (comma == std::string::npos) { comma = list.size(); }
+        std::string token = list.substr(pos, comma - pos);
+        while (!token.empty() && (token.front() == ' ' || token.front() == '\t')) {
+          token.erase(token.begin());
+        }
+        while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) {
+          token.pop_back();
+        }
+        if (!token.empty()) { filter.insert(token); }
+        pos = comma + 1;
+      }
+    }
+    checked = true;
+  }
+  return filter;
+}
+
+static bool CounterMatchesRequestedFilter(const CounterTableEntry& entry) {
+  const std::set<std::string>& filter = RequestedCounterFilter();
+  if (filter.empty()) { return true; }
+  if (filter.count(entry.name) > 0) { return true; }
+  return entry.fallback_name != NULL && filter.count(entry.fallback_name) > 0;
+}
+
 bool NetCounterIsEnabled() {
   static int enabled = -1;
   if (enabled == -1) {
@@ -127,6 +166,7 @@ std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type) {
   int size;
   GetTable(nic_type, table, size);
   for (int i = 0; i < size; i++) {
+    if (!CounterMatchesRequestedFilter(table[i])) continue;
     result.push_back({table[i].name, table[i].source, table[i].is_prefix,
                       table[i].fallback_name ? table[i].fallback_name : ""});
   }

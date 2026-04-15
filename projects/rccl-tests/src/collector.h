@@ -14,12 +14,16 @@
  *
  * Environment variables:
  *   RCCL_TESTS_NET_COUNTER_ENABLE=1   – enable collection
+ *   RCCL_TESTS_NIC_COUNTER_LIST=a,b   – comma-separated counter subset
+ *                                        (default: all counters for detected NIC)
  *   NCCL_IB_HCA=ib0,ib1,...           – IB device list (primary)
  *   RCCL_TESTS_NET_COUNTER_NIC_PREFIX – NIC prefix filter for auto-discovery
  *
  * Counter sources (looked up automatically per NIC type):
  *   COUNTER_SRC_ETHTOOL  – ethtool -S <ethernet device>
- *   COUNTER_SRC_IB_HW    – /sys/class/infiniband/<dev>/ports/1/hw_counters/
+ *   COUNTER_SRC_IB_HW    – /sys/class/infiniband/<dev>/ports/<port>/hw_counters/
+ *                           (port parsed from NCCL_IB_HCA suffix, default 1;
+ *                            falls back to device-level hw_counters/ if needed)
  *   COUNTER_SRC_DEBUGFS  – /sys/kernel/debug/bnxt_re/<dev>/info
  *************************************************************************/
 #ifndef __COLLECTOR_H__
@@ -40,10 +44,10 @@ enum CounterSource {
 };
 
 struct CounterDescriptor {
-  std::string name;           // actual hardware key name (unique per NIC type)
+  std::string name;           // canonical/display key (also primary sysfs lookup name)
   CounterSource source;
   bool is_prefix;             // true -> prefix match (expands to name0..name7)
-  std::string fallback_name;  // alternative sysfs key if 'name' not found
+  std::string fallback_name;  // alternative sysfs key to try when 'name' is missing
 };
 
 typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC } NicType;
