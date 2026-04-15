@@ -25,6 +25,7 @@
 #include "envvar.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <istream>
 #include <list>
 #include <mutex>
@@ -37,13 +38,81 @@
 
 namespace rocshmem {
 namespace envvar {
+
   inline namespace _base {
     const var<bool> uniqueid_with_mpi("UNIQUEID_WITH_MPI",
       "Defines whether rocSHMEM is expected to use MPI internally when using the uniqueId based initialization. 0: Do not use MPI; 1: Use MPI",
       false);
     const var<types::debug_level> debug_level("DEBUG_LEVEL",
-      "Debug output level (NONE, VERSION, WARN, ENV:MODIFIED, ENV:ALL, ENV:FULL, INFO, TRACE)",
-      types::debug_level::NONE);
+      "Debug output level (NONE, ERROR, WARN, ENV, VERSION, INFO, API, TRACE). "
+      "Append modifiers: :noversion, :noenv, :noinfo, :nowarn, :notrace to suppress categories; "
+      ":env[:all|:full] to enable/control env variable output; "
+      ":color (default) or :nocolor for ANSI colors (e.g. trace:noversion:nocolor, env:full)",
+      types::debug_level::WARN);
+  }  // close _base temporarily to define log_flags after debug_level
+
+  // Build log_flags from the parsed debug_level and any :modifiers.
+  // Must be defined after debug_level above.
+  static types::debug_flags make_debug_flags() {
+    using types::debug_level;
+    using types::env_print_mode;
+    auto lvl = envvar::debug_level.get_value();
+
+    bool error    = (lvl >= debug_level::ERROR);
+    bool ver      = (lvl >= debug_level::VERSION);
+    bool env      = (lvl >= debug_level::ENV);
+    auto env_mode = env_print_mode::MODIFIED;
+    bool info     = (lvl >= debug_level::INFO);
+    bool api      = (lvl >= debug_level::API);
+    bool warn     = (lvl >= debug_level::WARN);
+    bool trace    = (lvl >= debug_level::TRACE);
+    bool color    = true;
+
+    // Apply :modifier overrides
+    const char* envstr = std::getenv("ROCSHMEM_DEBUG_LEVEL");
+    if (envstr) {
+      std::string val(envstr);
+      size_t pos = val.find(':');
+      while (pos != std::string::npos) {
+        size_t next = val.find(':', pos + 1);
+        std::string mod = val.substr(pos + 1, next == std::string::npos ? next : next - pos - 1);
+        std::transform(mod.begin(), mod.end(), mod.begin(), ::tolower);
+        if      (mod == "noerror")    error = false;
+        else if (mod == "noversion")  ver   = false;
+        else if (mod == "noenv")      env   = false;
+        else if (mod == "noinfo")     info  = false;
+        else if (mod == "noapi")      api   = false;
+        else if (mod == "nowarn")     warn  = false;
+        else if (mod == "notrace")    trace = false;
+        else if (mod == "env") {
+          // :env as a modifier explicitly enables env output;
+          // may be followed by :all, :full, :modified
+          env = true;
+          env_mode = env_print_mode::MODIFIED;
+          if (next != std::string::npos) {
+            size_t next2 = val.find(':', next + 1);
+            std::string sub = val.substr(next + 1, next2 == std::string::npos ? next2 : next2 - next - 1);
+            std::transform(sub.begin(), sub.end(), sub.begin(), ::tolower);
+            if      (sub == "all")      { env_mode = env_print_mode::ALL;  next = next2; }
+            else if (sub == "full")     { env_mode = env_print_mode::FULL; next = next2; }
+            else if (sub == "modified") { next = next2; }
+          }
+        }
+        // :all, :full, :modified as standalone modifiers for the env level
+        else if (mod == "all")      env_mode = env_print_mode::ALL;
+        else if (mod == "full")     env_mode = env_print_mode::FULL;
+        else if (mod == "modified") env_mode = env_print_mode::MODIFIED;
+        else if (mod == "color")    color = true;
+        else if (mod == "nocolor")  color = false;
+        pos = next;
+      }
+    }
+    return {error, ver, env, env_mode, info, api, warn, trace, color};
+  }
+
+  const types::debug_flags log_flags = make_debug_flags();
+
+  inline namespace _base {  // reopen _base
     const var<size_t> heap_size("HEAP_SIZE",
       "Defines the size of the rocSHMEM symmetric heap in bytes (per PE). Size in bytes (per PE); Note: the heap is on GPU memory",
       1L << 30);
@@ -178,23 +247,25 @@ namespace envvar {
       std::istream& operator>>(std::istream& is, debug_level& level) {
         std::string level_str;
         is >> level_str;
+        // Strip colon-separated modifiers (parsed separately by init_debug_flags)
+        auto colon = level_str.find(':');
+        if (colon != std::string::npos)
+          level_str = level_str.substr(0, colon);
         std::transform(level_str.begin(), level_str.end(), level_str.begin(), ::toupper);
         if (level_str == "NONE") {
           level = debug_level::NONE;
+        } else if (level_str == "ERROR") {
+          level = debug_level::ERROR;
         } else if (level_str == "VERSION") {
           level = debug_level::VERSION;
         } else if (level_str == "WARN") {
           level = debug_level::WARN;
         } else if (level_str == "ENV") {
           level = debug_level::ENV;
-        } else if (level_str == "ENV:MODIFIED") {
-          level = debug_level::ENV;
-        } else if (level_str == "ENV:ALL") {
-          level = debug_level::ENV_ALL;
-        } else if (level_str == "ENV:FULL") {
-          level = debug_level::ENV_FULL;
         } else if (level_str == "INFO") {
           level = debug_level::INFO;
+        } else if (level_str == "API") {
+          level = debug_level::API;
         } else if (level_str == "TRACE") {
           level = debug_level::TRACE;
         } else {
@@ -208,22 +279,29 @@ namespace envvar {
       std::ostream& operator<<(std::ostream& os, const debug_level& level) {
         switch (level) {
         case debug_level::NONE:
-          return os << "NONE";
+          os << "NONE"; break;
+        case debug_level::ERROR:
+          os << "ERROR"; break;
         case debug_level::VERSION:
-          return os << "VERSION";
+          os << "VERSION"; break;
         case debug_level::WARN:
-          return os << "WARN";
+          os << "WARN"; break;
         case debug_level::ENV:
-          return os << "ENV:MODIFIED";
-        case debug_level::ENV_ALL:
-          return os << "ENV:ALL";
-        case debug_level::ENV_FULL:
-          return os << "ENV:FULL";
+          os << "ENV"; break;
         case debug_level::INFO:
-          return os << "INFO";
+          os << "INFO"; break;
+        case debug_level::API:
+          os << "API"; break;
         case debug_level::TRACE:
-          return os << "TRACE";
+          os << "TRACE"; break;
         }
+        // Append any :modifier suffixes from the env var
+        const char* env = std::getenv("ROCSHMEM_DEBUG_LEVEL");
+        if (env) {
+          const char* colon = std::strchr(env, ':');
+          if (colon) os << colon;
+        }
+        return os;
       }
     }  // inline namespace _debug
   }  // namespace types

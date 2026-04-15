@@ -359,7 +359,7 @@ class QueuePair {
   struct bnxt_device_sq bnxt_sq;
 
   __device__ void bnxt_poll_cq_until(uint32_t requested_available_slots);
-  __device__ void bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe);
+  [[maybe_unused]] __device__ __attribute__((noinline)) void bnxt_print_cqe_error(uint8_t status);
 
   /* GDAProvider::BNXT END */
 
@@ -369,7 +369,7 @@ class QueuePair {
   gda_mlx5_device_sq mlx5_sq;
 
   __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
-  __device__ void mlx5_check_cqe_error(const mlx5_cqe64* cqe);
+  [[maybe_unused]] __device__ __attribute__((noinline)) void mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode);
 
   /* GDAProvider::MLX5 END */
 

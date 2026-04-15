@@ -378,31 +378,32 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);
 
-    auto insert_xcp_metrics = [&](const char* base_name, const std::string& base_track,
-                                  bool is_enabled, const auto& get_array) {
+    auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
+                                  const auto& format_name) {
         if(!is_enabled) return;
         for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
         {
             const auto& arr = get_array(m.xcp_stats[xcp]);
             for(size_t i = 0; i < arr.size(); ++i)
             {
-                auto suffix =
-                    "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
-                auto pmc_name   = std::string(base_name) + suffix;
-                auto track_name = base_track + suffix;
-                insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
+                auto name = format_name(static_cast<int>(xcp), static_cast<int>(i));
+                insert_metric(true, name.c_str(), name.c_str(), arr[i]);
             }
         }
     };
 
-    insert_xcp_metrics(trait::name<category::amd_smi_vcn_activity>::value,
-                       info::format_track_name<category::amd_smi_vcn_activity>(),
-                       enabled.bits.vcn_busy,
-                       [](const auto& xcp) -> const auto& { return xcp.vcn_busy; });
-    insert_xcp_metrics(trait::name<category::amd_smi_jpeg_activity>::value,
-                       info::format_track_name<category::amd_smi_jpeg_activity>(),
-                       enabled.bits.jpeg_busy,
-                       [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; });
+    insert_xcp_metrics(
+        enabled.bits.vcn_busy,
+        [](const auto& xcp) -> const auto& { return xcp.vcn_busy; },
+        [](int xcp, int engine) {
+            return info::format_track_name<category::amd_smi_vcn_activity>(xcp, engine);
+        });
+    insert_xcp_metrics(
+        enabled.bits.jpeg_busy,
+        [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; },
+        [](int xcp, int engine) {
+            return info::format_track_name<category::amd_smi_jpeg_activity>(xcp, engine);
+        });
 
     auto insert_device_level_metrics = [&](const std::string_view base_name,
                                            bool is_enabled, const auto& arr) {
