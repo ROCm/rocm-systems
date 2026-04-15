@@ -181,6 +181,7 @@ global:
 	hsa_amd_image_get_info_max_dim;
 	hsa_amd_queue_cu_set_mask;
 	hsa_amd_queue_cu_get_mask;
+	hsa_amd_queue_create_with_flags;
 	hsa_amd_memory_fill;
 	hsa_amd_memory_async_copy;
 	hsa_amd_memory_async_copy_on_engine;

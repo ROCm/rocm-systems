@@ -35,6 +35,9 @@ class GraphNode;
 class GraphExecBase;
 class GraphExecClassic;
 class GraphExecSegmented;
+// The segmented executor is the concrete GraphExec used for sub-graph/conditional
+// body execution on the ROCm path. Alias keeps legacy `GraphExec` references valid.
+using GraphExec = GraphExecSegmented;
 class UserObject;
 class GraphKernelNode;
 typedef GraphNode* Node;
@@ -463,6 +466,12 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   // Base implementation returns false; specific node types should override.
   virtual bool GraphCaptureEnabled() {
     return false;
+  }
+
+  virtual bool HasSubGraphs() const { return false; }
+  virtual const std::vector<GraphExec*>& GetSubGraphExecs() const {
+    static const std::vector<GraphExec*> empty;
+    return empty;
   }
   virtual void PrintAttributes(std::ostream& out, hipGraphDebugDotFlags flag) override {
     out << "[";
@@ -1123,10 +1132,16 @@ class GraphExecSegmented : public GraphExecBase {
           instantiateDeviceId_ < static_cast<int>(g_devices.size()) &&
           g_devices[instantiateDeviceId_] != nullptr) {
         auto* device = g_devices[instantiateDeviceId_]->devices()[0];
-        device->svmFree(cmd_buffer_.device_ptr);
+        if (cmd_buffer_.device_local) {
+          device->deviceLocalFree(cmd_buffer_.device_ptr);
+        } else {
+          device->svmFree(cmd_buffer_.device_ptr);
+        }
       }
       cmd_buffer_.device_ptr = nullptr;
       cmd_buffer_.valid = false;
+      cmd_buffer_.device_local = false;
+      cmd_buffer_.blocks.clear();
     }
 
     segmentBatches_.clear();
@@ -1191,25 +1206,101 @@ class GraphExecSegmented : public GraphExecBase {
   bool ShouldCollapseToSingleStream() const;
   //! Check if graph is a single-branch, all-captured-kernel graph
   bool IsSingleBranchAllCaptured() const;
-  //! Build device-memory command buffer from captured packets
-  hipError_t BuildCommandBuffer();
+  //! Check if all segments have captured nodes (multi-segment support)
+  bool IsAllCapturedGraph() const;
+  //! Recursive eligibility check for command buffer path (supports sub-graphs)
+  bool IsCommandBufferEligible() const;
+  //! Build multi-block device-memory command buffer with CFG terminators
+  hipError_t BuildMultiBlockCommandBuffer();
+  //! Reset all conditional handles (recursively) to default values before GPU dispatch
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
   }
 
-  //! Device-side command buffer for optimized single-branch graph dispatch.
-  //! Layout: [kernel_pkt_0] ... [kernel_pkt_N-1]
-  //! A scheduler kernel copies these packets to the HW queue at launch.
+  // -----------------------------------------------------------------------
+  // Device-side command buffer for block-based graph dispatch.
+  //
+  // Memory layout (all in one SVM allocation):
+  //   [BlockDescriptor[0..N-1]]  block_table_offset
+  //   [ExecutionState]           exec_state_offset   (64-byte aligned)
+  //   [KernargPool]              kernarg_pool_offset  (256-byte aligned)
+  //   [Block 0 packets ...]      packets_offset
+  //   [Block 1 packets ...]
+  //   ...
+  //
+  // For single-segment graphs, the flat scheduler path is used (backward
+  // compatible).  For multi-segment all-captured graphs, blocks map 1:1
+  // to segments and are chained by CFG terminator dispatch packets
+  // (graphBranch / graphReturn) appended at the end of each block.
+  // -----------------------------------------------------------------------
+
+  // Must match GPU-side BlockDescriptor in graph_scheduler_kernel.hip
+  struct BlockDescriptor {
+    uint32_t packet_offset;   // Byte offset from packets area
+    uint32_t packet_count;    // AQL packets in this block (user + CFG)
+  };
+
+  // Must match GPU-side ExecutionState in graph_scheduler_kernel.hip (80 bytes)
+  struct alignas(128) DeviceExecutionState {
+    uint64_t cmd_buffer_base;        // Pointer to packets area
+    uint64_t block_table_ptr;        // Pointer to BlockDescriptor[]
+    uint32_t block_count;
+    uint32_t current_block;
+    uint64_t queue_ptr;              // Queue A (control) - amd_queue_t*
+    uint64_t completion_signal_ptr;  // &amd_signal_t->value
+    uint64_t kernarg_pool_ptr;
+    uint64_t doorbell_ptr;           // Queue A hardware_doorbell_ptr
+    uint64_t work_queue_ptr;         // Queue B (work) - body packets target
+    uint64_t work_doorbell_ptr;      // Queue B hardware_doorbell_ptr
+    uint64_t cond_init_ptr;          // Cond variable to init before first block (0 = skip)
+    uint64_t cond_init_value;        // Value to write to *cond_init_ptr
+    // Pre-resolved queue metadata for graphCondBranchWhile (avoids per-iter lookups)
+    uint64_t cached_queue_base;      // Queue ring buffer base address
+    uint32_t cached_queue_size;      // Queue ring buffer size (slots)
+    uint32_t _reserved0;
+  };
+  static_assert(sizeof(DeviceExecutionState) <= 128, "ExecutionState must fit 128 bytes");
+
+  struct BlockInfo {
+    int segment_id;
+    uint32_t packet_byte_offset;    // Byte offset within packets area
+    uint32_t user_packet_count;
+    uint32_t total_packet_count;    // user + CFG terminator (1)
+    uint32_t kernarg_offset;        // Offset into kernarg pool for CFG args
+  };
+
   struct CommandBuffer {
     uint8_t* device_ptr = nullptr;
-    size_t kernel_packet_count = 0;
-    size_t total_packet_count = 0;   // kernel_packet_count
-    size_t byte_size = 0;
+    size_t total_byte_size = 0;
     bool valid = false;
+    bool device_local = false;  // true if allocated via deviceLocalAlloc (VRAM)
+
+    size_t block_table_offset = 0;
+    size_t exec_state_offset = 0;
+    size_t kernarg_pool_offset = 0;
+    size_t packets_offset = 0;
+
+    uint32_t block_count = 0;
+    std::vector<BlockInfo> blocks;
+
+    // Fused WHILE loop: when set, use graphWhileLoop instead of graphBlockIssue
+    bool has_fused_while = false;
+    bool has_while_cond_branch = false;  // true if graph has WHILE self-loop blocks
+    uint64_t while_cond_ptr = 0;       // device pointer to condition variable
+    uint32_t while_body_block_idx = 0; // block index of the body in the command buffer
+
+    // GPU-side cond variable init (graphBlockIssue writes this before first block)
+    uint64_t cond_init_ptr = 0;        // 0 = no init needed
+    uint64_t cond_init_value = 0;
 
     static constexpr size_t kPacketSize = 64;
-    size_t KernelPacketsOffset() const { return 0; }
+    static constexpr size_t kKernargAlign = 256;
+    static constexpr size_t kKernargEntrySize = 64;
+
+    // Backward-compat helpers for the flat (single-segment) path
+    size_t kernel_packet_count = 0;
+    size_t KernelPacketsOffset() const { return packets_offset; }
   };
   CommandBuffer cmd_buffer_;
 
@@ -1342,6 +1433,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   ChildGraphNode(Graph* g) : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExecSegmented() {
     g->clone(this);
     graphCaptureStatus_ = false;
+    sub_graph_execs_ = {static_cast<GraphExec*>(this)};
   }
 
   ~ChildGraphNode() {
@@ -1359,6 +1451,11 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   GraphNode* clone() const override { return new ChildGraphNode(*this); }
 
   Graph* GetChildGraph() override { return this; }
+
+  bool HasSubGraphs() const override { return true; }
+  const std::vector<GraphExec*>& GetSubGraphExecs() const override {
+    return sub_graph_execs_;
+  }
 
   void SetGraphCaptureStatus(bool status) { graphCaptureStatus_ = status; }
 
@@ -1434,6 +1531,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
  private:
   bool graphCaptureStatus_;
+  std::vector<GraphExec*> sub_graph_execs_;
 };
 
 class GraphKernelNode : public GraphNode {
@@ -3081,6 +3179,46 @@ class GraphEmptyNode : public GraphNode {
     }
     return hipSuccess;
   }
+};
+
+// ================================================================================================
+class GraphConditionalNode : public GraphNode {
+ public:
+  GraphConditionalNode(hipGraphConditionalHandle handle,
+                       hipGraphConditionalType type,
+                       const std::vector<Graph*>& child_graphs)
+      : GraphNode(hipGraphNodeTypeConditional, "dashed", "diamond", "COND"),
+        handle_(handle), cond_type_(type), child_graphs_(child_graphs) {}
+
+  ~GraphConditionalNode() {
+    for (auto* exec : body_graph_execs_) {
+      delete exec;
+    }
+  }
+
+  GraphNode* clone() const override { return new GraphConditionalNode(*this); }
+
+  hipGraphConditionalHandle GetHandle() const { return handle_; }
+  hipGraphConditionalType GetCondType() const { return cond_type_; }
+  const std::vector<Graph*>& GetChildGraphs() const { return child_graphs_; }
+
+  bool HasSubGraphs() const override { return !body_graph_execs_.empty(); }
+  const std::vector<GraphExec*>& GetSubGraphExecs() const override {
+    return body_graph_execs_;
+  }
+  void SetBodyGraphExecs(std::vector<GraphExec*> execs) {
+    body_graph_execs_ = std::move(execs);
+  }
+
+  hipError_t CreateCommand(hip::Stream* stream) override {
+    return GraphNode::CreateCommand(stream);
+  }
+
+ private:
+  hipGraphConditionalHandle handle_;
+  hipGraphConditionalType cond_type_;
+  std::vector<Graph*> child_graphs_;
+  std::vector<GraphExec*> body_graph_execs_;
 };
 
 // ================================================================================================

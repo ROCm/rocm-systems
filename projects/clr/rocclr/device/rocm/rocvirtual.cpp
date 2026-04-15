@@ -2008,6 +2008,125 @@ bool VirtualGPU::runGraphSchedulerKernel(void* cmd_buffer, uint32_t packet_count
 }
 
 // ================================================================================================
+bool VirtualGPU::runGraphBlockIssue(void* exec_state_ptr, uint32_t total_graph_packets) {
+  if (gpu_queue_ == nullptr || exec_state_ptr == nullptr) {
+    return false;
+  }
+  if (!roc_device_.hasGraphBlockIssueHSACO()) {
+    return false;
+  }
+
+  // Kernarg: single pointer to ExecutionState
+  struct alignas(16) {
+    uint64_t state_ptr;
+  } *args = reinterpret_cast<decltype(args)>(allocKernArg(sizeof(*args), 256));
+  if (args == nullptr) return false;
+
+  args->state_ptr = reinterpret_cast<uint64_t>(exec_state_ptr);
+
+  hsa_kernel_dispatch_packet_t pkt = {};
+  pkt.setup = 1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+  pkt.workgroup_size_x = 1;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 1;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = roc_device_.graphBlockIssueKernelObject();
+  pkt.kernarg_address = args;
+  pkt.private_segment_size = roc_device_.graphBlockIssuePrivateSize();
+  pkt.group_segment_size = roc_device_.graphBlockIssueGroupSize();
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+      "[runGraphBlockIssue] exec_state=%p, kernel_obj=0x%lx, kernarg=%p, queue=%p",
+      exec_state_ptr, pkt.kernel_object, args, gpu_queue_);
+
+  // GPU kernel rings the doorbell directly (MI300X: doorbell is GPU-accessible).
+  // No host-side pre-ring needed.
+  return dispatchGenericAqlPacket(&pkt, dispatchPacketHeader_, 1, false, false);
+}
+
+// ================================================================================================
+bool VirtualGPU::runGraphWhileLoop(void* exec_state_ptr, uint64_t cond_ptr,
+                                   uint32_t body_block_idx) {
+  if (gpu_queue_ == nullptr || exec_state_ptr == nullptr) {
+    return false;
+  }
+  if (!roc_device_.hasGraphWhileLoopHSACO()) {
+    return false;
+  }
+
+  // Kernarg: state_ptr(8) + cond_ptr(8) + body_block_idx(4) + pad(4)
+  struct alignas(16) {
+    uint64_t state_ptr;
+    uint64_t cond_ptr;
+    uint32_t body_block_idx;
+    uint32_t pad;
+  } *args = reinterpret_cast<decltype(args)>(allocKernArg(sizeof(*args), 256));
+  if (args == nullptr) return false;
+
+  args->state_ptr = reinterpret_cast<uint64_t>(exec_state_ptr);
+  args->cond_ptr = cond_ptr;
+  args->body_block_idx = body_block_idx;
+  args->pad = 0;
+
+  hsa_kernel_dispatch_packet_t pkt = {};
+  pkt.setup = 1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+  pkt.workgroup_size_x = 1;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 1;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = roc_device_.graphWhileLoopKernelObject();
+  pkt.kernarg_address = args;
+  pkt.private_segment_size = roc_device_.graphWhileLoopPrivateSize();
+  pkt.group_segment_size = roc_device_.graphWhileLoopGroupSize();
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+      "[runGraphWhileLoop] exec_state=%p, cond_ptr=0x%lx, body_block=%u, queue=%p",
+      exec_state_ptr, cond_ptr, body_block_idx, gpu_queue_);
+
+  return dispatchGenericAqlPacket(&pkt, dispatchPacketHeader_, 1, false, false);
+}
+
+// ================================================================================================
+bool VirtualGPU::upgradeToDeviceMemQueue() {
+  if (device_mem_queue_) return true;  // Already upgraded
+
+  hsa_queue_t* old_queue = gpu_queue_;
+  device_mem_queue_ = true;
+
+  uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
+  hsa_queue_t* new_queue = roc_device_.acquireQueue(
+      queue_size, cooperative_, cuMask_, priority_, false, dedicated_queue_, true);
+  if (new_queue == nullptr) {
+    device_mem_queue_ = false;
+    return false;
+  }
+
+  gpu_queue_ = new_queue;
+  if (old_queue != nullptr) {
+    roc_device_.releaseQueue(old_queue, cuMask_, cooperative_);
+  }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+      "[VirtualGPU] Upgraded queue to device memory: old=%p new=%p", old_queue, new_queue);
+  return true;
+}
+
+// ================================================================================================
+bool VirtualGPU::addBarrierPacket(uint64_t signal_handle) {
+  if (gpu_queue_ == nullptr) return false;
+
+  hsa_signal_t sig;
+  sig.handle = signal_handle;
+  barrier_packet_.dep_signal[0] = sig;
+  dispatchBarrierPacket(kNopPacketHeader, false);
+  return true;
+}
+
+// ================================================================================================
 bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
                                           const uint32_t gfxVersion, bool blocking,
                                           const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi) {
@@ -2389,7 +2508,9 @@ bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   SetGpuQueue(roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
-                                       dedicated_queue_));
+                                       dedicated_queue_, /*preferred=*/nullptr,
+                                       /*excluded_ids=*/nullptr, /*metadata_ring_buffer=*/nullptr,
+                                       device_mem_queue_));
   if (!gpu_queue_) return false;
 
   if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() >= 5) {

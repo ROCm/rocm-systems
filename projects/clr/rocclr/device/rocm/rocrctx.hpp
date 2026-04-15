@@ -17,13 +17,13 @@
 #include "hsa_ven_amd_loader.h"
 #include "hsa_ven_amd_aqlprofile.h"
 #else
-#include "hsa/hsa.h"
-#include "hsa/hsa_ext_image.h"
-#include "hsa/hsa_ext_amd.h"
-#include "hsa/amd_hsa_signal.h"
-#include "hsa/hsa_ven_amd_loader.h"
-#include "hsa/hsa_ven_amd_aqlprofile.h"
-#endif
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_image.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_amd.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/amd_hsa_signal.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_loader.h"
+#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_aqlprofile.h"
+#endif  
 
 typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(
     hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs);
@@ -191,6 +191,16 @@ class Hsa : public amd::AllStatic {
                                    uint32_t group_segment_size, hsa_queue_t** queue) {
     return ROCR_DYN(hsa_queue_create)(agent, size, type, callback, data, private_segment_size,
                                       group_segment_size, queue);
+  }
+  static hsa_status_t queue_create_with_flags(hsa_agent_t agent, uint32_t size,
+                                              hsa_queue_type32_t type,
+                                              void (*callback)(hsa_status_t status,
+                                                               hsa_queue_t* source, void* data),
+                                              void* data, uint32_t private_segment_size,
+                                              uint32_t group_segment_size, uint64_t flags,
+                                              hsa_queue_t** queue) {
+    return hsa_amd_queue_create_with_flags(agent, size, type, callback, data, private_segment_size,
+                                           group_segment_size, flags, queue);
   }
   static hsa_status_t queue_destroy(hsa_queue_t* queue) {
     return ROCR_DYN(hsa_queue_destroy)(queue);

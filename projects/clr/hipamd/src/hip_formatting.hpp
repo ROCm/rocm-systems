@@ -816,3 +816,18 @@ inline std::ostream& operator<<(std::ostream& os, const hipMemLocation& s) {
   os << ", id=" << s.id << "}";
   return os;
 }
+
+inline std::ostream& operator<<(std::ostream& os, const hipGraphConditionalHandle& h) {
+  os << "{device_ptr=0x" << std::hex << h.device_ptr << std::dec << "}";
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const hipGraphConditionalType& t) {
+  switch (t) {
+    case hipGraphCondTypeIf:     os << "hipGraphCondTypeIf"; break;
+    case hipGraphCondTypeWhile:  os << "hipGraphCondTypeWhile"; break;
+    case hipGraphCondTypeSwitch: os << "hipGraphCondTypeSwitch"; break;
+    default: os << static_cast<int>(t); break;
+  }
+  return os;
+}
