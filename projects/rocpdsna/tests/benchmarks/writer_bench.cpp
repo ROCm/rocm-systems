@@ -32,7 +32,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
-#define VERSION (rocpdsna::version_t{ 3, 0, 0 })
+#define VERSION (rocpdsna::version_t{ 4, 0, 0 })
 namespace
 {
 

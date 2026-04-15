@@ -32,7 +32,6 @@ struct primary_key_providers
     [[nodiscard]] auto& memory_alloc_data() { return m_memory_alloc_data; }
 
     // v4-specific providers (new tables in v4+)
-    [[nodiscard]] auto& timestamp_data() { return m_timestamp_data; }
     [[nodiscard]] auto& category_info() { return m_category_info; }
     [[nodiscard]] auto& call_stack_data() { return m_call_stack_data; }
     [[nodiscard]] auto& line_info_data() { return m_line_info_data; }
@@ -59,7 +58,6 @@ private:
     autoincrementer<primary_key_t> m_memory_alloc_data;
 
     // v4-specific providers (for v4+ new tables)
-    autoincrementer<primary_key_t> m_timestamp_data;      // rocpd_timestamp
     autoincrementer<primary_key_t> m_category_info;       // rocpd_info_category
     autoincrementer<primary_key_t> m_call_stack_data;     // rocpd_call_stack
     autoincrementer<primary_key_t> m_line_info_data;      // rocpd_line_info

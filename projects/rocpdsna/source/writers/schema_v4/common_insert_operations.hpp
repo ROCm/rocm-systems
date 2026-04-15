@@ -29,11 +29,10 @@ namespace rocpdsna
  *
  * Key differences from schema_v3:
  * - Event: NO call_stack or line_info columns (use separate tables)
- * - Region/dispatch/memory: Uses track_id + timestamp IDs instead of nid/pid/tid + direct
- * timestamps
- * - Sample: Uses name_id + timestamp_id
- * - New operations: insert_timestamp(), insert_call_stack(), insert_line_info(),
- * insert_category()
+ * - Region/dispatch/memory: Uses track_id + inline timestamps with phase instead of
+ * nid/pid/tid + direct timestamps
+ * - Sample: Uses name_id + inline timestamp with phase
+ * - New operations: insert_call_stack(), insert_line_info(), insert_category()
  */
 template <>
 class common_insert_operations<data_storage::schema_v4_tag>
@@ -119,24 +118,6 @@ public:
     }
 
     /**
-     * @brief Insert timestamp into rocpd_timestamp table
-     *
-     * @param value The timestamp value
-     * @param phase Optional phase indicator (0 = none/instantaneous, 1 =
-     * start/enter/load, 2 = end/exit/unload)
-     * @param track_id Optional track ID reference
-     * @return Primary key of the inserted timestamp
-     */
-    primary_key_t insert_timestamp(uint64_t                     value,
-                                   std::optional<int>           phase    = std::nullopt,
-                                   std::optional<primary_key_t> track_id = std::nullopt)
-    {
-        const auto pk = m_ctx->key_providers->timestamp_data().get_primary_key_value();
-        m_stmts->timestamp_statement()(pk, value, phase, track_id);
-        return pk;
-    }
-
-    /**
      * @brief Ensure category is registered and return its primary key
      *
      * Uses the category_info registry (similar to how v3 uses string_info for categories)
@@ -197,15 +178,12 @@ public:
             m_ctx->registry->string_info().get_primary_key_value_for_entity(
                 std::string(track_name_view));
 
-        // Insert timestamp and get ID
-        // Phase 0 = none/instantaneous for sample timestamps
-        const auto timestamp_id = insert_timestamp(sample_data.timestamp, 0, track_pk);
-
         const auto pk = m_ctx->key_providers->sample_data().get_primary_key_value();
 
-        // v4 sample: id, track_id, name_id, timestamp_id, event_id, extdata
+        // Phase 0 = none/instantaneous for sample timestamps
+        // v4 sample: id, track_id, name_id, timestamp, phase, event_id, extdata
         m_stmts->sample_statement()(
-            pk, track_pk, name_pk, timestamp_id, event_pk, sample_data.extdata);
+            pk, track_pk, name_pk, sample_data.timestamp, 0, event_pk, sample_data.extdata);
     }
 
     void insert_arg(const writer_types::arg_data_t& arg_data, primary_key_t event_id)

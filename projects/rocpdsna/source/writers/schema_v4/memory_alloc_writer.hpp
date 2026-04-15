@@ -28,7 +28,7 @@ namespace rocpdsna
  *
  * Key differences from schema_v3:
  * - Uses track_id instead of nid/pid/tid columns
- * - Uses start_id/end_id (references rocpd_timestamp) instead of direct timestamps
+ * - Uses inline start/end BIGINT + phase instead of rocpd_timestamp FK references
  * - Uses name_id, region_name_id for string references
  */
 template <>
@@ -93,13 +93,6 @@ public:
         // Get track_id from trace environment
         const auto track_pk = m_common_ops->resolve_track_id(trace_env);
 
-        // Insert timestamps and get their IDs
-        // Phase: 1 = start/enter/load, 2 = end/exit/unload (per SQL CHECK constraint)
-        const auto start_id =
-            m_common_ops->insert_timestamp(data.start_timestamp, 1, track_pk);
-        const auto end_id =
-            m_common_ops->insert_timestamp(data.end_timestamp, 2, track_pk);
-
         // name_id is required: prefer user-provided name, fall back to type, then generic
         std::string_view name_str = data.name.has_value()
                                         ? data.name.value()
@@ -125,14 +118,18 @@ public:
 
         const auto pk = m_ctx->key_providers->memory_alloc_data().get_primary_key_value();
 
-        // v4 memory_allocate: id, track_id, type, level, start_id, end_id, name_id,
-        //                     address, size, region_name_id, event_id, extdata
+        // Phase: 1 = start/enter/load, 2 = end/exit/unload
+        // v4 memory_allocate: id, track_id, type, level, start, start_phase,
+        //                     end, end_phase, name_id, address, size,
+        //                     region_name_id, event_id, extdata
         m_stmts->memory_alloc_statement()(pk,
                                           track_pk,
                                           data.type,
                                           data.level,
-                                          start_id,
-                                          end_id,
+                                          data.start_timestamp,
+                                          1,
+                                          data.end_timestamp,
+                                          2,
                                           name_pk,
                                           data.address,
                                           data.size,

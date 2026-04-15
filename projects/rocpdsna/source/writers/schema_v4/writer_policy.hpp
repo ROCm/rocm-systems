@@ -22,7 +22,7 @@ namespace rocpdsna
  *
  * Key differences from v3:
  * - Uses track_id instead of nid/pid/tid columns
- * - Uses timestamp tables (rocpd_timestamp) instead of direct timestamps
+ * - Uses inline timestamps with phase metadata in each data table
  * - Event has no call_stack/line_info columns (stored in separate tables)
  * - Agent info uses generic_name instead of user_name
  */

@@ -24,7 +24,7 @@ namespace rocpdsna
  *
  * Key differences from schema_v3:
  * - Uses track_id instead of nid/pid/tid columns
- * - Uses start_id/end_id (references rocpd_timestamp) instead of direct timestamps
+ * - Uses inline start/end BIGINT + phase instead of rocpd_timestamp FK references
  * - Uses name_id, region_name_id for string references
  */
 template <>
@@ -62,13 +62,6 @@ public:
         // Get track_id from trace environment
         const auto track_pk = m_common_ops->resolve_track_id(trace_env);
 
-        // Insert timestamps and get their IDs
-        // Phase: 1 = start/enter/load, 2 = end/exit/unload (per SQL CHECK constraint)
-        const auto start_id =
-            m_common_ops->insert_timestamp(data.start_timestamp, 1, track_pk);
-        const auto end_id =
-            m_common_ops->insert_timestamp(data.end_timestamp, 2, track_pk);
-
         // Get name_id
         const auto name_pk =
             m_ctx->registry->string_info().get_primary_key_value_for_entity(
@@ -97,13 +90,16 @@ public:
 
         const auto pk = m_ctx->key_providers->memory_copy_data().get_primary_key_value();
 
-        // v4 memory_copy: id, track_id, start_id, end_id, name_id,
+        // Phase: 1 = start/enter/load, 2 = end/exit/unload
+        // v4 memory_copy: id, track_id, start, start_phase, end, end_phase, name_id,
         //                 dst_agent_id, dst_address, src_agent_id, src_address,
         //                 size, region_name_id, event_id, extdata
         m_stmts->memory_copy_statement()(pk,
                                          track_pk,
-                                         start_id,
-                                         end_id,
+                                         data.start_timestamp,
+                                         1,
+                                         data.end_timestamp,
+                                         2,
                                          name_pk,
                                          dst_agent_pk,
                                          data.dst_address,

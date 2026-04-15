@@ -24,7 +24,7 @@ namespace rocpdsna
  *
  * Key differences from schema_v3:
  * - Uses track_id instead of nid/pid/tid/agent_id/queue_id/stream_id columns
- * - Uses start_id/end_id (references rocpd_timestamp) instead of direct timestamps
+ * - Uses inline start/end BIGINT + phase instead of rocpd_timestamp FK references
  * - Uses region_name_id instead of name
  */
 template <>
@@ -62,13 +62,6 @@ public:
         // Get track_id from trace environment
         const auto track_pk = m_common_ops->resolve_track_id(trace_env);
 
-        // Insert timestamps and get their IDs
-        // Phase: 1 = start/enter/load, 2 = end/exit/unload (per SQL CHECK constraint)
-        const auto start_id =
-            m_common_ops->insert_timestamp(data.start_timestamp, 1, track_pk);
-        const auto end_id =
-            m_common_ops->insert_timestamp(data.end_timestamp, 2, track_pk);
-
         // Get region_name_id if name is provided
         std::optional<primary_key_t> region_name_pk =
             data.name.has_value()
@@ -87,7 +80,9 @@ public:
         const auto pk =
             m_ctx->key_providers->kernel_dispatch_data().get_primary_key_value();
 
-        // v4 kernel_dispatch: id, track_id, kernel_id, dispatch_id, start_id, end_id,
+        // Phase: 1 = start/enter/load, 2 = end/exit/unload
+        // v4 kernel_dispatch: id, track_id, kernel_id, dispatch_id,
+        //                     start, start_phase, end, end_phase,
         //                     private_segment_size, group_segment_size,
         //                     workgroup_size_x/y/z, grid_size_x/y/z,
         //                     region_name_id, event_id, extdata
@@ -95,8 +90,10 @@ public:
                                              track_pk,
                                              data.kernel_symbol_id,
                                              data.dispatch_id,
-                                             start_id,
-                                             end_id,
+                                             data.start_timestamp,
+                                             1,
+                                             data.end_timestamp,
+                                             2,
                                              data.private_segment_size,
                                              data.group_segment_size,
                                              data.workgroup_size_x,

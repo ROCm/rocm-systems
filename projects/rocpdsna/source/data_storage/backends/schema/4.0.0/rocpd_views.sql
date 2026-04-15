@@ -104,13 +104,6 @@ FROM
     `rocpd_info_pc{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
-    `rocpd_timestamp` AS
-SELECT
-    *
-FROM
-    `rocpd_timestamp{{uuid}}`;
-
-CREATE VIEW IF NOT EXISTS
     `rocpd_track` AS
 SELECT
     *

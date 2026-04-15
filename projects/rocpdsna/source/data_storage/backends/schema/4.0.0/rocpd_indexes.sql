@@ -14,8 +14,9 @@ CREATE INDEX `rocpd_info_process{{uuid}}_pid_idx` ON `rocpd_info_process{{uuid}}
 CREATE INDEX `rocpd_info_thread{{uuid}}_tid_idx` ON `rocpd_info_thread{{uuid}}` ("tid");
 CREATE INDEX `rocpd_info_process{{uuid}}_guid_pid_idx` ON `rocpd_info_process{{uuid}}` ("guid", "pid");
 CREATE INDEX `rocpd_info_thread{{uuid}}_guid_tid_idx` ON `rocpd_info_thread{{uuid}}` ("guid", "tid");
-CREATE INDEX `rocpd_timestamp{{uuid}}_value_idx` ON `rocpd_timestamp{{uuid}}` ("value");
-CREATE INDEX `rocpd_timestamp{{uuid}}_track_id_idx` ON `rocpd_timestamp{{uuid}}` ("track_id");
+-- Indexes on inline timestamp columns for frequently queried data tables
+CREATE INDEX `rocpd_region{{uuid}}_start_idx` ON `rocpd_region{{uuid}}` ("start");
+CREATE INDEX `rocpd_kernel_dispatch{{uuid}}_start_idx` ON `rocpd_kernel_dispatch{{uuid}}` ("start");
 
 -- CREATE INDEX `rocpd_kernel_dispatch{{uuid}}_guid_pid_tid_idx` ON `rocpd_kernel_dispatch{{uuid}}` ("guid", "pid", "tid");
 CREATE INDEX `rocpd_memory_copy{{uuid}}_guid_pid_tid_idx` ON `rocpd_memory_copy{{uuid}}` ("guid", "pid", "tid");

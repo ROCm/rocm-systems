@@ -202,9 +202,9 @@ SELECT
     T.nid,
     T.pid,
     T.tid,
-    DS.value AS `start`,
-    DE.value AS `end`,
-    (DE.value - DS.value) AS `duration`,
+    R.`start`,
+    R.`end`,
+    (R.`end` - R.`start`) AS `duration`,
     R.event_id,
     R.track_id,
     E.stack_id,
@@ -218,11 +218,7 @@ FROM
     INNER JOIN `tracks` T ON T.id = R.track_id
     AND T.guid = R.guid
     INNER JOIN `rocpd_string` NS ON NS.id = R.name_id
-    AND NS.guid = R.guid
-    INNER JOIN `rocpd_timestamp` DS ON DS.id = R.start_id
-    AND DS.guid = R.guid
-    INNER JOIN `rocpd_timestamp` DE ON DE.id = R.end_id
-    AND DE.guid = R.guid;
+    AND NS.guid = R.guid;
 
 --
 -- Samples
@@ -236,7 +232,7 @@ SELECT
     T.nid,
     T.pid,
     T.tid,
-    DI.value AS `timestamp`,
+    S.`timestamp`,
     S.event_id,
     S.track_id,
     E.stack_id AS stack_id,
@@ -250,9 +246,7 @@ FROM
     INNER JOIN `events` E ON E.id = S.event_id
     AND E.guid = S.guid
     INNER JOIN `rocpd_string` NS ON NS.id = S.name_id
-    AND NS.guid = S.guid
-    INNER JOIN `rocpd_timestamp` DI ON DI.id = S.timestamp_id
-    AND DI.guid = S.guid;
+    AND NS.guid = S.guid;
 
 --
 -- Provides samples view with the same columns as regions view
@@ -317,9 +311,9 @@ SELECT
     T.queue_name AS `queue`,
     T.stream_id,
     T.stream_name AS `stream`,
-    DS.value AS `start`,
-    DE.value AS `end`,
-    (DE.value - DS.value) AS `duration`,
+    K.`start`,
+    K.`end`,
+    (K.`end` - K.`start`) AS `duration`,
     K.event_id,
     K.track_id,
     -- OpenCL uses "grid" to mean number of work-items in a dimension
@@ -363,11 +357,7 @@ FROM
     INNER JOIN `rocpd_string` R ON R.id = K.region_name_id
     AND R.guid = K.guid
     INNER JOIN `rocpd_info_kernel_symbol` S ON S.id = K.kernel_id
-    AND S.guid = K.guid
-    INNER JOIN `rocpd_timestamp` DS ON DS.id = K.start_id
-    AND DS.guid = K.guid
-    INNER JOIN `rocpd_timestamp` DE ON DE.id = K.end_id
-    AND DE.guid = K.guid;
+    AND S.guid = K.guid;
 
 --
 -- Performance Monitoring Counters (PMC)
@@ -442,9 +432,9 @@ SELECT
     E.category,
     NS.string AS name,
     R.string AS region_name,
-    DS.value AS `start`,
-    DE.value AS `end`,
-    (DE.value - DS.value) AS `duration`,
+    M.`start`,
+    M.`end`,
+    (M.`end` - M.`start`) AS `duration`,
     T.queue_id,
     T.queue_name,
     T.stream_id,
@@ -481,11 +471,7 @@ FROM
     INNER JOIN `rocpd_info_agent` dst_agent ON dst_agent.id = M.dst_agent_id
     AND dst_agent.guid = M.guid
     INNER JOIN `rocpd_info_agent` src_agent ON src_agent.id = M.src_agent_id
-    AND src_agent.guid = M.guid
-    INNER JOIN `rocpd_timestamp` DS ON DS.id = M.start_id
-    AND DS.guid = M.guid
-    INNER JOIN `rocpd_timestamp` DE ON DE.id = M.end_id
-    AND DE.guid = M.guid;
+    AND src_agent.guid = M.guid;
 
 --
 --
@@ -501,9 +487,9 @@ SELECT
     E.category,
     NS.string AS name,
     R.string AS region_name,
-    DS.value AS `start`,
-    DE.value AS `end`,
-    (DE.value - DS.value) AS `duration`,
+    M.`start`,
+    M.`end`,
+    (M.`end` - M.`start`) AS `duration`,
     T.queue_id,
     T.queue_name,
     T.stream_id,
@@ -526,15 +512,11 @@ FROM
     INNER JOIN `events` E ON E.id = M.event_id
     AND E.guid = M.guid
     INNER JOIN `tracks` T ON T.id = M.track_id
-    AND E.guid = M.guid
+    AND T.guid = M.guid
     INNER JOIN `rocpd_string` NS ON NS.id = M.name_id
     AND NS.guid = M.guid
     LEFT JOIN `rocpd_string` R ON R.id = M.region_name_id
-    AND R.guid = M.guid
-    INNER JOIN `rocpd_timestamp` DS ON DS.id = M.start_id
-    AND DS.guid = M.guid
-    INNER JOIN `rocpd_timestamp` DE ON DE.id = M.end_id
-    AND DE.guid = M.guid;
+    AND R.guid = M.guid;
 
 --
 -- PMC events specific to kernels

@@ -25,12 +25,12 @@ using integer_foreign_key_t = size_t;
  * Key differences from schema_v3:
  * - rocpd_event: NO call_stack or line_info columns
  * - rocpd_info_agent: NO user_name, HAS generic_name
- * - rocpd_region: Uses track_id, start_id, end_id (references rocpd_timestamp)
- * - rocpd_kernel_dispatch: Uses track_id, start_id, end_id
- * - rocpd_memory_copy: Uses track_id, start_id, end_id
- * - rocpd_memory_allocate: Uses track_id, start_id, end_id, name_id, region_name_id
- * - rocpd_sample: Uses name_id, timestamp_id
- * - New tables: rocpd_timestamp, rocpd_call_stack, rocpd_line_info, rocpd_info_category
+ * - rocpd_region: Uses track_id, inline start/end + phase
+ * - rocpd_kernel_dispatch: Uses track_id, inline start/end + phase
+ * - rocpd_memory_copy: Uses track_id, inline start/end + phase
+ * - rocpd_memory_allocate: Uses track_id, inline start/end + phase, name_id, region_name_id
+ * - rocpd_sample: Uses name_id, inline timestamp + phase
+ * - New tables: rocpd_call_stack, rocpd_line_info, rocpd_info_category
  */
 template <typename Backend>
 struct insert_statements
@@ -50,7 +50,6 @@ struct insert_statements
         initialize_kernel_symbol_info_statement();
         initialize_code_object_info_statement();
         initialize_track_info_statement();
-        initialize_timestamp_statement();
         initialize_category_info_statement();
         initialize_address_range_info_statement();
         initialize_source_code_info_statement();
@@ -211,13 +210,6 @@ struct insert_statements
                     std::optional<integer_foreign_key_t>,  // name_id
                     std::string_view>;                     // extdata
 
-    // NEW in v4: rocpd_timestamp table
-    using timestamp_statement_func_t =
-        statement_t<integer_primary_key_t,                  // id
-                    uint64_t,                               // value
-                    std::optional<int>,                     // phase
-                    std::optional<integer_foreign_key_t>>;  // track_id
-
     // NEW in v4: rocpd_info_category table
     using category_info_statement_func_t = statement_t<integer_primary_key_t,  // id
                                                        std::string_view,       // name
@@ -296,33 +288,38 @@ struct insert_statements
                     double,                                // value
                     std::string_view>;                     // extdata
 
-    // v4: region uses track_id, start_id, end_id
+    // v4: region uses track_id, inline start/end + phase
     using region_statement_func_t =
         statement_t<integer_primary_key_t,                 // id
                     integer_foreign_key_t,                 // track_id
                     integer_foreign_key_t,                 // name_id
-                    integer_foreign_key_t,                 // start_id
-                    integer_foreign_key_t,                 // end_id
+                    uint64_t,                              // start
+                    std::optional<int>,                    // start_phase
+                    uint64_t,                              // end
+                    std::optional<int>,                    // end_phase
                     std::optional<integer_foreign_key_t>,  // event_id
                     std::string_view>;                     // extdata
 
-    // v4: sample uses name_id, timestamp_id
+    // v4: sample uses name_id, inline timestamp + phase
     using sample_statement_func_t =
         statement_t<integer_primary_key_t,                 // id
                     integer_foreign_key_t,                 // track_id
                     integer_foreign_key_t,                 // name_id
-                    integer_foreign_key_t,                 // timestamp_id
+                    uint64_t,                              // timestamp
+                    std::optional<int>,                    // phase
                     std::optional<integer_foreign_key_t>,  // event_id
                     std::string_view>;                     // extdata
 
-    // v4: kernel_dispatch uses track_id, start_id, end_id
+    // v4: kernel_dispatch uses track_id, inline start/end + phase
     using kernel_dispatch_statement_func_t =
         statement_t<integer_primary_key_t,                 // id
                     integer_foreign_key_t,                 // track_id
                     integer_foreign_key_t,                 // kernel_id
                     size_t,                                // dispatch_id
-                    integer_foreign_key_t,                 // start_id
-                    integer_foreign_key_t,                 // end_id
+                    uint64_t,                              // start
+                    std::optional<int>,                    // start_phase
+                    uint64_t,                              // end
+                    std::optional<int>,                    // end_phase
                     std::optional<size_t>,                 // private_segment_size
                     std::optional<size_t>,                 // group_segment_size
                     size_t,                                // workgroup_size_x
@@ -335,12 +332,14 @@ struct insert_statements
                     std::optional<integer_foreign_key_t>,  // event_id
                     std::string_view>;                     // extdata
 
-    // v4: memory_copy uses track_id, start_id, end_id
+    // v4: memory_copy uses track_id, inline start/end + phase
     using memory_copy_statement_func_t =
         statement_t<integer_primary_key_t,                 // id
                     integer_foreign_key_t,                 // track_id
-                    integer_foreign_key_t,                 // start_id
-                    integer_foreign_key_t,                 // end_id
+                    uint64_t,                              // start
+                    std::optional<int>,                    // start_phase
+                    uint64_t,                              // end
+                    std::optional<int>,                    // end_phase
                     integer_foreign_key_t,                 // name_id
                     std::optional<integer_foreign_key_t>,  // dst_agent_id
                     std::optional<size_t>,                 // dst_address
@@ -351,14 +350,16 @@ struct insert_statements
                     std::optional<integer_foreign_key_t>,  // event_id
                     std::string_view>;                     // extdata
 
-    // v4: memory_allocate uses track_id, start_id, end_id, name_id
+    // v4: memory_allocate uses track_id, inline start/end + phase, name_id
     using memory_alloc_statement_func_t =
         statement_t<integer_primary_key_t,                 // id
                     integer_foreign_key_t,                 // track_id
                     std::optional<std::string_view>,       // type
                     std::optional<std::string_view>,       // level
-                    integer_foreign_key_t,                 // start_id
-                    integer_foreign_key_t,                 // end_id
+                    uint64_t,                              // start
+                    std::optional<int>,                    // start_phase
+                    uint64_t,                              // end
+                    std::optional<int>,                    // end_phase
                     integer_foreign_key_t,                 // name_id
                     std::optional<size_t>,                 // address
                     size_t,                                // size
@@ -422,11 +423,6 @@ public:
     [[nodiscard]] const track_info_statement_func_t& track_info_statement() const
     {
         return m_track_info_statement;
-    }
-
-    [[nodiscard]] const timestamp_statement_func_t& timestamp_statement() const
-    {
-        return m_timestamp_statement;
     }
 
     [[nodiscard]] const category_info_statement_func_t& category_info_statement() const
@@ -750,18 +746,6 @@ private:
         create_statement(m_track_info_statement, query);
     }
 
-    // NEW in v4: rocpd_timestamp
-    void initialize_timestamp_statement()
-    {
-        rocpdsna::queries::insert::table_insert_query query_builder;
-        auto                                          query =
-            query_builder.set_table_name(fmt::format("rocpd_timestamp_{}", m_uuid))
-                .set_columns("id", "value", "phase", "track_id")
-                .set_values('?', '?', '?', '?')
-                .get_query_string();
-        create_statement(m_timestamp_statement, query);
-    }
-
     // NEW in v4: rocpd_info_category
     void initialize_category_info_statement()
     {
@@ -894,7 +878,7 @@ private:
         create_statement(m_pmc_event_statement, query);
     }
 
-    // v4: region uses track_id, start_id, end_id
+    // v4: region uses track_id, inline start/end + phase
     void initialize_region_statement()
     {
         rocpdsna::queries::insert::table_insert_query query_builder;
@@ -902,29 +886,31 @@ private:
                          .set_columns("id",
                                       "track_id",
                                       "name_id",
-                                      "start_id",
-                                      "end_id",
+                                      "start",
+                                      "start_phase",
+                                      "end",
+                                      "end_phase",
                                       "event_id",
                                       "extdata")
-                         .set_values('?', '?', '?', '?', '?', '?', '?')
+                         .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                          .get_query_string();
         create_statement(m_region_statement, query);
     }
 
-    // v4: sample uses name_id, timestamp_id
+    // v4: sample uses name_id, inline timestamp + phase
     void initialize_sample_statement()
     {
         rocpdsna::queries::insert::table_insert_query query_builder;
         auto                                          query =
             query_builder.set_table_name(fmt::format("rocpd_sample_{}", m_uuid))
                 .set_columns(
-                    "id", "track_id", "name_id", "timestamp_id", "event_id", "extdata")
-                .set_values('?', '?', '?', '?', '?', '?')
+                    "id", "track_id", "name_id", "timestamp", "phase", "event_id", "extdata")
+                .set_values('?', '?', '?', '?', '?', '?', '?')
                 .get_query_string();
         create_statement(m_sample_statement, query);
     }
 
-    // v4: kernel_dispatch uses track_id, start_id, end_id
+    // v4: kernel_dispatch uses track_id, inline start/end + phase
     void initialize_kernel_dispatch_statement()
     {
         rocpdsna::queries::insert::table_insert_query query_builder;
@@ -934,8 +920,10 @@ private:
                              "track_id",
                              "kernel_id",
                              "dispatch_id",
-                             "start_id",
-                             "end_id",
+                             "start",
+                             "start_phase",
+                             "end",
+                             "end_phase",
                              "private_segment_size",
                              "group_segment_size",
                              "workgroup_size_x",
@@ -963,12 +951,14 @@ private:
                             '?',
                             '?',
                             '?',
+                            '?',
+                            '?',
                             '?')
                 .get_query_string();
         create_statement(m_kernel_dispatch_statement, query);
     }
 
-    // v4: memory_copy uses track_id, start_id, end_id
+    // v4: memory_copy uses track_id, inline start/end + phase
     void initialize_memory_copy_statement()
     {
         rocpdsna::queries::insert::table_insert_query query_builder;
@@ -976,8 +966,10 @@ private:
             query_builder.set_table_name(fmt::format("rocpd_memory_copy_{}", m_uuid))
                 .set_columns("id",
                              "track_id",
-                             "start_id",
-                             "end_id",
+                             "start",
+                             "start_phase",
+                             "end",
+                             "end_phase",
                              "name_id",
                              "dst_agent_id",
                              "dst_address",
@@ -987,13 +979,26 @@ private:
                              "region_name_id",
                              "event_id",
                              "extdata")
-                .set_values(
-                    '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
+                .set_values('?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?')
                 .get_query_string();
         create_statement(m_memory_copy_statement, query);
     }
 
-    // v4: memory_allocate uses track_id, start_id, end_id, name_id
+    // v4: memory_allocate uses track_id, inline start/end + phase, name_id
     void initialize_memory_alloc_statement()
     {
         rocpdsna::queries::insert::table_insert_query query_builder;
@@ -1003,15 +1008,30 @@ private:
                              "track_id",
                              "type",
                              "level",
-                             "start_id",
-                             "end_id",
+                             "start",
+                             "start_phase",
+                             "end",
+                             "end_phase",
                              "name_id",
                              "address",
                              "size",
                              "region_name_id",
                              "event_id",
                              "extdata")
-                .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
+                .set_values('?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?',
+                            '?')
                 .get_query_string();
         create_statement(m_memory_alloc_statement, query);
     }
@@ -1030,7 +1050,6 @@ private:
     kernel_symbol_info_statement_func_t m_kernel_symbol_info_statement;
     code_object_info_statement_func_t   m_code_object_info_statement;
     track_info_statement_func_t         m_track_info_statement;
-    timestamp_statement_func_t          m_timestamp_statement;
     category_info_statement_func_t      m_category_info_statement;
     address_range_info_statement_func_t m_address_range_info_statement;
     source_code_info_statement_func_t   m_source_code_info_statement;
