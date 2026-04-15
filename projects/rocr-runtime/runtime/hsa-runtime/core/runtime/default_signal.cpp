@@ -83,11 +83,12 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
   waiting_++;
   MAKE_SCOPE_GUARD([&]() { waiting_--; });
 
-  const uint32_t &signal_abort_timeout =
-    core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
-
+  static const uint32_t& signal_abort_timeout =
+      core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
+  static const timer::fast_clock::duration abort_timeout =
+      std::chrono::seconds(signal_abort_timeout);
+  static const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
   const timer::fast_clock::time_point start_time = timer::fast_clock::now();
-  const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
 
   while (true) {
     if (!IsValid()) return 0;
@@ -98,11 +99,15 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
       return value;
     }
 
-    if (timer::fast_clock::now() - start_time > fast_timeout) {
+    auto elapsed = timer::fast_clock::now() - start_time;
+    if (elapsed > fast_timeout) {
       return value;
     }
 
-    timer::CheckAbortTimeout(start_time, signal_abort_timeout);
+    if (signal_abort_timeout && elapsed > abort_timeout) {
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL,
+                             "Signal wait abort timeout.\n");
+    }
 
     if (g_use_mwaitx) {
       // Use timer-enabled mwaitx for busy waiting

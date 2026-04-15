@@ -93,18 +93,6 @@ inline timer::fast_clock::duration GetFastTimeout(uint64_t timeout) {
       double(timeout) / double(hsa_freq));
 }
 
-inline void CheckAbortTimeout(const timer::fast_clock::time_point& start_time,
-                            uint32_t signal_abort_timeout) {
-  if (signal_abort_timeout) {
-    const timer::fast_clock::duration abort_timeout =
-        std::chrono::seconds(signal_abort_timeout);
-    if (timer::fast_clock::now() - start_time > abort_timeout) {
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL,
-                             "Signal wait abort timeout.\n");
-    }
-  }
-}
-
 inline void DoMwaitx(int64_t* addr, int64_t val_on_last_check, uint32_t timeout, bool timer_enable) {
 #if defined(__i386__) || defined(__x86_64__)
   _mm_monitorx(addr, 0, 0);

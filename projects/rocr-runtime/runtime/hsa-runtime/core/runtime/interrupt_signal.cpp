@@ -148,11 +148,13 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
   uint64_t event_age = core::Runtime::runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
   if (!event_age && prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
 
-  const timer::fast_clock::time_point start_time = timer::fast_clock::now();
-  const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
-  const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
-  const uint32_t &signal_abort_timeout =
+  static const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
+  static const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
+  static const uint32_t &signal_abort_timeout =
     core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
+  static const timer::fast_clock::duration abort_timeout =
+        std::chrono::seconds(signal_abort_timeout);
+  const timer::fast_clock::time_point start_time = timer::fast_clock::now();
 
   while (true) {
     if (!IsValid()) return 0;
@@ -163,12 +165,16 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       return value;
     }
 
-    auto now = timer::fast_clock::now();
-    if (now - start_time > fast_timeout) {
+    auto elapsed = timer::fast_clock::now() - start_time;
+    if (elapsed > fast_timeout) {
       return value;
     }
 
-    timer::CheckAbortTimeout(start_time, signal_abort_timeout);
+    if (signal_abort_timeout && elapsed > abort_timeout) {
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL,
+                             "Signal wait abort timeout.\n");
+    }
+
 
     if (wait_hint == HSA_WAIT_STATE_ACTIVE) {
       if (g_use_mwaitx) {
@@ -178,7 +184,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       continue;
     }
 
-    if (now - start_time < kMaxElapsed) {
+    if (elapsed < kMaxElapsed) {
       if (g_use_mwaitx) {
         // Longer timeout with timer for passive waiting
         timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
@@ -187,7 +193,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     }
 
     auto remaining_ms = timer::duration_cast<std::chrono::milliseconds>(
-      fast_timeout - (now - start_time)).count();
+      fast_timeout - elapsed).count();
 
     uint32_t wait_ms = std::min<uint32_t>(
       static_cast<uint32_t>(std::min<uint64_t>(remaining_ms, 0xFFFFFFFEUL)),
