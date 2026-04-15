@@ -108,3 +108,6 @@
 [submodule "projects/rocprofiler-compute/src/lib/external/gtest"]
 	path = projects/rocprofiler-compute/src/lib/external/gtest
 	url = https://github.com/google/googletest.git
+[submodule "projects/rocprofiler-compute/src/lib/external/fmt"]
+	path = projects/rocprofiler-compute/src/lib/external/fmt
+	url = https://github.com/fmtlib/fmt
