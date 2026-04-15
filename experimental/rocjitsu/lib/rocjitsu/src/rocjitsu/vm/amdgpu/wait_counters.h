@@ -41,13 +41,13 @@ enum class WaitCounterType : uint8_t {
 /// but their sum is also reflected in lgkmcnt for backward compatibility
 /// with the monolithic S_WAITCNT instruction that RDNA3/3.5 still support.
 struct WaitCounters {
-  // --- GFX9/10 counters (primary) ---
+  // GFX9/10 counters (primary)
   uint8_t vmcnt = 0;   ///< VMEM load count (GFX9/10) / loadcnt alias (GFX11+).
   uint8_t lgkmcnt = 0; ///< LDS+GDS+K+M count (GFX9/10) / sum of dscnt+kmcnt (GFX11+).
   uint8_t expcnt = 0;  ///< Export count (all ISAs).
   uint8_t vscnt = 0;   ///< Vector store count (GFX10) / storecnt alias (GFX11+).
 
-  // --- GFX11+ fine-grained counters ---
+  // GFX11+ fine-grained counters
   uint8_t dscnt = 0; ///< DS (LDS/GDS) count (GFX11+).
   uint8_t kmcnt = 0; ///< Scalar/constant memory count (GFX11+).
 

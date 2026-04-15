@@ -1299,6 +1299,17 @@ def _derive_mubuf(name: str) -> InstructionSemantics | None:
                                             num_elems=ne, sign_extend=se)
     return InstructionSemantics(name, 'nop')
 
+_MTBUF_FORMAT_MAP: dict[str, tuple[int, int, bool]] = {
+    'FORMAT_X':    (4, 1, False),
+    'FORMAT_XY':   (4, 2, False),
+    'FORMAT_XYZ':  (4, 3, False),
+    'FORMAT_XYZW': (4, 4, False),
+    'FORMAT_D16_X':    (2, 1, False),
+    'FORMAT_D16_XY':   (2, 2, False),
+    'FORMAT_D16_XYZ':  (2, 3, False),
+    'FORMAT_D16_XYZW': (2, 4, False),
+}
+
 def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     """Derive semantics for an MTBUF (Typed Buffer memory) instruction."""
     upper = name.upper()
@@ -1306,7 +1317,7 @@ def _derive_mtbuf(name: str) -> InstructionSemantics | None:
     for prefix in ('TBUFFER_LOAD_', 'TBUFFER_STORE_'):
         if upper.startswith(prefix):
             suffix = upper[len(prefix):]
-            info = _FLAT_DATA_MAP.get(suffix)
+            info = _FLAT_DATA_MAP.get(suffix) or _MTBUF_FORMAT_MAP.get(suffix)
             if info:
                 esz, ne, se = info
                 cls = 'tbuffer_store' if is_store else 'tbuffer_load'

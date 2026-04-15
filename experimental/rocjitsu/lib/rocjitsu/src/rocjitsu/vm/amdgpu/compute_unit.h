@@ -222,13 +222,11 @@ public:
     global_mem_pipeline_.set_l2(l2);
   }
 
-  // -----------------------------------------------------------------------
-  // Memory issue stubs for Phase C execute() bodies.
+  // Memory issue interface for instruction execute() bodies.
   //
   // These provide the public interface through which instruction execute()
-  // methods issue memory operations.  In FUNCTIONAL mode they perform
+  // methods issue memory operations. In FUNCTIONAL mode they perform
   // the memory access synchronously through the appropriate cache level.
-  // -----------------------------------------------------------------------
 
   /// @brief Issue a scalar memory load through the L1 scalar cache.
   ///

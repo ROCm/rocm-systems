@@ -10,9 +10,7 @@
 
 namespace util {
 
-// ---------------------------------------------------------------------------
 // IEEE 754 half-precision (FP16) conversion
-// ---------------------------------------------------------------------------
 
 /// @brief Convert a 16-bit IEEE 754 half-precision value to float.
 inline float f16_to_f32(uint16_t h) {
@@ -92,9 +90,7 @@ inline uint16_t f32_to_f16(float val) {
   return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
 }
 
-// ---------------------------------------------------------------------------
 // BFloat16 (BF16) conversion
-// ---------------------------------------------------------------------------
 
 /// @brief Convert a 16-bit BFloat16 value to float.
 inline float bf16_to_f32(uint16_t h) {
@@ -108,9 +104,7 @@ inline uint16_t f32_to_bf16(float val) {
   return static_cast<uint16_t>(f >> 16);
 }
 
-// ---------------------------------------------------------------------------
 // FP8 (E4M3) conversion - 1 sign, 4 exponent, 3 mantissa bits
-// ---------------------------------------------------------------------------
 
 /// @brief Convert an 8-bit E4M3 FP8 value to float.
 inline float fp8_e4m3_to_f32(uint8_t v) {
@@ -148,9 +142,7 @@ inline uint8_t f32_to_fp8_e4m3(float val) {
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
 }
 
-// ---------------------------------------------------------------------------
 // BF8 (E5M2) conversion - 1 sign, 5 exponent, 2 mantissa bits
-// ---------------------------------------------------------------------------
 
 /// @brief Convert an 8-bit E5M2 BF8 value to float.
 inline float bf8_e5m2_to_f32(uint8_t v) {

@@ -199,8 +199,10 @@ void AmdGpuCodeObject::load_sections(std::ifstream &elf_file) {
   }
 
   // Parse symbol table for kernel descriptor offsets.
+  // Scan both SHT_SYMTAB and SHT_DYNSYM — stripped code objects may
+  // only have the latter.
   for (size_t i = 0; i < section_hdrs.size(); ++i) {
-    if (section_hdrs[i].sh_type != SHT_SYMTAB)
+    if (section_hdrs[i].sh_type != SHT_SYMTAB && section_hdrs[i].sh_type != SHT_DYNSYM)
       continue;
     auto &symtab_shdr = section_hdrs[i];
     if (symtab_shdr.sh_entsize == 0)

@@ -37,9 +37,20 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -56,9 +67,20 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 2;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -75,9 +97,20 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 3;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -94,9 +127,20 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 4;
+  d->num_elems = 4;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -113,9 +157,29 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+  }
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -132,9 +196,32 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 2;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+  }
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -151,9 +238,35 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 3;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 12);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
+    uint32_t val2 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 2, lane);
+    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
+  }
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -170,9 +283,38 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 4;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 16);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 0, lane);
+    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 1, lane);
+    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
+    uint32_t val2 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 2, lane);
+    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
+    uint32_t val3 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata + 3, lane);
+    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
+  }
+  set_data(std::move(d));
+}
 
 TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -189,9 +331,20 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -208,9 +361,20 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 2;
+  d->num_elems = 2;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -227,9 +391,20 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 2;
+  d->num_elems = 3;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -246,9 +421,20 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  d->elem_size = 2;
+  d->num_elems = 4;
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
@@ -265,9 +451,29 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 2);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
+  }
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
@@ -284,9 +490,32 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 2;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 4);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 2);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 4 + 2], &val1, 2);
+  }
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
@@ -303,9 +532,35 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 3;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 6);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 6 + 0], &val0, 2);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 6 + 2], &val1, 2);
+    uint32_t val2 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 6 + 4], &val2, 2);
+  }
+  set_data(std::move(d));
+}
 
 TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
@@ -322,9 +577,38 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
   src_operands_[3] = &soffset;
   num_src_ = 4;
   num_dst_ = 0;
+  flags_ |= MEMORY_OP;
 }
 
-void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 4;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->non_temporal = 0;
+  mtbuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
+  d->store_data.resize(wf.wf_size() * 8);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 2);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 8 + 2], &val1, 2);
+    uint32_t val2 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val2, 2);
+    uint32_t val3 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, lane);
+    std::memcpy(&d->store_data[lane * 8 + 6], &val3, 2);
+  }
+  set_data(std::move(d));
+}
 
 } // namespace cdna2
 } // namespace rocjitsu

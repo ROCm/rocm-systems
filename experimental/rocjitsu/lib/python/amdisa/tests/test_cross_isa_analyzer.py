@@ -3,13 +3,17 @@
 
 """Unit tests for the CrossIsaAnalyzer."""
 
+import os
+
 import pytest
 
 from amdisa.cross_isa import CrossIsaAnalyzer, SharedInstructionPlan
 from amdisa.parser import Parser
 from amdisa.semantics import derive_all_semantics
 
-MRISA = '/home/agutierr/rocm-dev/mrisa'
+MRISA = os.environ.get('MRISA_PATH', '')
+if not MRISA:
+    pytest.skip('MRISA_PATH not set — skipping cross-ISA tests', allow_module_level=True)
 
 # Use a smaller subset for fast tests.
 _PROFILES = None

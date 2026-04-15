@@ -274,6 +274,8 @@ uint32_t rj_code_basic_block_num_instructions(const rj_code_basic_block_t *block
 const char *rj_code_inst_mnemonic(const rj_code_inst_t *inst) {
   if (!inst)
     return nullptr;
+  // Safe: mnemonic_ is always a string_view over a null-terminated string
+  // literal from the codegen (e.g., "s_add_u32"). The lifetime is static.
   return reinterpret_cast<const Instruction *>(inst)->mnemonic().data();
 }
 

@@ -127,7 +127,6 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
     tag->coherence = simdojo::CoherenceState::MODIFIED;
   }
 
-  // empty trace placeholder
   ++write_count_;
 }
 

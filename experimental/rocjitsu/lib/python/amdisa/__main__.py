@@ -106,8 +106,8 @@ def _run_multi(args) -> None:
             if key not in all_shared_bodies:
                 all_shared_bodies[key] = data
 
-    # Write accumulated shared execute templates once.
-    if all_shared_bodies:
+    # Write accumulated shared execute templates once (only when requested).
+    if args.gen_shared_execute and all_shared_bodies:
         first_spec = specs[0][1]
         first_sem = specs[0][2]
         writer = CodeGenerator(first_spec, args.output, first_sem,

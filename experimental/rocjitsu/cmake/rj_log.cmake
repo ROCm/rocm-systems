@@ -5,7 +5,6 @@
 #
 # Groups can be specified by name or raw bitmask:
 #   cmake -DRJ_LOG_GROUPS=VM        → group 0 only
-#   cmake -DRJ_LOG_GROUPS=VM,KFD    → groups 0 and 2
 #   cmake -DRJ_LOG_GROUPS=ALL       → all groups
 #   cmake -DRJ_LOG_GROUPS=0x3       → raw bitmask (groups 0 and 1)
 #   cmake -DRJ_LOG_GROUPS=OFF       → all logging off (default)

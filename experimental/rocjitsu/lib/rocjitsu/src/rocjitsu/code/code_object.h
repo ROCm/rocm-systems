@@ -124,6 +124,8 @@ public:
     uint64_t phoff = *reinterpret_cast<const uint64_t *>(ehdr + 32);
     uint16_t phentsize = *reinterpret_cast<const uint16_t *>(ehdr + 54);
     uint16_t phnum = *reinterpret_cast<const uint16_t *>(ehdr + 56);
+    if (phentsize == 0 || phoff + static_cast<uint64_t>(phnum) * phentsize > image_.size())
+      return image_.size(); // Malformed ELF — fall back to raw image size.
     for (uint16_t i = 0; i < phnum; ++i) {
       auto *ph = ehdr + phoff + i * phentsize;
       uint32_t p_type = *reinterpret_cast<const uint32_t *>(ph);

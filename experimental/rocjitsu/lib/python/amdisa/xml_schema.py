@@ -25,9 +25,16 @@ class SchemaVersion(NamedTuple):
 
     @classmethod
     def parse(cls, s: str) -> 'SchemaVersion':
-        """Parse a dot-separated version string into a SchemaVersion."""
-        parts = s.split('.')
-        return cls(int(parts[0]), int(parts[1]), int(parts[2]))
+        """Parse a dot-separated version string (e.g. '1.2.0') into a SchemaVersion."""
+        parts = s.strip().split('.')
+        if len(parts) != 3:
+            raise ValueError(
+                f"Expected 'major.minor.patch' version string, got {s!r}")
+        try:
+            return cls(int(parts[0]), int(parts[1]), int(parts[2]))
+        except ValueError as e:
+            raise ValueError(
+                f"Non-integer component in version string {s!r}") from e
 
     def __str__(self) -> str:
         return f'{self.major}.{self.minor}.{self.patch}'

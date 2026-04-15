@@ -982,9 +982,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
     check_all_idle();
 }
 
-// ---------------------------------------------------------------------------
 // SDMA packet processor
-// ---------------------------------------------------------------------------
 
 // SDMA opcodes (from sdma_registers.h).
 namespace sdma {
