@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
-#include "test_rocprifiler_compute_tool.h"
+#include "test_rocprofiler_compute_tool.h"
 
 #include <gtest/gtest.h>
 

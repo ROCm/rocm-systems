@@ -1,4 +1,4 @@
-#include "test_rocprifiler_compute_tool.h"
+#include "gtest/gtest.h"
 
 int main(int argc, char** argv)
 {
