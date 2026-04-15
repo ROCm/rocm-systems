@@ -174,11 +174,9 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
         }
     }
 
-    *&dev_mem_ptr[0] = hip_interop_[pic_idx].hip_mapped_device_mem;
-    horizontal_pitch[0] = hip_interop_[pic_idx].pitch[0];
-    if (hip_interop_[pic_idx].num_layers == 2) {
-        *&dev_mem_ptr[1] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[1];
-        horizontal_pitch[1] = hip_interop_[pic_idx].pitch[1];
+    for (int i = 0; i < hip_interop_[pic_idx].num_layers; i++) {
+        dev_mem_ptr[i] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[i];
+        horizontal_pitch[i] = hip_interop_[pic_idx].pitch[i];
     }
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
