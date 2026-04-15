@@ -62,11 +62,16 @@ enum class FormatKind : uint8_t {
   MUBUF,
   DS,
   MFMA,
+  DPP,
+  SDWA,
   Unknown,
 };
 
 inline FormatKind classifyFormat(uint64_t tsFlags) {
   if (tsFlags & SIInstrFlags::IsMAI)  return FormatKind::MFMA;
+  // DPP/SDWA must be checked before VOP1/VOP2 because they have both bits set.
+  if (tsFlags & SIInstrFlags::DPP)    return FormatKind::DPP;
+  if (tsFlags & SIInstrFlags::SDWA)   return FormatKind::SDWA;
   if (tsFlags & SIInstrFlags::SOPP)   return FormatKind::SOPP;
   if (tsFlags & SIInstrFlags::SOPC)   return FormatKind::SOPC;
   if (tsFlags & SIInstrFlags::SOP1)   return FormatKind::SOP1;
@@ -101,6 +106,8 @@ inline const char *formatName(FormatKind fk) {
   case FormatKind::MUBUF:   return "MUBUF";
   case FormatKind::DS:      return "DS";
   case FormatKind::MFMA:    return "MFMA";
+  case FormatKind::DPP:     return "DPP";
+  case FormatKind::SDWA:    return "SDWA";
   case FormatKind::Unknown: return "Unknown";
   }
   return "Unknown";
