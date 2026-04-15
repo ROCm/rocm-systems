@@ -62,8 +62,8 @@ struct kernel_dispatch_info_t
 struct iteration_multiplexing_dispatch_record_t
 {
     std::size_t                                   config;
-    std::map<uint64_t, std::size_t>               kernel_config;
-    std::map<kernel_dispatch_info_t, std::size_t> dispatch_config;
+    std::map<uint64_t, std::size_t>               kernel_id_to_profile_index;
+    std::map<kernel_dispatch_info_t, std::size_t> kernel_params_to_profile_index;
 };
 
 struct counter_info_record_t
@@ -132,7 +132,7 @@ private:
     std::unordered_map<uint64_t, uint64_t> m_kernel_dispatch_count_by_kernel_id{};
     std::shared_mutex                      m_kernel_id_iteration_mutex;
     std::shared_mutex                      m_mutex                                             = {};
-    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> m_profile_cache = {};
-    std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_data = {};
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> m_profile_cache_per_agent = {};
+    std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_per_agent = {};
 };
 }  // namespace rocprofiler_compute_tool
