@@ -18,16 +18,20 @@
 
 include_guard(GLOBAL)
 
-if(TBB_FOUND)
+if(NOT ROCPROFSYS_BUILD_TBB)
+    find_package(TBB)
+endif()
+
+if(TBB_FOUND AND NOT ROCPROFSYS_BUILD_TBB)
     return()
 endif()
 
 set(_tbb_components tbb tbbmalloc tbbmalloc_proxy)
 
-# =============================================================================
-# Bundled build: oneTBB 2022.3.0 from submodule
-# =============================================================================
 if(ROCPROFSYS_BUILD_TBB)
+    # =============================================================================
+    # Bundled build: oneTBB 2022.3.0 from submodule
+    # =============================================================================
     if(NOT UNIX)
         rocprofiler_systems_message(
             FATAL_ERROR "Building TBB from source is only supported on Unix"
@@ -106,10 +110,51 @@ if(ROCPROFSYS_BUILD_TBB)
         )
     endforeach()
 
+    # FindTBB.cmake-compatible variables so other modules see a consistent TBB package
+    # (avoids mixing stale cache entries from a prior system TBB configure).
+    set(_tbb_bundled_incdir "${TBB_ROOT_DIR}/include")
+    set(_tbb_bundled_libdir "${TBB_ROOT_DIR}/lib")
+    set(_tbb_bundled_libs_release "")
+
+    foreach(c ${_tbb_components})
+        set(_tbb_lib "${_tbb_bundled_libdir}/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+        list(APPEND _tbb_bundled_libs_release "${_tbb_lib}")
+        set(TBB_${c}_LIBRARY_RELEASE
+            "${_tbb_lib}"
+            CACHE FILEPATH
+            "Bundled oneTBB: ${c}"
+            FORCE
+        )
+        set(TBB_${c}_FOUND TRUE CACHE BOOL "" FORCE)
+    endforeach()
+
+    set(TBB_INCLUDE_DIRS
+        "${_tbb_bundled_incdir}"
+        CACHE PATH
+        "TBB include directories"
+        FORCE
+    )
+    set(TBB_INCLUDE_DIR "${_tbb_bundled_incdir}" CACHE PATH "TBB include directory" FORCE)
+    set(TBB_LIBRARY_DIRS
+        "${_tbb_bundled_libdir}"
+        CACHE PATH
+        "TBB library directories"
+        FORCE
+    )
+    set(TBB_LIBRARY
+        "${_tbb_bundled_libdir}"
+        CACHE PATH
+        "TBB library directory hint"
+        FORCE
+    )
+    set(TBB_LIBRARIES "${_tbb_bundled_libs_release}" CACHE STRING "TBB libraries" FORCE)
+    set(TBB_DEFINITIONS "" CACHE STRING "TBB compile definitions" FORCE)
+    set(TBB_VERSION "2022.3.0" CACHE STRING "Bundled oneTBB version" FORCE)
+    set(TBB_FOUND TRUE CACHE BOOL "Bundled oneTBB is used" FORCE)
+else()
     # =============================================================================
     # System package
     # =============================================================================
-else()
     set(TBB_USE_DEBUG_BUILD OFF CACHE BOOL "Use debug versions of TBB libraries")
     set(TBB_MIN_VERSION "2018.6" CACHE STRING "Minimum TBB version")
     set(TBB_ROOT_DIR "/usr" CACHE PATH "TBB root directory")
@@ -122,7 +167,7 @@ else()
         if(STERILE_BUILD)
             rocprofiler_systems_message(
                 FATAL_ERROR
-                    "TBB not found and the build is sterile. Install libtbb-dev or set TBB_ROOT_DIR."
+                    "TBB not found and cannot be downloaded because build is sterile"
             )
         else()
             rocprofiler_systems_message(
