@@ -59,12 +59,18 @@ typedef enum rocDecVideoSurfaceFormat_enum {
  *         if the chroma format is not recognized (callers should treat this as an error).
  */
 inline rocDecVideoSurfaceFormat SelectSurfaceFormat(rocDecVideoChromaFormat chroma_format, uint8_t bitdepth_minus_8) {
-    if (chroma_format == rocDecVideoChromaFormat_420 || chroma_format == rocDecVideoChromaFormat_Monochrome)
-        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_P016 : rocDecVideoSurfaceFormat_NV12;
-    else if (chroma_format == rocDecVideoChromaFormat_444)
-        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
-    else if (chroma_format == rocDecVideoChromaFormat_422)
-        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
-    else
-        return rocDecVideoSurfaceFormat_Native; // unrecognized chroma format
+    switch (chroma_format) {
+    case rocDecVideoChromaFormat_420:
+    case rocDecVideoChromaFormat_Monochrome:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_P016
+                                : rocDecVideoSurfaceFormat_NV12;
+    case rocDecVideoChromaFormat_444:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV444_16Bit
+                                : rocDecVideoSurfaceFormat_YUV444;
+    case rocDecVideoChromaFormat_422:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV422_16Bit
+                                : rocDecVideoSurfaceFormat_YUV422;
+    default:
+        return rocDecVideoSurfaceFormat_Native;  // unrecognized chroma format
+    }
 }

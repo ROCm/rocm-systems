@@ -20,6 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <cctype>
+#include <string>
+
 #include <gtest/gtest.h>
 #include "../../utils/rocvideodecode/surface_format_utils.h"
 
