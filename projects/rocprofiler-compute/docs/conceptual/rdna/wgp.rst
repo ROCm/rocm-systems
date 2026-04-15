@@ -24,7 +24,7 @@ The sections below list RDNA3.5 (gfx1151) metric descriptions.
 Roofline
 ========
 
-Roofline Performance Rates
+Roofline performance rates
 --------------------------
 
 .. tab-set::
@@ -35,7 +35,7 @@ Roofline Performance Rates
       .. jinja:: rdna1151-roofline-performance-rates-gfx1151
          :file: _templates/metrics_table.j2
 
-Roofline Plot Points
+Roofline plot points
 --------------------
 
 .. tab-set::
@@ -49,7 +49,7 @@ Roofline Plot Points
 WGP block metrics
 =================
 
-WGP Utilization
+WGP utilization
 ---------------
 
 .. tab-set::
@@ -60,7 +60,7 @@ WGP Utilization
       .. jinja:: rdna1151-wgp-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-Wavefront Launch Stats
+Wavefront launch stats
 ----------------------
 
 .. tab-set::
@@ -71,7 +71,7 @@ Wavefront Launch Stats
       .. jinja:: rdna1151-wavefront-launch-stats-gfx1151
          :file: _templates/metrics_table.j2
 
-Wave Dispatch
+Wave dispatch
 -------------
 
 .. tab-set::
@@ -82,7 +82,7 @@ Wave Dispatch
       .. jinja:: rdna1151-wave-dispatch-gfx1151
          :file: _templates/metrics_table.j2
 
-Wave Life
+Wave life
 ---------
 
 .. tab-set::
@@ -93,7 +93,7 @@ Wave Life
       .. jinja:: rdna1151-wave-life-gfx1151
          :file: _templates/metrics_table.j2
 
-Wave Instruction Mix
+Wave instruction mix
 --------------------
 
 .. tab-set::
@@ -104,7 +104,7 @@ Wave Instruction Mix
       .. jinja:: rdna1151-wave-instruction-mix-gfx1151
          :file: _templates/metrics_table.j2
 
-VMEM Instruction Mix
+VMEM instruction mix
 --------------------
 
 .. tab-set::
@@ -115,7 +115,7 @@ VMEM Instruction Mix
       .. jinja:: rdna1151-vmem-instruction-mix-gfx1151
          :file: _templates/metrics_table.j2
 
-LDS Instruction Mix
+LDS instruction mix
 -------------------
 
 .. tab-set::
@@ -126,7 +126,7 @@ LDS Instruction Mix
       .. jinja:: rdna1151-lds-instruction-mix-gfx1151
          :file: _templates/metrics_table.j2
 
-Wait State Analysis
+Wait state analysis
 -------------------
 
 .. tab-set::
@@ -137,7 +137,7 @@ Wait State Analysis
       .. jinja:: rdna1151-wait-state-analysis-gfx1151
          :file: _templates/metrics_table.j2
 
-WGP Instruction Cache
+WGP instruction cache
 ---------------------
 
 .. tab-set::
@@ -148,7 +148,7 @@ WGP Instruction Cache
       .. jinja:: rdna1151-wgp-instruction-cache-gfx1151
          :file: _templates/metrics_table.j2
 
-WGP Scalar Data Cache
+WGP scalar data cache
 ---------------------
 
 .. tab-set::

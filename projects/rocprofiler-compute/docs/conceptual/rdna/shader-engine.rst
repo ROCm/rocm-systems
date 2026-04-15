@@ -19,7 +19,7 @@ This complements the WGP chapter, which focuses on per-WGP execution metrics.
 Graphics Register Bus Manager (GRBM)
 =====================================
 
-GPU Utilization
+GPU utilization
 ---------------
 
 .. tab-set::
@@ -30,7 +30,7 @@ GPU Utilization
       .. jinja:: rdna1151-gpu-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-Shader Engine Utilization
+Shader engine utilization
 -------------------------
 
 .. tab-set::
@@ -44,7 +44,7 @@ Shader Engine Utilization
 Shader Processor Input (SPI)
 ============================
 
-SPI Utilization
+SPI utilization
 ---------------
 
 .. tab-set::
@@ -55,7 +55,7 @@ SPI Utilization
       .. jinja:: rdna1151-spi-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-Wave Dispatch Statistics
+Wave dispatch statistics
 ------------------------
 
 .. tab-set::

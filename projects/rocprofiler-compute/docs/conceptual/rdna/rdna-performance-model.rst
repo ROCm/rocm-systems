@@ -1,6 +1,6 @@
 .. meta::
-   :description: ROCm Compute Profiler RDNA3 APU performance model
-   :keywords: ROCm Compute Profiler, RDNA, RDNA3, gfx1151, Radeon, ROCm
+   :description: Understand the AMD RDNA architectures and hardware blocks with ROCm Compute Profiler to analyze and optimize performance on AMD Ryzen APUs.
+   :keywords: ROCm Compute Profiler, RDNA, RDNA3, gfx1151, Radeon, ROCm, Ryzen
 
 .. _rdna-performance-model:
 
@@ -8,7 +8,7 @@
 RDNA3
 =====
 
-This chapter covers AMD Radeon / RDNA configurations exposed in ROCm Compute Profiler.
+This chapter covers AMD Ryzen / RDNA configurations exposed in ROCm Compute Profiler.
 
 .. figure:: ../../data/conceptual/RDNA3_Block_Diagram.png
    :alt: AMD RDNA3 generation series block diagram — host CPU, system and device memory, memory controller, L2/L1 caches, global data share, command processors, ultra-threaded dispatch, and processor array of WGPs with CUs, LDS, instruction and constant caches

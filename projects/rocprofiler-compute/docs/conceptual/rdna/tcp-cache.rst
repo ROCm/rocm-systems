@@ -18,7 +18,7 @@ page for consistency with the counters' names.**
 TCP cache panels
 ================
 
-TCP Utilization
+TCP utilization
 ---------------
 
 .. tab-set::
@@ -29,7 +29,7 @@ TCP Utilization
       .. jinja:: rdna1151-tcp-utilization-gfx1151
          :file: _templates/metrics_table.j2
 
-TCP Request Statistics
+TCP request statistics
 ----------------------
 
 .. tab-set::
@@ -40,7 +40,7 @@ TCP Request Statistics
       .. jinja:: rdna1151-tcp-request-statistics-gfx1151
          :file: _templates/metrics_table.j2
 
-TCP Cache Performance
+TCP cache performance
 ---------------------
 
 .. tab-set::
@@ -62,7 +62,7 @@ TCP-GL1 interface
       .. jinja:: rdna1151-tcp-tcp-gl1-interface-gfx1151
          :file: _templates/metrics_table.j2
 
-TCP Stalls
+TCP stalls
 ----------
 
 .. tab-set::
@@ -73,13 +73,13 @@ TCP Stalls
       .. jinja:: rdna1151-tcp-stalls-gfx1151
          :file: _templates/metrics_table.j2
 
-Memory Chart: path up to GL1
+Memory chart: path up to GL1
 ============================
 
 The following Memory Chart tables align with the on-screen flow through instruction
 and scalar paths, TCP (GL0), LDS, and the TCP-GL1 interface.
 
-Memory chart - Instruction Cache
+Memory chart - instruction cache
 ---------------------------------
 
 .. tab-set::
@@ -90,7 +90,7 @@ Memory chart - Instruction Cache
       .. jinja:: rdna1151-memory-chart-instruction-cache-gfx1151
          :file: _templates/metrics_table.j2
 
-Memory chart - Scalar Data Cache
+Memory chart - scalar data cache
 ---------------------------------
 
 .. tab-set::
@@ -101,7 +101,7 @@ Memory chart - Scalar Data Cache
       .. jinja:: rdna1151-memory-chart-scalar-data-cache-gfx1151
          :file: _templates/metrics_table.j2
 
-Memory chart - TCP Cache (Vector Data Cache)
+Memory chart - TCP cache (vector data cache)
 ---------------------------------------------
 
 .. tab-set::
@@ -112,7 +112,7 @@ Memory chart - TCP Cache (Vector Data Cache)
       .. jinja:: rdna1151-memory-chart-tcp-cache-vector-l0-gfx1151
          :file: _templates/metrics_table.j2
 
-Memory chart - LDS (Local Data Share)
+Memory chart - LDS (local data share)
 --------------------------------------
 
 .. tab-set::
@@ -123,7 +123,7 @@ Memory chart - LDS (Local Data Share)
       .. jinja:: rdna1151-memory-chart-lds-local-data-share-gfx1151
          :file: _templates/metrics_table.j2
 
-Memory chart - TCP-GL1 Interface
+Memory chart - TCP-GL1 interface
 ---------------------------------
 
 .. tab-set::
