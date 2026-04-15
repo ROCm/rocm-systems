@@ -83,7 +83,7 @@ transpose_a(int* in, int* out, int M, int N)
     int iidx = (blockIdx.x * blockDim.x + threadIdx.x) * N + blockIdx.y * blockDim.y +
                threadIdx.y;
     int oidx =
-        (blockIdx.y * blockDim.y + threadIdx.y) * +blockIdx.x * blockDim.x + threadIdx.x;
+        (blockIdx.y * blockDim.y + threadIdx.y) * M + (blockIdx.x * blockDim.x + threadIdx.x);
 
     out[oidx] = in[iidx];
 }
