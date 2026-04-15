@@ -219,6 +219,14 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
           if (kasIt != kMap.end())
             meta.kernargSegmentSize = getNodeInt(kasIt->second);
 
+          auto gsfIt = kMap.find(doc.getNode(".group_segment_fixed_size"));
+          if (gsfIt != kMap.end())
+            meta.groupSegmentFixedSize = getNodeInt(gsfIt->second);
+
+          auto mfwIt = kMap.find(doc.getNode(".max_flat_workgroup_size"));
+          if (mfwIt != kMap.end())
+            meta.maxFlatWorkgroupSize = getNodeInt(mfwIt->second);
+
           auto argsIt = kMap.find(doc.getNode(".args"));
           if (argsIt != kMap.end() && argsIt->second.isArray()) {
             for (auto &argNode : argsIt->second.getArray()) {

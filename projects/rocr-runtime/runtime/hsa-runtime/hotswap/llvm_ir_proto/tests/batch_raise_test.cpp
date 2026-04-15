@@ -17,6 +17,7 @@ struct KernelResult {
   std::string coFile;
   std::string kernelName;
   bool success = false;
+  bool hasDivergentExec = false;
   int liftedCount = 0;
   int totalCount = 0;
   std::string failMnemonic;
@@ -31,9 +32,10 @@ static std::vector<std::string> collectCoFiles(const std::string &path) {
   }
 
   if (S_ISREG(st.st_mode)) {
-    if (path.size() >= 3 && path.substr(path.size() - 3) == ".co")
+    if ((path.size() >= 3 && path.substr(path.size() - 3) == ".co") ||
+        (path.size() >= 6 && path.substr(path.size() - 6) == ".hsaco"))
       return {path};
-    fprintf(stderr, "WARNING: '%s' is not a .co file, skipping\n",
+    fprintf(stderr, "WARNING: '%s' is not a .co/.hsaco file, skipping\n",
             path.c_str());
     return {};
   }
@@ -53,7 +55,8 @@ static std::vector<std::string> collectCoFiles(const std::string &path) {
       if (S_ISDIR(es.st_mode)) {
         dirs.push_back(full);
       } else if (S_ISREG(es.st_mode)) {
-        if (full.size() >= 3 && full.substr(full.size() - 3) == ".co")
+        if ((full.size() >= 3 && full.substr(full.size() - 3) == ".co") ||
+            (full.size() >= 6 && full.substr(full.size() - 6) == ".hsaco"))
           results.push_back(full);
       }
     }
@@ -132,6 +135,7 @@ int main(int argc, char **argv) {
       kr.coFile = coPath;
       kr.kernelName = kName;
       kr.success = raised.success;
+      kr.hasDivergentExec = raised.hasDivergentExec;
       kr.liftedCount = raised.liftedCount;
       kr.totalCount = raised.totalCount;
 
@@ -139,8 +143,9 @@ int main(int argc, char **argv) {
         successKernels++;
         anySuccess = true;
         if (verbose)
-          printf("  OK  %-60s %d/%d insts\n", kName.c_str(),
-                 raised.liftedCount, raised.totalCount);
+          printf("  OK  %-60s %d/%d insts%s\n", kName.c_str(),
+                 raised.liftedCount, raised.totalCount,
+                 raised.hasDivergentExec ? " [EXEC divergent]" : "");
       } else {
         failedKernels++;
         kr.failMnemonic = raised.failMnemonic.empty() ? "unknown" : raised.failMnemonic;
@@ -166,9 +171,15 @@ int main(int argc, char **argv) {
   printf("Code objects scanned:   %d\n", totalFiles);
   printf("  with >= 1 success:    %d\n", filesWithSuccess);
   printf("\n");
+  int divergentKernels = 0;
+  for (auto &kr : results)
+    if (kr.success && kr.hasDivergentExec)
+      divergentKernels++;
+
   printf("Kernels attempted:      %d\n", totalKernels);
   printf("  Succeeded:            %d  (%.1f%%)\n", successKernels,
          totalKernels ? 100.0 * successKernels / totalKernels : 0.0);
+  printf("    with EXEC divergence: %d\n", divergentKernels);
   printf("  Failed:               %d  (%.1f%%)\n", failedKernels,
          totalKernels ? 100.0 * failedKernels / totalKernels : 0.0);
   printf("\n");

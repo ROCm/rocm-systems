@@ -23,6 +23,7 @@ struct RaiseResult {
   std::string failMnemonic;
   std::string failFormat;
   bool success = false;
+  bool hasDivergentExec = false;
 };
 
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,

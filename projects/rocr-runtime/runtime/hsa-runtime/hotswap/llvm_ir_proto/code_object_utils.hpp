@@ -25,6 +25,8 @@ struct KernelArgMeta {
 struct KernelMeta {
   std::string name;
   int kernargSegmentSize = 0;
+  int groupSegmentFixedSize = 0;
+  int maxFlatWorkgroupSize = 256;
   std::vector<KernelArgMeta> args;
 
   int implicitArgsBase() const {

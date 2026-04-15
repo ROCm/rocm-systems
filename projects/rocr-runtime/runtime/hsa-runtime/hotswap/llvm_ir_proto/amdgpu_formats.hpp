@@ -64,9 +64,12 @@ enum class FormatKind : uint8_t {
   MFMA,
   DPP,
   SDWA,
+  VOPD,
   Unknown,
 };
 
+// VOPD detection cannot use TSFlags — the VOPD3 bit position varies across
+// LLVM versions.  Use classifyFormatWithMnemonic() which checks the mnemonic.
 inline FormatKind classifyFormat(uint64_t tsFlags) {
   if (tsFlags & SIInstrFlags::IsMAI)  return FormatKind::MFMA;
   // DPP/SDWA must be checked before VOP1/VOP2 because they have both bits set.
@@ -108,6 +111,7 @@ inline const char *formatName(FormatKind fk) {
   case FormatKind::MFMA:    return "MFMA";
   case FormatKind::DPP:     return "DPP";
   case FormatKind::SDWA:    return "SDWA";
+  case FormatKind::VOPD:    return "VOPD";
   case FormatKind::Unknown: return "Unknown";
   }
   return "Unknown";

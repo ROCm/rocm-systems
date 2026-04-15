@@ -17,7 +17,14 @@ struct PipelineResult {
 };
 
 /// End-to-end pipeline: HSACO binary → raise to LLVM IR → llc → HSACO.
+/// Single-ISA: raises and lowers using the same ISA.
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
+                           const std::string &targetISA,
+                           const std::string &kernelName);
+
+/// Cross-architecture pipeline: raises using sourceISA, lowers to targetISA.
+PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
+                           const std::string &sourceISA,
                            const std::string &targetISA,
                            const std::string &kernelName);
 

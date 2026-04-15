@@ -55,6 +55,13 @@ int runCommand(const std::string &cmd) {
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &targetISA,
                            const std::string &kernelName) {
+  return runPipeline(codeObjectData, targetISA, targetISA, kernelName);
+}
+
+PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
+                           const std::string &sourceISA,
+                           const std::string &targetISA,
+                           const std::string &kernelName) {
   PipelineResult result;
 
   // Step 1: Extract .text section
@@ -73,8 +80,8 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                  << "', using empty metadata\n";
   }
 
-  // Step 2: Raise to LLVM IR
-  auto raised = raiseToIR(text.bytes, targetISA, kernelName, meta);
+  // Step 2: Raise to LLVM IR (using source ISA for disassembly)
+  auto raised = raiseToIR(text.bytes, sourceISA, kernelName, meta);
   if (!raised.success) {
     llvm::errs() << "ir_proto: Raising to LLVM IR failed\n";
     return result;

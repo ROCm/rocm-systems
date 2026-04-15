@@ -140,6 +140,28 @@ if(hip_FOUND)
       hip::host
   )
 
+  # Cross-architecture GPU test (gfx1200 -> gfx942)
+  set(NATIVE_HSACO "/opt/rocm-7.2.1/lib/rocblas/library/Kernels.so-000-gfx942-xnack-.hsaco")
+  set(SOURCE_HSACO "/opt/rocm-7.2.1/lib/rocblas/library/Kernels.so-000-gfx1200.hsaco")
+
+  add_executable(cross_arch_gpu_test
+    tests/cross_arch_gpu_test.cpp
+  )
+  set(VECADD_CO "${HOTSWAP_DIR}/build/mve_vecadd_gfx1250.co")
+
+  target_compile_definitions(cross_arch_gpu_test PRIVATE
+    NATIVE_HSACO_PATH="${NATIVE_HSACO}"
+    SOURCE_HSACO_PATH="${SOURCE_HSACO}"
+    VECADD_CO_PATH="${VECADD_CO}"
+    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+  )
+  target_link_libraries(cross_arch_gpu_test
+    PRIVATE
+      -Wl,--exclude-libs,ALL
+      llvm-ir-raiser
+      hip::host
+  )
+
   message(STATUS "GPU tests enabled (HIP found)")
 else()
   message(STATUS "GPU tests DISABLED (HIP not found)")
