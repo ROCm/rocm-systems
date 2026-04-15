@@ -422,7 +422,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         current_freq = freq;
       }
 
-      // not * was detected so check for the min max if not sclk, mclk, or fclk, which are user defined
+      // not * was detected so check for the min max if not sclk, mclk, or fclk, which are user
+      // defined
       if (!sclk && !mclk && !fclk) {
         max = freq > max ? freq : max;
         min = freq < min ? freq : min;
@@ -861,8 +862,9 @@ amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::s
   char buffer[128];
 
   // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"),
-                             [](FILE* f) { if (f) pclose(f); });
+  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
+    if (f) pclose(f);
+  });
   if (!pipe) {
     return AMDSMI_STATUS_API_FAILED;
   }
