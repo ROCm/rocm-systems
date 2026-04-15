@@ -55,6 +55,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <ratio>
 #include <string>
 #include <type_traits>
@@ -86,6 +87,9 @@ extern ROCPROFSYS_HIDDEN_API bool debug_mark;
 
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids();
+
+std::mutex&
+get_perfetto_track_uuids_mutex();
 
 void
 copy_timemory_hash_ids();
@@ -171,8 +175,11 @@ template <typename CategoryT, typename TrackT = ::perfetto::Track, typename Func
 auto
 get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
 {
-    auto  _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
-    auto& _track_uuids = get_perfetto_track_uuids();
+    auto _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
+
+    std::lock_guard<std::mutex> _lk{ get_perfetto_track_uuids_mutex() };
+    auto&                       _track_uuids = get_perfetto_track_uuids();
+
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
         const auto _track = TrackT(_uuid, ::perfetto::ProcessTrack::Current());

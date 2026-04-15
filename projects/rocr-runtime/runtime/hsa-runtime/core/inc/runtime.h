@@ -136,6 +136,7 @@ class Runtime {
     bool supports_exception_debugging;
     bool supports_event_age;
     bool supports_core_dump;
+    bool supports_metadata_prefetch;
   };
 
   /// @brief Open connection to kernel driver and increment reference count.
@@ -383,6 +384,10 @@ class Runtime {
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
+  hsa_status_t SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
+                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                        hsa_signal_t completion_signal);
+
   hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset, uint64_t flags);
 
@@ -423,6 +428,8 @@ class Runtime {
                                                    hsa_amd_memory_type_t* type);
 
   hsa_status_t EnableLogging(uint8_t* flags, void* file);
+
+  hsa_status_t GetSignalEventId(hsa_signal_t signal, uint32_t *event_id);
 
   const std::vector<Agent*>& cpu_agents() { return cpu_agents_; }
 
@@ -503,6 +510,12 @@ class Runtime {
     if (thunkLoader()->IsDXG()) {
       kfd_version.supports_event_age = false;
     }
+
+    kfd_version.supports_metadata_prefetch = false;
+    if (version.KernelInterfaceMajorVersion > 1 ||
+        (version.KernelInterfaceMajorVersion == 1 &&
+        version.KernelInterfaceMinorVersion >= 19))
+      kfd_version.supports_metadata_prefetch = true;
   }
 
   void KfdVersion(bool exception_debugging, bool core_dump) {
@@ -515,8 +528,6 @@ class Runtime {
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
-  bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
-  os::LibHandle AqlProfileLib() const { return aqlprofile_lib_; }
 
   Driver &AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
@@ -928,8 +939,6 @@ class Runtime {
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
-
-  os::LibHandle aqlprofile_lib_;
 
   typedef void* ThunkHandle;
 

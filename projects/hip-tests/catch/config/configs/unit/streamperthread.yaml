@@ -29,8 +29,12 @@ streamperthread:
     tags: [stream]
   Unit_hipStreamPerThread_MultiThread:
     <<: *level_2
-    # Disabling test tracked SWDEV-395683
-    disabled: [amd_wsl]
+    # (amd_linux) === Test does not reflect a valid use case - SWDEV-569454
+    # (amd_windows) === Test does not reflect a valid use case - SWDEV-569454
+    # (amd_wsl) Disabling test tracked SWDEV-395683
+    # (nvidia_linux) === Test does not reflect a valid use case - SWDEV-569454
+    # (nvidia_windows) === Test does not reflect a valid use case - SWDEV-569454
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
     tags: [stream]
   Unit_hipStreamPerThread_DeviceReset_1:
     <<: *level_2

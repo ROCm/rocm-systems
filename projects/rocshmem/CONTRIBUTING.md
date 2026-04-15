@@ -33,7 +33,7 @@ and apply your changes there.
 
 - Ensure the PR is based on the `dev` branch of the rocSHMEM GitHub repository.
 
-- rocSHMEM requires new commits to include a "Signed-off-by" token in the commit message (typically enabled via the `git commit -s` option), indicating your agreement to the projects's [Developer's Certificate of Origin](https://developercertificate.org/) and compatability with the project [LICENSE](https://github.com/ROCm/rocSHMEM/blob/main/LICENSE):
+- rocSHMEM requires new commits to include a "Signed-off-by" token in the commit message (typically enabled via the `git commit -s` option), indicating your agreement to the project's [Developer's Certificate of Origin](https://developercertificate.org/) and compatibility with the project [LICENSE](https://github.com/ROCm/rocSHMEM/blob/main/LICENSE):
 
 
 > (a) The contribution was created in whole or in part by me and I

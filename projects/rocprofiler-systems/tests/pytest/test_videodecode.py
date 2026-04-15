@@ -28,7 +28,7 @@ def video_decode_env() -> dict[str, str]:
     """Environment variables for video decode tests."""
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api",
-        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,vcn_activity,mem_usage",
+        "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,vcn_activity,vcn_busy,mem_usage",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
     }
 
@@ -82,7 +82,7 @@ class TestVideoDecode(RocprofsysTest):
                 counts=[2],
                 depths=[1],
                 counter_names=(
-                    ["VCN Activity"] if "instinct" in gpu_info.categories else None
+                    ["VCN Busy"] if "instinct" in gpu_info.categories else None
                 ),
             )
             self.assert_rocpd(result, rules_files=video_decode_rules)

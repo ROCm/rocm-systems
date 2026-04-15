@@ -448,7 +448,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
-  *AvailableBytes = dev->VramAvail();
+  if (dev->VramAvail(AvailableBytes) != HSA_STATUS_SUCCESS) {
+    return HSAKMT_STATUS_ERROR;
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -503,8 +506,7 @@ bool is_ipc_sysmemfd(uint64_t fd) {
   linkTarget[bytes] = '\0';
   return strstr(linkTarget, "rocr4wsl_gtt") != nullptr;
 #else
-  assert(!"Unimplemeted!");
-  return true;
+  return false;
 #endif
 }
 
@@ -1097,16 +1099,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
   if (import_desc->mem != nullptr) {
     void *memaddr = import_desc->mem;
     auto phys_mem = GetGpuMemoryFromAddress(memaddr);
-    if (!phys_mem) return HSAKMT_STATUS_INVALID_HANDLE;
-    if (!phys_mem->IsPhysicalCreated()) {
-      auto code = phys_mem->CreatePhysicalMemory();
-      if (code != ErrorCode::Success) {
-        return HSAKMT_STATUS_OUT_OF_RESOURCES;
+    if (phys_mem) {
+      if (!phys_mem->IsPhysicalCreated()) {
+        auto code = phys_mem->CreatePhysicalMemory();
+        if (code != ErrorCode::Success) {
+          return HSAKMT_STATUS_OUT_OF_RESOURCES;
+        }
       }
+      import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
+                               phys_mem->GetGpuMemoryHandle());
+      return HSAKMT_STATUS_SUCCESS;
     }
-    import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
-                             phys_mem->GetGpuMemoryHandle());
-    return HSAKMT_STATUS_SUCCESS;
   }
 
   if (import_desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF) {

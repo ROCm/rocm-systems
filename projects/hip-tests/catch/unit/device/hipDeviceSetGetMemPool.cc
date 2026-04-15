@@ -23,7 +23,7 @@ static inline bool CheckMemPoolSupport(const int device) {
   HIP_CHECK(
       hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, device));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST("Test only runs on devices with memory pool support");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return false;
   }
   return true;

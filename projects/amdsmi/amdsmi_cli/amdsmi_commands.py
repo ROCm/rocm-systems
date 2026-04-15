@@ -23,6 +23,7 @@ import argparse
 import functools
 import json
 import logging
+import math
 import multiprocessing
 import os
 import signal
@@ -123,7 +124,8 @@ class AMDSMICommands:
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
-                self.cpu_handles = amdsmi_interface.amdsmi_get_cpusocket_handles()
+                ret = amdsmi_interface.amdsmi_get_cpu_handles()
+                self.cpu_handles = ret["processor_handles"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
@@ -160,6 +162,7 @@ class AMDSMICommands:
             "sys": amdsmi_interface.AmdSmiClkType.SYS,
             "mem": amdsmi_interface.AmdSmiClkType.MEM,
             "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
             "soc": amdsmi_interface.AmdSmiClkType.SOC,
             "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
             # vclk and dclk currently do not support levels so average clk is given for frequency levels
@@ -195,6 +198,10 @@ class AMDSMICommands:
             args.cpu_version = True
             args.nic_version = True
 
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
         try:
             amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
             amdsmi_lib_version_str = f"{amdsmi_lib_version['major']}.{amdsmi_lib_version['minor']}.{amdsmi_lib_version['release']}"
@@ -229,7 +236,8 @@ class AMDSMICommands:
             self.logger.output["amdgpu_version"] = gpu_version_str
         if args.cpu_version:
             try:
-                cpus = amdsmi_interface.amdsmi_get_cpusocket_handles()
+                ret = amdsmi_interface.amdsmi_get_cpu_handles()
+                cpus = ret["processor_handles"]
                 if isinstance(cpus, list) and len(cpus) > 0:
                     cpu_version_info = amdsmi_interface.amdsmi_get_cpu_hsmp_driver_version(cpus[0])
                     cpu_version_str = (
@@ -576,7 +584,7 @@ class AMDSMICommands:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        # Handle multiple Switchs
+        # Handle multiple Switches
         handled_multiple_switchs, device_handle = self.helpers.handle_switchs(
             args, self.logger, self.list_switch
         )
@@ -2286,7 +2294,7 @@ class AMDSMICommands:
                     gpu_args_enabled = True
                     break
 
-        # Handle CPU and GPU intialization cases
+        # Handle CPU and GPU initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
             # Print out all CPU and all GPU static info only if no device was specified.
             # If a GPU or CPU argument is provided only print out the specified device.
@@ -4478,6 +4486,7 @@ class AMDSMICommands:
                     "cpu_dimm_pow_consumption",
                     "cpu_dimm_thermal_sensor",
                     "cpu_dimm_sb_reg",
+                    "cpu_svi3_vr_controller_temp",
                 ):
                     setattr(args, arg, True)
 
@@ -4718,7 +4727,7 @@ class AMDSMICommands:
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ddr_bandwidth"]["response"] = "N/A"
                 logging.debug(
-                    "Failed to get ddr bandwdith for cpu %s | %s", cpu_id, e.get_error_info()
+                    "Failed to get ddr bandwidth for cpu %s | %s", cpu_id, e.get_error_info()
                 )
         if args.cpu_temp:
             static_dict["cpu_temp"] = {}
@@ -5225,7 +5234,7 @@ class AMDSMICommands:
             nic_metric_str = json.dumps(nic_metric_info, indent=4)
             logging.debug("NIC Metrics table for %s | %s", nic_id, nic_metric_str)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Unabled to load NIC Metrics table for %s | %s", nic_id, e.err_info)
+            logging.debug("Unable to load NIC Metrics table for %s | %s", nic_id, e.err_info)
 
         logging.debug(f"Metric Arg information for NIC {nic_id} on {self.helpers.os_info()}")
         logging.debug(f"Args:   {current_platform_args}")
@@ -5387,7 +5396,7 @@ class AMDSMICommands:
         # Handle multiple Switches
         if isinstance(args.switch, list):
             if len(args.switch) > 1:
-                # Deepcopy switchs as recursion will destroy the switch list
+                # Deepcopy switches as recursion will destroy the switch list
                 stored_switches = []
                 for switch in args.switch:
                     stored_switches.append(switch)
@@ -5401,7 +5410,7 @@ class AMDSMICommands:
                         switch=device_handle,
                     )
 
-                # Reload original switchs
+                # Reload original switches
                 args.switch = stored_switches
 
                 # Print multiple device output
@@ -5434,7 +5443,7 @@ class AMDSMICommands:
             switch_metric_str = json.dumps(switch_metric_info, indent=4)
             logging.debug("SWITCH Metrics table for %s | %s", switch_id, switch_metric_str)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Unabled to load SWITCH Metrics table for %s | %s", switch_id, e.err_info)
+            logging.debug("Unable to load SWITCH Metrics table for %s | %s", switch_id, e.err_info)
 
         logging.debug(f"Metric Arg information for SWITCH {switch_id} on {self.helpers.os_info()}")
         logging.debug(f"Args:   {current_platform_args}")
@@ -5820,7 +5829,7 @@ class AMDSMICommands:
                     core_args_enabled = True
                     break
 
-        # Handle CPU and GPU driver intialization cases
+        # Handle CPU and GPU driver initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
             logging.debug(
                 "gpu_args_enabled: %s, cpu_args_enabled: %s, core_args_enabled: %s",
@@ -6846,9 +6855,9 @@ class AMDSMICommands:
             #         "link_status": "ENABLED" - devices linked; "DISABLED" - devices not linked; Correlated to access
             #         "link_type": "SELF" - current node, "PCIE", "XGMI", "N/A" - no link,"UNKNOWN" - unidentified link type
             #         "num_hops": num_hops - # of hops between devices
-            #         "bandwidth": numa_bw - The NUMA "minimum bandwidth-maximum bandwidth" beween src and dest nodes
+            #         "bandwidth": numa_bw - The NUMA "minimum bandwidth-maximum bandwidth" between src and dest nodes
             #                      "N/A" - self node or not connected devices
-            #         "coherent": coherent - Coherant / Non-Coherant io links
+            #         "coherent": coherent - Coherent / Non-Coherent io links
             #         "atomics": atomics - 32 and 64-bit atomic io link capability between nodes
             #         "dma": dma - P2P direct memory access (DMA) link capability between nodes
             #         "bi_dir": bi_dir - P2P bi-directional link capability between nodes
@@ -7260,7 +7269,7 @@ class AMDSMICommands:
 
             if self.logger.is_human_readable_format():
                 self.logger.multiple_device_output = tabular_output
-                self.logger.table_title = "CACHE COHERANCY TABLE"
+                self.logger.table_title = "CACHE COHERENCY TABLE"
                 self.logger.print_output(multiple_device_enabled=True, tabular=True)
 
         if args.atomics:
@@ -7402,7 +7411,7 @@ class AMDSMICommands:
                 "  ENABLED / DISABLED = Link is enabled or disabled",
                 "  N/A = Not supported",
                 "  T/F = True / False",
-                "  C/NC = Coherant / Non-Coherant io links",
+                "  C/NC = Coherent / Non-Coherent io links",
                 "  64,32 = 64 bit and 32 bit atomic support",
                 "  <BW from>-<BW to>",
             ]
@@ -8188,7 +8197,7 @@ class AMDSMICommands:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
-            fan (int, optional): Value override for args.fan. Defaults to None.
+            fan (tuple, optional): Value override for args.fan as (value, is_percentage). Defaults to None.
             perf_level (amdsmi_interface.AmdSmiDevPerfLevel, optional): Value override for args.perf_level. Defaults to None.
             profile (bool, optional): Value override for args.profile. Defaults to None.
             perf_determinism (int, optional): Value override for args.perf_determinism. Defaults to None.
@@ -8305,21 +8314,93 @@ class AMDSMICommands:
 
         # Handle args
         if self.helpers.is_baremetal():
-            if isinstance(args.fan, int):
-                # Convert fan speed to percentage
-                # Note: amdsmi_set_gpu_fan_speed expects fan speed in RPM, so
-                # we convert the value to a percentage based on the maximum fan speed of 255 RPM.
-                # We need to round down the user's passed fan speed % to the nearest whole number.
-                # This allows us to match the float -> int conversion when converting from percentage to RPM (as previously passed by the parser).
-                fan_percentage = int(
-                    (int(args.fan) / 255) * 100 // 1
-                )  # round down (aka floor) to nearest whole number
+            if isinstance(args.fan, tuple):
+                # Parse input: args.fan is now (value, is_percentage) tuple from parser
+                input_value, is_percentage = args.fan
+
+                # Check if gpu_od interface is available
+                has_gpu_od, gpu_od_path = self.helpers.detect_gpu_od(gpu_bdf)
+
+                # Helper function for consistent error formatting
+                def format_fan_error(message, include_driver_note=False):
+                    error_msg = message
+                    if include_driver_note:
+                        error_msg += (
+                            "\nNote: For Navi3x+ GPUs, ensure the amdgpu driver is loaded with"
+                            " gpu_od enabled:\n  sudo modprobe amdgpu ppfeaturemask=0xfff7ffff"
+                            "\nIf fan operations return 'Device or resource busy', disable"
+                            " runtime PM:\n  echo on | sudo tee"
+                            " /sys/class/drm/card<N>/device/power/control"
+                        )
+                    return error_msg
+
+                # Convert based on interface type and input format
+                if has_gpu_od:
+                    # For gpu_od interface: read OD_RANGE dynamically using shared helper
+                    od_min, od_max = self.helpers.parse_gpu_od_fan_range(gpu_od_path)
+                    if od_min is None:
+                        # Parsing failed - cannot proceed without valid range
+                        result = format_fan_error(
+                            f"Unable to read gpu_od OD_RANGE from {gpu_od_path}. Cannot set fan speed.",
+                            include_driver_note=True,
+                        )
+                        self.logger.store_output(args.gpu, "fan", result)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+
+                    od_range = od_max - od_min
+                    if is_percentage:
+                        # Convert percentage (0-100%) to hardware range (od_min-od_max)
+                        hw_value = od_min + int((input_value / 100) * od_range)
+                        fan_percentage = input_value
+                    else:
+                        # Direct hardware value
+                        if od_min <= input_value <= od_max:
+                            hw_value = input_value
+                            fan_percentage = (
+                                int(((input_value - od_min) / od_range) * 100)
+                                if od_range > 0
+                                else 0
+                            )
+                        else:
+                            result = format_fan_error(
+                                f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: {od_min}-{od_max} or use percentage (0-100%)",
+                                include_driver_note=True,
+                            )
+                            self.logger.store_output(args.gpu, "fan", result)
+                            self.logger.print_output()
+                            self.logger.clear_multiple_devices_output()
+                            return
+                else:
+                    # For legacy hwmon: range 0-255
+                    if is_percentage:
+                        # Convert percentage (0-100%) to PWM (0-255) using ceiling rounding
+                        hw_value = math.ceil((input_value / 100) * 255)
+                        fan_percentage = input_value
+                    else:
+                        # Direct PWM value
+                        if 0 <= input_value <= 255:
+                            hw_value = input_value
+                            fan_percentage = int(
+                                (input_value / 255) * 100 // 1
+                            )  # round down (aka floor) to nearest whole number
+                        else:
+                            result = f"Invalid fan speed value {input_value}. Valid range: 0-255 or use percentage (0-100%)"
+                            self.logger.store_output(args.gpu, "fan", result)
+                            self.logger.print_output()
+                            self.logger.clear_multiple_devices_output()
+                            return
+
                 try:
-                    amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, args.fan)
+                    amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, hw_value)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    result = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {args.fan} RPM ({fan_percentage}%)"
+                    result = format_fan_error(
+                        f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
+                        include_driver_note=has_gpu_od,
+                    )
                     self.logger.store_output(args.gpu, "fan", result)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
@@ -8328,7 +8409,7 @@ class AMDSMICommands:
                 self.logger.store_output(
                     args.gpu,
                     "fan",
-                    f"Successfully set fan speed to {args.fan} RPM ({fan_percentage}%)",
+                    f"Successfully set fan speed to {hw_value} RPM/PWM ({fan_percentage}%)",
                 )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
@@ -8904,22 +8985,22 @@ class AMDSMICommands:
 
             # Validate the value against the extremum
             try:
-                # Parser only allows two options sclk or mclk
+                # Parser only allows three options sclk, mclk or fclk
                 if clk_type == "sclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.GFX
                 elif clk_type == "mclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.MEM
+                elif clk_type == "fclk":
+                    amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.DF
                 else:
-                    print(f"Valid clock types are: sclk, mclk\n")
+                    print(f"Valid clock types are: sclk, mclk, fclk\n")
                     self.logger.store_output(
                         args.gpu, "clk_limit", f"Invalid clock type {args.clk_limit.clk_type}"
                     )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
-
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
-
                 if lim_type == "min":
                     amdsmi_lim_type = amdsmi_interface.AmdSmiClkLimitType.MIN
                     if val > clk_tuple["max_clk"]:
@@ -9153,7 +9234,7 @@ class AMDSMICommands:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             gpu (device_handle, optional): device_handle for target device. Defaults to None.
-            fan (int, optional): Value override for args.fan. Defaults to None.
+            fan (tuple, optional): Value override for args.fan as (value, is_percentage). Defaults to None.
             perf_level (amdsmi_interface.AmdSmiDevPerfLevel, optional): Value override for args.perf_level. Defaults to None.
             profile (bool, optional): Value override for args.profile. Defaults to None.
             perf_determinism (int, optional): Value override for args.perf_determinism. Defaults to None.
@@ -9401,7 +9482,7 @@ class AMDSMICommands:
             if args.core == None:
                 args.core = self.core_handles
 
-        # Handle CPU and GPU intialization cases
+        # Handle CPU and GPU initialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
             # Print out all CPU and all GPU static info only if no device was specified.
             # If a GPU or CPU argument is provided only print out the specified device.
@@ -9859,8 +9940,8 @@ class AMDSMICommands:
                 return
             if args.power_cap:
                 final_output = {
-                    "ppt0": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
-                    "ppt1": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
+                    "ppt0": "N/A",
+                    "ppt1": "N/A",
                 }
                 power_limit_types = {}
                 for power_type in amdsmi_interface.AmdSmiPowerCapType:
@@ -10847,7 +10928,7 @@ class AMDSMICommands:
         ### XCP Metrics ###
         ###################
         # Must come after process list - XCP detail is a multi-dimensional array, which is displayed
-        # in tabular format with XCP values for same gpu shown on muliple lines.
+        # in tabular format with XCP values for same gpu shown on multiple lines.
         if args.violation:
             violation_status = {
                 "pviol": "N/A",
@@ -11483,7 +11564,7 @@ class AMDSMICommands:
     def partition(
         self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None
     ):
-        """Display parition information for the target GPU
+        """Display partition information for the target GPU
         param:
             args - argparser args to pass to subcommand
             multiple_devices (bool) - True if checking for multiple devices
@@ -11569,7 +11650,7 @@ class AMDSMICommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     current_mem_cap = "N/A"
                     logging.debug(
-                        "Failed to get current memory partition capabilties for GPU %s | %s",
+                        "Failed to get current memory partition capabilities for GPU %s | %s",
                         gpu_id,
                         e.get_error_info(),
                     )
@@ -12053,7 +12134,7 @@ class AMDSMICommands:
         base_board_temps=None,
         gtt=None,
     ):
-        """List node informations
+        """List node information
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args

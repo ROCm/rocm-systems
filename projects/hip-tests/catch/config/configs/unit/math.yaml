@@ -1275,44 +1275,36 @@ math:
     disabled: [amd_windows]
   Unit_Device_hexp10_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_h2exp10_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_hexp2_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_h2exp2_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_hlog_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_h2log_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_hlog10_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_h2log10_Accuracy_Positive:
     <<: *level_2
-    # (amd_linux) TODO === fail on 100% test data
-    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
-    disabled: [amd_linux, amd_windows]
+    # === Below tests cause timeout in stress test of 09/02/24 ===
+    disabled: [amd_windows]
   Unit_Device_hlog2_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24

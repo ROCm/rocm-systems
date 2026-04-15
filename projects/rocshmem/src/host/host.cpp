@@ -183,7 +183,7 @@ __host__ HostInterface::~HostInterface() {
   mpilib_ftable_.Win_free(&hdp_win);
 #endif  // USE_HDP_FLUSH
 
-  /* Detroy the pool of contexts */
+  /* Destroy the pool of contexts */
 
   if (host_window_context_pool_ != nullptr) {
     for (size_t ctx_i = 0; ctx_i < envvar::max_num_host_contexts; ctx_i++) {

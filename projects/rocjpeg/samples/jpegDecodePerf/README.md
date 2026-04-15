@@ -4,7 +4,7 @@ The jpeg decode perf sample illustrates decoding JPEG images by batches of speci
 
 ## Prerequisites:
 
-* Install [rocJPEG](../../README.md#build-and-install-instructions)
+* Install [rocJPEG](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/install/rocjpeg-build-and-install.html)
 
 ## Build
 

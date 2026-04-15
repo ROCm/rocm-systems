@@ -23,6 +23,14 @@
 #ifndef AMD_CUID_H
 #define AMD_CUID_H
 
+/**
+ * @file amd_cuid.h
+ * @brief AMD Component Unified ID (CUID) Library API
+ *
+ * Provides functions to enumerate devices, query device properties,
+ * and manage HMAC keys used for CUID computation.
+ */
+
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -124,13 +132,16 @@ const char* amdcuid_id_to_string(
     amdcuid_id_t cuid_value
 );
 
+/**
+ * @brief Enumeration of device types supported by the AMD CUID library.
+ */
 typedef enum {
-    AMDCUID_DEVICE_TYPE_NONE      = 0,
-    AMDCUID_DEVICE_TYPE_PLATFORM  = 0x1, /* chassis, motherboard */
-    AMDCUID_DEVICE_TYPE_CPU       = 0x2, /* CPU core */
-    AMDCUID_DEVICE_TYPE_GPU       = 0x3, /* GPU */
-    AMDCUID_DEVICE_TYPE_NIC       = 0x4, /* NIC */
-    AMDCUID_DEVICE_TYPE_LAST      = 0x4
+    AMDCUID_DEVICE_TYPE_NONE      = 0,          ///< No device type
+    AMDCUID_DEVICE_TYPE_PLATFORM  = 0x1,        ///< Platform device (chassis, motherboard)
+    AMDCUID_DEVICE_TYPE_CPU       = 0x2,        ///< CPU core
+    AMDCUID_DEVICE_TYPE_GPU       = 0x3,        ///< GPU
+    AMDCUID_DEVICE_TYPE_NIC       = 0x4,        ///< NIC (Network Interface Controller)
+    AMDCUID_DEVICE_TYPE_LAST      = 0x4         ///< Last valid device type
 } amdcuid_device_type_t;
 
 /**

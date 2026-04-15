@@ -277,10 +277,12 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+
   std::string smclk_min_max_fullpath = "";
 
   bool sclk = false;
   bool mclk = false;
+  bool fclk = false;
   switch (domain) {
     case AMDSMI_CLK_TYPE_GFX:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
@@ -308,14 +310,15 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
       fullpath += "/pp_dpm_socclk";
       break;
     case AMDSMI_CLK_TYPE_DF:
+      smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_fclk";
+      fclk = true;
       break;
     default:
       return AMDSMI_STATUS_INVAL;
   }
 
   std::ifstream ranges(fullpath.c_str());
-
   if (ranges.fail()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
@@ -328,41 +331,50 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
   dpm = 0;
   sleep_freq = UINT_MAX;
   current_freq = 0;
-
-  // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
-  if (sclk || mclk) {
+  // if getting sclk, mclk or fclk info, read pp_od_clk_voltage for min and max info
+  if (sclk || mclk || fclk) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
     unsigned int smax = 0;
     unsigned int mmax = 0;
+    unsigned int fmax = 0;
     unsigned int smin = UINT_MAX;
     unsigned int mmin = UINT_MAX;
+    unsigned int fmin = UINT_MAX;
 
     // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
     if (!smclk_ranges.is_open()) {
       sclk = false;
       mclk = false;
+      fclk = false;
     } else {
-      // using bool to switch between recording for s or mclk. true will be sclk, false will be mclk
-      bool s_or_m = true;
+      // using enum to switch between recording for sclk, mclk, or fclk
+      enum ClkType { PARSING_SCLK = 0, PARSING_MCLK = 1, PARSING_FCLK = 2 };
+      ClkType current_clk_type = PARSING_SCLK;
       unsigned int dpm_level, freq;
       for (std::string line; getline(smclk_ranges, line);) {
         if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
-          s_or_m = true;
+          current_clk_type = PARSING_SCLK;
           continue;
         } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
-          s_or_m = false;
+          current_clk_type = PARSING_MCLK;
+          continue;
+        } else if (line.compare("FCLK:") == 0 || line.compare("OD_FCLK:") == 0) {
+          current_clk_type = PARSING_FCLK;
           continue;
         }
         if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
           // skip lines that don't conform to the format
           continue;
         }
-        if (s_or_m) {
+        if (current_clk_type == PARSING_SCLK) {
           if (freq > smax) smax = freq;
           if (freq < smin) smin = freq;
-        } else {
+        } else if (current_clk_type == PARSING_MCLK) {
           if (freq > mmax) mmax = freq;
           if (freq < mmin) mmin = freq;
+        } else if (current_clk_type == PARSING_FCLK) {
+          if (freq > fmax) fmax = freq;
+          if (freq < fmin) fmin = freq;
         }
       }
 
@@ -372,6 +384,9 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
       } else if (mclk) {
         max = mmax;
         min = mmin;
+      } else if (fclk) {
+        max = fmax;
+        min = fmin;
       }
 
       smclk_ranges.close();
@@ -407,8 +422,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         current_freq = freq;
       }
 
-      // not * was detected so check for the min max if not s or mclk, which are user defined
-      if (!sclk && !mclk) {
+      // not * was detected so check for the min max if not sclk, mclk, or fclk, which are user defined
+      if (!sclk && !mclk && !fclk) {
         max = freq > max ? freq : max;
         min = freq < min ? freq : min;
       }
@@ -795,7 +810,7 @@ std::vector<std::string> split_string(const std::string& line, char delim) {
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description
 // Returns:
-// string - if fullStatus == true, returns full decription of return value
+// string - if fullStatus == true, returns full description of return value
 //      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'

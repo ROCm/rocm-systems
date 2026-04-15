@@ -61,7 +61,7 @@ enum hsmp_message_ids {
   HSMP_DIMM_SB_RD,                 /* 33h Get data from a specified device on the DIMM.*/
   HSMP_READ_CCD_POWER,             /* 34h Get the average power consumed by CCD */
   HSMP_READ_TDELTA,                /* 35h Get thermal solution behaviour */
-  HSMP_GET_SVI3_VR_CTRL_TEMP,      /* 36h Get temperature of SVI3 VR controlller rails */
+  HSMP_GET_SVI3_VR_CTRL_TEMP,      /* 36h Get temperature of SVI3 VR controller rails */
   HSMP_GET_ENABLED_HSMP_CMDS,      /* 37h Get/Set supported HSMP commands */
   HSMP_SET_GET_FLOOR_LIMIT,        /* 38h Get/Set supported Floor Limit commands */
   HSMP_DIMM_SB_WR,                 /* 39h Set data to a specified device on the DIMM.*/
@@ -258,7 +258,7 @@ static const struct hsmp_msg_desc hsmp_msg_desc_table[] = {
     /*
      * HSMP_GET_DIMM_THERMAL, num_args = 1, response_sz = 1
      * input: args[0] = DIMM address[7:0]
-     * output: args[0] = temperature in degree celcius[31:21] + update rate in ms[16:8] +
+     * output: args[0] = temperature in degree celsius[31:21] + update rate in ms[16:8] +
      * DIMM address[7:0]
      */
     {1, 1, HSMP_GET},

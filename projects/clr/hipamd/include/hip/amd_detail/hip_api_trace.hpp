@@ -47,8 +47,8 @@
 // - Reset any of the *_STEP_VERSION defines to zero if the corresponding *_MAJOR_VERSION increases
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
-#define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 25
+#define HIP_TOOLS_API_TABLE_STEP_VERSION 1
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 26
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -73,6 +73,7 @@ typedef void (*t___hipUnregisterFatBinary)(void** modules);
 
 // HIP tools dispatch functions
 typedef void (*t___hipReportDevices)(size_t numDevices, const hipUUID* uuids);
+typedef void (*t___hipTriggerReportDevices)();
 
 // HIP runtime dispatch functions
 typedef const char* (*t_hipApiName)(uint32_t id);
@@ -525,6 +526,10 @@ typedef hipError_t (*t_hipMemPrefetchAsync)(const void* dev_ptr, size_t count, i
 typedef hipError_t (*t_hipMemPrefetchAsync_v2)(const void* dev_ptr, size_t count,
                                                hipMemLocation location, unsigned int flags,
                                                hipStream_t stream);
+typedef hipError_t (*t_hipMemPrefetchBatchAsync)(void** dev_ptrs, size_t* sizes, size_t count,
+                                                hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                                size_t num_prefetch_locs, unsigned long long flags,
+                                                hipStream_t stream);
 typedef hipError_t (*t_hipMemPtrGetInfo)(void* ptr, size_t* size);
 typedef hipError_t (*t_hipMemRangeGetAttribute)(void* data, size_t data_size,
                                                 hipMemRangeAttribute attribute, const void* dev_ptr,
@@ -1728,8 +1733,11 @@ struct HipDispatchTable {
   t_hipKernelSetAttribute hipKernelSetAttribute_fn;
   t_hipKernelGetFunction hipKernelGetFunction_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
+  t_hipMemPrefetchBatchAsync hipMemPrefetchBatchAsync_fn;
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
 
   // ******************************************************************************************* //
   //
@@ -1749,10 +1757,15 @@ struct HipDispatchTable {
 struct HipToolsDispatchTable {
   // HIP_TOOLS_API_TABLE_STEP_VERSION == 0
   size_t size;
+  // Callback implemented and registered in profiler, called in hip.
   t___hipReportDevices __hipReportDevices_fn;
+  // HIP_TOOLS_API_TABLE_STEP_VERSION == 1
+  // Callback implemented in hip, called in hip::init(), and again in profiler
+  // when app attached by profiler.
+  t___hipTriggerReportDevices __hipTriggerReportDevices_fn;
 
   // DO NOT EDIT ABOVE!
-  // HIP_TOOLS_API_TABLE_STEP_VERSION == 1
+  // HIP_TOOLS_API_TABLE_STEP_VERSION == 2
 
   // ******************************************************************************************* //
   //

@@ -508,6 +508,60 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("periods");
     }
 
+    if(_data.environ_filter("selected_regions", _data))
+    {
+        _parser
+            .add_argument(
+                { "--selected-regions" },
+                "Comma-separated list of roctx region names. When set, only "
+                "activity inside matching roctx regions is traced (matched against "
+                "roctxRangeStartA message)")
+            .count(1)
+            .dtype("string")
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_SELECTED_REGIONS",
+                           p.get<std::string>("selected-regions"));
+            });
+
+        _data.processed_environs.emplace("selected_regions");
+    }
+
+    if(_data.environ_filter("rank_filter_id", _data))
+    {
+        _parser
+            .add_argument({ "--rank-filter-id" },
+                          "Sets the name of environment variable to read rank from for "
+                          "MPI output filtering")
+            .max_count(1)
+            .dtype("string")
+            .required({ "rank-filter-output" })
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_RANK_FILTER_ID",
+                           p.get<std::string>("rank-filter-id"));
+            });
+
+        _data.processed_environs.emplace("rank_filter_id");
+    }
+
+    if(_data.environ_filter("rank_filter_output", _data))
+    {
+        _parser
+            .add_argument({ "--rank-filter-output" },
+                          "Ranks for which file output is generated. Values should be "
+                          "separated by commas and can be explicit or ranges, e.g. "
+                          "0,1,5-8. An empty value enables output for all ranks")
+            .max_count(1)
+            .dtype("int and/or range")
+            .action([&](parser_t& p) {
+                update_env(
+                    _data, "ROCPROFSYS_RANK_FILTER_OUTPUT",
+                    fmt::format("{}",
+                                fmt::join(p.get<strvec_t>("rank-filter-output"), ",")));
+            });
+
+        _data.processed_environs.emplace("rank_filter_output");
+    }
+
     strset_t _backend_choices = { "all",        "kokkosp", "mpip", "ompt",
                                   "rcclp",      "amd-smi", "rocm", "mutex-locks",
                                   "spin-locks", "rw-locks" };
@@ -527,7 +581,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _backend_choices.erase("rcclp");
         _backend_choices.erase("amd-smi");
         _backend_choices.erase("rocm");
-        _backend_choices.erase("ompt");
 
         update_env(_data, "ROCPROFSYS_USE_AMD_SMI", false);
     }

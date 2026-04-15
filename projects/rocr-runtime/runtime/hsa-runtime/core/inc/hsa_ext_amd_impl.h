@@ -401,7 +401,15 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes, uint32_t count,
+                                               uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+                                               hsa_signal_t completion_signal);
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
 
 }  // namespace amd
 }  // namespace rocr
