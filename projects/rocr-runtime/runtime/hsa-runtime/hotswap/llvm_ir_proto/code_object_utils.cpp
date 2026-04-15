@@ -11,16 +11,33 @@
 
 namespace ir_proto {
 
+namespace {
+inline uint32_t readU32(const uint8_t *p) {
+  uint32_t v;
+  std::memcpy(&v, p, sizeof(v));
+  return v;
+}
+} // namespace
+
 std::vector<uint8_t> readFile(const std::string &path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open()) {
     llvm::errs() << "ir_proto: Cannot open file: " << path << "\n";
     return {};
   }
-  auto sz = f.tellg();
+  auto pos = f.tellg();
+  if (pos < 0) {
+    llvm::errs() << "ir_proto: tellg failed for: " << path << "\n";
+    return {};
+  }
+  auto sz = static_cast<size_t>(pos);
   f.seekg(0);
   std::vector<uint8_t> data(sz);
   f.read(reinterpret_cast<char *>(data.data()), sz);
+  if (!f) {
+    llvm::errs() << "ir_proto: short read on: " << path << "\n";
+    return {};
+  }
   return data;
 }
 
@@ -87,13 +104,14 @@ std::vector<std::string> listKernelNames(const std::vector<uint8_t> &elfData) {
 
     size_t off = 0;
     while (off + 12 <= data.size()) {
-      uint32_t namesz = *(uint32_t *)(data.data() + off);
-      uint32_t descsz = *(uint32_t *)(data.data() + off + 4);
-      uint32_t type = *(uint32_t *)(data.data() + off + 8);
+      uint32_t namesz = readU32(data.data() + off);
+      uint32_t descsz = readU32(data.data() + off + 4);
+      uint32_t type   = readU32(data.data() + off + 8);
       off += 12;
 
-      uint32_t nameAligned = (namesz + 3) & ~3;
-      if (off + nameAligned + descsz > data.size()) break;
+      uint32_t nameAligned = (namesz + 3) & ~3u;
+      uint64_t needed = static_cast<uint64_t>(nameAligned) + descsz;
+      if (needed > data.size() - off) break;
 
       const char *noteName = reinterpret_cast<const char *>(data.data() + off);
       off += nameAligned;
@@ -104,19 +122,19 @@ std::vector<std::string> listKernelNames(const std::vector<uint8_t> &elfData) {
                              descsz);
         llvm::msgpack::Document doc;
         if (!doc.readFromBlob(blob, false)) {
-          off += (descsz + 3) & ~3;
+          off += (descsz + 3) & ~3u;
           continue;
         }
 
         auto &root = doc.getRoot();
-        if (!root.isMap()) { off += (descsz + 3) & ~3; continue; }
+        if (!root.isMap()) { off += (descsz + 3) & ~3u; continue; }
         auto &rootMap = root.getMap();
 
         auto kernelsIt = rootMap.find(doc.getNode("amdhsa.kernels"));
-        if (kernelsIt == rootMap.end()) { off += (descsz + 3) & ~3; continue; }
+        if (kernelsIt == rootMap.end()) { off += (descsz + 3) & ~3u; continue; }
 
         auto &kernelsNode = kernelsIt->second;
-        if (!kernelsNode.isArray()) { off += (descsz + 3) & ~3; continue; }
+        if (!kernelsNode.isArray()) { off += (descsz + 3) & ~3u; continue; }
 
         for (auto &kNode : kernelsNode.getArray()) {
           if (!kNode.isMap()) continue;
@@ -167,13 +185,14 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
 
     size_t off = 0;
     while (off + 12 <= data.size()) {
-      uint32_t namesz = *(uint32_t *)(data.data() + off);
-      uint32_t descsz = *(uint32_t *)(data.data() + off + 4);
-      uint32_t type = *(uint32_t *)(data.data() + off + 8);
+      uint32_t namesz = readU32(data.data() + off);
+      uint32_t descsz = readU32(data.data() + off + 4);
+      uint32_t type   = readU32(data.data() + off + 8);
       off += 12;
 
-      uint32_t nameAligned = (namesz + 3) & ~3;
-      if (off + nameAligned + descsz > data.size()) break;
+      uint32_t nameAligned = (namesz + 3) & ~3u;
+      uint64_t needed = static_cast<uint64_t>(nameAligned) + descsz;
+      if (needed > data.size() - off) break;
 
       const char *noteName = reinterpret_cast<const char *>(data.data() + off);
       off += nameAligned;
@@ -184,16 +203,16 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
                              descsz);
         llvm::msgpack::Document doc;
         if (!doc.readFromBlob(blob, false)) {
-          off += (descsz + 3) & ~3;
+          off += (descsz + 3) & ~3u;
           continue;
         }
 
         auto &root = doc.getRoot();
-        if (!root.isMap()) { off += (descsz + 3) & ~3; continue; }
+        if (!root.isMap()) { off += (descsz + 3) & ~3u; continue; }
         auto &rootMap = root.getMap();
 
         auto kernelsIt = rootMap.find(doc.getNode("amdhsa.kernels"));
-        if (kernelsIt == rootMap.end()) { off += (descsz + 3) & ~3; continue; }
+        if (kernelsIt == rootMap.end()) { off += (descsz + 3) & ~3u; continue; }
 
         auto &kernelsNode = kernelsIt->second;
         if (!kernelsNode.isArray()) { off += (descsz + 3) & ~3; continue; }
@@ -269,13 +288,17 @@ uint64_t findKernelSymbolOffset(const std::vector<uint8_t> &elfData,
     return 0;
   }
 
-  uint64_t textBase = 0;
+  uint64_t textBase = UINT64_MAX;
   for (const auto &sec : (*objOrErr)->sections()) {
     auto nameOrErr = sec.getName();
     if (nameOrErr && *nameOrErr == ".text") {
       textBase = sec.getAddress();
       break;
     }
+  }
+  if (textBase == UINT64_MAX) {
+    llvm::errs() << "ir_proto: findKernelSymbolOffset: no .text section found\n";
+    return 0;
   }
 
   for (const auto &sym : (*objOrErr)->symbols()) {
@@ -284,8 +307,13 @@ uint64_t findKernelSymbolOffset(const std::vector<uint8_t> &elfData,
     if (*nameOrErr == kernelName) {
       auto addrOrErr = sym.getAddress();
       if (!addrOrErr) continue;
-      uint64_t offset = *addrOrErr - textBase;
-      return offset;
+      if (*addrOrErr < textBase) {
+        llvm::errs() << "ir_proto: findKernelSymbolOffset: symbol address 0x"
+                     << llvm::utohexstr(*addrOrErr) << " < .text base 0x"
+                     << llvm::utohexstr(textBase) << "\n";
+        return 0;
+      }
+      return *addrOrErr - textBase;
     }
   }
 

@@ -860,6 +860,17 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   for (uint64_t addr : blockStarts)
     offsetToBB[addr] = BasicBlock::Create(C, "bb_0x" + utohexstr(addr - kernelOffset), F);
 
+  auto lookupBB = [&](uint64_t addr) -> BasicBlock * {
+    auto it = offsetToBB.find(addr);
+    if (it != offsetToBB.end())
+      return it->second;
+    errs() << "ir_proto: missing basic block for offset 0x" << utohexstr(addr)
+           << " — creating fallback\n";
+    BasicBlock *bb = BasicBlock::Create(C, "bb_fallback_0x" + utohexstr(addr - kernelOffset), F);
+    offsetToBB[addr] = bb;
+    return bb;
+  };
+
   // ==== Phase 4: Init entry registers ====
   IRBuilder<> B(offsetToBB[kernelOffset]);
 
@@ -912,6 +923,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       if (!v) {
         errs() << "ir_proto: unreadable register '"
                << mc.regInfo->getName(di.getReg(opIdx)) << "' in " << di.mnemonic << "\n";
+        return UndefValue::get(i32Ty);
       }
       return v;
     }
@@ -923,7 +935,9 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         return ConstantInt::get(i32Ty, (uint32_t)(val & 0xFFFFFFFF));
       return ConstantInt::get(i32Ty, 0);
     }
-    return nullptr;
+    errs() << "ir_proto: readOp32 unresolvable operand " << opIdx
+           << " in " << di.mnemonic << "\n";
+    return UndefValue::get(i32Ty);
   };
 
   auto readOp64 = [&](const DecodedInst &di, unsigned opIdx) -> Value * {
@@ -941,6 +955,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       if (!v) {
         errs() << "ir_proto: unreadable register64 '"
                << mc.regInfo->getName(di.getReg(opIdx)) << "' in " << di.mnemonic << "\n";
+        return UndefValue::get(i64Ty);
       }
       return v;
     }
@@ -951,7 +966,9 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       di.inst.getOperand(opIdx).getExpr()->evaluateAsAbsolute(val);
       return ConstantInt::getSigned(i64Ty, val);
     }
-    return nullptr;
+    errs() << "ir_proto: readOp64 unresolvable operand " << opIdx
+           << " in " << di.mnemonic << "\n";
+    return UndefValue::get(i64Ty);
   };
 
   auto readOpExecWidth = [&](const DecodedInst &di, unsigned opIdx) -> Value * {
@@ -965,7 +982,9 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         if (isa.isWave32()) return regs.loadSGPR32(B, pr.baseIdx);
         return regs.loadSGPR64(B, pr.baseIdx);
       }
-      return nullptr;
+      errs() << "ir_proto: readOpExecWidth unresolvable register '"
+             << mc.regInfo->getName(di.getReg(opIdx)) << "' in " << di.mnemonic << "\n";
+      return UndefValue::get(regs.execTy);
     }
     if (di.isImm(opIdx))
       return ConstantInt::getSigned(regs.execTy, di.getImm(opIdx));
@@ -974,7 +993,9 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       di.inst.getOperand(opIdx).getExpr()->evaluateAsAbsolute(val);
       return ConstantInt::getSigned(regs.execTy, val);
     }
-    return nullptr;
+    errs() << "ir_proto: readOpExecWidth unresolvable operand " << opIdx
+           << " in " << di.mnemonic << "\n";
+    return UndefValue::get(regs.execTy);
   };
 
   // OpResolver: read source operands via srcMap, which skips VOP3 modifiers.
@@ -1087,15 +1108,15 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       if (mn == "s_branch") {
         int64_t raw = di.getImm(0);
         int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
-        B.CreateBr(offsetToBB[di.offset + 4 + brOff * 4]);
+        B.CreateBr(lookupBB(di.offset + 4 + brOff * 4));
         handled = true; break;
       }
       if (mn == "s_cbranch_execz" || mn == "s_cbranch_execnz") {
         int64_t raw = di.getImm(0);
         int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
         uint64_t target = di.offset + 4 + brOff * 4;
-        BasicBlock *targetBB = offsetToBB[target];
-        BasicBlock *fallthroughBB = offsetToBB[di.offset + di.size];
+        BasicBlock *targetBB = lookupBB(target);
+        BasicBlock *fallthroughBB = lookupBB(di.offset + di.size);
         Value *execVal = regs.loadExec(B);
         Value *isZero = B.CreateICmpEQ(execVal, Constant::getNullValue(regs.execTy), "exec_is_zero");
         if (mn == "s_cbranch_execz")
@@ -1108,8 +1129,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         int64_t raw = di.getImm(0);
         int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
         uint64_t target = di.offset + 4 + brOff * 4;
-        BasicBlock *targetBB = offsetToBB[target];
-        BasicBlock *fallthroughBB = offsetToBB[di.offset + di.size];
+        BasicBlock *targetBB = lookupBB(target);
+        BasicBlock *fallthroughBB = lookupBB(di.offset + di.size);
         Value *sccV = regs.loadSCC(B);
         if (mn == "s_cbranch_scc0") sccV = B.CreateNot(sccV, "not_scc");
         B.CreateCondBr(sccV, targetBB, fallthroughBB);
@@ -1119,8 +1140,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         int64_t raw = di.getImm(0);
         int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
         uint64_t target = di.offset + 4 + brOff * 4;
-        BasicBlock *targetBB = offsetToBB[target];
-        BasicBlock *fallthroughBB = offsetToBB[di.offset + di.size];
+        BasicBlock *targetBB = lookupBB(target);
+        BasicBlock *fallthroughBB = lookupBB(di.offset + di.size);
         Value *vccV = regs.loadVCC(B);
         if (mn == "s_cbranch_vccz") vccV = B.CreateNot(vccV, "not_vcc");
         B.CreateCondBr(vccV, targetBB, fallthroughBB);
@@ -1528,10 +1549,16 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
       if (mn == "s_addc_u32") {
         Value *src0 = op.src(0), *src1 = op.src(1);
-        Value *carry = B.CreateZExt(regs.loadSCC(B), i32Ty);
-        Value *res = B.CreateAdd(B.CreateAdd(src0, src1), carry, "addc");
+        Value *cin = B.CreateZExt(regs.loadSCC(B), i32Ty);
+        Function *uaddOv = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::uadd_with_overflow, {i32Ty});
+        Value *step1 = B.CreateCall(uaddOv, {src0, src1});
+        Value *sum1 = B.CreateExtractValue(step1, 0);
+        Value *c1   = B.CreateExtractValue(step1, 1);
+        Value *step2 = B.CreateCall(uaddOv, {sum1, cin});
+        Value *res   = B.CreateExtractValue(step2, 0, "addc");
+        Value *c2    = B.CreateExtractValue(step2, 1);
         regs.writeReg32(B, op.dst(), res);
-        regs.storeSCC(B, B.CreateOr(B.CreateICmpULT(res, src0), B.CreateICmpULT(res, src1)));
+        regs.storeSCC(B, B.CreateOr(c1, c2));
         sccHandled = true; handled = true; break;
       }
       if (mn == "s_sub_u32") {
@@ -1658,9 +1685,15 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         Value *src = op.src(0), *ctrl = op.src(1);
         Value *offset = B.CreateAnd(ctrl, ConstantInt::get(i32Ty, 0x1F));
         Value *width = B.CreateAnd(B.CreateLShr(ctrl, 16), ConstantInt::get(i32Ty, 0x7F));
+        Value *safeWidth = B.CreateAnd(width, ConstantInt::get(i32Ty, 0x1F));
         Value *shifted = B.CreateLShr(src, offset);
-        Value *mask = B.CreateSub(B.CreateShl(ConstantInt::get(i32Ty, 1), width), ConstantInt::get(i32Ty, 1));
-        sccResult = B.CreateAnd(shifted, mask, "bfe");
+        Value *mask = B.CreateSub(B.CreateShl(ConstantInt::get(i32Ty, 1), safeWidth),
+                                  ConstantInt::get(i32Ty, 1));
+        Value *isGE32 = B.CreateICmpUGE(width, ConstantInt::get(i32Ty, 32));
+        mask = B.CreateSelect(isGE32, ConstantInt::getSigned(i32Ty, -1), mask);
+        Value *isZero = B.CreateICmpEQ(width, ConstantInt::get(i32Ty, 0));
+        sccResult = B.CreateSelect(isZero, ConstantInt::get(i32Ty, 0),
+                                   B.CreateAnd(shifted, mask, "bfe"));
         regs.writeReg32(B, op.dst(), sccResult);
         handled = true; break;
       }
@@ -1930,10 +1963,16 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       // Vector add with carry-in/carry-out (GFX12: v_add_co_ci_u32)
       if (mn == "v_add_co_ci_u32" || mn == "v_addc_co_u32" || mn == "v_addc_u32") {
         Value *s0 = op.src(0), *s1 = op.src(1);
-        Value *carry = B.CreateZExt(regs.loadVCC(B), i32Ty);
-        Value *res = B.CreateAdd(B.CreateAdd(s0, s1), carry, "vadd_ci");
+        Value *cin = B.CreateZExt(regs.loadVCC(B), i32Ty);
+        Function *uaddOv = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::uadd_with_overflow, {i32Ty});
+        Value *step1 = B.CreateCall(uaddOv, {s0, s1});
+        Value *sum1 = B.CreateExtractValue(step1, 0);
+        Value *c1   = B.CreateExtractValue(step1, 1);
+        Value *step2 = B.CreateCall(uaddOv, {sum1, cin});
+        Value *res   = B.CreateExtractValue(step2, 0, "vadd_ci");
+        Value *c2    = B.CreateExtractValue(step2, 1);
         regs.writeReg32(B, op.dst(), res);
-        regs.storeVCC(B, B.CreateOr(B.CreateICmpULT(res, s0), B.CreateICmpULT(res, s1)));
+        regs.storeVCC(B, B.CreateOr(c1, c2));
         handled = true; break;
       }
       // v_mad_co_u64_u32: D.u64 = S0.u32 * S1.u32 + S2.u64, VCC = carry
@@ -2039,10 +2078,9 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         offset = B.CreateAnd(offset, ConstantInt::get(i32Ty, 31));
         width = B.CreateAnd(width, ConstantInt::get(i32Ty, 31));
         Value *shifted = B.CreateLShr(base, offset);
+        // width is 0-31 after masking, so shl i32 1, width is always valid
         Value *mask = B.CreateSub(B.CreateShl(ConstantInt::get(i32Ty, 1), width),
                                   ConstantInt::get(i32Ty, 1));
-        Value *isFullWidth = B.CreateICmpEQ(width, ConstantInt::get(i32Ty, 32));
-        mask = B.CreateSelect(isFullWidth, ConstantInt::getSigned(i32Ty, -1), mask);
         Value *isZeroWidth = B.CreateICmpEQ(width, ConstantInt::get(i32Ty, 0));
         Value *result = B.CreateAnd(shifted, mask, "bfe");
         result = B.CreateSelect(isZeroWidth, ConstantInt::get(i32Ty, 0), result);
@@ -2280,20 +2318,22 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
       // ---- 64-bit vector ops ----
       if (mn == "v_lshlrev_b64") {
+        Value *shamt = op.src(0);
         Value *src = op.src64(1);
-        int64_t shamt = op.srcImm(0);
         if (src->getType() != i64Ty) src = B.CreateBitOrPointerCast(src, i64Ty);
-        regs.writeReg64(B, op.dst(), B.CreateShl(src, ConstantInt::get(i64Ty, shamt), "shl"));
+        Value *shamtExt = B.CreateZExt(shamt, i64Ty);
+        regs.writeReg64(B, op.dst(), B.CreateShl(src, shamtExt, "shl"));
         handled = true; break;
       }
       if (mn == "v_lshl_add_u64") {
         Value *src0 = op.src64(0);
-        int64_t shift = op.srcImm(1);
+        Value *shamt = op.src(1);
         Value *src2 = op.src64(2);
         if (src0->getType()->isPointerTy()) src0 = B.CreatePtrToInt(src0, i64Ty);
         if (src0->getType() != i64Ty) src0 = B.CreateBitOrPointerCast(src0, i64Ty);
         if (src2->getType() != i64Ty) src2 = B.CreateBitOrPointerCast(src2, i64Ty);
-        Value *shifted = (shift == 0) ? src0 : B.CreateShl(src0, ConstantInt::get(i64Ty, shift));
+        Value *shamtExt = B.CreateZExt(shamt, i64Ty);
+        Value *shifted = B.CreateShl(src0, shamtExt);
         regs.writeReg64(B, op.dst(), B.CreateAdd(shifted, src2, "lshl_add"));
         handled = true; break;
       }
