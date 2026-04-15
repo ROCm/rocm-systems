@@ -721,7 +721,7 @@ Examples:
         if suffix == ".svg":
             try:
                 svg_content = render_perfmon_plan_svg(output_files, config_dir, arch)
-                output_path.write_text(svg_content)
+                output_path.write_text(svg_content, encoding="utf-8")
                 print(f"SVG saved to {output_path}")
             except ImportError as e:
                 print(f"Error: {e}", file=sys.stderr)
@@ -731,7 +731,9 @@ Examples:
             metrics_output = generate_multi_bucket_metrics(
                 output_files, config_dir, arch
             )
-            output_path.write_text(bucket_output + metrics_output)
+            output_path.write_text(
+                bucket_output + metrics_output, encoding="utf-8"
+            )
             print(f"Output written to {output_path}")
         else:
             print(
