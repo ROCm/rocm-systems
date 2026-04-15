@@ -668,7 +668,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
 
       uint64_t val;
       try {
-        val = static_cast<uint64_t>(std::stoi(tmp));
+        val = std::stoull(tmp);
       } catch (...) {
         std::cerr << "Error; read invalid data: " << tmp << " from " << q_gpu_id_str << std::endl;
         closedir(queues_dir_hd);

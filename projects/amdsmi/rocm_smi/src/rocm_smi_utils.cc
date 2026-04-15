@@ -681,7 +681,7 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::stri
   }
   // template for our file
   std::string fullTempFilePath = "/tmp/" + fullFileName + ".XXXXXX";
-  char* fileName = &fullTempFilePath[0];
+  char* fileName = fullTempFilePath.data();
   int fd = mkstemp(fileName);
   if (fd == -1) {
     return RSMI_STATUS_FILE_ERROR;

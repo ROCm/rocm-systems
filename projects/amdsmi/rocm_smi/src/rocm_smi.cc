@@ -7052,17 +7052,32 @@ rsmi_status_t rsmi_event_notification_init(uint32_t dv_ind) {
 
   int ret = ioctl(smi.kfd_notif_evt_fh(), AMDKFD_IOC_SMI_EVENTS, &args);
   if (ret < 0) {
-    return amd::smi::ErrnoToRsmiStatus(errno);
+    rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(errno);
+    if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
+      close(smi.kfd_notif_evt_fh());
+      smi.set_kfd_notif_evt_fh(-1);
+    }
+    return err;
   }
   if (args.anon_fd < 1) {
+    if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
+      close(smi.kfd_notif_evt_fh());
+      smi.set_kfd_notif_evt_fh(-1);
+    }
     return RSMI_STATUS_NO_DATA;
   }
 
   dev->set_evt_notif_anon_fd(args.anon_fd);
   FILE* anon_file_ptr = fdopen(static_cast<int>(args.anon_fd), "r");
   if (anon_file_ptr == nullptr) {
+    rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(errno);
     close(dev->evt_notif_anon_fd());
-    return amd::smi::ErrnoToRsmiStatus(errno);
+    dev->set_evt_notif_anon_fd(-1);
+    if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
+      close(smi.kfd_notif_evt_fh());
+      smi.set_kfd_notif_evt_fh(-1);
+    }
+    return err;
   }
   dev->set_evt_notif_anon_file_ptr(anon_file_ptr);
 
@@ -7177,7 +7192,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             char task_name[MAX_EVENT_NOTIFICATION_MSG_SIZE];
             memset(task_name, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
-            sscanf(message, "%x:%s\n", &pid, task_name);
+            sscanf(message, "%x:%255s\n", &pid, task_name);
             std::stringstream final_message;
             final_message << "PID: " << std::to_string(pid).c_str() << "  task name: " << task_name;
 
@@ -7201,7 +7216,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
             memset(reset_cause, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
-            sscanf(message, "%x %[^\n]\n", &reset_seq_num, reset_cause);
+            sscanf(message, "%x %255[^\n]\n", &reset_seq_num, reset_cause);
             std::stringstream final_message;
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str()
                           << "  reset cause: " << reset_cause;
@@ -7213,7 +7228,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             uint32_t reset_seq_num;
 
             char tmp[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            sscanf(message, "%x %[^\n]\n", &reset_seq_num, tmp);
+            sscanf(message, "%x %255[^\n]\n", &reset_seq_num, tmp);
             std::stringstream final_message;
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str();
 
@@ -7356,7 +7371,7 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
           case RSMI_EVT_NOTIF_EVENT_PROCESS_END: {
             uint32_t pid;
             char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            int rc = sscanf(message, "%x %s", &pid, task);
+            int rc = sscanf(message, "%x %255s", &pid, task);
             std::stringstream msg;
             if (rc == 2) {
               msg << "PID: " << pid << "  task: " << task;

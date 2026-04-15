@@ -9939,10 +9939,7 @@ class AMDSMICommands:
                 self.logger.clear_multiple_devices_output()
                 return
             if args.power_cap:
-                final_output = {
-                    "ppt0": "N/A",
-                    "ppt1": "N/A",
-                }
+                final_output = {"ppt0": "N/A", "ppt1": "N/A"}
                 power_limit_types = {}
                 for power_type in amdsmi_interface.AmdSmiPowerCapType:
                     # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase
