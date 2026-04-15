@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
@@ -126,6 +125,3 @@ def test_counter_grouping_inspector_all_supported_archs():
         + "\n".join(f"  - {err}" for err in failed_archs)
     )
 
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
