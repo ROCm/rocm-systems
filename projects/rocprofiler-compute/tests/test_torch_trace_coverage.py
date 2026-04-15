@@ -94,6 +94,13 @@ if not torch.cuda.is_available():
 
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
+# Names for common POSIX signals referenced in subprocess failure messages.
+_POSIX_SIGNAL_NUMBER_TO_NAME: Dict[int, str] = {
+    6: "SIGABRT",
+    9: "SIGKILL",
+    11: "SIGSEGV",
+}
+
 # Standalone script: loads ``coverage_workload.py``, runs one torch.profiler
 # window per op, writes ``ground_truth.json``. Kept in-repo as a string so the
 # generated workload file stays free of profiler/JSON noise.
@@ -166,31 +173,6 @@ def unique_get_output_param_id(prefix: str) -> str:
 
 
 # -- Hardcoded args for ops whose schemas don't encode shape constraints --
-
-
-def _linalg_householder_product_hardcoded(device: str) -> Tuple[List[Any], dict]:
-    """Build ``(input, tau)`` for ``linalg_householder_product`` across torch builds.
-
-    Some stacks (e.g. certain ROCm wheels) omit ``torch.linalg.geqrf``; fall back to
-    legacy ``torch.geqrf`` or CPU ``geqrf`` + ``.to(device)``. Last resort: tensors
-    with valid ranks only (may be weaker numerically).
-    """
-    a = torch.randn(6, 4, device=device)
-    for geqrf in (getattr(torch.linalg, "geqrf", None), getattr(torch, "geqrf", None)):
-        if geqrf is None:
-            continue
-        try:
-            qr_tau = geqrf(a)
-            return [qr_tau[0], qr_tau[1]], {}
-        except Exception:
-            try:
-                qr_tau = geqrf(torch.randn(6, 4))
-            except Exception:
-                continue
-            return [qr_tau[0].to(device), qr_tau[1].to(device)], {}
-    inp = torch.randn(6, 4, device=device)
-    tau = torch.randn(4, device=device)
-    return [inp, tau], {}
 
 
 def get_hardcoded_args(device: str) -> Dict[str, Any]:
@@ -358,6 +340,32 @@ def get_hardcoded_args(device: str) -> Dict[str, Any]:
             {},
         ),
     }
+
+
+def _linalg_householder_product_hardcoded(device: str) -> Tuple[List[Any], dict]:
+    """Build ``(input, tau)`` for ``linalg_householder_product`` across torch builds.
+
+    Some stacks (e.g. certain ROCm wheels) omit ``torch.linalg.geqrf``; fall back to
+    legacy ``torch.geqrf`` or CPU ``geqrf`` + ``.to(device)``. Last resort: tensors
+    with valid ranks only (may be weaker numerically).
+    """
+    a = torch.randn(6, 4, device=device)
+    for geqrf in (getattr(torch.linalg, "geqrf", None), getattr(torch, "geqrf", None)):
+        if geqrf is None:
+            continue
+        try:
+            qr_tau = geqrf(a)
+            return [qr_tau[0], qr_tau[1]], {}
+        except Exception:
+            pass
+        try:
+            qr_tau = geqrf(torch.randn(6, 4))
+        except Exception:
+            continue
+        return [qr_tau[0].to(device), qr_tau[1].to(device)], {}
+    inp = torch.randn(6, 4, device=device)
+    tau = torch.randn(4, device=device)
+    return [inp, tau], {}
 
 
 # -- Schema-driven arg generation --
@@ -651,12 +659,12 @@ def emit_structural_preamble(
 
 
 def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
-    """Build minimal ``coverage_workload.py`` text: ``torch`` + one def per op + ``run_all``.
+    """Emit source lines for a minimal ``coverage_workload.py`` module.
 
-    No torch.profiler, no JSON, no GC helpers. ``coverage_ground_truth_runner.py``
-    imports this module and wraps each ``ALL_OPS`` entry with ``profile``.
-    ``run_all()`` is the entry point used when rocprof-compute runs this file as
-    the profiled application.
+    One ``def`` per operator plus ``run_all``. No torch.profiler, JSON, or GC
+    helpers. ``coverage_ground_truth_runner.py`` imports this module and wraps
+    each ``ALL_OPS`` entry with ``profile``. ``run_all()`` is the entry point
+    when rocprof-compute runs this file as the profiled application.
     """
     lines = [
         "import sys",
@@ -977,12 +985,7 @@ def _describe_subprocess_exit_code(returncode: int) -> str:
     """Human-readable explanation for ``subprocess`` ``returncode`` (POSIX)."""
     if returncode < 0:
         signal_number = -returncode
-        sig_names = {
-            6: "SIGABRT",
-            9: "SIGKILL",
-            11: "SIGSEGV",
-        }
-        name = sig_names.get(signal_number, "")
+        name = _POSIX_SIGNAL_NUMBER_TO_NAME.get(signal_number, "")
         name_part = f" ({name})" if name else ""
         return (
             f"The child process was terminated by OS signal {signal_number}{name_part} "
@@ -1007,18 +1010,13 @@ def _op_workload_failure_due_to(
     assert returncode is not None
     if returncode < 0:
         signal_number = -returncode
-        sig_names = {
-            6: "SIGABRT",
-            9: "SIGKILL",
-            11: "SIGSEGV",
-        }
-        name = sig_names.get(signal_number, "")
+        name = _POSIX_SIGNAL_NUMBER_TO_NAME.get(signal_number, "")
         name_part = f", {name}" if name else ""
         return (
-            f"the ground-truth subprocess was killed by signal {signal_number}{name_part} "
-            f"(exit {returncode}) while running the sampled CUDA operators in "
-            "``coverage_workload.py``—often bad generated args for one op, a kernel or "
-            "driver fault, or profiler interaction"
+            f"the ground-truth subprocess was killed by signal {signal_number}"
+            f"{name_part} (exit {returncode}) while running the sampled CUDA "
+            "operators in ``coverage_workload.py``—often bad generated args for one "
+            "op, a kernel or driver fault, or profiler interaction"
         )
     return (
         f"the ground-truth subprocess exited with status {returncode} while running "
@@ -1134,8 +1132,9 @@ def run_ground_truth_torch_profiler_subprocess(
         due = _op_workload_failure_due_to(timed_out=True, returncode=None)
         out_tail = _stderr_tail_collapsed(exc.stdout or "", max_lines=8)
         err_tail = _stderr_tail_collapsed(exc.stderr or "")
+        lead = f'The op workload itself failed due to "{due}". Fix it.'
         pytest.fail(
-            f'The op workload itself failed due to "{due}". Fix it.{repro}{copy_note}\n\n'
+            f"{lead}{repro}{copy_note}\n\n"
             "Details: subprocess timed out after 120s.\n\n"
             f"--- stdout (tail) ---\n{out_tail}\n\n"
             f"--- stderr (tail, collapsed) ---\n{err_tail}"
@@ -1153,11 +1152,13 @@ def run_ground_truth_torch_profiler_subprocess(
         err_tail = _stderr_tail_collapsed(completed.stderr or "")
         out_tail = _stderr_tail_collapsed(completed.stdout or "", max_lines=12)
         cmdline = subprocess.list2cmdline(argv)
+        lead = f'The op workload itself failed due to "{due}". Fix it.'
         pytest.fail(
-            f'The op workload itself failed due to "{due}". Fix it.{repro}{copy_note}\n\n'
+            f"{lead}{repro}{copy_note}\n\n"
             f"{exit_expl}\n\n"
-            "Roctracer / ``hipDeviceSynchronize`` lines often repeat after a single GPU "
-            "queue abort; the first few distinct lines usually matter more than the tail.\n\n"
+            "Roctracer / ``hipDeviceSynchronize`` lines often repeat after a single "
+            "GPU queue abort; the first few distinct lines usually matter more than "
+            "the tail.\n\n"
             f"--- command ---\n{cmdline}\n\n"
             f"--- stdout (tail) ---\n{out_tail}\n\n"
             f"--- stderr (tail, collapsed) ---\n{err_tail}"
