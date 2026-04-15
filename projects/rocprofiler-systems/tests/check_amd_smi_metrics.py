@@ -73,13 +73,15 @@ class GpuMetricAvailability:
             "temp",
             "power",
             "mem_usage",
-            "vcn_activity",
-            "jpeg_activity",
             "xgmi",
             "pcie",
         ):
             if getattr(self, name):
                 categories.append(name)
+        if self.vcn_activity or self.vcn_busy:
+            categories.append("vcn_activity")
+        if self.jpeg_activity or self.jpeg_busy:
+            categories.append("jpeg_activity")
         return ", ".join(categories)
 
 
@@ -461,12 +463,11 @@ def collect_metric_names(gpu: GpuMetricAvailability) -> set[str]:
         if getattr(gpu, name):
             metrics.add(name)
 
-    # vcn_activity and jpeg_activity are kept separate from vcn_busy/jpeg_busy.
-    # The Radeon (device-level) and Instinct (per-XCP) paths use different data
-    # sources and workloads may not produce nonzero values on both paths.
-    if gpu.vcn_activity:
+    # vcn_activity/jpeg_activity is the user-facing metric name that covers
+    # both device-level (Radeon) and per-XCP (MI300) paths.
+    if gpu.vcn_activity or gpu.vcn_busy:
         metrics.add("vcn_activity")
-    if gpu.jpeg_activity:
+    if gpu.jpeg_activity or gpu.jpeg_busy:
         metrics.add("jpeg_activity")
 
     return metrics

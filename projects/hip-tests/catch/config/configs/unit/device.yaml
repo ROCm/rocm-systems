@@ -35,7 +35,7 @@ device:
     tags: [query]
   Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [query]
   Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr:
     <<: *level_2
     tags: [query]
@@ -89,10 +89,10 @@ device:
     tags: [query]
   Unit_hipGetDeviceCount_HideDevices:
     <<: *level_2
-    tags: [query]
+    tags: [multigpu, query]
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [query]
   Unit_hipGetDeviceProperties_NegTst:
     <<: *level_2
     tags: [query]
@@ -125,10 +125,10 @@ device:
     tags: [config]
   Unit_hipSetDevice_BasicSetGet:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [query]
   Unit_hipGetSetDevice_MultiThreaded:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [query]
   Unit_hipSetGetDevice_Positive_Threaded_Basic:
     <<: *level_2
     tags: [multigpu, query]
@@ -149,10 +149,10 @@ device:
     tags: [query]
   Unit_hipDeviceGetUuid_From_RocmInfo:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [query]
   Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
     <<: *level_2
-    tags: [multigpu, query]
+    tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
@@ -172,8 +172,12 @@ device:
   Unit_hipDeviceGetDefaultMemPool_Negative_Parameters:
     <<: *level_2
     tags: [query]
-  Unit_hipDeviceCanAccessPeer_positive: *level_2
-  Unit_hipDeviceCanAccessPeer_negative: *level_2
+  Unit_hipDeviceCanAccessPeer_positive:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDeviceCanAccessPeer_negative:
+    <<: *level_2
+    tags: [multigpu]
   Unit_hipDeviceEnableDisablePeerAccess_positive:
     <<: *level_2
     tags: [multigpu]
@@ -321,16 +325,16 @@ device:
     tags: [config]
   Unit_hipSetValidDevices_Positive_Cases:
     <<: *level_2
-    tags: [config]
+    tags: [config, multigpu]
   Unit_hipSetValidDevices_MultiProcess:
     <<: *level_2
-    tags: [config]
+    tags: [config, multigpu]
   Unit_hipSetValidDevices_MultiThread:
     <<: *level_2
-    tags: [config]
+    tags: [config, multigpu]
   Unit_hipSetValidDevices_with_hipMemcpyPeer:
     <<: *level_2
-    tags: [config]
+    tags: [config, multigpu]
   Unit_hipGetProcAddress_ValidateDeviceApis: *level_2
   Unit_hipGetProcAddress_PeerDeviceAccessAPIs:
     <<: *level_2

@@ -1324,10 +1324,12 @@ class VirtualDevice : public amd::ReferenceCountedObject {
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
-                                          bool blocking = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr) {
+                                          const std::vector<const std::string*>* kernelNames = nullptr,
+                                          bool pre_patched = false,
+                                          bool blocking = false) {
     return false;
   }
+
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1836,7 +1838,7 @@ class Device : public RuntimeObject {
    */
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = kNoAtomics,
-                          const void* agentInfo = nullptr) const {
+                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1855,7 +1857,7 @@ class Device : public RuntimeObject {
   } AllocationFlags;
 
   virtual void* deviceLocalAlloc(
-      size_t size, const AllocationFlags& flags = AllocationFlags{}) const {
+      size_t size, const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -2039,6 +2041,21 @@ class Device : public RuntimeObject {
 
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
+
+  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  virtual void DestroyHwEvent(void* hw_event) const {}
+
+  struct HwEventPatch {
+    uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
+    uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
+    int hw_event_index;
+    int dep_slot;  // -1 = completion_signal, 0-4 = dep_signal[slot]
+  };
+
+  virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
+  virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
+                                   const std::vector<void*>& hw_events) const {}
+
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
   }

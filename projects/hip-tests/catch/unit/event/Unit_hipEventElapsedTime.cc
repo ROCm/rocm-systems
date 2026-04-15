@@ -32,7 +32,7 @@
  *    -# When first event is `nullptr`
  *      - Expected output: return `hipErrorInvalidHandle`
  *    -# When second event is `nullptr`
- *      - Expected output: return `hipErrorInvalidValue`
+ *      - Expected output: return `hipErrorInvalidHandle`
  * Test source
  * ------------------------
  *  - unit/event/Unit_hipEventElapsedTime.cc
@@ -61,7 +61,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
  * ------------------------
  *  - Calculates elapsed time when events are created with disable timing flag
  *    -# When flag is set to disable timing
- *      - Expected output: return `hipErrorInvalidValue`
+ *      - Expected output: return `hipErrorInvalidHandle`
  * Test source
  * ------------------------
  *  - unit/event/Unit_hipEventElapsedTime.cc
@@ -84,7 +84,7 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
  * ------------------------
  *  - Calculates elapsed time when events are recorded on different devices
  *    -# When start and stop events are recorded on different devices
- *      - Expected output: return `hipErrorInvalidValue`
+ *      - Expected output: return `hipErrorInvalidHandle`
  * Test source
  * ------------------------
  *  - unit/event/Unit_hipEventElapsedTime.cc
@@ -93,32 +93,34 @@ HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
-  int devCount = 0;
-  HIP_CHECK(hipGetDeviceCount(&devCount));
-  if (devCount > 1) {
-    // create event on dev=0
-    HIP_CHECK(hipSetDevice(0));
-    hipEvent_t start;
-    HIP_CHECK(hipEventCreate(&start));
-
-    HIP_CHECK(hipEventRecord(start, nullptr));
-    HIP_CHECK(hipEventSynchronize(start));
-
-    // create event on dev=1
-    HIP_CHECK(hipSetDevice(1));
-    hipEvent_t stop;
-    HIP_CHECK(hipEventCreate(&stop));
-
-    HIP_CHECK(hipEventRecord(stop, nullptr));
-    HIP_CHECK(hipEventSynchronize(stop));
-
-    float tElapsed = 1.0f;
-    // start on device 0 but stop on device 1
-    HIP_ASSERT(hipEventElapsedTime(&tElapsed, start, stop) == hipErrorInvalidHandle);
-
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
+  const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
+
+  // create event on dev=0
+  HIP_CHECK(hipSetDevice(0));
+  hipEvent_t start;
+  HIP_CHECK(hipEventCreate(&start));
+
+  HIP_CHECK(hipEventRecord(start, nullptr));
+  HIP_CHECK(hipEventSynchronize(start));
+
+  // create event on dev=1
+  HIP_CHECK(hipSetDevice(1));
+  hipEvent_t stop;
+  HIP_CHECK(hipEventCreate(&stop));
+
+  HIP_CHECK(hipEventRecord(stop, nullptr));
+  HIP_CHECK(hipEventSynchronize(stop));
+
+  float tElapsed = 1.0f;
+  // start on device 0 but stop on device 1
+  HIP_ASSERT(hipEventElapsedTime(&tElapsed, start, stop) == hipErrorInvalidHandle);
+
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(stop));
 }
 
 

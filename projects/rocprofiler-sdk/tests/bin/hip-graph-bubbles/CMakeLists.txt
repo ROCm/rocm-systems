@@ -40,7 +40,3 @@ target_compile_options(hip-graph-bubbles PRIVATE -W -Wall -Wextra -Wpedantic -Ws
 
 find_package(Threads REQUIRED)
 target_link_libraries(hip-graph-bubbles PRIVATE Threads::Threads)
-
-find_package(rocprofiler-sdk-roctx REQUIRED)
-target_link_libraries(hip-graph-bubbles
-                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)

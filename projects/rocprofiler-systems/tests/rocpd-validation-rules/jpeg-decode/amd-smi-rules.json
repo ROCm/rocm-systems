@@ -19,7 +19,7 @@
                     "description": "Check for jpeg_activity amd-smi metrics",
                     "error_message": "Did not find jpeg_activity in amd-smi metrics",
                     "expected_result": 1,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'JpegAct%'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE symbol LIKE 'device_jpeg_activity_%'"
                 }
             ]
         },

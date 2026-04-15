@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_gda.hpp"
+#include "log.hpp"
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
 
@@ -63,7 +64,7 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
                       num_qps * sizeof(QueuePair),
                       hipMemcpyDefault));
 
-  for (int i = 0; i < num_qps; i++) {
+  for (uint32_t i = 0; i < num_qps; i++) {
     qps[i].base_heap = base_heap;
   }
 
@@ -77,12 +78,6 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
 __host__ GDAContext::~GDAContext() {
   CHECK_HIP(hipFree(qp_counter));
   CHECK_HIP(hipFree(qps));
-}
-
-__device__ void GDAContext::ctx_create() {
-}
-
-__device__ void GDAContext::ctx_destroy(){
 }
 
 __device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems,
@@ -147,7 +142,7 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
 
 __device__ void GDAContext::fence() { //TODO: optimize
   ActiveWFInfo wf_info(ctx_id_);
-  for (int i = 0; i < num_qps; i++) {
+  for (uint32_t i = 0; i < num_qps; i++) {
     qps[i].quiet(wf_info);
   }
   __threadfence_system();
@@ -156,7 +151,7 @@ __device__ void GDAContext::fence() { //TODO: optimize
 __device__ void GDAContext::fence([[maybe_unused]] int pe) {
   //TODO: optimize
   ActiveWFInfo wf_info(ctx_id_);
-  for(int i = 0; i < num_qps_per_pe; i++) {
+  for(uint32_t i = 0; i < num_qps_per_pe; i++) {
     int qp_index = i * num_pes + pe;
     qps[qp_index].quiet(wf_info);
   }
@@ -168,8 +163,16 @@ __device__ void GDAContext::quiet() {
 }
 
 __device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {
-  for (int i = 0; i < num_qps; i++) {
+  for (uint32_t i = 0; i < num_qps; i++) {
     qps[i].quiet(wf_info);
+  }
+}
+
+__device__ void GDAContext::pe_quiet(size_t pe) {
+  ActiveWFInfo wf_info(ctx_id_);
+  for(uint32_t i = 0; i < num_qps_per_pe; i++) {
+    int qp_index = i * num_pes + pe;
+    qps[qp_index].quiet(wf_info);
   }
 }
 
@@ -339,7 +342,7 @@ __device__ void GDAContext::putmem_signal(void *dest, const void *source,
       qp_index, wf_info);
     break;
   default:
-    DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+    LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
     break;
   }
   //TODO: missing quiet_pe?
@@ -362,7 +365,7 @@ __device__ void GDAContext::putmem_signal_wg(void *dest, const void *source,
         qp_index, wf_info);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
     //TODO: missing quiet_pe?
@@ -386,7 +389,7 @@ __device__ void GDAContext::putmem_signal_wave(void *dest, const void *source,
         qp_index, wf_info);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
     //TODO: missing quiet_pe?

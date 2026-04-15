@@ -111,7 +111,7 @@ class BlitSdmaBase : public core::Blit {
   virtual bool SwapSupported() const = 0;
 };
 
-template <bool useGCR> class BlitSdma : public BlitSdmaBase {
+template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
  public:
   BlitSdma();
 
@@ -365,7 +365,7 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 
   static const uint32_t trap_command_size_;
 
-  static const uint32_t gcr_command_size_;
+  uint32_t gcr_command_size();
 
   // Max copy size of a single linear copy command packet.
   size_t max_single_linear_copy_size_;
@@ -415,10 +415,16 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
 };
 
 
-typedef BlitSdma<false> BlitSdmaV4;
+typedef BlitSdma<false, false> BlitSdmaV4;
 
 // SDMA is connected to gL2.
-typedef BlitSdma<true> BlitSdmaV5;
+typedef BlitSdma<true, false> BlitSdmaV5;
+
+// SDMA ops are done by DACC Backend so LINEAR_COPY and CONSTANT_FILL ops are
+// not cached in GL2.
+// SDMA ops support NPD field (no prior dependency)
+// SDMA OSS v7.1
+typedef BlitSdma<true, true> BlitSdmaV6;
 
 }  // namespace amd
 }  // namespace rocr
