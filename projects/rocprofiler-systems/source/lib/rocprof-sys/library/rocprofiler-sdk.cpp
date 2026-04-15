@@ -2669,6 +2669,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(!_counter_events.empty())
     {
+        // Resolve counter names to counter IDs per agent
         for(const auto& itr : _data->gpu_agents)
         {
             const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
@@ -2676,6 +2677,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
         }
 
+        // --- Dispatch-mode kernel counters ---
         ROCPROFILER_CALL(rocprofiler_create_context(&_data->counter_ctx));
 
         auto _operations = std::array<rocprofiler_tracing_operation_t, 1>{
@@ -2689,6 +2691,64 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
             _data->counter_ctx, dispatch_counting_service_callback, _data,
             counter_record_callback, _data));
+    }
+
+    // --- SDK PMC Device Counting Service (polled hardware counters) ---
+    if(!_counter_events.empty() && !_data->gpu_agents.empty())
+    {
+        ROCPROFILER_CALL(rocprofiler_create_context(&_data->sdk_pmc_ctx));
+
+        using profile_map_t =
+            std::unordered_map<uint64_t, rocprofiler_profile_config_id_t>;
+
+        // Must outlive tool_init — the set_profile callback fires on context start.
+        static auto profile_map = profile_map_t{};
+        profile_map.clear();
+
+        auto null_buffer     = rocprofiler_buffer_id_t{ 0 };
+        auto agent_ids       = std::vector<uint64_t>{};
+        auto profile_configs = std::vector<uint64_t>{};
+        auto device_indices  = std::vector<size_t>{};
+
+        auto set_profile = [](rocprofiler_context_id_t ctx, rocprofiler_agent_id_t agent,
+                              rocprofiler_device_counting_agent_cb_t set_config,
+                              void*                                  user_data) {
+            auto* map  = static_cast<profile_map_t*>(user_data);
+            auto  iter = map->find(agent.handle);
+            if(iter != map->end())
+            {
+                set_config(ctx, iter->second);
+            }
+        };
+
+        for(const auto& itr : _data->gpu_agents)
+        {
+            const auto _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
+
+            auto events_it = _data->agent_events.find(_agent_id);
+            if(events_it == _data->agent_events.end() || events_it->second.empty())
+            {
+                continue;
+            }
+
+            auto profile = rocprofiler_profile_config_id_t{};
+            ROCPROFILER_CALL(rocprofiler_create_profile_config(
+                _agent_id, events_it->second.data(), events_it->second.size(), &profile));
+
+            profile_map[_agent_id.handle] = profile;
+            agent_ids.push_back(_agent_id.handle);
+            profile_configs.push_back(profile.handle);
+            device_indices.push_back(itr.device_id);
+
+            ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
+                _data->sdk_pmc_ctx, null_buffer, _agent_id, set_profile, &profile_map));
+        }
+
+        if(!agent_ids.empty())
+        {
+            pmc::register_sdk_pmc_source(_data->sdk_pmc_ctx.handle, agent_ids,
+                                         profile_configs, device_indices);
+        }
     }
 
     for(const auto& itr : _data->get_buffers())
@@ -2801,7 +2861,6 @@ tool_fini(void* callback_data)
 void
 flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 {
-    // Get current timestamp if not provided
     if(timestamp == 0)
     {
         ROCPROFILER_CALL(rocprofiler_get_timestamp(&timestamp));

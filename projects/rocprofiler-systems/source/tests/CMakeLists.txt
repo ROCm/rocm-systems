@@ -18,18 +18,19 @@ list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-driver-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-sdk-pmc-collector-tests>)
 
 add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
 
 target_link_libraries(
     rocprof-sys-unit-tests
     PRIVATE
-        rocprofiler-systems-googletest-library
-        rocprofiler-systems-common-library
-        rocprofiler-systems-core-library
-        rocprofiler-systems::rocprofiler-systems-binary
-        $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
-        rocprofiler-systems::rocprofiler-systems-interface-library
+    rocprofiler-systems-googletest-library
+    rocprofiler-systems-common-library
+    rocprofiler-systems-core-library
+    rocprofiler-systems::rocprofiler-systems-binary
+    $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
+    rocprofiler-systems::rocprofiler-systems-interface-library
 )
 
 target_include_directories(

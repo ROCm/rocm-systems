@@ -6,8 +6,10 @@
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
 #include "library/pmc/collectors/gpu/collector.hpp"
 #include "library/pmc/collectors/gpu/perfetto_policy.hpp"
+#include "library/pmc/collectors/sdk_pmc/collector.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
 #include <cstdint>
+#include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
 #    include "library/pmc/collectors/nic/cache_policy.hpp"
@@ -24,6 +26,7 @@
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
+#include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
 #include "library/runtime.hpp"
 
 #include "library/pmc/sampler.hpp"
@@ -90,6 +93,11 @@ using provider_factory_t =
     device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
 using provider_t      = provider_factory_t::provider_t;
 using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
+
+using sdk_pmc_provider_t =
+    device_providers::rocprofiler_sdk::provider<drivers::rocprofiler_sdk::driver_factory>;
+using sdk_pmc_collector_t = collectors::sdk_pmc::collector<sdk_pmc_provider_t>;
+
 #if defined(ROCPROFSYS_BUILD_AINIC)
 using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
 #endif
@@ -101,7 +109,9 @@ using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_productio
 
 std::shared_ptr<provider_t> g_device_provider;
 
-std::unique_ptr<gpu_collector_t> g_gpu_collector;
+std::unique_ptr<gpu_collector_t>     g_gpu_collector;
+std::shared_ptr<sdk_pmc_provider_t>  g_sdk_pmc_provider;
+std::shared_ptr<sdk_pmc_collector_t> g_sdk_pmc_collector;
 #if defined(ROCPROFSYS_BUILD_AINIC)
 std::unique_ptr<nic_collector_t> g_nic_collector;
 #endif
@@ -243,6 +253,8 @@ post_process()
         slice.post_process();
     }
     g_collector_slices.clear();
+    g_sdk_pmc_collector.reset();
+    g_sdk_pmc_provider.reset();
     g_device_provider.reset();
     g_cpu_provider.reset();
 }
@@ -276,6 +288,8 @@ postfork_child_cleanup()
         slice.shutdown();
     }
     g_collector_slices.clear();
+    g_sdk_pmc_collector.reset();
+    g_sdk_pmc_provider.reset();
     g_gpu_collector.reset();
 #if defined(ROCPROFSYS_BUILD_AINIC)
     g_nic_collector.reset();
@@ -326,4 +340,42 @@ postfork_child_reset_sampler_lock()
     ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
+register_sdk_pmc_source(uint64_t context_handle, const std::vector<uint64_t>& agent_ids,
+                        const std::vector<uint64_t>& profile_configs,
+                        const std::vector<size_t>&   device_indices)
+{
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    try
+    {
+        using agent_info = pmc::device_providers::rocprofiler_sdk::agent_info;
+
+        auto context = rocprofiler_context_id_t{ context_handle };
+        auto agents  = std::vector<agent_info>{};
+        agents.reserve(agent_ids.size());
+
+        for(size_t i = 0; i < agent_ids.size(); ++i)
+        {
+            agents.push_back(
+                agent_info{ rocprofiler_agent_id_t{ agent_ids[i] },
+                            rocprofiler_counter_config_id_t{ profile_configs[i] },
+                            device_indices[i] });
+        }
+
+        g_sdk_pmc_provider =
+            std::make_shared<sdk_pmc_provider_t>(context, std::move(agents));
+        g_sdk_pmc_provider->start();
+        g_sdk_pmc_collector = std::make_shared<sdk_pmc_collector_t>(g_sdk_pmc_provider);
+
+        g_sdk_pmc_collector->setup();
+        g_sdk_pmc_collector->config();
+        g_collector_slices.emplace_back(*g_sdk_pmc_collector);
+
+        LOG_DEBUG("Registered SDK PMC source, total slices={}",
+                  g_collector_slices.size());
+    } catch(const std::runtime_error& _e)
+    {
+        LOG_ERROR("Failed to register SDK PMC source: {}", _e.what());
+    }
+}
 }  // namespace rocprofsys::pmc
