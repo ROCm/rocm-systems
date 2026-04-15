@@ -103,6 +103,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         sparse-checkout: |
+          .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
           projects/clr
           projects/hip
