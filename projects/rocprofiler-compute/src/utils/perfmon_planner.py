@@ -43,9 +43,6 @@ from utils.utils_common import (  # noqa: E402
 )
 from vendored import yaml  # noqa: E402
 
-# Local alias for internal use
-_flat_counters_in_perfmon_file = flat_counters_in_perfmon_file
-
 
 def _counter_display_ip_prefix(counter: str) -> str:
     """First IP-style token of a PMC name (column key for bucket tables)."""
@@ -364,12 +361,28 @@ def _allocate_same_bucket_groups(
     return grouped_buckets, remaining, file_count
 
 
+def _rebuild_tcc_channel_file_map(
+    output_files: list[CounterFile],
+) -> dict[str, CounterFile]:
+    """Map TCC counter base name to the bucket that holds its channel instances."""
+    result: dict[str, CounterFile] = {}
+    for bucket in output_files:
+        for ctr in flat_counters_in_perfmon_file(bucket):
+            if is_tcc_channel_counter(ctr):
+                result[ctr.split("[")[0]] = bucket
+    return result
+
+
 def allocate_buckets(
     counters: set[str],
     perfmon_config: dict[str, int],
     same_bucket_groups: list[set[str]] | None = None,
 ) -> list[CounterFile]:
-    """Allocate counters to perfmon bucket files."""
+    """Allocate counters to perfmon bucket files.
+
+    TCC channel counters (e.g., TCC_HIT[0], TCC_HIT[1]) are co-located in the
+    same bucket to match the profiling behavior in soc_base.py.
+    """
     output_files: list[CounterFile] = []
     work = sorted(list(counters))
 
@@ -398,11 +411,25 @@ def allocate_buckets(
     )
     output_files.extend(grouped_files)
 
+    # Build TCC channel co-location map (same behavior as profiling)
+    tcc_channel_file_map = _rebuild_tcc_channel_file_map(output_files)
+
     for ctr in work:
+        # TCC channel counters should be co-located with same base name
+        if is_tcc_channel_counter(ctr):
+            base_name = ctr.split("[")[0]
+            existing_bucket = tcc_channel_file_map.get(base_name)
+            if existing_bucket:
+                existing_bucket.add(ctr)
+                continue
+
         added = False
         for output_file in output_files:
             if output_file.add(ctr):
                 added = True
+                # Track TCC channel counters for co-location
+                if is_tcc_channel_counter(ctr):
+                    tcc_channel_file_map[ctr.split("[")[0]] = output_file
                 break
 
         if not added:
@@ -420,7 +447,7 @@ def _global_ip_column_widths(
     """Column order and cell widths from the longest header or counter name."""
     max_cell: dict[str, int] = {}
     for counter_file in output_files:
-        flat = _flat_counters_in_perfmon_file(counter_file)
+        flat = flat_counters_in_perfmon_file(counter_file)
         by_ip = _counters_grouped_by_ip_sorted(flat)
         for ip, names in by_ip.items():
             longest = max((len(n) for n in names), default=0)
@@ -477,7 +504,7 @@ def generate_bucket_plan(
 
     for counter_file in output_files:
         bucket_label = counter_file.file_name_txt.replace(".txt", "")
-        flat = _flat_counters_in_perfmon_file(counter_file)
+        flat = flat_counters_in_perfmon_file(counter_file)
         total_assignments += len(flat)
         buf.write(f"Bucket: {bucket_label}\n")
         if not flat:
@@ -509,7 +536,7 @@ def _counter_to_bucket_map(
     result: dict[str, str] = {}
     for counter_file in output_files:
         label = counter_file.file_name_txt.replace(".txt", "")
-        for ctr in _flat_counters_in_perfmon_file(counter_file):
+        for ctr in flat_counters_in_perfmon_file(counter_file):
             result[ctr] = label
     return result
 
@@ -688,7 +715,7 @@ def render_perfmon_plan_svg(
     total_assignments = 0
     for counter_file in output_files:
         bucket_label = counter_file.file_name_txt.replace(".txt", "")
-        flat = _flat_counters_in_perfmon_file(counter_file)
+        flat = flat_counters_in_perfmon_file(counter_file)
         total_assignments += len(flat)
 
         console.print(f"[bold blue]Bucket: {bucket_label}[/bold blue]")
