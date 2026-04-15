@@ -59,7 +59,7 @@ struct triple_buffer_shared_data_t
         size_t     size{};
     };
 
-    att_queue_t* queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
+    att_queue_t*            queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
     std::atomic<bool>       consumer_running{true};
     std::condition_variable write_cv{};
     std::atomic<size_t>     write_index{0};

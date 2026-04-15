@@ -84,7 +84,7 @@ struct att_queue_t
     hsa_agent_t                        near_cpu{};
 
     /// Function pointer for submit — allows test injection (replaces virtual dispatch).
-    void (*submit_fn)(const att_queue_t& self,
+    void (*submit_fn)(const att_queue_t&            self,
                       hsa_ext_amd_aql_pm4_packet_t* packet,
                       signal_t*                     completion){nullptr};
 };

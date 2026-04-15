@@ -113,7 +113,7 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
     size_t triple_buffer_size = params.triple_buffering ? params.buffer_size : 0ul;
-    queue = make_att_queue(*agent, triple_buffer_size);
+    queue                     = make_att_queue(*agent, triple_buffer_size);
 
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(*agent, this->params, *core, *ext);
     control_packet = factory->construct_control_packet();
@@ -257,7 +257,8 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
-    auto unique_signal = att_queue_submit_and_signal_last(*queue, control_packet_copy->before_krn_pkt);
+    auto unique_signal =
+        att_queue_submit_and_signal_last(*queue, control_packet_copy->before_krn_pkt);
     auto shared_signal = std::shared_ptr<signal_t>(std::move(unique_signal));
 
     if(params.triple_buffering)

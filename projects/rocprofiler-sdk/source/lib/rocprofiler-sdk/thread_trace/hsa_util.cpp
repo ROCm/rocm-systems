@@ -42,7 +42,7 @@ constexpr size_t QUEUE_SIZE = 256;  // Small dedicated queue for SQTT control tr
 signal_t
 signal_create()
 {
-    auto sig  = signal_t{};
+    auto  sig = signal_t{};
     auto* ext = CHECK_NOTNULL(hsa::get_amd_ext_table());
     CHECK_HSA(ext->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &sig.hsa_signal),
               "failed to create signal");
@@ -52,8 +52,8 @@ signal_create()
 signal_t
 signal_create(hsa_ext_amd_aql_pm4_packet_t* packet)
 {
-    auto sig                   = signal_create();
-    packet->completion_signal  = sig.hsa_signal;
+    auto sig                  = signal_create();
+    packet->completion_signal = sig.hsa_signal;
     signal_reset(sig);
     return sig;
 }
@@ -147,12 +147,12 @@ att_queue_create(const hsa::AgentCache& agent, size_t triple_buffer_size)
 {
     ROCP_TRACE << "Constructing Async queue.";
 
-    auto q      = att_queue_t{};
-    q.agent_id  = CHECK_NOTNULL(agent.get_rocp_agent())->id;
+    auto q        = att_queue_t{};
+    q.agent_id    = CHECK_NOTNULL(agent.get_rocp_agent())->id;
     q.buffer_size = triple_buffer_size;
-    q.hsa_agent = agent.get_hsa_agent();
-    q.near_cpu  = agent.near_cpu();
-    q.submit_fn = default_submit;
+    q.hsa_agent   = agent.get_hsa_agent();
+    q.near_cpu    = agent.near_cpu();
+    q.submit_fn   = default_submit;
 
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
     auto* ext  = CHECK_NOTNULL(hsa::get_amd_ext_table());

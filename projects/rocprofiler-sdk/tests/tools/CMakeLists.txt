@@ -61,9 +61,10 @@ set(THREAD_TRACE_TOOL_LINK_LIBRARIES
 
 # single dispatch thread trace tool
 add_library(thread-trace-single-tool SHARED)
-target_sources(thread-trace-single-tool
-               PRIVATE thread-trace-single-tool.cpp thread-trace-callbacks.cpp)
-target_link_libraries(thread-trace-single-tool PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
+target_sources(thread-trace-single-tool PRIVATE thread-trace-single-tool.cpp
+                                                thread-trace-callbacks.cpp)
+target_link_libraries(thread-trace-single-tool
+                      PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
 set_target_properties(
     thread-trace-single-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
@@ -71,8 +72,8 @@ set_target_properties(
 
 # multi dispatch thread trace tool
 add_library(thread-trace-multi-tool SHARED)
-target_sources(thread-trace-multi-tool
-               PRIVATE thread-trace-multi-tool.cpp thread-trace-callbacks.cpp)
+target_sources(thread-trace-multi-tool PRIVATE thread-trace-multi-tool.cpp
+                                               thread-trace-callbacks.cpp)
 target_link_libraries(thread-trace-multi-tool PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
 set_target_properties(
     thread-trace-multi-tool
@@ -81,8 +82,8 @@ set_target_properties(
 
 # agent (device) thread trace tool
 add_library(thread-trace-agent-tool SHARED)
-target_sources(thread-trace-agent-tool
-               PRIVATE thread-trace-agent-tool.cpp thread-trace-callbacks.cpp)
+target_sources(thread-trace-agent-tool PRIVATE thread-trace-agent-tool.cpp
+                                               thread-trace-callbacks.cpp)
 target_link_libraries(thread-trace-agent-tool PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
 set_target_properties(
     thread-trace-agent-tool
@@ -91,7 +92,8 @@ set_target_properties(
 
 # triple buffer thread trace tool
 add_library(thread-trace-triple-buffer-tool SHARED)
-target_sources(thread-trace-triple-buffer-tool PRIVATE thread-trace-triple-buffer-tool.cpp)
+target_sources(thread-trace-triple-buffer-tool
+               PRIVATE thread-trace-triple-buffer-tool.cpp)
 target_link_libraries(thread-trace-triple-buffer-tool
                       PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
 set_target_properties(

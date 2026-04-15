@@ -16,8 +16,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "$<TARGET_FILE:thread-trace-single-tool>"
-)
+    PRELOAD "$<TARGET_FILE:thread-trace-single-tool>")
 
 # Multi dispatch test
 rocprofiler_add_integration_execute_test(
@@ -25,8 +24,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "$<TARGET_FILE:thread-trace-multi-tool>"
-)
+    PRELOAD "$<TARGET_FILE:thread-trace-multi-tool>")
 
 # Agent profiling test
 rocprofiler_add_integration_execute_test(
@@ -34,8 +32,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
-    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
-)
+    PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>")
 
 # Feature introduced in ROCm 7.1, however some pre-release CI builds for 7.1 dont have
 # this feature in aqlprofile. Disable the next tests for ROCm < 7.2.

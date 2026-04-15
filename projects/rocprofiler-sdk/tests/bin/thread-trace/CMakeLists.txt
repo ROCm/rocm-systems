@@ -42,6 +42,5 @@ target_sources(thread-trace-test-app PRIVATE main.cpp kernel_branch.cpp kernel_l
 
 find_package(rocprofiler-sdk-roctx REQUIRED)
 target_link_libraries(
-    thread-trace-test-app
-    PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
-            rocprofiler-sdk::tests-build-flags)
+    thread-trace-test-app PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+                                  rocprofiler-sdk::tests-build-flags)

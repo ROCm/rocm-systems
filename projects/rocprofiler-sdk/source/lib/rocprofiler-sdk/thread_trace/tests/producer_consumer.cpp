@@ -75,12 +75,7 @@ mock_submit(const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, signal_t*)
 {}
 
 void
-copy_data_mock(void*       dst,
-               const void* src,
-               hsa_agent_t,
-               hsa_agent_t,
-               size_t size,
-               signal_t*)
+copy_data_mock(void* dst, const void* src, hsa_agent_t, hsa_agent_t, size_t size, signal_t*)
 {
     std::memcpy(dst, src, size);
 }
@@ -88,7 +83,7 @@ copy_data_mock(void*       dst,
 att_queue_ptr_t
 make_mock_queue(const hsa::AgentCache& agent)
 {
-    auto q = make_att_queue(agent, MOCK_BUFFER_SIZE);
+    auto q       = make_att_queue(agent, MOCK_BUFFER_SIZE);
     q->submit_fn = mock_submit;
     return q;
 }
@@ -158,11 +153,10 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     for(size_t i = 0; i < worker_data->buffers.size(); i++)
         worker_data->buffers.at(i).memory = mock_queue->triple_buffer_memory.at(i);
 
-    auto start_signal = std::shared_ptr<signal_t>(
-        new signal_t{signal_create()}, [](signal_t* s) {
-            signal_destroy(*s);
-            delete s;
-        });
+    auto start_signal = std::shared_ptr<signal_t>(new signal_t{signal_create()}, [](signal_t* s) {
+        signal_destroy(*s);
+        delete s;
+    });
 
     auto producer_data             = triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;

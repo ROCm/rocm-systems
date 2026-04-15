@@ -41,7 +41,8 @@ constexpr double SQTT_BANDWIDTH_DEFAULT = 70E9;  // 70GB/s, for wiggle room
 
 namespace
 {
-// RAII wrapper for signal_t used in .cpp scope (classes allowed in .cpp per CONTRIBUTING.md rule #8)
+// RAII wrapper for signal_t used in .cpp scope (classes allowed in .cpp per CONTRIBUTING.md rule
+// #8)
 struct scoped_signal_t
 {
     signal_t sig;
@@ -49,7 +50,7 @@ struct scoped_signal_t
     : sig{signal_create()}
     {}
     ~scoped_signal_t() { signal_destroy(sig); }
-    scoped_signal_t(const scoped_signal_t&)            = delete;
+    scoped_signal_t(const scoped_signal_t&) = delete;
     scoped_signal_t& operator=(const scoped_signal_t&) = delete;
 };
 
@@ -93,8 +94,7 @@ copy_data_sync(void*       dst,
     auto copy_fn = CHECK_NOTNULL(hsa::get_amd_ext_table())->hsa_amd_memory_async_copy_fn;
 
     signal_reset(signal.sig);
-    auto status =
-        copy_fn(dst, dst_agent, src, src_agent, size, 1, &dep, signal_get(signal.sig));
+    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 1, &dep, signal_get(signal.sig));
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy: " << status;
     signal_wait(signal.sig);
 }
@@ -268,7 +268,7 @@ producer_loop(
                                          true);
 
                     att_queue_submit_and_signal_last(queue,
-                                                    parameters.control_packet->before_krn_pkt);
+                                                     parameters.control_packet->before_krn_pkt);
                 }
             }
             // The status_query test verifies we immediately poll again after consuming a
