@@ -38,7 +38,7 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
 
 void ScratchLoadU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -64,7 +64,7 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
 
 void ScratchLoadI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -91,7 +91,7 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
 
 void ScratchLoadU16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -117,7 +117,7 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
 
 void ScratchLoadI16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -144,7 +144,7 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
 
 void ScratchLoadB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -170,7 +170,7 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
 
 void ScratchLoadB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;
@@ -196,7 +196,7 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
 
 void ScratchLoadB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
@@ -222,7 +222,7 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
 
 void ScratchLoadB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
@@ -260,7 +260,7 @@ void ScratchStoreB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -294,7 +294,7 @@ void ScratchStoreB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -328,7 +328,7 @@ void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -362,9 +362,9 @@ void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -398,11 +398,11 @@ void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 1, lane);
     std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 2, lane);
     std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
   }
   set_data(std::move(d));
@@ -436,13 +436,13 @@ void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc + 3, lane);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -464,7 +464,7 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
 
 void ScratchLoadD16U8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -490,7 +490,7 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
 
 void ScratchLoadD16I8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -517,7 +517,7 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
 
 void ScratchLoadD16B16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -543,7 +543,7 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
 
 void ScratchLoadD16HiU8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -569,7 +569,7 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
 
 void ScratchLoadD16HiI8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -596,7 +596,7 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
 
 void ScratchLoadD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -634,7 +634,7 @@ void ScratchStoreD16HiB8Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -668,7 +668,7 @@ void ScratchStoreD16HiB16Vscratch::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vsrc, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.vsrc, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));

@@ -1156,25 +1156,54 @@ class CodeGenerator:
             return self._gen_ds_atomic(dst_ops, src_ops, sem)
 
         if cls == 'ds_permute':
-            # DS_PERMUTE_B32: forward lane permute.
-            #   For each active lane: vdst[lane] = src0[addr[lane] / 4]
-            # DS_BPERMUTE_B32: backward lane permute.
-            #   For each active lane: vdst[lane] = src0[addr[lane] / 4]
-            # Both use addr as a byte offset into the wave (divided by 4
-            # to get a lane index). The data source is always src0 (data0).
+            is_bpermute = 'BPERMUTE' in sem.name.upper()
             L.append(f'  auto &cu = wf.cu();')
             L.append(f'  uint64_t exec = wf.exec();')
             L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
-            L.append(f'  // Pre-read all src0 (data0) values.')
+            L.append(f'  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
+            L.append(f'  // Pre-read all data0 values from every lane.')
             L.append(f'  uint32_t src_data[64];')
             L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i)')
             L.append(f'    src_data[i] = cu.read_vgpr(vb + inst_.data0, i);')
-            L.append(f'  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{')
-            L.append(f'    if (!(exec & (1ULL << lane))) continue;')
-            L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, lane);')
-            L.append(f'    uint32_t src_lane = (addr_val / 4) % wf.wf_size();')
-            L.append(f'    cu.write_vgpr(vb + inst_.vdst, lane, src_data[src_lane]);')
-            L.append(f'  }}')
+            if is_bpermute:
+                # DS_BPERMUTE_B32 (ISA spec pseudocode, page 476):
+                #   tmp[i] = 0 for all lanes
+                #   for i in 0..63:
+                #     src_lane = (VGPR[i][ADDR] + OFFSET) / 4 % 64
+                #     if EXEC[src_lane]: tmp[i] = VGPR[src_lane][DATA0]
+                #   for i in 0..63:
+                #     if EXEC[i]: VGPR[i][VDST] = tmp[i]
+                L.append(f'  uint32_t tmp[64] = {{}};')
+                L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
+                L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
+                L.append(f'    uint32_t src_lane = ((addr_val + offset) / 4) % wf.wf_size();')
+                L.append(f'    if (exec & (1ULL << src_lane))')
+                L.append(f'      tmp[i] = src_data[src_lane];')
+                L.append(f'  }}')
+                L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
+                L.append(f'    if (exec & (1ULL << i))')
+                L.append(f'      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);')
+                L.append(f'  }}')
+            else:
+                # DS_PERMUTE_B32 (ISA spec pseudocode, page 475):
+                #   tmp[i] = 0 for all lanes
+                #   for i in 0..63:
+                #     if EXEC[i]:
+                #       dst_lane = (VGPR[i][ADDR] + OFFSET) / 4 % 64
+                #       tmp[dst_lane] = VGPR[i][DATA0]
+                #   for i in 0..63:
+                #     if EXEC[i]: VGPR[i][VDST] = tmp[i]
+                L.append(f'  uint32_t tmp[64] = {{}};')
+                L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
+                L.append(f'    if (!(exec & (1ULL << i))) continue;')
+                L.append(f'    uint32_t addr_val = cu.read_vgpr(vb + inst_.addr, i);')
+                L.append(f'    uint32_t dst_lane = ((addr_val + offset) / 4) % wf.wf_size();')
+                L.append(f'    tmp[dst_lane] = src_data[i];')
+                L.append(f'  }}')
+                L.append(f'  for (uint32_t i = 0; i < wf.wf_size(); ++i) {{')
+                L.append(f'    if (exec & (1ULL << i))')
+                L.append(f'      cu.write_vgpr(vb + inst_.vdst, i, tmp[i]);')
+                L.append(f'  }}')
             return '\n'.join(L)
 
         if cls == 'ds_swizzle':
@@ -1246,6 +1275,9 @@ class CodeGenerator:
         L.append('  uint64_t exec = wf.exec();')
         if is_cmpx:
             L.append('  uint64_t result = 0;')
+        elif dst:
+            # VOP3: initialize from destination register for inactive lanes.
+            L.append(f'  uint64_t vcc = {dst[0]}.read_scalar64(wf);')
         else:
             L.append('  uint64_t vcc = wf.vcc();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -2141,11 +2173,15 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_scalar_saveexec(self, dst: list[str], src: list[str], op: str | None) -> str:
-        """Generate saveexec body."""
+        """Generate saveexec body.
+
+        Per the ISA spec, all sources are read before any destination is written.
+        Reading ssrc0 before writing sdst prevents aliasing bugs when sdst == ssrc0.
+        """
         L = []
         L.append('  uint64_t old_exec = wf.exec();')
-        L.append(f'  {dst[0]}.write_scalar64(wf, old_exec);')
         L.append(f'  uint64_t src = {src[0]}.read_scalar64(wf);')
+        L.append(f'  {dst[0]}.write_scalar64(wf, old_exec);')
         saveexec_map = {
             'and': 'old_exec & src',
             'or': 'old_exec | src',
@@ -2153,10 +2189,10 @@ class CodeGenerator:
             'nand': '~(old_exec & src)',
             'nor': '~(old_exec | src)',
             'xnor': '~(old_exec ^ src)',
-            'andn1': 'src & ~old_exec',
-            'andn2': 'old_exec & ~src',
-            'orn1': 'src | ~old_exec',
-            'orn2': 'old_exec | ~src',
+            'andn1': '~src & old_exec',
+            'andn2': 'src & ~old_exec',
+            'orn1': '~src | old_exec',
+            'orn2': 'src | ~old_exec',
             # RDNA3/4 not0/not1 variants
             'and_not0': 'old_exec & ~src',
             'or_not0': 'old_exec | ~src',
@@ -2167,6 +2203,10 @@ class CodeGenerator:
             L.append('  (void)src;')
         expr = saveexec_map.get(op, f'old_exec /* TODO: {op} */')
         L.append(f'  uint64_t result = {expr};')
+        L.append(f'  util::Logger::vm([&](auto &os) {{')
+        L.append(f'    os << std::format("saveexec ssrc0_ev={{}} src={{:#x}} exec={{:#x}}->{{:#x}}",')
+        L.append(f'                      {src[0]}.encoding_value(), src, old_exec, result);')
+        L.append(f'  }});')
         L.append('  wf.set_exec(result);')
         L.append('  wf.write_scc(result != 0);')
         return '\n'.join(L)
@@ -3114,10 +3154,17 @@ class CodeGenerator:
 
         VOPC (VOP2-like): result always goes to VCC.
         VOP3: result goes to dst[0] (explicit SGPR pair, may be VCC or any SGPR).
+        Inactive lanes preserve the destination register's existing bits.
         """
         L = []
         L.append('  uint64_t exec = wf.exec();')
-        L.append('  uint64_t vcc = wf.vcc();')
+        if dst:
+            # VOP3: initialize from the destination register so inactive
+            # lanes preserve its existing bits (not VCC).
+            L.append(f'  uint64_t vcc = {dst[0]}.read_scalar64(wf);')
+        else:
+            # VOPC: destination is VCC.
+            L.append('  uint64_t vcc = wf.vcc();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -3993,12 +4040,25 @@ class CodeGenerator:
         }
         return _MAP.get(sem_class)
 
+    @property
+    def _acc_vgpr_expr(self) -> str:
+        """AccVGPR offset expression for the current encoding.
+
+        When the encoding has an ``acc`` bit field and acc=1, data/vdata/vdst
+        references AccVGPRs (physical +256). For encodings without ``acc``
+        (CDNA1 DS/FLAT, all RDNA), returns ``0u``.
+        """
+        if hasattr(self, '_current_inst_fields') and 'acc' in self._current_inst_fields:
+            return '(inst_.acc ? 256u : 0u)'
+        return '0u'
+
     def _gen_flat_load(self, dst: list[str], src: list[str], sem: InstructionSemantics) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         sc0, sc1, nt = self._coherency_exprs()
+        acc = self._acc_vgpr_expr
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
-        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = true;')
@@ -4015,6 +4075,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         sc0, sc1, nt = self._coherency_exprs()
+        acc = self._acc_vgpr_expr
         data_field = self.isa_spec.profile.flat_store_src_field
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->elem_size = {esz};')
@@ -4031,16 +4092,15 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
             if esz == 4:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field} + {i}, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.{data_field} + {i}, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 4);')
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field}, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.{data_field}, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);')
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field}, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.{data_field}, lane);')
                 L.append(f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
-        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -4082,7 +4142,8 @@ class CodeGenerator:
         L = []
         sc0, sc1, nt = self._coherency_exprs()
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
-        L.append('  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        acc = self._acc_vgpr_expr
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = ({sc0} != 0);')
@@ -4098,7 +4159,7 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(data_dwords):
-            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.{data_field} + {i}, lane);')
+            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.{data_field} + {i}, lane);')
             L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);')
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
@@ -4117,8 +4178,9 @@ class CodeGenerator:
 
         L = []
         sc0, sc1, nt = self._coherency_exprs()
+        acc = self._acc_vgpr_expr
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
-        L.append('  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdata;')
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
         L.append(f'  d->is_load = ({sc0} != 0);')
@@ -4133,7 +4195,7 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(data_dwords):
-            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + {i}, lane);')
+            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.vdata + {i}, lane);')
             L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);')
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
@@ -4151,8 +4213,9 @@ class CodeGenerator:
         data_dwords = sem.num_elems or 1
 
         L = []
+        acc = self._acc_vgpr_expr
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
-        L.append('  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
         # DS atomics always return the old value (like GLC=1).
@@ -4166,7 +4229,7 @@ class CodeGenerator:
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(data_dwords):
-            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + {i}, lane);')
+            L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0 + {i}, lane);')
             L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);')
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
@@ -4203,8 +4266,9 @@ class CodeGenerator:
             L.append('    set_data(std::move(d));')
             L.append('    return;')
             L.append('  }')
+        acc = self._acc_vgpr_expr
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
-        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdata;')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdata;')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = true;')
@@ -4213,7 +4277,6 @@ class CodeGenerator:
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append(f'  {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
-        # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -4221,6 +4284,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         sc0, sc1, nt = self._coherency_exprs()
+        acc = self._acc_vgpr_expr
         addr_fn = 'mtbuf_calculate_addresses' if cls == 'tbuffer_store' else 'mubuf_calculate_addresses'
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);')
         L.append(f'  d->elem_size = {esz};')
@@ -4237,13 +4301,13 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
             if esz >= 4:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata + {i}, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.vdata + {i}, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, {esz});')
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.vdata, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);')
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.vdata, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.vdata, lane);')
                 L.append(f'    d->store_data[lane * {stride} + {i}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
@@ -4253,8 +4317,9 @@ class CodeGenerator:
     def _gen_ds_read(self, dst: list[str], src: list[str], sem: InstructionSemantics) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        acc = self._acc_vgpr_expr
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
-        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = true;')
@@ -4268,6 +4333,7 @@ class CodeGenerator:
     def _gen_ds_write(self, dst: list[str], src: list[str], sem: InstructionSemantics) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        acc = self._acc_vgpr_expr
         L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -4283,18 +4349,18 @@ class CodeGenerator:
             off = i * esz
             if esz == 8:
                 vgpr_base = i * 2
-                L.append(f'    uint32_t lo{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + {vgpr_base}, lane);')
-                L.append(f'    uint32_t hi{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + {vgpr_base + 1}, lane);')
+                L.append(f'    uint32_t lo{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0 + {vgpr_base}, lane);')
+                L.append(f'    uint32_t hi{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0 + {vgpr_base + 1}, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &lo{i}, 4);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {off + 4}], &hi{i}, 4);')
             elif esz == 4:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + {i}, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0 + {i}, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 4);')
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0, lane);')
                 L.append(f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 2);')
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);')
+                L.append(f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0, lane);')
                 L.append(f'    d->store_data[lane * {stride} + {off}] = static_cast<uint8_t>(val{i});')
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
@@ -4650,6 +4716,7 @@ class CodeGenerator:
                         else None
                     )
                     if sem:
+                        self._current_inst_fields = inst_field_names
                         body = self._gen_execute_body(inst, sem, enc.enc_name)
                         # VOP1/VOP2: prepend DPP preamble so the encoding
                         # base's apply_dpp() runs before the ALU logic.

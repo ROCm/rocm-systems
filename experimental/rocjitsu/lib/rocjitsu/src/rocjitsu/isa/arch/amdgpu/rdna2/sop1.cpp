@@ -665,9 +665,13 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
 
 void SAndSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec & src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -689,9 +693,13 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
 
 void SOrSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec | src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -713,9 +721,13 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
 
 void SXorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec ^ src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -775,9 +787,13 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
 
 void SNandSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec & src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -799,9 +815,13 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
 
 void SNorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec | src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -823,9 +843,13 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
 
 void SXnorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec ^ src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1080,9 +1104,13 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
 
 void SAndSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec & src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1104,9 +1132,13 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
 
 void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec | src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1128,9 +1160,13 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
 
 void SXorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec ^ src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1190,9 +1226,13 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
 
 void SNandSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec & src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1214,9 +1254,13 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
 
 void SNorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec | src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1238,9 +1282,13 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
 
 void SXnorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
+  sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec ^ src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }

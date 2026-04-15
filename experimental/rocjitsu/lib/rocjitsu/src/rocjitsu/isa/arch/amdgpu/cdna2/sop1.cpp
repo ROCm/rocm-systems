@@ -711,9 +711,13 @@ SAndn2SaveexecB64Sop1::SAndn2SaveexecB64Sop1(const MachineInst *inst)
 
 void SAndn2SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
-  uint64_t result = old_exec & ~src;
+  sdst.write_scalar64(wf, old_exec);
+  uint64_t result = src & ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -735,9 +739,13 @@ SOrn2SaveexecB64Sop1::SOrn2SaveexecB64Sop1(const MachineInst *inst)
 
 void SOrn2SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
-  uint64_t result = old_exec | ~src;
+  sdst.write_scalar64(wf, old_exec);
+  uint64_t result = src | ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -968,9 +976,13 @@ SAndn1SaveexecB64Sop1::SAndn1SaveexecB64Sop1(const MachineInst *inst)
 
 void SAndn1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
-  uint64_t result = src & ~old_exec;
+  sdst.write_scalar64(wf, old_exec);
+  uint64_t result = ~src & old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -992,9 +1004,13 @@ SOrn1SaveexecB64Sop1::SOrn1SaveexecB64Sop1(const MachineInst *inst)
 
 void SOrn1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  sdst.write_scalar64(wf, old_exec);
   uint64_t src = ssrc0.read_scalar64(wf);
-  uint64_t result = src | ~old_exec;
+  sdst.write_scalar64(wf, old_exec);
+  uint64_t result = ~src | old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}", ssrc0.encoding_value(),
+                      src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }

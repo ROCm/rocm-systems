@@ -6578,7 +6578,7 @@ VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
 
 void VCmpClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6722,7 +6722,7 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
 
 void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6835,7 +6835,7 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
 
 void VCmpFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6859,7 +6859,7 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
 
 void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6896,7 +6896,7 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
 
 void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6933,7 +6933,7 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
 
 void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6970,7 +6970,7 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
 
 void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7007,7 +7007,7 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
 
 void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7044,7 +7044,7 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
 
 void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7080,7 +7080,7 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
 
 void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7116,7 +7116,7 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
 
 void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7153,7 +7153,7 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
 
 void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7190,7 +7190,7 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
 
 void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7227,7 +7227,7 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
 
 void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7264,7 +7264,7 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
 
 void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7301,7 +7301,7 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
 
 void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7338,7 +7338,7 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
 
 void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7375,7 +7375,7 @@ VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
 
 void VCmpTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7952,7 +7952,7 @@ VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
 
 void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -7976,7 +7976,7 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
 
 void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8013,7 +8013,7 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
 
 void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8050,7 +8050,7 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
 
 void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8087,7 +8087,7 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
 
 void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8124,7 +8124,7 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
 
 void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8161,7 +8161,7 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
 
 void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8197,7 +8197,7 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
 
 void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8233,7 +8233,7 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
 
 void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8270,7 +8270,7 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
 
 void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8307,7 +8307,7 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
 
 void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8344,7 +8344,7 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
 
 void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8381,7 +8381,7 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
 
 void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8418,7 +8418,7 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
 
 void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8455,7 +8455,7 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
 
 void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -8492,7 +8492,7 @@ VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst)
 
 void VCmpTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9069,7 +9069,7 @@ VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
 
 void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9329,7 +9329,7 @@ VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst)
 
 void VCmpTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9657,7 +9657,7 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
 
 void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9686,7 +9686,7 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
 
 void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9715,7 +9715,7 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
 
 void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9744,7 +9744,7 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
 
 void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9773,7 +9773,7 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
 
 void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9802,7 +9802,7 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
 
 void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9863,7 +9863,7 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
 
 void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9892,7 +9892,7 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
 
 void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9921,7 +9921,7 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
 
 void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9950,7 +9950,7 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
 
 void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -9979,7 +9979,7 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
 
 void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10008,7 +10008,7 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
 
 void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10456,7 +10456,7 @@ VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
 
 void VCmpFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10480,7 +10480,7 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
 
 void VCmpLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10509,7 +10509,7 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
 
 void VCmpEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10538,7 +10538,7 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
 
 void VCmpLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10567,7 +10567,7 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
 
 void VCmpGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10596,7 +10596,7 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
 
 void VCmpNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10625,7 +10625,7 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
 
 void VCmpGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10653,7 +10653,7 @@ VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
 
 void VCmpTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10676,7 +10676,7 @@ VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
 
 void VCmpFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10700,7 +10700,7 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
 
 void VCmpLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10729,7 +10729,7 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
 
 void VCmpEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10758,7 +10758,7 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
 
 void VCmpLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10787,7 +10787,7 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
 
 void VCmpGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10816,7 +10816,7 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
 
 void VCmpNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10845,7 +10845,7 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
 
 void VCmpGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10873,7 +10873,7 @@ VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
 
 void VCmpTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -11332,7 +11332,7 @@ VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
 
 void VCmpFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -11457,7 +11457,7 @@ VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
 
 void VCmpTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -11480,7 +11480,7 @@ VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
 
 void VCmpFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -11605,7 +11605,7 @@ VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
 
 void VCmpTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

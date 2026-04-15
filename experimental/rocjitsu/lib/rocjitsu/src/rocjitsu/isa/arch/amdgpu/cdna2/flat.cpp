@@ -36,7 +36,7 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
 
 void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -60,7 +60,7 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
 
 void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -85,7 +85,7 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
 
 void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -109,7 +109,7 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
 
 void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -134,7 +134,7 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
 
 void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -158,7 +158,7 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
 
 void FlatLoadDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;
@@ -182,7 +182,7 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
 
 void FlatLoadDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
@@ -206,7 +206,7 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
 
 void FlatLoadDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
@@ -242,7 +242,7 @@ void FlatStoreByteFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -274,7 +274,7 @@ void FlatStoreByteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -306,7 +306,7 @@ void FlatStoreShortFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -338,7 +338,7 @@ void FlatStoreShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -370,7 +370,8 @@ void FlatStoreDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -402,9 +403,11 @@ void FlatStoreDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -436,11 +439,14 @@ void FlatStoreDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 2, lane);
+    uint32_t val2 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 2, lane);
     std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
   }
   set_data(std::move(d));
@@ -473,13 +479,17 @@ void FlatStoreDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 2, lane);
+    uint32_t val2 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 3, lane);
+    uint32_t val3 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -499,7 +509,7 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
 
 void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -523,7 +533,7 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
 
 void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -547,7 +557,7 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
 
 void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -572,7 +582,7 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
 
 void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -597,7 +607,7 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
 
 void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -621,7 +631,7 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
 
 void FlatLoadShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -647,7 +657,7 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
 
 void FlatAtomicSwapFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -661,7 +671,8 @@ void FlatAtomicSwapFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -683,7 +694,7 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
 
 void FlatAtomicCmpswapFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -697,9 +708,11 @@ void FlatAtomicCmpswapFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -721,7 +734,7 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
 
 void FlatAtomicAddFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -735,7 +748,8 @@ void FlatAtomicAddFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -757,7 +771,7 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
 
 void FlatAtomicSubFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -771,7 +785,8 @@ void FlatAtomicSubFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -793,7 +808,7 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
 
 void FlatAtomicSminFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -807,7 +822,8 @@ void FlatAtomicSminFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -829,7 +845,7 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
 
 void FlatAtomicUminFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -843,7 +859,8 @@ void FlatAtomicUminFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -865,7 +882,7 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
 
 void FlatAtomicSmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -879,7 +896,8 @@ void FlatAtomicSmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -901,7 +919,7 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
 
 void FlatAtomicUmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -915,7 +933,8 @@ void FlatAtomicUmaxFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -937,7 +956,7 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
 
 void FlatAtomicAndFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -951,7 +970,8 @@ void FlatAtomicAndFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -973,7 +993,7 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
 
 void FlatAtomicOrFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -987,7 +1007,8 @@ void FlatAtomicOrFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1009,7 +1030,7 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
 
 void FlatAtomicXorFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1023,7 +1044,8 @@ void FlatAtomicXorFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1045,7 +1067,7 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
 
 void FlatAtomicIncFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1059,7 +1081,8 @@ void FlatAtomicIncFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1081,7 +1104,7 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
 
 void FlatAtomicDecFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1095,7 +1118,8 @@ void FlatAtomicDecFlat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1117,7 +1141,7 @@ FlatAtomicAddF64Flat::FlatAtomicAddF64Flat(const MachineInst *inst)
 
 void FlatAtomicAddF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1131,9 +1155,11 @@ void FlatAtomicAddF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1155,7 +1181,7 @@ FlatAtomicMinF64Flat::FlatAtomicMinF64Flat(const MachineInst *inst)
 
 void FlatAtomicMinF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1169,9 +1195,11 @@ void FlatAtomicMinF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1193,7 +1221,7 @@ FlatAtomicMaxF64Flat::FlatAtomicMaxF64Flat(const MachineInst *inst)
 
 void FlatAtomicMaxF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1207,9 +1235,11 @@ void FlatAtomicMaxF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1231,7 +1261,7 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
 
 void FlatAtomicSwapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1245,9 +1275,11 @@ void FlatAtomicSwapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1270,7 +1302,7 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
 
 void FlatAtomicCmpswapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1284,13 +1316,17 @@ void FlatAtomicCmpswapX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 2, lane);
+    uint32_t val2 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 3, lane);
+    uint32_t val3 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -1312,7 +1348,7 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
 
 void FlatAtomicAddX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1326,9 +1362,11 @@ void FlatAtomicAddX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1350,7 +1388,7 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
 
 void FlatAtomicSubX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1364,9 +1402,11 @@ void FlatAtomicSubX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1388,7 +1428,7 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
 
 void FlatAtomicSminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1402,9 +1442,11 @@ void FlatAtomicSminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1426,7 +1468,7 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
 
 void FlatAtomicUminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1440,9 +1482,11 @@ void FlatAtomicUminX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1464,7 +1508,7 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
 
 void FlatAtomicSmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1478,9 +1522,11 @@ void FlatAtomicSmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1502,7 +1548,7 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
 
 void FlatAtomicUmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1516,9 +1562,11 @@ void FlatAtomicUmaxX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1540,7 +1588,7 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
 
 void FlatAtomicAndX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1554,9 +1602,11 @@ void FlatAtomicAndX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1578,7 +1628,7 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
 
 void FlatAtomicOrX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1592,9 +1642,11 @@ void FlatAtomicOrX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1616,7 +1668,7 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
 
 void FlatAtomicXorX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1630,9 +1682,11 @@ void FlatAtomicXorX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1654,7 +1708,7 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
 
 void FlatAtomicIncX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1668,9 +1722,11 @@ void FlatAtomicIncX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1692,7 +1748,7 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
 
 void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
@@ -1706,9 +1762,11 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 0, lane);
+    uint32_t val0 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data + 1, lane);
+    uint32_t val1 =
+        cu.read_vgpr(wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));

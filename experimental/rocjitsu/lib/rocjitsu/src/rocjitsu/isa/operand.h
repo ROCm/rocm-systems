@@ -31,8 +31,10 @@ public:
   virtual ~Operand() = default;
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
-  /// @returns Operand name string.
   virtual std::string name() const { return std::to_string(encoding_value_); }
+
+  /// @brief Raw encoding value from the instruction binary.
+  int encoding_value() const { return encoding_value_; }
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.

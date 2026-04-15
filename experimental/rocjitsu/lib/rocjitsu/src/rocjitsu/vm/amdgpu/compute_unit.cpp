@@ -387,31 +387,74 @@ bool ComputeUnitCore::step() {
                         active->exec(), active->wf_id());
   });
 
-  // Per-instruction trace with operand values (zone 0).
+  // Per-instruction trace: snapshot registers and flags for wf0.
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
-    if (active->wf_id() == 0 && active->trace_inst_count_ <= 100) {
-      uint32_t sb = active->sgpr_alloc().base;
-      uint32_t vb = active->vgpr_alloc().base;
-      util::Logger::vm("BEFORE #", active->trace_inst_count_, " pc=0x", std::hex, active->pc, " ",
-                       inst->mnemonic(), " s[0:3]=[", read_sgpr(sb), ",", read_sgpr(sb + 1), ",",
-                       read_sgpr(sb + 2), ",", read_sgpr(sb + 3), "] v[0:3][0]=[", read_vgpr(vb, 0),
-                       ",", read_vgpr(vb + 1, 0), ",", read_vgpr(vb + 2, 0), ",",
-                       read_vgpr(vb + 3, 0), "] vcc=", active->vcc(), " exec=", active->exec(),
-                       std::dec);
+    if (active->wf_id() == 0 && active->trace_inst_count_ <= 2000 && active->num_vgprs_ >= 32) {
+      util::Logger::vm([&](auto &os) {
+        uint32_t sb = active->sgpr_alloc().base;
+        uint32_t vb = active->vgpr_alloc().base;
+        os << std::format(
+            "EXECUTE #{} pc={:#x} {} w={:08x},{:08x}"
+            " s[0:7]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            " s[8:15]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
+            active->trace_inst_count_, active->pc, inst->mnemonic(), words[0], words[1],
+            read_sgpr(sb), read_sgpr(sb + 1), read_sgpr(sb + 2), read_sgpr(sb + 3),
+            read_sgpr(sb + 4), read_sgpr(sb + 5), read_sgpr(sb + 6), read_sgpr(sb + 7),
+            read_sgpr(sb + 8), read_sgpr(sb + 9), read_sgpr(sb + 10), read_sgpr(sb + 11),
+            read_sgpr(sb + 12), read_sgpr(sb + 13), read_sgpr(sb + 14), read_sgpr(sb + 15));
+        os << std::format(
+            " s[16:31]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            ",{:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            " v[0:7]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            " v[8:15]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            " scc={} vcc={:x} exec={:x}",
+            read_sgpr(sb + 16), read_sgpr(sb + 17), read_sgpr(sb + 18), read_sgpr(sb + 19),
+            read_sgpr(sb + 20), read_sgpr(sb + 21), read_sgpr(sb + 22), read_sgpr(sb + 23),
+            read_sgpr(sb + 24), read_sgpr(sb + 25), read_sgpr(sb + 26), read_sgpr(sb + 27),
+            read_sgpr(sb + 28), read_sgpr(sb + 29), read_sgpr(sb + 30), read_sgpr(sb + 31),
+            read_vgpr(vb, 0), read_vgpr(vb + 1, 0), read_vgpr(vb + 2, 0), read_vgpr(vb + 3, 0),
+            read_vgpr(vb + 4, 0), read_vgpr(vb + 5, 0), read_vgpr(vb + 6, 0), read_vgpr(vb + 7, 0),
+            read_vgpr(vb + 8, 0), read_vgpr(vb + 9, 0), read_vgpr(vb + 10, 0),
+            read_vgpr(vb + 11, 0), read_vgpr(vb + 12, 0), read_vgpr(vb + 13, 0),
+            read_vgpr(vb + 14, 0), read_vgpr(vb + 15, 0), active->read_scc(), active->vcc(),
+            active->exec());
+      });
     }
   }
 
   execute_instruction(inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
-    if (active->wf_id() == 0 && active->trace_inst_count_ <= 100) {
-      uint32_t sb = active->sgpr_alloc().base;
-      uint32_t vb = active->vgpr_alloc().base;
-      util::Logger::vm("AFTER  #", active->trace_inst_count_, " s[0:3]=[", std::hex, read_sgpr(sb),
-                       ",", read_sgpr(sb + 1), ",", read_sgpr(sb + 2), ",", read_sgpr(sb + 3),
-                       "] v[0:3][0]=[", read_vgpr(vb, 0), ",", read_vgpr(vb + 1, 0), ",",
-                       read_vgpr(vb + 2, 0), ",", read_vgpr(vb + 3, 0), "] vcc=", active->vcc(),
-                       std::dec);
+    if (active->wf_id() == 0 && active->trace_inst_count_ <= 2000 && active->num_vgprs_ >= 32) {
+      util::Logger::vm([&](auto &os) {
+        uint32_t sb = active->sgpr_alloc().base;
+        uint32_t vb = active->vgpr_alloc().base;
+        os << std::format("RESULT  #{}"
+                          " s[0:7]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+                          " s[8:15]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}",
+                          active->trace_inst_count_, read_sgpr(sb), read_sgpr(sb + 1),
+                          read_sgpr(sb + 2), read_sgpr(sb + 3), read_sgpr(sb + 4),
+                          read_sgpr(sb + 5), read_sgpr(sb + 6), read_sgpr(sb + 7),
+                          read_sgpr(sb + 8), read_sgpr(sb + 9), read_sgpr(sb + 10),
+                          read_sgpr(sb + 11), read_sgpr(sb + 12), read_sgpr(sb + 13),
+                          read_sgpr(sb + 14), read_sgpr(sb + 15));
+        os << std::format(
+            " s[16:31]={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            ",{:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            " v[0:7]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            " v[8:15]L0={:x},{:x},{:x},{:x},{:x},{:x},{:x},{:x}"
+            " scc={} vcc={:x} exec={:x}",
+            read_sgpr(sb + 16), read_sgpr(sb + 17), read_sgpr(sb + 18), read_sgpr(sb + 19),
+            read_sgpr(sb + 20), read_sgpr(sb + 21), read_sgpr(sb + 22), read_sgpr(sb + 23),
+            read_sgpr(sb + 24), read_sgpr(sb + 25), read_sgpr(sb + 26), read_sgpr(sb + 27),
+            read_sgpr(sb + 28), read_sgpr(sb + 29), read_sgpr(sb + 30), read_sgpr(sb + 31),
+            read_vgpr(vb, 0), read_vgpr(vb + 1, 0), read_vgpr(vb + 2, 0), read_vgpr(vb + 3, 0),
+            read_vgpr(vb + 4, 0), read_vgpr(vb + 5, 0), read_vgpr(vb + 6, 0), read_vgpr(vb + 7, 0),
+            read_vgpr(vb + 8, 0), read_vgpr(vb + 9, 0), read_vgpr(vb + 10, 0),
+            read_vgpr(vb + 11, 0), read_vgpr(vb + 12, 0), read_vgpr(vb + 13, 0),
+            read_vgpr(vb + 14, 0), read_vgpr(vb + 15, 0), active->read_scc(), active->vcc(),
+            active->exec());
+      });
     }
   }
 

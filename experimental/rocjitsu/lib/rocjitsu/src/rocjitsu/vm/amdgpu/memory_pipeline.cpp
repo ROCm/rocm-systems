@@ -91,7 +91,7 @@ void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   util::Logger::vm([&](auto &os) {
     if (wf.wg_id() == 0) {
       static thread_local uint32_t slw_count = 0;
-      if (++slw_count <= 20) {
+      if (++slw_count <= 100) {
         os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
                           d.dst_reg_base, d.num_dwords, d.response_data[0]);
         for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)

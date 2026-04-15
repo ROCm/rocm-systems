@@ -16,8 +16,11 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <cstring>
+#include <elf.h>
 #include <set>
 #include <string>
+#include <sys/mman.h>
 #include <thread>
 
 namespace rocjitsu {
@@ -471,6 +474,55 @@ CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, bool host_acces
   return kd;
 }
 
+/// @brief Find the kernel symbol name from the code object containing kernel_object.
+/// @details Scans backward from kernel_object to find the ELF header, then
+/// parses .symtab to find the STT_FUNC symbol whose value matches the kernel
+/// descriptor offset within the code object.
+/// @brief Find the kernel symbol name from the code object containing kernel_object.
+/// @details Uses /proc/self/maps to verify readability, then scans backward
+/// from kernel_object to find the ELF header and parses the symbol table.
+static std::string find_kernel_symbol(uint64_t kernel_object, bool host_accessible) {
+  if (kernel_object == 0 || !host_accessible)
+    return {};
+
+  auto *ko = reinterpret_cast<const uint8_t *>(kernel_object);
+
+  // The kernel descriptor is inside a code object ELF loaded by ROCR.
+  // The ELF starts at the page-aligned base of the allocation.
+  // kernel_code_entry_byte_offset is typically 0x100, so the descriptor
+  // is 0x100 bytes into the ELF — the ELF header is at the page base.
+  auto *elf_base = reinterpret_cast<const uint8_t *>(kernel_object & ~0xFFFULL);
+  if (elf_base[0] != 0x7f || elf_base[1] != 'E' || elf_base[2] != 'L' || elf_base[3] != 'F')
+    return {};
+
+  auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(elf_base);
+  if (ehdr->e_shentsize < sizeof(Elf64_Shdr) || ehdr->e_shnum == 0 || ehdr->e_shoff == 0)
+    return {};
+
+  auto *shdrs = reinterpret_cast<const Elf64_Shdr *>(elf_base + ehdr->e_shoff);
+  uint64_t kd_offset = static_cast<uint64_t>(ko - elf_base);
+
+  for (uint32_t sh_type : {SHT_SYMTAB, SHT_DYNSYM}) {
+    for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+      if (shdrs[i].sh_type != sh_type || shdrs[i].sh_link >= ehdr->e_shnum)
+        continue;
+      auto *strtab = reinterpret_cast<const char *>(elf_base + shdrs[shdrs[i].sh_link].sh_offset);
+      auto *syms = reinterpret_cast<const Elf64_Sym *>(elf_base + shdrs[i].sh_offset);
+      size_t nsyms = shdrs[i].sh_size / sizeof(Elf64_Sym);
+      for (size_t s = 0; s < nsyms; ++s) {
+        if (syms[s].st_value != kd_offset)
+          continue;
+        std::string_view name(strtab + syms[s].st_name);
+        if (name.ends_with(".kd"))
+          name.remove_suffix(3);
+        if (!name.empty())
+          return std::string(name);
+      }
+    }
+  }
+  return {};
+}
+
 void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
                                           const HwQueue &queue, uint64_t pkt_addr) {
   bool host_accessible = queue.host_accessible;
@@ -482,6 +534,10 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
   uint32_t vgprs = (vgpr_gran + 1) * vgpr_granularity_;
   uint32_t sgprs = (sgpr_gran + 1) * 8;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("CP: rsrc1={:#x} vgpr_gran={} vgprs={} sgpr_gran={} sgprs={} gran={}",
+                      kd.compute_pgm_rsrc1, vgpr_gran, vgprs, sgpr_gran, sgprs, vgpr_granularity_);
+  });
   uint32_t user_sgprs = AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
   uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
 
@@ -514,11 +570,14 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
                           karg_dw[17], karg_dw[18], karg_dw[19], karg_dw[20]);
       }
     });
-    // Register the kernarg region.
+    // Register the kernarg region. Map enough pages to cover the full kernarg
+    // buffer. PyTorch reduction kernels can have kernarg buffers exceeding 4KB
+    // (TensorIterator packs many pointers, strides, and flags).
     uint64_t karg = reinterpret_cast<uint64_t>(pkt.kernarg_address);
     if (karg != 0) {
       uint64_t karg_base = karg & ~0xFFFULL;
-      memory_->map_host_pages(karg_base, reinterpret_cast<void *>(karg_base), 4096);
+      constexpr size_t KARG_MAP_SIZE = 8 * 4096; // 32KB covers large kernarg buffers.
+      memory_->map_host_pages(karg_base, reinterpret_cast<void *>(karg_base), KARG_MAP_SIZE);
       // Verify: read back from GpuMemory and compare to host.
       util::Logger::vm([&](auto &os) {
         uint32_t host_val = *reinterpret_cast<const uint32_t *>(karg + 0x50);
@@ -634,22 +693,36 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.host_signal = host_accessible;
   dp.ordered = host_accessible;
 
-  // Dump kernarg for multi-WF blit copies to debug zero-size loops.
-  if (host_accessible && wfs_per_wg > 1 && dp.kernarg_addr != 0) {
-    auto *ka = reinterpret_cast<const uint32_t *>(dp.kernarg_addr);
-    util::Logger::vm("CP: kernarg[0:15] for multi-WF dispatch:");
-    for (int i = 0; i < 16; i += 4)
-      util::Logger::vm("  dw[", i, ":", i + 3, "] = 0x", std::hex, ka[i], " 0x", ka[i + 1], " 0x",
-                       ka[i + 2], " 0x", ka[i + 3], std::dec);
+  // Dump first 32 dwords of kernarg for all host-accessible dispatches.
+  util::Logger::vm([&](auto &os) {
+    if (host_accessible && dp.kernarg_addr != 0) {
+      auto *ka = reinterpret_cast<const uint32_t *>(dp.kernarg_addr);
+      os << "CP: kernarg dump";
+      for (int i = 0; i < 256; i += 4)
+        os << std::format("\n[rj trace VM]   dw[{:3d}:{:3d}] = {:08x} {:08x} {:08x} {:08x}", i,
+                          i + 3, ka[i], ka[i + 1], ka[i + 2], ka[i + 3]);
+    }
+  });
+  util::Logger::vm([&](auto &os) {
+    std::string sym = find_kernel_symbol(pkt.kernel_object, host_accessible);
+    os << std::format("CP: dispatch \"{}\" entry_pc={:#x} kernarg={:#x}"
+                      " wgs={} wfs/wg={} grid=[{},{},{}] wg=[{},{},{}]"
+                      " sgprs={} vgprs={} user_sgprs={} kcp={:#x} signal={:#x}",
+                      sym.empty() ? "?" : sym, entry_pc,
+                      reinterpret_cast<uint64_t>(pkt.kernarg_address), total_wgs, wfs_per_wg,
+                      pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
+                      pkt.workgroup_size_y, pkt.workgroup_size_z, dp.sgprs_per_wf, dp.vgprs_per_wf,
+                      dp.num_user_sgprs, dp.kernel_code_properties, dp.completion_signal);
+  });
+
+  // Process AQL acquire fence: invalidate caches so the kernel sees the
+  // latest host/agent writes (kernarg data, input buffers, etc.).
+  // On real hardware the CP issues GL1_INV + GL2_INV for SYSTEM/AGENT scope.
+  uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
+  if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
+    cus_[0]->flush_all();
+    util::Logger::vm("CP: acquire fence scope=", acquire_scope, " → L1+L2 flush+invalidate");
   }
-  util::Logger::vm(
-      "CP: dispatch kernel_object=0x", std::hex, pkt.kernel_object, " entry_pc=0x", entry_pc,
-      " kernarg=0x", reinterpret_cast<uint64_t>(pkt.kernarg_address), std::dec, " wgs=", total_wgs,
-      " wfs/wg=", wfs_per_wg, " grid=[", pkt.grid_size_x, ",", pkt.grid_size_y, ",",
-      pkt.grid_size_z, "]", " wg=[", pkt.workgroup_size_x, ",", pkt.workgroup_size_y, ",",
-      pkt.workgroup_size_z, "]", " sgprs=", dp.sgprs_per_wf, " vgprs=", dp.vgprs_per_wf,
-      " user_sgprs=", dp.num_user_sgprs, " kcp=0x", std::hex, dp.kernel_code_properties,
-      " signal=0x", dp.completion_signal, std::dec, " host=", host_accessible);
 
   dispatch_queue_.push_back(std::move(dp));
 }

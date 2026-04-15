@@ -370,7 +370,6 @@ int SimulatedDriver::close() {
 }
 
 int SimulatedDriver::ioctl(unsigned long request, void *arg) {
-  util::Logger::vm("ioctl: request=0x", std::hex, request, std::dec);
   switch (request) {
   case AMDKFD_IOC_GET_VERSION:
     return get_version_ioctl(arg);
@@ -567,9 +566,12 @@ void *SimulatedDriver::mmap(void *addr, size_t length, int prot, int flags, off_
 
   alloc.host_ptr = host_ptr;
 
-  util::Logger::vm("mmap: gpu_va=0x", std::hex, alloc.gpu_va, " host_ptr=0x",
-                   reinterpret_cast<uintptr_t>(host_ptr), std::dec, " size=", length, " flags=0x",
-                   std::hex, alloc.flags, std::dec, " MAP_FIXED=", bool(flags & MAP_FIXED));
+  util::Logger::vm([&](auto &os) {
+    os << std::format("mmap: gpu_va={:#x} host_ptr={:#x} size={} flags={:#x}"
+                      " MAP_FIXED={} reuse_pages={} user_va={}",
+                      alloc.gpu_va, reinterpret_cast<uintptr_t>(host_ptr), length, alloc.flags,
+                      bool(flags & MAP_FIXED), reuse_pages, alloc.user_va);
+  });
 
   if (auto *mem = soc_.memory())
     mem->map_host_pages(alloc.gpu_va, host_ptr, length);
@@ -718,7 +720,20 @@ int SimulatedDriver::free_memory_ioctl(void *arg) {
 }
 
 int SimulatedDriver::map_memory_ioctl(void *arg) {
-  (void)arg;
+  auto *args = static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg);
+  std::lock_guard<std::mutex> lock(alloc_mutex_);
+  auto it = allocations_.find(args->handle);
+  if (it == allocations_.end())
+    return -EINVAL;
+  auto &alloc = it->second;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("MAP_MEMORY handle={} gpu_va={:#x} size={} flags={:#x} host_ptr={:#x}",
+                      alloc.handle, alloc.gpu_va, alloc.size, alloc.flags,
+                      reinterpret_cast<uintptr_t>(alloc.host_ptr));
+  });
+  // Ensure the allocation's host pages are registered in GpuMemory.
+  if (alloc.host_ptr && soc_.memory())
+    soc_.memory()->map_host_pages(alloc.gpu_va, alloc.host_ptr, alloc.size);
   return 0;
 }
 
@@ -821,6 +836,23 @@ int SimulatedDriver::create_event_ioctl(void *arg) {
   if (next_event_id_ >= KFD_SIGNAL_EVENT_LIMIT)
     return -ENOSPC;
 
+  // dGPU path: libhsakmt pre-allocates the event page as a regular GPUVM
+  // allocation and passes its mmap offset in event_page_offset. The real
+  // kernel calls kfd_kmap_event_page() to adopt it. We resolve the offset
+  // back to the host pointer via our allocation table.
+  if (args->event_page_offset != 0 && !event_page_) {
+    uint64_t handle = static_cast<uint64_t>(args->event_page_offset) >> 12;
+    std::lock_guard<std::mutex> alock(alloc_mutex_);
+    auto it = allocations_.find(handle);
+    if (it != allocations_.end() && it->second.host_ptr) {
+      event_page_ = it->second.host_ptr;
+      event_page_size_ = it->second.size;
+      util::Logger::vm("CREATE_EVENT: adopted pre-allocated event page handle=", handle,
+                       " host_ptr=0x", std::hex, reinterpret_cast<uintptr_t>(event_page_),
+                       " size=", std::dec, event_page_size_);
+    }
+  }
+
   GpuEvent ev{};
   ev.event_id = next_event_id_++;
   ev.event_type = args->event_type;
@@ -831,7 +863,7 @@ int SimulatedDriver::create_event_ioctl(void *arg) {
 
   args->event_id = ev.event_id;
   args->event_trigger_data = ev.event_id;
-  args->event_slot_index = ev.event_id; // 1-indexed; slot 0 unused
+  args->event_slot_index = ev.event_id;
   args->event_page_offset = KFD_MMAP_TYPE_EVENTS | kfd_mmap_gpu_id(gpu_id_);
   return 0;
 }

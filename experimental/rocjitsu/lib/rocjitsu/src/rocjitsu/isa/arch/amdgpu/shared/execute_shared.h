@@ -26,16 +26,21 @@ inline void execute_ds_bpermute_b32_ds([[maybe_unused]] Inst &inst,
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t vb = wf.vgpr_alloc().base;
-  // Pre-read all src0 (data0) values.
+  uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
+  // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
     src_data[i] = cu.read_vgpr(vb + inst.inst_.data0, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t addr_val = cu.read_vgpr(vb + inst.inst_.addr, lane);
-    uint32_t src_lane = (addr_val / 4) % wf.wf_size();
-    cu.write_vgpr(vb + inst.inst_.vdst, lane, src_data[src_lane]);
+  uint32_t tmp[64] = {};
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    uint32_t addr_val = cu.read_vgpr(vb + inst.inst_.addr, i);
+    uint32_t src_lane = ((addr_val + offset) / 4) % wf.wf_size();
+    if (exec & (1ULL << src_lane))
+      tmp[i] = src_data[src_lane];
+  }
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    if (exec & (1ULL << i))
+      cu.write_vgpr(vb + inst.inst_.vdst, i, tmp[i]);
   }
 }
 
@@ -44,16 +49,22 @@ inline void execute_ds_permute_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unuse
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t vb = wf.vgpr_alloc().base;
-  // Pre-read all src0 (data0) values.
+  uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
+  // Pre-read all data0 values from every lane.
   uint32_t src_data[64];
   for (uint32_t i = 0; i < wf.wf_size(); ++i)
     src_data[i] = cu.read_vgpr(vb + inst.inst_.data0, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+  uint32_t tmp[64] = {};
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    if (!(exec & (1ULL << i)))
       continue;
-    uint32_t addr_val = cu.read_vgpr(vb + inst.inst_.addr, lane);
-    uint32_t src_lane = (addr_val / 4) % wf.wf_size();
-    cu.write_vgpr(vb + inst.inst_.vdst, lane, src_data[src_lane]);
+    uint32_t addr_val = cu.read_vgpr(vb + inst.inst_.addr, i);
+    uint32_t dst_lane = ((addr_val + offset) / 4) % wf.wf_size();
+    tmp[dst_lane] = src_data[i];
+  }
+  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
+    if (exec & (1ULL << i))
+      cu.write_vgpr(vb + inst.inst_.vdst, i, tmp[i]);
   }
 }
 
@@ -200,9 +211,13 @@ template <typename Inst>
 inline void execute_s_and_not0_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec & ~src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -211,9 +226,13 @@ template <typename Inst>
 inline void execute_s_and_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec & ~src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -236,9 +255,13 @@ template <typename Inst>
 inline void execute_s_and_not1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~src & ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -247,9 +270,13 @@ template <typename Inst>
 inline void execute_s_and_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~src & ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -272,9 +299,13 @@ template <typename Inst>
 inline void execute_s_and_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec & src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -283,9 +314,13 @@ template <typename Inst>
 inline void execute_s_and_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec & src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -294,9 +329,13 @@ template <typename Inst>
 inline void execute_s_andn1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = src & ~old_exec;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = ~src & old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -305,9 +344,13 @@ template <typename Inst>
 inline void execute_s_andn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = src & ~old_exec;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = ~src & old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -348,9 +391,13 @@ template <typename Inst>
 inline void execute_s_andn2_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = old_exec & ~src;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = src & ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -359,9 +406,13 @@ template <typename Inst>
 inline void execute_s_andn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = old_exec & ~src;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = src & ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1292,9 +1343,13 @@ template <typename Inst>
 inline void execute_s_nand_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec & src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1303,9 +1358,13 @@ template <typename Inst>
 inline void execute_s_nand_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec & src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1332,9 +1391,13 @@ template <typename Inst>
 inline void execute_s_nor_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec | src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1343,9 +1406,13 @@ template <typename Inst>
 inline void execute_s_nor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec | src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1388,9 +1455,13 @@ template <typename Inst>
 inline void execute_s_or_not0_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec | ~src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1399,9 +1470,13 @@ template <typename Inst>
 inline void execute_s_or_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec | ~src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1410,9 +1485,13 @@ template <typename Inst>
 inline void execute_s_or_not1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~src | old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1421,9 +1500,13 @@ template <typename Inst>
 inline void execute_s_or_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~src | old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1432,9 +1515,13 @@ template <typename Inst>
 inline void execute_s_or_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec | src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1443,9 +1530,13 @@ template <typename Inst>
 inline void execute_s_or_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec | src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1454,9 +1545,13 @@ template <typename Inst>
 inline void execute_s_orn1_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = src | ~old_exec;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = ~src | old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1465,9 +1560,13 @@ template <typename Inst>
 inline void execute_s_orn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = src | ~old_exec;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = ~src | old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1494,9 +1593,13 @@ template <typename Inst>
 inline void execute_s_orn2_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = old_exec | ~src;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = src | ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1505,9 +1608,13 @@ template <typename Inst>
 inline void execute_s_orn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
-  uint64_t result = old_exec | ~src;
+  inst.sdst.write_scalar64(wf, old_exec);
+  uint64_t result = src | ~old_exec;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1702,9 +1809,13 @@ template <typename Inst>
 inline void execute_s_xnor_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec ^ src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1713,9 +1824,13 @@ template <typename Inst>
 inline void execute_s_xnor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = ~(old_exec ^ src);
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1742,9 +1857,13 @@ template <typename Inst>
 inline void execute_s_xor_saveexec_b32_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec ^ src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -1753,9 +1872,13 @@ template <typename Inst>
 inline void execute_s_xor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t old_exec = wf.exec();
-  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t src = inst.ssrc0.read_scalar64(wf);
+  inst.sdst.write_scalar64(wf, old_exec);
   uint64_t result = old_exec ^ src;
+  util::Logger::vm([&](auto &os) {
+    os << std::format("saveexec ssrc0_ev={} src={:#x} exec={:#x}->{:#x}",
+                      inst.ssrc0.encoding_value(), src, old_exec, result);
+  });
   wf.set_exec(result);
   wf.write_scc(result != 0);
 }
@@ -2577,7 +2700,7 @@ template <typename Inst>
 inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2667,7 +2790,7 @@ template <typename Inst>
 inline void execute_v_cmp_class_f32_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2753,7 +2876,7 @@ template <typename Inst>
 inline void execute_v_cmp_class_f64_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2842,7 +2965,7 @@ inline void execute_v_cmp_class_f64_vopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cmp_eq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2884,7 +3007,7 @@ inline void execute_v_cmp_eq_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2926,7 +3049,7 @@ inline void execute_v_cmp_eq_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -2968,7 +3091,7 @@ inline void execute_v_cmp_eq_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3002,7 +3125,7 @@ inline void execute_v_cmp_eq_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3036,7 +3159,7 @@ inline void execute_v_cmp_eq_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3070,7 +3193,7 @@ inline void execute_v_cmp_eq_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3104,7 +3227,7 @@ inline void execute_v_cmp_eq_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3138,7 +3261,7 @@ inline void execute_v_cmp_eq_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_eq_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3172,7 +3295,7 @@ inline void execute_v_cmp_eq_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_f_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3196,7 +3319,7 @@ inline void execute_v_cmp_f_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3220,7 +3343,7 @@ inline void execute_v_cmp_f_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3244,7 +3367,7 @@ inline void execute_v_cmp_f_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3268,7 +3391,7 @@ inline void execute_v_cmp_f_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3292,7 +3415,7 @@ inline void execute_v_cmp_f_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3316,7 +3439,7 @@ inline void execute_v_cmp_f_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3340,7 +3463,7 @@ inline void execute_v_cmp_f_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3364,7 +3487,7 @@ inline void execute_v_cmp_f_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_f_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3388,7 +3511,7 @@ inline void execute_v_cmp_f_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_ge_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3430,7 +3553,7 @@ inline void execute_v_cmp_ge_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3472,7 +3595,7 @@ inline void execute_v_cmp_ge_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3514,7 +3637,7 @@ inline void execute_v_cmp_ge_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3548,7 +3671,7 @@ inline void execute_v_cmp_ge_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3582,7 +3705,7 @@ inline void execute_v_cmp_ge_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3616,7 +3739,7 @@ inline void execute_v_cmp_ge_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3650,7 +3773,7 @@ inline void execute_v_cmp_ge_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3684,7 +3807,7 @@ inline void execute_v_cmp_ge_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ge_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3718,7 +3841,7 @@ inline void execute_v_cmp_ge_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3760,7 +3883,7 @@ inline void execute_v_cmp_gt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3802,7 +3925,7 @@ inline void execute_v_cmp_gt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3844,7 +3967,7 @@ inline void execute_v_cmp_gt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3878,7 +4001,7 @@ inline void execute_v_cmp_gt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3912,7 +4035,7 @@ inline void execute_v_cmp_gt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3946,7 +4069,7 @@ inline void execute_v_cmp_gt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -3980,7 +4103,7 @@ inline void execute_v_cmp_gt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4014,7 +4137,7 @@ inline void execute_v_cmp_gt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_gt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4048,7 +4171,7 @@ inline void execute_v_cmp_gt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4090,7 +4213,7 @@ inline void execute_v_cmp_le_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4132,7 +4255,7 @@ inline void execute_v_cmp_le_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4174,7 +4297,7 @@ inline void execute_v_cmp_le_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4208,7 +4331,7 @@ inline void execute_v_cmp_le_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4242,7 +4365,7 @@ inline void execute_v_cmp_le_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4276,7 +4399,7 @@ inline void execute_v_cmp_le_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4310,7 +4433,7 @@ inline void execute_v_cmp_le_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4344,7 +4467,7 @@ inline void execute_v_cmp_le_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_le_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4378,7 +4501,7 @@ inline void execute_v_cmp_le_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lg_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4420,7 +4543,7 @@ inline void execute_v_cmp_lg_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lg_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4462,7 +4585,7 @@ inline void execute_v_cmp_lg_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lg_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4504,7 +4627,7 @@ inline void execute_v_cmp_lg_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4546,7 +4669,7 @@ inline void execute_v_cmp_lt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4588,7 +4711,7 @@ inline void execute_v_cmp_lt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4630,7 +4753,7 @@ inline void execute_v_cmp_lt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4664,7 +4787,7 @@ inline void execute_v_cmp_lt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4698,7 +4821,7 @@ inline void execute_v_cmp_lt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4732,7 +4855,7 @@ inline void execute_v_cmp_lt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4766,7 +4889,7 @@ inline void execute_v_cmp_lt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4800,7 +4923,7 @@ inline void execute_v_cmp_lt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_lt_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4834,7 +4957,7 @@ inline void execute_v_cmp_lt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ne_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4868,7 +4991,7 @@ inline void execute_v_cmp_ne_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ne_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4902,7 +5025,7 @@ inline void execute_v_cmp_ne_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ne_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4936,7 +5059,7 @@ inline void execute_v_cmp_ne_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ne_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -4970,7 +5093,7 @@ inline void execute_v_cmp_ne_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ne_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5004,7 +5127,7 @@ inline void execute_v_cmp_ne_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cmp_ne_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5039,7 +5162,7 @@ template <typename Inst>
 inline void execute_v_cmp_neq_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5083,7 +5206,7 @@ template <typename Inst>
 inline void execute_v_cmp_neq_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5127,7 +5250,7 @@ template <typename Inst>
 inline void execute_v_cmp_neq_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5171,7 +5294,7 @@ template <typename Inst>
 inline void execute_v_cmp_nge_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5215,7 +5338,7 @@ template <typename Inst>
 inline void execute_v_cmp_nge_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5259,7 +5382,7 @@ template <typename Inst>
 inline void execute_v_cmp_nge_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5303,7 +5426,7 @@ template <typename Inst>
 inline void execute_v_cmp_ngt_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5347,7 +5470,7 @@ template <typename Inst>
 inline void execute_v_cmp_ngt_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5391,7 +5514,7 @@ template <typename Inst>
 inline void execute_v_cmp_ngt_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5435,7 +5558,7 @@ template <typename Inst>
 inline void execute_v_cmp_nle_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5479,7 +5602,7 @@ template <typename Inst>
 inline void execute_v_cmp_nle_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5523,7 +5646,7 @@ template <typename Inst>
 inline void execute_v_cmp_nle_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5567,7 +5690,7 @@ template <typename Inst>
 inline void execute_v_cmp_nlg_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5611,7 +5734,7 @@ template <typename Inst>
 inline void execute_v_cmp_nlg_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5655,7 +5778,7 @@ template <typename Inst>
 inline void execute_v_cmp_nlg_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5699,7 +5822,7 @@ template <typename Inst>
 inline void execute_v_cmp_nlt_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5743,7 +5866,7 @@ template <typename Inst>
 inline void execute_v_cmp_nlt_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5787,7 +5910,7 @@ template <typename Inst>
 inline void execute_v_cmp_nlt_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5830,7 +5953,7 @@ inline void execute_v_cmp_nlt_f64_vopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cmp_o_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5872,7 +5995,7 @@ inline void execute_v_cmp_o_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_o_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5914,7 +6037,7 @@ inline void execute_v_cmp_o_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_o_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5956,7 +6079,7 @@ inline void execute_v_cmp_o_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -5980,7 +6103,7 @@ inline void execute_v_cmp_t_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6004,7 +6127,7 @@ inline void execute_v_cmp_t_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6028,7 +6151,7 @@ inline void execute_v_cmp_t_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6052,7 +6175,7 @@ inline void execute_v_cmp_t_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6076,7 +6199,7 @@ inline void execute_v_cmp_t_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_i64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6100,7 +6223,7 @@ inline void execute_v_cmp_t_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6124,7 +6247,7 @@ inline void execute_v_cmp_t_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6148,7 +6271,7 @@ inline void execute_v_cmp_t_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_t_u64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6173,7 +6296,7 @@ template <typename Inst>
 inline void execute_v_cmp_tru_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6199,7 +6322,7 @@ template <typename Inst>
 inline void execute_v_cmp_tru_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6225,7 +6348,7 @@ template <typename Inst>
 inline void execute_v_cmp_tru_f64_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6250,7 +6373,7 @@ inline void execute_v_cmp_tru_f64_vopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cmp_u_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6292,7 +6415,7 @@ inline void execute_v_cmp_u_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_u_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -6334,7 +6457,7 @@ inline void execute_v_cmp_u_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_cmp_u_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = inst.vdst.read_scalar64(wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

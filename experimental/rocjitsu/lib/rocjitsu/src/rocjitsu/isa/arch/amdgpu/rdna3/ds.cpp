@@ -36,7 +36,7 @@ DsAddU32Ds::DsAddU32Ds(const MachineInst *inst)
 
 void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -48,7 +48,7 @@ void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -67,7 +67,7 @@ DsSubU32Ds::DsSubU32Ds(const MachineInst *inst)
 
 void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -79,7 +79,7 @@ void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -98,7 +98,7 @@ DsRsubU32Ds::DsRsubU32Ds(const MachineInst *inst)
 
 void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -110,7 +110,7 @@ void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -129,7 +129,7 @@ DsIncU32Ds::DsIncU32Ds(const MachineInst *inst)
 
 void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -141,7 +141,7 @@ void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -160,7 +160,7 @@ DsDecU32Ds::DsDecU32Ds(const MachineInst *inst)
 
 void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -172,7 +172,7 @@ void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -191,7 +191,7 @@ DsMinI32Ds::DsMinI32Ds(const MachineInst *inst)
 
 void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -203,7 +203,7 @@ void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -222,7 +222,7 @@ DsMaxI32Ds::DsMaxI32Ds(const MachineInst *inst)
 
 void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -234,7 +234,7 @@ void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -253,7 +253,7 @@ DsMinU32Ds::DsMinU32Ds(const MachineInst *inst)
 
 void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -265,7 +265,7 @@ void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -284,7 +284,7 @@ DsMaxU32Ds::DsMaxU32Ds(const MachineInst *inst)
 
 void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -296,7 +296,7 @@ void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -315,7 +315,7 @@ DsAndB32Ds::DsAndB32Ds(const MachineInst *inst)
 
 void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -327,7 +327,7 @@ void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -346,7 +346,7 @@ DsOrB32Ds::DsOrB32Ds(const MachineInst *inst)
 
 void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -358,7 +358,7 @@ void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -377,7 +377,7 @@ DsXorB32Ds::DsXorB32Ds(const MachineInst *inst)
 
 void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -389,7 +389,7 @@ void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -432,7 +432,7 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -464,7 +464,7 @@ void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -496,7 +496,7 @@ void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -518,7 +518,7 @@ DsCmpstoreB32Ds::DsCmpstoreB32Ds(const MachineInst *inst)
 
 void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -530,9 +530,9 @@ void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -554,7 +554,7 @@ DsCmpstoreF32Ds::DsCmpstoreF32Ds(const MachineInst *inst)
 
 void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -566,9 +566,9 @@ void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -587,7 +587,7 @@ DsMinF32Ds::DsMinF32Ds(const MachineInst *inst)
 
 void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -599,7 +599,7 @@ void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -618,7 +618,7 @@ DsMaxF32Ds::DsMaxF32Ds(const MachineInst *inst)
 
 void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -630,7 +630,7 @@ void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -657,7 +657,7 @@ DsAddF32Ds::DsAddF32Ds(const MachineInst *inst)
 
 void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -669,7 +669,7 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -757,7 +757,7 @@ void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -786,7 +786,7 @@ void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -808,7 +808,7 @@ DsAddRtnU32Ds::DsAddRtnU32Ds(const MachineInst *inst)
 
 void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -820,7 +820,7 @@ void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -842,7 +842,7 @@ DsSubRtnU32Ds::DsSubRtnU32Ds(const MachineInst *inst)
 
 void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -854,7 +854,7 @@ void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -876,7 +876,7 @@ DsRsubRtnU32Ds::DsRsubRtnU32Ds(const MachineInst *inst)
 
 void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -888,7 +888,7 @@ void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -910,7 +910,7 @@ DsIncRtnU32Ds::DsIncRtnU32Ds(const MachineInst *inst)
 
 void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -922,7 +922,7 @@ void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -944,7 +944,7 @@ DsDecRtnU32Ds::DsDecRtnU32Ds(const MachineInst *inst)
 
 void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -956,7 +956,7 @@ void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -978,7 +978,7 @@ DsMinRtnI32Ds::DsMinRtnI32Ds(const MachineInst *inst)
 
 void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -990,7 +990,7 @@ void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1012,7 +1012,7 @@ DsMaxRtnI32Ds::DsMaxRtnI32Ds(const MachineInst *inst)
 
 void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1024,7 +1024,7 @@ void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1046,7 +1046,7 @@ DsMinRtnU32Ds::DsMinRtnU32Ds(const MachineInst *inst)
 
 void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1058,7 +1058,7 @@ void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1080,7 +1080,7 @@ DsMaxRtnU32Ds::DsMaxRtnU32Ds(const MachineInst *inst)
 
 void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1092,7 +1092,7 @@ void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1114,7 +1114,7 @@ DsAndRtnB32Ds::DsAndRtnB32Ds(const MachineInst *inst)
 
 void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1126,7 +1126,7 @@ void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1147,7 +1147,7 @@ DsOrRtnB32Ds::DsOrRtnB32Ds(const MachineInst *inst)
 
 void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1159,7 +1159,7 @@ void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1181,7 +1181,7 @@ DsXorRtnB32Ds::DsXorRtnB32Ds(const MachineInst *inst)
 
 void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1193,7 +1193,7 @@ void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1232,7 +1232,7 @@ DsStorexchgRtnB32Ds::DsStorexchgRtnB32Ds(const MachineInst *inst)
 
 void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1244,7 +1244,7 @@ void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1268,7 +1268,7 @@ DsStorexchg2addrRtnB32Ds::DsStorexchg2addrRtnB32Ds(const MachineInst *inst)
 
 void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1280,7 +1280,7 @@ void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1304,7 +1304,7 @@ DsStorexchg2addrStride64RtnB32Ds::DsStorexchg2addrStride64RtnB32Ds(const Machine
 
 void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1316,7 +1316,7 @@ void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1340,7 +1340,7 @@ DsCmpstoreRtnB32Ds::DsCmpstoreRtnB32Ds(const MachineInst *inst)
 
 void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1352,9 +1352,9 @@ void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1378,7 +1378,7 @@ DsCmpstoreRtnF32Ds::DsCmpstoreRtnF32Ds(const MachineInst *inst)
 
 void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1390,9 +1390,9 @@ void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1414,7 +1414,7 @@ DsMinRtnF32Ds::DsMinRtnF32Ds(const MachineInst *inst)
 
 void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1426,7 +1426,7 @@ void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1448,7 +1448,7 @@ DsMaxRtnF32Ds::DsMaxRtnF32Ds(const MachineInst *inst)
 
 void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1460,7 +1460,7 @@ void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -1511,7 +1511,7 @@ DsLoadB32Ds::DsLoadB32Ds(const MachineInst *inst)
 
 void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1533,7 +1533,7 @@ DsLoad2addrB32Ds::DsLoad2addrB32Ds(const MachineInst *inst)
 
 void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1555,7 +1555,7 @@ DsLoad2addrStride64B32Ds::DsLoad2addrStride64B32Ds(const MachineInst *inst)
 
 void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -1576,7 +1576,7 @@ DsLoadI8Ds::DsLoadI8Ds(const MachineInst *inst)
 
 void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -1598,7 +1598,7 @@ DsLoadU8Ds::DsLoadU8Ds(const MachineInst *inst)
 
 void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -1619,7 +1619,7 @@ DsLoadI16Ds::DsLoadI16Ds(const MachineInst *inst)
 
 void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -1641,7 +1641,7 @@ DsLoadU16Ds::DsLoadU16Ds(const MachineInst *inst)
 
 void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -1695,7 +1695,7 @@ DsAddU64Ds::DsAddU64Ds(const MachineInst *inst)
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1707,9 +1707,9 @@ void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1728,7 +1728,7 @@ DsSubU64Ds::DsSubU64Ds(const MachineInst *inst)
 
 void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1740,9 +1740,9 @@ void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1761,7 +1761,7 @@ DsRsubU64Ds::DsRsubU64Ds(const MachineInst *inst)
 
 void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1773,9 +1773,9 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1794,7 +1794,7 @@ DsIncU64Ds::DsIncU64Ds(const MachineInst *inst)
 
 void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1806,9 +1806,9 @@ void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1827,7 +1827,7 @@ DsDecU64Ds::DsDecU64Ds(const MachineInst *inst)
 
 void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1839,9 +1839,9 @@ void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1860,7 +1860,7 @@ DsMinI64Ds::DsMinI64Ds(const MachineInst *inst)
 
 void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1872,9 +1872,9 @@ void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1893,7 +1893,7 @@ DsMaxI64Ds::DsMaxI64Ds(const MachineInst *inst)
 
 void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1905,9 +1905,9 @@ void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1926,7 +1926,7 @@ DsMinU64Ds::DsMinU64Ds(const MachineInst *inst)
 
 void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1938,9 +1938,9 @@ void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1959,7 +1959,7 @@ DsMaxU64Ds::DsMaxU64Ds(const MachineInst *inst)
 
 void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -1971,9 +1971,9 @@ void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1992,7 +1992,7 @@ DsAndB64Ds::DsAndB64Ds(const MachineInst *inst)
 
 void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2004,9 +2004,9 @@ void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2025,7 +2025,7 @@ DsOrB64Ds::DsOrB64Ds(const MachineInst *inst)
 
 void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2037,9 +2037,9 @@ void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2058,7 +2058,7 @@ DsXorB64Ds::DsXorB64Ds(const MachineInst *inst)
 
 void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2070,9 +2070,9 @@ void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2115,8 +2115,8 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
     std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
   }
@@ -2149,8 +2149,8 @@ void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
     std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
   }
@@ -2183,8 +2183,8 @@ void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
     std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
   }
@@ -2207,7 +2207,7 @@ DsCmpstoreB64Ds::DsCmpstoreB64Ds(const MachineInst *inst)
 
 void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2219,13 +2219,13 @@ void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 3, lane);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -2247,7 +2247,7 @@ DsCmpstoreF64Ds::DsCmpstoreF64Ds(const MachineInst *inst)
 
 void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2259,13 +2259,13 @@ void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 3, lane);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -2284,7 +2284,7 @@ DsMinF64Ds::DsMinF64Ds(const MachineInst *inst)
 
 void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2296,9 +2296,9 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2317,7 +2317,7 @@ DsMaxF64Ds::DsMaxF64Ds(const MachineInst *inst)
 
 void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2329,9 +2329,9 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2353,7 +2353,7 @@ DsAddRtnU64Ds::DsAddRtnU64Ds(const MachineInst *inst)
 
 void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2365,9 +2365,9 @@ void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2389,7 +2389,7 @@ DsSubRtnU64Ds::DsSubRtnU64Ds(const MachineInst *inst)
 
 void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2401,9 +2401,9 @@ void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2425,7 +2425,7 @@ DsRsubRtnU64Ds::DsRsubRtnU64Ds(const MachineInst *inst)
 
 void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2437,9 +2437,9 @@ void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2461,7 +2461,7 @@ DsIncRtnU64Ds::DsIncRtnU64Ds(const MachineInst *inst)
 
 void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2473,9 +2473,9 @@ void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2497,7 +2497,7 @@ DsDecRtnU64Ds::DsDecRtnU64Ds(const MachineInst *inst)
 
 void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2509,9 +2509,9 @@ void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2533,7 +2533,7 @@ DsMinRtnI64Ds::DsMinRtnI64Ds(const MachineInst *inst)
 
 void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2545,9 +2545,9 @@ void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2569,7 +2569,7 @@ DsMaxRtnI64Ds::DsMaxRtnI64Ds(const MachineInst *inst)
 
 void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2581,9 +2581,9 @@ void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2605,7 +2605,7 @@ DsMinRtnU64Ds::DsMinRtnU64Ds(const MachineInst *inst)
 
 void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2617,9 +2617,9 @@ void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2641,7 +2641,7 @@ DsMaxRtnU64Ds::DsMaxRtnU64Ds(const MachineInst *inst)
 
 void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2653,9 +2653,9 @@ void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2677,7 +2677,7 @@ DsAndRtnB64Ds::DsAndRtnB64Ds(const MachineInst *inst)
 
 void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2689,9 +2689,9 @@ void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2712,7 +2712,7 @@ DsOrRtnB64Ds::DsOrRtnB64Ds(const MachineInst *inst)
 
 void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2724,9 +2724,9 @@ void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2748,7 +2748,7 @@ DsXorRtnB64Ds::DsXorRtnB64Ds(const MachineInst *inst)
 
 void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2760,9 +2760,9 @@ void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2801,7 +2801,7 @@ DsStorexchgRtnB64Ds::DsStorexchgRtnB64Ds(const MachineInst *inst)
 
 void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2813,9 +2813,9 @@ void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2839,7 +2839,7 @@ DsStorexchg2addrRtnB64Ds::DsStorexchg2addrRtnB64Ds(const MachineInst *inst)
 
 void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2851,9 +2851,9 @@ void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2877,7 +2877,7 @@ DsStorexchg2addrStride64RtnB64Ds::DsStorexchg2addrStride64RtnB64Ds(const Machine
 
 void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2889,9 +2889,9 @@ void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -2915,7 +2915,7 @@ DsCmpstoreRtnB64Ds::DsCmpstoreRtnB64Ds(const MachineInst *inst)
 
 void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2927,13 +2927,13 @@ void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 3, lane);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -2957,7 +2957,7 @@ DsCmpstoreRtnF64Ds::DsCmpstoreRtnF64Ds(const MachineInst *inst)
 
 void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -2969,13 +2969,13 @@ void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 3, lane);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -2997,7 +2997,7 @@ DsMinRtnF64Ds::DsMinRtnF64Ds(const MachineInst *inst)
 
 void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -3009,9 +3009,9 @@ void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -3033,7 +3033,7 @@ DsMaxRtnF64Ds::DsMaxRtnF64Ds(const MachineInst *inst)
 
 void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -3045,9 +3045,9 @@ void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -3066,7 +3066,7 @@ DsLoadB64Ds::DsLoadB64Ds(const MachineInst *inst)
 
 void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -3088,7 +3088,7 @@ DsLoad2addrB64Ds::DsLoad2addrB64Ds(const MachineInst *inst)
 
 void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -3110,7 +3110,7 @@ DsLoad2addrStride64B64Ds::DsLoad2addrStride64B64Ds(const MachineInst *inst)
 
 void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -3134,7 +3134,7 @@ DsAddRtnF32Ds::DsAddRtnF32Ds(const MachineInst *inst)
 
 void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -3146,7 +3146,7 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -3194,7 +3194,7 @@ DsCondxchg32RtnB64Ds::DsCondxchg32RtnB64Ds(const MachineInst *inst)
 
 void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
@@ -3206,13 +3206,13 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 3, lane);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -3242,7 +3242,7 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0, lane);
     d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
   }
   set_data(std::move(d));
@@ -3272,7 +3272,7 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0, lane);
     std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
   }
   set_data(std::move(d));
@@ -3292,7 +3292,7 @@ DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
 
 void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -3314,7 +3314,7 @@ DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst)
 
 void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -3336,7 +3336,7 @@ DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst)
 
 void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -3359,7 +3359,7 @@ DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst)
 
 void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
@@ -3382,7 +3382,7 @@ DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst)
 
 void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -3404,7 +3404,7 @@ DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst)
 
 void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
@@ -3452,7 +3452,7 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
   }
   set_data(std::move(d));
@@ -3470,7 +3470,7 @@ DsLoadAddtidB32Ds::DsLoadAddtidB32Ds(const MachineInst *inst)
 
 void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
@@ -3535,11 +3535,11 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 2, lane);
     std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
   }
   set_data(std::move(d));
@@ -3569,13 +3569,13 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 0, lane);
+    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 1, lane);
+    uint32_t val1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 2, lane);
+    uint32_t val2 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 2, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + inst_.data0 + 3, lane);
+    uint32_t val3 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 3, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -3594,7 +3594,7 @@ DsLoadB96Ds::DsLoadB96Ds(const MachineInst *inst)
 
 void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
@@ -3615,7 +3615,7 @@ DsLoadB128Ds::DsLoadB128Ds(const MachineInst *inst)
 
 void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
