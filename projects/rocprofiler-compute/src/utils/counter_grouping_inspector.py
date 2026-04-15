@@ -866,16 +866,29 @@ Examples:
             try:
                 svg_content = render_perfmon_plan_svg(output_files, config_dir, arch)
                 output_path.write_text(svg_content, encoding="utf-8")
-                print(f"SVG saved to {output_path}")
             except ImportError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
+            except OSError as e:
+                print(
+                    f"Error: could not write SVG output to {output_path}: {e}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print(f"SVG saved to {output_path}")
         elif suffix == ".txt":
             bucket_output = generate_bucket_plan(output_files, arch)
             metrics_output = generate_multi_bucket_metrics(
                 output_files, config_dir, arch
             )
-            output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
+            try:
+                output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
+            except OSError as e:
+                print(
+                    f"Error: could not write text output to {output_path}: {e}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             print(f"Output written to {output_path}")
         else:
             print(
