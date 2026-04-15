@@ -49,6 +49,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-simulate-ls
     TARGET rocprofiler-systems-instrument
     ARGS --simulate
+         --dump-info
          --print-format
          json
          txt
