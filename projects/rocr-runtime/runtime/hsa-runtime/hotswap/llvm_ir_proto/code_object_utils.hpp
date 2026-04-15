@@ -46,6 +46,8 @@ TextSection extractTextSection(const std::vector<uint8_t> &elfData);
 std::vector<std::string> listKernelNames(const std::vector<uint8_t> &elfData);
 KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
                              const std::string &kernelName);
+uint64_t findKernelSymbolOffset(const std::vector<uint8_t> &elfData,
+                                const std::string &kernelName);
 
 } // namespace ir_proto
 

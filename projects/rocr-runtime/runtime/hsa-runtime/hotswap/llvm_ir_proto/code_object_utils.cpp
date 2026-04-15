@@ -257,4 +257,41 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
   return meta;
 }
 
+uint64_t findKernelSymbolOffset(const std::vector<uint8_t> &elfData,
+                                const std::string &kernelName) {
+  auto bufOrErr = llvm::MemoryBuffer::getMemBuffer(
+      llvm::StringRef(reinterpret_cast<const char *>(elfData.data()),
+                      elfData.size()),
+      "", false);
+  auto objOrErr = llvm::object::ObjectFile::createELFObjectFile(*bufOrErr);
+  if (!objOrErr) {
+    llvm::errs() << "ir_proto: findKernelSymbolOffset: Failed to parse ELF\n";
+    return 0;
+  }
+
+  uint64_t textBase = 0;
+  for (const auto &sec : (*objOrErr)->sections()) {
+    auto nameOrErr = sec.getName();
+    if (nameOrErr && *nameOrErr == ".text") {
+      textBase = sec.getAddress();
+      break;
+    }
+  }
+
+  for (const auto &sym : (*objOrErr)->symbols()) {
+    auto nameOrErr = sym.getName();
+    if (!nameOrErr) continue;
+    if (*nameOrErr == kernelName) {
+      auto addrOrErr = sym.getAddress();
+      if (!addrOrErr) continue;
+      uint64_t offset = *addrOrErr - textBase;
+      return offset;
+    }
+  }
+
+  llvm::errs() << "ir_proto: findKernelSymbolOffset: symbol '" << kernelName
+               << "' not found, defaulting to offset 0\n";
+  return 0;
+}
+
 } // namespace ir_proto

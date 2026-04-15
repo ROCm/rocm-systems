@@ -29,7 +29,8 @@ struct RaiseResult {
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const std::string &targetISA,
                       const std::string &kernelName,
-                      const KernelMeta &meta);
+                      const KernelMeta &meta,
+                      uint64_t kernelOffset = 0);
 
 } // namespace ir_proto
 

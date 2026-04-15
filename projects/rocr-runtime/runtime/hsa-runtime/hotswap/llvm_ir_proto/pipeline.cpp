@@ -5,6 +5,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/StringExtras.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -80,8 +81,15 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                  << "', using empty metadata\n";
   }
 
+  // Step 1c: Find kernel symbol offset in .text section
+  uint64_t kernelOffset = findKernelSymbolOffset(codeObjectData, kernelName);
+  if (kernelOffset > 0)
+    llvm::errs() << "ir_proto: Kernel '" << kernelName
+                 << "' at .text offset 0x" << llvm::utohexstr(kernelOffset)
+                 << "\n";
+
   // Step 2: Raise to LLVM IR (using source ISA for disassembly)
-  auto raised = raiseToIR(text.bytes, sourceISA, kernelName, meta);
+  auto raised = raiseToIR(text.bytes, sourceISA, kernelName, meta, kernelOffset);
   if (!raised.success) {
     llvm::errs() << "ir_proto: Raising to LLVM IR failed\n";
     return result;
