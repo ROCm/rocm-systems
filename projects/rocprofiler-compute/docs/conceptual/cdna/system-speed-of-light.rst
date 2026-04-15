@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler performance model: System Speed-of-Light
+   :description: Learn about the System Speed‑of‑Light metrics for AMD Instinct MI GPUs using CDNA–CDNA4 architectures with ROCm Compute Profiler.
    :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD, system, speed of light
 
 .. _sys-sol:
@@ -8,8 +8,11 @@
 System Speed-of-Light
 *********************
 
-System Speed-of-Light summarizes some of the key metrics from various sections
-of ROCm Compute Profiler’s profiling report.
+The page lists the System Speed-of-Light metrics from various sections
+of the ROCm Compute Profiler’s profiling report for AMD Instinct™ MI-series
+GPUs based on CDNA-CDNA4 architectures.
+
+For RDNA3.5 (gfx1151) APUs, see :doc:`../rdna/system-speed-of-light` under RDNA3.
 
 .. warning::
 
