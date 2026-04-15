@@ -27,9 +27,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
-#include <map>
-
-#include <race-emulator/RaceDetector.h>
+#include "rocjitsu/vm/amdgpu/execution_plugin.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 #define HSA_LARGE_MODEL 1
@@ -149,17 +147,15 @@ public:
   /// queue is empty, signals that this primary component is done.
   void check_all_idle();
 
-  /// @brief Enable or disable LDS race detection for future dispatches.
-  void set_race_detection(bool enabled) { race_detection_enabled_ = enabled; }
-
-  /// @brief Return the collected race violations, keyed by workgroup id.
-  const std::map<uint32_t, std::vector<raceemulator::RaceViolation>> &race_violations() const {
-    return race_violations_;
+  /// @brief Add an execution plugin for dispatch and execution hooks.
+  void add_plugin(std::unique_ptr<ExecutionPlugin> p) {
+    plugins_.push_back(std::move(p));
+    sync_plugins_to_cus();
   }
 
-  /// @brief Return the diagnostic strings, keyed by workgroup id.
-  const std::map<uint32_t, std::vector<std::string>> &race_diagnostics() const {
-    return race_violations_summaries_;
+  /// @brief Return the registered plugins.
+  const std::vector<std::unique_ptr<ExecutionPlugin>> &plugins() const {
+    return plugins_;
   }
 
   /// @brief Set a workgroup ID offset for multi-XCD dispatch.
@@ -269,16 +265,17 @@ private:
 
   InterruptCallback interrupt_cb_; ///< Fired after writing to a signal's event mailbox.
 
-  bool race_detection_enabled_ = false;
-  // Mapping from workgroup id to race_detectors.
-  std::map<uint32_t, std::unique_ptr<raceemulator::RaceDetector>> race_detectors_;
+  std::vector<std::unique_ptr<ExecutionPlugin>> plugins_;
 
-  // Mapping from workgroup id to race violations.
-  std::map<uint32_t, std::vector<raceemulator::RaceViolation>> race_violations_;
-
-  std::map<uint32_t, std::vector<std::string>> race_violations_summaries_;
-
-  std::map<Wavefront*, uint32_t> wavefront_to_index_;
+  /// @brief Push non-owning plugin pointers to all registered CUs.
+  void sync_plugins_to_cus() {
+    std::vector<ExecutionPlugin *> ptrs;
+    ptrs.reserve(plugins_.size());
+    for (auto &p : plugins_)
+      ptrs.push_back(p.get());
+    for (auto *cu : cus_)
+      cu->set_plugins(ptrs);
+  }
 
   /// @brief Doorbell polling thread. Monitors registered HW queue doorbells
   /// and injects doorbell events when new packets are detected.

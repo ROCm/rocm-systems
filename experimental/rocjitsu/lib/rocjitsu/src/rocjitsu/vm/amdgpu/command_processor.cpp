@@ -13,13 +13,10 @@ RJ_DIAGNOSTIC_POP
 #include "simdojo/sim/simulation.h"
 #include "util/log.h"
 
-#include <race-emulator/RaceDetector.h>
-
 #include <atomic>
 #include <cassert>
 #include <chrono>
 #include <set>
-#include <sstream>
 #include <string>
 #include <thread>
 
@@ -259,104 +256,10 @@ bool CommandProcessor::step() {
     uint32_t global_wg_id = wg + pkt.workgroup_id_offset;
     bool wg_dispatched = false;
 
-    // Create a race detector for this workgroup if race detection is enabled.
-    raceemulator::RaceDetector *detector = nullptr;
-    if (race_detection_enabled_) {
-      auto handler = [this, global_wg_id](raceemulator::RaceViolation v) {
-        race_violations_[global_wg_id].push_back(v);
-
-        // Find the violating wavefront to get its PC.
-        Wavefront *violating_wf = nullptr;
-        for (auto &[wf, idx] : wavefront_to_index_) {
-          if (static_cast<int>(idx) == v.wave && wf->wg_id() == global_wg_id) {
-            violating_wf = wf;
-            break;
-          }
-        }
-
-        std::ostringstream oss;
-        auto *detector = race_detectors_[global_wg_id].get();
-
-        if (v.space == raceemulator::RaceViolation::Space::VGPR) {
-          oss << "VGPR race on v" << v.index << ": wave " << v.wave
-              << (v.isWrite ? " write" : " read") << " lane " << v.lane;
-          if (violating_wf) {
-            oss << " (pc=0x" << std::hex << violating_wf->pc << std::dec << ")";
-          }
-
-          // Find the conflicting load event on this VGPR.
-          auto &waveRaceState =
-              detector->getWaveRaceState(v.wave);
-          for (auto eventId : waveRaceState.getVgprMemoryEvents(v.index)) {
-            if (raceemulator::isToVgpr(detector->getEventType(eventId))) {
-              oss << " conflicts with pending load (pc=0x" << std::hex
-                  << detector->getEventPc(eventId) << std::dec << ")";
-              break;
-            }
-          }
-        } else if (v.space == raceemulator::RaceViolation::Space::SGPR) {
-          oss << "SGPR race on s" << v.index << ": wave " << v.wave
-              << (v.isWrite ? " write" : " read");
-          if (violating_wf) {
-            oss << " (pc=0x" << std::hex << violating_wf->pc << std::dec << ")";
-          }
-
-          // Find the conflicting load event on this SGPR.
-          auto &waveRaceState = detector->getWaveRaceState(v.wave);
-          for (auto eventId : waveRaceState.getWaveMemoryEvents()) {
-            if (!raceemulator::isToSgpr(detector->getEventType(eventId)))
-              continue;
-            auto regs = detector->getEventRegisters(eventId);
-            bool found = false;
-            for (uint32_t r : regs) {
-              if (static_cast<int>(r) == v.index) {
-                found = true;
-                break;
-              }
-            }
-            if (found) {
-              oss << " conflicts with pending load (pc=0x" << std::hex
-                  << detector->getEventPc(eventId) << std::dec << ")";
-              break;
-            }
-          }
-        } else {
-          oss << "LDS race at byte " << v.index << " (0x" << std::hex
-              << v.index << std::dec << "): wave " << v.wave
-              << (v.isWrite ? " write" : " read") << " lane " << v.lane;
-          if (violating_wf) {
-            oss << " (pc=0x" << std::hex << violating_wf->pc << std::dec << ")";
-          }
-
-          // Find the conflicting event from the detector.
-          const auto &events = v.isWrite ? detector->getLdsReadEvents()
-                                         : detector->getLdsWriteEvents();
-          for (auto eventId : events) {
-            if (detector->getEventIntervals(eventId).contains(v.index)) {
-              auto conflictingWave = detector->getEventWaveId(eventId);
-              auto conflictingPc = detector->getEventPc(eventId);
-              bool conflictingIsWrite = !v.isWrite;
-              oss << " conflicts with wave " << conflictingWave.value
-                  << (conflictingIsWrite ? " write" : " read")
-                  << " (pc=0x" << std::hex << conflictingPc << std::dec << ")";
-              break;
-            }
-          }
-        }
-
-        oss << ", workgroup (" << v.workgroupId.x << "," << v.workgroupId.y
-            << "," << v.workgroupId.z << ")";
-        race_violations_summaries_[global_wg_id].push_back(oss.str());
-      };
-      race_detectors_[global_wg_id] = std::make_unique<raceemulator::RaceDetector>(
-          static_cast<int>(pkt.group_segment_fixed_size),
-          static_cast<int>(pkt.wfs_per_workgroup),
-          static_cast<int>(pkt.vgprs_per_wf),
-          /*sgprCount=*/static_cast<int>(pkt.sgprs_per_wf),
-          raceemulator::Dim3d(static_cast<int>(global_wg_id)),
-          std::move(handler));
-      detector = race_detectors_[global_wg_id].get();
-    }
+    for (auto &p : plugins_)
+      p->onWorkgroupDispatch(global_wg_id, pkt.group_segment_fixed_size,
+                             pkt.wfs_per_workgroup, pkt.vgprs_per_wf,
+                             pkt.sgprs_per_wf);
 
     for (size_t attempt = 0; attempt < cus_.size() && !wg_dispatched; ++attempt) {
       size_t cu_idx = (next_cu_ + attempt) % cus_.size();
@@ -369,10 +272,8 @@ bool CommandProcessor::step() {
             cu->dispatch_wf(wg, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
         assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
         init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
-        wavefront_to_index_[wf] = w;
-        if (detector) {
-          wf->set_race_state(&detector->getWaveRaceState(static_cast<int>(w)));
-        }
+        for (auto &p : plugins_)
+          p->onWavefrontDispatch(wf, global_wg_id, w);
       }
       next_cu_ = (cu_idx + 1) % cus_.size();
       wg_dispatched = true;

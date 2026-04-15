@@ -22,7 +22,7 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/log.h"
 
-#include <race-emulator/WaveRaceState.h>
+#include "rocjitsu/vm/amdgpu/execution_plugin.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -143,6 +143,12 @@ public:
   /// The command processor uses this to detect when all CUs are done.
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
+
+  /// @brief Set the execution plugins (non-owning, from CP).
+  void set_plugins(std::vector<ExecutionPlugin *> p) { plugins_ = std::move(p); }
+
+  /// @brief Return the registered plugins.
+  const std::vector<ExecutionPlugin *> &plugins() const { return plugins_; }
 
   /// @brief Return the number of dispatched (active or halted) wavefront slots.
   /// @returns Count of non-idle wavefront slots.
@@ -288,9 +294,9 @@ public:
   uint32_t read_sgpr(uint32_t reg_idx) const {
     if (reg_idx < sgpr_to_wave_.size()) {
       if (auto *wf = sgpr_to_wave_[reg_idx]) {
-        if (auto *rs = wf->race_state()) {
-          rs->checkSgprRead(static_cast<int>(reg_idx - wf->sgpr_alloc().base));
-        }
+        uint32_t logical = reg_idx - wf->sgpr_alloc().base;
+        for (auto *p : plugins_)
+          p->onSgprRead(wf, logical);
       }
     }
     return sgpr_file_[reg_idx];
@@ -410,6 +416,7 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  std::vector<ExecutionPlugin *> plugins_; ///< Non-owning plugin list from CP.
   std::vector<Wavefront *> sgpr_to_wave_; ///< Physical SGPR index -> owning wavefront.
   simdojo::Port *cpl_ = nullptr;  ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr;  ///< Requester port: L2 cache request (structural).
@@ -526,10 +533,9 @@ public:
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
     if (reg_idx < vgpr_to_wave_.size()) {
       if (auto *wf = vgpr_to_wave_[reg_idx]) {
-        if (auto *rs = wf->race_state()) {
-          rs->checkVgprRead(static_cast<int>(reg_idx - wf->vgpr_alloc().base),
-                            static_cast<int>(lane), 0xF);
-        }
+        uint32_t logical = reg_idx - wf->vgpr_alloc().base;
+        for (auto *p : this->plugins_)
+          p->onVgprRead(wf, logical, lane);
       }
     }
     return vgpr_file_[reg_idx][lane];

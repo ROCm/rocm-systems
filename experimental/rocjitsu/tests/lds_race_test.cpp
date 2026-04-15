@@ -11,6 +11,7 @@
 #include "rocjitsu/code/kernel_metadata.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/race_detection_plugin.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -25,6 +26,7 @@
 namespace {
 
 using namespace rocjitsu;
+using rocjitsu::amdgpu::RaceDetectionPlugin;
 
 const std::string kSchemaPath = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 const std::string kConfigPath = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
@@ -90,7 +92,9 @@ TEST(LdsRaceTest, DetectsRace) {
 
   // Dispatch with race detection enabled.
   auto *cp = soc->xcd(0)->command_processor();
-  cp->set_race_detection(true);
+  auto race_plugin = std::make_unique<RaceDetectionPlugin>();
+  auto *rp = race_plugin.get();
+  cp->add_plugin(std::move(race_plugin));
 
   test::AqlQueue queue(memory, cp);
   // grid_size = 128 (1 workgroup of 128 threads = 2 wavefronts).
@@ -100,7 +104,7 @@ TEST(LdsRaceTest, DetectsRace) {
   soc->flush_all();
 
   // Verify: race detector should have found violations with diagnostics.
-  auto &diagnostics = cp->race_diagnostics();
+  auto &diagnostics = rp->diagnostics();
   EXPECT_FALSE(diagnostics.empty())
       << "Expected LDS race diagnostics but none were generated";
 
@@ -180,7 +184,9 @@ TEST(VgprRaceTest, DetectsRace) {
 
   // Dispatch with race detection enabled.
   auto *cp = soc->xcd(0)->command_processor();
-  cp->set_race_detection(true);
+  auto race_plugin = std::make_unique<RaceDetectionPlugin>();
+  auto *rp = race_plugin.get();
+  cp->add_plugin(std::move(race_plugin));
 
   test::AqlQueue queue(memory, cp);
   // grid_size = 64 (1 workgroup of 64 threads = 1 wavefront).
@@ -190,7 +196,7 @@ TEST(VgprRaceTest, DetectsRace) {
   soc->flush_all();
 
   // Verify: race detector should have found VGPR violations.
-  auto &diagnostics = cp->race_diagnostics();
+  auto &diagnostics = rp->diagnostics();
   ASSERT_FALSE(diagnostics.empty())
       << "Expected VGPR race diagnostics but none were generated";
 
@@ -273,7 +279,9 @@ TEST(DtlTest, DetectsRace) {
   }
 
   auto *cp = soc->xcd(0)->command_processor();
-  cp->set_race_detection(true);
+  auto race_plugin = std::make_unique<RaceDetectionPlugin>();
+  auto *rp = race_plugin.get();
+  cp->add_plugin(std::move(race_plugin));
 
   test::AqlQueue queue(memory, cp);
   queue.dispatch(kernel_object, 64, 64, KERNARG_ADDR);
@@ -283,7 +291,7 @@ TEST(DtlTest, DetectsRace) {
 
   // Verify: race detector should have found LDS violations from the missing
   // s_waitcnt vmcnt(0) between buffer_load_dword...lds and ds_read_b32.
-  auto &diagnostics = cp->race_diagnostics();
+  auto &diagnostics = rp->diagnostics();
   ASSERT_FALSE(diagnostics.empty())
       << "Expected LDS race diagnostics but none were generated";
 
@@ -375,7 +383,9 @@ TEST(LgkmVgprRaceTest, DetectsRace) {
   }
 
   auto *cp = soc->xcd(0)->command_processor();
-  cp->set_race_detection(true);
+  auto race_plugin = std::make_unique<RaceDetectionPlugin>();
+  auto *rp = race_plugin.get();
+  cp->add_plugin(std::move(race_plugin));
 
   test::AqlQueue queue(memory, cp);
   queue.dispatch(kernel_object, N, N, KERNARG_ADDR);
@@ -391,7 +401,7 @@ TEST(LgkmVgprRaceTest, DetectsRace) {
 
   // Verify VGPR race diagnostics from the missing lgkmcnt on the inline asm
   // ds_read_b32. The v_add_u32 reads the VGPR before the ds_read completes.
-  auto &diagnostics = cp->race_diagnostics();
+  auto &diagnostics = rp->diagnostics();
   ASSERT_FALSE(diagnostics.empty())
       << "Expected VGPR race diagnostics (lgkmcnt) but none were generated";
 
@@ -469,7 +479,9 @@ TEST(SgprRaceTest, DetectsRace) {
   }
 
   auto *cp = soc->xcd(0)->command_processor();
-  cp->set_race_detection(true);
+  auto race_plugin = std::make_unique<RaceDetectionPlugin>();
+  auto *rp = race_plugin.get();
+  cp->add_plugin(std::move(race_plugin));
 
   test::AqlQueue queue(memory, cp);
   queue.dispatch(kernel_object, 64, 64, KERNARG_ADDR);
@@ -477,7 +489,7 @@ TEST(SgprRaceTest, DetectsRace) {
   engine->run();
   soc->flush_all();
 
-  auto &diagnostics = cp->race_diagnostics();
+  auto &diagnostics = rp->diagnostics();
   ASSERT_FALSE(diagnostics.empty())
       << "Expected SGPR race diagnostics (lgkmcnt) but none were generated";
 

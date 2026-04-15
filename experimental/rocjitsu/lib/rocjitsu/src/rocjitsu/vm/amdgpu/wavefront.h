@@ -16,8 +16,6 @@
 #include <memory>
 #include <string_view>
 
-#include <race-emulator/WaveRaceState.h>
-
 namespace rocjitsu {
 namespace amdgpu {
 
@@ -138,12 +136,6 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
-  /// @brief Return the race detection state, or nullptr if not enabled.
-  raceemulator::WaveRaceState *race_state() const { return race_state_; }
-
-  /// @brief Set the race detection state for this wavefront.
-  void set_race_state(raceemulator::WaveRaceState *rs) { race_state_ = rs; }
-
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
   uint64_t scratch_base() const { return scratch_base_; }
@@ -168,17 +160,8 @@ public:
   /// @param vmcnt VM counter threshold.
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
-  void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
-    if (race_state_) {
-      race_state_->dispatch(raceemulator::PendingWaitCount{
-          static_cast<int>(vmcnt), static_cast<int>(lgkmcnt)});
-    }
-    wait_target_.vmcnt = vmcnt;
-    wait_target_.lgkmcnt = lgkmcnt;
-    wait_target_.expcnt = expcnt;
-    if (!wait_satisfied())
-      state_ = WfState::WAITCNT;
-  }
+  void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt);
+
 
   /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
   void set_wait_target_vscnt(uint8_t threshold) {
@@ -326,7 +309,6 @@ public:
     vcc_ = 0;
     m0_ = 0;
     scratch_base_ = 0;
-    race_state_ = nullptr;
     wait_counters_ = {};
     wait_target_ = {};
     state_ = WfState::HALTED;
@@ -361,7 +343,6 @@ private:
   uint64_t vcc_ = 0;                ///< Vector condition code (per-lane comparison result).
   uint32_t m0_ = 0;                 ///< M0 special register (misc addressing).
   uint64_t scratch_base_ = 0;       ///< Per-wavefront scratch (private segment) base address.
-  raceemulator::WaveRaceState *race_state_ = nullptr; ///< Non-owning; set per dispatch.
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
 
