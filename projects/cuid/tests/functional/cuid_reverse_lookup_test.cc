@@ -26,6 +26,7 @@
 #include <cstring>
 #include <gtest/gtest.h>
 #include <unistd.h>
+#include <vector>
 
 // write tests to reverse CUID into its components like serial number, product
 // family, etc. tests must be run with sudo to be able to access primary CUIDs
@@ -47,11 +48,19 @@ static void extract_primary_raw_bits(const amdcuid_id_t &uuid,
 }
 
 void test_cuid_reverse_serial_number() {
-  // This test assumes that the system has at least one device with a valid CUID
-  // and that the serial number can be extracted from it
-  uint32_t count = 100;
-  amdcuid_id_t *handles = new amdcuid_id_t[count];
-  amdcuid_status_t status = amdcuid_get_all_handles(handles, &count);
+  if (geteuid() != 0) {
+    GTEST_SKIP()
+        << "Skipping test_cuid_reverse_serial_number: requires elevated "
+           "permissions";
+  }
+
+  uint32_t count = 0;
+  std::vector<amdcuid_id_t> handles(count);
+  amdcuid_status_t status = amdcuid_get_all_handles(handles.data(), &count);
+  EXPECT_TRUE(status == AMDCUID_STATUS_INSUFFICIENT_SIZE);
+
+  handles.resize(count);
+  status = amdcuid_get_all_handles(handles.data(), &count);
   EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
   EXPECT_GT(count, 0);
 
@@ -80,8 +89,6 @@ void test_cuid_reverse_serial_number() {
     memcpy(&extracted_serial, raw_bits, sizeof(extracted_serial));
     EXPECT_EQ(serial_number, extracted_serial);
   }
-
-  delete[] handles;
 }
 
 void test_cuid_reverse_vendor_id() {
@@ -94,8 +101,8 @@ void test_cuid_reverse_vendor_id() {
   amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
   ASSERT_GT(count, 0u);
 
-  amdcuid_id_t *handles = new amdcuid_id_t[count];
-  status = amdcuid_get_all_handles(handles, &count);
+  std::vector<amdcuid_id_t> handles(count);
+  status = amdcuid_get_all_handles(handles.data(), &count);
   EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
   EXPECT_GT(count, 0u);
 
@@ -119,8 +126,6 @@ void test_cuid_reverse_vendor_id() {
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_vendor, queried_vendor);
   }
-
-  delete[] handles;
 }
 
 void test_cuid_reverse_device_id() {
@@ -133,8 +138,8 @@ void test_cuid_reverse_device_id() {
   amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
   ASSERT_GT(count, 0u);
 
-  amdcuid_id_t *handles = new amdcuid_id_t[count];
-  status = amdcuid_get_all_handles(handles, &count);
+  std::vector<amdcuid_id_t> handles(count);
+  status = amdcuid_get_all_handles(handles.data(), &count);
   EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
   EXPECT_GT(count, 0u);
 
@@ -161,8 +166,6 @@ void test_cuid_reverse_device_id() {
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_device_id, queried_device_id);
   }
-
-  delete[] handles;
 }
 
 void test_cuid_reverse_revision_id() {
@@ -175,8 +178,8 @@ void test_cuid_reverse_revision_id() {
   amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
   ASSERT_GT(count, 0u);
 
-  amdcuid_id_t *handles = new amdcuid_id_t[count];
-  status = amdcuid_get_all_handles(handles, &count);
+  std::vector<amdcuid_id_t> handles(count);
+  status = amdcuid_get_all_handles(handles.data(), &count);
   EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
   EXPECT_GT(count, 0u);
 
@@ -204,8 +207,6 @@ void test_cuid_reverse_revision_id() {
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_revision, queried_revision);
   }
-
-  delete[] handles;
 }
 
 void test_cuid_reverse_unit_id() {
@@ -218,8 +219,8 @@ void test_cuid_reverse_unit_id() {
   amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
   ASSERT_GT(count, 0u);
 
-  amdcuid_id_t *handles = new amdcuid_id_t[count];
-  status = amdcuid_get_all_handles(handles, &count);
+  std::vector<amdcuid_id_t> handles(count);
+  status = amdcuid_get_all_handles(handles.data(), &count);
   EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
   EXPECT_GT(count, 0u);
 
@@ -250,8 +251,6 @@ void test_cuid_reverse_unit_id() {
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(extracted_unit_id, queried_unit_id);
   }
-
-  delete[] handles;
 }
 
 void test_cuid_reverse_device_type() {
@@ -264,8 +263,8 @@ void test_cuid_reverse_device_type() {
   amdcuid_status_t status = amdcuid_get_all_handles(nullptr, &count);
   ASSERT_GT(count, 0u);
 
-  amdcuid_id_t *handles = new amdcuid_id_t[count];
-  status = amdcuid_get_all_handles(handles, &count);
+  std::vector<amdcuid_id_t> handles(count);
+  status = amdcuid_get_all_handles(handles.data(), &count);
   EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
   EXPECT_GT(count, 0u);
 
@@ -291,8 +290,6 @@ void test_cuid_reverse_device_type() {
     EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
     EXPECT_EQ(static_cast<amdcuid_device_type_t>(extracted_type), queried_type);
   }
-
-  delete[] handles;
 }
 
 TEST(CUIDReverseLookupTest, ReverseSerialNumber) {
