@@ -113,7 +113,7 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
         CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocprofiler::agent::get_agent(agent_id)));
 
     size_t triple_buffer_size = params.triple_buffering ? params.buffer_size : 0ul;
-    queue                     = std::make_shared<HsaATTQueue>(*agent, triple_buffer_size);
+    queue = make_att_queue(*agent, triple_buffer_size);
 
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(*agent, this->params, *core, *ext);
     control_packet = factory->construct_control_packet();
@@ -226,7 +226,8 @@ ThreadTracerAgent::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
     if(!queue || active_traces.load() < 1) return;
 
     auto packet = factory->construct_load_marker_packet(id, addr, size);
-    queue->Submit(&packet->packet, true)->WaitOn();
+    auto sig    = att_queue_submit(*queue, &packet->packet, true);
+    if(sig) signal_wait(*sig);
 }
 
 void
@@ -240,10 +241,11 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
     if(!queue || active_traces.load() < 1) return;
 
     auto packet = factory->construct_unload_marker_packet(id);
-    queue->Submit(&packet->packet, true)->WaitOn();
+    auto sig    = att_queue_submit(*queue, &packet->packet, true);
+    if(sig) signal_wait(*sig);
 }
 
-std::shared_ptr<Signal>
+std::shared_ptr<signal_t>
 ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
@@ -255,8 +257,8 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
-    auto unique_signal = queue->SubmitAndSignalLast(control_packet_copy->before_krn_pkt);
-    auto shared_signal = std::shared_ptr<Signal>(std::move(unique_signal));
+    auto unique_signal = att_queue_submit_and_signal_last(*queue, control_packet_copy->before_krn_pkt);
+    auto shared_signal = std::shared_ptr<signal_t>(std::move(unique_signal));
 
     if(params.triple_buffering)
     {
@@ -280,12 +282,11 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         }
 
         auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
-        worker_data->queue = queue;
+        worker_data->queue = queue.get();  // non-owning; ThreadTracerAgent owns queue
 
         // Initialize buffer memory pointers from the queue's triple buffer
-        auto buffer_memory = worker_data->queue->get_triple_buffer_memory();
-        for(size_t i = 0; i < buffer_memory.size(); i++)
-            worker_data->buffers.at(i).memory = buffer_memory.at(i);
+        for(size_t i = 0; i < worker_data->buffers.size(); i++)
+            worker_data->buffers.at(i).memory = worker_data->queue->triple_buffer_memory.at(i);
 
         auto producer_data             = triple_buffer_producer_data_t{};
         producer_data.producer_running = worker_flag;
@@ -308,7 +309,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     return shared_signal;
 }
 
-std::unique_ptr<Signal>
+signal_ptr_t
 ThreadTracerAgent::stop_thread_trace()
 {
     ROCP_TRACE << "Stopping Thread trace for agent " << agent_id.handle;
@@ -333,7 +334,7 @@ ThreadTracerAgent::stop_thread_trace()
         control_packet_copy->clear();
         // Join helpers and emit the final set of packets so the GPU drains.
         control_packet_copy->populate_after();
-        return queue->SubmitAndSignalLast(control_packet_copy->after_krn_pkt);
+        return att_queue_submit_and_signal_last(*queue, control_packet_copy->after_krn_pkt);
     }
 }
 
@@ -539,13 +540,13 @@ DeviceThreadTracer::start_context()
 
     int expected = WORKER_FLAG_STOP;
     CHECK_NOTNULL(worker_flag)->compare_exchange_strong(expected, WORKER_FLAG_RUNNING);
-    auto wait_list = std::vector<std::shared_ptr<Signal>>{};
+    auto wait_list = std::vector<std::shared_ptr<signal_t>>{};
 
     for(auto& [_, tracer] : agents)
         wait_list.emplace_back(tracer->start_thread_trace(worker_flag));
 
-    for(auto& signal : wait_list)
-        CHECK_NOTNULL(signal)->WaitOn();
+    for(auto& sig : wait_list)
+        signal_wait(*CHECK_NOTNULL(sig));
 }
 
 void
@@ -560,7 +561,7 @@ DeviceThreadTracer::stop_context()
     int expected = WORKER_FLAG_RUNNING;
     if(auto flag = worker_flag) flag->compare_exchange_strong(expected, WORKER_FLAG_STOP);
 
-    auto wait_list = std::vector<std::unique_ptr<Signal>>{};
+    auto wait_list = std::vector<signal_ptr_t>{};
 
     for(auto& [_, tracer] : agents)
         wait_list.emplace_back(tracer->stop_thread_trace());

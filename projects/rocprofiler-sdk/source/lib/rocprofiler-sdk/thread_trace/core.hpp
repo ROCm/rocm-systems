@@ -116,15 +116,15 @@ public:
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
     /// Start the trace and spawn helper threads when triple buffering is used.
-    std::shared_ptr<Signal> start_thread_trace(std::shared_ptr<std::atomic<int>> running_flag);
+    std::shared_ptr<signal_t> start_thread_trace(std::shared_ptr<std::atomic<int>> running_flag);
     /// Stop the trace and flush the outstanding hardware packets.
-    std::unique_ptr<Signal> stop_thread_trace();
+    signal_ptr_t stop_thread_trace();
 
 private:
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
-    std::shared_ptr<HsaATTQueue> queue{};
+    att_queue_ptr_t queue{};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
