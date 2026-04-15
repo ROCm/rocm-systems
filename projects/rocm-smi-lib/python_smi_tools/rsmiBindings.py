@@ -86,7 +86,7 @@ rsmi_status_verbose_err_out = {
     rsmi_status_t.RSMI_STATUS_DRM_ERROR: "Error when calling libdrm",
     rsmi_status_t.RSMI_STATUS_FAIL_LOAD_MODULE: "Failed to load a library",
     rsmi_status_t.RSMI_STATUS_FAIL_LOAD_SYMBOL: "Failed to load a library symbol",
-    rsmi_status_t.RSMI_STATUS_UNKNOWN_ERROR: "Unknown error occured",
+    rsmi_status_t.RSMI_STATUS_UNKNOWN_ERROR: "Unknown error occurred",
 }
 
 

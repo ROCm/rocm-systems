@@ -2473,8 +2473,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemset2D_ptr = nullptr;
   void* hipMemset2DAsync_ptr = nullptr;
   void* hipMemset3D_ptr = nullptr;
@@ -2703,7 +2701,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
   CHECK_IMAGE_SUPPORT
-
   void* hipMemcpy2D_ptr = nullptr;
   void* hipMemcpy2DAsync_ptr = nullptr;
   void* hipMemcpyParam2D_ptr = nullptr;
@@ -4479,8 +4476,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
-  CHECK_IMAGE_SUPPORT
-
   void* hipMemcpy3D_ptr = nullptr;
   void* hipMemcpy3DAsync_ptr = nullptr;
   void* hipDrvMemcpy3D_ptr = nullptr;
@@ -5378,7 +5373,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
   if (HmmAttrPrint() != 1) {
-    HipTest::HIP_SKIP_TEST("Skipping test since managed memory not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
 
@@ -5672,7 +5667,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
 
   if (mem_pool_support != 1) {
-    HipTest::HIP_SKIP_TEST("Skipping test since Memory Pool is not supported");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
     return;
   }
 
@@ -6016,7 +6011,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 
@@ -6048,9 +6043,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int canAccessPeer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId));
   if (!canAccessPeer) {
-    std::string msg = "Skipped as peer access cannot be enabled between devices " +
-                      std::to_string(deviceId) + " " + std::to_string(peerDeviceId);
-    HipTest::HIP_SKIP_TEST(msg.c_str());
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     return;
   }
 

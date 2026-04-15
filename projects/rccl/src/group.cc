@@ -18,8 +18,6 @@
 #include "profiler.h"
 #include "nvtx.h"
 
-#include "msccl/msccl_lifecycle.h"
-
 using namespace rccl;
 
 #define GROUP_MAX_RECLAIM_STEPS 10
@@ -99,10 +97,7 @@ ncclResult_t ncclAsyncJobComplete(struct ncclAsyncJob* job) {
 
 NCCL_API(ncclResult_t, ncclGroupStart);
 ncclResult_t ncclGroupStart_impl() {
-  if (!mscclIsCaller())
-  {
-    NCCLCHECK(Recorder::instance().record(rrGroupStart, ncclGroupDepth));
-  }
+  NCCLCHECK(Recorder::instance().record(rrGroupStart, ncclGroupDepth));
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
 
@@ -113,18 +108,12 @@ ncclResult_t ncclGroupStart_impl() {
 
 ncclResult_t ncclGroupStartInternal() {
   ncclGroupDepth++;
-  if (mscclAvailable() && !mscclIsCaller()) {
-    NCCLCHECK(mscclGroupStart());
-  }
   return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclGroupEnd);
 ncclResult_t ncclGroupEnd_impl() {
-  if (!mscclIsCaller())
-  {
-    NCCLCHECK(Recorder::instance().record(rrGroupEnd, ncclGroupDepth));
-  }
+  NCCLCHECK(Recorder::instance().record(rrGroupEnd, ncclGroupDepth));
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, exit);
@@ -135,10 +124,7 @@ exit:
 
 NCCL_API(ncclResult_t, ncclGroupSimulateEnd, ncclSimInfo_t* simInfo);
 ncclResult_t ncclGroupSimulateEnd(ncclSimInfo_t* simInfo) {
-  if (!mscclIsCaller())
-  {
-    Recorder::instance().record(ncclGroupDepth, simInfo);
-  }
+  Recorder::instance().record(ncclGroupDepth, simInfo);
   ncclResult_t ret = ncclSuccess;
   NCCL_NVTX3_FUNC_RANGE;
   NCCLCHECKGOTO(ncclGroupEndInternal(simInfo), ret, exit);
@@ -162,10 +148,15 @@ struct ncclPrepareTasksAndCollPreconnectJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  // Preconnect is not meant to be captured;
+  // swap to relaxed mode so CUDA graph capture works correctly.
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
   if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
+  if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   return ncclSuccess;
 }
 
@@ -223,7 +214,14 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
-  if (comm->cuMemSupport && needConnect) NCCLCHECK(ncclCollPreconnect(comm, algoNeedConnect));
+  if (comm->cuMemSupport && needConnect) {
+    // Preconnect is not meant to be captured;
+    // swap to relaxed mode so CUDA graph capture works correctly.
+    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    NCCLCHECK(ncclCollPreconnect(comm, algoNeedConnect));
+    if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+  }
   return ncclSuccess;
 }
 
@@ -231,12 +229,19 @@ ncclResult_t ncclCollPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  // Preconnect is not meant to be captured;
+  // swap to relaxed mode so HIP graph capture works correctly.
+  bool modeChanged = false;
 
   if (!job_->isThreadMain) CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
+  modeChanged = (mode != cudaStreamCaptureModeRelaxed);
   NCCLCHECKGOTO(ncclCollPreconnect(comm, job->algoNeedConnect), ret, fail);
 
 exit:
+  if (modeChanged) (void)cudaThreadExchangeStreamCaptureMode(&mode);
   free(job->algoNeedConnect);
   return ret;
 fail:
@@ -692,10 +697,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     goto exit;
   }
 
-  if (mscclAvailable() && !mscclIsCaller()) {
-    NCCLCHECK(mscclGroupEnd());
-  }
-  
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
     ncclProfilerApiState.profilerGroupDepth--;
   }

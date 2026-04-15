@@ -162,7 +162,12 @@ enum {
    * layouts with a row pitch that is a multiple of this value. Must be
    * a power of 2. The type of this attribute is size_t.
    */
-  HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT = 0x300C
+  HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT = 0x300C,
+  /**
+   * Image intrinsics support. The agent only supports image intrinsics.
+   * The type of this attribute is bool.
+   */
+  HSA_EXT_AGENT_INFO_IMAGE_SUPPORT = 0x300D,
 };
 
 /**

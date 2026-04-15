@@ -141,8 +141,9 @@ Pre-commit hooks automatically check your code for formatting issues before each
 
 **Setup:**
 
+First, install [development dependencies](README.md#development-dependencies), then enable the hooks:
+
 ```bash
-python3 -m pip install pre-commit
 cd rocprofiler-compute
 pre-commit install
 ```
@@ -155,88 +156,26 @@ See the [pre-commit documentation](https://pre-commit.com/#quick-start) for more
 
 ## Code Style and Formatting
 
-ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. All contributions to `src/` must pass Ruff checks before merging. Pre-commit hooks handle this automatically, but you can also run Ruff manually.
+ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. All contributions to `src/` must pass Ruff checks before merging. Pre-commit hooks handle this automatically.
 
-### Running Ruff
+**Style references:**
 
-Install the version of Ruff pinned in [`.pre-commit-config.yaml`](.pre-commit-config.yaml):
+| Topic | Source of Truth |
+|-------|-----------------|
+| Function design, naming, code organization | [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) |
+| Ruff configuration (enforced rules, ignores, formatting) | [`pyproject.toml`](pyproject.toml) |
+
+### Running Ruff Manually
 
 ```bash
-pip install ruff==<version>  # replace <version> with the rev in .pre-commit-config.yaml
-```
-
-Check for issues:
-
-```bash
+# Check for issues
 ruff check .
 ruff format --check .
-```
 
-Auto-fix most issues:
-
-```bash
+# Auto-fix most issues
 ruff check --fix .
 ruff format .
 ```
-
-### Type Annotations
-
-All new functions in `src/` must include type annotations on arguments and return values (except `self` and `cls`). When modifying an existing function, please annotate any parameters you touch.
-
-```python
-# Correct
-def process_kernel_data(kernel_name: str, metrics: list[float]) -> dict[str, Any]:
-    return {"kernel": kernel_name, "avg": sum(metrics) / len(metrics)}
-
-# Will be flagged by Ruff (ANN rules)
-def process_kernel_data(kernel_name, metrics):
-    return {"kernel": kernel_name, "avg": sum(metrics) / len(metrics)}
-```
-
-To check specifically for missing annotations:
-
-```bash
-ruff check --select ANN .
-```
-
-### String Formatting
-
-Use f-strings for all string interpolation. Older-style `.format()` and `%` formatting will be flagged by Ruff.
-
-```python
-# Correct
-message = f"Processing {name} with {count} metrics"
-
-# Will be flagged by Ruff (UP rules)
-message = "Processing {} with {} metrics".format(name, count)
-message = "Processing %s with %s metrics" % (name, count)
-```
-
-### Path Handling
-
-Use `pathlib.Path` for all file system operations instead of `os.path`.
-
-```python
-# Correct
-config_path = Path.cwd() / "config" / "settings.yaml"
-if config_path.exists() and config_path.is_file():
-    ...
-
-# Will be flagged by Ruff (PTH rules)
-config_path = os.path.join(os.getcwd(), "config", "settings.yaml")
-if os.path.exists(config_path) and os.path.isfile(config_path):
-    ...
-```
-
-### Disabling Formatting Rules Locally
-
-If you have a specific reason to suppress formatting in a section of code:
-
-- `# fmt: off` / `# fmt: on` — disable/re-enable formatting for a block.
-- `# fmt: skip` — skip formatting for a single line.
-- `# noqa: <RULE>` — suppress a specific lint rule for a line.
-
-Use these sparingly and only when genuinely necessary.
 
 ## Documentation Changes
 
@@ -261,3 +200,90 @@ rocprofiler-compute vendors certain Python dependencies (via git submodules) to 
 - Stable packages with permissive licenses
 
 For detailed vendoring workflow (adding/updating packages), see [`src/vendored/README.md`](./src/vendored/README.md).
+
+## AI Agent Guidelines
+
+This project uses AI coding assistants (Claude Code, Cursor, GitHub Copilot). All AI-specific guidelines live in [`AGENTS.md`](AGENTS.md), which serves as the single source of truth. Tool-specific adapter files (e.g., `CLAUDE.md`, `.github/copilot-instructions.md`) reference `AGENTS.md` without duplicating content.
+
+To add or update AI guidelines, edit the appropriate file under `.ai/` and add a reference in `AGENTS.md`.
+## Profile Mode Dependency Policy
+
+Profile mode code should not use non-standard Python libraries.
+
+### Why This Matters
+
+Profile mode uses only stdlib to:
+1. **Avoid dependency conflicts** - Users can profile without creating virtual environments or worrying about package version conflicts with their own projects
+2. **Work everywhere** - No `pip install` needed:
+   - HPC systems with locked-down Python environments
+   - Security-sensitive systems requiring minimal dependencies
+   - Any system with Python 3.8+ installed
+
+### Enforcement
+
+**Python Version Requirement:**
+- Import enforcement requires Python 3.10+ (uses `sys.stdlib_module_names`)
+- Python 3.8-3.9: Tests run but import enforcement is disabled (warning issued)
+- CI uses Python 3.10+ to ensure full enforcement coverage
+
+Enforcement is automatically done for tests which execute profile pipeline using main
+function instead of subprocess (unlike tests using --call-binary and multi mpi rank tests).
+These tests are automatically protected by guards in `tests/conftest.py` when testing with Python 3.10 and above.
+The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
+non-stdlib packages are imported.
+
+### What's Allowed
+
+**Python standard library** (Python 3.8+):
+- `json`, `csv`, `sqlite3`, `subprocess`, `pathlib`, `logging`, `sys`, `os`, etc.
+
+**Project modules**:
+- `rocprof_compute`, `utils`, `vendored.*`, `roofline`, `config`, `argparser`
+
+**ROCm system libraries** (bundled with ROCm, not pip packages):
+- `amdsmi` - AMD System Management Interface
+- `hip` - HIP runtime Python bindings
+- `rocprofv3` - rocprofv3 Python bindings
+
+### What's NOT Allowed
+
+These are forbidden in profile mode
+
+**External packages**:
+- `pandas`, `yaml`, `numpy`, `plotly`, `dash`, `textual`, etc.
+- Anything from `requirements.txt`
+
+### Common Mistakes
+
+**Don't do this in profile code:**
+```python
+import pandas  # External package
+import yaml    # Use json or vendored.pyyaml instead
+import numpy   # Use stdlib math/statistics
+```
+
+**Do this instead:**
+```python
+import json              # Stdlib for config/data
+import csv               # Stdlib for CSV operations
+import sqlite3           # Stdlib for data manipulation
+from vendored.pyyaml import yaml  # Vendored package (if needed)
+```
+
+### If Your Test Fails
+
+**Error message:**
+```
+PROFILE MODE DEPENDENCY VIOLATION
+Forbidden package: pandas
+```
+
+**How to fix:**
+
+1. **Move import to analyze mode**
+   - Move the import and relevant code to analysis mode
+
+2. **Use stdlib alternative**
+   - `pandas` → `csv` module + `sqlite3` for dataframes
+   - `yaml` → `json` module (or `vendored.pyyaml` if YAML required)
+   - `numpy` → `math`/`statistics` modules

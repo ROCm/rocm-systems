@@ -58,8 +58,8 @@ endif()
 rocprofiler_systems_get_gfx_archs(MI300_DETECTED GFX_MATCH "gfx9[4-9][A-Fa-f0-9]" ECHO)
 
 if(MI300_DETECTED)
-    list(APPEND _vcn_counter_names --counter-names "VCN Activity")
-    list(APPEND _jpeg_counter_names --counter-names "JPEG Activity")
+    list(APPEND _vcn_counter_names --counter-names "VCN Busy")
+    list(APPEND _jpeg_counter_names --counter-names "JPEG Busy")
     list(
         APPEND _vcn_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/video-decode/amd-smi-rules.json"

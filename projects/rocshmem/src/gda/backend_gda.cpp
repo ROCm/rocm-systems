@@ -29,9 +29,11 @@
 #include <cassert>
 
 #include "backend_gda.hpp"
+#include "debug_gda.hpp"
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
 #include "gda_team.hpp"
+#include "log.hpp"
 #include "mpi_instance.hpp"
 #include "util.hpp"
 #include "topology.hpp"
@@ -40,8 +42,7 @@ namespace rocshmem {
 
 #define NET_CHECK(cmd) {                                     \
     if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort();                                               \
+      LOG_ERROR_EXIT("Unrecoverable error: MPI Failure");    \
     }                                                        \
   }
 
@@ -80,6 +81,14 @@ void GDABackend::init() {
   qp_allocator_ = new HIPAllocatorFinegrained();
 
   select_nic();
+
+  // Determine number of QPs to create per PE
+  num_qps_per_pe = envvar::gda::num_qps_per_pe_default_ctx.get_value() +
+                   envvar::gda::num_qps_per_pe_usr_ctx.get_value() *
+                   envvar::max_num_contexts;
+
+  // Total number of QPs created
+  num_qps = num_qps_per_pe * num_pes;
 
   //TODO setup_host_interface();
   /* Initialize the host interface */
@@ -222,7 +231,7 @@ void GDABackend::cleanup_ctxs() {
   CHECK_HIP(hipFree(ctx_array));
 }
 
-__device__ bool GDABackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool GDABackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   GDAContext *ctx_{nullptr};
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -242,17 +251,8 @@ __device__ void GDABackend::destroy_ctx(rocshmem_ctx_t *ctx) {
 }
 
 void GDABackend::setup_team_world() {
-  TeamInfo *team_info_wrt_parent, *team_info_wrt_world;
-
-  /**
-   * Allocate device-side memory for team_world and construct a
-   * GDA team in it.
-   */
-  CHECK_HIP(hipMalloc(&team_info_wrt_parent, sizeof(TeamInfo)));
-  CHECK_HIP(hipMalloc(&team_info_wrt_world, sizeof(TeamInfo)));
-
-  new (team_info_wrt_parent) TeamInfo(nullptr, 0, 1, num_pes);
-  new (team_info_wrt_world) TeamInfo(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
+  TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
   GDATeam *team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(GDATeam)));
@@ -312,7 +312,7 @@ void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   }
   backend_bootstr->groupAllGather(tmp_buffer, num_bytes, pes_in_world);
 
-  for (int i = 0; i < num_bytes; i++) {
+  for (size_t i = 0; i < num_bytes; i++) {
     outbuf[i] = tmp_buffer[i];
     for (int j = 1; j < num_pes; j++) {
       outbuf[i] &= tmp_buffer[j * num_bytes + i];
@@ -323,9 +323,10 @@ void GDABackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
 }
 
 void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   /**
    * Read the bit mask and find out a common index into
@@ -344,8 +345,8 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
   int common_index = get_ls_non_zero_bit(team_reduced_bitmask_, max_num_teams);
   if (common_index < 0) {
     /* No team available */
-    printf("Could not create team, all bits in use. Aborting.\n");
-    abort();
+    LOG_ERROR_EXIT("Could not create team, out of resources: all bits in use.\n"
+                   "  Please adjust ROCSHMEM_MAX_NUM_TEAMS\n");
   }
 
   /* Mark the team as taken (by unsetting the bit in the pool bitmask) */
@@ -466,7 +467,7 @@ void GDABackend::setup_collectives() {
   /*
    * Initialize the barrier synchronization array with default values.
    */
-  for (int i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
+  for (size_t i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
     barrier_sync[i] = ROCSHMEM_SYNC_VALUE;
   }
 
@@ -479,7 +480,7 @@ void GDABackend::setup_collectives() {
 
 void GDABackend::setup_teams() {
   /**
-   * Allocate pools for the teams sync and work arrary from the SHEAP.
+   * Allocate pools for the teams sync and work array from the SHEAP.
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
@@ -538,7 +539,7 @@ void GDABackend::setup_teams() {
    * Logical:
    * MSB..........................................................................LSB
    * Physical: MSB...1st least significant 8 bits...LSB  MSB...2nd least
-   * signifant 8 bits...LSB
+   * significant 8 bits...LSB
    *
    * Description shows only a 2-byte long mask but idea extends to any
    * arbitrary size.
@@ -572,11 +573,11 @@ void GDABackend::rte_barrier() {
 }
 
 GDAProvider GDABackend::requested_provider() {
-  /* Check whether the user explicitely requests a particular provider type */
+  /* Check whether the user explicitly requests a particular provider type */
   std::string envstr = envvar::gda::provider;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
-    DPRINTF("Found environment variable ROCSHMEM_GDA_PROVIDER, value is %s\n", envstr.c_str());
+    LOG_INFO("Found environment variable ROCSHMEM_GDA_PROVIDER, value is %s", envstr.c_str());
     if (envstr.find("bnxt") != std::string::npos) {
       return GDAProvider::BNXT;
     }
@@ -595,9 +596,9 @@ GDAProvider GDABackend::requested_provider() {
  */
 bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
                                                  const struct ibv_device_attr &device_attr,
-                                                 const char *device_name) {
+                                                 [[maybe_unused]] const char *device_name) {
   uint32_t expected_vendor_id = 0;
-  const char *vendor_name = nullptr;
+  [[maybe_unused]] const char *vendor_name = nullptr;
 
   switch (provider) {
     case GDAProvider::BNXT:
@@ -620,7 +621,7 @@ bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
   }
 
   if (device_attr.vendor_id != expected_vendor_id) {
-    DPRINTF("Skipping device %s with vendor_id=0x%04x (not %s)\n",
+    LOG_TRACE("Skipping device %s with vendor_id=0x%04x (not %s)",
             device_name, device_attr.vendor_id, vendor_name);
     return false;
   }
@@ -640,12 +641,12 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
 
   device_list = ibv.get_device_list(&num_devices);
   if (!device_list || num_devices == 0) {
-    DPRINTF("No RDMA NIC devices found\n");
+    LOG_WARN("No RDMA NIC devices found");
     return false;
   }
 
   for (int i = 0; i < num_devices && !has_active; i++) {
-    DPRINTF("ibv.open device[%d] of %d\n", i, num_devices);
+    LOG_TRACE("ibv.open device[%d] of %d", i, num_devices);
     struct ibv_context *context = ibv.open_device(device_list[i]);
     if (!context) {
       continue;
@@ -664,7 +665,7 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
         struct ibv_port_attr port_attr;
         if (ibv.query_port(context, port, &port_attr) == 0) {
           if (port_attr.state == IBV_PORT_ACTIVE) {
-            DPRINTF("Found active RDMA NIC port %d on device %s (vendor_id=0x%04x, state=%d, phys_state=%d)\n",
+            LOG_TRACE("Found at least one device with an active RDMA NIC (port=%d device=%s vendor_id=0x%04x, state=%d, phys_state=%d)",
                     port, ibv.get_device_name(device_list[i]),
                     device_attr.vendor_id, port_attr.state, port_attr.phys_state);
             has_active = true;
@@ -680,7 +681,7 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
   ibv.free_device_list(device_list);
 
   if (!has_active) {
-    DPRINTF("No active InfiniBand ports found on any device\n");
+    LOG_WARN("No active InfiniBand ports found on any device");
   }
 
   return has_active;
@@ -704,7 +705,7 @@ int GDABackend::backend_can_run() {
       auto ret = has_active_ib_interface(GDAProvider::BNXT);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
-      DPRINTF("BNXT DV library found but no active InfiniBand interface available\n");
+      LOG_TRACE("BNXT DV library found but no active InfiniBand interface available");
     }
   }
 #endif //defined(GDA_BNXT)
@@ -717,7 +718,7 @@ int GDABackend::backend_can_run() {
       auto ret = has_active_ib_interface(GDAProvider::IONIC);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
-      DPRINTF("IONIC DV library found but no active InfiniBand interface available\n");
+      LOG_TRACE("IONIC DV library found but no active InfiniBand interface available");
     }
   }
 #endif //defined(GDA_IONIC)
@@ -730,7 +731,7 @@ int GDABackend::backend_can_run() {
       auto ret = has_active_ib_interface(GDAProvider::MLX5);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
-      DPRINTF("MLX5 DV library found but no active InfiniBand interface available\n");
+      LOG_TRACE("MLX5 DV library found but no active InfiniBand interface available");
     }
   }
 #endif //defined(GDA_MLX5)
@@ -758,7 +759,7 @@ void GDABackend::cleanup_ibv() {
   int err;
 
   if (gda_provider == GDAProvider::BNXT) {
-    for (int i = 0; i < qps.size(); i++) {
+    for (size_t i = 0; i < qps.size(); i++) {
       err = bnxt_re_dv.destroy_qp(qps[i]);
       CHECK_ZERO(err, "bnxt_re_dv_destroy_qp");
 
@@ -799,22 +800,17 @@ void GDABackend::cleanup_ibv() {
     }
   } else if (gda_provider == GDAProvider::MLX5) {
     for (size_t i = 0; i < mlx5_qps.size(); i++) {
-      err = mlx5_qps[i].destroy(mlx5dv);
-      CHECK_ZERO(err, "mlx5_devx_qp::destroy");
-
-      err = ibv.destroy_cq(cqs[i]);
-      CHECK_ZERO(err, "ibv_destroy_cqs");
+      // mlx5dv::destroy_qp also destroys the associated CQ
+      err = mlx5dv.destroy_qp(mlx5_qps[i]);
+      CHECK_ZERO(err, "mlx5dv::destroy_qp");
     }
-
-    err = ibv.dealloc_pd(pd_parent);
-    CHECK_ZERO(err, "ibv_dealloc_pd (pd_parent)");
   } else {
-    for (int i = 0; i < qps.size(); i++) {
+    for (size_t i = 0; i < qps.size(); i++) {
       err = ibv.destroy_qp(qps[i]);
       CHECK_ZERO(err, "ibv_destroy_qp");
 
       err = ibv.destroy_cq(cqs[i]);
-      CHECK_ZERO(err, "ibv_destroy_cqs");
+      CHECK_ZERO(err, "ibv_destroy_cq");
     }
 
     if (gda_provider == GDAProvider::IONIC) {
@@ -852,7 +848,7 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::BNXT;
     } else {
-      DPRINTF("Initializing rocSHMEM BNXT GDA support failed\n");
+      LOG_TRACE("Initializing rocSHMEM BNXT GDA support failed");
     }
   }
 #endif // defined(GDA_BNXT)
@@ -865,7 +861,7 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::IONIC;
     } else {
-      DPRINTF("Initializing rocSHMEM IONIC GDA support failed\n");
+      LOG_TRACE("Initializing rocSHMEM IONIC GDA support failed");
     }
   }
 #endif // defined(GDA_IONIC)
@@ -878,14 +874,13 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::MLX5;
     } else {
-      DPRINTF("Initializing rocSHMEM MLX5 GDA support failed\n");
+      LOG_TRACE("Initializing rocSHMEM MLX5 GDA support failed");
     }
   }
 #endif // defined(GDA_MLX5)
 
   if (gda_provider == GDAProvider::UNSET) {
-    printf("rocshmem::gda:open_dv_libs: no DV library could dlopen for IONIC, BNXT, or MLX5 GDA support\n");
-    exit(1);
+    LOG_ERROR_EXIT("gda:open_dv_libs: no DV library could dlopen for IONIC, BNXT, or MLX5 GDA support");
   }
 }
 
@@ -903,7 +898,7 @@ void GDABackend::close_dv_libs() {
 }
 
 void GDABackend::exchange_qp_dest_info() {
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     dest_info[i].lid = portinfo.lid;
     if (gda_provider == GDAProvider::MLX5) {
       dest_info[i].qpn = mlx5_qps[i].qpn;
@@ -914,7 +909,7 @@ void GDABackend::exchange_qp_dest_info() {
     dest_info[i].gid = gid;
   }
 
-  for (size_t i = 0; i < envvar::max_num_contexts + 1; i++) {
+  for (size_t i = 0; i < num_qps_per_pe; i++) {
     if (backend_comm != MPI_COMM_NULL) {
       mpilib_ftable_.Alltoall(MPI_IN_PLACE, sizeof(dest_info_t), MPI_CHAR, dest_info.data() + i * num_pes, sizeof(dest_info_t), MPI_CHAR, backend_comm);
     } else {
@@ -968,7 +963,7 @@ void GDABackend::setup_gpu_qps() {
   size_t qp_objs_count;
   size_t qp_objs_mem_size;
 
-  qp_objs_count    = (envvar::max_num_contexts + 1) * num_pes;
+  qp_objs_count    = num_qps;
   qp_objs_mem_size = sizeof(QueuePair) * qp_objs_count;
 
   CHECK_HIP(hipMalloc(&gpu_qps, qp_objs_mem_size));
@@ -987,7 +982,7 @@ void GDABackend::setup_gpu_qps() {
 void GDABackend::cleanup_gpu_qps() {
   size_t qp_objs_count;
 
-  qp_objs_count = (envvar::max_num_contexts + 1) * num_pes;
+  qp_objs_count = num_qps;
 
   for (size_t i = 0; i < qp_objs_count; i++) {
     host_qps[i].~QueuePair();
@@ -1020,16 +1015,16 @@ void GDABackend::open_ib_device() {
   }
 
   if (nullptr == device) {
-    fprintf(stderr,
-      "rocshmem error: failed to select a NIC when initializing GDA backend.\n"
+    LOG_ERROR_EXIT(
+      "Failed to select a NIC when initializing GDA backend.\n"
       "  ROCSHMEM_HCA_LIST or ROCSHMEM_USE_IB_HCA may have excluded all available NICs.\n"
-      "  Please adjust HCA_LIST or NIC configuration.\n");
-    exit(1);
+      "  Please review HCA_LIST or NIC configuration.\n");
   }
 
   if (gda_provider == GDAProvider::MLX5) {
     /* Explicitly request DevX context */
-    struct mlx5dv_context_attr context_attr{ .flags = MLX5DV_CONTEXT_FLAGS_DEVX };
+    struct mlx5dv_context_attr context_attr = {};
+    context_attr.flags = MLX5DV_CONTEXT_FLAGS_DEVX;
     context = mlx5dv.open_device(device, &context_attr);
   } else {
     context = ibv.open_device(device);
@@ -1044,7 +1039,7 @@ void GDABackend::open_ib_device() {
   CHECK_NNULL(pd_orig, "ib allocate pd");
   dump_ibv_pd(pd_orig);
 
-  if (gda_provider == GDAProvider::IONIC || gda_provider == GDAProvider::MLX5) {
+  if (gda_provider == GDAProvider::IONIC) {
     create_parent_domain();
   }
 
@@ -1079,25 +1074,34 @@ void GDABackend::validate_ib_device() {
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
     if (device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
-      fprintf(stderr, "%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
-      exit(1);
+      LOG_ERROR_EXIT("%s GDAProvider::BNXT requested but an invalid device is selected", debug_str.c_str());
     }
 
     if (supported_bnxt_part_ids.find(device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
-      fprintf(stderr, "%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
-      exit(1);
+      LOG_ERROR_EXIT("%s Unsupported Broadcom Part: %x", debug_str.c_str(), device_attr.vendor_part_id);
     }
 
     if (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0) {
-      fprintf(stderr, "%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
-
+      LOG_ERROR("%s Unsupported firmware version: %s", debug_str.c_str(), device_attr.fw_ver);
       if (envvar::gda::override_nic_firmware_check == false) {
-        exit(1);
+        exit(EXIT_FAILURE);
       }
 
-      fprintf(stderr, "[WARNING] BNXT NIC Firmware check is disabled\n");
+      LOG_WARN("BNXT NIC Firmware check is disabled");
     }
   }
+
+  for (int port = 1; port <= device_attr.phys_port_cnt; ++port) {
+    struct ibv_port_attr port_attr;
+    if (ibv.query_port(context, port, &port_attr) == 0) {
+      if (port_attr.state == IBV_PORT_ACTIVE) {
+        LOG_INFO("Using NIC %s: it has an active RDMA NIC port %d (vendor_id=0x%04x, state=%d, phys_state=%d)",
+                  nicname, port, device_attr.vendor_id, port_attr.state, port_attr.phys_state);
+        return;
+      }
+    }
+  }
+  LOG_ERROR_EXIT("Could not validate that selected RDMA NIC %s has an active port", debug_str.c_str());
 }
 
 void GDABackend::modify_qps_reset_to_init() {
@@ -1120,11 +1124,11 @@ void GDABackend::modify_qps_reset_to_init() {
             | IBV_QP_PORT
             | IBV_QP_ACCESS_FLAGS;
 
-  for (int i =0; i < qps.size() ; i++) {
+  for (size_t i =0; i < qps.size() ; i++) {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1152,7 +1156,7 @@ void GDABackend::modify_qps_init_to_rtr() {
   if (portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
     attr.ah_attr.grh.sgid_index = gid_index;
     attr.ah_attr.is_global      = 1;
-    attr.ah_attr.grh.hop_limit  = 1;
+    attr.ah_attr.grh.hop_limit  = 255; // Max possible value
     attr.ah_attr.sl             = 1;
     attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
   }
@@ -1165,7 +1169,7 @@ void GDABackend::modify_qps_init_to_rtr() {
             | IBV_QP_MAX_DEST_RD_ATOMIC
             | IBV_QP_MIN_RNR_TIMER;
 
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     attr.rq_psn      = dest_info[i].psn;
     attr.dest_qp_num = dest_info[i].qpn;
 
@@ -1178,7 +1182,7 @@ void GDABackend::modify_qps_init_to_rtr() {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1210,13 +1214,13 @@ void GDABackend::modify_qps_rtr_to_rts() {
             | IBV_QP_RETRY_CNT
             | IBV_QP_RNR_RETRY;
 
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     attr.sq_psn = dest_info[i].psn;
 
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
     } else if (gda_provider == GDAProvider::MLX5) {
-      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
+      err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1226,38 +1230,33 @@ void GDABackend::modify_qps_rtr_to_rts() {
 
 void GDABackend::create_queues() {
   int ncqes;
-  size_t resize_length;
+  uint32_t sq_size = envvar::gda::sq_size;
 
   if (gda_provider == GDAProvider::IONIC) {
-    ncqes = envvar::sq_size << 1;
+    ncqes = sq_size << 1;
   } else {
-    ncqes = envvar::sq_size;
+    ncqes = sq_size;
   }
 
-  resize_length = (envvar::max_num_contexts + 1) * num_pes;
+  dest_info.resize(num_qps);
+  cqs.resize(num_qps);
+  qps.resize(num_qps);
 
-  dest_info.resize(resize_length);
-  cqs.resize(resize_length);
-  qps.resize(resize_length);
+  bnxt_scqs.resize(num_qps);
+  bnxt_rcqs.resize(num_qps);
+  bnxt_qps.resize(num_qps);
 
-  bnxt_scqs.resize(resize_length);
-  bnxt_rcqs.resize(resize_length);
-  bnxt_qps.resize(resize_length);
-
-  mlx5_qps.resize(resize_length);
+  mlx5_qps.resize(num_qps);
 
   if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
-    bnxt_create_qps(envvar::sq_size);
+    bnxt_create_qps(sq_size);
   } else if (gda_provider == GDAProvider::IONIC) {
     ionic_create_cqs(ncqes);
-    create_qps(envvar::sq_size);
+    create_qps(sq_size);
   } else if (gda_provider == GDAProvider::MLX5) {
-    create_cqs(ncqes);
-    mlx5_create_qps(envvar::sq_size);
-  } else {
-    create_cqs(ncqes);
-    create_qps(envvar::sq_size);
+    // mlx5_create_qps also creates the associated CQs
+    mlx5_create_qps(sq_size);
   }
 
   alternate_qp_ports();
@@ -1295,12 +1294,12 @@ void GDABackend::alternate_qp_ports() {
      */
 
     /* Re-Map each context */
-    for (size_t i = 1; i < (envvar::max_num_contexts + 1); i += 2) {
-      for (size_t p = 0; p < num_pes; p += 2) {
+    for (size_t i = 1; i < num_qps_per_pe; i += 2) {
+      for (size_t p = 0; p < static_cast<size_t>(num_pes); p += 2) {
         cur_qp_idx = (i * num_pes) + p;
         new_qp_idx = cur_qp_idx + 1;
 
-        if (new_qp_idx < qps.size()) {
+        if (static_cast<size_t>(new_qp_idx) < qps.size()) {
           // Swap QPs
           std::swap(cqs[cur_qp_idx],       cqs[new_qp_idx]);
           std::swap(qps[cur_qp_idx],       qps[new_qp_idx]);
@@ -1314,21 +1313,22 @@ void GDABackend::alternate_qp_ports() {
   }
 }
 
-void* GDABackend::pd_alloc_device_uncached(struct ibv_pd* pd, void* pd_context, size_t size, size_t alignment, uint64_t resource_type) {
+void* GDABackend::pd_alloc_device_uncached([[maybe_unused]] struct ibv_pd* pd, [[maybe_unused]] void* pd_context, size_t size, [[maybe_unused]] size_t alignment, [[maybe_unused]] uint64_t resource_type) {
   void* dev_ptr{nullptr};
   CHECK_HIP(hipExtMallocWithFlags(reinterpret_cast<void**>(&dev_ptr), size, hipDeviceMallocUncached));
-  memset(dev_ptr, 0, size);
+  CHECK_HIP(hipMemset(dev_ptr, 0, size));
+  CHECK_HIP(hipStreamSynchronize(0));
   return dev_ptr;
 }
 
-void* GDABackend::pd_alloc_host(struct ibv_pd* pd, void* pd_context, size_t size, size_t alignment, uint64_t resource_type) {
+void* GDABackend::pd_alloc_host([[maybe_unused]] struct ibv_pd* pd, [[maybe_unused]] void* pd_context, size_t size, [[maybe_unused]] size_t alignment, [[maybe_unused]] uint64_t resource_type) {
   void* dev_ptr{nullptr};
   CHECK_HIP(hipHostMalloc(reinterpret_cast<void**>(&dev_ptr), size, hipHostMallocDefault));
   memset(dev_ptr, 0, size);
   return dev_ptr;
 }
 
-void GDABackend::pd_release(struct ibv_pd* pd, void* pd_context, void* ptr, uint64_t resource_type) {
+void GDABackend::pd_release([[maybe_unused]] struct ibv_pd* pd, [[maybe_unused]] void* pd_context, void* ptr, [[maybe_unused]] uint64_t resource_type) {
   CHECK_HIP(hipFree(ptr));
 }
 
@@ -1386,7 +1386,7 @@ void GDABackend::create_cqs(int cqe) {
     cq_attr.flags      |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
   }
 
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     cq_ex = ibv.create_cq_ex(context, &cq_attr);
     CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
 
@@ -1399,9 +1399,11 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   switch (gda_provider) {
   case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
+    dump_ibv_qp(qps[conn_num], conn_num);
     break;
   case GDAProvider::BNXT:
     bnxt_initialize_gpu_qp(gpu_qp, conn_num);
+    dump_ibv_qp(qps[conn_num], conn_num);
     break;
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
@@ -1427,7 +1429,7 @@ void GDABackend::create_qps(int sq_length) {
     attr.cap.max_recv_sge    = 1; // TODO allow zero sges in the driver
   }
 
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     if (gda_provider == GDAProvider::IONIC) {
       attr.pd      = pd_uxdma[i & 1];
     }
@@ -1441,7 +1443,6 @@ void GDABackend::create_qps(int sq_length) {
 
 void GDABackend::select_gid_index() {
   struct ibv_gid_entry *gid_entries;
-  struct ibv_gid_entry *gid_entry;
   union ibv_gid current_gid;
   union ibv_gid selected_gid;
   uint32_t current_gid_type;
@@ -1458,7 +1459,7 @@ void GDABackend::select_gid_index() {
 
   gid_tbl_entries = ibv.query_gid_table(context, gid_entries, gid_tbl_len, 0);
   if (gid_tbl_entries < 0) {
-    fprintf(stderr, "[Warning] ibv_query_gid_table failed. No available GIDs\n");
+    LOG_WARN("ibv_query_gid_table failed: GIDs not available");
     free(gid_entries);
     return;
   }
@@ -1512,7 +1513,7 @@ int GDABackend::ibv_mtu_to_int(enum ibv_mtu mtu) {
     case IBV_MTU_2048: return 2048;
     case IBV_MTU_4096: return 4096;
     default: {
-      fprintf(stderr, "[ERROR] Invalid ibv_mtu\n");
+      LOG_WARN("Invalid ibv_mtu %d", mtu);
       return 0;
     }
   }

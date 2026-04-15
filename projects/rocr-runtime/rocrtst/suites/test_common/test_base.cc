@@ -60,7 +60,7 @@ static const char kCloseLabel[] = "TEST CLEAN UP";
 static const char kResultsLabel[] = "TEST RESULTS";
 
 
-TestBase::TestBase() : description_("") {
+TestBase::TestBase() : skip_(false), description_("") {
 }
 TestBase::~TestBase() {
 }

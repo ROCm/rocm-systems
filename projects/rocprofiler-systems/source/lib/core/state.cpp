@@ -99,6 +99,18 @@ set_state(State _n)
     return _v;
 }
 
+State
+reset_state()
+{
+    if(get_debug_init())
+    {
+        LOG_DEBUG("Resetting state :: {} -> PreInit", std::to_string(get_state()));
+    }
+    auto _v = get_state();
+    get_state_value().store(State::PreInit, std::memory_order_relaxed);
+    return _v;
+}
+
 ThreadState
 set_thread_state(ThreadState _n)
 {

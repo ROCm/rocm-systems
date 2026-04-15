@@ -6,11 +6,142 @@ Tests rocprof-sys binaries
 """
 
 from __future__ import annotations
+import json
+import re
 import pytest
 import os
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.rocprof_binary, pytest.mark.ci_enable]
+
+# ============================================================================
+# Avail format consistency data
+# ============================================================================
+
+# Env vars intentionally excluded from the JSON preset schema.
+# These are internal/session-specific settings documented in
+# json_config.cpp::env_vars_to_json_schema(). If this set needs
+# updating, that comment should be updated too.
+EXCLUDED_FROM_JSON_SCHEMA: frozenset[str] = frozenset(
+    {
+        "ROCPROFSYS_CI",
+        "ROCPROFSYS_CONFIG_FILE",
+        "ROCPROFSYS_ENABLED",
+        "ROCPROFSYS_OUTPUT_PREFIX",
+        "ROCPROFSYS_SUPPRESS_CONFIG",
+        "ROCPROFSYS_SUPPRESS_PARSING",
+    }
+)
+
+# Mapping from ROCPROFSYS_* env var names to their expected JSON schema
+# path. Used to verify that the JSON config export covers the same
+# settings as the TXT config export.
+ENV_VAR_TO_JSON_PATH: dict[str, str] = {
+    # --- Tracing ---
+    "ROCPROFSYS_TRACE": "tracing.enabled",
+    "ROCPROFSYS_TRACE_LEGACY": "tracing.legacy",
+    "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB": "tracing.buffer_size_kb",
+    "ROCPROFSYS_PERFETTO_FILL_POLICY": "tracing.fill_policy",
+    "ROCPROFSYS_PERFETTO_BACKEND": "tracing.backend",
+    "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS": "tracing.flush_period_ms",
+    "ROCPROFSYS_SELECTED_REGIONS": "tracing.region",
+    # --- Profiling ---
+    "ROCPROFSYS_PROFILE": "profiling.enabled",
+    "ROCPROFSYS_FLAT_PROFILE": "profiling.flat_profile",
+    # --- Sampling ---
+    "ROCPROFSYS_USE_SAMPLING": "sampling.enabled",
+    "ROCPROFSYS_SAMPLING_FREQ": "sampling.frequency_hz",
+    "ROCPROFSYS_SAMPLING_DELAY": "sampling.delay_sec",
+    "ROCPROFSYS_SAMPLING_DURATION": "sampling.duration_sec",
+    "ROCPROFSYS_SAMPLING_CPUS": "sampling.cpus",
+    "ROCPROFSYS_SAMPLING_GPUS": "sampling.gpus",
+    "ROCPROFSYS_SAMPLING_AINICS": "sampling.ainics",
+    "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT": "sampling.overflow_event",
+    # --- Domains: GPU ---
+    "ROCPROFSYS_USE_AMD_SMI": "domains.gpu.enabled",
+    "ROCPROFSYS_AMD_SMI_METRICS": "domains.gpu.metrics",
+    "ROCPROFSYS_USE_AINIC": "domains.gpu.ainic",
+    "ROCPROFSYS_USE_PROCESS_SAMPLING": "domains.gpu.process_sampling",
+    "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
+    "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",
+    "ROCPROFSYS_CPU_FREQ_ENABLED": "domains.cpu.cpu_freq_enabled",
+    # --- Domains: ROCm ---
+    "ROCPROFSYS_ROCM_DOMAINS": "domains.rocm.api_domains",
+    "ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "domains.rocm.group_by_queue",
+    # --- Domains: Parallel ---
+    "ROCPROFSYS_USE_MPIP": "domains.parallel.runtimes.mpi",
+    "ROCPROFSYS_USE_OMPT": "domains.parallel.runtimes.openmp",
+    "ROCPROFSYS_USE_KOKKOSP": "domains.parallel.runtimes.kokkos",
+    "ROCPROFSYS_USE_RCCLP": "domains.parallel.runtimes.rccl",
+    "ROCPROFSYS_USE_SHMEM": "domains.parallel.runtimes.shmem",
+    "ROCPROFSYS_USE_UCX": "domains.parallel.runtimes.ucx",
+    # --- Output ---
+    "ROCPROFSYS_OUTPUT_PATH": "output.path",
+    "ROCPROFSYS_TIME_OUTPUT": "output.time_output",
+    "ROCPROFSYS_FILE_OUTPUT": "output.file_output",
+    "ROCPROFSYS_USE_ROCPD": "output.rocpd_output",
+    "ROCPROFSYS_USE_PID": "output.use_pid",
+    # --- Hardware counters ---
+    "ROCPROFSYS_ROCM_EVENTS": "hardware_counters.rocm_events",
+    "ROCPROFSYS_PAPI_EVENTS": "hardware_counters.papi_events",
+    "ROCPROFSYS_PAPI_MULTIPLEXING": "hardware_counters.papi_multiplexing",
+    # --- Causal ---
+    "ROCPROFSYS_USE_CAUSAL": "causal.enabled",
+    "ROCPROFSYS_CAUSAL_MODE": "causal.mode",
+    "ROCPROFSYS_CAUSAL_BACKEND": "causal.backend",
+    "ROCPROFSYS_CAUSAL_BINARY_SCOPE": "causal.binary_scope",
+    "ROCPROFSYS_CAUSAL_BINARY_EXCLUDE": "causal.binary_exclude",
+    "ROCPROFSYS_CAUSAL_FUNCTION_SCOPE": "causal.function_scope",
+    "ROCPROFSYS_CAUSAL_FUNCTION_EXCLUDE": "causal.function_exclude",
+    "ROCPROFSYS_CAUSAL_SOURCE_SCOPE": "causal.source_scope",
+    "ROCPROFSYS_CAUSAL_SOURCE_EXCLUDE": "causal.source_exclude",
+    "ROCPROFSYS_CAUSAL_DELAY": "causal.delay_sec",
+    "ROCPROFSYS_CAUSAL_DURATION": "causal.duration_sec",
+    "ROCPROFSYS_CAUSAL_RANDOM_SEED": "causal.random_seed",
+    # --- Advanced ---
+    "ROCPROFSYS_VERBOSE": "advanced.verbose",
+    "ROCPROFSYS_DEBUG": "advanced.debug",
+    "ROCPROFSYS_MAX_DEPTH": "advanced.max_depth",
+    "ROCPROFSYS_TRACE_DELAY": "advanced.trace_delay_sec",
+    "ROCPROFSYS_TRACE_DURATION": "advanced.trace_duration_sec",
+    "ROCPROFSYS_CPU_AFFINITY": "advanced.cpu_affinity",
+    "ROCPROFSYS_COLLAPSE_THREADS": "advanced.collapse_threads",
+    "ROCPROFSYS_TIMEMORY_COMPONENTS": "advanced.timemory_components",
+    "ROCPROFSYS_NETWORK_INTERFACE": "advanced.network_interface",
+    "ROCPROFSYS_TRACE_PERIODS": "advanced.trace_periods",
+    "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "advanced.trace_period_clock_id",
+}
+
+
+def flatten_json_keys(
+    obj: dict | list | str | int | float | bool, prefix: str = ""
+) -> set[str]:
+    """Recursively collect all leaf paths in a JSON object."""
+    keys: set[str] = set()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            keys |= flatten_json_keys(v, f"{prefix}.{k}" if prefix else k)
+    else:
+        keys.add(prefix)
+    return keys
+
+
+def validate_format_consistency(txt_vars: set[str], json_paths: set[str]) -> list[str]:
+    """Check that every TXT env var has a JSON schema mapping.
+
+    Returns a list of error messages for vars without coverage.
+    """
+    missing = []
+    for var in sorted(txt_vars):
+        if var in EXCLUDED_FROM_JSON_SCHEMA:
+            continue
+        if var in ENV_VAR_TO_JSON_PATH:
+            json_key = ENV_VAR_TO_JSON_PATH[var]
+            if not any(json_key in path for path in json_paths):
+                missing.append(f"{var} -> expected JSON path '{json_key}' not found")
+        else:
+            missing.append(f"{var} -> no JSON schema mapping defined")
+    return missing
 
 
 # ============================================================================
@@ -66,6 +197,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
         test_args = [
             "--simulate",
+            "--dump-info",
             "--print-format",
             "json",
             "txt",
@@ -448,6 +580,62 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         self.assert_file_exists(
             config_files, subtest_name="Config file existence validation"
         )
+
+    def test_format_consistency(self, test_output_dir):
+        """Validate that JSON and TXT config formats cover the same env vars.
+
+        Generates both JSON (hierarchical schema) and TXT (flat key=value)
+        configs, then verifies that every ROCPROFSYS_* env var in the TXT
+        output has a corresponding mapping in the JSON schema — except for
+        documented internal/session-specific vars in EXCLUDED_FROM_JSON_SCHEMA.
+        """
+        config_base = test_output_dir / "format-check"
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "-G",
+                str(config_base) + ".cfg",
+                "-F",
+                "txt",
+                "json",
+                "--force",
+            ],
+            timeout=45,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result)
+
+        txt_file = test_output_dir / "format-check.cfg"
+        json_file = test_output_dir / "format-check.json"
+
+        self.assert_file_exists(
+            [txt_file, json_file],
+            subtest_name="Config files generated",
+        )
+
+        # Parse TXT: extract all ROCPROFSYS_* env var names
+        txt_vars = set()
+        with open(txt_file) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#") or not line:
+                    continue
+                match = re.match(r"(ROCPROFSYS_\w+)\s*=", line)
+                if match:
+                    txt_vars.add(match.group(1))
+
+        # Parse JSON: flatten to find all leaf paths
+        with open(json_file) as f:
+            json_paths = flatten_json_keys(json.load(f))
+
+        missing = validate_format_consistency(txt_vars, json_paths)
+        if missing:
+            pytest.fail(
+                f"TXT config has {len(missing)} env var(s) without JSON "
+                f"schema coverage:\n" + "\n".join(f"  {m}" for m in missing)
+            )
 
     def test_list_keys(self):
         pass_regex = [r"Output Keys:[\s\S]*%argv%[\s\S]*%argv_hash%"]

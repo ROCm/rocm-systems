@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "gda/backend_gda.hpp"
+#include "log.hpp"
 #include "util.hpp"
 #include <unistd.h> // getpagesize()
 
@@ -63,9 +64,8 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->bnxt_sq.depth      = bnxt_qps[conn_num].mem_info.sq_slots;
 
   if ((gpu_qp->bnxt_sq.depth % BNXT_RE_STATIC_WQE_BB) != 0) {
-    fprintf(stderr,
-            "[WARNING] SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
-            "There may be runtime errors.\n");
+    LOG_WARN("SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
+             "There may be runtime errors.");
   }
 
   gpu_qp->bnxt_sq.id          = ib_qp->qp_num;
@@ -97,7 +97,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
   cqe = 1;
 
   /* Create SCQs */
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     /* Allocate SCQ mem */
     memset(&cq_attr, 0, sizeof(struct bnxt_re_dv_cq_attr));
     bnxt_scqs[i].handle = bnxt_re_dv.cq_mem_alloc(context, cqe, &cq_attr);
@@ -140,7 +140,7 @@ void GDABackend::bnxt_create_cqs(int cqe) {
   }
 
   /* Create RCQs */
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     /* Allocate RCQ mem */
     memset(&cq_attr, 0, sizeof(struct bnxt_re_dv_cq_attr));
     bnxt_rcqs[i].handle = bnxt_re_dv.cq_mem_alloc(context, cqe, &cq_attr);
@@ -193,7 +193,7 @@ void GDABackend::bnxt_create_qps(int sq_length) {
 
   int dmabuf_enabled = ibv.is_dmabuf_supported();
 
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     /* IB QP Init Attr */
     memset(&ib_qp_attr, 0, sizeof(struct ibv_qp_init_attr));
     ib_qp_attr.send_cq             = bnxt_scqs[i].cq;
@@ -306,7 +306,7 @@ void* GDABackend::bnxt_dv_dlopen() {
     // Try hard-coded PATH
     dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
     if (!dv_handle) {
-      DPRINTF("Could not open libbnxt_re.so. Returning\n");
+      LOG_TRACE("Could not open libbnxt_re.so. Returning");
     }
   }
   return dv_handle;

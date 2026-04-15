@@ -189,6 +189,9 @@ class Isa final: public amd::hsa::common::Signed<0xB13594F2BD8F212D> {
       hsa_fp_type_t fp_type,
       hsa_flush_mode_t flush_mode) const;
 
+  /// @returns true if this ISA supports image intrinsics
+  bool HasImageSupport() const;
+
   /// @brief Default constructor.
   Isa()
       : version_(Version(-1, -1, -1)),
