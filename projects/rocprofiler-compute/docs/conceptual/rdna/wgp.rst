@@ -15,10 +15,11 @@ tracked with wave32-oriented waves in the gfx1151 panel set. The profiler's
 WGP panel is the analogue of the Instinct compute unit chapter: occupancy,
 dispatch, instruction mix, and local caches at that granularity.
 
-For VALU / VMEM / MFMA-style pipeline tables and MI-series diagrams, see
-:doc:`../cdna/compute-unit`.
+The sections below list RDNA3.5 (gfx1151) metric descriptions.
 
-The sections below list RDNA3.5 (gfx1151) metric descriptions for this chapter.
+.. Note::
+   For VALU / VMEM / MFMA-style pipeline tables and MI-series diagrams, see
+   :doc:`../cdna/compute-unit`.
 
 Roofline
 ========

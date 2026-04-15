@@ -9,12 +9,12 @@ Shader engine
 ===============
 
 Shader engines (SEs) still partition the GPU on RDNA hardware; gfx1151 reports
-chip- and SE-level utilization through GRBM-derived counters and SPI (Shader
-Processor Input) dispatch statistics. This complements the WGP chapter, which
-focuses on per-WGP execution metrics.
+Shader Processor Input (SPI) utilization through GRBM-derived counters and dispatch statistics.
+This complements the WGP chapter, which focuses on per-WGP execution metrics.
 
-For Instinct-centric SE, sL1D, and L1I metric tabs, see
-:doc:`../cdna/shader-engine`.
+.. Note::
+   For Instinct-centric SE, sL1D, and L1I metric tabs, see
+   :doc:`../cdna/shader-engine`.
 
 Graphics Register Bus Manager (GRBM)
 =====================================
