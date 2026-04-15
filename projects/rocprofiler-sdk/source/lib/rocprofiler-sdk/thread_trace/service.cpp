@@ -93,7 +93,8 @@ build_pack_from_array(parameter_pack&                             pack,
                 if(param.value >= ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_LAST)
                     return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
                 pack.triple_buffering =
-                    param.value == ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER;
+                    (ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER ==
+                     param.value);
                 break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -190,7 +191,7 @@ rocprofiler_configure_device_thread_trace_service(
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
         // Triple buffering requires specific AQLProfile symbols that may not be available
-        auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+        auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
         if(!aqlprofile_dl || !aqlprofile_dl->valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 

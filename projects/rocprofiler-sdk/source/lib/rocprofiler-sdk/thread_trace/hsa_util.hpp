@@ -25,7 +25,8 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
-#include <atomic>
+#include <array>
+#include <memory>
 
 namespace rocprofiler
 {
@@ -33,64 +34,87 @@ namespace thread_trace
 {
 constexpr size_t NUM_CPU_BUFFERS = 3;
 
-/// RAII wrapper around an HSA signal used to synchronize packet submission.
-class Signal
+// Lifecycle
+hsa_signal_t
+signal_create();
+
+hsa_signal_t
+signal_create(hsa_ext_amd_aql_pm4_packet_t* packet);
+
+void
+signal_destroy(hsa_signal_t sig);
+
+// Operations
+void
+signal_wait(hsa_signal_t sig);
+
+void
+signal_reset(hsa_signal_t sig);
+
+// RAII helpers
+struct signal_deleter_t
 {
-public:
-    Signal(hsa_ext_amd_aql_pm4_packet_t* packet);
-    Signal();
-    ~Signal();
-    Signal(Signal& other) = delete;
-    Signal& operator=(Signal& other) = delete;
-
-    void WaitOn() const;
-
-    hsa_signal_t getSignal() const { return signal; }
-    void         reset();
-
-private:
-    hsa_signal_t      signal{};
-    std::atomic<bool> released{false};
+    void operator()(hsa_signal_t* s) const;
 };
+using signal_ptr_t = std::unique_ptr<hsa_signal_t, signal_deleter_t>;
 
-/// Helper queue that owns the async DMA path used by thread trace copies.
-class HsaATTQueue
+signal_ptr_t
+make_signal();
+
+signal_ptr_t
+make_signal(hsa_ext_amd_aql_pm4_packet_t* packet);
+
+/// Plain data struct for the async DMA queue used by thread trace copies.
+struct att_queue_t
 {
-    using code_object_id_t = uint64_t;
-
-public:
-    HsaATTQueue(const hsa::AgentCache& agent, size_t triple_buffer_size);
-    virtual ~HsaATTQueue();
-    HsaATTQueue(HsaATTQueue& other) = delete;
-    HsaATTQueue& operator=(HsaATTQueue& other) = delete;
-
-    std::unique_ptr<Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait) const;
-    virtual void            Submit(hsa_ext_amd_aql_pm4_packet_t* packet, Signal* completion) const;
-
-    /// Enqueues a sequence of packets and returns the completion signal of the last entry.
-    template <typename VecType>
-    std::unique_ptr<Signal> SubmitAndSignalLast(VecType vec)
-    {
-        for(size_t i = 0; i < vec.size(); i++)
-        {
-            auto sig = Submit(&vec.at(i), i == vec.size() - 1);
-            if(sig) return sig;
-        }
-        return nullptr;
-    }
-
-    std::array<void*, 3> get_triple_buffer_memory() const { return triple_buffer_memory; }
-
-    const rocprofiler_agent_id_t agent_id;
-    const size_t                 buffer_size;
-
-    const hsa_agent_t hsa_agent;
-    const hsa_agent_t near_cpu;
-
-protected:
-    hsa_queue_t*                       queue{nullptr};
+    hsa_queue_t*                       hsa_queue{nullptr};
     std::array<void*, NUM_CPU_BUFFERS> triple_buffer_memory{};
+    rocprofiler_agent_id_t             agent_id{};
+    size_t                             buffer_size{0};
+    hsa_agent_t                        hsa_agent{};
+    hsa_agent_t                        near_cpu{};
+
+    /// Function pointer for submit — allows test injection (replaces virtual dispatch).
+    void (*submit_fn)(const att_queue_t&            self,
+                      hsa_ext_amd_aql_pm4_packet_t* packet,
+                      hsa_signal_t*                 completion){nullptr};
 };
+
+att_queue_t
+att_queue_create(const hsa::AgentCache& agent, size_t triple_buffer_size);
+
+void
+att_queue_destroy(att_queue_t& q);
+
+signal_ptr_t
+att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait);
+
+void
+att_queue_submit(const att_queue_t&            q,
+                 hsa_ext_amd_aql_pm4_packet_t* packet,
+                 hsa_signal_t*                 completion);
+
+/// Enqueues a sequence of packets and returns the completion signal of the last entry.
+template <typename VecType>
+signal_ptr_t
+att_queue_submit_and_signal_last(const att_queue_t& q, VecType vec)
+{
+    for(size_t i = 0; i < vec.size(); i++)
+    {
+        auto sig = att_queue_submit(q, &vec.at(i), i == vec.size() - 1);
+        if(sig) return sig;
+    }
+    return nullptr;
+}
+
+struct att_queue_deleter_t
+{
+    void operator()(att_queue_t* q) const;
+};
+using att_queue_ptr_t = std::unique_ptr<att_queue_t, att_queue_deleter_t>;
+
+att_queue_ptr_t
+make_att_queue(const hsa::AgentCache& agent, size_t triple_buffer_size);
 
 };  // namespace thread_trace
 };  // namespace rocprofiler

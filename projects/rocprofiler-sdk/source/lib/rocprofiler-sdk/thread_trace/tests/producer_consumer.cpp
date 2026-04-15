@@ -68,26 +68,25 @@ test_init()
     [[maybe_unused]] static bool run_once = init();
 }
 
-class QueueMock : public HsaATTQueue
+constexpr size_t MOCK_BUFFER_SIZE = 1u << 20;
+
+void
+mock_submit(const att_queue_t&, hsa_ext_amd_aql_pm4_packet_t*, hsa_signal_t*)
+{}
+
+void
+copy_data_mock(void* dst, const void* src, hsa_agent_t, hsa_agent_t, size_t size, hsa_signal_t*)
 {
-public:
-    QueueMock(const hsa::AgentCache& agent)
-    : HsaATTQueue(agent, BUFFER_SIZE)
-    {}
-    virtual void Submit(hsa_ext_amd_aql_pm4_packet_t*, Signal*) const {};
+    std::memcpy(dst, src, size);
+}
 
-    static void copy_data_mock(void*       dst,
-                               const void* src,
-                               hsa_agent_t,
-                               hsa_agent_t,
-                               size_t size,
-                               Signal*)
-    {
-        std::memcpy(dst, src, size);
-    }
-
-    static constexpr size_t BUFFER_SIZE = 1u << 20;
-};
+att_queue_ptr_t
+make_mock_queue(const hsa::AgentCache& agent)
+{
+    auto q       = make_att_queue(agent, MOCK_BUFFER_SIZE);
+    q->submit_fn = mock_submit;
+    return q;
+}
 
 using query_status_t = std::function<std::optional<hsa::sqtt_buffer_status_t>(void)>;
 
@@ -104,9 +103,10 @@ public:
 
 struct consumer_producer_t
 {
+    att_queue_ptr_t                   mock_queue{};  // destroyed last — must outlive threads
+    std::shared_ptr<std::atomic<int>> flag{};
     std::thread                       consumer{};
     std::thread                       producer{};
-    std::shared_ptr<std::atomic<int>> flag{};
 };
 
 consumer_producer_t
@@ -136,7 +136,7 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
 
     auto params              = thread_trace_parameter_pack{};
     params.triple_buffering  = true;
-    params.buffer_size       = QueueMock::BUFFER_SIZE;
+    params.buffer_size       = MOCK_BUFFER_SIZE;
     params.shader_cb_fn      = cb_fn;
     params.callback_userdata = userdata;
 
@@ -145,19 +145,25 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     auto control_packet = factory->construct_control_packet();
     auto buffer_packet  = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
 
+    auto mock_queue    = make_mock_queue(*agent);
     auto worker_data   = std::make_shared<triple_buffer_shared_data_t>();
-    worker_data->queue = std::make_shared<QueueMock>(*agent);
+    worker_data->queue = mock_queue.get();
 
     // Initialize buffer memory pointers from the queue's triple buffer
-    auto buffer_memory = worker_data->queue->get_triple_buffer_memory();
-    for(size_t i = 0; i < buffer_memory.size(); i++)
-        worker_data->buffers.at(i).memory = buffer_memory.at(i);
+    for(size_t i = 0; i < worker_data->buffers.size(); i++)
+        worker_data->buffers.at(i).memory = mock_queue->triple_buffer_memory.at(i);
+
+    auto start_signal =
+        std::shared_ptr<hsa_signal_t>(new hsa_signal_t{signal_create()}, [](hsa_signal_t* s) {
+            signal_destroy(*s);
+            delete s;
+        });
 
     auto producer_data             = triple_buffer_producer_data_t{};
     producer_data.producer_running = running_flag;
-    producer_data.start_pkt_signal = std::make_shared<Signal>();
+    producer_data.start_pkt_signal = start_signal;
     producer_data.control_packet   = std::move(control_packet);
-    producer_data.copy_data_fn     = QueueMock::copy_data_mock;
+    producer_data.copy_data_fn     = copy_data_mock;
     producer_data.shared           = worker_data;
     producer_data.buffer_packet    = std::move(buffer_packet);
 
@@ -167,9 +173,10 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     consumer_data.shared      = worker_data;
 
     consumer_producer_t ret{};
-    ret.producer = std::thread{producer_loop, std::move(producer_data)};
-    ret.consumer = std::thread{consumer_loop, std::move(consumer_data)};
-    ret.flag     = running_flag;
+    ret.mock_queue = std::move(mock_queue);
+    ret.producer   = std::thread{producer_loop, std::move(producer_data)};
+    ret.consumer   = std::thread{consumer_loop, std::move(consumer_data)};
+    ret.flag       = running_flag;
 
     return ret;
 }
@@ -230,7 +237,7 @@ TEST(thread_trace, status_query)
 TEST(thread_trace, multiple_calls)
 {
     rocprofiler::thread_trace::test_init();
-    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto data_received = std::atomic<size_t>{0};
 
@@ -278,7 +285,7 @@ TEST(thread_trace, data_integrity)
     using pair_t = std::pair<std::atomic<int>, std::vector<size_t>>;
 
     rocprofiler::thread_trace::test_init();
-    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto  pair          = pair_t{};
     auto& output_buffer = pair.second;
@@ -339,7 +346,7 @@ TEST(thread_trace, data_integrity)
 TEST(thread_trace, slow_cpu)
 {
     rocprofiler::thread_trace::test_init();
-    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto interrupt_received = std::atomic<bool>{false};
 
@@ -385,7 +392,7 @@ TEST(thread_trace, slow_cpu)
 TEST(thread_trace, slow_gpu)
 {
     rocprofiler::thread_trace::test_init();
-    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     auto interrupt_received = std::atomic<bool>{false};
 
@@ -431,7 +438,7 @@ TEST(thread_trace, slow_gpu)
 TEST(thread_trace, restart_after_overflow)
 {
     rocprofiler::thread_trace::test_init();
-    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     struct callback_state_t
     {
@@ -513,7 +520,7 @@ TEST(thread_trace, restart_after_overflow)
 TEST(thread_trace, buffer_alternation)
 {
     rocprofiler::thread_trace::test_init();
-    const size_t BUFFER_SIZE = rocprofiler::thread_trace::QueueMock::BUFFER_SIZE;
+    const size_t BUFFER_SIZE = rocprofiler::thread_trace::MOCK_BUFFER_SIZE;
 
     struct callback_state_t
     {

@@ -217,7 +217,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 : handle(_handle)
 , shader_engine_id(_shader_engine_id)
 {
-    auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+    auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
     if(!aqlprofile_dl || !aqlprofile_dl->valid())
     {
         ROCP_FATAL << "AQLProfile dynamic library not loaded or missing required symbols. "
@@ -246,7 +246,7 @@ SQTTBufferingPackets::SQTTBufferingPackets(aqlprofile_handle_t _handle, int _sha
 std::optional<sqtt_buffer_status_t>
 SQTTBufferingPackets::query_buffer_status()
 {
-    auto aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
+    auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
     ROCP_FATAL_IF(!aqlprofile_dl || !aqlprofile_dl->valid())
         << "AQLProfile dynamic library not valid. Cannot query buffer status.";
 

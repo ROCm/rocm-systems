@@ -258,8 +258,8 @@ public:
     void reset_current_buffer() { current_buffer = 0; };
 
     const aqlprofile_handle_t handle;
-    uint64_t                  header{0};
     const int                 shader_engine_id;
+    uint64_t                  header{0};
 
 private:
     size_t                                    current_buffer{0};

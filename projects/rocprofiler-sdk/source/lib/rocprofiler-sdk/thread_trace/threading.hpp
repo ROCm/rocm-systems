@@ -38,12 +38,12 @@ namespace thread_trace
 {
 /// Performs a blocking async copy while honoring the supplied signal dependency.
 void
-copy_data_sync(void*       dst,
-               const void* src,
-               hsa_agent_t dst_agent,
-               hsa_agent_t src_agent,
-               size_t      size,
-               Signal*     dependency);
+copy_data_sync(void*         dst,
+               const void*   src,
+               hsa_agent_t   dst_agent,
+               hsa_agent_t   src_agent,
+               size_t        size,
+               hsa_signal_t* dependency);
 
 typedef decltype(copy_data_sync) copy_data_t;
 
@@ -59,11 +59,11 @@ struct triple_buffer_shared_data_t
         size_t     size{};
     };
 
-    std::shared_ptr<HsaATTQueue> queue{};
-    std::atomic<bool>            consumer_running{true};
-    std::condition_variable      write_cv{};
-    std::atomic<size_t>          write_index{0};
-    std::atomic<size_t>          read_index{0};
+    att_queue_t*            queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
+    std::atomic<bool>       consumer_running{true};
+    std::condition_variable write_cv{};
+    std::atomic<size_t>     write_index{0};
+    std::atomic<size_t>     read_index{0};
 
     std::array<buffer_slot_t, NUM_CPU_BUFFERS> buffers{};
 };
@@ -81,7 +81,7 @@ struct triple_buffer_producer_data_t
 {
     copy_data_t*                                 copy_data_fn{};
     std::shared_ptr<std::atomic<int>>            producer_running{};
-    std::shared_ptr<Signal>                      start_pkt_signal{};
+    std::shared_ptr<hsa_signal_t>                start_pkt_signal{};
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
     std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};

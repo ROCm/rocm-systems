@@ -116,15 +116,16 @@ public:
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
     /// Start the trace and spawn helper threads when triple buffering is used.
-    std::shared_ptr<Signal> start_thread_trace(std::shared_ptr<std::atomic<int>> running_flag);
+    std::shared_ptr<hsa_signal_t> start_thread_trace(
+        std::shared_ptr<std::atomic<int>> running_flag);
     /// Stop the trace and flush the outstanding hardware packets.
-    std::unique_ptr<Signal> stop_thread_trace();
+    signal_ptr_t stop_thread_trace();
 
 private:
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
 
-    std::shared_ptr<HsaATTQueue> queue{};
+    att_queue_ptr_t queue{};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
@@ -202,6 +203,8 @@ public:
 
     const auto& get_agents() const { return agents; }
 
+    friend void flush_and_stop();
+
 private:
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
@@ -217,6 +220,11 @@ initialize(HsaApiTable* table);
 /// Tear down shared resources when the runtime shuts down.
 void
 finalize();
+
+/// Stop and join all active producer/consumer threads, flushing any pending
+/// data.  Safe to call before hsa_shut_down; prevents new traces from starting.
+void
+flush_and_stop();
 
 }  // namespace thread_trace
 }  // namespace rocprofiler
