@@ -125,3 +125,21 @@ def test_counter_grouping_inspector_all_supported_archs():
         + "\n".join(f"  - {err}" for err in failed_archs)
     )
 
+
+def test_counter_grouping_inspector_invalid_arch():
+    """Invalid --arch must exit non-zero (argparse rejects unknown choices)."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(COUNTER_GROUPING_INSPECTOR_SCRIPT),
+            "--arch",
+            "__not_a_valid_arch__",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 2
+    err = (result.stderr or "") + (result.stdout or "")
+    assert "invalid choice" in err.lower()
+
