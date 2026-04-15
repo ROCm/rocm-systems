@@ -7628,7 +7628,7 @@ protected:
 
   static constexpr int ttmp11_saved_trap_id_shift = 28;
   static constexpr int ttmp11_saved_trap_id_size = 4;
-  static constexpr uint32_t ttmp11_saved_trap_id_mask = utils::bit_mask (
+  static constexpr auto ttmp11_saved_trap_id_mask = utils::bit_mask<uint32_t> (
     ttmp11_saved_trap_id_shift,
     ttmp11_saved_trap_id_shift + ttmp11_saved_trap_id_size - 1);
 
@@ -7855,9 +7855,9 @@ gfx12_5_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
     {
     case amdgpu_regnum_t::mode:
       {
-        static uint32_t mode_ro_bits = utils::bit_mask (8, 11)
-                                       | utils::bit_mask (20, 22)
-                                       | utils::bit_mask (28, 31);
+        static uint32_t mode_ro_bits = utils::bit_mask<uint32_t> (8, 11)
+                                       | utils::bit_mask<uint32_t> (20, 22)
+                                       | utils::bit_mask<uint32_t> (28, 31);
         return &mode_ro_bits;
       }
     default:
