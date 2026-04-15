@@ -3,6 +3,7 @@
 
 #include "rocprofiler_compute_tool.h"
 
+#include "counters_writer.h"
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
@@ -17,6 +18,7 @@ using namespace rocprofiler_compute_tool;
 static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
 static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
 static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
+static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
 static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
@@ -32,6 +34,11 @@ void test_knobs::set_sdk_callbacks(const std::shared_ptr<SdkCallbacks>& sdk_call
 void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
 {
     g_sdk_wrapper = sdk_wrapper;
+}
+
+void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_writer)
+{
+    g_counters_writer = csv_writer;
 }
 
 void test_knobs::reset_cfg()
@@ -126,22 +133,7 @@ void generate_output(tool_data_t* tool_data)
     // Write collected counter records and clean up
     if (!tool_data->output_filename.empty())
     {
-        std::ofstream ofs(tool_data->output_filename);
-        if (!ofs.is_open())
-        {
-            std::cerr << "Failed to open output file: " << tool_data->output_filename << std::endl;
-            return;
-        }
-        // Write header at the beginning of the file
-        ofs << "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
-               "counter_id,counter_name,counter_value\n";
-        for (const auto& r : tool_data->counter_records)
-            ofs << r.dispatch_id << ',' << r.agent_id << "," << r.kernel_id << ',' << r.LDS_memory_size
-                << ',' << r.counter_id << ',' << r.counter_name << ',' << r.counter_value << '\n';
-        ofs.flush();
-        std::clog << "[rocprofiler-compute] [" << __FUNCTION__
-                  << "] Counter collection data has been written to: " << tool_data->output_filename
-                  << std::endl;
+        g_counters_writer->write_counters(tool_data);
     }
 }
 
@@ -263,9 +255,10 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
     if (!g_cfg)
         g_cfg = std::make_shared<rocprofiler_tool_configure_result_t>(
             rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-             &tool_init,
-             &tool_fini,
-             static_cast<void*>(new std::unique_ptr<tool_data_t>(std::move(tool_data)))});
+                                                &tool_init,
+                                                &tool_fini,
+                                                static_cast<void*>(new std::unique_ptr<tool_data_t>(
+                                                    std::move(tool_data)))});
 
     return g_cfg.get();
 }

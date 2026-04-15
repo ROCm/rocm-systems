@@ -15,10 +15,12 @@ protected:
         m_input_parameters = std::make_shared<MockInputParameters>();
         m_sdk_callbacks    = std::make_shared<MockSdkCallbacks>();
         m_sdk_wrapper      = std::make_shared<MockSdkWrapper>();
+        m_counters_writer = std::make_shared<MockCountersWriter>();
 
         test_knobs::set_input_parameters(m_input_parameters);
         test_knobs::set_sdk_callbacks(m_sdk_callbacks);
         test_knobs::set_sdk_wrapper(m_sdk_wrapper);
+        test_knobs::set_csv_writer(m_counters_writer);
     }
 
     void TearDown() override { test_knobs::reset_cfg(); }
@@ -42,6 +44,7 @@ protected:
     std::shared_ptr<MockInputParameters> m_input_parameters;
     std::shared_ptr<MockSdkCallbacks>    m_sdk_callbacks;
     std::shared_ptr<MockSdkWrapper>      m_sdk_wrapper;
+    std::shared_ptr<MockCountersWriter>  m_counters_writer;
 };
 
 TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_Throws)
@@ -191,7 +194,8 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_CreatesAndStartsContext)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     cfg->initialize(nullptr, cfg->tool_data);
-    compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(), m_sdk_wrapper->get_started_contexts());
+    compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(),
+                               m_sdk_wrapper->get_started_contexts());
 }
 
 TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
@@ -205,9 +209,14 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
     EXPECT_TRUE(args.dispatch_callback_args != nullptr);
     EXPECT_TRUE(args.record_callback != nullptr);
     EXPECT_TRUE(args.record_callback_args != nullptr);
-
 }
 
+TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    cfg->finalize(cfg->tool_data);
+    EXPECT_EQ(m_counters_writer->get_write_counters_count(), 0);
+}
 
 int main(int argc, char** argv)
 {

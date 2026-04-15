@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
+#include "counters_writer.h"
 #include "input_parameters.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
@@ -102,3 +103,14 @@ private:
     std::vector<uint64_t>                       m_started_contexts;
     std::vector<dispatch_counting_service_args> m_dispatch_counting_service_args;
 };
+
+class MockCountersWriter : public rocprofiler_compute_tool::CountersWriter
+{
+public:
+    void write_counters(rocprofiler_compute_tool::tool_data_t* tool_data) override;
+    uint32_t get_write_counters_count() const;
+
+private:
+    uint32_t m_writer_counters_count = 0;
+};
+

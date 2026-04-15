@@ -3,6 +3,8 @@ set(target rocprofiler-compute-tool)
 add_library(${target} SHARED
     rocprofiler_compute_tool.h
     rocprofiler_compute_tool.cpp
+    counters_writer.h
+    counters_writer.cpp
     sdk_callbacks.h
     sdk_callbacks.cpp
     helper.hpp
@@ -11,7 +13,7 @@ add_library(${target} SHARED
     input_parameters.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
-)
+ "counters_writer.h")
 
 target_include_directories(${target} PUBLIC .)
 target_link_libraries(${target} PUBLIC rocprofiler-sdk::rocprofiler-sdk)

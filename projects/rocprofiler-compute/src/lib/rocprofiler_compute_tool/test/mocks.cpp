@@ -126,3 +126,15 @@ const std::vector<MockSdkWrapper::dispatch_counting_service_args>& MockSdkWrappe
 {
     return m_dispatch_counting_service_args;
 }
+
+/////////////////////////////////////////////////////////////////////////
+// MockCountersWriter
+void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
+{
+    m_writer_counters_count++;
+}
+
+uint32_t MockCountersWriter::get_write_counters_count() const
+{
+    return m_writer_counters_count;
+}
