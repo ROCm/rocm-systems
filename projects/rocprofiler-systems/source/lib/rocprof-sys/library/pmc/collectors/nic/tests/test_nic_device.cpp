@@ -90,7 +90,7 @@ protected:
             .Times(AtLeast(1))
             .WillRepeatedly([](amdsmi_processor_handle, uint8_t, uint32_t* count,
                                amdsmi_nic_stat_t*) {
-                *count = 6;
+                *count = 10;
                 return AMDSMI_STATUS_SUCCESS;
             });
     }
@@ -107,7 +107,7 @@ protected:
             .Times(AtLeast(1))
             .WillRepeatedly([](amdsmi_processor_handle, uint8_t, uint32_t* count,
                                amdsmi_nic_stat_t* stats) {
-                *count = 6;
+                *count = 10;
 
                 std::strncpy(stats[0].name, "rx_rdma_ucast_bytes",
                              sizeof(stats[0].name) - 1);
