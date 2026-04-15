@@ -380,7 +380,7 @@ class SamplingRunner(BaseRunner):
             sample_args: Arguments for rocprof-sys-sample
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_binary_environment()
+        base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.sample_args = sample_args or []
 
@@ -419,7 +419,7 @@ class BinaryRewriteRunner(BaseRunner):
                 fixture handle cleanup after validation completes.
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_binary_environment()
+        base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.rewrite_args = rewrite_args or []
         self.instrumented_exe = output_dir / f"{target}.inst"
@@ -576,7 +576,7 @@ class RuntimeInstrumentRunner(BaseRunner):
             runtime_args: Arguments for rocprof-sys-instrument
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_binary_environment()
+        base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.runtime_args = runtime_args or []
 
@@ -612,7 +612,7 @@ class SysRunRunner(BaseRunner):
             sysrun_args: Arguments for rocprof-sys-run (before --)
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_binary_environment()
+        base_env = config.get_base_environment()
         super().__init__(config, base_env, target, output_dir, **kwargs)
         self.sysrun_args = sysrun_args or []
 
