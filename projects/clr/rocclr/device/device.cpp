@@ -1143,11 +1143,17 @@ std::vector<amd::CommandQueue*> Device::getActiveQueues() {
 
   amd::ScopedLock lock(activeQueuesLock_);
   for (auto it = activeQueues.begin(); it != activeQueues.end(); ++it) {
+    if (!it->second) {
+      // An inactive queue might have been releeased already, so dereferencing
+      // it->first isn't safe
+      continue;
+    }
     if (it->first->referenceCount() == 0) {
       // It is being terminated in HostQueue::terminate().
       // We should not wait for commands in a queue being terminated.
       it->second = false;
-    } else if (it->second) {
+    } else {
+      assert(it->second);
       // In case the queue will be destroyed in Stream::Destroy().
       it->first->retain();
       result.push_back(it->first);
