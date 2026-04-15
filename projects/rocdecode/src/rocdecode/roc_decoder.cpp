@@ -179,9 +179,6 @@ rocDecStatus RocDecoder::GetVideoFrame(int pic_idx, void *dev_mem_ptr[3], uint32
     if (hip_interop_[pic_idx].num_layers == 2) {
         *&dev_mem_ptr[1] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[1];
         horizontal_pitch[1] = hip_interop_[pic_idx].pitch[1];
-    } else if (hip_interop_[pic_idx].num_layers == 3) {
-        *&dev_mem_ptr[2] = hip_interop_[pic_idx].hip_mapped_device_mem + hip_interop_[pic_idx].offset[2];
-        horizontal_pitch[2] = hip_interop_[pic_idx].pitch[2];
     }
     FunctionExitLog(g_rocdec_logger);
     return rocdec_status;
