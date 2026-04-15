@@ -1145,7 +1145,7 @@ def build_report():
     pdf.table(
         ["Dependency", "rocdecode", "rocjpeg", "Layer"],
         [
-            ["amdgpu KMD + KFD", "Indirect (via HSA)", "Indirect (via HSA)", "0 - Kernel"],
+            ["amdgpu KMD + KFD", "Indirect (via HSA and Mesa)", "Indirect (via HSA and Mesa)", "0 - Kernel"],
             ["/dev/dri/renderD*", "Direct (DRM open)", "Direct (DRM open)", "0 - Kernel"],
             ["libdrm_amdgpu", "Direct link", "Direct link", "1 - DRM"],
             ["libva (>= 1.22)", "Direct link", "Direct link", "2 - VA-API"],
