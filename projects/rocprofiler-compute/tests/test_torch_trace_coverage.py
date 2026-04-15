@@ -4,9 +4,11 @@
 """ROCTX marker coverage test for inject_roctx.py.
 
 Selects ATen operators that have CUDA dispatch, synthesizes call arguments,
-runs a generated ``torch.profiler`` workload for ground truth, then runs
-rocprof-compute with ``--torch-trace`` and compares ROCTX marker names and
-kernel correlation to that ground truth.
+writes a minimal ``coverage_workload.py`` (GPU ops only) plus a small
+``coverage_ground_truth_runner.py`` that runs ``torch.profiler`` per op and
+writes JSON ground truth, then runs rocprof-compute with ``--torch-trace`` on
+the workload script and compares ROCTX marker names and kernel correlation to
+that ground truth.
 
 Sampling uses pytest options ``--coverage-seed`` and ``--coverage-n`` (see
 ``pytest --help``), with defaults defined in ``conftest.py``.
@@ -33,6 +35,13 @@ Or from the ``rocprofiler-compute`` project root::
     pytest tests/test_torch_trace_coverage.py -m torch_trace \\
         --coverage-seed=0 --coverage-n=10000 \\
         -s 2>&1 | tee torch_trace_coverage_report.txt
+
+**Ground-truth subprocess failure:** If the profiler **runner** subprocess fails,
+copies of ``coverage_workload.py`` (GPU ops only) and
+``coverage_ground_truth_runner.py`` (torch.profiler + JSON) are written to
+``./failed_torch_trace_coverage_workload.py`` and
+``./failed_torch_trace_coverage_runner.py`` under the pytest cwd for manual
+reruns (``python failed_torch_trace_coverage_runner.py <workload> <json>``).
 """
 
 from __future__ import annotations
@@ -40,12 +49,13 @@ from __future__ import annotations
 import json
 import os
 import random
-import string
+import shutil
 import subprocess
 import sys
 import textwrap
 import threading
 import uuid
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -84,27 +94,64 @@ if not torch.cuda.is_available():
 
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
-# One ``torch.profiler`` block per operator in the generated workload script.
-_WORKLOAD_OP_BLOCK = string.Template(
-    textwrap.dedent(
-        """\
-${setup_block}try:
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as _prof:
-        ${call_line}
-        torch.cuda.synchronize()
-    results[${op_key}] = {
-        "aten_ops": [e.name for e in _prof.events() if e.name.startswith("aten::")],
-        "cuda_kernels": [
-            e.name
-            for e in _prof.events()
-            if e.device_type == torch.autograd.DeviceType.CUDA
-        ],
-    }
-except Exception as _e:
-    results[${op_key}] = {"error": str(_e)[:200]}
-"""
+# Standalone script: loads ``coverage_workload.py``, runs one torch.profiler
+# window per op, writes ``ground_truth.json``. Kept in-repo as a string so the
+# generated workload file stays free of profiler/JSON noise.
+COVERAGE_GROUND_TRUTH_RUNNER_SOURCE = textwrap.dedent(
+    """
+import importlib.util
+import json
+import sys
+
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+
+def main() -> None:
+    workload_path, output_path = sys.argv[1], sys.argv[2]
+    spec = importlib.util.spec_from_file_location(
+        "_torch_trace_coverage_workload",
+        workload_path,
     )
-)
+    wl = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(wl)
+    results: dict = {}
+    for op_name, run_fn in zip(wl.OP_NAMES, wl.ALL_OPS):
+        try:
+            with profile(
+                activities=[
+                    ProfilerActivity.CPU,
+                    ProfilerActivity.CUDA,
+                ],
+                acc_events=True,
+            ) as prof:
+                run_fn()
+                torch.cuda.synchronize()
+            results[op_name] = {
+                "aten_ops": [
+                    e.name
+                    for e in prof.events()
+                    if e.name.startswith("aten::")
+                ],
+                "cuda_kernels": [
+                    e.name
+                    for e in prof.events()
+                    if e.device_type == torch.autograd.DeviceType.CUDA
+                ],
+            }
+        except Exception as exc:
+            results[op_name] = {
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+    with open(output_path, "w", encoding="utf-8") as out_f:
+        json.dump(results, out_f)
+
+
+if __name__ == "__main__":
+    main()
+"""
+).strip()
 
 
 def unique_get_output_param_id(prefix: str) -> str:
@@ -119,6 +166,31 @@ def unique_get_output_param_id(prefix: str) -> str:
 
 
 # -- Hardcoded args for ops whose schemas don't encode shape constraints --
+
+
+def _linalg_householder_product_hardcoded(device: str) -> Tuple[List[Any], dict]:
+    """Build ``(input, tau)`` for ``linalg_householder_product`` across torch builds.
+
+    Some stacks (e.g. certain ROCm wheels) omit ``torch.linalg.geqrf``; fall back to
+    legacy ``torch.geqrf`` or CPU ``geqrf`` + ``.to(device)``. Last resort: tensors
+    with valid ranks only (may be weaker numerically).
+    """
+    a = torch.randn(6, 4, device=device)
+    for geqrf in (getattr(torch.linalg, "geqrf", None), getattr(torch, "geqrf", None)):
+        if geqrf is None:
+            continue
+        try:
+            qr_tau = geqrf(a)
+            return [qr_tau[0], qr_tau[1]], {}
+        except Exception:
+            try:
+                qr_tau = geqrf(torch.randn(6, 4))
+            except Exception:
+                continue
+            return [qr_tau[0].to(device), qr_tau[1].to(device)], {}
+    inp = torch.randn(6, 4, device=device)
+    tau = torch.randn(4, device=device)
+    return [inp, tau], {}
 
 
 def get_hardcoded_args(device: str) -> Dict[str, Any]:
@@ -179,6 +251,23 @@ def get_hardcoded_args(device: str) -> Dict[str, Any]:
                 torch.randint(0, 10, (4,), device=device),
             ],
             {},
+        ),
+        # grad_output (*, embed_dim), indices must be integral (Long); num_weights
+        # is embedding.num_embeddings and must exceed max index.
+        "embedding_dense_backward": lambda: (
+            [
+                torch.randn(8, 16, device=device),
+                torch.randint(0, 32, (8,), device=device),
+                32,
+                -1,
+                False,
+            ],
+            {},
+        ),
+        # Reflectors + tau from geqrf when available; see
+        # :func:`_linalg_householder_product_hardcoded`.
+        "linalg_householder_product": lambda: _linalg_householder_product_hardcoded(
+            device
         ),
         "cross_entropy_loss": lambda: (
             [
@@ -561,26 +650,23 @@ def emit_structural_preamble(
     return [], op_name, ""
 
 
-def build_workload_script_lines(
-    operators: List[OpEntry],
-    ground_truth_path: str,
-) -> List[str]:
-    """Build the full source of ``coverage_workload.py`` as text lines (no I/O).
+def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
+    """Build minimal ``coverage_workload.py`` text: ``torch`` + one def per op + ``run_all``.
 
-    The emitted script imports torch, runs ``torch.profiler`` once per operator,
-    and writes ``aten_ops``, ``cuda_kernels``, or ``error`` per key. Each op block
-    is produced from :data:`_WORKLOAD_OP_BLOCK`. Operators skipped by
-    :func:`build_args_for_op` do not appear in the output.
+    No torch.profiler, no JSON, no GC helpers. ``coverage_ground_truth_runner.py``
+    imports this module and wraps each ``ALL_OPS`` entry with ``profile``.
+    ``run_all()`` is the entry point used when rocprof-compute runs this file as
+    the profiled application.
     """
     lines = [
-        "import json, os, sys, torch",
-        "from torch.profiler import profile, ProfilerActivity",
+        "import sys",
+        "import torch",
         "",
-        "device = 'cuda'",
-        "torch.cuda.synchronize()",
-        "results = {}",
+        'device = "cuda"',
         "",
     ]
+    op_name_literals: List[str] = []
+    runner_fn_names: List[str] = []
 
     for op in operators:
         build_result = build_args_for_op(op)
@@ -614,32 +700,67 @@ def build_workload_script_lines(
         else:
             call_expr = op.name
 
-        setup_block = ("\n".join(op_setup) + "\n") if op_setup else ""
         call_line = f"{call_expr}({call_args})"
-        op_key = repr(op.name)
-        block = _WORKLOAD_OP_BLOCK.substitute(
-            setup_block=setup_block,
-            call_line=call_line,
-            op_key=op_key,
-        ).rstrip("\n")
-        lines.extend(block.splitlines())
+        fn_name = f"_run_{safe_var}"
+        lines.append(f"def {fn_name}():")
+        for setup_line in op_setup:
+            lines.append(f"    {setup_line}")
+        lines.append(f"    {call_line}")
         lines.append("")
 
-    lines.append(f'with open({ground_truth_path!r}, "w") as _f:')
-    lines.append("    json.dump(results, _f)")
+        op_name_literals.append(repr(op.name))
+        runner_fn_names.append(fn_name)
+
+    lines.append("OP_NAMES = [")
+    for lit in op_name_literals:
+        lines.append(f"    {lit},")
+    lines.append("]")
+    lines.append("")
+    lines.append("ALL_OPS = [")
+    for fn in runner_fn_names:
+        lines.append(f"    {fn},")
+    lines.append("]")
+    lines.append("")
+    lines.append("def run_all():")
+    lines.append("    for op_label, fn in zip(OP_NAMES, ALL_OPS):")
+    lines.append("        try:")
+    lines.append("            fn()")
+    lines.append("        except Exception as exc:")
+    lines.append("            msg = (")
+    lines.append(
+        '                f"coverage_workload.run_all: operator {op_label!r} failed "'
+    )
+    lines.append('                f"({type(exc).__name__}: {exc})"')
+    lines.append("            )")
+    lines.append("            print(msg, file=sys.stderr, flush=True)")
+    lines.append("            raise RuntimeError(msg) from exc")
+    lines.append("")
+    lines.append('if __name__ == "__main__":')
+    lines.append("    run_all()")
     lines.append("")
 
     return lines
 
 
-def generate_workload_script(
+def write_coverage_ground_truth_runner_script(path: str) -> None:
+    """Write the static torch.profiler runner next to ``coverage_workload.py``."""
+    Path(path).write_text(
+        COVERAGE_GROUND_TRUTH_RUNNER_SOURCE + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_coverage_workload_artifacts(
     operators: List[OpEntry],
-    ground_truth_path: str,
-    script_path: str,
+    workload_script_path: str,
+    ground_truth_runner_script_path: str,
 ) -> None:
-    """Write ``build_workload_script_lines(...)`` to ``script_path`` on disk."""
-    source_lines = build_workload_script_lines(operators, ground_truth_path)
-    Path(script_path).write_text("\n".join(source_lines), encoding="utf-8")
+    """Write ``coverage_workload.py`` and ``coverage_ground_truth_runner.py``."""
+    Path(workload_script_path).write_text(
+        "\n".join(build_workload_module_lines(operators)),
+        encoding="utf-8",
+    )
+    write_coverage_ground_truth_runner_script(ground_truth_runner_script_path)
 
 
 # -- ROCTX marker CSV parsing --
@@ -712,13 +833,14 @@ def compare_single_op(
             if ground_truth_entry
             else "not in generated script"
         )
-        reason = err_msg[:200]
+        reason = err_msg if len(err_msg) <= 4000 else f"{err_msg[:4000]}…"
         return OpCompareOutcome(
             "skip",
             reason,
             (
                 f"  [SKIP] {op.name}",
-                f"         reason: {reason[:120]}",
+                "         reason (ground truth / args / profiler):",
+                *(f"         {line}" for line in reason.splitlines() or [reason]),
             ),
         )
 
@@ -820,7 +942,12 @@ def print_torch_trace_coverage_session_header(
     aten_operator_count: int,
     structural_operator_count: int,
 ) -> None:
-    """Print seed / sampling summary lines for the coverage test run."""
+    """Print seed / sampling summary for ``pytest -s``; warn for default capture.
+
+    Under normal pytest capture, ``print`` output is hidden when the test passes.
+    A :class:`UserWarning` is always emitted so ``--coverage-seed`` /
+    ``--coverage-n`` and a full reproduce command appear in the warnings summary.
+    """
     print(
         f"\n  Seed: {seed} | {sampled_operator_count} operators"
         f" selected from {aten_operator_count} CUDA ATen ops"
@@ -831,26 +958,210 @@ def print_torch_trace_coverage_session_header(
         f"  (reproduce: pytest ... --coverage-seed={seed}"
         f" --coverage-n={sample_budget} ...)\n"
     )
+    reproduce_cmd = (
+        "pytest tests/test_torch_trace_coverage.py -m torch_trace "
+        f"--coverage-seed={seed} --coverage-n={sample_budget}"
+    )
+    warnings.warn(
+        (
+            f"torch_trace_coverage RNG: --coverage-seed={seed} "
+            f"--coverage-n={sample_budget}. "
+            f"Re-run: {reproduce_cmd}"
+        ),
+        UserWarning,
+        stacklevel=2,
+    )
 
 
-def run_ground_truth_torch_profiler_subprocess(script_path: str) -> None:
-    """Execute the generated workload script under CPython; fail on error or timeout."""
+def _describe_subprocess_exit_code(returncode: int) -> str:
+    """Human-readable explanation for ``subprocess`` ``returncode`` (POSIX)."""
+    if returncode < 0:
+        signal_number = -returncode
+        sig_names = {
+            6: "SIGABRT",
+            9: "SIGKILL",
+            11: "SIGSEGV",
+        }
+        name = sig_names.get(signal_number, "")
+        name_part = f" ({name})" if name else ""
+        return (
+            f"The child process was terminated by OS signal {signal_number}{name_part} "
+            f"(exit code {returncode}). This is not a normal Python ``Exception`` in "
+            "the test process: native code (GPU kernel, driver, or profiler hook) "
+            "faulted or the runtime aborted."
+        )
+    return f"The child process exited with status {returncode}."
+
+
+def _op_workload_failure_due_to(
+    *,
+    timed_out: bool,
+    returncode: int | None,
+) -> str:
+    """Short phrase for ``pytest.fail`` lead-in (what went wrong with the workload)."""
+    if timed_out:
+        return (
+            "the ground-truth subprocess exceeded the 120s timeout while running "
+            "``coverage_workload.py`` under ``torch.profiler`` (hang or very slow GPU)"
+        )
+    assert returncode is not None
+    if returncode < 0:
+        signal_number = -returncode
+        sig_names = {
+            6: "SIGABRT",
+            9: "SIGKILL",
+            11: "SIGSEGV",
+        }
+        name = sig_names.get(signal_number, "")
+        name_part = f", {name}" if name else ""
+        return (
+            f"the ground-truth subprocess was killed by signal {signal_number}{name_part} "
+            f"(exit {returncode}) while running the sampled CUDA operators in "
+            "``coverage_workload.py``—often bad generated args for one op, a kernel or "
+            "driver fault, or profiler interaction"
+        )
+    return (
+        f"the ground-truth subprocess exited with status {returncode} while running "
+        "``coverage_workload.py`` (see stderr for a Python traceback if any)"
+    )
+
+
+def _stderr_tail_collapsed(
+    stderr: str,
+    *,
+    max_lines: int = 32,
+    max_chars: int = 6000,
+) -> str:
+    """Return a shorter stderr view: drop leading duplicate spam, collapse repeats."""
+    if not stderr or not stderr.strip():
+        return "(no stderr)"
+
+    lines = stderr.splitlines()
+    collapsed: List[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        run_end = index + 1
+        while run_end < len(lines) and lines[run_end] == line:
+            run_end += 1
+        repeat_count = run_end - index
+        if repeat_count > 1:
+            collapsed.append(f"{line}  [repeated {repeat_count} times]")
+        else:
+            collapsed.append(line)
+        index = run_end
+
+    if len(collapsed) <= max_lines:
+        body_lines = collapsed
+    else:
+        head_n = min(10, max_lines // 3)
+        tail_n = max_lines - head_n - 1
+        head = collapsed[:head_n]
+        tail = collapsed[-tail_n:]
+        omitted = len(collapsed) - head_n - tail_n
+        body_lines = head + [f"... ({omitted} line(s) omitted) ..."] + tail
+    body = "\n".join(body_lines)
+    if len(body) > max_chars:
+        body = body[-max_chars:]
+        body = f"... (stderr tail, {max_chars} char cap) ...\n{body}"
+    return body
+
+
+def _copy_failed_coverage_artifacts_to_cwd(
+    workload_script_path: str,
+    runner_script_path: str,
+) -> str:
+    """Copy workload + profiler runner from the failed run into pytest cwd."""
+    workload_dest = Path.cwd() / "failed_torch_trace_coverage_workload.py"
+    runner_dest = Path.cwd() / "failed_torch_trace_coverage_runner.py"
+    notes: List[str] = []
+    for src, dest in (
+        (workload_script_path, workload_dest),
+        (runner_script_path, runner_dest),
+    ):
+        try:
+            shutil.copy2(src, dest)
+            notes.append(str(dest.resolve()))
+        except OSError as exc:
+            return f"\n\nCould not copy {src} to {dest}: {exc}"
+    return (
+        f"\n\nSaved workload to {notes[0]} and runner to {notes[1]} "
+        f"(multi-op snapshot, not a single-op repro). "
+        f"Re-run ground truth: ``python {runner_dest.name} "
+        f"{workload_dest.name} ground_truth.json``."
+    )
+
+
+def run_ground_truth_torch_profiler_subprocess(
+    runner_script_path: str,
+    workload_script_path: str,
+    ground_truth_json_path: str,
+    *,
+    coverage_seed: int | None = None,
+    coverage_sample_budget: int | None = None,
+) -> None:
+    """Run ``coverage_ground_truth_runner.py`` (torch.profiler + JSON write).
+
+    Args:
+        runner_script_path: Path to the static runner (loads workload via importlib).
+        workload_script_path: Path to minimal ``coverage_workload.py``.
+        ground_truth_json_path: Output path for profiler JSON.
+    """
+    repro = ""
+    if coverage_seed is not None and coverage_sample_budget is not None:
+        repro = (
+            f" (RNG: --coverage-seed={coverage_seed} "
+            f"--coverage-n={coverage_sample_budget})"
+        )
+    argv = [
+        sys.executable,
+        str(Path(runner_script_path).resolve()),
+        str(Path(workload_script_path).resolve()),
+        str(Path(ground_truth_json_path).resolve()),
+    ]
     try:
         completed = subprocess.run(
-            [sys.executable, script_path],
+            argv,
             capture_output=True,
             text=True,
             timeout=120,
         )
     except subprocess.TimeoutExpired as exc:
-        pytest.fail(
-            "Ground truth script timed out after 120s\n"
-            f"stdout: {exc.stdout}\n"
-            f"stderr: {exc.stderr}"
+        copy_note = _copy_failed_coverage_artifacts_to_cwd(
+            workload_script_path,
+            runner_script_path,
         )
-    assert completed.returncode == 0, (
-        f"Ground truth script failed:\nstderr: {completed.stderr}"
-    )
+        due = _op_workload_failure_due_to(timed_out=True, returncode=None)
+        out_tail = _stderr_tail_collapsed(exc.stdout or "", max_lines=8)
+        err_tail = _stderr_tail_collapsed(exc.stderr or "")
+        pytest.fail(
+            f'The op workload itself failed due to "{due}". Fix it.{repro}{copy_note}\n\n'
+            "Details: subprocess timed out after 120s.\n\n"
+            f"--- stdout (tail) ---\n{out_tail}\n\n"
+            f"--- stderr (tail, collapsed) ---\n{err_tail}"
+        )
+    if completed.returncode != 0:
+        copy_note = _copy_failed_coverage_artifacts_to_cwd(
+            workload_script_path,
+            runner_script_path,
+        )
+        due = _op_workload_failure_due_to(
+            timed_out=False,
+            returncode=completed.returncode,
+        )
+        exit_expl = _describe_subprocess_exit_code(completed.returncode)
+        err_tail = _stderr_tail_collapsed(completed.stderr or "")
+        out_tail = _stderr_tail_collapsed(completed.stdout or "", max_lines=12)
+        cmdline = subprocess.list2cmdline(argv)
+        pytest.fail(
+            f'The op workload itself failed due to "{due}". Fix it.{repro}{copy_note}\n\n'
+            f"{exit_expl}\n\n"
+            "Roctracer / ``hipDeviceSynchronize`` lines often repeat after a single GPU "
+            "queue abort; the first few distinct lines usually matter more than the tail.\n\n"
+            f"--- command ---\n{cmdline}\n\n"
+            f"--- stdout (tail) ---\n{out_tail}\n\n"
+            f"--- stderr (tail, collapsed) ---\n{err_tail}"
+        )
 
 
 # -- Main test --
@@ -863,8 +1174,9 @@ def test_random_operator_kernel_coverage(
 ):
     """Verify ``--torch-trace`` ROCTX output matches profiler ground truth.
 
-    Steps: sample ops → emit ``coverage_workload.py`` + run it for JSON → run
-    rocprof-compute on that script → parse CSVs → compare per op. Uses
+    Steps: sample ops → emit ``coverage_workload.py`` (ops only) and
+    ``coverage_ground_truth_runner.py`` → run the runner for JSON → run
+    rocprof-compute on the workload script → parse CSVs → compare per op. Uses
     :func:`test_utils.get_output_dir` with :func:`unique_get_output_param_id` for
     both the ground-truth script directory and the rocprof workload directory so
     names stay unique under xdist, repeated runs, and threaded callers.
@@ -904,27 +1216,36 @@ def test_random_operator_kernel_coverage(
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
     ground_truth_path = str(Path(gt_work_dir) / "ground_truth.json")
-    script_path = str(Path(gt_work_dir) / "coverage_workload.py")
+    workload_script_path = str(Path(gt_work_dir) / "coverage_workload.py")
+    ground_truth_runner_script_path = str(
+        Path(gt_work_dir) / "coverage_ground_truth_runner.py"
+    )
 
     try:
-        generate_workload_script(
+        write_coverage_workload_artifacts(
             sampled,
-            ground_truth_path,
-            script_path,
+            workload_script_path,
+            ground_truth_runner_script_path,
         )
 
-        # Run 1: torch.profiler ground truth
-        run_ground_truth_torch_profiler_subprocess(script_path)
+        # Run 1: torch.profiler ground truth (runner loads workload module)
+        run_ground_truth_torch_profiler_subprocess(
+            ground_truth_runner_script_path,
+            workload_script_path,
+            ground_truth_path,
+            coverage_seed=seed,
+            coverage_sample_budget=sample_budget,
+        )
         with open(ground_truth_path) as f:
             ground_truth = json.load(f)
 
-        # Run 2: rocprof-compute --torch-trace
+        # Run 2: rocprof-compute --torch-trace (profiled app is minimal workload)
         binary_handler_profile_rocprof_compute(
             {
                 **COVERAGE_TEST_CONFIG,
                 "coverage_workload": [
                     sys.executable,
-                    script_path,
+                    workload_script_path,
                 ],
             },
             workload_dir,
@@ -972,7 +1293,10 @@ def test_random_operator_kernel_coverage(
             )
 
         assert not failures, (
-            f"seed={seed}, {len(failures)} op(s) failed kernel / ROCTX coverage:\n"
+            f"{len(failures)} op(s) failed kernel / ROCTX coverage "
+            f"(seed={seed}, --coverage-n={sample_budget}). "
+            "Reproduce: pytest tests/test_torch_trace_coverage.py -m torch_trace "
+            f"--coverage-seed={seed} --coverage-n={sample_budget}\n"
             + "\n".join(f"  - {n}" for n in failures)
         )
     finally:
