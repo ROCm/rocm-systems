@@ -22,9 +22,10 @@ TEST_F(TestSdkCallbacks, ProvidedKernelIds_ReturnsResultForThemOnly)
 
     const std::vector<std::string> counters_pmc0 = {"counter0", "counter1"};
     const std::vector<std::string> counters_pmc1 = {"counter2"};
+
     m_tool_data->target_kernel_ids.insert(2);
-    dispatch_kernel(1, counters_pmc0, {});
-    dispatch_kernel(2, counters_pmc1, {});
+    dispatch_kernel(1, counters_pmc0);
+    dispatch_kernel(2, counters_pmc1);
 
     EXPECT_EQ(m_sdk_wrapper->get_create_counter_config_info().size(), 1);
     EXPECT_EQ(m_sdk_wrapper->get_create_counter_config_info()[0].counter_names, counters_pmc1);
@@ -32,10 +33,16 @@ TEST_F(TestSdkCallbacks, ProvidedKernelIds_ReturnsResultForThemOnly)
 
 TEST_F(TestSdkCallbacks, ProvidedKernelDispatchRanges_ReturnsResultForThemOnly)
 {
-    m_tool_data->kernel_filter_ranges.push_back({1, 2});
-}
+    const std::vector<std::string> counters_pmc0 = {"counter0", "counter1"};
+    const std::vector<std::string> counters_pmc1 = {"counter2"};
 
-TEST_F(TestSdkCallbacks, ProvidedCountersNotSupported_DoesntReturnThem) {}
+    m_tool_data->kernel_filter_ranges.emplace_back(2, 2);
+    dispatch_kernel(11, counters_pmc0);
+    dispatch_kernel(11, counters_pmc1);
+
+    EXPECT_EQ(m_sdk_wrapper->get_create_counter_config_info().size(), 1);
+    EXPECT_EQ(m_sdk_wrapper->get_create_counter_config_info()[0].counter_names, counters_pmc1);
+}
 
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacks
