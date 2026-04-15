@@ -197,6 +197,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
         test_args = [
             "--simulate",
+            "--dump-info",
             "--print-format",
             "json",
             "txt",
