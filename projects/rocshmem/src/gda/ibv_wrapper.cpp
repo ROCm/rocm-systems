@@ -150,6 +150,8 @@ int IBVWrapper::init_function_table() {
   DLSYM_HELPER(ibv, ibv_, ibv_handle, create_qp);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, modify_qp);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, destroy_qp);
+  DLSYM_HELPER(ibv, ibv_, ibv_handle, create_ah);
+  DLSYM_HELPER(ibv, ibv_, ibv_handle, destroy_ah);
   return ROCSHMEM_SUCCESS;
 }
 
@@ -301,6 +303,19 @@ int IBVWrapper::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_
 
 int IBVWrapper::destroy_qp(struct ibv_qp *qp) {
   return ibv.destroy_qp(qp);
+}
+
+uint16_t IBVWrapper::flow_label_to_udp_sport(uint32_t fl) {
+  // Passthrough function for ibv_flow_label_to_udp_sport inline function in verbs.h
+  return ibv_flow_label_to_udp_sport(fl);
+}
+
+struct ibv_ah* IBVWrapper::create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr) {
+  return ibv.create_ah(pd, attr);
+}
+
+int IBVWrapper::destroy_ah(struct ibv_ah *ah) {
+  return ibv.destroy_ah(ah);
 }
 
 } // namespace rocshmem

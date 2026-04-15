@@ -31,6 +31,7 @@ static inline float GetChromaWidthFactor(rocDecVideoSurfaceFormat surface_format
     case rocDecVideoSurfaceFormat_P016:
     case rocDecVideoSurfaceFormat_YUV444:
     case rocDecVideoSurfaceFormat_YUV444_16Bit:
+    default:
         factor = 1.0;
         break;
     case rocDecVideoSurfaceFormat_YUV420:
@@ -52,7 +53,7 @@ FFMpegVideoDecoder::FFMpegVideoDecoder(int device_id, OutputSurfaceMemoryType ou
     }
     if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
         if (!InitHIP(device_id_)) {
-            ROCDEC_THROW("Failed to initilize the HIP", ROCDEC_DEVICE_INVALID);
+            ROCDEC_THROW("Failed to initialize the HIP", ROCDEC_DEVICE_INVALID);
         }
     }
     // many of the decoder parameters are hardcoded below for just creating the decoder.

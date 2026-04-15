@@ -10,8 +10,10 @@
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
 * Added `ROCSHMEM_TEAM_WORLD` for the device code
-* Added new Enviroment variable:
+* Added new environment variables:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
+  * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`
+  * `ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX`
 * Added VMM POSIX memory allocator (`USE_HEAP_DEVICE_VMM_POSIX`)
    * Uses HIP Virtual Memory Management (VMM) APIs for fine-grained memory control
    * Requires ROCm 7.0+ and Linux kernel 5.6+
@@ -63,7 +65,7 @@
    a shared memory region when the IPC transport is available to reach that region.
    Previously, it would return a null pointer.
 * `ROCSHMEM_RO_DISABLE_IPC` was renamed to `ROCSHMEM_DISABLE_MIXED_IPC`.
-  This enviroment variable was not documented for prior releases.
+  This environment variable was not documented for prior releases.
   It is now documented to inform users who were using this undocumented feature.
 
 ### Removed

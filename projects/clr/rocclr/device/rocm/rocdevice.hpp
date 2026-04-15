@@ -482,6 +482,11 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
+  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
+                                   const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -612,6 +617,9 @@ class Device : public NullDevice {
 
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
+
+  //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
+  void WaitForHsaAsyncHandlersIdle();
 
  private:
   bool create();

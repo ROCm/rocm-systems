@@ -169,7 +169,7 @@ HIP_TEST_CASE(Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess) {
 HIP_TEST_CASE(Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess) {
   CHECK_IMAGE_SUPPORT
   if (HipTest::getDeviceCount() < 2) {
-    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);

@@ -621,6 +621,7 @@ to_string (amd_dbgapi_process_info_t process_info)
       CASE (PROCESS_INFO_OS_ID);
       CASE (PROCESS_INFO_CORE_STATE);
       CASE (PROCESS_INFO_PRECISE_ALU_EXCEPTIONS_SUPPORTED);
+      CASE (PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS);
     }
   return to_string (make_hex (process_info));
 }
@@ -652,6 +653,9 @@ to_string (detail::query_ref<amd_dbgapi_process_info_t> ref)
     case AMD_DBGAPI_PROCESS_INFO_PRECISE_ALU_EXCEPTIONS_SUPPORTED:
       return to_string (make_ref (
         static_cast<const amd_dbgapi_alu_exceptions_precision_t *> (value)));
+    case AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS:
+      return to_string (
+        make_ref (static_cast<const amd_dbgapi_segment_address_t *> (value)));
     }
   fatal_error ("unhandled amd_dbgapi_process_info_t query (%s)",
                to_cstring (query));

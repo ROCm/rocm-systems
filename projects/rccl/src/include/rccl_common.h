@@ -61,8 +61,6 @@ typedef enum {
 
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
-  RCCL_MSCCL,
-  RCCL_MSCCLPP,
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif
@@ -129,6 +127,9 @@ bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, 
 
 // Direct ReduceScatter Limit
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
+// Hierarchical AllGather enabled
+RCCL_PARAM_DECLARE(HierarchicalAllGather);
+#define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED

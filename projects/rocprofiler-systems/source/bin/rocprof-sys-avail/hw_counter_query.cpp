@@ -46,7 +46,7 @@ namespace avail
 {
 namespace
 {
-// Local counter info struct — avoids depending on library/rocprofiler-sdk/fwd.hpp
+// Local counter info struct - avoids depending on library/rocprofiler-sdk/fwd.hpp
 struct counter_info
 {
     rocprofiler_agent_id_t                           agent_id       = {};

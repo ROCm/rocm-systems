@@ -71,11 +71,10 @@ inline void DISPLAY_AMDSMI_API(std::string_view func_name, std::string_view desc
 }
 
 template <typename... Args>
-inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
-                                  long unsigned int lineNum, amdsmi_status_t returnCode,
-                                  Args... args) {
+inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName, uint32_t lineNum,
+                                  amdsmi_status_t returnCode, Args... args) {
   // Input:
-  //     isVerbose  : Toggle for outputing to std_out
+  //     isVerbose  : Toggle for outputting to std_out
   //                  True : Allow printing
   //                  False: No printing
   //     fileName   : Name of file calling this routine
@@ -102,23 +101,28 @@ inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
   //            where:
   //                 X1 API error code
   //                XX1 API error code string
-  //                 X2 API exptected error code
-  //                XX2 API exptected error code string
+  //                 X2 API expected error code
+  //                XX2 API expected error code string
   //
   // TODO(amdsmi_team):
   //     1. Use this function to verify expected return codes and report failures
   //        to testing framework
   //     2. Upon failures, alter test flow
   //     3. For not supported API's, allow function to mark as failures where applicable
+  //
+  // NOTE: This function currently only prints to stdout and does NOT call any
+  //       GTest assertion (ADD_FAILURE, EXPECT_*, etc.). Unexpected return codes
+  //       that are not in NotSupportedErrorCodes[] will silently pass CI unless
+  //       verbose output is reviewed for "TEST FAILURE" lines. See TODOs above
+  //       for planned GTest integration.
 
-  int i;
   amdsmi_status_t retExpected[] = {args...};
   int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]);
   std::string status = smi_amdgpu_get_status_string(returnCode, false);
-  amdsmi_status_t retExpectedStr = retExpected[0];
+  amdsmi_status_t firstExpectedRet = retExpected[0];
 
   // Check for successful (expected) return code
-  for (i = 0; i < numRetExpected; ++i) {
+  for (int i = 0; i < numRetExpected; ++i) {
     if (returnCode == retExpected[i]) {
       if (isVerbose)
         std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status
@@ -135,7 +139,7 @@ inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
   // Check if return code is in the not supported list
   int numNotSupportedErrorCodes =
       sizeof(NotSupportedErrorCodes) / sizeof(NotSupportedErrorCodes[0]);
-  for (i = 0; i < numNotSupportedErrorCodes; ++i) {
+  for (int i = 0; i < numNotSupportedErrorCodes; ++i) {
     if (returnCode == NotSupportedErrorCodes[i]) {
       if (isVerbose)
         std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status
@@ -153,8 +157,8 @@ inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
               << returnCode << ", " << status << std::endl;
     std::cout << "\t===>                          Expected ";
     if (numRetExpected == 1) {
-      expectedStatus = smi_amdgpu_get_status_string(retExpectedStr, false);
-      std::cout << std::setfill(' ') << std::setw(2) << std::right << retExpectedStr << ", "
+      expectedStatus = smi_amdgpu_get_status_string(firstExpectedRet, false);
+      std::cout << std::setfill(' ') << std::setw(2) << std::right << firstExpectedRet << ", "
                 << expectedStatus << std::endl;
     } else {
       for (int i = 0; i < numRetExpected; ++i) {

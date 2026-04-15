@@ -43,6 +43,8 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 //#pragma message "RCCL DWORDX4 Builtins Disabled on GFX942/GFX950"
 #endif
+#else
+#define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #endif
 
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;

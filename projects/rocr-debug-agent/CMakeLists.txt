@@ -52,242 +52,201 @@
 # GIT (optional)
 # Threads
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
-project(rocm-debug-agent VERSION 2.1.0)
+project(rocm-debug-agent VERSION 2.1.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
 # By default build the Debug Agent tests.
 option(ENABLE_TESTS "Enable building Debug Agent tests" ON)
 
-file(GLOB SOURCES "src/*.cpp")
-add_library(rocm-debug-agent SHARED ${SOURCES})
+add_library(rocm-debug-agent SHARED)
+target_sources(
+    rocm-debug-agent
+    PRIVATE src/code_object.cpp src/debug_agent.cpp src/logging.cpp
+)
 
-set_target_properties(rocm-debug-agent PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-  VERSION ${PROJECT_VERSION}
-  SOVERSION ${PROJECT_VERSION_MAJOR}
-  NO_SYSTEM_FROM_IMPORTED ON)
+set_target_properties(
+    rocm-debug-agent
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        NO_SYSTEM_FROM_IMPORTED ON
+)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
+# Unified dependency discovery for both TheRock and standalone builds.
+# Try CONFIG mode first (TheRock), then fall back to manual discovery (standalone).
 
-# Start by looking for libdw (lowercase).
-find_package(libdw CONFIG)
-
-# If libdw is found, we're likely building within TheRock build platform.
-#
-# Note that we use the same CMAKE variables as we would use in a standalone
-# build, to avoid duplication of code.
-if(libdw_FOUND)
-  # Set the include file path for libdw.
-  get_property(LIBDW_INCLUDES
-               TARGET libdw::libdw
-               PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-  # Set the libdw library reference accordingly for the link setup.
-  set(LIBDW_LIBRARIES libdw::libdw)
-
-  # Find the ROCm Runtime.
-  find_package(hsa-runtime64 REQUIRED CONFIG)
-  # Set the include file path for the ROCm Runtime.
-  get_property(ROCR_INCLUDES
-               TARGET hsa-runtime64::hsa-runtime64
-               PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-  # Set the ROCm Runtime library reference accordingly for the link setup.
-  set(ROCR_LIBRARIES hsa-runtime64::hsa-runtime64)
-
-  # Find LibElf.
-  find_package(LibElf REQUIRED CONFIG)
-  # Set the include file path for LibElf.
-  get_property(LIBELF_INCLUDES
-               TARGET elf::elf
-               PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-  # Set the LibElf library reference accordingly for the link setup.
-  set(LIBELF_LIBRARIES elf::elf)
-else()
-  # Otherwise we're doing a regular standalone build, so use our cmake
-  # modules to locate the ROCR and LibElf.
-  find_package(ROCR REQUIRED)
-  find_package(LibDw REQUIRED)
-  find_package(LibElf REQUIRED)
+# Find libdw (elfutils)
+find_package(libdw CONFIG QUIET)
+if(NOT libdw_FOUND)
+    find_path(
+        LIBDW_INCLUDE_DIR
+        NAMES elfutils/libdw.h
+        PATHS /usr/include /usr/local/include
+    )
+    find_library(LIBDW_LIBRARY NAMES dw PATHS /usr/lib /usr/local/lib)
+    if(NOT LIBDW_INCLUDE_DIR OR NOT LIBDW_LIBRARY)
+        message(FATAL_ERROR "Could not find libdw")
+    endif()
+    add_library(libdw::libdw UNKNOWN IMPORTED)
+    set_target_properties(
+        libdw::libdw
+        PROPERTIES
+            IMPORTED_LOCATION "${LIBDW_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${LIBDW_INCLUDE_DIR}"
+    )
+    message(STATUS "Found libdw: ${LIBDW_LIBRARY}")
 endif()
 
-message(STATUS "libdw include: ${LIBDW_INCLUDES}")
-message(STATUS "libhsa include: ${ROCR_INCLUDES}")
-message(STATUS "libelf include: ${LIBELF_INCLUDES}")
+# Find hsa-runtime64 (ROCm Runtime)
+find_package(hsa-runtime64 CONFIG QUIET)
+if(NOT hsa-runtime64_FOUND)
+    find_path(
+        HSA_INCLUDE_DIR
+        NAMES hsa/hsa.h
+        PATHS /opt/rocm/include /opt/rocm/hsa/include
+    )
+    find_library(
+        HSA_LIBRARY
+        NAMES hsa-runtime64
+        PATHS /opt/rocm/lib /opt/rocm/hsa/lib
+    )
+    if(NOT HSA_INCLUDE_DIR OR NOT HSA_LIBRARY)
+        message(FATAL_ERROR "Could not find hsa-runtime64")
+    endif()
+    add_library(hsa-runtime64::hsa-runtime64 UNKNOWN IMPORTED)
+    set_target_properties(
+        hsa-runtime64::hsa-runtime64
+        PROPERTIES
+            IMPORTED_LOCATION "${HSA_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${HSA_INCLUDE_DIR}"
+    )
+    message(STATUS "Found hsa-runtime64: ${HSA_LIBRARY}")
+endif()
 
-find_package(amd-dbgapi REQUIRED CONFIG
-  PATHS
-    /opt/rocm/
-  PATH_SUFFIXES
-    cmake/amd-dbgapi
-    lib/cmake/amd-dbgapi
+# Find libelf
+find_package(LibElf CONFIG QUIET)
+if(NOT LibElf_FOUND)
+    find_path(
+        LIBELF_INCLUDE_DIR
+        NAMES libelf.h
+        PATHS /usr/include /usr/local/include
+        PATH_SUFFIXES libelf
+    )
+    find_library(LIBELF_LIBRARY NAMES elf PATHS /usr/lib /usr/local/lib)
+    if(NOT LIBELF_INCLUDE_DIR OR NOT LIBELF_LIBRARY)
+        message(FATAL_ERROR "Could not find libelf")
+    endif()
+    add_library(elf::elf UNKNOWN IMPORTED)
+    set_target_properties(
+        elf::elf
+        PROPERTIES
+            IMPORTED_LOCATION "${LIBELF_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${LIBELF_INCLUDE_DIR}"
+    )
+    message(STATUS "Found libelf: ${LIBELF_LIBRARY}")
+endif()
+
+find_package(
+    amd-dbgapi
+    REQUIRED
+    CONFIG
+    PATHS /opt/rocm/
+    PATH_SUFFIXES cmake/amd-dbgapi lib/cmake/amd-dbgapi
 )
 
 find_package(Threads REQUIRED)
 
-target_include_directories(rocm-debug-agent
-  SYSTEM PRIVATE ${ROCR_INCLUDES} ${LIBELF_INCLUDES} ${LIBDW_INCLUDES})
-target_compile_options(rocm-debug-agent PRIVATE -Werror -Wall)
+target_link_libraries(
+    rocm-debug-agent
+    PRIVATE
+        amd-dbgapi
+        hsa-runtime64::hsa-runtime64
+        elf::elf
+        libdw::libdw
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+)
+
+target_link_options(
+    rocm-debug-agent
+    PRIVATE
+        -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/exportmap
+        -Wl,--no-undefined
+)
 
 if(DEFINED ENV{ROCM_BUILD_ID})
-  # ROCM_BUILD_ID is set by the ROCm-CI build environment.
-  set(build_info $ENV{ROCM_BUILD_ID})
+    # ROCM_BUILD_ID is set by the ROCm-CI build environment.
+    set(build_info $ENV{ROCM_BUILD_ID})
 else()
-  string(TIMESTAMP NOW "%Y%m%dT%H%M%S")
-  set(build_info developer-build-${NOW})
+    string(TIMESTAMP NOW "%Y%m%dT%H%M%S")
+    set(build_info developer-build-${NOW})
 
-  if(DEFINED ENV{USER})
-    set(build_info ${build_info}-$ENV{USER})
-  endif()
+    if(DEFINED ENV{USER})
+        set(build_info ${build_info}-$ENV{USER})
+    endif()
 
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(
-      COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-      OUTPUT_VARIABLE build_revision
-      ERROR_QUIET
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  else()
-    message(STATUS "GIT not found")
-  endif()
+    find_package(Git)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            OUTPUT_VARIABLE build_revision
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+    else()
+        message(STATUS "GIT not found")
+    endif()
 
-  if(DEFINED build_revision)
-    set(build_info ${build_info}-git-${build_revision})
-  endif()
+    if(DEFINED build_revision)
+        set(build_info ${build_info}-git-${build_revision})
+    endif()
 endif()
 
 # Check for memfd_create headers and libs
-include(CheckCSourceCompiles)
-check_c_source_compiles("
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles(
+    "
   #define _GNU_SOURCE
   #include <sys/mman.h>
   int main() { return memfd_create (\"cmake_test\", 0); }
-  " HAVE_MEMFD_CREATE)
-if (HAVE_MEMFD_CREATE)
-  add_definitions(-DHAVE_MEMFD_CREATE)
-endif()
+  "
+    HAVE_MEMFD_CREATE
+)
 
-target_link_libraries(rocm-debug-agent
-  PRIVATE amd-dbgapi ${ROCR_LIBRARIES} ${LIBELF_LIBRARIES} ${LIBDW_LIBRARIES}
-  Threads::Threads ${CMAKE_DL_LIBS}
-  -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/exportmap -Wl,--no-undefined)
+target_compile_options(
+    rocm-debug-agent
+    PRIVATE -Werror -Wall -Wno-attributes -fno-rtti -fvisibility=hidden
+)
 
-target_compile_options(rocm-debug-agent
-  PRIVATE -fno-rtti -Wall -Wno-attributes -fvisibility=hidden)
+target_compile_definitions(
+    rocm-debug-agent
+    PRIVATE
+        AMD_INTERNAL_BUILD
+        _GNU_SOURCE
+        __STDC_LIMIT_MACROS
+        __STDC_CONSTANT_MACROS
+        $<$<BOOL:${HAVE_MEMFD_CREATE}>:HAVE_MEMFD_CREATE>
+)
 
-target_compile_definitions(rocm-debug-agent
-  PRIVATE AMD_INTERNAL_BUILD _GNU_SOURCE __STDC_LIMIT_MACROS __STDC_CONSTANT_MACROS)
+install(
+    TARGETS rocm-debug-agent
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
+)
 
-install(TARGETS rocm-debug-agent
-  LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  COMPONENT runtime)
-
-install(FILES LICENSE.txt README.md
-  DESTINATION ${CMAKE_INSTALL_DOCDIR}
-  COMPONENT runtime)
-# ASAN package requires libraries and license file
-install(TARGETS rocm-debug-agent
-  LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  COMPONENT asan)
-
-install(FILES LICENSE.txt
-  DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan
-  COMPONENT asan)
-
-# Add packaging directives for rocm-debug-agent
-set(CPACK_PACKAGE_NAME rocm-debug-agent)
-set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc")
-set(CPACK_PACKAGE_CONTACT "ROCm Debugger Support <rocm-gdb.support@amd.com>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radeon Open Compute Debug Agent (ROCdebug-agent)")
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
-
-if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-  set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
-  message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
-endif()
-
-if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
-  set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
-else()
-  set(CPACK_RPM_PACKAGE_RELEASE "local")
-endif()
-message("Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}")
-
-## 'dist' breaks manual builds on debian systems due to empty Provides
-execute_process(COMMAND rpm --eval %{?dist}
-                 RESULT_VARIABLE PROC_RESULT
-                 OUTPUT_VARIABLE EVAL_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE)
-if(PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "")
-  string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
-endif()
-set(CPACK_RPM_COMPONENT_INSTALL ON)
-set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-set(CPACK_RPM_RUNTIME_PACKAGE_NAME "rocm-debug-agent")
-set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "rocm-dbgapi, hsa-rocr, rocm-core")
-set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "rocm-debug-agent, rocm-core")
-
-# RPM package specific variable for ASAN
-set(CPACK_RPM_ASAN_PACKAGE_NAME "rocm-debug-agent-asan")
-set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "rocm-dbgapi-asan, hsa-rocr-asan, rocm-core-asan")
-# Debian package specific variables
-if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-  set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-else()
-  set(CPACK_DEBIAN_PACKAGE_RELEASE ${build_info})
-endif()
-message("Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}")
-set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
-set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "rocm-debug-agent")
-set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "rocm-dbgapi, hsa-rocr, rocm-core")
-set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "rocm-debug-agent, rocm-core")
-
-# Debian package specific variable for ASAN
-set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "rocm-debug-agent-asan")
-set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "rocm-dbgapi-asan, hsa-rocr-asan, rocm-core-asan")
-# Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
-if(NOT ROCM_DEP_ROCMCORE)
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES ${CPACK_RPM_RUNTIME_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_RPM_TESTS_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS ${CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core-asan" "" CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core-asan" "" CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_ASAN_PACKAGE_REQUIRES})
-endif()
+install(
+    FILES LICENSE.txt README.md
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT runtime
+)
 
 if(ENABLE_TESTS)
-  enable_testing()
-  add_subdirectory(test)
+    enable_testing()
+    add_subdirectory(test)
 endif()
-
-if(ENABLE_ASAN_PACKAGING)
-  set(CPACK_COMPONENTS_ALL asan)
-else()
-  set(CPACK_COMPONENTS_ALL runtime tests)
-endif()
-
-if (NOT CPack_CMake_INCLUDED)
-  include(CPack)
-endif()
-
-cpack_add_component(runtime
-  DISPLAY_NAME "Runtime"
-  DESCRIPTION "Dynamic libraries for the ROCdebug-agent")
-
-cpack_add_component(tests
-  DISPLAY_NAME "Tests"
-  DESCRIPTION "Tests for the ROCdebug-agent"
-  DEPENDS runtime)
-
-cpack_add_component(asan
-  DISPLAY_NAME "Asan"
-  DESCRIPTION "AddressSanitizer libraries for the ROCdebug-agent")

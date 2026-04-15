@@ -3070,6 +3070,11 @@ void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
         return;
     }
 
+    if (!Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
+        LOG() << "Skipping test: Test requires a large bar GPU." << std::endl;
+        return;
+    }
+
     // Use a GTT BO for export because it's conveniently CPU accessible.
     // On multi-GPU systems this also checks for interactions with driver-
     // internal DMA buf use for DMA attachment to multiple GPUs

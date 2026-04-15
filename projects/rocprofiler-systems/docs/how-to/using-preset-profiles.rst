@@ -1,36 +1,74 @@
 .. meta::
-   :description: ROCprofiler-Systems preset profiles guide
-   :keywords: ROCm, profiling, presets, HPC, AI, ML, GPU, tracing
+   :description: ROCprofiler-Systems preset profiles and domain flags guide
+   :keywords: ROCm, profiling, presets, domain flags, HPC, AI, ML, GPU, tracing, configuration
 
 ******************************************************************************
-Using preset profiles
+Using preset profiles and domain flags
 ******************************************************************************
 
-ROCm Systems Profiler provides preset profiles that configure the profiler for common workload scenarios. Instead of manually setting numerous environment variables and command-line options, presets offer optimized configurations for specific use cases.
+ROCm Systems Profiler provides preset profiles and domain flags that simplify
+configuring the profiler for common workload scenarios. Instead of manually
+setting numerous environment variables, use a single ``--preset`` flag or
+combine domain flags for composable configuration.
 
-The presets are command-line options that automatically configure profiling settings for different workload types. They provide:
+Quick start
+===========
 
-* **Simplified usage** - Single flag instead of multiple configuration options.
-* **Optimized settings** - Pre-tuned configurations based on real-world usage.
-* **Reduced overhead** - Settings tailored to minimize performance impact.
-* **Consistent behavior** - Standardized profiling across different scenarios.
+The following example runs are using the ``rocprof-sys-run`` tool.
+All of the examples should and will produce the same output when running with ``rocprof-sys-sample`` tool also.
 
-To see detailed information about active preset configuration, use the ``-v`` or ``--verbose`` flag.
+.. code-block:: shell
+
+   # Use a preset for balanced profiling
+   rocprof-sys-run --preset=balanced -- ./myapp
+
+   # List all available presets
+   rocprof-sys-run --list-presets
+
+   # See detailed info about a preset
+   rocprof-sys-run --explain=balanced
+
+   # Combine a preset with domain flags
+   rocprof-sys-run --preset=balanced --gpu=temp,power -- ./myapp
+
+   # Export configuration as reusable JSON
+   rocprof-sys-run --preset=balanced --gpu --export-config=my-config.json
+
+Topic-based help
+================
+
+The ``--help`` system is organized by topic to avoid overwhelming output:
+
+.. code-block:: shell
+
+   # Compact summary with essential options
+   rocprof-sys-run --help
+
+   # Help for a specific topic
+   rocprof-sys-run --help=sampling
+   rocprof-sys-run --help=gpu
+   rocprof-sys-run --help=tracing
+
+   # Full option listing
+   rocprof-sys-run --help=all
+
+Available help topics:
+
+* **Group topics:** ``preset``, ``general``, ``tracing``, ``profiling``,
+  ``sampling``, ``process``, ``counters``, ``backend``, ``debug``, ``misc``
+* **Domain topics:** ``gpu``, ``cpu``, ``rocm``, ``parallel``
 
 Available presets
 ==================
 
-The available presets are broadly categorized into:
-
-* General purpose presets
-* Workload-specific presets
-* API tracing presets
+Use ``--list-presets`` to see all presets grouped by category, or
+``--explain=<name>`` for detailed information about a specific preset.
 
 General purpose presets
 ------------------------
 
---balanced
-~~~~~~~~~~
+--preset=balanced
+~~~~~~~~~~~~~~~~~
 
 **Purpose:** Balanced profiling with moderate overhead and comprehensive data
 
@@ -41,19 +79,15 @@ General purpose presets
 * Tracing: ON (Perfetto timeline)
 * Profiling: ON (call-stack based)
 * CPU Sampling: ON @ 50 Hz
-* Process Metrics: ON (CPU freq, memory)
-
-**Example:**
+* GPU Metrics: ON (via AMD SMI)
 
 .. code-block:: shell
 
-   rocprof-sys-sample --balanced -- ./myapp
-   rocprof-sys-run --balanced -- ./myapp.inst
+   rocprof-sys-run --preset=balanced -- ./myapp
+   rocprof-sys-sample --preset=balanced -- ./myapp
 
-**When to use:** First-time profiling, getting an overview of application behavior, general-purpose profiling
-
---profile-only
-~~~~~~~~~~~~~~
+--preset=profile-only
+~~~~~~~~~~~~~~~~~~~~~
 
 **Purpose:** Profiling-only mode without tracing (flat profile)
 
@@ -63,19 +97,14 @@ General purpose presets
 
 * Tracing: OFF
 * Profiling: ON (flat profile)
-* CPU Sampling: ON @ 100 Hz
-* Process Metrics: OFF
-
-**Example:**
+* CPU Sampling: OFF
 
 .. code-block:: shell
 
-   rocprof-sys-sample --profile-only -- ./production_app
+   rocprof-sys-sample --preset=profile-only -- ./production_app
 
-**When to use:** Profiling production workloads where tracing overhead is unacceptable
-
---detailed
-~~~~~~~~~~
+--preset=detailed
+~~~~~~~~~~~~~~~~~
 
 **Purpose:** Comprehensive profiling with full system metrics
 
@@ -85,394 +114,395 @@ General purpose presets
 
 * Tracing: ON (Perfetto timeline)
 * Profiling: ON (call-stack based)
-* CPU Sampling: ON @ 100 Hz (all CPUs)
-* Process Metrics: ON (CPU freq, memory)
-
-**Example:**
+* CPU Sampling: ON (all CPUs)
+* GPU Metrics: ON
 
 .. code-block:: shell
 
-   rocprof-sys-sample --detailed -- ./complex_app
+   rocprof-sys-sample --preset=detailed -- ./complex_app
 
-**When to use:** Detailed performance investigation, comprehensive analysis
-
-Workload-specific presets
+GPU and workload presets
 --------------------------
 
---trace-hpc
-~~~~~~~~~~~
+--preset=trace-gpu
+~~~~~~~~~~~~~~~~~~
 
-**Purpose:** Optimized for HPC/MPI/OpenMP applications
+**Purpose:** GPU workload analysis with device activity
 
-**Best for:** High-Performance Computing workloads, MPI applications, OpenMP codes
-
-**Configuration:**
-
-* Tracing: ON (Perfetto timeline)
-* Profiling: ON (call-stack based)
-* CPU Sampling: OFF (reduced overhead)
-* Process Metrics: ON
-* OpenMP (OMPT): ON
-* MPI (MPIP): ON
-* Kokkos: ON
-* RCCL: ON
-* PAPI Events: PAPI_TOT_INS, PAPI_TOT_CYC, PAPI_L3_TCM
-* ROCm Domains: HIP API, kernels, memory, scratch
-* GPU Metrics: busy, temp, power, mem_usage
-
-**Example:**
+**Configuration:** Tracing ON, Profiling OFF, ROCm domains ON, GPU metrics ON,
+CPU Sampling OFF
 
 .. code-block:: shell
 
-   mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
-   rocprof-sys-sample --trace-hpc -- ./openmp_offload_app
+   rocprof-sys-sample --preset=trace-gpu -- ./gpu_compute_app
 
-**When to use:** MPI applications, OpenMP offload, scientific computing codes
+--preset=workload-trace
+~~~~~~~~~~~~~~~~~~~~~~~
 
---workload-trace
-~~~~~~~~~~~~~~~~
+**Purpose:** Comprehensive tracing for AI/ML, HPC, and GPU workloads
 
-**Purpose:** General compute workloads (AI/ML, HPC, etc.)
-
-**Best for:** AI/ML frameworks (ROCm supported AI/ML frameworks), GPU-intensive workloads
-
-**Configuration:**
-
-* Tracing: ON (Perfetto timeline)
-* Profiling: ON (call-stack based)
-* CPU Sampling: OFF (reduced overhead)
-* Process Metrics: ON
-* ROCtracer: ON
-* HIP API Trace: ON
-* HIP Activity: ON (kernel timing)
-* RCCL: ON (collective comms)
-* rocPD: ON (SQLite Database Output)
-* MPI (MPIP): ON
-* ROCm Domains: HIP API, kernels, memory, scratch
-* GPU Metrics: busy, temp, power, mem_usage
-* Buffer Size: 2 GB (for long traces)
-
-**Example:**
+**Configuration:** Tracing ON (2 GB buffer), Profiling ON, MPI ON, RCCL ON,
+ROCm domains ON, GPU metrics ON, rocPD ON
 
 .. code-block:: shell
 
-   rocprof-sys-sample --workload-trace -- python train.py
-   rocprof-sys-instrument --workload-trace -- python inference.py
+   rocprof-sys-sample --preset=workload-trace -- python train.py
 
-**When to use:** AI/ML training and inference, GPU compute workloads, Python applications
+--preset=trace-hw-counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
---trace-gpu
-~~~~~~~~~~~
-
-**Purpose:** GPU workload analysis with host functions, MPI, and device activity
-
-**Best for:** Understanding GPU utilization, kernel execution, memory transfers
-
-**Configuration:**
-
-* Tracing: ON (Perfetto timeline)
-* Profiling: OFF (reduced overhead)
-* ROCm: ON
-* AMD SMI: ON (GPU metrics)
-* CPU Sampling: Disabled (none)
-* ROCm Domains: HIP runtime, ROCTx, kernels, memory, scratch
-
-**Example:**
+**Purpose:** Hardware counter collection (VALUUtilization, Occupancy)
 
 .. code-block:: shell
 
-   rocprof-sys-sample --trace-gpu -- ./gpu_compute_app
+   rocprof-sys-sample --preset=trace-hw-counters -- ./kernel_heavy_app
 
-**When to use:** GPU-focused performance analysis, identifying GPU bottlenecks
+HPC presets
+-----------
 
---trace-openmp
-~~~~~~~~~~~~~~
+--preset=trace-hpc
+~~~~~~~~~~~~~~~~~~
 
-**Purpose:** OpenMP offload workloads with HSA domains
+**Purpose:** Optimized for MPI, OpenMP, and compute-intensive applications
 
-**Best for:** OpenMP target offload to GPUs
-
-**Configuration:**
-
-* Tracing: ON (Perfetto timeline)
-* Profiling: OFF (reduced overhead)
-* ROCm: ON
-* OMPT: ON (OpenMP tools interface)
-* ROCm Domains: HIP runtime, ROCTx, kernels, memory, HSA API
-
-**Example:**
+**Configuration:** Tracing ON, Profiling ON, MPI ON, OpenMP ON, Kokkos ON,
+RCCL ON, PAPI events ON, ROCm domains ON, GPU metrics ON
 
 .. code-block:: shell
 
-   rocprof-sys-sample --trace-openmp -- ./openmp_target_app
+   mpirun -n 4 rocprof-sys-sample --preset=trace-hpc -- ./mpi_app
 
-**When to use:** OpenMP offload applications, analyzing host-device data transfers
+--preset=trace-openmp
+~~~~~~~~~~~~~~~~~~~~~
 
---profile-mpi
-~~~~~~~~~~~~~
-
-**Purpose:** MPI communication latency profiling
-
-**Best for:** Studying MPI performance, communication patterns
-
-**Configuration:**
-
-* Tracing: OFF
-* Profiling: ON (flat profile)
-* AMD SMI: OFF
-* ROCm: OFF
-* Focus: Wall-clock files per rank
-
-**Example:**
+**Purpose:** OpenMP offload with HSA domains and OMPT
 
 .. code-block:: shell
 
-   mpirun -n 16 rocprof-sys-sample --profile-mpi -- ./mpi_comm_app
+   rocprof-sys-sample --preset=trace-openmp -- ./openmp_target_app
 
-**When to use:** MPI-only applications, analyzing communication overhead
+--preset=profile-mpi
+~~~~~~~~~~~~~~~~~~~~
 
---trace-hw-counters
-~~~~~~~~~~~~~~~~~~~
-
-**Purpose:** Hardware counter collection during execution
-
-**Best for:** Understanding GPU performance metrics, VALU utilization
-
-**Configuration:**
-
-* Profiling: ON
-* CPU Sampling: Disabled (none)
-* ROCm Events: VALUUtilization, Occupancy
-
-**Example:**
+**Purpose:** MPI communication latency profiling (no tracing, no GPU)
 
 .. code-block:: shell
 
-   rocprof-sys-sample --trace-hw-counters -- ./kernel_heavy_app
-
-**When to use:** GPU kernel optimization, understanding hardware utilization
+   mpirun -n 16 rocprof-sys-sample --preset=profile-mpi -- ./mpi_comm_app
 
 API tracing presets
 -------------------
 
---sys-trace
-~~~~~~~~~~~
+--preset=sys-trace
+~~~~~~~~~~~~~~~~~~
 
-**Purpose:** Comprehensive system API tracing
-
-**Best for:** Complete API call tracing, debugging API usage
-
-**Configuration:**
-
-* Tracing: ON (Perfetto timeline)
-* Profiling: ON (call-stack based)
-* ROCm APIs: HIP API, HSA API
-* Marker API: ROCTx
-* RCCL: ON (collective communications)
-* Decode/JPEG: rocDecode, rocJPEG
-* Memory Ops: copies, scratch, allocations
-* Kernel Dispatch: ON
-
-**Example:**
+**Purpose:** Comprehensive system API tracing (HIP, HSA, ROCTx, RCCL)
 
 .. code-block:: shell
 
-   rocprof-sys-sample --sys-trace -- ./my_rocm_app
+   rocprof-sys-sample --preset=sys-trace -- ./my_rocm_app
 
-**When to use:** Tracing all ROCm API calls including low-level HSA
+--preset=runtime-trace
+~~~~~~~~~~~~~~~~~~~~~~
 
---runtime-trace
-~~~~~~~~~~~~~~~
-
-**Purpose:** Runtime API tracing (excludes compiler and low-level HSA)
-
-**Best for:** Application-level API tracing without low-level noise
-
-**Configuration:**
-
-* Tracing: ON (Perfetto timeline)
-* Profiling: ON (call-stack based)
-* HIP Runtime: ON (excludes compiler API)
-* Marker API: ROCTx
-* RCCL: ON (collective communications)
-* Decode/JPEG: rocDecode, rocJPEG
-* Memory Ops: copies, scratch, allocations
-* Kernel Dispatch: ON
-
-**Example:**
+**Purpose:** Runtime API tracing (excludes compiler API and HSA internals)
 
 .. code-block:: shell
 
-   rocprof-sys-sample --runtime-trace -- ./my_hip_app
+   rocprof-sys-sample --preset=runtime-trace -- ./my_hip_app
 
-**When to use:** Focusing on runtime API calls, excluding HIP compiler and HSA internals
+Domain flags
+============
 
-Usage examples
-==============
+Domain flags provide high-level control over specific profiling domains.
+They can be used standalone or combined with presets.
 
-Quick Start
------------
+--gpu
+-----
 
-Start with ``--balanced`` for an initial overview:
-
-.. code-block:: shell
-
-   rocprof-sys-sample --balanced -- ./myapp
-
-This provides a balanced view of performance with moderate overhead.
-
-Targeting Specific Workloads
------------------------------
-
-**MPI Application:**
+Enable GPU metrics collection via AMD SMI. Optionally specify which metrics:
 
 .. code-block:: shell
 
-   mpirun -n 4 rocprof-sys-sample --trace-hpc -v -- ./simulation
+   # All default GPU metrics
+   rocprof-sys-run --gpu -- ./myapp
 
-**OpenMP Offload:**
+   # Specific metrics only
+   rocprof-sys-run --gpu=temp,power,busy -- ./myapp
 
-.. code-block:: shell
+Available metrics: ``temp``, ``power``, ``busy`` (utilization), ``mem_usage``
 
-   rocprof-sys-sample --trace-openmp -v -- ./offload_compute
+Shortcuts: ``temperature`` -> ``temp``, ``usage``/``utilization`` -> ``busy``,
+``memory`` -> ``mem_usage``
 
-Combining with Other Options
------------------------------
+--rocm
+------
 
-Presets can be combined with other command-line options:
-
-.. code-block:: shell
-
-   # Use preset with custom output directory
-   rocprof-sys-sample --balanced -o ./my-results -- ./myapp
-
-   # Use preset with additional instrumentation options
-   rocprof-sys-instrument --trace-hpc -R '^compute_' -o app.inst -- ./app
-
-Viewing Results
-===============
-
-After profiling with a preset, results are saved to ``rocprof-sys-output/`` (or custom directory specified with ``-o``):
-
-**Text Profile:**
+Enable ROCm API tracing. Optionally specify which API domains:
 
 .. code-block:: shell
 
-   cat rocprof-sys-output/wall_clock.txt
+   # All default ROCm domains
+   rocprof-sys-run --rocm -- ./myapp
 
-**Visual Timeline:**
+   # Specific domains only
+   rocprof-sys-run --rocm=hip,kernel,memory -- ./myapp
 
-Open ``rocprof-sys-output/perfetto-trace.proto`` in https://ui.perfetto.dev
+Available domains: ``hip_runtime_api``, ``marker_api``, ``kernel_dispatch``,
+``memory_copy``, ``scratch_memory``, ``hsa_api``, ``rccl_api``
 
-**JSON Data:**
+Shortcuts: ``hip`` -> ``hip_runtime_api``, ``kernel`` -> ``kernel_dispatch``,
+``memory`` -> ``memory_copy``, ``hsa`` -> ``hsa_api``,
+``marker`` -> ``marker_api``, ``rccl`` -> ``rccl_api``
+
+--cpu
+-----
+
+Enable CPU call-stack sampling. Optionally specify frequency in Hz:
 
 .. code-block:: shell
 
-   cat rocprof-sys-output/wall_clock.json
+   # Default 100 Hz sampling
+   rocprof-sys-run --cpu -- ./myapp
 
-Best Practices
-==============
+   # Custom frequency
+   rocprof-sys-run --cpu=50 -- ./myapp
 
-Choosing the Right Preset
---------------------------
+--parallel
+----------
 
-1. **Start simple** - Begin with ``--balanced`` or ``--profile-only`` to minimize overhead
-2. **Match your workload** - Use workload-specific presets for better insights
-3. **Iterate** - Start with low overhead, increase detail as needed
+Enable parallel runtime profiling. Optionally specify which runtimes:
 
-Performance Considerations
---------------------------
+.. code-block:: shell
 
-* **CPU sampling** - Some presets disable sampling to reduce overhead
-* **Buffer sizes** - ``--workload-trace`` uses larger buffers for long-running applications
-* **ROCm domains** - API tracing presets focus on specific API layers
+   # All runtimes (MPI, OpenMP, Kokkos, RCCL)
+   rocprof-sys-run --parallel -- ./myapp
 
-Preset Limitations
-------------------
+   # Specific runtimes
+   rocprof-sys-run --parallel=mpi,openmp -- ./mpi_app
 
-* **Mutual exclusion** - Only ONE preset can be used at a time
-* **Override with env vars** - Environment variables can override preset settings if needed
-* **No mixing** - Cannot combine multiple presets in a single invocation
+Combining presets with domain flags
+------------------------------------
+
+Domain flags override or extend preset settings:
+
+.. code-block:: shell
+
+   # Balanced preset with specific GPU metrics
+   rocprof-sys-run --preset=balanced --gpu=temp,power -- ./myapp
+
+   # HPC preset with custom ROCm domains
+   rocprof-sys-sample --preset=trace-hpc --rocm=hip,kernel,rccl -- ./app
+
+   # Profile-only preset with CPU sampling enabled
+   rocprof-sys-run --preset=profile-only --cpu=100 -- ./myapp
+
+Configuration export
+====================
+
+Export the resolved configuration (preset + domain flags + env overrides) as
+a reusable JSON file:
+
+.. code-block:: shell
+
+   # Export to stdout
+   rocprof-sys-run --preset=balanced --gpu --export-config
+
+   # Export to file
+   rocprof-sys-run --preset=balanced --gpu --export-config=team-config.json
+
+   # Reuse the exported configuration
+   rocprof-sys-run --preset=./team-config.json -- ./myapp
+
+Custom configuration files
+==========================
+
+Custom JSON configuration files can be loaded using the ``--preset`` flag
+with a file path:
+
+.. code-block:: shell
+
+   # Load from relative path
+   rocprof-sys-run --preset=./my-config.json -- ./myapp
+
+   # Load from absolute path
+   rocprof-sys-run --preset=/path/to/config.json -- ./myapp
+
+See the JSON schema file at ``share/rocprofiler-systems/presets/schema.json``
+for the full configuration format.
+
+Preset directory
+================
+
+Presets are loaded from the following locations (in order):
+
+1. ``$ROCPROFSYS_PRESET_DIR`` (if set)
+2. ``<install-prefix>/share/rocprofiler-systems/presets``
+3. ``$ROCM_PATH/share/rocprofiler-systems/presets``
+
+Adding custom presets
+---------------------
+
+Create a JSON file in the preset directory:
+
+.. code-block:: json
+
+   {
+       "metadata": {
+           "name": "my-preset",
+           "description": "Custom profiling configuration",
+           "use_case": "My specific workload",
+           "category": "custom"
+       },
+       "tracing": { "enabled": true },
+       "profiling": { "enabled": true },
+       "sampling": {
+           "enabled": true,
+           "frequency_hz": { "value": 100 }
+       }
+   }
+
+The preset will be automatically discovered and available via
+``--preset=my-preset``.
+
+JSON schema reference
+---------------------
+
+The JSON preset schema supports the following sections. See the full schema
+file at ``share/rocprofiler-systems/presets/schema.json`` for all available
+fields with descriptions and types.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Section
+     - Description
+   * - ``tracing``
+     - Perfetto trace output: ``enabled``, ``legacy``, ``buffer_size_kb``,
+       ``fill_policy``
+   * - ``profiling``
+     - Call-stack profiling: ``enabled``, ``flat_profile``
+   * - ``sampling``
+     - CPU sampling: ``enabled``, ``frequency_hz``, ``timer``, ``delay_sec``,
+       ``duration_sec``, ``cpus``, ``gpus``, ``ainics``
+   * - ``domains.gpu``
+     - GPU metrics via AMD SMI: ``enabled``, ``metrics`` (temp, power, busy,
+       mem_usage), ``sampling_rate_hz``, ``process_sampling_freq``, ``ainic``
+   * - ``domains.rocm``
+     - ROCm API tracing: ``enabled``, ``api_domains`` (hip_runtime_api,
+       kernel_dispatch, etc.), ``group_by_queue``
+   * - ``domains.cpu``
+     - CPU domain metrics: ``enabled``, ``metrics.freq``
+   * - ``domains.parallel``
+     - Parallel runtimes: ``mpi``, ``openmp``, ``kokkos``, ``rccl``,
+       ``shmem``, ``ucx``
+   * - ``output``
+     - Output control: ``path``, ``time_output``, ``file_output``,
+       ``rocpd_output``
+   * - ``hardware_counters``
+     - HW counters: ``enabled``, ``rocm_events``, ``papi_events``,
+       ``papi_multiplexing``
+   * - ``causal``
+     - Causal profiling: ``enabled``, ``mode``, ``backend``,
+       ``binary_scope``/``binary_exclude``,
+       ``function_scope``/``function_exclude``,
+       ``source_scope``/``source_exclude``, ``end_to_end``, ``delay_sec``,
+       ``duration_sec``, ``random_seed``
+   * - ``advanced``
+     - Advanced settings: ``verbose``, ``debug``, ``max_depth``,
+       ``trace_delay_sec``, ``trace_duration_sec``, ``cpu_affinity``,
+       ``collapse_threads``, ``timemory_components``, ``network_interface``,
+       ``trace_periods``, ``trace_period_clock_id``
+
+Environment variables excluded from presets
+-------------------------------------------
+
+The following ``ROCPROFSYS_*`` environment variables are intentionally
+**not included** in the JSON preset schema. These are internal runtime
+settings whose values depend on the invocation context or low-level
+implementation details. A preset should describe *what* to profile, not
+how the profiler manages its internals.
+
+**Session-specific** (depend on the invocation, not the profiling intent):
+
+.. list-table::
+   :widths: 35 65
+
+   * - ``ROCPROFSYS_CONFIG_FILE``
+     - Path to the user's config file. Set at invocation time, not a
+       profiling choice.
+   * - ``ROCPROFSYS_OUTPUT_PREFIX``
+     - Per-run output prefix (e.g., test name). Set by the test harness
+       or user for each run.
+   * - ``ROCPROFSYS_SELECTED_REGIONS``
+     - Region filter for selective tracing. Depends on the specific
+       application being profiled.
+
+**Internal plumbing** (implementation details users should not configure
+via presets):
+
+.. list-table::
+   :widths: 35 65
+
+   * - ``ROCPROFSYS_ENABLED``
+     - Master profiler enable flag. Always ``true`` when running via CLI
+       tools. Setting to ``false`` in a preset would silently disable
+       all profiling.
+   * - ``ROCPROFSYS_SUPPRESS_CONFIG``
+     - Suppress config file loading. Used internally by
+       ``rocprof-sys-avail``.
+   * - ``ROCPROFSYS_SUPPRESS_PARSING``
+     - Suppress config parsing. Used internally. Setting in a preset
+       would break config file handling.
+   * - ``ROCPROFSYS_USE_PID``
+     - Include PID in output paths. Managed automatically by the output
+       subsystem.
+   * - ``ROCPROFSYS_PERFETTO_BACKEND``
+     - Perfetto transport backend (``inprocess``/``system``). Low-level
+       transport choice, not a profiling concern.
+   * - ``ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS``
+     - Perfetto flush interval. Performance tuning for the trace writer.
+   * - ``ROCPROFSYS_PROCESS_SAMPLING_DURATION``
+     - Duration of process sampling. Controlled via ``sampling.duration_sec``
+       in the sampling section instead.
+   * - ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``
+     - Hardware overflow event name. Highly platform-specific and not
+       portable across machines.
+   * - ``ROCPROFSYS_CPU_FREQ_ENABLED``
+     - CPU frequency monitoring. Controlled indirectly via the
+       ``domains.cpu`` section instead.
+
+These variables can still be set directly via environment variables to
+override behavior at runtime, but they are not part of the preset schema
+and will not appear in ``--export-config`` output.
 
 Troubleshooting
 ===============
 
-Preset Not Recognized
----------------------
-
-Ensure you're using a valid preset name:
+Preset not found
+----------------
 
 .. code-block:: shell
 
-   rocprof-sys-sample --help | grep -A20 "PRESET"
+   # Check available presets
+   rocprof-sys-run --list-presets
 
-Multiple Presets Error
------------------------
+   # Set preset directory explicitly
+   export ROCPROFSYS_PRESET_DIR=/opt/rocm/share/rocprofiler-systems/presets
 
-If you see "Multiple preset modes specified":
-
-.. code-block:: shell
-
-   # Wrong: Multiple presets
-   rocprof-sys-sample --balanced --detailed -- ./app
-
-   # Correct: Single preset
-   rocprof-sys-sample --balanced -- ./app
-
-No Output with Preset
----------------------
-
-Add ``-v`` flag to see preset configuration:
-
-.. code-block:: shell
-
-   rocprof-sys-sample --balanced -v 2 -- ./app
-
-This shows which settings are active.
-
-Advanced Usage
-==============
-
-Viewing Active Configuration
+Viewing active configuration
 -----------------------------
 
-Use verbose mode to see what the preset configures:
+Use verbose mode to see what settings a preset configures:
 
 .. code-block:: shell
 
-   rocprof-sys-sample --trace-hpc -v 2 -- ls
+   rocprof-sys-run --preset=balanced -v 2 -- ./myapp
 
-This displays the full preset configuration before execution.
-
-Overriding Preset Settings
----------------------------
-
-Environment variables can override preset defaults:
-
-.. code-block:: shell
-
-   # Use --balanced preset but customize sampling frequency
-   ROCPROFSYS_SAMPLING_FREQ=200 rocprof-sys-sample --balanced -- ./app
-
-Custom Configuration Files
----------------------------
-
-For complex configurations beyond presets:
-
-.. code-block:: shell
-
-   rocprof-sys-sample -c custom-config.cfg -- ./app
-
-See Also
+See also
 ========
 
 * :doc:`sampling-call-stack` - Call-stack sampling basics
 * :doc:`instrumenting-rewriting-binary-application` - Binary instrumentation
 * :doc:`configuring-validating-environment` - Environment configuration
-
-Additional Resources
-====================
-
-* `ROCprofiler-Systems Documentation <https://rocm.docs.amd.com/projects/rocprofiler-systems>`_
-* `Perfetto UI <https://ui.perfetto.dev>`_ for trace visualization
-* `ROCm Documentation <https://rocm.docs.amd.com>`_

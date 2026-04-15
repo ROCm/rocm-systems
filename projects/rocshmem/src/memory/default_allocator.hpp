@@ -87,7 +87,7 @@ namespace rocshmem {
     // Temporary hack that will be fixed when we add the ability
     // to use an environment variable to set the Heap Allocatory Type.
     // With that commit we will introduce also a generic 'default'
-    // setting that can be adjusted for differnt architectures.
+    // setting that can be adjusted for different architectures.
     // This is to avoid failures with rocSHMEM on gfx1201 if using
     // Uncached allocator with ROCm 7.2.0
     if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
@@ -104,7 +104,7 @@ namespace rocshmem {
 #endif
   }
 
-  static HIPAllocator* get_default_allocator()
+  [[maybe_unused]] static HIPAllocator* get_default_allocator()
   {
     if (default_allocator_ == nullptr) {
       set_default_allocator();
@@ -113,7 +113,7 @@ namespace rocshmem {
     return default_allocator_;
   }
 
-  static void delete_default_allocator()
+  [[maybe_unused]] static void delete_default_allocator()
   {
     if (default_allocator_ != nullptr) {
       delete default_allocator_;

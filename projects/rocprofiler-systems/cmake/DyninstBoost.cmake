@@ -1,5 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # ========================================================================================================
-# Boost.cmake
+# DyninstBoost.cmake
 #
 # Configure Boost for Dyninst
 #
@@ -7,30 +10,31 @@
 #
 # Accepts the following CMake variables
 #
+# ROCPROFSYS_BUILD_BOOST    - Build Boost from source instead of finding system package
 # Boost_ROOT_DIR            - Hint directory that contains the Boost installation
-# PATH_BOOST                - Alias for Boost_ROOT_DIR Boost_MIN_VERSION         - Minimum
-# acceptable version of Boost Boost_USE_MULTITHREADED   - Use the multithreaded version of
-# Boost Boost_USE_STATIC_RUNTIME  - Use libraries linked statically to the C++ runtime
+# PATH_BOOST                - Alias for Boost_ROOT_DIR
+# Boost_MIN_VERSION         - Minimum acceptable version of Boost
+# Boost_USE_MULTITHREADED   - Use the multithreaded version of Boost
+# Boost_USE_STATIC_RUNTIME  - Use libraries linked statically to the C++ runtime
+# Boost_DEBUG               - Enable debug output from FindBoost
+# Boost_NO_SYSTEM_PATHS     - Disable searching in locations not specified by hint variables
 #
-# Options inherited from Modules/FindBoost.cmake that may be useful
+# Build-from-source options:
 #
-# BOOST_INCLUDEDIR          - Hint directory that contains the Boost headers files
-# BOOST_LIBRARYDIR          - Hint directory that contains the Boost library files
-#
-# Advanced options:
-#
-# Boost_DEBUG               - Enable debug output from FindBoost Boost_NO_SYSTEM_PATHS -
-# Disable searching in locations not specified by hint variables
+# BOOST_LINK_STATIC         - Link to boost libraries statically (default: ON)
+# ROCPROFSYS_BOOST_DOWNLOAD_VERSION - Version of boost to download (default: 1.79.0)
 #
 # Exports the following CMake cache variables
 #
-# Boost_ROOT_DIR            - Computed base directory the of Boost installation
-# Boost_INCLUDE_DIRS        - Boost include directories Boost_INCLUDE_DIR - Alias for
-# Boost_INCLUDE_DIRS Boost_LIBRARY_DIRS        - Link directories for Boost libraries
-# Boost_DEFINES             - Boost compiler definitions Boost_LIBRARIES           - Boost
-# library files Boost_<C>_LIBRARY_RELEASE - Release libraries to link for component <C>
-# (<C> is upper-case) Boost_<C>_LIBRARY_DEBUG   - Debug libraries to link for component
-# <C> Boost_THREAD_LIBRARY      - The filename of the Boost thread library
+# Boost_ROOT_DIR            - Computed base directory of the Boost installation
+# Boost_INCLUDE_DIRS        - Boost include directories
+# Boost_INCLUDE_DIR         - Alias for Boost_INCLUDE_DIRS
+# Boost_LIBRARY_DIRS        - Link directories for Boost libraries
+# Boost_DEFINES             - Boost compiler definitions
+# Boost_LIBRARIES           - Boost library files
+# Boost_<C>_LIBRARY_RELEASE - Release libraries to link for component <C> (<C> is upper-case)
+# Boost_<C>_LIBRARY_DEBUG   - Debug libraries to link for component <C>
+# Boost_THREAD_LIBRARY      - The filename of the Boost thread library
 # Boost_USE_MULTITHREADED   - Use the multithreaded version of Boost
 # Boost_USE_STATIC_RUNTIME  - Use libraries linked statically to the C++ runtime
 #
@@ -111,7 +115,7 @@ if(NOT PATH_BOOST AND NOT Boost_ROOT_DIR)
 endif()
 
 # Set the default location to look for Boost
-set(Boost_ROOT_DIR ${PATH_BOOST} CACHE PATH "Base directory the of Boost installation")
+set(Boost_ROOT_DIR ${PATH_BOOST} CACHE PATH "Base directory of the Boost installation")
 
 # In FindBoost, Boost_ROOT_DIR is spelled BOOST_ROOT
 set(BOOST_ROOT ${Boost_ROOT_DIR})
@@ -175,6 +179,39 @@ if(Boost_FOUND AND NOT ROCPROFSYS_BUILD_BOOST)
         FORCE
     )
     set(Boost_INCLUDE_DIR ${Boost_INCLUDE_DIR} CACHE PATH "Boost include directory" FORCE)
+
+    # Update Boost_ROOT_DIR to the found location for Dyninst.
+    # Prefer include dirs: on Debian/Ubuntu multiarch, Boost_DIR may be under
+    # lib/<triplet>/cmake/... and a fixed "../.." depth yields /usr/lib instead of /usr.
+    set(_boost_root "")
+    if(Boost_INCLUDE_DIRS)
+        list(GET Boost_INCLUDE_DIRS 0 _boost_inc)
+        get_filename_component(_boost_root "${_boost_inc}" DIRECTORY)
+    endif()
+    if(NOT _boost_root AND Boost_DIR)
+        # Strip lib/.../cmake/Boost* from Boost_DIR to recover the install prefix.
+        string(
+            REGEX REPLACE
+            "/lib(/[^/]+)*/cmake/Boost[^/]*$"
+            ""
+            _boost_root
+            "${Boost_DIR}"
+        )
+        if(_boost_root STREQUAL Boost_DIR)
+            set(_boost_root "")
+        else()
+            get_filename_component(_boost_root "${_boost_root}" ABSOLUTE)
+        endif()
+    endif()
+    if(_boost_root)
+        set(Boost_ROOT_DIR
+            "${_boost_root}"
+            CACHE PATH
+            "Base directory of the Boost installation"
+            FORCE
+        )
+    endif()
+    set(BOOST_ROOT ${Boost_ROOT_DIR})
 elseif(NOT Boost_FOUND AND STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR "Boost not found and cannot be downloaded because build is sterile."
@@ -224,7 +261,7 @@ else()
     set(Boost_ROOT_DIR
         ${TPL_STAGING_PREFIX}/boost
         CACHE PATH
-        "Base directory the of Boost installation"
+        "Base directory of the Boost installation"
         FORCE
     )
 
@@ -432,6 +469,39 @@ rocprofiler_systems_message(STATUS "Boost library dirs: ${Boost_LIBRARY_DIRS}")
 rocprofiler_systems_message(STATUS "Boost thread library: ${Boost_THREAD_LIBRARY}")
 rocprofiler_systems_message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
-# Just the headers (effectively a simplified Boost::headers target)
-add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
-target_include_directories(Dyninst::Boost_headers SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
+# --------------------------------------------------------------------------------------#
+# Create Dyninst::Boost target if building from source
+# --------------------------------------------------------------------------------------#
+# When Boost is built from source, Dyninst's find_package(Boost) would fail
+# because the bundled Boost isn't installed in standard locations. Creating this
+# target causes Dyninst to skip find_package(Boost) and use the bundled dependency.
+#
+# Also defines Dyninst::Boost_headers below when ROCPROFSYS_BUILD_BOOST=ON. When
+# ROCPROFSYS_BUILD_DYNINST=OFF, Packages.cmake creates Dyninst::Boost_headers before
+# find_package(Dyninst) instead (preinstalled Dyninst); that path does not run when
+# building the Dyninst submodule here.
+
+if(ROCPROFSYS_BUILD_BOOST)
+    if(NOT TARGET Dyninst::Boost)
+        add_library(Dyninst::Boost INTERFACE IMPORTED)
+        target_link_libraries(Dyninst::Boost INTERFACE ${Boost_LIBRARIES})
+        target_include_directories(Dyninst::Boost SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
+        target_compile_definitions(
+            Dyninst::Boost
+            INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
+        )
+    endif()
+
+    if(NOT TARGET Dyninst::Boost_headers)
+        add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+        target_include_directories(
+            Dyninst::Boost_headers
+            SYSTEM
+            INTERFACE ${Boost_INCLUDE_DIRS}
+        )
+        target_compile_definitions(
+            Dyninst::Boost_headers
+            INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
+        )
+    endif()
+endif()

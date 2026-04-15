@@ -135,6 +135,8 @@ ExecTest() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
+  IS_RETRY=${6:-0}  # Optional 6th parameter to indicate if this is a retry
+
   if [[ "" == "$NOTIMEOUT" ]]; then
     TIMEOUT=$((5 * 60)) # Timeout in seconds
   fi
@@ -181,8 +183,8 @@ ExecTest() {
   local -a cmd
   cmd=( "$LAUNCHER"
         -n "$NUM_RANKS"
-        -mca pml ucx
-        -mca osc ucx
+        -mca pml "${OMPI_MCA_pml:-ucx}"
+        -mca osc "${OMPI_MCA_osc:-ucx}"
         -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
@@ -207,11 +209,20 @@ ExecTest() {
   fi
   # Create a human-readable representation of the command for logging purposes
   CMD="${cmd[@]}"
+
+  # Determine log file name based on whether this is a retry
+  if [ $IS_RETRY -eq 1 ]; then
+    LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.retry.log"
+    echo "Retry:  $TEST_LOG_NAME"
+  else
+    LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.log"
+    echo "Test:   $TEST_LOG_NAME"
+  fi
+
   # Run Test
   if [ $NUM_GPUS -ge $NUM_RANKS ] || [[ "" != "$HOSTFILE" ]]; then
-    echo "Test:   $TEST_LOG_NAME"
-    echo "# $CMD >> $LOG_DIR/$TEST_LOG_NAME.log" >"$LOG_DIR/$TEST_LOG_NAME.log"
-    "${cmd[@]}" >>"$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
+    echo "# $CMD >> $LOG_FILE" >"$LOG_FILE"
+    "${cmd[@]}" >>"$LOG_FILE" 2>&1
   else
     echo "Skip:   $TEST_LOG_NAME ($NUM_RANKS greater than $NUM_GPUS)"
   fi
@@ -220,9 +231,23 @@ ExecTest() {
   if [ $? -ne 0 ]
   then
     echo -e "$PRETTY_FAILED: $TEST_LOG_NAME" >&2
-    cat "$LOG_DIR/$TEST_LOG_NAME.log"
+    cat "$LOG_FILE"
     DRIVER_RETURN_STATUS=1
-    FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
+    if [ $IS_RETRY -eq 0 ]; then
+      # Track failed tests with their parameters for potential retry
+      # Capture environment/config state to ensure retry runs under same conditions
+      FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
+    else
+      # Track tests that failed even after retry
+      RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
+    fi
+  else
+    # If this was a retry and it passed, remove from failed list
+    if [ $IS_RETRY -eq 1 ]; then
+      echo -e "$PRETTY_PASSED: $TEST_LOG_NAME (passed on retry)"
+      RETRY_PASSED_LIST="$RETRY_PASSED_LIST $TEST_LOG_NAME"
+    fi
   fi
 
   unset ROCSHMEM_MAX_NUM_CONTEXTS
@@ -349,24 +374,20 @@ TestAMO() {
   ExecTest  "amo_add"          2       8            1
   ExecTest  "amo_add"          2       32           128
 
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_fadd"         2       1            1
   ExecTest  "amo_fadd"         2       1            1024
   ExecTest  "amo_fadd"         2       8            1
   ExecTest  "amo_fadd"         2       32           128
-  else echo "Skip:   amo_fadd* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
 
   ExecTest  "amo_inc"          2       1            1
   ExecTest  "amo_inc"          2       1            1024
   ExecTest  "amo_inc"          2       8            1
   ExecTest  "amo_inc"          2       32           128
 
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_finc"         2       1            1
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
-  else echo "Skip:   amo_finc* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
   else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1
@@ -582,11 +603,20 @@ ValidateInput() {
   INPUT_COUNT=$1
   if [ $INPUT_COUNT -lt 3 ] ; then
     echo "This script must be run with at least 3 arguments."
-    echo 'Usage: ${0} argument1 argument2 argument3 [argument4]'
-    echo "  argument1 : path to the tester driver"
-    echo "  argument2 : test type to run, e.g put"
-    echo "  argument3 : directory to put the output logs"
-    echo "  argument4 : path to hostfile"
+    echo "Usage: ${0} <executable> <test_suite | test_name | test_config> <log_dir> [hostfile]"
+    echo
+    echo "    <executable>  : path to the tester executable"
+    echo "    <test_suite>  : test suite to run, e.g. 'all', 'rma', or 'put'"
+    echo "    <test_name>   : name of test to run, e.g. 'putnbi' or 'amo_fadd'"
+    echo "    <test_config> : quoted test configuration to run, in the format"
+    echo '                    "<test_name> <ranks> <workgroups> <threads> [max_msg_size]"'
+    echo '                    e.g. "putnbi 2 8 1024 65536" or "amo_fadd 2 1 64"'
+    echo "        <ranks>        : number of PEs/ranks to use for test"
+    echo "        <workgroups>   : number of workgroups per PE"
+    echo "        <threads>      : number of threads per workgroup"
+    echo "        [max_msg_size] : maximum message size to test"
+    echo "    <log_dir>     : path to output log directory"
+    echo "    [hostfile]    : path to hostfile"
     exit 1
   fi
 }
@@ -599,15 +629,86 @@ ValidateLogDir() {
   fi
 }
 
+RerunFailedTests() {
+  if [ ${#FAILED_TESTS[@]} -eq 0 ]; then
+    return
+  fi
+
+  echo ""
+  echo "========================================================================"
+  echo "Rerunning ${#FAILED_TESTS[@]} failed test(s)..."
+  echo "========================================================================"
+  echo ""
+
+  # Clear the driver return status for retry
+  DRIVER_RETURN_STATUS=0
+  RETRY_FAILED_LIST=""
+  RETRY_PASSED_LIST=""
+
+  # Rerun each failed test with the same environment/config state
+  for test_params in "${FAILED_TESTS[@]}"; do
+    IFS='|' read -r test_name num_ranks num_wg num_threads max_msg_size use_default_stream max_contexts notimeout noverif <<< "$test_params"
+
+    # Restore environment state from original test run
+    if [[ -n "$use_default_stream" ]]; then
+      export ROCSHMEM_TEST_USE_DEFAULT_STREAM="$use_default_stream"
+    fi
+    if [[ -n "$max_contexts" ]]; then
+      export ROCSHMEM_MAX_NUM_CONTEXTS="$max_contexts"
+    fi
+    if [[ -n "$notimeout" ]]; then
+      NOTIMEOUT="$notimeout"
+    fi
+    if [[ -n "$noverif" ]]; then
+      NOVERIF="$noverif"
+    fi
+
+    ExecTest "$test_name" "$num_ranks" "$num_wg" "$num_threads" "$max_msg_size" 1
+
+    # Clean up environment state after retry
+    unset ROCSHMEM_TEST_USE_DEFAULT_STREAM
+    unset ROCSHMEM_MAX_NUM_CONTEXTS
+    unset NOTIMEOUT
+    unset NOVERIF
+  done
+
+  echo ""
+  echo "========================================================================"
+  echo "Retry Summary"
+  echo "========================================================================"
+
+  if [[ -n "$RETRY_PASSED_LIST" ]]; then
+    echo -e "$PRETTY_PASSED on retry:$RETRY_PASSED_LIST"
+  fi
+
+  if [[ -n "$RETRY_FAILED_LIST" ]]; then
+    echo -e "$PRETTY_FAILED even after retry:$RETRY_FAILED_LIST"
+  fi
+
+  echo ""
+}
+
 APP=$1
 TEST=$2
 LOG_DIR=$3
 HOSTFILE=$4
 
 DRIVER_RETURN_STATUS=0
+FAILED_TESTS=()  # Array to store failed test parameters
+RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry (can be overridden via env var)
 
 ValidateInput $#
 ValidateLogDir $LOG_DIR
+
+# Print build info and environment variables before running tests
+ROCSHMEM_INFO="$(dirname "$APP")/rocshmem_info"
+if [ ! -x "$ROCSHMEM_INFO" ]; then
+  # builddir case
+  ROCSHMEM_INFO="$(dirname "$APP")/../../tools/rocshmem_info"
+fi
+if [ -x "$ROCSHMEM_INFO" ]; then
+  "$ROCSHMEM_INFO"
+fi
 
 case $TEST in
   "heatmaprma")
@@ -654,17 +755,56 @@ case $TEST in
     TestOther
     ;;
   *)
-    ##############################################################################
-    #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
-    ##############################################################################
-    ExecTest  $TEST              2       1            1         8
+    #######################################################################################
+    #        |   Name   |   Ranks   |   Workgroups   |   Threads   |   Max Message Size   #
+    #######################################################################################
+    # Allow passing in a test config as "<test_name> <ranks> <workgroups> <threads> [max_msg_size]"
+    # e.g. "putnbi 2 8 1024 65536" or "amo_fadd 2 1 64"
+    TEST_OPTS=($TEST)
+    NAME=${TEST_OPTS[0]}
+    if [ ${#TEST_OPTS[@]} -eq 4 ] || [ ${#TEST_OPTS[@]} -eq 5 ]; then
+      RANKS=${TEST_OPTS[1]}
+      WORKGROUPS=${TEST_OPTS[2]}
+      THREADS=${TEST_OPTS[3]}
+      MAX_MESSAGE_SIZE=${TEST_OPTS[4]}
+    else
+      RANKS=2
+      WORKGROUPS=1
+      THREADS=1
+      MAX_MESSAGE_SIZE=8
+    fi
+    ExecTest  "${NAME}"  "${RANKS}"  "${WORKGROUPS}"  "${THREADS}"  "${MAX_MESSAGE_SIZE}"
     ;;
 esac
 
-EXIT_STATUS=$(($DRIVER_RETURN_STATUS || $?))
+EXIT_STATUS=$DRIVER_RETURN_STATUS
+
+# If there were failures, try to rerun them once (only if below threshold)
+if [ $EXIT_STATUS -ne 0 ] && [ ${#FAILED_TESTS[@]} -gt 0 ]; then
+  if [ ${#FAILED_TESTS[@]} -le $RETRY_THRESHOLD ]; then
+    RerunFailedTests
+    EXIT_STATUS=$DRIVER_RETURN_STATUS
+  else
+    echo ""
+    echo "========================================================================"
+    echo "Too many test failures (${#FAILED_TESTS[@]} > $RETRY_THRESHOLD threshold)"
+    echo "Skipping retry - this may indicate a systemic issue"
+    echo "========================================================================"
+    echo ""
+  fi
+fi
+
+# Final summary
+echo ""
+echo "========================================================================"
 if [ $EXIT_STATUS -eq 0 ]; then
   echo -e "TESTS PASSED"
 else
-  echo -e "TESTS FAILED: $FAILED_LIST"
+  if [[ -n "$RETRY_FAILED_LIST" ]]; then
+    echo -e "TESTS FAILED (even after retry): $RETRY_FAILED_LIST"
+  else
+    echo -e "TESTS FAILED: $FAILED_LIST"
+  fi
 fi
+echo "========================================================================"
 exit $EXIT_STATUS

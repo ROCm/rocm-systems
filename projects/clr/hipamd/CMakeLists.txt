@@ -79,41 +79,7 @@ list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
 list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
 list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
 
-if(HIP_VERSION_PATCH EQUAL 0 AND GIT_FOUND AND UNIX)
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} fetch --tags origin
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-    OUTPUT_QUIET
-    ERROR_QUIET)
-
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0 HEAD
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-    RESULT_VARIABLE _git_tag_result
-    OUTPUT_VARIABLE _git_tag_string
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
-
-  if(_git_tag_result EQUAL 0 AND _git_tag_string)
-    string(REGEX MATCH "hip-version_([0-9]+)\\.([0-9]+)\\.([0-9]+)" _version_matched "${_git_tag_string}")
-
-    if(_version_matched)
-      set(HIP_VERSION_MAJOR ${CMAKE_MATCH_1})
-      set(HIP_VERSION_MINOR ${CMAKE_MATCH_2})
-      set(HIP_VERSION_PATCH ${CMAKE_MATCH_3})
-
-      file(WRITE ${HIP_COMMON_DIR}/VERSION
-           "#HIP_VERSION_MAJOR\n${HIP_VERSION_MAJOR}\n"
-           "#HIP_VERSION_MINOR\n${HIP_VERSION_MINOR}\n"
-           "#HIP_VERSION_PATCH\n${HIP_VERSION_PATCH}\n")
-
-      message(STATUS "Updated HIP version from git tag: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH} -> ${HIP_COMMON_DIR}/VERSION")
-    endif()
-  endif()
-else()
-  message(STATUS "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
-endif()
-
+set(HIP_VERSION_UNIXDATE 0)
 set(HIP_VERSION_GITDATE 0)
 
 # FIXME: Two different version strings used.
@@ -148,6 +114,13 @@ if(GIT_FOUND)
     OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(git_result EQUAL 0)
     set(HIP_VERSION_GITHASH ${git_output})
+  endif()
+
+  if(HIP_VERSION_PATCH EQUAL 0 AND HIP_VERSION_UNIXDATE GREATER 0)
+    set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
+    message(STATUS "Using HIP major, minor versions from VERSION file & patch version from git commit date: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
+  else()
+    message(STATUS "Using HIP version from VERSION file: ${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}.${HIP_VERSION_PATCH}")
   endif()
 
   set(HIP_VERSION_BUILD_ID 0)
@@ -384,12 +357,6 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
                                PATTERN "pal" EXCLUDE
                                PATTERN "libamdhsacode" EXCLUDE)
       endif()
-    else()
-      # Exclude .bat files on Linux.
-      #Hip bin files moved to /opt/rocm/bin and the file permission need to set properly
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
-              DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-              PATTERN *.bat EXCLUDE)
     endif()
 
     if(WIN32) #not required for flat folder structure
@@ -415,7 +382,6 @@ endif()
 if(HIP_PLATFORM STREQUAL "amd")
 install(FILES ${PROJECT_BINARY_DIR}/include/hip/amd_detail/hip_prof_str.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip/amd_detail)
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin DESTINATION . USE_SOURCE_PERMISSIONS)
 endif()
 install(FILES ${PROJECT_BINARY_DIR}/include/hip/hip_version.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hip)
