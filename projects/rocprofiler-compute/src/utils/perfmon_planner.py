@@ -238,7 +238,12 @@ def detect_counters(
     effective_blocks: list[str] = filter_blocks or []
 
     if not effective_blocks:
-        for filename in config_files.values():
+        default_config_files = {
+            block_id: filename
+            for block_id, filename in config_files.items()
+            if block_id != "3000"
+        }
+        for filename in default_config_files.values():
             with open(filename) as stream:
                 texts.append(stream.read())
     else:
