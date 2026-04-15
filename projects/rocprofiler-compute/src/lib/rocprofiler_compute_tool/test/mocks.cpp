@@ -126,7 +126,7 @@ void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agen
                                            size_t                           counters_count,
                                            rocprofiler_counter_config_id_t* config_id)
 {
-    Expects(counters_count < m_counter_names.size());
+    Expects(counters_count <= m_counter_names.size());
     create_counter_config_info info;
     for (size_t i = 0; i < counters_count; ++i)
     {

@@ -17,5 +17,6 @@ target_link_libraries(${target} PRIVATE
     gtest_main
     gmock
     gsl_assert
+    fmt::fmt
 )
 

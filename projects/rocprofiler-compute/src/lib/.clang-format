@@ -108,4 +108,4 @@ UseTab: Never
 PenaltyExcessCharacter: 3
 PenaltyBreakAssignment: 100
 PenaltyBreakBeforeFirstCallParameter: 100
-PenaltyReturnTypeOnItsOwnLine: 1000
+PenaltyReturnTypeOnItsOwnLine: 200

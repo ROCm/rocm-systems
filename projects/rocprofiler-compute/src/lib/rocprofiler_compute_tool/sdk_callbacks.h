@@ -68,11 +68,11 @@ struct iteration_multiplexing_dispatch_record_t
 
 struct counter_info_record_t
 {
-    uint64_t    dispatch_id = 0;
-    uint64_t    agent_id = 0;
-    uint64_t    kernel_id = 0;
+    uint64_t    dispatch_id     = 0;
+    uint64_t    agent_id        = 0;
+    uint64_t    kernel_id       = 0;
     uint32_t    LDS_memory_size = 0;
-    uint64_t    counter_id = 0;
+    uint64_t    counter_id      = 0;
     std::string counter_name;
     double      counter_value = 0.;
 };
@@ -102,7 +102,7 @@ public:
                                  size_t                                       record_count,
                                  void* callback_data_args)   = 0;
     virtual void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                       void*                                 callback_data) = 0;
+                                       void*                                 callback_data)  = 0;
 };
 
 class SdkCallbacksImpl : public SdkCallbacks
@@ -112,7 +112,7 @@ public:
 
     void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                            rocprofiler_counter_config_id_t*             config,
-                           void*                                        callback_data_args) override;
+                           void* callback_data_args) override;
 
     void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                          rocprofiler_counter_record_t*                record_data,
@@ -124,10 +124,15 @@ public:
 private:
     static bool is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
     void create_counter_collection_profile(
-        tool_data_t*                                                                tool,
-        rocprofiler_agent_id_t                                                      agent_id,
+        tool_data_t*           tool,
+        rocprofiler_agent_id_t agent_id,
         std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache) const;
 
-    std::shared_ptr<SdkWrapper> m_sdk_wrapper;
+    std::shared_ptr<SdkWrapper>            m_sdk_wrapper;
+    std::unordered_map<uint64_t, uint64_t> m_kernel_dispatch_count_by_kernel_id{};
+    std::shared_mutex                      m_kernel_id_iteration_mutex;
+    std::shared_mutex                      m_mutex                                             = {};
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> m_profile_cache = {};
+    std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_data = {};
 };
 }  // namespace rocprofiler_compute_tool
