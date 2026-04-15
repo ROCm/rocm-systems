@@ -373,7 +373,7 @@ template <typename T_in, typename T_out>
 void device_e8m0_constructors(const std::vector<T_in>& in, std::vector<T_out>& out) {
   T_in* in_d = nullptr;
   T_out* out_d = nullptr;
-  REQUIRE(in.size() =< 1024);
+  REQUIRE(in.size() <= 1024);
 
   HIP_CHECK(hipMalloc(&in_d, sizeof(T_in) * in.size()));
   HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()));
@@ -406,7 +406,7 @@ void compare_e8m0_results(const std::vector<T>& out, const std::vector<T>& exp) 
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_e8m0_float_constructors", , half, __hip_bfloat16, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_e8m0_float_constructors, , half, __hip_bfloat16, float, double) {
   bool run_on_host = GENERATE(true, false);
 
   std::vector<TestType> in = {0, 10, 16, -10, -16, std::nanf("0")};
@@ -435,8 +435,8 @@ TEMPLATE_TEST_CASE("Unit_e8m0_float_constructors", , half, __hip_bfloat16, float
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_e8m0_int_constructors", , int, long int, long long int, short int,
-                   unsigned int, unsigned long int, unsigned long long int, unsigned short int) {
+HIP_TEMPLATE_TEST_CASE(Unit_e8m0_int_constructors, , int, long int, long long int, short int,
+                       unsigned int, unsigned long int, unsigned long long int, unsigned short int) {
   bool run_on_host = GENERATE(true, false);
 
   std::vector<TestType> in = {
@@ -507,7 +507,7 @@ void device_e8m0_float_conversions(const std::vector<float>& in, std::vector<T_o
   HIP_CHECK(hipFree(out_d));
 }
 
-TEMPLATE_TEST_CASE("Unit_e8m0_float_conversions", , half, __hip_bfloat16, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_e8m0_float_conversions, , half, __hip_bfloat16, float, double) {
   bool run_on_host = GENERATE(true, false);
 
   std::vector<float> in = {0.0f, 10.0f, 16.0f, -10.0f, -16.0f, std::nanf("0")};
@@ -536,9 +536,9 @@ TEMPLATE_TEST_CASE("Unit_e8m0_float_conversions", , half, __hip_bfloat16, float,
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_e8m0_int_conversions", , char, int, long int, long long int, short int,
-                   signed char, unsigned char, unsigned int, unsigned long int,
-                   unsigned long long int, unsigned short int) {
+HIP_TEMPLATE_TEST_CASE(Unit_e8m0_int_conversions, , char, int, long int, long long int, short int,
+                       signed char, unsigned char, unsigned int, unsigned long int,
+                       unsigned long long int, unsigned short int) {
   bool run_on_host = GENERATE(true, false);
 
   std::vector<float> in = {0.0f, 1.0f, 2.0f, 4.0f, 8.0f, 15.0f, 16.0f, 32.0f, 64.0f};
@@ -608,9 +608,9 @@ void device_e8m0_saturation_conversions(const std::vector<unsigned char>& in,
   HIP_CHECK(hipFree(out_d));
 }
 
-TEMPLATE_TEST_CASE("Unit_e8m0_int_conversions_saturation", , char, int, long int, long long int,
-                   short int, signed char, unsigned char, unsigned int, unsigned long int,
-                   unsigned long long int, unsigned short int) {
+HIP_TEMPLATE_TEST_CASE(Unit_e8m0_int_conversions_saturation, , char, int, long int, long long int,
+                       short int, signed char, unsigned char, unsigned int, unsigned long int,
+                       unsigned long long int, unsigned short int) {
   bool run_on_host = GENERATE(true, false);
 
   // Test with maximum non-NAN e8m0 value
