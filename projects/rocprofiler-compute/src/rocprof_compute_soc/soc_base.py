@@ -1052,10 +1052,14 @@ def _rebuild_tcc_channel_file_map(
     return result
 
 
-def _flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
+def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
     """Ordered list of PMC counter names assigned to one perfmon bucket file."""
     return [
         ctr
         for block_name in counter_file.blocks
         for ctr in counter_file.blocks[block_name].elements
     ]
+
+
+# Internal alias for backward compatibility with existing code
+_flat_counters_in_perfmon_file = flat_counters_in_perfmon_file

@@ -32,7 +32,7 @@ if str(_src_dir) not in sys.path:
 # Import from existing modules to maintain single source of truth
 from rocprof_compute_soc.soc_base import (  # noqa: E402
     CounterFile,
-    _flat_counters_in_perfmon_file,
+    flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
 )
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
@@ -42,6 +42,9 @@ from utils.utils_common import (  # noqa: E402
     get_panel_alias,
 )
 from vendored import yaml  # noqa: E402
+
+# Local alias for internal use
+_flat_counters_in_perfmon_file = flat_counters_in_perfmon_file
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
