@@ -1,3 +1,5 @@
+## Copyright (c) Advanced Micro Devices, Inc.
+## SPDX-License-Identifier:  MIT
 set(target test_rocprofiler_compute)
 
 add_executable(${target}
@@ -14,5 +16,6 @@ target_link_libraries(${target} PRIVATE
     rocprofiler-compute-tool
     gtest_main
     gmock
+    gsl_assert
 )
 

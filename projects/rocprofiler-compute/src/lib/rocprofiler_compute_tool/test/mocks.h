@@ -72,14 +72,19 @@ public:
     void query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                  rocprofiler_counter_id_t*         counter_id) override;
 
+    // Test functions
+    void set_available_counters(const std::vector<std::string>& counter_names);
     const std::vector<uint64_t>&                       get_created_contexts() const;
     const std::vector<uint64_t>&                       get_started_contexts() const;
     const std::vector<dispatch_counting_service_args>& get_dispatch_counting_service_args() const;
 
 private:
+    std::vector<rocprofiler_counter_id_t> get_counters() const;
+
     std::vector<uint64_t>                       m_created_contexts;
     std::vector<uint64_t>                       m_started_contexts;
     std::vector<dispatch_counting_service_args> m_dispatch_counting_service_args;
+    std::vector<std::string>                    m_counter_names;
 };
 
 class MockCountersWriter : public rocprofiler_compute_tool::CountersWriter

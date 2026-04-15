@@ -1,4 +1,5 @@
-
+## Copyright (c) Advanced Micro Devices, Inc.
+## SPDX-License-Identifier:  MIT
 set(target rocprofiler-compute-tool)
 add_library(${target} SHARED
     rocprofiler_compute_tool.h

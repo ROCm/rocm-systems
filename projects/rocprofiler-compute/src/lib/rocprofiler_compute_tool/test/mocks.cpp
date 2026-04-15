@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #include "mocks.h"
 
+#include "gsl_assert.h"
+
 const char* MockInputParameters::get_output_path()
 {
     return m_output_path.c_str();
@@ -92,12 +94,31 @@ void MockSdkWrapper::iterate_agent_supported_counters(rocprofiler_agent_id_t    
                                                       rocprofiler_available_counters_cb_t cb,
                                                       void*                               user_data)
 {
+    auto counters = get_counters();
+    cb(agent_id, counters.data(), counters.size(), user_data);
+}
+
+std::vector<rocprofiler_counter_id_t> MockSdkWrapper::get_counters() const
+{
+    std::vector<rocprofiler_counter_id_t> counters;
+    for (uint32_t i = 0; i < m_counter_names.size(); ++i)
+    {
+        rocprofiler_counter_id_t counter_id{i};
+        counters.push_back(counter_id);
+    }
+    return counters;
 }
 
 void MockSdkWrapper::query_counter_info(rocprofiler_counter_id_t              counter_id,
                                         rocprofiler_counter_info_version_id_t version,
                                         void*                                 info)
 {
+    Expects(counter_id.handle < m_counter_names.size());
+    Expects(info);
+
+    const auto counter_info  = static_cast<rocprofiler_counter_info_v0_t*>(info);
+    counter_info->id   = counter_id;
+    counter_info->name = m_counter_names[counter_id.handle].c_str();
 }
 
 void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agent_id,
@@ -110,6 +131,11 @@ void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agen
 void MockSdkWrapper::query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                              rocprofiler_counter_id_t*         counter_id)
 {
+}
+
+void MockSdkWrapper::set_available_counters(const std::vector<std::string>& counter_names)
+{
+    m_counter_names = counter_names;
 }
 
 const std::vector<uint64_t>& MockSdkWrapper::get_created_contexts() const

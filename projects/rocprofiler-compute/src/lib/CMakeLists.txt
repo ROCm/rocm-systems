@@ -20,3 +20,4 @@ find_package(
 
 add_subdirectory(external)
 add_subdirectory(rocprofiler_compute_tool)
+add_subdirectory(utils)
