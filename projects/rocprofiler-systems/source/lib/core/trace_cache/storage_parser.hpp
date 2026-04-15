@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -41,6 +42,10 @@ namespace rocprofsys
 {
 namespace trace_cache
 {
+
+/// Callback reporting parsing progress: (bytes_read, total_bytes)
+using progress_callback_t = std::function<void(size_t, size_t)>;
+
 template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class storage_parser
 {
@@ -50,12 +55,13 @@ class storage_parser
     static_assert(sizeof...(SupportedTypes) != 0, "SupportedTypes must be non-empty");
 
 public:
-    storage_parser(std::string _filename)
+    explicit storage_parser(std::string _filename)
     : m_filename(std::move(_filename))
     {}
 
     template <typename TypeProcessing>
-    void load(std::shared_ptr<TypeProcessing> _type_processing)
+    void load(std::shared_ptr<TypeProcessing> _type_processing,
+              progress_callback_t             progress_cb = nullptr)
     {
         static_assert(
             type_traits::has_execute_processing<TypeProcessing, TypeIdentifierEnum,
@@ -77,6 +83,16 @@ public:
                 fmt::format("Error opening file for reading: {}", m_filename));
         }
 
+        size_t file_size = 0;
+        if(progress_cb)
+        {
+            ifs.seekg(0, std::ios::end);
+            auto end_pos = ifs.tellg();
+            file_size    = (end_pos > 0) ? static_cast<size_t>(end_pos) : 0;
+            ifs.seekg(0, std::ios::beg);
+            if(file_size == 0) progress_cb = nullptr;
+        }
+
         struct __attribute__((packed)) sample_header
         {
             TypeIdentifierEnum type;
@@ -89,6 +105,11 @@ public:
         sample.reserve(4096);
         size_t last_capacity = sample.capacity();
 
+        // Report progress every N samples to balance UI responsiveness vs. overhead
+        constexpr size_t PROGRESS_INTERVAL = 500;
+        size_t           samples_processed = 0;
+        size_t           bytes_read        = 0;
+
         while(!ifs.eof())
         {
             if(!ifs.good())
@@ -98,6 +119,7 @@ public:
             }
 
             ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
+            if(ifs.gcount() < static_cast<std::streamsize>(sizeof(header))) break;
 
             if(header.sample_size == 0 || ifs.eof())
             {
@@ -118,7 +140,14 @@ public:
                 throw std::runtime_error(
                     fmt::format("Bad read while consuming buffered storage. Filename: {} "
                                 "Bytes read: {}",
-                                m_filename, static_cast<int>(ifs.tellg())));
+                                m_filename, static_cast<size_t>(ifs.tellg())));
+            }
+
+            bytes_read += sizeof(header) + header.sample_size;
+
+            if(progress_cb && ++samples_processed % PROGRESS_INTERVAL == 0)
+            {
+                progress_cb(bytes_read, file_size);
             }
 
             if(header.type == TypeIdentifierEnum::fragmented_space)
@@ -144,6 +173,11 @@ public:
                 LOG_TRACE("Unknown sample type encountered, skipping");
                 continue;
             }
+        }
+
+        if(progress_cb)
+        {
+            progress_cb(file_size, file_size);
         }
 
         ifs.close();

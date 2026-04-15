@@ -30,17 +30,23 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
+#include "core/progress_bar.hpp"
 #include "core/timemory.hpp"
 
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <fstream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
@@ -401,6 +407,62 @@ merge_perfetto_files()
 
 namespace processing_utils
 {
+
+constexpr size_t PROGRESS_BAR_WIDTH = 40;
+
+std::shared_ptr<rocprofsys::progress_bar>
+make_progress_bar(std::string postfix, size_t max_progress)
+{
+    if(!isatty(STDERR_FILENO) || config::get_verbose() < 0 || max_progress == 0)
+    {
+        return nullptr;
+    }
+    return std::make_shared<rocprofsys::progress_bar>(
+        PROGRESS_BAR_WIDTH, "Generating ", std::move(postfix), max_progress, std::cerr);
+}
+
+progress_callback_t
+make_progress_callback(const std::shared_ptr<rocprofsys::progress_bar>& bar)
+{
+    if(!bar) return nullptr;
+    return [bar](size_t bytes_read, size_t /*total_bytes*/) {
+        if(!bar->is_completed())
+        {
+            bar->set_progress(bytes_read);
+        }
+    };
+}
+
+progress_callback_t
+make_shared_progress_callback(const std::shared_ptr<rocprofsys::progress_bar>& bar,
+                              std::shared_ptr<std::atomic<size_t>> total_bytes_read)
+{
+    if(!bar) return nullptr;
+    return [bar, total_bytes_read, last_pos = size_t{ 0 }](size_t pos,
+                                                           size_t /*file_size*/) mutable {
+        size_t delta = (pos >= last_pos) ? (pos - last_pos) : 0;
+        last_pos     = pos;
+        auto total =
+            total_bytes_read->fetch_add(delta, std::memory_order_relaxed) + delta;
+        bar->set_progress(total);
+    };
+}
+
+size_t
+get_total_cache_size(
+    const std::vector<std::shared_ptr<data::processor_config_t>>& configs)
+{
+    size_t total = 0;
+    for(const auto& config : configs)
+    {
+        auto fname = utility::get_buffered_storage_filename(config->_ppid, config->_pid);
+        struct stat file_stat;
+        if(stat(fname.c_str(), &file_stat) == 0 && file_stat.st_size > 0)
+            total += static_cast<size_t>(file_stat.st_size);
+    }
+    return total;
+}
+
 [[nodiscard]] data::processor_storage_t
 configure_processors(const std::shared_ptr<sample_processor_t>&       _type_processing,
                      const std::shared_ptr<data::processor_config_t>& _processor_config,
@@ -429,7 +491,7 @@ void
 process_buffered_storage(
     const std::shared_ptr<data::processor_config_t>& _processor_config,
     const std::string& _storage_filename, const data::enabled_formats_t& _enabled_formats,
-    output_file_registry& _output_registry)
+    output_file_registry& _output_registry, progress_callback_t _progress_cb)
 {
     LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
               _processor_config->_pid);
@@ -442,7 +504,7 @@ process_buffered_storage(
     _processor_coordinator->prepare_for_processing();
     try
     {
-        _parser.load(_processor_coordinator);
+        _parser.load(_processor_coordinator, std::move(_progress_cb));
         LOG_TRACE("Successfully loaded buffered storage: {}", _storage_filename);
     } catch(const std::runtime_error& exp)
     {
@@ -492,6 +554,20 @@ multithreaded_processing(
               _processor_configs.size());
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
+    auto total_file_size  = get_total_cache_size(_processor_configs);
+    auto total_bytes_read = std::make_shared<std::atomic<size_t>>(0);
+
+    std::vector<pid_t> pids;
+    pids.reserve(_processor_configs.size());
+    for(const auto& cfg : _processor_configs)
+    {
+        pids.push_back(cfg->_pid);
+    }
+
+    auto bar = make_progress_bar(fmt::format("rocpd output from {} process(es) [{}]",
+                                             pids.size(), fmt::join(pids, ", ")),
+                                 total_file_size);
+
     std::vector<std::thread> processing_threads;
     processing_threads.reserve(_processor_configs.size());
     for(const auto& processor_config : _processor_configs)
@@ -501,7 +577,8 @@ multithreaded_processing(
             process_buffered_storage, processor_config,
             utility::get_buffered_storage_filename(processor_config->_ppid,
                                                    processor_config->_pid),
-            _enabled_formats, std::ref(_output_registry));
+            _enabled_formats, std::ref(_output_registry),
+            make_shared_progress_callback(bar, total_bytes_read));
     }
 
     LOG_TRACE("Waiting for {} processing threads to complete", processing_threads.size());
@@ -509,6 +586,8 @@ multithreaded_processing(
     {
         thread.join();
     }
+    if(bar) bar->mark_as_completed();
+
     LOG_DEBUG("Multithreaded processing completed");
 }
 
@@ -520,13 +599,28 @@ sequential_processing(
 {
     LOG_DEBUG("Starting sequential processing with {} configs",
               _processor_configs.size());
+
     for(const auto& processor_config : _processor_configs)
     {
-        LOG_TRACE("Processing config for pid={}", processor_config->_pid);
-        process_buffered_storage(processor_config,
-                                 utility::get_buffered_storage_filename(
-                                     processor_config->_ppid, processor_config->_pid),
-                                 _enabled_formats, _output_registry);
+        auto pid  = processor_config->_pid;
+        auto ppid = processor_config->_ppid;
+
+        LOG_TRACE("Processing config for pid={}", pid);
+
+        auto cache_file = utility::get_buffered_storage_filename(ppid, pid);
+
+        struct stat file_stat = {};
+        size_t      file_size = 0;
+        if(stat(cache_file.c_str(), &file_stat) == 0 && file_stat.st_size > 0)
+        {
+            file_size = static_cast<size_t>(file_stat.st_size);
+        }
+
+        auto bar = make_progress_bar(
+            fmt::format("perfetto output from process [{}]", pid), file_size);
+
+        process_buffered_storage(processor_config, cache_file, _enabled_formats,
+                                 _output_registry, make_progress_callback(bar));
     }
     LOG_DEBUG("Sequential processing completed");
 }
