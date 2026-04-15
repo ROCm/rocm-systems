@@ -223,7 +223,7 @@ TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     cfg->finalize(cfg->tool_data);
-    EXPECT_EQ(m_counters_writer->get_write_counters_count(), 0);
+    EXPECT_EQ(m_counters_writer->get_write_counters_args().size(), 0);
 }
 
 TEST_F(TestRocprofilerComputeTool, OnFiniNonEmptyCounterRecords_WritesCounters)
@@ -234,7 +234,8 @@ TEST_F(TestRocprofilerComputeTool, OnFiniNonEmptyCounterRecords_WritesCounters)
     constexpr uint64_t kernel_id  = 10;
     tool_data->counter_records.push_back(create_counter_record(counter_id, kernel_id));
     cfg->finalize(cfg->tool_data);
-    EXPECT_EQ(m_counters_writer->get_write_counters_count(), 1);
+    EXPECT_EQ(m_counters_writer->get_write_counters_args().size(), 1);
+    EXPECT_EQ(m_counters_writer->get_write_counters_args()[0].counter_ids, std::vector{counter_id});
 }
 
 int main(int argc, char** argv)

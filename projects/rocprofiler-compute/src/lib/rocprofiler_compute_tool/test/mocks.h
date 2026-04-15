@@ -107,10 +107,15 @@ private:
 class MockCountersWriter : public rocprofiler_compute_tool::CountersWriter
 {
 public:
+    struct write_counters_args
+    {
+        std::vector<uint64_t> counter_ids;
+    };
     void write_counters(rocprofiler_compute_tool::tool_data_t* tool_data) override;
-    uint32_t get_write_counters_count() const;
+    const std::vector<write_counters_args>& get_write_counters_args() const;
 
 private:
+    std::vector<write_counters_args> m_write_counters_args;
     uint32_t m_writer_counters_count = 0;
 };
 

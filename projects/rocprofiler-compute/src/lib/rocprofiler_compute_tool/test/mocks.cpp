@@ -131,10 +131,13 @@ const std::vector<MockSdkWrapper::dispatch_counting_service_args>& MockSdkWrappe
 // MockCountersWriter
 void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
 {
-    m_writer_counters_count++;
+    for (const auto& counter : tool_data->counter_records)
+    {
+        m_write_counters_args.push_back({{counter.counter_id}});
+    }
 }
 
-uint32_t MockCountersWriter::get_write_counters_count() const
+const std::vector<MockCountersWriter::write_counters_args>& MockCountersWriter::get_write_counters_args() const
 {
-    return m_writer_counters_count;
+    return m_write_counters_args;
 }
