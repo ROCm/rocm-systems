@@ -1,5 +1,5 @@
 .. meta::
-   :description: ROCm Compute Profiler performance model — CDNA and RDNA overview
+   :description: Performance model overview in ROCm Compute Profiler, covering CDNA and RDNA architectures, GPU metrics, panel layouts, and profiling concepts.
    :keywords: ROCm Compute Profiler, performance model, CDNA, RDNA, Instinct, Radeon
 
 *****************
