@@ -271,7 +271,7 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   }
   plan->kernelArgsSize = sizeof(struct ncclDevKernelArgs) + batchBytes;
   plan->kernelArgsSize += (plan->workStorageType == ncclDevWorkStorageTypeArgs) ? workBytes : 0;
-  if (!plan->isSymColl) plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclDevKernelArgsDefaultStorage));
+  plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclDevKernelArgsDefaultStorage));
   plan->kernelArgsSize = alignUp(plan->kernelArgsSize, 16);
   plan->kernelArgs = (struct ncclDevKernelArgs*)ncclMemoryStackAlloc(&comm->memScoped, plan->kernelArgsSize, /*align=*/16);
   plan->kernelArgs->comm = comm->devComm;
@@ -1647,11 +1647,7 @@ static ncclResult_t reclaimPlan(struct ncclComm* comm, struct ncclCommCallback* 
     }
   }
   if (plan->isSymColl) {
-    // free(plan->kernelSymArgs);
-    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
-    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-    CUDACHECK(hipFree(plan->kernelArgs));
-    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    free(plan->kernelSymArgs);
   }
   // Free coll tasks
   struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue);
@@ -1898,7 +1894,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
   void* extra[] = {
-    CU_LAUNCH_PARAM_BUFFER_POINTER, plan->isSymColl ? (void*)&plan->kernelSymArgs : (void*)plan->kernelArgs,
+    CU_LAUNCH_PARAM_BUFFER_POINTER, plan->kernelArgs,
     CU_LAUNCH_PARAM_BUFFER_SIZE, &plan->kernelArgsSize,
     CU_LAUNCH_PARAM_END
   };
