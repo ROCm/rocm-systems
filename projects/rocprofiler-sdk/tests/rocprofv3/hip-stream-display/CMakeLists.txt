@@ -38,9 +38,8 @@ set(hip-stream-display-env "${PRELOAD_ENV}")
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-hip-stream-display
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-rename -s -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace csv
-        --log-level env -- $<TARGET_FILE:hip-streams>
+        sh -c
+        "rm -rf ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace && $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-rename -s -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace csv --log-level env -- $<TARGET_FILE:hip-streams>"
     DEPENDS hip-streams
     TIMEOUT 60
     LABELS "integration-tests"
@@ -54,13 +53,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_results.pftrace
          --kernel-csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_kernel_trace.csv
          --memory-copy-csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_*_memory_copy_trace.csv
     TIMEOUT 60
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hip-stream-display

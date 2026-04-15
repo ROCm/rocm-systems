@@ -26,9 +26,8 @@ foreach(_XNACK on off)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-kfd-xnack-${_XNACK}
         COMMAND
-            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kfd-trace -d
-            ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format
-            json --log-level env -- $<TARGET_FILE:transpose> 1 1 1 2048 2048
+            sh -c
+            "rm -rf ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace && $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kfd-trace -d ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format json --log-level env -- $<TARGET_FILE:transpose> 1 1 1 2048 2048"
         DEPENDS transpose
         TIMEOUT 45
         LABELS "integration-tests;multi-gpu"
@@ -42,7 +41,7 @@ foreach(_XNACK on off)
         COPY conftest.py
         CONFIG pytest.ini
         ARGS --json-input
-             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_results.json
+             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_*_results.json
         TIMEOUT 45
         LABELS "integration-tests;multi-gpu"
         FAIL_REGULAR_EXPRESSION "AssertionError"

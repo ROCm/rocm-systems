@@ -17,10 +17,8 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-minimum-bytes
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.json --output-format csv json pftrace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-kernel-trace -o out --
-        $<TARGET_FILE:simple-transpose>
+        sh -c
+        "rm -rf ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace && $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.json --output-format csv json pftrace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-kernel-trace -o out -- $<TARGET_FILE:simple-transpose>"
     DEPENDS simple-transpose
     TIMEOUT 45
     LABELS "integration-tests"
@@ -33,11 +31,11 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input.json
     CONFIG pytest.ini
     ARGS --trace-input-csv
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out*.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_*_kernel_trace.csv
          --trace-input-json
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_*_results.json
          --trace-input-pftrace
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_*_results.pftrace
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-minimum-bytes)

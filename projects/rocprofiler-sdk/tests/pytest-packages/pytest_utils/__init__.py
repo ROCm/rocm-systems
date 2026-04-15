@@ -22,6 +22,10 @@
 
 from __future__ import absolute_import
 
+import glob
+import csv
+import json
+
 
 def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
     """Collapse a dictionary entry list into a single mapped value"""
@@ -41,3 +45,60 @@ def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
         return check_return({key: data[key][0]})
 
     return check_return(data)
+
+
+def find_single_file(pattern, description="file"):
+    """
+    Find a single file matching the glob pattern.
+
+    Args:
+        pattern: Glob pattern to match (e.g., "out_*_results.csv")
+        description: Human-readable description for error messages
+
+    Returns:
+        str: Path to the matched file
+
+    Raises:
+        AssertionError: If pattern doesn't match exactly one file
+    """
+    matches = glob.glob(pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 {description} matching {pattern}, found {len(matches)}: {matches}"
+    return matches[0]
+
+
+def read_csv_with_glob(filename_pattern, description="CSV file"):
+    """
+    Read CSV file using glob pattern to find it.
+
+    Args:
+        filename_pattern: Glob pattern to find the CSV file
+        description: Human-readable description for error messages
+
+    Returns:
+        list: List of dictionaries, one per CSV row
+    """
+    filepath = find_single_file(filename_pattern, description)
+    data = []
+    with open(filepath, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+    return data
+
+
+def read_json_with_glob(filename_pattern, description="JSON file"):
+    """
+    Read JSON file using glob pattern to find it.
+
+    Args:
+        filename_pattern: Glob pattern to find the JSON file
+        description: Human-readable description for error messages
+
+    Returns:
+        dict: Parsed JSON data
+    """
+    filepath = find_single_file(filename_pattern, description)
+    with open(filepath, "r") as inp:
+        return json.load(inp)

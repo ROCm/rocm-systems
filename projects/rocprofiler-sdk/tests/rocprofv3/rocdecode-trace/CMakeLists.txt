@@ -34,11 +34,8 @@ endif()
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocdecode-tracing
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocdecode-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv pftrace
-        otf2 --log-level env --
-        $<IF:$<TARGET_EXISTS:rocdecode-demo>,$<TARGET_FILE:rocdecode-demo>,rocdecode-demo>
-        -i ${ROCDECODE_VIDEO_FILE}
+        sh -c
+        "rm -rf ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace && $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocdecode-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv pftrace otf2 --log-level env -- $<IF:$<TARGET_EXISTS:rocdecode-demo>,$<TARGET_FILE:rocdecode-demo>,rocdecode-demo> -i ${ROCDECODE_VIDEO_FILE}"
     DEPENDS rocdecode-demo
     TIMEOUT 45
     LABELS "integration-tests"
@@ -52,13 +49,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_*_results.json
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_*_results.otf2
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_*_results.pftrace
          --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_rocdecode_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_*_rocdecode_api_trace.csv
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-rocdecode-tracing

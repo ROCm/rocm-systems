@@ -74,7 +74,7 @@ output_config::parse_env()
        output_file.find("%p") == std::string::npos)
     {
         ROCP_WARNING << fmt::format(
-            "Modifying output file name from {} to {}", output_file, output_file + "_%pid%");
+            "Modifying output file name from {} to {}_{}", output_file, output_file, getpid());
         output_file += "_%pid%";
     }
     auto to_upper = [](std::string val) {

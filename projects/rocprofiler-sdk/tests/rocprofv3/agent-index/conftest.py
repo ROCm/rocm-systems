@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import pytest
 import json
 
@@ -60,9 +61,13 @@ def pytest_addoption(parser):
     )
 
 
-def read_csv(filename):
+def read_csv(filename_pattern):
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
     data = []
-    with open(filename, "r") as inp:
+    with open(matches[0], "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -89,8 +94,12 @@ def csv_memory_allocation_input(request):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
+    filename_pattern = request.config.getoption("--json-input")
+    matches = glob.glob(filename_pattern)
+    assert (
+        len(matches) == 1
+    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    with open(matches[0], "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 

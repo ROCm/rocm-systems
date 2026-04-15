@@ -22,12 +22,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import csv
-import json
 import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    read_csv_with_glob,
+    read_json_with_glob,
+)
 
 
 def pytest_addoption(parser):
@@ -47,18 +49,13 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_input_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    return dotdict(
+        collapse_dict_list(read_json_with_glob(filename_pattern, "results JSON"))
+    )
 
 
 @pytest.fixture
 def csv_input_data(request):
-    filename = request.config.getoption("--csv-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--csv-input")
+    return read_csv_with_glob(filename_pattern, "scratch memory trace CSV")

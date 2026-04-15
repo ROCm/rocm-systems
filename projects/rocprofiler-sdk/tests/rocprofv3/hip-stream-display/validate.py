@@ -58,6 +58,16 @@ def test_stream_trace(json_data):
     assert len(kernel_dispatch_data) > 0
     assert len(memory_copies_data) > 0
 
+    # Build kernel ID to name mapping from kernel_symbols
+    kernel_names = {}
+    if "kernel_symbols" in data:
+        for sym in data["kernel_symbols"]:
+            kid = sym.get("kernel_id")
+            if kid and kid > 0:
+                kernel_names[kid] = sym.get(
+                    "formatted_kernel_name", sym.get("kernel_name", "")
+                )
+
     # Expect stream ids to be set between 1 and 8 inclusive for transpose executable
     expected_stream_ids = set([i for i in range(1, 9)])
     kernel_stream_id_set = set()
@@ -83,6 +93,11 @@ def test_stream_trace(json_data):
 
             stream_id = node.stream_id.handle
             if titr[1] == "KERNEL_DISPATCH":
+                # Filter to only cube kernels (skip internal kernels like __amd_rocclr_initHeap)
+                kernel_id = node.dispatch_info.kernel_id
+                kernel_name = kernel_names.get(kernel_id, "")
+                if not kernel_name.startswith("cube"):
+                    continue
                 assert stream_id not in kernel_stream_id_set
                 kernel_stream_id_set.add(stream_id)
             elif titr[1] == "MEMORY_COPY":
@@ -115,6 +130,11 @@ def test_csv_data(kernel_csv_data, memory_copy_csv_data):
     kernel_stream_id_set = set()
     for row in kernel_csv_data:
         assert "Stream_Id" in row
+        assert "Kernel_Name" in row
+
+        # Filter to only cube kernels (skip internal kernels like __amd_rocclr_initHeap)
+        if not row["Kernel_Name"].startswith("cube"):
+            continue
 
         stream_id = int(row["Stream_Id"])
         assert stream_id not in kernel_stream_id_set

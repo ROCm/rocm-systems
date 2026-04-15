@@ -28,7 +28,12 @@ import os
 import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    read_csv_with_glob,
+    read_json_with_glob,
+    find_single_file,
+)
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
 
@@ -56,27 +61,22 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    return dotdict(
+        collapse_dict_list(
+            read_json_with_glob(filename_pattern, "memory allocation JSON")
+        )
+    )
 
 
 @pytest.fixture
 def otf2_data(request):
-    filename = request.config.getoption("--otf2-input")
-    if not os.path.exists(filename):
-        raise FileExistsError(f"{filename} does not exist")
+    filename_pattern = request.config.getoption("--otf2-input")
+    filename = find_single_file(filename_pattern, "OTF2 file")
     return OTF2Reader(filename).read()[0]
 
 
 @pytest.fixture
 def csv_data(request):
-    filename = request.config.getoption("--csv-input")
-    data = []
-    if not os.path.isfile(filename):
-        raise FileExistsError(f"{filename} does not exist")
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-    return data
+    filename_pattern = request.config.getoption("--csv-input")
+    return read_csv_with_glob(filename_pattern, "memory allocation CSV")

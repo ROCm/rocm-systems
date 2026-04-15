@@ -92,13 +92,13 @@ rocprofiler_add_integration_validate_test(
     ARGS --agent-index
          absolute
          --csv-kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_*_kernel_trace.csv
          --csv-memory-allocation-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_*_memory_allocation_trace.csv
          --csv-memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_*_memory_copy_trace.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_*_results.json
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 rocprofiler_add_integration_validate_test(
@@ -114,13 +114,13 @@ rocprofiler_add_integration_validate_test(
     ARGS --agent-index
          relative
          --csv-kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_*_kernel_trace.csv
          --csv-memory-allocation-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_*_memory_allocation_trace.csv
          --csv-memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_*_memory_copy_trace.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_*_results.json
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
 rocprofiler_add_integration_validate_test(
@@ -136,11 +136,11 @@ rocprofiler_add_integration_validate_test(
     ARGS --agent-index
          type-relative
          --csv-kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_*_kernel_trace.csv
          --csv-memory-allocation-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_*_memory_allocation_trace.csv
          --csv-memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_*_memory_copy_trace.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_*_results.json
     FAIL_REGULAR_EXPRESSION "AssertionError")
