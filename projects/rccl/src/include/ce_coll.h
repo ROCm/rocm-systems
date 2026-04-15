@@ -53,8 +53,13 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70002
+  /* hipify does not rewrite .h; HIP headers expose hipMemcpyAttributes, not cudaMemcpyAttributes. */
+#if defined(__HIP_PLATFORM_AMD__)
+  hipMemcpyAttributes* attrs;
+#else
   cudaMemcpyAttributes* attrs;
+#endif
   size_t* attrIdxs;
   size_t numAttrs;
 #endif

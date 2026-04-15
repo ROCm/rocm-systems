@@ -14,7 +14,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
   NCCL_NVTX3_FUNC_RANGE;
   ncclResult_t ret = ncclSuccess;
 
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70002
   size_t memGran = 0;
   CUdevice currentDev;
   CUmemAllocationProp memprop = {};
@@ -112,7 +112,7 @@ ncclResult_t  ncclMemFree_impl(void *ptr) {
   int saveDevice;
 
   CUDACHECK(cudaGetDevice(&saveDevice));
-#if ROCM_VERSION >= 71200
+#if ROCM_VERSION >= 70002
   CUdevice ptrDev = 0;
 
   if (ptr == NULL) goto fallback;

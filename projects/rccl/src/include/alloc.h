@@ -309,7 +309,8 @@ static_assert(sizeof(struct allocationTracker) == 64, "allocationTracker must be
 #define MAX_ALLOC_TRACK_NGPU 128
 extern struct allocationTracker allocTracker[];
 
-#if ROCM_VERSION >= 71200
+/* CMake: 7.0.2 -> 70002; 7.12.0 -> 71200. Use 70002 so 7.0.2 matches (70200 would be 7.2.0). */
+#if ROCM_VERSION >= 70002
 
 #include "rocmwrap.h"
 
@@ -498,21 +499,21 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
 extern int ncclCuMemEnable();
 
 static inline ncclResult_t ncclCuMemAlloc(void **ptr, void *handlep, int type, size_t size) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM stubs: build with ROCM_VERSION >= 70002 (e.g. ROCm 7.0.2)");
   return ncclInternalError;
 }
 static inline ncclResult_t ncclCuMemFree(void *ptr) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM stubs: build with ROCM_VERSION >= 70002 (e.g. ROCm 7.0.2)");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM stubs: build with ROCM_VERSION >= 70002 (e.g. ROCm 7.0.2)");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
-  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
+  WARN("CUMEM stubs: build with ROCM_VERSION >= 70002 (e.g. ROCm 7.0.2)");
   return ncclInternalError;
 }
 #endif
