@@ -35,13 +35,18 @@ private:
 class MockSdkWrapper : public rocprofiler_compute_tool::SdkWrapper
 {
 public:
-    struct dispatch_counting_service_args
+    struct dispatch_counting_service_info
     {
         uint64_t context                = 0;
         void*    dispatch_callback      = nullptr;
         void*    dispatch_callback_args = nullptr;
         void*    record_callback        = nullptr;
         void*    record_callback_args   = nullptr;
+    };
+
+    struct create_counter_config_info
+    {
+        std::vector<std::string> counter_names;
     };
 
     ~MockSdkWrapper() override = default;
@@ -76,29 +81,31 @@ public:
     void set_available_counters(const std::vector<std::string>& counter_names);
     const std::vector<uint64_t>&                       get_created_contexts() const;
     const std::vector<uint64_t>&                       get_started_contexts() const;
-    const std::vector<dispatch_counting_service_args>& get_dispatch_counting_service_args() const;
+    const std::vector<dispatch_counting_service_info>& get_dispatch_counting_service_info() const;
+    const std::vector<create_counter_config_info>&     get_create_counter_config_info() const;
 
 private:
     std::vector<rocprofiler_counter_id_t> get_counters() const;
 
     std::vector<uint64_t>                       m_created_contexts;
     std::vector<uint64_t>                       m_started_contexts;
-    std::vector<dispatch_counting_service_args> m_dispatch_counting_service_args;
+    std::vector<dispatch_counting_service_info> m_dispatch_counting_service_info;
+    std ::vector<create_counter_config_info>    m_create_counter_config_info;
     std::vector<std::string>                    m_counter_names;
 };
 
 class MockCountersWriter : public rocprofiler_compute_tool::CountersWriter
 {
 public:
-    struct write_counters_args
+    struct write_counters_info
     {
         std::vector<uint64_t> counter_ids;
         std::vector<uint64_t> kernel_id;
     };
 
     void write_counters(rocprofiler_compute_tool::tool_data_t* tool_data) override;
-    const std::vector<write_counters_args>& get_write_counters_args() const;
+    const std::vector<write_counters_info>& get_write_counters_info() const;
 
 private:
-    std::vector<write_counters_args> m_write_counters_args;
+    std::vector<write_counters_info> m_write_counters_args;
 };

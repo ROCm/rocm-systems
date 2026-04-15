@@ -164,8 +164,8 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     cfg->initialize(nullptr, cfg->tool_data);
-    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_args().size(), 1);
-    const auto& args = m_sdk_wrapper->get_dispatch_counting_service_args()[0];
+    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1);
+    const auto& args = m_sdk_wrapper->get_dispatch_counting_service_info()[0];
     EXPECT_EQ(args.context, m_sdk_wrapper->get_created_contexts()[0]);
     EXPECT_TRUE(args.dispatch_callback != nullptr);
     EXPECT_TRUE(args.dispatch_callback_args != nullptr);
@@ -177,7 +177,7 @@ TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     cfg->finalize(cfg->tool_data);
-    EXPECT_EQ(m_counters_writer->get_write_counters_args().size(), 0);
+    EXPECT_EQ(m_counters_writer->get_write_counters_info().size(), 0);
 }
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounters)
@@ -188,8 +188,8 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounte
     constexpr uint64_t kernel_id  = 11;
     tool_data->counter_records.push_back(create_counter_record(counter_id, kernel_id));
     cfg->finalize(cfg->tool_data);
-    EXPECT_EQ(m_counters_writer->get_write_counters_args().size(), 1);
-    EXPECT_EQ(m_counters_writer->get_write_counters_args()[0].counter_ids, std::vector{counter_id});
+    EXPECT_EQ(m_counters_writer->get_write_counters_info().size(), 1);
+    EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].counter_ids, std::vector{counter_id});
 }
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_WriteOnlyFilteredCounters)
@@ -203,9 +203,9 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
     tool_data->counter_records.push_back(create_counter_record(counter_id, kernel_id1));
     tool_data->target_kernel_ids.insert(kernel_id0);
     cfg->finalize(cfg->tool_data);
-    EXPECT_EQ(m_counters_writer->get_write_counters_args().size(), 1);
-    EXPECT_EQ(m_counters_writer->get_write_counters_args()[0].counter_ids, std::vector{counter_id});
-    EXPECT_EQ(m_counters_writer->get_write_counters_args()[0].kernel_id, std::vector{kernel_id0});
+    EXPECT_EQ(m_counters_writer->get_write_counters_info().size(), 1);
+    EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].counter_ids, std::vector{counter_id});
+    EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].kernel_id, std::vector{kernel_id0});
 }
 
 //////////////////////////////////////////////////////////////////////////

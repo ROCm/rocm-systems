@@ -68,12 +68,12 @@ void MockSdkWrapper::configure_callback_dispatch_counting_service(
     rocprofiler_dispatch_counting_record_cb_t  record_callback,
     void*                                      record_callback_args)
 {
-    m_dispatch_counting_service_args.push_back(
-        dispatch_counting_service_args{context_id.handle,
-                                       reinterpret_cast<void*>(dispatch_callback),
-                                       dispatch_callback_args,
-                                       reinterpret_cast<void*>(record_callback),
-                                       record_callback_args});
+    m_dispatch_counting_service_info.push_back(
+        dispatch_counting_service_info{context_id.handle,
+                                            reinterpret_cast<void*>(dispatch_callback),
+                                            dispatch_callback_args,
+                                            reinterpret_cast<void*>(record_callback),
+                                            record_callback_args});
 }
 
 void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
@@ -116,9 +116,9 @@ void MockSdkWrapper::query_counter_info(rocprofiler_counter_id_t              co
     Expects(counter_id.handle < m_counter_names.size());
     Expects(info);
 
-    const auto counter_info  = static_cast<rocprofiler_counter_info_v0_t*>(info);
-    counter_info->id   = counter_id;
-    counter_info->name = m_counter_names[counter_id.handle].c_str();
+    const auto counter_info = static_cast<rocprofiler_counter_info_v0_t*>(info);
+    counter_info->id        = counter_id;
+    counter_info->name      = m_counter_names[counter_id.handle].c_str();
 }
 
 void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agent_id,
@@ -126,6 +126,13 @@ void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agen
                                            size_t                           counters_count,
                                            rocprofiler_counter_config_id_t* config_id)
 {
+    Expects(counters_count < m_counter_names.size());
+    create_counter_config_info info;
+    for (size_t i = 0; i < counters_count; ++i)
+    {
+        Expects(counters_list[i].handle < m_counter_names.size());
+        info.counter_names.push_back(m_counter_names[counters_list[i].handle]);
+    }
 }
 
 void MockSdkWrapper::query_record_counter_id(rocprofiler_counter_instance_id_t id,
@@ -148,16 +155,21 @@ const std::vector<uint64_t>& MockSdkWrapper::get_started_contexts() const
     return m_started_contexts;
 }
 
-const std::vector<MockSdkWrapper::dispatch_counting_service_args>& MockSdkWrapper::get_dispatch_counting_service_args() const
+const std::vector<MockSdkWrapper::dispatch_counting_service_info>& MockSdkWrapper::get_dispatch_counting_service_info() const
 {
-    return m_dispatch_counting_service_args;
+    return m_dispatch_counting_service_info;
+}
+
+const std::vector<MockSdkWrapper::create_counter_config_info>& MockSdkWrapper::get_create_counter_config_info() const
+{
+    return m_create_counter_config_info;
 }
 
 /////////////////////////////////////////////////////////////////////////
 // MockCountersWriter
 void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
 {
-    write_counters_args args;
+    write_counters_info args;
     for (const auto& counter : tool_data->counter_records)
     {
         args.counter_ids.push_back(counter.counter_id);
@@ -166,7 +178,7 @@ void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* t
     m_write_counters_args.push_back(std::move(args));
 }
 
-const std::vector<MockCountersWriter::write_counters_args>& MockCountersWriter::get_write_counters_args() const
+const std::vector<MockCountersWriter::write_counters_info>& MockCountersWriter::get_write_counters_info() const
 {
     return m_write_counters_args;
 }

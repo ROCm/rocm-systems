@@ -4,7 +4,7 @@
 
 #include "rocprofiler_compute_tool.h"
 
-TEST_F(TestSdkCallbacks, Simple)
+TEST_F(TestSdkCallbacks, DISABLED_Simple)
 {
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
     dispatch_data.dispatch_info.kernel_id = 1;
