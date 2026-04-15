@@ -96,7 +96,7 @@ runs:
           -DHIP_PLATFORM=amd \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
-          -DHIP_LLVM_ROOT=${{ inputs.rocm-path }}/lib/llvm \
+          -DHIP_LLVM_ROOT=${{ inputs.rocm-path }}/llvm \
           -DHIP_CATCH_TEST=0 \
           -DCLR_BUILD_HIP=ON \
           -DCLR_BUILD_OCL=ON \
