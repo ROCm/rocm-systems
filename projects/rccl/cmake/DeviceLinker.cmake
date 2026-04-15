@@ -1,42 +1,34 @@
 # cmake/DeviceLinker.cmake
 #
-# Assembly-extract device linker pipeline.
-# Replaces the standard -fgpu-rdc compilation and linking of device code.
+# Assembly-extract device linker pipeline, using the RCCLDEV custom language.
 #
-# All commands are expressed as add_custom_command so that the build system
-# (ninja/make) can schedule them optimally alongside the rest of the build.
+# The rccl-device-compile driver presents a compiler/linker interface to CMake.
+# Per-kernel compilation (cpp -> extract -> obj) is a native CMake compile step.
+# Per-arch linking (objects -> aggregate -> patch -> link -> elf) uses the driver
+# in --link mode via a custom command.
 #
-# Pipeline per specialized kernel (860 files, fully parallel, per GPU target):
-#   compile .cpp -> .s  ->  extract .s -> extracted.s + .json  ->  assemble .o
-#
-# Dispatcher (per GPU target):
-#   compile common.cu.cpp -> .s
-#   aggregate resource .json files -> max_resources.json
-#   patch dispatcher .s with max resources -> patched.s
-#   assemble patched.s -> common_device.o
-#
-# Final:
-#   lld -shared  ->  device.elf  (one per GPU target)
-#   clang-offload-bundler  ->  device.hipfb  (bundles all GPU targets)
-#   host compile common.cu.cpp with -fcuda-include-gpubinary  ->  common.o (fat)
-#   normal HIP compile onerank.cu.cpp  ->  onerank.o (fat)
-#
-# Required variables (set by including CMakeLists.txt):
+# Required variables (set by src/CMakeLists.txt before including this file):
 #   HIPIFY_DIR, GEN_DIR, GPU_TARGETS, PROJECT_BINARY_DIR, PROJECT_SOURCE_DIR,
-#   ROCM_PATH, Python3_EXECUTABLE
+#   Python3_EXECUTABLE
 
-message(STATUS "Device Linker: assembly-extract pipeline enabled")
+message(STATUS "Device Linker: assembly-extract pipeline enabled (RCCLDEV language)")
+
+# ---------------------------------------------------------------------------
+# Enable RCCLDEV custom language
+# ---------------------------------------------------------------------------
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+enable_language(RCCLDEV)
+
+# Tell the driver where to find the real compiler.
+get_filename_component(_dl_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(DL_CLANG NAMES amdclang++ clang++
+  HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
+find_program(DL_BUNDLER NAMES clang-offload-bundler
+  HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
+        "${ROCM_PATH}/llvm/bin" REQUIRED)
 
 set(DEVICE_BUILD_DIR "${PROJECT_BINARY_DIR}/device_build")
-set(ASM_EXTRACT_DIR  "${PROJECT_SOURCE_DIR}/tools/asm_extract")
 set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
-
-# Derive tool paths from the C++ compiler cmake already resolved.
-# ROCM_PATH may be empty in super-project builds (e.g. TheRock).
-get_filename_component(_dl_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-find_program(DL_CLANG NAMES amdclang++ clang++ HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
-find_program(DL_LLD   NAMES ld.lld             HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin" "${ROCM_PATH}/llvm/bin" REQUIRED)
-find_program(DL_BUNDLER NAMES clang-offload-bundler HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin" "${ROCM_PATH}/llvm/bin" REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Parse GPU_TARGETS: strip target features, build offload-arch flag list
@@ -51,57 +43,7 @@ endforeach()
 message(STATUS "Device Linker: GPU targets = ${DL_GPU_TARGETS}")
 
 # ---------------------------------------------------------------------------
-# Compile definitions — read from the rccl target (set by src/CMakeLists.txt)
-# plus infrastructure defs that come from directory scope / linked targets.
-# ---------------------------------------------------------------------------
-get_target_property(_rccl_defs rccl COMPILE_DEFINITIONS)
-set(DL_COMPILE_DEFS "")
-if(_rccl_defs)
-  foreach(_def ${_rccl_defs})
-    list(APPEND DL_COMPILE_DEFS "-D${_def}")
-  endforeach()
-endif()
-
-# Directory-scope defs (add_compile_definitions / add_definitions in root CMakeLists.txt)
-# and defs inherited from linked targets (hip::device) that custom commands don't see.
-list(APPEND DL_COMPILE_DEFS
-  -DFMT_HEADER_ONLY=1
-  -DNCCL_MAJOR=${NCCL_MAJOR}
-  -DNCCL_MINOR=${NCCL_MINOR}
-  -DNCCL_PATCH=${NCCL_PATCH}
-  -DNCCL_VERSION_CODE=${NCCL_VERSION}
-  -DROCM_VERSION=${ROCM_VERSION}
-  -D__HIP_PLATFORM_AMD__=1
-)
-
-# ---------------------------------------------------------------------------
-# Include paths
-# ---------------------------------------------------------------------------
-set(DL_INCLUDE_DIRS
-  -I${PROJECT_BINARY_DIR}/include
-  -I${HIPIFY_DIR}/src
-  -I${HIPIFY_DIR}/src/device
-  -I${HIPIFY_DIR}/src/device/network/unpack
-  -I${HIPIFY_DIR}/src/include
-  -I${HIPIFY_DIR}/src/include/mlx5
-  -I${HIPIFY_DIR}/src/include/nccl_device
-  -I${HIPIFY_DIR}/src/include/ionic
-  -I${HIPIFY_DIR}/src/include/plugin
-  -I${GEN_DIR}
-  -isystem${ROCM_PATH}/include
-)
-
-# fmt is needed by proxy_trace.h (included transitively from collectives.cc).
-# Only add the include path for FetchContent-fetched fmt; system-installed
-# fmt headers are already in the compiler's default include path, and adding
-# them explicitly via -isystem breaks #include_next ordering in device-only
-# compilation (e.g., GCC's cmath can no longer find math.h).
-if(fmt_SOURCE_DIR)
-  list(APPEND DL_INCLUDE_DIRS -isystem${fmt_SOURCE_DIR}/include)
-endif()
-
-# ---------------------------------------------------------------------------
-# Optimization / common flags
+# Optimization flags (passed to both compile and link modes of the driver)
 # ---------------------------------------------------------------------------
 if(CMAKE_BUILD_TYPE MATCHES "Debug")
   set(DL_OPT_FLAGS -O0 -g)
@@ -109,9 +51,57 @@ else()
   set(DL_OPT_FLAGS -O3)
 endif()
 
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# INTERFACE library: shared definitions and includes for device compilation.
+# Reads from the rccl target (already fully configured) and directory scope.
+# No manual lists — everything comes from what CMake already knows.
+# ---------------------------------------------------------------------------
+add_library(rccl_device_defs INTERFACE)
+
+# Target-scope definitions from the rccl target
+get_target_property(_rccl_defs rccl COMPILE_DEFINITIONS)
+if(_rccl_defs)
+  target_compile_definitions(rccl_device_defs INTERFACE ${_rccl_defs})
+endif()
+
+# Directory-scope definitions (add_compile_definitions / add_definitions in root CMakeLists.txt)
+get_directory_property(_dir_defs COMPILE_DEFINITIONS)
+if(_dir_defs)
+  target_compile_definitions(rccl_device_defs INTERFACE ${_dir_defs})
+endif()
+
+# __HIP_PLATFORM_AMD__ and FMT_HEADER_ONLY come from linked targets (hip::device)
+# and are not visible via get_target_property. Add them explicitly.
+target_compile_definitions(rccl_device_defs INTERFACE
+  __HIP_PLATFORM_AMD__=1
+  FMT_HEADER_ONLY=1
+)
+
+# Include directories from the rccl target (only the device-relevant subset)
+get_target_property(_rccl_includes rccl INCLUDE_DIRECTORIES)
+if(_rccl_includes)
+  target_include_directories(rccl_device_defs INTERFACE ${_rccl_includes})
+endif()
+
+# System includes: HIP headers.
+# Query hip::host or hip::device for INTERFACE_INCLUDE_DIRECTORIES.
+if(TARGET hip::host)
+  get_target_property(_hip_includes hip::host INTERFACE_INCLUDE_DIRECTORIES)
+  if(_hip_includes)
+    target_include_directories(rccl_device_defs SYSTEM INTERFACE ${_hip_includes})
+  endif()
+elseif(ROCM_PATH)
+  target_include_directories(rccl_device_defs SYSTEM INTERFACE "${ROCM_PATH}/include")
+endif()
+
+# fmt include path (FetchContent builds only; system-installed fmt is in the default path)
+if(fmt_SOURCE_DIR)
+  target_include_directories(rccl_device_defs SYSTEM INTERFACE "${fmt_SOURCE_DIR}/include")
+endif()
+
+# ---------------------------------------------------------------------------
 # Read specialized file list
-# ===========================================================================
+# ---------------------------------------------------------------------------
 set(SPECIALIZED_FILES_TXT "${GEN_DIR}/specialized_files.txt")
 if(NOT EXISTS "${SPECIALIZED_FILES_TXT}")
   message(FATAL_ERROR "Device Linker: ${SPECIALIZED_FILES_TXT} not found. generate.py must run first.")
@@ -121,28 +111,23 @@ file(STRINGS "${SPECIALIZED_FILES_TXT}" SPECIALIZED_ENTRIES)
 list(LENGTH SPECIALIZED_ENTRIES DL_KERNEL_COUNT)
 message(STATUS "Device Linker: ${DL_KERNEL_COUNT} specialized kernels")
 
-# ===========================================================================
-# Guard evaluation: skip kernels whose #if guard excludes this GPU target.
-# Guards in specialized_files.txt look like:
-#   (defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)
-# ===========================================================================
+# ---------------------------------------------------------------------------
+# Guard evaluation: skip kernels whose #if guard excludes a GPU target.
+# ---------------------------------------------------------------------------
 function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
   if("${GUARD}" STREQUAL "")
     set(${RESULT_VAR} TRUE PARENT_SCOPE)
     return()
   endif()
-
   if("${GUARD}" MATCHES "ENABLE_LL128" AND NOT LL128_ENABLED)
     set(${RESULT_VAR} FALSE PARENT_SCOPE)
     return()
   endif()
-
   string(REGEX MATCHALL "__gfx[0-9a-z]+__" _guard_archs "${GUARD}")
   if(NOT _guard_archs)
     set(${RESULT_VAR} TRUE PARENT_SCOPE)
     return()
   endif()
-
   foreach(_ga ${_guard_archs})
     string(REGEX REPLACE "^__(.+)__$" "\\1" _arch "${_ga}")
     if("${_arch}" STREQUAL "${GPU_TARGET}")
@@ -150,62 +135,47 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
       return()
     endif()
   endforeach()
-
   set(${RESULT_VAR} FALSE PARENT_SCOPE)
 endfunction()
 
+# ---------------------------------------------------------------------------
+# Derive host triple for the offload bundler
+# ---------------------------------------------------------------------------
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" _dl_sys_name)
+if(NOT _dl_sys_name)
+  set(_dl_sys_name "linux")
+endif()
+set(_dl_host_triple "${CMAKE_SYSTEM_PROCESSOR}-unknown-${_dl_sys_name}-gnu")
+
 # ===========================================================================
-# Per-GPU-target device pipeline
+# Per-GPU-target: OBJECT library (compile) + link custom command
 # ===========================================================================
 set(ALL_DEVICE_ELFS "")
-set(DL_BUNDLER_TARGETS "host-x86_64-unknown-linux-gnu-")
+set(DL_BUNDLER_TARGETS "host-${_dl_host_triple}-")
 set(DL_BUNDLER_INPUTS "--input=/dev/null")
 set(ALL_IR_FILES "")
 
 foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
-  # CMake's Ninja generator sorts build rules by output path.  Without this,
-  # "gfx1030" < "gfx906" lexicographically, so all RDNA kernels get lower
-  # edge IDs and run first.  CDNA FP8 tree_simple kernels take ~6 minutes
-  # each to compile; delaying them behind ~140s of RDNA work extends the
-  # build tail significantly.  Prefix CDNA dirs with '-' ('-' < 'g') so
-  # they sort first and those long compilations start immediately.
+  # Sort CDNA targets first for better build scheduling (see original rationale)
   if(DL_GPU_TARGET MATCHES "^gfx9")
     set(DL_ARCH_DIR "${DEVICE_BUILD_DIR}/-${DL_GPU_TARGET}")
   else()
     set(DL_ARCH_DIR "${DEVICE_BUILD_DIR}/${DL_GPU_TARGET}")
   endif()
-
-  file(MAKE_DIRECTORY
-    ${DL_ARCH_DIR}/specialized_asm
-    ${DL_ARCH_DIR}/extracted_asm
-    ${DL_ARCH_DIR}/extracted_obj
-    ${DL_ARCH_DIR}/resources
-  )
-
-  set(DL_DEVICE_COMPILE_FLAGS
-    -x hip --cuda-device-only --offload-arch=${DL_GPU_TARGET}
-    --no-gpu-bundle-output
-    -gline-tables-only
-    -std=c++17
-    -w
-    ${DL_OPT_FLAGS}
-  )
+  file(MAKE_DIRECTORY ${DL_ARCH_DIR})
 
   # =========================================================================
-  # Per-specialized-kernel commands (compile -> extract -> assemble)
+  # Filter specialized sources for this arch
   # =========================================================================
-  set(ARCH_EXTRACTED_OBJS "")
-  set(ARCH_RESOURCE_JSONS "")
+  set(ARCH_SOURCES "")
   set(_dl_skipped 0)
 
   foreach(ENTRY ${SPECIALIZED_ENTRIES})
-    # Format: "filename funcname [guard]"
     if(NOT ENTRY MATCHES "^([^ ]+) +([^ ]+) *(.*)")
       continue()
     endif()
     set(CPP_FILE "${CMAKE_MATCH_1}")
     set(_entry_guard "${CMAKE_MATCH_3}")
-    string(REGEX REPLACE "\\.cpp$" "" BASE "${CPP_FILE}")
 
     dl_evaluate_guard("${_entry_guard}" "${DL_GPU_TARGET}" _guard_ok)
     if(NOT _guard_ok)
@@ -213,154 +183,90 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       continue()
     endif()
 
-    set(SRC      "${SPECIALIZED_DIR}/${CPP_FILE}")
-    set(ASM_OUT  "${DL_ARCH_DIR}/specialized_asm/${BASE}.s")
-    set(EXT_ASM  "${DL_ARCH_DIR}/extracted_asm/${BASE}.s")
-    set(RES_JSON "${DL_ARCH_DIR}/resources/${BASE}.json")
-    set(OBJ_OUT  "${DL_ARCH_DIR}/extracted_obj/${BASE}.o")
-
-    # Step 1: Compile specialized kernel to assembly
-    add_custom_command(
-      OUTPUT  ${ASM_OUT}
-      COMMAND ${DL_CLANG}
-        -DRCCL_DEVICE_LINKER
-        ${DL_COMPILE_DEFS}
-        ${DL_INCLUDE_DIRS}
-        ${DL_DEVICE_COMPILE_FLAGS}
-        -S
-        -o ${ASM_OUT}
-        ${SRC}
-      DEPENDS ${SRC}
-      COMMENT "DL [${DL_GPU_TARGET}] compile: ${CPP_FILE}"
-      VERBATIM
-    )
-
-    # Step 2: Extract device function + resource usage
-    add_custom_command(
-      OUTPUT  ${EXT_ASM} ${RES_JSON}
-      COMMAND ${Python3_EXECUTABLE} ${ASM_EXTRACT_DIR}/extract_device_function.py
-        ${ASM_OUT} ${EXT_ASM} ${RES_JSON}
-        > /dev/null
-      DEPENDS ${ASM_OUT} ${ASM_EXTRACT_DIR}/extract_device_function.py
-      COMMENT "DL [${DL_GPU_TARGET}] extract: ${BASE}"
-      VERBATIM
-    )
-
-    # Step 3: Assemble extracted function to relocatable object
-    add_custom_command(
-      OUTPUT  ${OBJ_OUT}
-      COMMAND ${DL_CLANG}
-        -x assembler -target amdgcn-amd-amdhsa -mcpu=${DL_GPU_TARGET}
-        -c -o ${OBJ_OUT}
-        ${EXT_ASM}
-      DEPENDS ${EXT_ASM}
-      COMMENT "DL [${DL_GPU_TARGET}] assemble: ${BASE}"
-      VERBATIM
-    )
-
-    list(APPEND ARCH_EXTRACTED_OBJS ${OBJ_OUT})
-    list(APPEND ARCH_RESOURCE_JSONS ${RES_JSON})
+    list(APPEND ARCH_SOURCES "${SPECIALIZED_DIR}/${CPP_FILE}")
   endforeach()
 
-  list(LENGTH ARCH_EXTRACTED_OBJS _dl_built)
+  list(LENGTH ARCH_SOURCES _dl_built)
   if(_dl_skipped GREATER 0)
     message(STATUS "Device Linker [${DL_GPU_TARGET}]: ${_dl_built} kernels to build, ${_dl_skipped} skipped (arch guard)")
   endif()
 
   # =========================================================================
-  # Dispatcher: compile common.cu.cpp to device assembly
+  # OBJECT library: per-kernel device compilation via RCCLDEV language
   # =========================================================================
-  set(ARCH_COMMON_DEVICE_ASM "${DL_ARCH_DIR}/common_device.s")
+  set(_dev_target "rccl_device_${DL_GPU_TARGET}")
 
-  add_custom_command(
-    OUTPUT  ${ARCH_COMMON_DEVICE_ASM}
-    COMMAND ${DL_CLANG}
-      -DRCCL_DEVICE_LINKER
-      -DUSE_INDIRECT_FUNCTION_CALL
-      ${DL_COMPILE_DEFS}
-      ${DL_INCLUDE_DIRS}
-      -x hip --cuda-device-only --offload-arch=${DL_GPU_TARGET}
-      --no-gpu-bundle-output
-      -g
-      -std=c++17
-      -w
-      ${DL_OPT_FLAGS}
-      -S
-      -o ${ARCH_COMMON_DEVICE_ASM}
-      ${HIPIFY_DIR}/src/device/common.cu.cpp
-    DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp
-    COMMENT "DL [${DL_GPU_TARGET}] compile dispatcher: common.cu.cpp -> assembly"
-    VERBATIM
+  add_library(${_dev_target} OBJECT ${ARCH_SOURCES})
+  set_source_files_properties(${ARCH_SOURCES} PROPERTIES LANGUAGE RCCLDEV)
+  set_target_properties(${_dev_target} PROPERTIES
+    LINKER_LANGUAGE RCCLDEV
   )
 
-  # =========================================================================
-  # Aggregate resource usage across all specialized functions
-  # =========================================================================
-  set(ARCH_MAX_RESOURCES_JSON "${DL_ARCH_DIR}/max_resources.json")
-
-  add_custom_command(
-    OUTPUT  ${ARCH_MAX_RESOURCES_JSON}
-    COMMAND ${Python3_EXECUTABLE} ${ASM_EXTRACT_DIR}/aggregate_resources.py
-      ${DL_ARCH_DIR}/resources
-      ${ARCH_MAX_RESOURCES_JSON}
-      ${DL_GPU_TARGET}
-    DEPENDS ${ARCH_RESOURCE_JSONS} ${ASM_EXTRACT_DIR}/aggregate_resources.py
-    COMMENT "DL [${DL_GPU_TARGET}] aggregate: resource usage from ${_dl_built} functions"
-    VERBATIM
+  target_compile_options(${_dev_target} PRIVATE
+    --arch=${DL_GPU_TARGET}
+    --clang=${DL_CLANG}
+    ${DL_OPT_FLAGS}
+    -std=c++17
   )
+  target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
+  target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
+
+  add_dependencies(${_dev_target} hipify_all)
 
   # =========================================================================
-  # Patch dispatcher assembly with aggregated resource values
-  # =========================================================================
-  set(ARCH_COMMON_DEVICE_PATCHED "${DL_ARCH_DIR}/common_device_patched.s")
-
-  add_custom_command(
-    OUTPUT  ${ARCH_COMMON_DEVICE_PATCHED}
-    COMMAND ${Python3_EXECUTABLE} ${ASM_EXTRACT_DIR}/patch_dispatcher.py
-      ${ARCH_COMMON_DEVICE_ASM}
-      ${ARCH_COMMON_DEVICE_PATCHED}
-      ${ARCH_MAX_RESOURCES_JSON}
-      ${DL_GPU_TARGET}
-    DEPENDS ${ARCH_COMMON_DEVICE_ASM} ${ARCH_MAX_RESOURCES_JSON}
-            ${ASM_EXTRACT_DIR}/patch_dispatcher.py
-    COMMENT "DL [${DL_GPU_TARGET}] patch dispatcher with max resources"
-    VERBATIM
-  )
-
-  # =========================================================================
-  # Assemble patched dispatcher
-  # =========================================================================
-  set(ARCH_COMMON_DEVICE_OBJ "${DL_ARCH_DIR}/common_device.o")
-
-  add_custom_command(
-    OUTPUT  ${ARCH_COMMON_DEVICE_OBJ}
-    COMMAND ${DL_CLANG}
-      -x assembler -target amdgcn-amd-amdhsa -mcpu=${DL_GPU_TARGET}
-      -c -o ${ARCH_COMMON_DEVICE_OBJ}
-      ${ARCH_COMMON_DEVICE_PATCHED}
-    DEPENDS ${ARCH_COMMON_DEVICE_PATCHED}
-    COMMENT "DL [${DL_GPU_TARGET}] assemble: common_device.o"
-    VERBATIM
-  )
-
-  # =========================================================================
-  # Link all device objects into device.elf for this architecture
+  # Link step: driver --link mode produces device.elf
   # =========================================================================
   set(ARCH_DEVICE_ELF "${DL_ARCH_DIR}/device.elf")
-  set(ARCH_LINK_RSP   "${DL_ARCH_DIR}/device_link.rsp")
 
-  list(JOIN ARCH_EXTRACTED_OBJS "\n" _arch_objs_newline)
-  file(GENERATE OUTPUT ${ARCH_LINK_RSP}
-    CONTENT "${ARCH_COMMON_DEVICE_OBJ}\n${_arch_objs_newline}\n")
+  # Gather definitions and includes for the dispatcher compilation inside --link.
+  # The driver forwards these to amdclang++ when compiling common.cu.cpp.
+  get_target_property(_dev_defs ${_dev_target} COMPILE_DEFINITIONS)
+  set(_link_def_flags "")
+  if(_dev_defs)
+    foreach(_d ${_dev_defs})
+      list(APPEND _link_def_flags "-D${_d}")
+    endforeach()
+  endif()
+  # Also add interface definitions from rccl_device_defs
+  get_target_property(_iface_defs rccl_device_defs INTERFACE_COMPILE_DEFINITIONS)
+  if(_iface_defs)
+    foreach(_d ${_iface_defs})
+      list(APPEND _link_def_flags "-D${_d}")
+    endforeach()
+  endif()
+  list(REMOVE_DUPLICATES _link_def_flags)
+
+  get_target_property(_dev_includes rccl_device_defs INTERFACE_INCLUDE_DIRECTORIES)
+  set(_link_inc_flags "")
+  if(_dev_includes)
+    foreach(_inc ${_dev_includes})
+      list(APPEND _link_inc_flags "-I${_inc}")
+    endforeach()
+  endif()
+  get_target_property(_dev_sys_includes rccl_device_defs INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
+  if(_dev_sys_includes)
+    foreach(_inc ${_dev_sys_includes})
+      list(APPEND _link_inc_flags "-isystem${_inc}")
+    endforeach()
+  endif()
 
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
-    COMMAND ${DL_LLD} -shared
+    COMMAND ${CMAKE_RCCLDEV_COMPILER}
+      --link
+      --arch=${DL_GPU_TARGET}
+      --clang=${DL_CLANG}
+      --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
+      ${_link_def_flags}
+      ${_link_inc_flags}
+      ${DL_OPT_FLAGS}
+      -std=c++17
       -o ${ARCH_DEVICE_ELF}
-      @${ARCH_LINK_RSP}
-    DEPENDS ${ARCH_COMMON_DEVICE_OBJ} ${ARCH_EXTRACTED_OBJS}
+      $<TARGET_OBJECTS:${_dev_target}>
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
+    COMMAND_EXPAND_LISTS
   )
 
   list(APPEND ALL_DEVICE_ELFS "${ARCH_DEVICE_ELF}")
@@ -393,9 +299,12 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       OUTPUT  ${IR_OUT}
       COMMAND ${DL_CLANG}
         -DRCCL_DEVICE_LINKER
-        ${DL_COMPILE_DEFS}
-        ${DL_INCLUDE_DIRS}
-        ${DL_DEVICE_COMPILE_FLAGS}
+        ${_link_def_flags}
+        ${_link_inc_flags}
+        -x hip --cuda-device-only --offload-arch=${DL_GPU_TARGET}
+        --no-gpu-bundle-output
+        -gline-tables-only
+        -std=c++17 -w ${DL_OPT_FLAGS}
         -emit-llvm -S
         -o ${IR_OUT}
         ${SRC}
@@ -406,7 +315,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     list(APPEND ALL_IR_FILES ${IR_OUT})
   endforeach()
 
-endforeach()  # end of per-GPU-target loop
+endforeach()  # end per-GPU-target loop
 
 # ===========================================================================
 # Bundle all per-arch device.elf files into a single .hipfb fat binary
@@ -443,15 +352,27 @@ if(ENABLE_COMPRESS)
   set(DL_HOST_COMPRESS "--offload-compress")
 endif()
 
+# Gather include flags for host compile (same paths as device)
+set(_host_inc_flags "")
+if(_dev_includes)
+  foreach(_inc ${_dev_includes})
+    list(APPEND _host_inc_flags "-I${_inc}")
+  endforeach()
+endif()
+if(_dev_sys_includes)
+  foreach(_inc ${_dev_sys_includes})
+    list(APPEND _host_inc_flags "-isystem${_inc}")
+  endforeach()
+endif()
+
 add_custom_command(
   OUTPUT  ${COMMON_FAT_OBJ}
   COMMAND ${DL_CLANG}
     -x hip --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS}
     -Xclang -fcuda-include-gpubinary -Xclang ${DEVICE_HIPFB}
     -DRCCL_DEVICE_LINKER
-    -DUSE_INDIRECT_FUNCTION_CALL
-    ${DL_COMPILE_DEFS}
-    ${DL_INCLUDE_DIRS}
+    ${_link_def_flags}
+    ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
@@ -474,8 +395,8 @@ add_custom_command(
   COMMAND ${DL_CLANG}
     -x hip ${DL_OFFLOAD_ARCH_FLAGS}
     -DRCCL_DEVICE_LINKER
-    ${DL_COMPILE_DEFS}
-    ${DL_INCLUDE_DIRS}
+    ${_link_def_flags}
+    ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
@@ -498,8 +419,8 @@ add_custom_command(
   COMMAND ${DL_CLANG}
     -x hip ${DL_OFFLOAD_ARCH_FLAGS}
     -DRCCL_DEVICE_LINKER
-    ${DL_COMPILE_DEFS}
-    ${DL_INCLUDE_DIRS}
+    ${_link_def_flags}
+    ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
