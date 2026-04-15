@@ -147,16 +147,8 @@ public:
   /// queue is empty, signals that this primary component is done.
   void check_all_idle();
 
-  /// @brief Add an execution plugin for dispatch and execution hooks.
-  void add_plugin(std::unique_ptr<ExecutionPlugin> p) {
-    plugins_.push_back(std::move(p));
-    sync_plugins_to_cus();
-  }
-
-  /// @brief Return the registered plugins.
-  const std::vector<std::unique_ptr<ExecutionPlugin>> &plugins() const {
-    return plugins_;
-  }
+  /// @brief Set the plugin group (non-owning, from SoC).
+  void set_plugin_group(ExecutionPluginGroup *plugin_group) { plugin_group_ = plugin_group; }
 
   /// @brief Set a workgroup ID offset for multi-XCD dispatch.
   /// @details In multi-XCD configurations, each XCD's CP is assigned a different
@@ -265,17 +257,7 @@ private:
 
   InterruptCallback interrupt_cb_; ///< Fired after writing to a signal's event mailbox.
 
-  std::vector<std::unique_ptr<ExecutionPlugin>> plugins_;
-
-  /// @brief Push non-owning plugin pointers to all registered CUs.
-  void sync_plugins_to_cus() {
-    std::vector<ExecutionPlugin *> ptrs;
-    ptrs.reserve(plugins_.size());
-    for (auto &p : plugins_)
-      ptrs.push_back(p.get());
-    for (auto *cu : cus_)
-      cu->set_plugins(ptrs);
-  }
+  ExecutionPluginGroup *plugin_group_ = nullptr; ///< Non-owning, owned by SoC.
 
   /// @brief Doorbell polling thread. Monitors registered HW queue doorbells
   /// and injects doorbell events when new packets are detected.

@@ -144,11 +144,11 @@ public:
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
 
-  /// @brief Set the execution plugins (non-owning, from CP).
-  void set_plugins(std::vector<ExecutionPlugin *> p) { plugins_ = std::move(p); }
+  /// @brief Set the plugin group (non-owning, from SoC).
+  void set_plugin_group(ExecutionPluginGroup *plugin_group) { plugin_group_ = plugin_group; }
 
-  /// @brief Return the registered plugins.
-  const std::vector<ExecutionPlugin *> &plugins() const { return plugins_; }
+  /// @brief Return the plugin group.
+  ExecutionPluginGroup *plugin_group() const { return plugin_group_; }
 
   /// @brief Return the number of dispatched (active or halted) wavefront slots.
   /// @returns Count of non-idle wavefront slots.
@@ -292,12 +292,9 @@ public:
   /// @param reg_idx Physical register index.
   /// @returns Register value.
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (reg_idx < sgpr_to_wave_.size()) {
-      if (auto *wf = sgpr_to_wave_[reg_idx]) {
-        uint32_t logical = reg_idx - wf->sgpr_alloc().base;
-        for (auto *p : plugins_)
-          p->onSgprRead(wf, logical);
-      }
+    if (plugin_group_) {
+      if (auto *wf = sgpr_to_wave_[reg_idx])
+        plugin_group_->onSgprRead(wf, reg_idx - wf->sgpr_alloc().base);
     }
     return sgpr_file_[reg_idx];
   }
@@ -378,7 +375,15 @@ protected:
   /// @param base Base index returned by allocate_vgprs().
   virtual void free_vgprs(uint32_t base) = 0;
 
-  /// @brief Update physical-VGPR-to-wavefront mapping for race detection.
+  /// @brief Update physical-register-to-wavefront mappings.
+  void update_register_wave_mappings(uint32_t sgpr_base, uint32_t sgpr_count,
+                                     uint32_t vgpr_base, uint32_t vgpr_count,
+                                     Wavefront *wf) {
+    std::fill(sgpr_to_wave_.begin() + sgpr_base,
+              sgpr_to_wave_.begin() + sgpr_base + sgpr_count, wf);
+    fill_vgpr_to_wave(vgpr_base, vgpr_count, wf);
+  }
+
   virtual void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) {
     (void)base; (void)count; (void)wf;
   }
@@ -416,7 +421,7 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
-  std::vector<ExecutionPlugin *> plugins_; ///< Non-owning plugin list from CP.
+  ExecutionPluginGroup *plugin_group_ = nullptr; ///< Non-owning, owned by SoC.
   std::vector<Wavefront *> sgpr_to_wave_; ///< Physical SGPR index -> owning wavefront.
   simdojo::Port *cpl_ = nullptr;  ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr;  ///< Requester port: L2 cache request (structural).
@@ -531,12 +536,9 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (reg_idx < vgpr_to_wave_.size()) {
-      if (auto *wf = vgpr_to_wave_[reg_idx]) {
-        uint32_t logical = reg_idx - wf->vgpr_alloc().base;
-        for (auto *p : this->plugins_)
-          p->onVgprRead(wf, logical, lane);
-      }
+    if (this->plugin_group_) {
+      if (auto *wf = vgpr_to_wave_[reg_idx])
+        this->plugin_group_->onVgprRead(wf, reg_idx - wf->vgpr_alloc().base, lane);
     }
     return vgpr_file_[reg_idx][lane];
   }

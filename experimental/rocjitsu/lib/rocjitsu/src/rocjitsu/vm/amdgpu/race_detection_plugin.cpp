@@ -15,10 +15,11 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-void RaceDetectionPlugin::onWorkgroupDispatch(uint32_t wg_id, uint32_t lds_size,
-                                              uint32_t num_waves,
-                                              uint32_t vgpr_count,
-                                              uint32_t sgpr_count) {
+void RaceDetectionPlugin::onWorkgroupDispatched(
+    uint32_t wg_id, uint32_t lds_size, uint32_t vgpr_count,
+    uint32_t sgpr_count, std::span<Wavefront *> wavefronts) {
+  uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
+
   auto handler = [this, wg_id](raceemulator::RaceViolation v) {
     // Find the violating wavefront to get its PC.
     Wavefront *violating_wf = nullptr;
@@ -104,15 +105,13 @@ void RaceDetectionPlugin::onWorkgroupDispatch(uint32_t wg_id, uint32_t lds_size,
       static_cast<int>(lds_size), static_cast<int>(num_waves),
       static_cast<int>(vgpr_count), static_cast<int>(sgpr_count),
       raceemulator::Dim3d(static_cast<int>(wg_id)), std::move(handler));
-}
 
-void RaceDetectionPlugin::onWavefrontDispatch(Wavefront *wf, uint32_t wg_id,
-                                              uint32_t wave_index) {
-  wavefront_to_index_[wf] = wave_index;
-  auto it = detectors_.find(wg_id);
-  if (it != detectors_.end()) {
-    auto *rs = &it->second->getWaveRaceState(static_cast<int>(wave_index));
-    wavefront_to_race_state_[wf] = rs;
+  auto &det = *detectors_[wg_id];
+  for (uint32_t w = 0; w < num_waves; ++w) {
+    auto *wf = wavefronts[w];
+    wavefront_to_index_[wf] = w;
+    wavefront_to_race_state_[wf] =
+        &det.getWaveRaceState(static_cast<int>(w));
   }
 }
 

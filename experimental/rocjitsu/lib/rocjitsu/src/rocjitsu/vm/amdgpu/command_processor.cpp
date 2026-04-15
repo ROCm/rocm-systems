@@ -256,25 +256,26 @@ bool CommandProcessor::step() {
     uint32_t global_wg_id = wg + pkt.workgroup_id_offset;
     bool wg_dispatched = false;
 
-    for (auto &p : plugins_)
-      p->onWorkgroupDispatch(global_wg_id, pkt.group_segment_fixed_size,
-                             pkt.wfs_per_workgroup, pkt.vgprs_per_wf,
-                             pkt.sgprs_per_wf);
-
     for (size_t attempt = 0; attempt < cus_.size() && !wg_dispatched; ++attempt) {
       size_t cu_idx = (next_cu_ + attempt) % cus_.size();
       ComputeUnitCore *cu = cus_[cu_idx];
       cu->retire_halted_wfs();
       if (!cu->can_accept_workgroup(pkt.wfs_per_workgroup))
         continue;
+      std::vector<Wavefront *> wg_wavefronts;
+      wg_wavefronts.reserve(pkt.wfs_per_workgroup);
       for (uint32_t w = 0; w < pkt.wfs_per_workgroup; ++w) {
         Wavefront *wf =
             cu->dispatch_wf(wg, pkt.kernel_entry_pc, pkt.sgprs_per_wf, pkt.vgprs_per_wf);
         assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
         init_wavefront_regs(cu, wf, pkt, global_wg_id, w);
-        for (auto &p : plugins_)
-          p->onWavefrontDispatch(wf, global_wg_id, w);
+        wg_wavefronts.push_back(wf);
       }
+      if (plugin_group_)
+        plugin_group_->onWorkgroupDispatched(global_wg_id,
+                                             pkt.group_segment_fixed_size,
+                                             pkt.vgprs_per_wf, pkt.sgprs_per_wf,
+                                             wg_wavefronts);
       next_cu_ = (cu_idx + 1) % cus_.size();
       wg_dispatched = true;
     }

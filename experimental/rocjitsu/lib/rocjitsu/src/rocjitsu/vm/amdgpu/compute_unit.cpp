@@ -140,10 +140,8 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   wf->m0_ = 0;
   wf->state_ = WfState::RUNNING;
 
-  // Update physical-register-to-wavefront mappings for race detection.
-  std::fill(sgpr_to_wave_.begin() + sgpr_base,
-            sgpr_to_wave_.begin() + sgpr_base + sgprs, wf);
-  fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgprs, wf);
+  update_register_wave_mappings(static_cast<uint32_t>(sgpr_base), sgprs,
+                                static_cast<uint32_t>(vgpr_base), vgprs, wf);
 
   return wf;
 }
@@ -228,8 +226,8 @@ void ComputeUnitCore::tick_pipelines() {
 
 void Wavefront::set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt,
                                 uint8_t expcnt) {
-  for (auto *p : cu_.plugins())
-    p->onWaitcnt(this, static_cast<int>(vmcnt), static_cast<int>(lgkmcnt));
+  if (auto *plugin_group = cu_.plugin_group())
+    plugin_group->onWaitcnt(this, static_cast<int>(vmcnt), static_cast<int>(lgkmcnt));
   wait_target_.vmcnt = vmcnt;
   wait_target_.lgkmcnt = lgkmcnt;
   wait_target_.expcnt = expcnt;
@@ -238,8 +236,8 @@ void Wavefront::set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt,
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  for (auto *p : plugins_)
-    p->onMemoryInstruction(inst, wf);
+  if (plugin_group_)
+    plugin_group_->onMemoryInstruction(inst, wf);
 
   switch (inst->data()->tag()) {
   case SCALAR_MEM:

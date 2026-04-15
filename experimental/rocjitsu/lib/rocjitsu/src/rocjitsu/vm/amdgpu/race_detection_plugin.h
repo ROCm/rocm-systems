@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <map>
+#include <span>
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,12 +24,9 @@ namespace amdgpu {
 /// for VGPR/SGPR/LDS races, and collects diagnostic strings.
 class RaceDetectionPlugin : public ExecutionPlugin {
 public:
-  void onWorkgroupDispatch(uint32_t wg_id, uint32_t lds_size,
-                           uint32_t num_waves, uint32_t vgpr_count,
-                           uint32_t sgpr_count) override;
-
-  void onWavefrontDispatch(Wavefront *wf, uint32_t wg_id,
-                           uint32_t wave_index) override;
+  void onWorkgroupDispatched(uint32_t wg_id, uint32_t lds_size,
+                             uint32_t vgpr_count, uint32_t sgpr_count,
+                             std::span<Wavefront *> wavefronts) override;
 
   void onMemoryInstruction(Instruction *inst, Wavefront &wf) override;
 

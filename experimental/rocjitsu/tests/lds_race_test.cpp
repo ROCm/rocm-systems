@@ -92,9 +92,11 @@ TEST(LdsRaceTest, DetectsRace) {
 
   // Dispatch with race detection enabled.
   auto *cp = soc->xcd(0)->command_processor();
+  auto plugin_group = std::make_unique<amdgpu::ExecutionPluginGroup>();
   auto race_plugin = std::make_unique<RaceDetectionPlugin>();
   auto *rp = race_plugin.get();
-  cp->add_plugin(std::move(race_plugin));
+  plugin_group->add(std::move(race_plugin));
+  soc->set_plugin_group(std::move(plugin_group));
 
   test::AqlQueue queue(memory, cp);
   // grid_size = 128 (1 workgroup of 128 threads = 2 wavefronts).
@@ -184,9 +186,11 @@ TEST(VgprRaceTest, DetectsRace) {
 
   // Dispatch with race detection enabled.
   auto *cp = soc->xcd(0)->command_processor();
+  auto plugin_group = std::make_unique<amdgpu::ExecutionPluginGroup>();
   auto race_plugin = std::make_unique<RaceDetectionPlugin>();
   auto *rp = race_plugin.get();
-  cp->add_plugin(std::move(race_plugin));
+  plugin_group->add(std::move(race_plugin));
+  soc->set_plugin_group(std::move(plugin_group));
 
   test::AqlQueue queue(memory, cp);
   // grid_size = 64 (1 workgroup of 64 threads = 1 wavefront).
@@ -279,9 +283,11 @@ TEST(DtlTest, DetectsRace) {
   }
 
   auto *cp = soc->xcd(0)->command_processor();
+  auto plugin_group = std::make_unique<amdgpu::ExecutionPluginGroup>();
   auto race_plugin = std::make_unique<RaceDetectionPlugin>();
   auto *rp = race_plugin.get();
-  cp->add_plugin(std::move(race_plugin));
+  plugin_group->add(std::move(race_plugin));
+  soc->set_plugin_group(std::move(plugin_group));
 
   test::AqlQueue queue(memory, cp);
   queue.dispatch(kernel_object, 64, 64, KERNARG_ADDR);
@@ -383,9 +389,11 @@ TEST(LgkmVgprRaceTest, DetectsRace) {
   }
 
   auto *cp = soc->xcd(0)->command_processor();
+  auto plugin_group = std::make_unique<amdgpu::ExecutionPluginGroup>();
   auto race_plugin = std::make_unique<RaceDetectionPlugin>();
   auto *rp = race_plugin.get();
-  cp->add_plugin(std::move(race_plugin));
+  plugin_group->add(std::move(race_plugin));
+  soc->set_plugin_group(std::move(plugin_group));
 
   test::AqlQueue queue(memory, cp);
   queue.dispatch(kernel_object, N, N, KERNARG_ADDR);
@@ -479,9 +487,11 @@ TEST(SgprRaceTest, DetectsRace) {
   }
 
   auto *cp = soc->xcd(0)->command_processor();
+  auto plugin_group = std::make_unique<amdgpu::ExecutionPluginGroup>();
   auto race_plugin = std::make_unique<RaceDetectionPlugin>();
   auto *rp = race_plugin.get();
-  cp->add_plugin(std::move(race_plugin));
+  plugin_group->add(std::move(race_plugin));
+  soc->set_plugin_group(std::move(plugin_group));
 
   test::AqlQueue queue(memory, cp);
   queue.dispatch(kernel_object, 64, 64, KERNARG_ADDR);

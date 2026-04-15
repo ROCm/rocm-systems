@@ -78,6 +78,20 @@ SoC::SoC(std::string name, const Config &config)
   }
 }
 
+void SoC::set_plugin_group(
+    std::unique_ptr<amdgpu::ExecutionPluginGroup> plugin_group) {
+  plugin_group_ = std::move(plugin_group);
+  auto *raw = plugin_group_.get();
+  for (auto *xcd : xcds_) {
+    xcd->command_processor()->set_plugin_group(raw);
+    for (uint32_t si = 0; si < xcd->num_shader_engines(); ++si) {
+      auto *shader_engine = xcd->shader_engine(si);
+      for (uint32_t ci = 0; ci < shader_engine->num_compute_units(); ++ci)
+        shader_engine->compute_unit(ci)->set_plugin_group(raw);
+    }
+  }
+}
+
 void SoC::flush_all() {
   // Flush all per-CU L1 caches (invalidate, since L1 is write-through).
   for (auto *x : xcds_) {
