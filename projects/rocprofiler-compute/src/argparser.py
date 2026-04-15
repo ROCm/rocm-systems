@@ -523,7 +523,7 @@ Examples:
         help=(
             "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"
             "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
-            "\t\t\t --retain-rocpd-output is deprecated. .db files will be retained by default in release 7.14."  # noqa: E501
+            "\t\t\t --retain-rocpd-output is deprecated. .db files will be retained by default in a future release."  # noqa: E501
         ),
     )
 

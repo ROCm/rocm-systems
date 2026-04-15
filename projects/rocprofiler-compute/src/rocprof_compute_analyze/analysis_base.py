@@ -456,7 +456,7 @@ class OmniAnalyze_Base:
 
             console_warning(
                 "Reading intermediate results_*.csv files is deprecated and "
-                "will be removed in release 7.14."
+                "will be removed in a future release."
             )
 
             with open(output_file, "w", newline="") as outfile:

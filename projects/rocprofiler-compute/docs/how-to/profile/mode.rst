@@ -390,7 +390,7 @@ of raw performance counter data produced by the underlying
 .. note::
 
    Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
-   ``--retain-rocpd-output`` are deprecated and will be removed in release 7.14.
+   ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
    ``.db`` files will be retained by default and the analyze step will read them directly.
 
 

@@ -19,7 +19,7 @@ choose.
 .. note::
 
    Reading intermediate ``results_*.csv`` files produced by ``rocpd`` profiling is
-   deprecated and will be removed in release 7.14. The analyze step will read ``.db``
+   deprecated and will be removed in a future release. The analyze step will read ``.db``
    files directly.
 
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
