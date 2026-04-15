@@ -68,13 +68,13 @@ struct iteration_multiplexing_dispatch_record_t
 
 struct counter_info_record_t
 {
-    uint64_t    dispatch_id;
-    uint64_t    agent_id;
-    uint64_t    kernel_id;
-    uint32_t    LDS_memory_size;
-    uint64_t    counter_id;
+    uint64_t    dispatch_id = 0;
+    uint64_t    agent_id = 0;
+    uint64_t    kernel_id = 0;
+    uint32_t    LDS_memory_size = 0;
+    uint64_t    counter_id = 0;
     std::string counter_name;
-    double      counter_value;
+    double      counter_value = 0.;
 };
 
 struct tool_data_t

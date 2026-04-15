@@ -15,7 +15,7 @@ protected:
         m_input_parameters = std::make_shared<MockInputParameters>();
         m_sdk_callbacks    = std::make_shared<MockSdkCallbacks>();
         m_sdk_wrapper      = std::make_shared<MockSdkWrapper>();
-        m_counters_writer = std::make_shared<MockCountersWriter>();
+        m_counters_writer  = std::make_shared<MockCountersWriter>();
 
         test_knobs::set_input_parameters(m_input_parameters);
         test_knobs::set_sdk_callbacks(m_sdk_callbacks);
@@ -38,6 +38,14 @@ protected:
         {
             EXPECT_EQ(expected[i], actual[i]) << "Counter config ID at index " << i << " does not match";
         }
+    }
+
+    static counter_info_record_t create_counter_record(uint64_t counter_id, uint64_t kernel_id)
+    {
+        counter_info_record_t record = {};
+        record.counter_id            = counter_id;
+        record.kernel_id             = kernel_id;
+        return record;
     }
 
     rocprofiler_client_id_t              m_client_id{};
@@ -216,6 +224,17 @@ TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     cfg->finalize(cfg->tool_data);
     EXPECT_EQ(m_counters_writer->get_write_counters_count(), 0);
+}
+
+TEST_F(TestRocprofilerComputeTool, OnFiniNonEmptyCounterRecords_WritesCounters)
+{
+    const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto         tool_data  = get_tool_data(cfg);
+    constexpr uint64_t counter_id = 20;
+    constexpr uint64_t kernel_id  = 10;
+    tool_data->counter_records.push_back(create_counter_record(counter_id, kernel_id));
+    cfg->finalize(cfg->tool_data);
+    EXPECT_EQ(m_counters_writer->get_write_counters_count(), 1);
 }
 
 int main(int argc, char** argv)
