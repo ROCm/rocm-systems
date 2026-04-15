@@ -111,8 +111,6 @@ void TestMutualExclusion::Close() {
   TestBase::Close();
 }
 
-extern amdsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
-
 void TestMutualExclusion::Run(void) {
   amdsmi_status_t ret;
 
@@ -136,7 +134,7 @@ void TestMutualExclusion::Run(void) {
     sleep(2);
     TestBase::Run();
     IF_VERB(STANDARD) {
-      std::cout << "TESTER process: verifing that all amdsmi_dev_* functions "
+      std::cout << "TESTER process: verifying that all amdsmi_dev_* functions "
                    "return AMDSMI_STATUS_BUSY because MUTEX_HOLDER process "
                    "holds the mutex"
                 << std::endl;

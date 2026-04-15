@@ -148,7 +148,7 @@ __device__ void ROContext::fence() {
                       true, get_status_flag(), is_default_ctx);
 }
 
-__device__ void ROContext::fence(int pe) {
+__device__ void ROContext::fence([[maybe_unused]] int pe) {
   // TODO(khamidou): need to check if per pe has any special handling
   build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
                       nullptr, NULL, ro_net_win_id, block_handle,
@@ -161,7 +161,7 @@ __device__ void ROContext::quiet() {
                       true, get_status_flag(), is_default_ctx);
 }
 
-__device__ void ROContext::pe_quiet(size_t pe) {
+__device__ void ROContext::pe_quiet([[maybe_unused]] size_t pe) {
   // TODO: Optimize
   quiet();
 }
@@ -273,26 +273,6 @@ __device__ void ROContext::sync_wg(rocshmem_team_t team) {
                         nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
                         true, get_status_flag(), is_default_ctx);
   }
-  __syncthreads();
-}
-
-__device__ void ROContext::ctx_destroy() {
-  if (is_thread_zero_in_block()) {
-    ROBackend *backend{static_cast<ROBackend *>(device_backend_proxy)};
-    BackendProxyT &backend_proxy{backend->backend_proxy};
-    auto *proxy{backend_proxy.get()};
-
-    build_queue_element(RO_NET_FINALIZE, nullptr, nullptr, 0, 0, 0, 0, 0,
-                        nullptr, nullptr, NULL, ro_net_win_id,
-                        block_handle, true, get_status_flag(), is_default_ctx);
-
-    int buffer_id = ro_net_win_id;
-    backend->queue_.descriptor(buffer_id)->write_index = block_handle->write_index;
-
-    ROStats &global_handle = proxy->profiler[buffer_id];
-    global_handle.accumulateStats(block_handle->profiler);
-  }
-
   __syncthreads();
 }
 
@@ -537,7 +517,7 @@ __device__ uint64_t ROContext::signal_fetch_wg(const uint64_t *sig_addr) {
 }
 
 __device__ uint64_t ROContext::signal_fetch_wave(const uint64_t *sig_addr) {
-  uint64_t value;
+  uint64_t value = 0;
   if (is_thread_zero_in_wave()) {
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
     value = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
@@ -669,7 +649,7 @@ __device__ uint64_t next_write_slot(BlockHandle *handle) {
 
 __device__ void build_queue_element(
     ro_net_cmds type, void *dst, void *src, size_t size, int pe,
-    int logPE_stride, int PE_size, int PE_root, void *pWrk, long *pSync,
+    [[maybe_unused]] int logPE_stride, [[maybe_unused]] int PE_size, int PE_root, void *pWrk, [[maybe_unused]] long *pSync,
     intptr_t team_comm, int ro_net_win_id, BlockHandle *handle,
     bool blocking, volatile char *status, bool default_ctx, ROCSHMEM_OP op,
     ro_net_types datatype) {

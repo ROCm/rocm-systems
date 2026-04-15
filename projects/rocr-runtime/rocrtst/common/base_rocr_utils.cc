@@ -59,6 +59,7 @@
 #include "common/os.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
+#include "hsa/hsa_ven_amd_loader.h"
 
 namespace rocrtst {
 
@@ -226,6 +227,39 @@ hsa_status_t InitAndSetupHSA(BaseRocR* test) {
   err = hsa_init();
   RET_IF_HSA_UTILS_ERR(err);
 
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table = {nullptr};
+
+hsa_status_t GetKernelObjectHostAddress(const void* device, const void** host) {
+  return amd_loader_ext_table.hsa_ven_amd_loader_query_host_address
+      ? amd_loader_ext_table.hsa_ven_amd_loader_query_host_address(device, host)
+      : HSA_STATUS_ERROR;
+}
+
+hsa_status_t EnableMetadataPrefetch(BaseRocR* test, hsa_queue_t* q) {
+  hsa_status_t err = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(amd_loader_ext_table),
+                                       &amd_loader_ext_table);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  void* metadata_ring_buffer = nullptr;
+  err = hsa_amd_queue_get_info(q, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER, &metadata_ring_buffer);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  if (!metadata_ring_buffer)
+    return HSA_STATUS_ERROR_INVALID_QUEUE; // Not supported on this device
+
+  uint8_t version_major, version_minor;
+  err = hsa_amd_queue_get_info(q, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR, &version_major);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  err = hsa_amd_queue_get_info(q, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR, &version_minor);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  test->set_metadata_prefetch_queue_base(metadata_ring_buffer);
+
+  test->set_metadata_prefetch_dispatch_ver(version_major, version_minor);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -406,7 +440,7 @@ hsa_status_t InitializeAQLPacket(const BaseRocR* test,
   if (aql == nullptr) {
     return HSA_STATUS_ERROR;
   }
-  
+
   // Initialize Packet type as Invalid
   // Update packet type to Kernel Dispatch
   // right before ringing doorbell
@@ -438,6 +472,81 @@ hsa_status_t InitializeAQLPacket(const BaseRocR* test,
     err = HSA_STATUS_SUCCESS;
 
   return err;
+}
+
+// Initialize the provided aql packet with standard default values, and
+// values from provided BaseRocR object.
+hsa_status_t InitializeMetadataPrefetchPacket(const BaseRocR* test,
+  void* host_kernargs,
+  hsa_kernel_dispatch_packet_t* aql,
+  hsa_amd_metadata_kernel_dispatch_packet_t* metadata) {
+  hsa_status_t err;
+
+  assert(metadata != nullptr);
+  assert(aql != nullptr);
+
+  if (aql == nullptr || metadata == nullptr)
+    return HSA_STATUS_ERROR;
+
+  if (aql->completion_signal.handle) {
+    err = hsa_amd_signal_get_event_id(aql->completion_signal, &metadata->event_id);
+    if (err) return err;
+  }
+
+  /* Fill hsa_amd_metadata_kernel_dispatch_packet->kernel_descriptor fields */
+  /**
+   * https://llvm.org/docs/AMDGPUUsage.html#code-object-v3-kernel-descriptor
+   *
+   * The metadata packet kernel descriptor fields is a subset of the full
+   * kernel descriptor from the AQL packet, from bytes 16 - 64.
+   */
+  const void* host_address;
+  err = GetKernelObjectHostAddress((void*) aql->kernel_object, &host_address);
+  if (err) return err;
+
+  const size_t METADATA_DESCRIPTOR_OFFSET = 16;
+  memcpy(&metadata->kernel_descriptor,
+    (uint8_t*)host_address + METADATA_DESCRIPTOR_OFFSET,
+    sizeof(metadata->kernel_descriptor));
+
+  /* Fill hsa_amd_metadata_kernel_dispatch_packet->kernarg_preload_* fields */
+
+  uint16_t kernarg_preload_length = metadata->kernel_descriptor.kernarg_preload.length;
+  uint16_t kernarg_preload_offset = metadata->kernel_descriptor.kernarg_preload.offset;
+
+  if (kernarg_preload_length) {
+    /* Kernarg preload offset is in dwords */
+    uint8_t* kernarg_preload_address = (uint8_t*)host_kernargs + kernarg_preload_offset * sizeof(uint32_t);
+
+    size_t preload_remain = kernarg_preload_length * sizeof(uint32_t);
+
+    /* Copy kernarg_preload 0-14 */
+    size_t to_copy = std::min(preload_remain, sizeof(metadata->kernarg_preload_0_14));
+    memcpy(metadata->kernarg_preload_0_14, kernarg_preload_address, to_copy);
+
+    preload_remain -= to_copy;
+
+    /* Copy kernarg_preload 15-29 */
+    if (preload_remain > 0) {
+      kernarg_preload_address += to_copy;
+      to_copy = std::min(preload_remain, sizeof(metadata->kernarg_preload_15_29));
+      memcpy(metadata->kernarg_preload_15_29, kernarg_preload_address, to_copy);
+
+      preload_remain -= to_copy;
+    }
+
+    /* Copy kernarg_preload 30-31 */
+    if (preload_remain > 0) {
+      kernarg_preload_address += to_copy;
+      to_copy = std::min(preload_remain, sizeof(metadata->kernarg_preload_30_31));
+      memcpy(metadata->kernarg_preload_30_31, kernarg_preload_address, to_copy);
+
+      // Maximum preload length = 32.
+      assert((preload_remain - to_copy == 0));
+    }
+  }
+
+  return HSA_STATUS_SUCCESS;
 }
 
 // Copy BaseRocR aql object values to the BaseRocR object queue in the
@@ -502,6 +611,26 @@ WriteAQLToQueueLoc(hsa_queue_t *queue, uint64_t indx,
   queue_aql_packet->kernel_object = aql_pkt->kernel_object;
   queue_aql_packet->kernarg_address = aql_pkt->kernarg_address;
   queue_aql_packet->completion_signal = aql_pkt->completion_signal;
+}
+
+// Copy BaseRocR aql object values to the BaseRocR object queue in the
+// specified queue position (ind)
+hsa_amd_metadata_kernel_dispatch_packet_t * WriteMetadataToQueue(BaseRocR* test, const uint64_t ind) {
+  assert(test);
+  assert(test->main_queue());
+  assert(test->metadata_prefetch_queue_base());
+
+  void *queue_base = test->metadata_prefetch_queue_base();
+  const uint32_t queue_mask = test->main_queue()->size - 1;
+
+  hsa_amd_metadata_kernel_dispatch_packet_t* staging_metadata_packet = &test->metadata_prefetch();
+  hsa_amd_metadata_kernel_dispatch_packet_t* queue_metadata_packet =
+       &(reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(queue_base))
+                                                        [ind & queue_mask];
+
+  memcpy(queue_metadata_packet, staging_metadata_packet, sizeof(*queue_metadata_packet));
+
+  return queue_metadata_packet;
 }
 
 // Allocate a buffer in the kern_arg_pool for the kernel arguments and write

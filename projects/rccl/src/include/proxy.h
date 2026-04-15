@@ -257,6 +257,7 @@ struct ncclProxySharedP2p {
   char* hostBuff;
   // CUDA IPC
   ncclIpcDesc ipcDesc;
+  int dmaBufFd;  // DMA-BUF fd for cuMem allocations
   struct ncclProxyArgs* proxyAppend[MAXCHANNELS]; // Separate send and recv
 };
 
@@ -380,6 +381,12 @@ struct ncclProxyState {
   // Profiler plugin
   void* profilerContext;
 
+#ifdef ENABLE_ROCSHMEM
+  // When ROCshmem GDA is active, the proxy must busy-poll instead of sleeping
+  // to avoid OS scheduling delays at GDA-to-RCCL transitions.
+  bool rocshmemEnabled;
+#endif
+
   // Queue of expected responses from the proxy
   struct ncclExpectedProxyResponse* expectedResponses;
 
@@ -458,5 +465,4 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm);
 
-ncclResult_t mscclSaveProxy(struct ncclComm* comm, struct ncclChannel* channel, int type, int peer, struct ncclProxyOp* op, int connIndex);
 #endif

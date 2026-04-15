@@ -61,7 +61,7 @@ extern "C" {
 #define RSMI_NUM_VOLTAGE_CURVE_POINTS 3
 
 /**
- * @brief Error codes retured by rocm_smi_lib functions
+ * @brief Error codes returned by rocm_smi_lib functions
  */
 typedef enum {
   RSMI_STATUS_SUCCESS = 0x0,        //!< Operation was successful
@@ -430,12 +430,12 @@ typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
 typedef enum {
   RSMI_MEMORY_PARTITION_UNKNOWN = 0,
   RSMI_MEMORY_PARTITION_NPS1,  //!< NPS1 - All CCD & XCD data is interleaved
-                               //!< accross all 8 HBM stacks (all stacks/1).
+                               //!< across all 8 HBM stacks (all stacks/1).
   RSMI_MEMORY_PARTITION_NPS2,  //!< NPS2 - 2 sets of CCDs or 4 XCD interleaved
-                               //!< accross the 4 HBM stacks per AID pair
+                               //!< across the 4 HBM stacks per AID pair
                                //!< (8 stacks/2).
-  RSMI_MEMORY_PARTITION_NPS4,  //!< NPS4 - Each XCD data is interleaved accross
-                               //!< accross 2 (or single) HBM stacks
+  RSMI_MEMORY_PARTITION_NPS4,  //!< NPS4 - Each XCD data is interleaved across
+                               //!< across 2 (or single) HBM stacks
                                //!< (8 stacks/8 or 8 stacks/4).
   RSMI_MEMORY_PARTITION_NPS8,  //!< NPS8 - Each XCD uses a single HBM stack
                                //!< (8 stacks/8). Or each XCD uses a single
@@ -475,7 +475,7 @@ typedef struct {
 /**
  * @brief Temperature Metrics.  This enum is used to identify various
  * temperature metrics. Corresponding values will be in millidegress
- * Celcius.
+ * Celsius.
  */
 typedef enum {
   RSMI_TEMP_CURRENT = 0x0,  //!< Temperature current value.
@@ -632,7 +632,7 @@ typedef enum {
 
 /**
  * @brief Voltage Metrics.  This enum is used to identify various
- * Volatge metrics. Corresponding values will be in millivolt.
+ * Voltage metrics. Corresponding values will be in millivolt.
  *
  */
 typedef enum {
@@ -874,7 +874,7 @@ typedef enum _RSMI_IO_LINK_TYPE {
  */
 typedef enum {
   RSMI_UTILIZATION_COUNTER_FIRST = 0,
-  //!< Corse grain activity counters
+  //!< Coarse grain activity counters
   RSMI_COARSE_GRAIN_GFX_ACTIVITY = RSMI_UTILIZATION_COUNTER_FIRST,
   RSMI_COARSE_GRAIN_MEM_ACTIVITY,  //!< Memory Activity
   RSMI_COARSE_DECODER_ACTIVITY,    //!< Decoder Activity
@@ -1113,8 +1113,10 @@ typedef struct {
   rsmi_range_t curr_sclk_range;   //!< The current SCLK frequency range
   rsmi_range_t curr_mclk_range;   //!< The current MCLK frequency range;
                                   //!< (upper bound only)
+  rsmi_range_t curr_fclk_range;   //!< The current FCLK frequency range
   rsmi_range_t sclk_freq_limits;  //!< The range possible of SCLK values
   rsmi_range_t mclk_freq_limits;  //!< The range possible of MCLK values
+  rsmi_range_t fclk_freq_limits;  //!< The range possible of FCLK values
 
   /**
    * @brief The current voltage curve
@@ -1402,7 +1404,7 @@ typedef struct {
    * aka PVIOL
    *
    * Ex. PVIOL/TVIOL calculations
-   * Where A and B are measurments recorded at prior points in time.
+   * Where A and B are measurements recorded at prior points in time.
    * Typically A is the earlier measured value and B is the latest measured value.
    *
    * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) -
@@ -1418,7 +1420,7 @@ typedef struct {
    * aka TVIOL
    *
    * Ex. PVIOL/TVIOL calculations
-   * Where A and B are measurments recorded at prior points in time.
+   * Where A and B are measurements recorded at prior points in time.
    * Typically A is the earlier measured value and B is the latest measured value.
    *
    * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) -
@@ -1599,7 +1601,7 @@ typedef struct {
  *  @details When called, this initializes internal data structures,
  *  including those corresponding to sources of information that SMI provides.
  *
- *  @param[in] init_flags Bit flags that tell SMI how to initialze. Values of
+ *  @param[in] init_flags Bit flags that tell SMI how to initialize. Values of
  *  ::rsmi_init_flags_t may be OR'd together and passed through @p init_flags
  *  to modify how RSMI initializes.
  *
@@ -2005,7 +2007,7 @@ rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind, char* serial_num, uint
 rsmi_status_t rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t* id);
 
 /**
- *  @brief Get the name string for the device subsytem
+ *  @brief Get the name string for the device subsystem
  *
  *  @details Given a device index @p dv_ind, a pointer to a caller provided
  *  char buffer @p name, and a length of this buffer @p len, this function
@@ -2489,12 +2491,12 @@ rsmi_status_t rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint6
 rsmi_status_t rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t* socket_power);
 
 /**
- *  @brief A generic get which attempts to retieve current socket power
+ *  @brief A generic get which attempts to retrieve current socket power
  *  (also known as instant power) of the device index provided, if not
  *  supported tries to get average power consumed by device. Current
  *  socket power is typically supported by newer devices, whereas average
  *  power is generally reported on older devices. This function
- *  aims to provide backwards compatability depending on device support.
+ *  aims to provide backwards compatibility depending on device support.
  *
  *  @details Given a device index @p dv_ind, a pointer to a uint64_t
  *  @p power, and @p type this function will write the current socket or
@@ -2975,7 +2977,7 @@ rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
  *  retrieved
  *
  *  @param[inout] temperature a pointer to int64_t to which the temperature
- *  will be written, in millidegrees Celcius.
+ *  will be written, in millidegrees Celsius.
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
@@ -3115,17 +3117,17 @@ rsmi_status_t rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t* busy_percent)
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] utilization_counters Multiple utilization counters can be retreived with a single
+ *  @param[inout] utilization_counters Multiple utilization counters can be retrieved with a single
  *  call. The caller must allocate enough space to the utilization_counters array. The caller also
  *  needs to set valid RSMI_UTILIZATION_COUNTER_TYPE type for each element of the array.
  *  ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the provided arguments.
  *
- *  If the function reutrns RSMI_STATUS_SUCCESS, the counter will be set in the value field of
+ *  If the function returns RSMI_STATUS_SUCCESS, the counter will be set in the value field of
  *  the rsmi_utilization_counter_t.
  *
  *  @param[in] count The size of utilization_counters array.
  *
- *  @param[inout] timestamp The timestamp when the counter is retreived. Resolution: 1 ns.
+ *  @param[inout] timestamp The timestamp when the counter is retrieved. Resolution: 1 ns.
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
@@ -3409,18 +3411,18 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
  *  @details Given a device index @p dv_ind, @p pm_metrics pointer,
  *  and @p num_of_metrics pointer,
  *  this function will write the pm metrics name value pair
- *  to the array at @p pm_metrics and the number of metrics retreived to @p num_of_metrics
+ *  to the array at @p pm_metrics and the number of metrics retrieved to @p num_of_metrics
  *  Note: the library allocated memory for pm_metrics, and user must call
  *  free(pm_metrics) to free it after use.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] pm_metrics A pointerto an array to hold multiple PM metrics. On successs,
+ *  @param[inout] pm_metrics A pointerto an array to hold multiple PM metrics. On success,
  *  the library will allocate memory of pm_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
- *  metrics is allocated for pm_metrics array as input, and the number of metrics retreived
+ *  metrics is allocated for pm_metrics array as input, and the number of metrics retrieved
  *  as output. If this parameter is NULL, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
@@ -3441,7 +3443,7 @@ rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind, rsmi_name_value_t** 
  *  @details Given a device index @p dv_ind, @p reg_type, @p reg_metrics pointer,
  *  and @p num_of_metrics pointer,
  *  this function will write the register metrics name value pair
- *  to the array at @p reg_metrics and the number of metrics retreived to @p num_of_metrics
+ *  to the array at @p reg_metrics and the number of metrics retrieved to @p num_of_metrics
  *  Note: the library allocated memory for reg_metrics, and user must call
  *  free(reg_metrics) to free it after use.
  *
@@ -3449,12 +3451,12 @@ rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind, rsmi_name_value_t** 
  *
  *  @param[in] reg_type The register type
  *
- *  @param[inout] reg_metrics A pointerto an array to hold multiple register metrics. On successs,
+ *  @param[inout] reg_metrics A pointerto an array to hold multiple register metrics. On success,
  *  the library will allocate memory of reg_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
- *  metrics is allocated for reg_metrics array as input, and the number of metrics retreived
+ *  metrics is allocated for reg_metrics array as input, and the number of metrics retrieved
  *  as output. If this parameter is NULL, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
@@ -3703,7 +3705,7 @@ rsmi_status_t rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t 
  *  device index with the provided value. See details for WARNING.
  *
  *  @deprecated This function is deprecated. ::rsmi_dev_overdrive_level_set_v1
- *  has the same functionaltiy, with an interface that more closely
+ *  has the same functionality, with an interface that more closely
  *  matches the rest of the rocm_smi API.
  *
  *  @details Given a device index @p dv_ind and an overdrive level @p od,
@@ -3993,7 +3995,7 @@ rsmi_status_t rsmi_version_get(rsmi_version_t* version);
 rsmi_status_t rsmi_version_str_get(rsmi_sw_component_t component, char* ver_str, uint32_t len);
 
 /**
- *  @brief Get the VBIOS identifer string
+ *  @brief Get the VBIOS identifier string
  *
  *  @details Given a device ID @p dv_ind, and a pointer to a char buffer,
  *  @p vbios, this function will write the VBIOS string (up to @p len
@@ -4703,7 +4705,7 @@ rsmi_status_t rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_nod
 rsmi_status_t rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst, uint64_t* weight);
 
 /**
- *  @brief Retreive minimal and maximal io link bandwidth between 2 GPUs
+ *  @brief Retrieve minimal and maximal io link bandwidth between 2 GPUs
  *
  *  @details Given a source device index @p dv_ind_src and
  *  a destination device index @p dv_ind_dst,  pointer to an
@@ -4776,7 +4778,7 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
  *  @param[in] dv_ind_dst the destination device index
  *
  *  @param[inout] accessible A pointer to a bool to which the status for
- *  the P2P connection availablity should be written.
+ *  the P2P connection availability should be written.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
@@ -4819,7 +4821,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 /*****************************************************************************/
 /** @defgroup ComputePartition Compute Partition Functions
  *  These functions are used to configure and query the device's
- *  compute parition setting.
+ *  compute partition setting.
  *  @{
  */
 
@@ -4829,7 +4831,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @details
  *  Given a device index @p dv_ind and a string @p compute_partition ,
  *  and uint32 @p len , this function will attempt to obtain the device's
- *  current compute partition setting string. Upon successful retreival,
+ *  current compute partition setting string. Upon successful retrieval,
  *  the obtained device's compute partition settings string shall be stored in
  *  the passed @p compute_partition char string variable.
  *
@@ -4887,7 +4889,7 @@ rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
  *  @details
  *  Given a device index @p dv_ind and a uint32_t pointer @p partition_id ,
  *  this function will attempt to obtain the device's partition ID.
- *  Upon successful retreival, the obtained device's partition will be stored
+ *  Upon successful retrieval, the obtained device's partition will be stored
  *  in the passed @p partition_id uint32_t variable. If device does
  *  not support partitions or is in SPX, a @p partition_id ID of 0 shall
  *  be returned.
@@ -4913,7 +4915,7 @@ rsmi_status_t rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t* partition_id)
  *  Given a device index @p dv_ind and a string @p compute_partition_caps ,
  *  and uint32 @p len , this function will attempt to obtain the device's
  *  available compute partition capabilities string. Upon successful
- *  retreival, the obtained device's available compute partition capablilities
+ *  retrieval, the obtained device's available compute partition capabilities
  *  string shall be stored in the passed @p compute_partition_caps
  *  char string variable.
  *
@@ -4947,7 +4949,7 @@ rsmi_status_t rsmi_dev_compute_partition_capabilities_get(uint32_t dv_ind,
  *  Given a device index @p dv_ind and a string @p supported_configs ,
  *  and uint32 @p len , this function will attempt to obtain the device's
  *  compute partition supported xcp configs string. Upon successful
- *  retreival, the obtained device's available compute partition supported xcp configs
+ *  retrieval, the obtained device's available compute partition supported xcp configs
  *  string shall be stored in the passed @p supported_configs
  *  char string variable.
  *
@@ -4981,7 +4983,7 @@ rsmi_status_t rsmi_dev_compute_partition_supported_xcp_configs_get(uint32_t dv_i
  *  Given a device index @p dv_ind and a string @p supported_configs ,
  *  and uint32 @p len , this function will attempt to obtain the device's
  *  compute partition supported NPS configs string. Upon successful
- *  retreival, the obtained device's available compute partition supported NPS configs
+ *  retrieval, the obtained device's available compute partition supported NPS configs
  *  string shall be stored in the passed @p supported_configs
  *  char string variable.
  *
@@ -5014,8 +5016,8 @@ rsmi_status_t rsmi_dev_compute_partition_supported_nps_configs_get(uint32_t dv_i
  *  @details
  *  Given a device index @p dv_ind and a string @p current_xcp_config ,
  *  and uint32 @p len , this function will attempt to obtain the device's
- *  curren tcompute partition xcp config string. Upon successful
- *  retreival, the obtained device's current compute partition xcp config
+ *  current compute partition xcp config string. Upon successful
+ *  retrieval, the obtained device's current compute partition xcp config
  *  string shall be stored in the passed @p current_xcp_config
  *  char string variable.
  *
@@ -5070,7 +5072,7 @@ rsmi_status_t rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
 /**
  *  @brief Retrieves a selected device's compute partition resource profile.
  *
- *  @details Given a device index @p dv_ind, a pointer to a requested resorce of
+ *  @details Given a device index @p dv_ind, a pointer to a requested resource of
  *  rsmi_accelerator_partition_resource_type_t @p type, and a
  * rsmi_accelerator_partition_resource_profile_t
  *  @p profile this function will write the current XCP config's
@@ -5108,7 +5110,7 @@ rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(
  *  @details
  *  Given a device index @p dv_ind and a string @p memory_partition ,
  *  and uint32 @p len , this function will attempt to obtain the device's
- *  memory partition string. Upon successful retreival, the obtained device's
+ *  memory partition string. Upon successful retrieval, the obtained device's
  *  memory partition string shall be stored in the passed @p memory_partition
  *  char string variable.
  *
@@ -5140,7 +5142,7 @@ rsmi_status_t rsmi_dev_memory_partition_get(uint32_t dv_ind, char* memory_partit
  *  Given a device index @p dv_ind and a string @p memory_partition_caps ,
  *  and uint32 @p len , this function will attempt to obtain the device's
  *  available memory partition capabilities string. Upon successful
- *  retreival, the obtained device's available memory partition capablilities
+ *  retrieval, the obtained device's available memory partition capabilities
  *  string shall be stored in the passed @p memory_partition_caps
  *  char string variable.
  *
@@ -5356,7 +5358,7 @@ rsmi_status_t rsmi_dev_supported_variant_iterator_open(rsmi_func_id_iter_handle_
                                                        rsmi_func_id_iter_handle_t* var_iter);
 
 /**
- * @brief Advance a function identifer iterator
+ * @brief Advance a function identifier iterator
  *
  * @details Given a function id iterator handle (::rsmi_func_id_iter_handle_t)
  * @p handle, this function will increment the iterator to point to the next
@@ -5401,7 +5403,7 @@ rsmi_status_t rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t*
  * @param[in] handle An iterator for which the value is being requested
  *
  * @param[inout] value A pointer to an ::rsmi_func_id_value_t provided by the
- * caller to which this function will write the value assocaited with @p handle
+ * caller to which this function will write the value associated with @p handle
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
@@ -5477,7 +5479,7 @@ rsmi_status_t rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask);
  *
  * This function requires prior calls to ::rsmi_event_notification_init() and
  * ::rsmi_event_notification_mask_set(). This function polls for the
- * occurrance of the events on the respective devices that were previously
+ * occurrence of the events on the respective devices that were previously
  * specified by ::rsmi_event_notification_mask_set().
  *
  * @param[in] timeout_ms number of milliseconds to wait for an event
@@ -5626,7 +5628,7 @@ rsmi_status_t rsmi_get_gpu_ptl_formats(uint32_t dv_ind, char* format, size_t len
 /**
  *  @brief Set ptl data formats
  *
- *  @details Given a device index @p dv_ind and raw string poitner in which to set ptl format
+ *  @details Given a device index @p dv_ind and raw string pointer in which to set ptl format
  *
  *  @param[in] dv_ind a device index
  *
@@ -5702,7 +5704,7 @@ rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind);
  *  ::RSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
  *  did not reload properly and the user should check dmesg logs.
  *
- *  This function has been created in order to conviently reload the
+ *  This function has been created in order to conveniently reload the
  *  AMD GPU driver once `rsmi_dev_memory_partition_set()`
  *  successfully has been changed on Baremetal systems.
  *  Now users can control the reload once all GPU processes/workloads

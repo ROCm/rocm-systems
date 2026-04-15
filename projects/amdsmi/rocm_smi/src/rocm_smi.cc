@@ -1499,6 +1499,9 @@ OD_SCLK:
 1:       1837Mhz
 OD_MCLK:
 1:       1000Mhz
+OD_FCLK:
+0:       1200Mhz
+1:       1300Mhz
 OD_VDDC_CURVE:
 0:        872Mhz        736mV
 1:       1354Mhz        860mV
@@ -1506,6 +1509,7 @@ OD_VDDC_CURVE:
 OD_RANGE:
 SCLK:     872Mhz       1900Mhz
 MCLK:     168Mhz       1200Mhz
+FCLK:     1200Mhz      1400Mhz
 VDDC_CURVE_SCLK[0]:     872Mhz       1900Mhz
 VDDC_CURVE_VOLT[0]:     737mV        1137mV
 VDDC_CURVE_SCLK[1]:     872Mhz       1900Mhz
@@ -1523,6 +1527,9 @@ MCLK:
 1: 700Mhz
 2: 1200Mhz
 3: 1600Mhz *
+FCLK:
+0: 1200Mhz
+1: 1300Mhz *
 
 For the new format, GFXCLK field will show min and max values(0/1). If the current
 frequency in neither min/max but lies within the range, this is indicated by
@@ -1544,6 +1551,8 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
   p->curr_sclk_range.upper_bound = UINT64_MAX;
   p->curr_mclk_range.lower_bound = UINT64_MAX;
   p->curr_mclk_range.upper_bound = UINT64_MAX;
+  p->curr_fclk_range.lower_bound = UINT64_MAX;
+  p->curr_fclk_range.upper_bound = UINT64_MAX;
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1559,9 +1568,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
   // Tags expected in this file
   const std::string kTAG_OD_SCLK{"OD_SCLK:"};
   const std::string KTAG_OD_MCLK{"OD_MCLK:"};
+  const std::string kTAG_OD_FCLK{"OD_FCLK:"};
   const std::string kTAG_GFXCLK{"GFXCLK:"};
   const std::string KTAG_MCLK{"MCLK:"};
   const std::string KTAG_SCLK{"SCLK:"};
+  const std::string KTAG_FCLK{"FCLK:"};
   const std::string KTAG_OD_RANGE{"OD_RANGE:"};
   const std::string KTAG_FIRST_FREQ_IDX{"0:"};
 
@@ -1570,9 +1581,6 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
       .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
       .structure_content();
 
-  // Note:  For debug builds/purposes only.
-  assert(txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) ||
-         txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK));
   // Note:  For release builds/purposes.
   if (!txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) &&
       !txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK)) {
@@ -1592,7 +1600,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
 
   // track the number of keys found, if this goes down to 0 then that means that there is no valid
   // data
-  const uint8_t kNumStructuredKeysToCheck = 6;
+  const uint8_t kNumStructuredKeysToCheck = 9;
   uint8_t structured_key_counter = kNumStructuredKeysToCheck;
   // Validates 'OD_SCLK' is in the structure
   if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK, KTAG_FIRST_FREQ_IDX)) {
@@ -1610,6 +1618,14 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
         freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
   } else
     structured_key_counter--;
+  // Validates 'OD_FCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_FCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_fclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(kTAG_OD_FCLK), nullptr, nullptr, 0);
+    p->curr_fclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(kTAG_OD_FCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
 
   // Validates 'OD_RANGE' is in the structure
   if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_SCLK)) {
@@ -1622,6 +1638,12 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
     od_value_pair_str_to_range(
         txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
         &p->mclk_freq_limits);
+  } else
+    structured_key_counter--;
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_FCLK)) {
+    od_value_pair_str_to_range(
+        txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_FCLK),
+        &p->fclk_freq_limits);
   } else
     structured_key_counter--;
   // Validates 'GFXCLK' is in the structure
@@ -1638,6 +1660,14 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
         freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
     p->curr_mclk_range.upper_bound =
         freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
+  // Validates 'FCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_FCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_fclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(KTAG_FCLK), nullptr, nullptr, 0);
+    p->curr_fclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(KTAG_FCLK), nullptr, nullptr, 0);
   } else
     structured_key_counter--;
 
@@ -1659,7 +1689,7 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, 
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  if (clkType != RSMI_CLK_TYPE_SYS && clkType != RSMI_CLK_TYPE_MEM) {
+  if (clkType != RSMI_CLK_TYPE_SYS && clkType != RSMI_CLK_TYPE_MEM && clkType != RSMI_CLK_TYPE_DF) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   if (level != RSMI_FREQ_IND_MIN && level != RSMI_FREQ_IND_MAX) {
@@ -1669,6 +1699,7 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, 
   std::map<rsmi_clk_type_t, std::string> clk_char_map = {
       {RSMI_CLK_TYPE_SYS, "s"},
       {RSMI_CLK_TYPE_MEM, "m"},
+      {RSMI_CLK_TYPE_DF, "f"},
   };
   DEVICE_MUTEX
 
@@ -1900,8 +1931,8 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind, uint32_t* nu
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
-       << getRSMIStatusString(ret);
+    ss << __PRETTY_FUNCTION__ << " | Issue: could not retrieve kDevPowerODVoltage"
+       << "; returning " << getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -2921,6 +2952,7 @@ rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char* name, size_t len) 
   assert(len > 0);
 
   DEVICE_MUTEX
+
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_VENDOR);
   return ret;
   CATCH
@@ -2965,7 +2997,9 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
 
   GET_DEV_AND_KFDNODE_FROM_INDX
   CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
+
   DEVICE_MUTEX
+
   ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind, &b->transfer_rate,
                         b->lanes);
   if (ret == RSMI_STATUS_SUCCESS) {
@@ -3488,6 +3522,19 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 
   DEVICE_MUTEX
 
+  // On gpu_od GPUs (Navi3x+), hwmon pwm1 does not reflect the actual fan speed.
+  // Read the FAN_MINIMUM_PWM value from the gpu_od sysfs instead.
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
+    uint64_t current_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
+    if (parse_ret == 0) {
+      *speed = static_cast<int64_t>(current_pwm);
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+
+  // Legacy hwmon path
   ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
 
   return ret;
@@ -3519,11 +3566,29 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  ++sensor_ind;  // fan sysfs files have 1-based indices
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 2);
-  return ret;
+
+  // Get gpu_od fan control path
+  GET_DEV_FROM_INDX
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
+
+  // Check if gpu_od fan control attribute is available
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
+    // Use gpu_od interface for fan reset - set fan_minimum_pwm to OD_RANGE minimum
+    uint64_t od_min_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, nullptr);
+    if (parse_ret != 0) {
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(parse_ret);
+    }
+    return amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(od_min_pwm));
+
+  } else {
+    // Fallback to legacy hwmon interface
+    ++sensor_ind;  // fan sysfs files have 1-based indices
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 2);
+    return ret;
+  }
 
   CATCH
 }
@@ -3540,26 +3605,66 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
-  ret = rsmi_dev_fan_speed_max_get(dv_ind, sensor_ind, &max_speed);
+  // Get gpu_od fan control path
+  GET_DEV_FROM_INDX
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
 
-  if (ret != RSMI_STATUS_SUCCESS) {
+  // Check if gpu_od fan control attribute is available
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
+    // Use gpu_od interface for fan control
+    // Read OD_RANGE to validate the speed against hardware limits
+    uint64_t od_min_pwm = 0;
+    uint64_t od_max_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
+    if (parse_ret != 0) {
+      return amd::smi::SysfsWriteErrnoToRsmiStatus(parse_ret);
+    }
+    if (speed < od_min_pwm || speed > od_max_pwm) {
+      return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+
+    // Write fan speed value and commit
+    rsmi_status_t od_ret = amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(speed));
+    if (od_ret != RSMI_STATUS_SUCCESS) {
+      // If write/commit fails, attempt to reset to automatic control
+      rsmi_status_t reset_ret =
+          amd::smi::WriteGpuOdFanPwm(fan_ctrl_path, std::to_string(od_min_pwm));
+      if (reset_ret != RSMI_STATUS_SUCCESS) {
+        ss << __PRETTY_FUNCTION__ << " | Failed to set fan speed " << speed << " (error: " << od_ret
+           << ") and recovery reset to " << od_min_pwm << " also failed (error: " << reset_ret
+           << ")";
+        LOG_ERROR(ss);
+      } else {
+        ss << __PRETTY_FUNCTION__ << " | Failed to set fan speed " << speed << " (error: " << od_ret
+           << "), successfully reset to minimum " << od_min_pwm;
+        LOG_WARN(ss);
+      }
+    }
+    return od_ret;
+
+  } else {
+    // Fallback to legacy hwmon interface (range: 0-255)
+    ret = rsmi_dev_fan_speed_max_get(dv_ind, sensor_ind, &max_speed);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+
+    if (speed > max_speed) {
+      return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+
+    ++sensor_ind;  // fan sysfs files have 1-based indices
+
+    // Set fan mode to manual (pwm1_enable = 1)
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 1);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+
+    // Write fan speed value
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
     return ret;
   }
-
-  if (speed > max_speed) {
-    return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
-  }
-
-  ++sensor_ind;  // fan sysfs files have 1-based indices
-
-  // First need to set fan mode (pwm1_enable) to 1 (aka, "manual")
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 1);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
-  return ret;
 
   CATCH
 }
@@ -3574,6 +3679,20 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
 
+  // On gpu_od GPUs (Navi3x+), the effective max fan speed is the OD_RANGE
+  // maximum from fan_minimum_pwm, not the hwmon pwm1_max (which is always 255).
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
+  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
+    uint64_t od_min_pwm = 0;
+    uint64_t od_max_pwm = 0;
+    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
+    if (parse_ret == 0) {
+      *max_speed = od_max_pwm;
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+
+  // Legacy hwmon path
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
                           reinterpret_cast<int64_t*>(max_speed));
 
@@ -5558,10 +5677,10 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 
     /*
      *  Note: Adjust tmp_capability for the returned capabilities.
-     *  Todo: We need to fix it directy as part of the KFD Nodes 'KFDNode::Initialize(void)'
+     *  Todo: We need to fix it directly as part of the KFD Nodes 'KFDNode::Initialize(void)'
      *        However, it involves a more complex change, so we will discuss it and fix in in the
      * future. Ideally, due to the fact we would need to check every IO link (for each KFD node),
-     * and considering the topology could change (ie; new GPUs added, partioning changed, etc), we
+     * and considering the topology could change (ie; new GPUs added, partitioning changed, etc), we
      *          are looking into O(N^2) time complexity, no to mention the fact that the IO links
      * then need to be changed/updated too. I have some ideas about how to do this, but it will take
      *          some time to implement and test it, should we consider it is *really necessary*.
@@ -6377,7 +6496,7 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Cause: issue writing requested setting of " + newMemoryPartition
        << " | Returning = " << getRSMIStatusString(status, false);
     LOG_ERROR(ss);
     return status;
@@ -7534,7 +7653,8 @@ rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind) {
   auto status_code = dev->dev_log_gpu_metrics(ostrstream);
   ostrstream << __PRETTY_FUNCTION__ << " | ======= end ======= "
              << " | End Result "
-             << " | Device #:  " << dv_ind << " | Metric Type: " << "All GPU Metrics..."
+             << " | Device #:  " << dv_ind << " | Metric Type: "
+             << "All GPU Metrics..."
              << " | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
 

@@ -553,30 +553,30 @@ inline DIEInfo::DIEInfo(Dwarf_Die* die)
         Dwarf_Word      call_line{};
 
         // Get the file and line number where this function was called/inlined
-
-        if(!dwarf_attr(die, DW_AT_call_file, &call_file_attr) ||
-           !dwarf_attr(die, DW_AT_call_line, &call_line_attr) ||
-           dwarf_formudata(&call_file_attr, &call_file) != 0 ||
-           dwarf_formudata(&call_line_attr, &call_line) != 0)
-            return;  // No call site information available
-
-        // Get the compilation unit to resolve file names
-        Dwarf_Die cu_die{};
-        if(!dwarf_diecu(die, &cu_die, nullptr, nullptr)) return;
-
-        // Get the source files table for this compilation unit
-        Dwarf_Files* files{};
-        size_t       nfiles{};
-        if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
+        // Do not return early - children must always be traversed for nested inlining
+        if(dwarf_attr(die, DW_AT_call_file, &call_file_attr) &&
+           dwarf_attr(die, DW_AT_call_line, &call_line_attr) &&
+           dwarf_formudata(&call_file_attr, &call_file) == 0 &&
+           dwarf_formudata(&call_line_attr, &call_line) == 0)
         {
-            if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
+            // Get the compilation unit to resolve file names
+            Dwarf_Die cu_die{};
+            if(dwarf_diecu(die, &cu_die, nullptr, nullptr))
             {
-                // Add "filename:line" to call stack showing where this function was inlined
-                file_and_line = std::string(filename) + ":" + std::to_string(call_line);
-                return;
+                // Get the source files table for this compilation unit
+                Dwarf_Files* files{};
+                size_t       nfiles{};
+                if(dwarf_getsrcfiles(&cu_die, &files, &nfiles) == 0 && call_file < nfiles)
+                {
+                    if(const char* filename = dwarf_filesrc(files, call_file, nullptr, nullptr))
+                    {
+                        file_and_line = std::string(filename) + ":" + std::to_string(call_line);
+                    }
+                }
             }
         }
 
+        // Always include this node's range so parents can find it via children_range
         children_range = total_range;
     }
 

@@ -46,24 +46,26 @@ __global__ void multipleMasksKernel(T* output, const T* input, const unsigned lo
 template <class T, class Op, class MaskType>
 __global__ void reduceOp(T* output, const T* input, const MaskType* masks, int numReduces, Op) {
   int tid = threadIdx.x;
+  int laneId = tid % warpSize;
 
   for (int i = 0; i < numReduces; i++) {
-    if (masks[i] & (1ul << tid)) {
+    if (masks[i] & (1ul << laneId)) {
+      int idx = warpSize * i + laneId;
       // call the operator only if the lane is mentioned in the mask
-      T& result = output[warpSize * i + tid];
+      T& result = output[idx];
 
       if constexpr (std::is_same<Op, std::plus<T>>::value)
-        result = __reduce_add_sync(masks[i], input[tid]);
+        result = __reduce_add_sync(masks[i], input[idx]);
       else if constexpr (std::is_same<Op, MinOp<T>>::value)
-        result = __reduce_min_sync(masks[i], input[tid]);
+        result = __reduce_min_sync(masks[i], input[idx]);
       else if constexpr (std::is_same<Op, MaxOp<T>>::value)
-        result = __reduce_max_sync(masks[i], input[tid]);
+        result = __reduce_max_sync(masks[i], input[idx]);
       else if constexpr (std::is_same<Op, AndOp<T>>::value)
-        result = __reduce_and_sync(masks[i], input[tid]);
+        result = __reduce_and_sync(masks[i], input[idx]);
       else if (std::is_same<Op, OrOp<T>>::value)
-        result = __reduce_or_sync(masks[i], input[tid]);
+        result = __reduce_or_sync(masks[i], input[idx]);
       else if (std::is_same<Op, XorOp<T>>::value)
-        result = __reduce_xor_sync(masks[i], input[tid]);
+        result = __reduce_xor_sync(masks[i], input[idx]);
       else
         assert(false && "Unsupported operator");
     }
@@ -171,7 +173,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   bool customNumIterations = cmd_options.reduce_iterations != 1;
 
   if (customNumIterations)
-    std::cout << "\n" << opToString<T, Op>() << " - " << typeToString<T>() << "\n";
+    std::cout << "\n" << opToString<T, Op<T>>() << " - " << typeToString<T>() << "\n";
 
   while (iteration < cmd_options.reduce_iterations) {
     runTestReduce<T, decltype(reduceFunc), Op>(iteration, reduceFunc);

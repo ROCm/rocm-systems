@@ -854,15 +854,13 @@ class Graph {
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
-    // Check if any segment is a leaf (no outgoing edges). A leaf segment on a
-    // parallel stream must be synced back to the launch stream
-    size_t leafSegmentCount = 0;
+    // Single-segment graphs run entirely on the launch stream — no sync needed.
+    if (segments_.size() <= 1) return false;
+    size_t leafCount = 0;
     for (const auto& seg : segments_) {
-      if (seg.segment_ids_edges.empty()) {
-        leafSegmentCount++;
-      }
+      if (seg.segment_ids_edges.empty() && ++leafCount > 1) return true;
     }
-    return leafSegmentCount > 1;
+    return false;
   }
 
  protected:
@@ -1019,7 +1017,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
                                       const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                            amd::AccumulateCommand* accumulate, bool* out_attach_signal);
+                            amd::AccumulateCommand* accumulate);
 
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
@@ -1055,6 +1053,9 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
 
   // PacketBatch structure
   struct PacketBatch {
+    // Size of one AQL packet
+    static constexpr size_t kAqlPktSize = 64;
+
     // Main dispatch vectors - always ready for batch dispatch
     std::vector<uint8_t*> dispatchPackets;
     std::vector<const std::string*> dispatchKernelNames;
@@ -1063,11 +1064,21 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     std::vector<uint8_t*> enabledPackets;
     std::vector<const std::string*> enabledKernelNames;
 
+    // Pre-built flat packet buffer for fast bulk dispatch (all nodes enabled).
+    std::vector<uint8_t> flatPacketData;
+    std::vector<uint32_t> validPacketFullHeaders;
+
+    // Filtered flat buffer - built alongside enabledPackets when some nodes are disabled.
+    // Allows the fast flat-dispatch path even in the partially-disabled case.
+    std::vector<uint8_t> filteredFlatPacketData;
+    std::vector<uint32_t> filteredValidPacketFullHeaders;
+
     // Node tracking
     struct NodeRange {
       size_t startIndex;    // Start index in dispatchPackets
       size_t packetCount;   // Number of packets for this node
       bool enabled;         // Node enabled state (checked during dispatch)
+      bool captured;        // Whether this node was AQL-captured (false = individual execution)
     };
     std::vector<NodeRange> nodeRanges;
     std::unordered_map<GraphNode*, size_t> nodeToRangeIndex;  // O(1) lookup
@@ -1077,6 +1088,14 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale
     void rebuildFilteredLists();
+    // Rebuild the flat buffer from the current dispatchPackets contents.
+    void rebuildFlatBuffer();
+    // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the
+    // full_header dword, and invalidates the header. Zeroes completion_signal
+    // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
+    static void appendPacketToFlatBuffer(const uint8_t* pkt_raw,
+                                         std::vector<uint8_t>& flatData,
+                                         std::vector<uint32_t>& fullHeaders);
   };
 
   //! Structure linking packet batches to segments
@@ -1084,6 +1103,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     int segment_id;           // Segment this batch belongs to
     std::vector<bool> node_capture_status; // Capture status for each node in this segment
     std::vector<PacketBatch> packet_batches; // All packet batches for this segment
+    bool has_uncaptured_nodes = false;  // At least one node was not AQL-captured
 
     SegmentBatch(int seg_id) : segment_id(seg_id) {}
   };
@@ -1091,6 +1111,31 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
   //! Map from segment ID to SegmentBatch for O(1) lookup
   std::unordered_map<int, SegmentBatch> segmentBatches_;
+
+  struct SegmentSyncInfo {
+    int segment_id;
+    std::vector<int> barrier_dep_indices;
+  };
+
+  struct SyncPlan {
+    int num_segments = 0;
+    std::vector<SegmentSyncInfo> segment_sync;
+
+    std::vector<amd::Device::HwEventPatch> patch_list;
+    std::vector<uint8_t*> barrier_packets;
+
+    // Leaf segment IDs (segments with no outgoing edges) that are NOT on the
+    // launch stream — these need their completion signals waited on.
+    std::vector<int> leaf_segment_ids;
+
+    ~SyncPlan() {
+      for (auto* p : barrier_packets) { delete[] p; }
+    }
+  };
+
+  SyncPlan sync_plan_;
+
+  void BuildSyncPlan();
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
@@ -1197,6 +1242,7 @@ class GraphKernelNode : public GraphNode {
   int globalWorkSizeX_remainder_;
   int globalWorkSizeY_remainder_;
   int globalWorkSizeZ_remainder_;
+  hipFunction_t resolvedFunc_ = nullptr;  //!< Cached resolved function to avoid redundant lookups
 
  public:
   bool HasHiddenHeap() const { return hasHiddenHeap_; }
@@ -1214,9 +1260,6 @@ class GraphKernelNode : public GraphNode {
       return;
     }
     for (auto& command : commands_) {
-      hipFunction_t func = getFunc(kernelParams_, dev_id_);
-      hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-      std::scoped_lock lock(function->dflock_);
       command->enqueue();
       command->release();
     }
@@ -1254,8 +1297,8 @@ class GraphKernelNode : public GraphNode {
   }
 
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
-    hipFunction_t func = getFunc(kernelParams_, dev_id_);
-    hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
+    hipFunction_t func = resolvedFunc_ ? resolvedFunc_ : getFunc(kernelParams_, dev_id_);
+    amd::Kernel* kernel = hip::asKernel(func);
     std::string label;
     char buffer[4096];
     if (flag == hipGraphDebugDotFlagsVerbose) {
@@ -1264,7 +1307,7 @@ class GraphKernelNode : public GraphNode {
               "handle | func handle} | {%p | %p}}\n| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} | {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), function->name().c_str(), kernelParams_.gridDim.x,
+              label_, GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z, kernelParams_.blockDim.x,
               kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
@@ -1280,7 +1323,7 @@ class GraphKernelNode : public GraphNode {
               "| {accessPolicyWindow | {base_ptr | num_bytes | "
               "hitRatio | hitProp | missProp} |\n| {%p | %zu | %f | %d | %d}}\n| {cooperative | "
               "%u}\n| {priority | %d}\n}",
-              label_, GetID(), function->name().c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
+              label_, GetID(), kernel->name().c_str(), kernelAttr_.accessPolicyWindow.base_ptr,
               kernelAttr_.accessPolicyWindow.num_bytes, kernelAttr_.accessPolicyWindow.hitRatio,
               kernelAttr_.accessPolicyWindow.hitProp, kernelAttr_.accessPolicyWindow.missProp,
               kernelAttr_.cooperative, kernelAttr_.priority);
@@ -1288,14 +1331,14 @@ class GraphKernelNode : public GraphNode {
     }
     else if (flag == hipGraphDebugDotFlagsKernelNodeParams) {
       sprintf(buffer, "%d\n%s\n\\<\\<\\<(%u,%u,%u),(%u,%u,%u),(%u,%u,%u),%u\\>\\>\\>",
-              GetID(), function->name().c_str(), kernelParams_.gridDim.x,
+              GetID(), kernel->name().c_str(), kernelParams_.gridDim.x,
               kernelParams_.gridDim.y, kernelParams_.gridDim.z,
               kernelParams_.blockDim.x, kernelParams_.blockDim.y, kernelParams_.blockDim.z,
               globalWorkSizeX_remainder_, globalWorkSizeY_remainder_, globalWorkSizeZ_remainder_,
               kernelParams_.sharedMemBytes);
       label = buffer;
     } else {
-      label = std::to_string(GetID()) + "\n" + function->name() + "\n";
+      label = std::to_string(GetID()) + "\n" + kernel->name() + "\n";
     }
     return label;
   }
@@ -1327,8 +1370,8 @@ class GraphKernelNode : public GraphNode {
     if (!func) {
       return hipErrorInvalidDeviceFunction;
     }
-    hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-    amd::Kernel* kernel = function->kernel();
+    resolvedFunc_ = func;
+    amd::Kernel* kernel = hip::asKernel(func);
     if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
       auto device = g_devices[dev_id_]->devices()[0];
       device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(*device));
@@ -1470,12 +1513,14 @@ class GraphKernelNode : public GraphNode {
     if (!isEnabled_) {
       return hipSuccess;
     }
-    hipFunction_t func = getFunc(kernelParams_, dev_id_);
+    hipFunction_t func = resolvedFunc_;
     if (!func) {
-      return hipErrorInvalidDeviceFunction;
+      func = getFunc(kernelParams_, dev_id_);
+      if (!func) {
+        return hipErrorInvalidDeviceFunction;
+      }
+      resolvedFunc_ = func;
     }
-    hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-    std::scoped_lock lock(function->dflock_);
     status = validateKernelParams(&kernelParams_, func, dev_id_);
     if (hipSuccess != status) {
       return status;

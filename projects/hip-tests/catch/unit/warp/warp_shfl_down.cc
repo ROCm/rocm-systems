@@ -40,7 +40,7 @@ template <typename T> class WarpShflDown : public WarpShflTest<WarpShflDown<T>, 
     LinearAllocGuard<unsigned int> deltas_dev(LinearAllocs::hipMalloc, alloc_size);
     deltas_.resize(width_);
     std::generate(deltas_.begin(), deltas_.end(),
-                  [this] { return GenerateRandomInteger(0u, static_cast<unsigned int>(width_)); });
+                  [this] { return GenRandomInteger(0u, static_cast<unsigned int>(width_)); });
     HIP_CHECK(hipMemcpy(deltas_dev.ptr(), deltas_.data(), alloc_size, hipMemcpyHostToDevice));
     shfl_down<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
                                                                  deltas_dev.ptr(), width_);
@@ -94,7 +94,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Down_Positive_Basic, int, unsigned int, lo
   HIP_CHECK(hipGetDeviceProperties(&device_properties, device));
 
   if (!device_properties.arch.hasWarpShuffle) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support Warp Shuffle!");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kWarpShuffleUnsupported);
     return;
   }
 

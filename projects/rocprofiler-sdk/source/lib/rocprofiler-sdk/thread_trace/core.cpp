@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -56,17 +57,29 @@ namespace rocprofiler
 {
 namespace thread_trace
 {
+namespace
+{
 constexpr size_t   QUEUE_SIZE      = 128;
 constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                          agent;
-    rocprofiler_thread_trace_shader_data_callback_t cb_fn;
-    const rocprofiler_user_data_t*                  userdata;
+    rocprofiler_agent_id_t                          agent    = {.handle = 0};
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn    = nullptr;
+    const rocprofiler_user_data_t*                  userdata = nullptr;
 };
 
 common::Synchronized<std::optional<int64_t>> client;
+
+hsa_status_t
+thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callback_data)
+{
+    auto& cb_data = *CHECK_NOTNULL(static_cast<cbdata_t*>(callback_data));
+
+    cb_data.cb_fn(cb_data.agent, shader, buffer, size, *cb_data.userdata);
+    return HSA_STATUS_SUCCESS;
+}
+}  // namespace
 
 bool
 thread_trace_parameter_pack::are_params_valid() const
@@ -229,15 +242,6 @@ ThreadTracerQueue::get_control(bool bStart)
     return active_resources;
 }
 
-hsa_status_t
-thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callback_data)
-{
-    auto& cb_data = *static_cast<cbdata_t*>(callback_data);
-
-    cb_data.cb_fn(cb_data.agent, shader, buffer, size, *cb_data.userdata);
-    return HSA_STATUS_SUCCESS;
-}
-
 void
 ThreadTracerQueue::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data)
 {
@@ -316,7 +320,7 @@ DispatchThreadTracer::resource_deinit()
  * Callback we get from HSA interceptor when a kernel packet is being enqueued.
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
-hsa::Queue::pkt_and_serialize_t
+hsa::write_packet_t
 DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                       rocprofiler_kernel_id_t        kernel_id,
                                       rocprofiler_dispatch_id_t      dispatch_id,
@@ -360,8 +364,9 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
 }
 
 void
-DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t&       aql,
-                                       const hsa::Queue::queue_info_session_t& session)
+DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
+                                       const hsa::queue_info_session_t& /*session*/,
+                                       const hsa::packet_data_t& packet_data)
 {
     if(post_move_data.load() < 1) return;
 
@@ -377,14 +382,14 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t&       a
 
         auto it = agents.find(pkt->GetAgent());
         if(it != agents.end() && it->second != nullptr)
-            it->second->iterate_data(pkt->GetHandle(), session.user_data);
+            it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
     }
 }
 
 void
 DispatchThreadTracer::start_context()
 {
-    using corr_id_map_t = hsa::Queue::queue_info_session_t::external_corr_id_map_t;
+    using corr_id_map_t = hsa::queue_info_session_t::external_corr_id_map_t;
 
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
 
@@ -392,26 +397,30 @@ DispatchThreadTracer::start_context()
     client.wlock([&](auto& client_id) {
         if(client_id) return;
 
-        client_id =
-            CHECK_NOTNULL(hsa::get_queue_controller())
-                ->add_callback(
-                    std::nullopt,
-                    [=](const hsa::Queue& q,
-                        const hsa::rocprofiler_packet& /* kern_pkt */,
-                        rocprofiler_kernel_id_t   kernel_id,
-                        rocprofiler_dispatch_id_t dispatch_id,
-                        rocprofiler_user_data_t*  user_data,
-                        const corr_id_map_t& /* extern_corr_ids */,
-                        const context::correlation_id* corr_id) {
-                        return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
-                    },
-                    [=](const hsa::Queue& /* q */,
-                        hsa::rocprofiler_packet /* kern_pkt */,
-                        std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                        inst_pkt_t&                                        aql,
-                        kernel_dispatch::profiling_time) {
-                        this->post_kernel_call(aql, *session);
-                    });
+        auto&& _callbacks = hsa::queue_callbacks_t{
+            .batch_packets = []() { return false; },
+            .write_interceptor =
+                [=](const hsa::Queue& q,
+                    const hsa::rocprofiler_packet& /* kern_pkt */,
+                    rocprofiler_kernel_id_t   kernel_id,
+                    rocprofiler_dispatch_id_t dispatch_id,
+                    rocprofiler_user_data_t*  user_data,
+                    const corr_id_map_t& /* extern_corr_ids */,
+                    const context::correlation_id* corr_id) {
+                    return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
+                },
+            .signal_completion =
+                [=](const hsa::Queue& /* q */,
+                    hsa::rocprofiler_packet /* kern_pkt */,
+                    std::shared_ptr<hsa::queue_info_session_t>& session,
+                    hsa::packet_data_t&                         packet_data,
+                    inst_pkt_t&                                 aql,
+                    kernel_dispatch::profiling_time) {
+                    this->post_kernel_call(aql, *session, packet_data);
+                }};
+
+        client_id = CHECK_NOTNULL(hsa::get_queue_controller())
+                        ->add_callback(std::nullopt, std::move(_callbacks));
     });
 }
 
@@ -541,7 +550,5 @@ finalize()
 
     code_object::finalize();
 }
-
 }  // namespace thread_trace
-
 }  // namespace rocprofiler

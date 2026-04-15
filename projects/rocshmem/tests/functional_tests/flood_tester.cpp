@@ -120,12 +120,12 @@ __global__ void FloodTest(int loop, int skip, long long int *start_time,
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
-static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
+static __global__ void verify_results_kernel(uint64_t *dest, [[maybe_unused]] size_t buf_size,
                                              bool *verification_error) {
   int num_pe {rocshmem_n_pes()};
   int num_wg {get_grid_num_blocks()};
   int num_th {get_flat_block_size()};
-  int my_pe {rocshmem_my_pe()};
+  [[maybe_unused]] int my_pe {rocshmem_my_pe()};
   int wg_id {get_flat_grid_id()};
   int t_id {get_flat_block_id()};
 
@@ -138,7 +138,7 @@ static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
     auto v_wg = (value>>12) & 0xffff'ffff;
     auto v_pe = (value>>44);
 
-    if (v_th != t_id || v_wg != wg_id || v_pe != pe) {
+    if (v_th != static_cast<uint64_t>(t_id) || v_wg != static_cast<uint64_t>(wg_id) || v_pe != static_cast<uint64_t>(pe)) {
       *verification_error = true;
     }
   }
@@ -151,7 +151,7 @@ FloodTester::FloodTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
   int my_pe {rocshmem_my_pe()};
   s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size);
-  for(int wg = 0; wg < args.num_wgs; wg++) for(int th = 0; th < args.wg_size; th++) {
+  for(unsigned int wg = 0; wg < args.num_wgs; wg++) for(unsigned int th = 0; th < static_cast<unsigned int>(args.wg_size); th++) {
     s_buf[wg * args.wg_size + th] = (((uint64_t)my_pe)<<44) + (wg<<12) + th; // set value for verification
   }
   r_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
@@ -162,13 +162,13 @@ FloodTester::~FloodTester() {
   rocshmem_free(r_buf);
 }
 
-void FloodTester::resetBuffers(size_t size) {
+void FloodTester::resetBuffers([[maybe_unused]] size_t size) {
   int num_pes {rocshmem_n_pes()};
   memset(r_buf, 0, sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
 }
 
 void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                size_t size) {
+                                [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
   int num_pes {rocshmem_n_pes()};
 
@@ -181,11 +181,10 @@ void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop * gridSize.x * blockSize.x * num_pes;
 }
 
-void FloodTester::verifyResults(size_t size) {
+void FloodTester::verifyResults([[maybe_unused]] size_t size) {
   int num_pes {rocshmem_n_pes()};
-  int my_pe {rocshmem_my_pe()};
 
-  if (num_pes > 1<<20 || args.num_wgs > 1<<31 || args.wg_size > 1<<12) {
+  if (num_pes > (1<<20) || args.num_wgs > (1U<<31) || args.wg_size > (1U<<12)) {
     // can't check
     return;
   }
@@ -197,15 +196,15 @@ void FloodTester::verifyResults(size_t size) {
 
   if (*verification_error) {
     for(auto pe = 0; pe < num_pes; pe++)
-      for(auto wg = 0; wg < args.num_wgs; wg++)
-        for(auto th = 0; th < args.wg_size; th++) {
+      for(unsigned int wg = 0; wg < static_cast<unsigned int>(args.num_wgs); wg++)
+        for(unsigned int th = 0; th < static_cast<unsigned int>(args.wg_size); th++) {
       auto t_offset {wg * args.wg_size + th};
       auto dst_offset {pe * args.num_wgs * args.wg_size + t_offset};
       auto value = r_buf[dst_offset];
       auto v_th = value & 0x0fff;
       auto v_wg = (value>>12) & 0xffff'ffff;
       auto v_pe = (value>>44);
-      if (v_th != th || v_wg != wg || v_pe != pe) {
+      if (v_th != static_cast<uint64_t>(th) || v_wg != static_cast<uint64_t>(wg) || v_pe != static_cast<uint64_t>(pe)) {
         std::cerr << "Data validation error at idx " << dst_offset << std::endl;
         std::cerr << " Got " << v_pe << ":" << v_wg << ":" << v_th
                   << ", Expected " << pe << ":" << wg << ":" << th << std::endl;

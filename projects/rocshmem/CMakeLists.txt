@@ -59,7 +59,7 @@ option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on t
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (Requires MPI)" OFF)
 option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
-option(BUILD_TESTS_ONLY "Build only tests. Used to link agains rocSHMEM in a ROCm Release" OFF)
+option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
@@ -110,8 +110,7 @@ endif()
 include(cmake/rocm_local_targets.cmake)
 
 set(DEFAULT_GPUS
-    gfx90a:xnack-;
-    gfx90a:xnack+;
+    gfx90a;
     gfx1100;
     gfx1201;
     gfx942)
@@ -186,6 +185,18 @@ if (NOT BUILD_TESTS_ONLY)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
 
+  # Check if std::filesystem requires linking stdc++fs
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_QUIET TRUE)
+  check_cxx_source_compiles("
+    #include <filesystem>
+    int main() {
+      auto p = std::filesystem::current_path();
+      return 0;
+    }
+  " FILESYSTEM_NO_LINK_NEEDED)
+  set(CMAKE_REQUIRED_QUIET FALSE)
+
   if(${ROCM_MAJOR_VERSION} GREATER_EQUAL 6 )
     set(HAVE_DEVICE_MALLOC_UNCACHED ON)
   elseif (${ROCM_MAJOR_VERSION} EQUAL 5 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 5)
@@ -194,7 +205,30 @@ if (NOT BUILD_TESTS_ONLY)
     set(HAVE_DEVICE_MALLOC_UNCACHED OFF)
   endif()
 
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE ROCSHMEM_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT ROCSHMEM_GIT_HASH)
+    set(ROCSHMEM_GIT_HASH "unknown")
+  endif()
+
+  string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${GPU_TARGETS}")
+
   configure_file(cmake/rocshmem_config.h.in include/rocshmem/rocshmem_config.h)
+
+  # Embed rocshmem_config.h as a C++17 raw string literal so build_info.cpp
+  # (and the rocshmem_info tool) can display it without reading the file at runtime.
+  file(READ "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config.h" _config_content)
+  file(WRITE "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config_embedded.hpp"
+    "// Auto-generated from rocshmem_config.h — do not edit.\n"
+    "#pragma once\n"
+    "static const char rocshmem_config_h_content[] = R\"ROCSHMEM_CFG_END(\n"
+    "${_config_content}"
+    ")ROCSHMEM_CFG_END\";\n"
+  )
 
   #############################################################################
   # LINKING AND INCLUDE DIRECTORIES
@@ -203,6 +237,10 @@ if (NOT BUILD_TESTS_ONLY)
     ${PROJECT_NAME}
     PUBLIC
       -fgpu-rdc
+    PRIVATE
+      -Wall
+      -Wextra
+      -Werror
   )
 
   target_include_directories(
@@ -225,6 +263,7 @@ if (NOT BUILD_TESTS_ONLY)
       dl
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
+      $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -256,8 +295,9 @@ if (NOT BUILD_TESTS_ONLY)
   )
 
   if (BUILD_TOOLS)
+    add_subdirectory(tools)
     rocm_install(
-      PROGRAMS "${CMAKE_BINARY_DIR}/src/tools/rocshmem_info"
+      PROGRAMS "${CMAKE_BINARY_DIR}/tools/rocshmem_info"
       DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
   endif()

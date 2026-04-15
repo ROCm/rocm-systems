@@ -491,7 +491,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
 
   // Build PMC read PM4 packets
   uint32_t ReadXccPackets(CmdBuffer* cmd_buffer, const counters_vector& counters_vec,
-                          void* data_buffer, uint32_t& read_counter) {
+                          uint32_t* buf, uint32_t& read_counter) {
     // Reset Grbm to its default state - broadcast
     SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
 
@@ -500,7 +500,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
         if ((elem.block_info->attr & CounterBlockGRBMAttr) == 0) continue;
         const auto& reg_info = get_reg_table(elem)[elem.index];
         builder.BuildCopyCounterDataPacket(cmd_buffer, reg_info.register_addr_lo,
-                                           reg_info.register_addr_hi, data_buffer, 3);
+                                           reg_info.register_addr_hi, buf, 3);
         break;
       }
     }
@@ -542,9 +542,8 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
         SetGrbmGfxIndex(cmd_buffer, grbm_value);
         builder.BuildWritePConfigRegPacket(cmd_buffer, reg_info.control_addr,
                                            Primitives::mc_config_value(counter_des));
-        uint32_t* data = reinterpret_cast<uint32_t*>(data_buffer) + read_counter;
         builder.BuildCopyCounterDataPacket(cmd_buffer, reg_info.register_addr_lo,
-                                           reg_info.register_addr_hi, data, 3);
+                                           reg_info.register_addr_hi, buf + read_counter, 3);
         read_counter += 2;
       } else if (block_info->attr & CounterBlockSdmaAttr) {
         // Stop SDMA: this code path appplies only to non-MI300
@@ -566,12 +565,12 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
         // Read SDMA
         uint32_t dw_mask = 0x1;
         if (reg_info.register_addr_hi.offset != 0) dw_mask = 0x3;
-        uint32_t* data = reinterpret_cast<uint32_t*>(data_buffer) + read_counter;
-        if (data_buffer != 0) {
-          *reinterpret_cast<uint64_t*>(data) = 0;
+        if (buf != nullptr) {
+          buf[read_counter]     = 0;
+          buf[read_counter + 1] = 0;
         }
         builder.BuildCopyCounterDataPacket(cmd_buffer, reg_info.register_addr_lo,
-                                           reg_info.register_addr_hi, data, dw_mask);
+                                           reg_info.register_addr_hi, buf + read_counter, dw_mask);
         read_counter += 2;
       } else if (block_info->attr & CounterBlockUmcAttr) {
         // skip
@@ -604,7 +603,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
                 SetGrbmGfxIndex(cmd_buffer, grbm_value);
                 builder.BuildCopyCounterDataPacket(
                     cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
-                    reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 1);
+                    buf + read_counter, 1);
                 read_counter += 2;
               }
             } else if (bIsWGPcounter12) {
@@ -618,16 +617,16 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
                 uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
                 builder.BuildCopyCounterDataPacket(
                     cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
-                    reinterpret_cast<uint32_t*>(data_buffer) + read_counter, dw_mask);
-                if (data_buffer && (dw_mask == 1))
-                  *(reinterpret_cast<uint32_t*>(data_buffer) + read_counter + 1) = 0;
+                    buf + read_counter, dw_mask);
+                if (buf && (dw_mask == 1))
+                  buf[read_counter + 1] = 0;
                 read_counter += 2;
               }
             } else {
               SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
               builder.BuildCopyCounterDataPacket(
                   cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
-                  reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 3);
+                  buf + read_counter, 3);
               read_counter += 2;
             }
           }
@@ -707,6 +706,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
   // Build PMC read PM4 comands
   uint32_t Read(CmdBuffer* cmd_buffer, const counters_vector& counters_vec,
                 void* data_buffer) override {
+    uint32_t* buf = reinterpret_cast<uint32_t*>(data_buffer);
     uint32_t read_counter = 0;
     auto counters_attr = counters_vec.get_attr();
 
@@ -740,11 +740,10 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
                                                Primitives::sdma_stop_value(counter_des));
             dw_mask = 0x3;
           }
-          uint32_t* smn_data_buffer = reinterpret_cast<uint32_t*>(data_buffer) + read_counter;
           auto smn_register_addr_lo = get_smn_addr(reg_info.register_addr_lo, target_aid_index);
           auto smn_register_addr_hi = get_smn_addr(reg_info.register_addr_hi, target_aid_index);
           builder.BuildCopyCounterDataPacket(cmd_buffer, smn_register_addr_lo, smn_register_addr_hi,
-                                             smn_data_buffer, dw_mask);
+                                             buf + read_counter, dw_mask);
           read_counter += 2;
         } else if ((block_info->attr & CounterBlockAidAttr)) {
           // Read UMC/ATC/RPB
@@ -759,11 +758,10 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
             builder.BuildWritePConfigRegPacket(cmd_buffer, control_addr,
                                                Primitives::mc_config_value(counter_des));
           }
-          uint32_t* smn_data_buffer = reinterpret_cast<uint32_t*>(data_buffer) + read_counter;
           auto smn_register_addr_lo = get_smn_addr(reg_info.register_addr_lo, target_aid_index);
           auto smn_register_addr_hi = get_smn_addr(reg_info.register_addr_hi, target_aid_index);
           builder.BuildCopyCounterDataPacket(cmd_buffer, smn_register_addr_lo, smn_register_addr_hi,
-                                             smn_data_buffer, 3);
+                                             buf + read_counter, 3);
           read_counter += 2;
         }
       }
@@ -771,10 +769,10 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     for (size_t xcc_selected = 0; xcc_selected < xcc_number_; ++xcc_selected) {
       PrecExecBuilder<Builder> prec_exec_builder(builder, cmd_buffer, xcc_selected,
                                                  xcc_number_ > 1);
-      ReadXccPackets(cmd_buffer, counters_vec, data_buffer, read_counter);
+      ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter);
     }
 
-    builder.BuildCacheFlushPacket(cmd_buffer, size_t(data_buffer), read_counter * sizeof(uint32_t));
+    builder.BuildCacheFlushPacket(cmd_buffer, reinterpret_cast<size_t>(buf), read_counter * sizeof(uint32_t));
 
     // Return amount of data to read
     return read_counter * sizeof(uint32_t);
