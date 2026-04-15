@@ -269,6 +269,7 @@ def generate_recommendations(
     short_kernels: Optional[Dict[str, Any]] = None,  # TraceLens
     interval_timeline: Optional[Dict[str, Any]] = None,  # TraceLens
     att_analysis: Optional[Dict[str, Any]] = None,  # Tier 3 ATT
+    warmup_issues: Optional[Dict[str, Any]] = None,  # Warmup detection
 ) -> List[Dict[str, Any]]:
     """
     Generate performance recommendations based on analysis results.
@@ -308,7 +309,8 @@ def generate_recommendations(
                         "Reduce shared memory (LDS) usage per workgroup",
                         "Check for resource limitations preventing more waves with rocprof-compute",
                     ],
-                    "estimated_impact": "10-30% throughput improvement depending on occupancy gap",
+                    "confidence": 0.75,
+                    "estimated_impact": f"Current {avg_waves:.0f} waves/SIMD; occupancy gap suggests room for improvement — collect counters with rocprof-compute to quantify",
                     "commands": [
                         {
                             "tool": "rocprofv3",
@@ -353,6 +355,7 @@ def generate_recommendations(
                         "Reduce hipDeviceSynchronize() and hipStreamSynchronize() call frequency",
                         "Overlap host-device transfers with compute using async streams",
                     ],
+                    "confidence": 0.80,
                     "estimated_impact": f"Up to {100 - gpu_util:.0f}% reduction in idle time",
                     "commands": [
                         {
@@ -459,6 +462,7 @@ def generate_recommendations(
                     "issue": issue,
                     "suggestion": f"Reduce {label.lower()} stalls in kernel '{kernel_name}'",
                     "actions": _CATEGORY_ACTIONS.get(category, []),
+                    "confidence": 0.85,
                     "estimated_impact": impact,
                     "commands": [
                         {
@@ -499,6 +503,7 @@ def generate_recommendations(
                         "Consider profiling with hardware counters (--pmc) to check memory bandwidth utilization",
                         "Use rocprof-compute for full roofline model and micro-architecture metrics",
                     ],
+                    "confidence": 0.70,
                     "estimated_impact": "N/A -- no significant stalls found",
                     "commands": [],
                 }
@@ -521,7 +526,8 @@ def generate_recommendations(
                     "Use hipMemcpyAsync with streams to overlap transfers with kernel execution",
                     "Minimize round-trips: keep data on GPU between consecutive kernels",
                 ],
-                "estimated_impact": "15-30% reduction in total runtime when transfers dominate",
+                "confidence": 0.70,
+                "estimated_impact": f"Memory copies account for {memcpy_percent:.1f}% of runtime ({time_breakdown.get('total_memcpy_time', 0) / 1e6:.1f}ms) — eliminating all transfers would save at most this amount",
                 "commands": [
                     {
                         "tool": "rocprofv3",
@@ -568,6 +574,7 @@ def generate_recommendations(
                     "Place roctxRangeStart/Stop markers around the hot loop only to exclude init from analysis",
                     "If this IS the full workload, consider lazy initialization or pre-compiled kernels (hiprtc)",
                 ],
+                "confidence": 0.60,
                 "estimated_impact": "N/A — GPU compute itself appears efficient; runtime init cost is one-time",
                 "commands": [],
             }
@@ -588,7 +595,8 @@ def generate_recommendations(
                     "Batch hipMemcpy calls; use hipMemcpyAsync where possible",
                     "Minimize hipDeviceSynchronize() — synchronize at stream level instead",
                 ],
-                "estimated_impact": "5-15% reduction when overhead exceeds 15%",
+                "confidence": 0.60,
+                "estimated_impact": f"API overhead is {overhead_percent:.1f}% of runtime ({max(0.0, (time_breakdown.get('total_runtime', 0) - time_breakdown.get('total_kernel_time', 0) - time_breakdown.get('total_memcpy_time', 0)) / 1e6):.1f}ms) — reducing API calls could recover up to this time",
                 "commands": [
                     {
                         "tool": "rocprofv3",
@@ -624,6 +632,8 @@ def generate_recommendations(
             _has_ctr = bool((hardware_counters or {}).get("has_counters", False))
             if _has_ctr and _gpu_util is not None:
                 if _gpu_util > 90:
+                    _rule3_category = "Compute-Bound Kernel"
+                    _rule3_confidence = 0.85
                     _suggestion = (
                         f"GPU utilization is {_gpu_util:.1f}% — kernel is compute-bound. "
                         "Optimize the kernel algorithm or reduce instruction count"
@@ -635,6 +645,8 @@ def generate_recommendations(
                         "Run rocprof-compute for roofline model and instruction mix breakdown",
                     ]
                 elif _gpu_util > 70:
+                    _rule3_category = "Mixed Bottleneck Kernel"
+                    _rule3_confidence = 0.70
                     _suggestion = (
                         f"GPU utilization is {_gpu_util:.1f}% — moderate. "
                         "Check for memory-bound behavior or occupancy limits"
@@ -646,6 +658,8 @@ def generate_recommendations(
                         "Run rocprof-compute for roofline analysis",
                     ]
                 else:
+                    _rule3_category = "Memory-Bound Kernel"
+                    _rule3_confidence = 0.80
                     _suggestion = (
                         f"GPU utilization is only {_gpu_util:.1f}% — significant room for improvement"
                     )
@@ -656,8 +670,11 @@ def generate_recommendations(
                         "Check for excessive synchronization or launch overhead",
                     ]
             else:
+                _rule3_category = "Kernel Hotspot"
+                _rule3_confidence = 0.50
                 _suggestion = "Profile this kernel with hardware counters to identify its specific bottleneck"
                 _actions = [
+                    "Bottleneck type unknown — collect hardware counters to classify",
                     "Collect hardware counters to classify compute vs memory bound",
                     "Check memory access patterns for coalescing issues",
                     "Analyze instruction mix: VALU, MFMA, load/store ratios",
@@ -666,11 +683,12 @@ def generate_recommendations(
             recommendations.append(
                 {
                     "priority": "HIGH",
-                    "category": "Compute Bottleneck",
-                    "issue": f"Kernel '{kernel_name}' consumes {percent:.1f}% of GPU time",
+                    "category": _rule3_category,
+                    "issue": f"Kernel '{kernel_name}' dominates GPU time: {percent:.1f}% of total kernel execution",
                     "suggestion": _suggestion,
+                    "confidence": _rule3_confidence,
                     "actions": _actions,
-                    "estimated_impact": "Highly dependent on bottleneck type; 20-50% improvement possible",
+                    "estimated_impact": f"Kernel accounts for {percent:.1f}% of GPU time ({top_kernel.get('total_duration', 0) / 1e6:.1f}ms) — bottleneck type unknown without counters; impact depends on classification",
                     "commands": [
                         {
                             "tool": "rocprofv3",
@@ -732,7 +750,8 @@ def generate_recommendations(
                             "Increase problem size per launch to push avg duration above 50 \u03bcs",
                             "Use persistent kernels for iterative workloads to eliminate repeated launches",
                         ],
-                        "estimated_impact": "Eliminates up to 50% of launch overhead for fine-grained workloads",
+                        "confidence": 0.75,
+                        "estimated_impact": f"{total_calls} launches at avg {avg_duration/1000:.1f}μs each; estimated launch overhead is ~{total_calls * 5 / 1000:.1f}ms (assuming ~5μs per launch)",
                         "commands": [
                             {
                                 "tool": "rocprofv3",
@@ -772,7 +791,8 @@ def generate_recommendations(
                         "Consider hipMemcpyAsync with stream to overlap with compute",
                         "For multi-GPU: evaluate hipMemcpyPeer for direct device-to-device transfers",
                     ],
-                    "estimated_impact": "2-10x bandwidth improvement by eliminating small-transfer PCIe overhead",
+                    "confidence": 0.65,
+                    "estimated_impact": f"{direction} bandwidth is {bandwidth_gbps:.2f} GB/s with avg transfer {avg_bytes/1024:.1f}KB — larger transfers could approach PCIe peak (~32 GB/s for Gen4 x16)",
                     "commands": [
                         {
                             "tool": "rocprofv3",
@@ -815,7 +835,8 @@ def generate_recommendations(
                     "- Consider persistent kernels for kernels called >1000\u00d7/sec",
                     "- Profile with rocprofv3 --hip-trace to measure queue latency vs. execution time",
                 ],
-                "estimated_impact": "5\u201315% reduction in total kernel time if short kernels are dominant",
+                "confidence": 0.70,
+                "estimated_impact": f"Short kernels waste {wasted_pct:.1f}% of kernel time; fusing or batching could recover up to {wasted_pct:.1f}% of kernel execution time",
                 "commands": [],
             }
         )
@@ -835,6 +856,7 @@ def generate_recommendations(
                     "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
                     "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
                 ],
+                "confidence": 0.65,
                 "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
                 "commands": [],
             }
@@ -853,6 +875,7 @@ def generate_recommendations(
                     "Enable PC sampling for instruction-level hotspot analysis",
                     "Profile with rocprof-compute for roofline model and bottleneck classification",
                 ],
+                "confidence": 0.50,
                 "estimated_impact": "Depends on findings from deeper analysis",
                 "commands": [
                     {
@@ -888,6 +911,28 @@ def generate_recommendations(
                 ],
             }
         )
+
+    # Warmup detection
+    if warmup_issues and warmup_issues.get("has_warmup_issues"):
+        for outlier in warmup_issues["outliers"]:
+            ratio = outlier["ratio"]
+            kname = outlier["kernel_name"]
+            first_us = outlier["first_duration_ns"] / 1e3
+            avg_us = outlier["avg_duration_ns"] / 1e3
+            recommendations.append({
+                "priority": "INFO",
+                "category": "Warmup",
+                "issue": f"First dispatch of '{kname}' is {ratio:.1f}x slower than average ({first_us:.1f}\u03bcs vs {avg_us:.1f}\u03bcs)",
+                "suggestion": "Add a warmup launch before timing to exclude one-time GPU initialization costs",
+                "actions": [
+                    "Add a dummy kernel launch before the timed section",
+                    "Use roctx markers to separate warmup from the figure-of-merit region",
+                    "If using roctx, check that first dispatch falls inside a 'warmup' range, not the timing range",
+                ],
+                "estimated_impact": f"First dispatch adds {first_us - avg_us:.1f}\u03bcs ({(ratio - 1) * 100:.0f}% overhead) to the first iteration",
+                "confidence": 0.80,
+                "commands": [],
+            })
 
     # Strip or drop commands whose flags are already covered by the original run
     if already_collected:

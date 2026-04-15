@@ -408,6 +408,9 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);
 
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
+
 }  // namespace amd
 }  // namespace rocr
 

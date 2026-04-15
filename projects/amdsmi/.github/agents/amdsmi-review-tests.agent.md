@@ -2,7 +2,7 @@
 name: amdsmi-review-tests
 description: "Test review subagent. Checks test coverage, quality, missing tests. Use when: test review, coverage check, test quality."
 tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4"
+model: "Claude Sonnet 4.6"
 user-invocable: false
 ---
 

@@ -894,7 +894,6 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   uint32_t satisfying_signal_idx =
       core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
                                  satisfying_value_vec, false);
-
   //  Map back the index
   satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
 
@@ -903,6 +902,18 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   return satisfying_signal_idx;
   CATCHRET(uint32_t);
 }
+
+hsa_status_t hsa_amd_signal_get_event_id(hsa_signal_t hsa_signal, uint32_t *event_id) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(event_id);
+  core::Signal* signal = core::Signal::Convert(hsa_signal);
+  IS_VALID(signal);
+
+  return core::Runtime::runtime_singleton_->GetSignalEventId(hsa_signal, event_id);
+  CATCH;
+}
+
 
 hsa_status_t hsa_amd_signal_async_handler(hsa_signal_t hsa_signal, hsa_signal_condition_t cond,
                                           hsa_signal_value_t value, hsa_amd_signal_handler handler,

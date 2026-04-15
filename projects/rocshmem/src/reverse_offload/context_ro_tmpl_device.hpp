@@ -30,6 +30,7 @@
 #include "context_ro_device.hpp"
 #include "queue_proxy.hpp"
 #include "ro_net_team.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
@@ -350,8 +351,7 @@ __device__ void ROContext::alltoallv([[maybe_unused]] rocshmem_team_t team,
                                      [[maybe_unused]] const size_t dest_displs[],
                                      [[maybe_unused]] T *source, [[maybe_unused]] const size_t source_nelems[],
                                      [[maybe_unused]] const size_t source_displs[]) {
-  printf("rocshmem::ipc:alltoallv not implemented\n");
-  abort();
+  LOGD_ERROR_ABORT("rocshmem::ipc:alltoallv not implemented");
 }
 
 template <typename T>
