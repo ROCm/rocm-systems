@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -200,8 +201,6 @@ def pytest_addoption(parser):
 @pytest.fixture
 def torch_trace_coverage_sampling(request):
     """Return ``(seed, sample_budget)`` for ``test_random_operator_kernel_coverage``."""
-    import random
-
     seed = request.config.getoption("--coverage-seed")
     if seed is None:
         seed = random.randrange(2**32)

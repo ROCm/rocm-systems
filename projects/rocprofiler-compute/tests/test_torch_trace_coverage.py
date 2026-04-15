@@ -35,8 +35,11 @@ Or from the ``rocprofiler-compute`` project root::
         -s 2>&1 | tee torch_trace_coverage_report.txt
 """
 
+from __future__ import annotations
+
 import json
 import os
+import random
 import string
 import subprocess
 import sys
@@ -113,24 +116,6 @@ def unique_get_output_param_id(prefix: str) -> str:
     """
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
     return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
-
-
-class OpEntry(NamedTuple):
-    """One row in the coverage sample: what to call and how it was discovered.
-
-    Attributes:
-        name: Human-readable op id, e.g. ``torch.ops.aten.mm`` or
-            ``nn.Module.__call__`` for structural patterns.
-        category: ``aten`` for ``torch.ops`` entries, ``structural`` for
-            synthetic workload patterns (module forward, optimizer step, etc.).
-        fn: For ATen ops, the ``OpOverloadPacket``; ``None`` for structural.
-        schema: PyTorch ``FunctionSchema`` for the chosen overload, or ``None``.
-    """
-
-    name: str
-    category: str
-    fn: object
-    schema: object
 
 
 # -- Hardcoded args for ops whose schemas don't encode shape constraints --
@@ -480,11 +465,12 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
 # -- Workload script generation --
 
 
-def serialize_arg(a: Any, vname: str) -> Tuple[List[str], str]:
+def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
     """Build emitted-source lines that define ``vname`` plus an expression to pass.
 
     Args:
-        a: Runtime argument value from :func:`build_args_for_op` (tensor, list, etc.).
+        argument_value: Runtime value from :func:`build_args_for_op` (tensor, list,
+            etc.).
         vname: Unique variable name in the generated workload script.
 
     Returns:
@@ -492,28 +478,32 @@ def serialize_arg(a: Any, vname: str) -> Tuple[List[str], str]:
         the profiled call (empty for scalars), and ``expr`` is what appears inside
         ``call_expr(expr, ...)`` (usually ``vname`` or a literal).
     """
-    if isinstance(a, torch.Tensor):
-        shape = tuple(a.shape)
-        if a.dtype == torch.long:
+    if isinstance(argument_value, torch.Tensor):
+        shape = tuple(argument_value.shape)
+        if argument_value.dtype == torch.long:
             return (
                 [f"{vname} = torch.randint(0, 4, {shape}, device=device)"],
                 vname,
             )
         return ([f"{vname} = torch.randn({shape}, device=device)"], vname)
-    if isinstance(a, list) and a and isinstance(a[0], torch.Tensor):
-        shape = tuple(a[0].shape)
+    if (
+        isinstance(argument_value, list)
+        and argument_value
+        and isinstance(argument_value[0], torch.Tensor)
+    ):
+        shape = tuple(argument_value[0].shape)
         return (
             [
                 f"{vname} = [torch.randn({shape}, device=device) "
-                f"for _ in range({len(a)})]"
+                f"for _ in range({len(argument_value)})]"
             ],
             vname,
         )
-    if a is None:
+    if argument_value is None:
         return [], "None"
-    if isinstance(a, bool):
-        return [], str(a)
-    return [], repr(a)
+    if isinstance(argument_value, bool):
+        return [], str(argument_value)
+    return [], repr(argument_value)
 
 
 def emit_structural_preamble(
@@ -571,23 +561,16 @@ def emit_structural_preamble(
     return [], op_name, ""
 
 
-def generate_workload_script(
+def build_workload_script_lines(
     operators: List[OpEntry],
     ground_truth_path: str,
-    script_path: str,
-) -> None:
-    """Write a standalone Python file at ``script_path`` and ground-truth JSON path.
+) -> List[str]:
+    """Build the full source of ``coverage_workload.py`` as text lines (no I/O).
 
-    Args:
-        operators: Sampled ops to include (order preserved).
-        ground_truth_path: Path string embedded in the script for ``json.dump``.
-        script_path: Filesystem path to create; overwritten if it exists.
-
-    The script imports torch, runs ``torch.profiler`` once per operator, and
-    writes ``aten_ops``, ``cuda_kernels``, or ``error`` per key. Each op block is
-    produced from :data:`_WORKLOAD_OP_BLOCK` (:class:`string.Template`) so the
-    control flow stays visible in one place. Operators skipped by
-    :func:`build_args_for_op` do not appear in the file.
+    The emitted script imports torch, runs ``torch.profiler`` once per operator,
+    and writes ``aten_ops``, ``cuda_kernels``, or ``error`` per key. Each op block
+    is produced from :data:`_WORKLOAD_OP_BLOCK`. Operators skipped by
+    :func:`build_args_for_op` do not appear in the output.
     """
     lines = [
         "import json, os, sys, torch",
@@ -609,13 +592,15 @@ def generate_workload_script(
 
         op_setup: List[str] = []
         arg_strs = []
-        for i, a in enumerate(args):
-            vname = f"_arg_{safe_var}_{i}"
-            stmts, expr = serialize_arg(a, vname)
+        for arg_index, arg_value in enumerate(args):
+            vname = f"_arg_{safe_var}_{arg_index}"
+            stmts, expr = serialize_arg(arg_value, vname)
             op_setup.extend(stmts)
             arg_strs.append(expr)
 
-        kwarg_strs = [f"{k}={repr(v)}" for k, v in kwargs.items()]
+        kwarg_strs = [
+            f"{keyword}={repr(value)}" for keyword, value in kwargs.items()
+        ]
         call_args = ", ".join(arg_strs + kwarg_strs)
 
         if op.name.startswith("torch.ops."):
@@ -644,8 +629,17 @@ def generate_workload_script(
     lines.append("    json.dump(results, _f)")
     lines.append("")
 
-    with open(script_path, "w") as f:
-        f.write("\n".join(lines))
+    return lines
+
+
+def generate_workload_script(
+    operators: List[OpEntry],
+    ground_truth_path: str,
+    script_path: str,
+) -> None:
+    """Write ``build_workload_script_lines(...)`` to ``script_path`` on disk."""
+    source_lines = build_workload_script_lines(operators, ground_truth_path)
+    Path(script_path).write_text("\n".join(source_lines), encoding="utf-8")
 
 
 # -- ROCTX marker CSV parsing --
@@ -677,58 +671,12 @@ def parse_roctx_markers(
         [pd.read_csv(f) for f in marker_files],
         ignore_index=True,
     )
-    if "Correlation_Id" in marker_df.columns:
-        marker_df = marker_df.rename(columns={"Correlation_Id": "Correlation_ID"})
-
-    marker_ops: Set[str] = set()
-    op_to_corr: Dict[str, Set] = {}
-
-    func_col = marker_df.get("Function")
-    corr_col = marker_df.get("Correlation_ID")
-    if func_col is not None:
-        for idx, func in enumerate(func_col):
-            if not isinstance(func, str):
-                continue
-            op_path = func.split(":#")[0] if ":#" in func else func
-            leaf = (
-                op_path.rsplit("/", 1)[-1].strip()
-                if "/" in op_path
-                else op_path.strip()
-            )
-            if leaf:
-                marker_ops.add(leaf)
-                if corr_col is not None:
-                    cid = corr_col.iloc[idx]
-                    if pd.notna(cid):
-                        op_to_corr.setdefault(leaf, set()).add(cid)
+    marker_df = _with_correlation_id_standard_name(marker_df)
+    marker_ops, op_to_corr = _collect_marker_ops_and_correlations(marker_df)
 
     op_to_kernels: Dict[str, Set[str]] = {}
     if counter_files and op_to_corr:
-        counter_df = pd.concat(
-            [pd.read_csv(f) for f in counter_files],
-            ignore_index=True,
-        )
-        if "Correlation_Id" in counter_df.columns:
-            counter_df = counter_df.rename(columns={"Correlation_Id": "Correlation_ID"})
-        if "Kernel_Name" in counter_df.columns:
-            all_corr_ids = set()
-            for ids in op_to_corr.values():
-                all_corr_ids |= ids
-            matched = counter_df[counter_df["Correlation_ID"].isin(all_corr_ids)]
-            corr_to_kernel: Dict = {}
-            for cid, kname in zip(
-                matched["Correlation_ID"],
-                matched["Kernel_Name"],
-            ):
-                if pd.notna(kname):
-                    corr_to_kernel.setdefault(cid, set()).add(kname)
-
-            for leaf, cids in op_to_corr.items():
-                kernels: Set[str] = set()
-                for cid in cids:
-                    kernels |= corr_to_kernel.get(cid, set())
-                if kernels:
-                    op_to_kernels[leaf] = kernels
+        op_to_kernels = _kernels_by_marker_leaf(op_to_corr, counter_files)
 
     return op_to_kernels, marker_ops
 
@@ -741,7 +689,7 @@ def compare_single_op(
     ground_truth: Dict[str, Any],
     roctx_marker_names: Set[str],
     roctx_kernels_map: Dict[str, Set[str]],
-) -> Tuple[str, str]:
+) -> OpCompareOutcome:
     """Compare one op's profiler JSON entry to parsed ROCTX markers and kernels.
 
     Args:
@@ -752,80 +700,157 @@ def compare_single_op(
         roctx_kernels_map: Marker leaf → kernel names from correlation join.
 
     Returns:
-        ``(status, skip_reason)``. ``status`` is ``pass``, ``fail``, or ``skip``.
-        ``skip_reason`` is a short human string only for ``skip``; for ``pass``
-        and ``fail`` it is ``""`` (details are only printed to stdout).
+        Outcome with ``status`` ``pass`` / ``fail`` / ``skip``, ``skip_reason`` for
+        skips, and ``log_lines`` for the caller to print (keeps I/O out of this
+        function).
     """
-    gt = ground_truth.get(op.name)
+    ground_truth_entry = ground_truth.get(op.name)
 
-    if gt is None or "error" in gt:
+    if ground_truth_entry is None or "error" in ground_truth_entry:
         err_msg = (
-            gt.get("error", "not in ground truth") if gt else "not in generated script"
+            ground_truth_entry.get("error", "not in ground truth")
+            if ground_truth_entry
+            else "not in generated script"
         )
         reason = err_msg[:200]
-        print(f"  [SKIP] {op.name}")
-        print(f"         reason: {reason[:120]}")
-        return "skip", reason
+        return OpCompareOutcome(
+            "skip",
+            reason,
+            (
+                f"  [SKIP] {op.name}",
+                f"         reason: {reason[:120]}",
+            ),
+        )
 
-    profiler_kernels = gt.get("cuda_kernels", [])
+    profiler_kernels = ground_truth_entry.get("cuda_kernels", [])
     profiler_kernel_set = set(profiler_kernels)
 
-    marker_found = any(marker_matches_op(op.name, m) for m in roctx_marker_names)
+    marker_found = any(
+        marker_matches_op(op.name, observed_marker_leaf)
+        for observed_marker_leaf in roctx_marker_names
+    )
     roctx_kernels: Set[str] = set()
-    for m_name in roctx_marker_names:
-        if marker_matches_op(op.name, m_name):
-            roctx_kernels |= roctx_kernels_map.get(m_name, set())
+    for observed_marker_leaf in roctx_marker_names:
+        if marker_matches_op(op.name, observed_marker_leaf):
+            roctx_kernels |= roctx_kernels_map.get(observed_marker_leaf, set())
 
     # Structural ops are hierarchical wrappers: their markers
     # don't directly correlate to GPU kernels (inner ATen ops
     # do). Marker presence alone is sufficient for PASS.
     if op.category == "structural":
         if marker_found:
-            print(f"  [PASS] {op.name} — structural marker present")
-            return "pass", ""
+            return OpCompareOutcome(
+                "pass",
+                "",
+                (f"  [PASS] {op.name} — structural marker present",),
+            )
         # inject_roctx wraps base-class methods; subclass
         # overrides (e.g. SGD.step) may bypass the wrapper.
-        print(
-            f"  [WARN] {op.name}"
-            " — structural marker not found"
-            " (possible inject_roctx gap)"
-        )
-        return (
+        skip_msg = "structural marker not found (possible inject_roctx gap)"
+        return OpCompareOutcome(
             "skip",
-            "structural marker not found (possible inject_roctx gap)",
+            skip_msg,
+            (
+                f"  [WARN] {op.name}"
+                " — structural marker not found"
+                " (possible inject_roctx gap)",
+            ),
         )
 
     if not profiler_kernel_set:
         if marker_found:
-            print(f"  [PASS] {op.name} — marker found, no kernels")
-            return "pass", ""
-        print(f"  [SKIP] {op.name} — no GPU kernels dispatched")
-        return "skip", "no GPU kernels in torch.profiler ground truth"
+            return OpCompareOutcome(
+                "pass",
+                "",
+                (f"  [PASS] {op.name} — marker found, no kernels",),
+            )
+        skip_msg = "no GPU kernels in torch.profiler ground truth"
+        return OpCompareOutcome(
+            "skip",
+            skip_msg,
+            (f"  [SKIP] {op.name} — no GPU kernels dispatched",),
+        )
 
     kernel_summary = ", ".join(
-        f"{k[:60]} (x{profiler_kernels.count(k)})"
-        for k in sorted(profiler_kernel_set)[:5]
+        f"{kernel_name[:60]} (x{profiler_kernels.count(kernel_name)})"
+        for kernel_name in sorted(profiler_kernel_set)[:5]
     )
     if len(profiler_kernel_set) > 5:
         kernel_summary += f" ... +{len(profiler_kernel_set) - 5} more"
 
     if marker_found and roctx_kernels:
-        roctx_summary = ", ".join(sorted(roctx_kernels)[:5])
-        print(f"  [PASS] {op.name}")
-        print(f"         profiler: {kernel_summary}")
-        print(f"         roctx: {roctx_summary}")
-        return "pass", ""
+        roctx_kernel_names_preview = sorted(roctx_kernels)[:5]
+        roctx_summary = ", ".join(roctx_kernel_names_preview)
+        return OpCompareOutcome(
+            "pass",
+            "",
+            (
+                f"  [PASS] {op.name}",
+                f"         profiler: {kernel_summary}",
+                f"         roctx: {roctx_summary}",
+            ),
+        )
 
     if marker_found:
-        print(f"  [FAIL] {op.name}")
-        print(f"         profiler: {kernel_summary}")
-        print("         roctx marker found but no correlated kernels")
-        return "fail", ""
+        return OpCompareOutcome(
+            "fail",
+            "",
+            (
+                f"  [FAIL] {op.name}",
+                f"         profiler: {kernel_summary}",
+                "         roctx marker found but no correlated kernels",
+            ),
+        )
 
-    print(f"  [FAIL] {op.name}")
-    print(f"         profiler: {kernel_summary}")
-    print("         roctx marker: NOT FOUND")
-    return "fail", ""
+    return OpCompareOutcome(
+        "fail",
+        "",
+        (
+            f"  [FAIL] {op.name}",
+            f"         profiler: {kernel_summary}",
+            "         roctx marker: NOT FOUND",
+        ),
+    )
+
+
+def print_torch_trace_coverage_session_header(
+    seed: int,
+    sample_budget: int,
+    sampled_operator_count: int,
+    aten_operator_count: int,
+    structural_operator_count: int,
+) -> None:
+    """Print seed / sampling summary lines for the coverage test run."""
+    print(
+        f"\n  Seed: {seed} | {sampled_operator_count} operators"
+        f" selected from {aten_operator_count} CUDA ATen ops"
+        f" + {structural_operator_count} structural"
+        f" (budget={sample_budget})"
+    )
+    print(
+        f"  (reproduce: pytest ... --coverage-seed={seed}"
+        f" --coverage-n={sample_budget} ...)\n"
+    )
+
+
+def run_ground_truth_torch_profiler_subprocess(script_path: str) -> None:
+    """Execute the generated workload script under CPython; fail on error or timeout."""
+    try:
+        completed = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            "Ground truth script timed out after 120s\n"
+            f"stdout: {exc.stdout}\n"
+            f"stderr: {exc.stderr}"
+        )
+    assert completed.returncode == 0, (
+        f"Ground truth script failed:\nstderr: {completed.stderr}"
+    )
 
 
 # -- Main test --
@@ -847,8 +872,6 @@ def test_random_operator_kernel_coverage(
     Fails with ``assert not failures`` listing any op missing expected ROCTX
     correlation when kernels were present in ground truth.
     """
-    import random
-
     seed, sample_budget = torch_trace_coverage_sampling
     rng = random.Random(seed)
 
@@ -860,15 +883,12 @@ def test_random_operator_kernel_coverage(
     )
     sampled = rng.sample(aten_ops, n_aten) + structural_ops
 
-    print(
-        f"\n  Seed: {seed} | {len(sampled)} operators"
-        f" selected from {len(aten_ops)} CUDA ATen ops"
-        f" + {len(structural_ops)} structural"
-        f" (budget={sample_budget})"
-    )
-    print(
-        f"  (reproduce: pytest ... --coverage-seed={seed}"
-        f" --coverage-n={sample_budget} ...)\n"
+    print_torch_trace_coverage_session_header(
+        seed,
+        sample_budget,
+        len(sampled),
+        len(aten_ops),
+        len(structural_ops),
     )
 
     gt_work_dir = test_utils.get_output_dir(
@@ -894,22 +914,7 @@ def test_random_operator_kernel_coverage(
         )
 
         # Run 1: torch.profiler ground truth
-        try:
-            run1 = subprocess.run(
-                [sys.executable, script_path],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-        except subprocess.TimeoutExpired as exc:
-            pytest.fail(
-                "Ground truth script timed out after 120s\n"
-                f"stdout: {exc.stdout}\n"
-                f"stderr: {exc.stderr}"
-            )
-        assert run1.returncode == 0, (
-            f"Ground truth script failed:\nstderr: {run1.stderr}"
-        )
+        run_ground_truth_torch_profiler_subprocess(script_path)
         with open(ground_truth_path) as f:
             ground_truth = json.load(f)
 
@@ -935,19 +940,21 @@ def test_random_operator_kernel_coverage(
         passed = skipped = 0
         skipped_detail: List[Tuple[str, str]] = []
         for op in sampled:
-            result, skip_reason = compare_single_op(
+            outcome = compare_single_op(
                 op,
                 ground_truth,
                 roctx_marker_names,
                 roctx_kernels_map,
             )
-            if result == "pass":
+            for line in outcome.log_lines:
+                print(line)
+            if outcome.status == "pass":
                 passed += 1
-            elif result == "fail":
+            elif outcome.status == "fail":
                 failures.append(op.name)
             else:
                 skipped += 1
-                skipped_detail.append((op.name, skip_reason))
+                skipped_detail.append((op.name, outcome.skip_reason))
 
         print(
             f"\n  {len(sampled)} operators tested: "
@@ -977,3 +984,121 @@ def test_random_operator_kernel_coverage(
             COVERAGE_TEST_CONFIG["cleanup"],
             gt_work_dir,
         )
+
+
+# -- ROCTX marker CSV parsing (helpers for :func:`parse_roctx_markers`) --
+
+
+def _with_correlation_id_standard_name(marker_df: pd.DataFrame) -> pd.DataFrame:
+    if "Correlation_Id" not in marker_df.columns:
+        return marker_df
+    return marker_df.rename(columns={"Correlation_Id": "Correlation_ID"})
+
+
+def _leaf_from_function_cell(func: object) -> str | None:
+    if not isinstance(func, str):
+        return None
+    op_path = func.split(":#")[0] if ":#" in func else func
+    if "/" in op_path:
+        leaf = op_path.rsplit("/", 1)[-1].strip()
+    else:
+        leaf = op_path.strip()
+    return leaf or None
+
+
+def _collect_marker_ops_and_correlations(
+    marker_df: pd.DataFrame,
+) -> tuple[set[str], dict[str, set]]:
+    marker_ops: set[str] = set()
+    op_to_corr: dict[str, set] = {}
+    func_col = marker_df.get("Function")
+    corr_col = marker_df.get("Correlation_ID")
+    if func_col is None:
+        return marker_ops, op_to_corr
+
+    for row_index, function_cell in enumerate(func_col):
+        leaf = _leaf_from_function_cell(function_cell)
+        if leaf is None:
+            continue
+        marker_ops.add(leaf)
+        if corr_col is None:
+            continue
+        correlation_id = corr_col.iloc[row_index]
+        if not pd.notna(correlation_id):
+            continue
+        op_to_corr.setdefault(leaf, set()).add(correlation_id)
+
+    return marker_ops, op_to_corr
+
+
+def _merge_kernel_names_for_correlation_ids(
+    correlation_ids: set,
+    correlation_id_to_kernels: dict,
+) -> set[str]:
+    kernels: set[str] = set()
+    for correlation_id in correlation_ids:
+        kernels |= correlation_id_to_kernels.get(correlation_id, set())
+    return kernels
+
+
+def _kernels_by_marker_leaf(
+    op_to_corr: dict[str, set],
+    counter_files: list[Path],
+) -> dict[str, set[str]]:
+    counter_df = pd.concat(
+        [pd.read_csv(f) for f in counter_files],
+        ignore_index=True,
+    )
+    counter_df = _with_correlation_id_standard_name(counter_df)
+    if "Kernel_Name" not in counter_df.columns:
+        return {}
+
+    all_corr_ids: set = set()
+    for ids in op_to_corr.values():
+        all_corr_ids |= ids
+
+    matched = counter_df[counter_df["Correlation_ID"].isin(all_corr_ids)]
+    correlation_id_to_kernels: dict = {}
+    for correlation_id, kernel_name in zip(
+        matched["Correlation_ID"],
+        matched["Kernel_Name"],
+    ):
+        if not pd.notna(kernel_name):
+            continue
+        correlation_id_to_kernels.setdefault(correlation_id, set()).add(kernel_name)
+
+    op_to_kernels: dict[str, set[str]] = {}
+    for leaf, correlation_ids_for_leaf in op_to_corr.items():
+        kernels = _merge_kernel_names_for_correlation_ids(
+            correlation_ids_for_leaf,
+            correlation_id_to_kernels,
+        )
+        if kernels:
+            op_to_kernels[leaf] = kernels
+    return op_to_kernels
+
+
+class OpCompareOutcome(NamedTuple):
+    """Result of :func:`compare_single_op` (status + optional log lines for stdout)."""
+
+    status: str
+    skip_reason: str
+    log_lines: Tuple[str, ...]
+
+
+class OpEntry(NamedTuple):
+    """One row in the coverage sample: what to call and how it was discovered.
+
+    Attributes:
+        name: Human-readable op id, e.g. ``torch.ops.aten.mm`` or
+            ``nn.Module.__call__`` for structural patterns.
+        category: ``aten`` for ``torch.ops`` entries, ``structural`` for
+            synthetic workload patterns (module forward, optimizer step, etc.).
+        fn: For ATen ops, the ``OpOverloadPacket``; ``None`` for structural.
+        schema: PyTorch ``FunctionSchema`` for the chosen overload, or ``None``.
+    """
+
+    name: str
+    category: str
+    fn: object
+    schema: object
