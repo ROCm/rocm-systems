@@ -1139,13 +1139,11 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     return ctx;
   }
 
-  ctx.selected_counters = NetCounterParseCounterList();
   ctx.nGpus = args->nGpus;
   ctx.nranks = args->nProcs * args->nThreads * args->nGpus;
   ctx.base_rank = args->proc * args->nThreads * args->nGpus;
 
-  // Primary: NCCL_IB_HCA → resolve ethernet NICs.
-  // Fallback: discover ethernet NICs → resolve IB device names.
+  // Discover devices: NCCL_IB_HCA (primary) or auto-discover NICs (fallback)
   std::vector<std::string> ib_hca = NetCounterParseIbHcaList();
   if (!ib_hca.empty()) {
     for (const auto& ib : ib_hca) {
@@ -1155,18 +1153,21 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
   } else {
     std::vector<std::string> all_nics;
     NetCounterGetNetworkInterfaces(all_nics);
-    // Get all NICs -> for each, check if it has an IB device -> only keep NICs that do
     for (const auto& nic : all_nics) {
       std::string ib = NetCounterFindIbDeviceForNic(nic);
-      // it skips non-RDMA interfaces. Only NICs that actually have
-      // an associated InfiniBand device are added
       if (ib.empty()) continue;
       ctx.nic_names.push_back(nic);
       ctx.ib_names.push_back(ib);
     }
-    // If no IB devices are found, use eth0 as a fallback.
     if (ctx.nic_names.empty()) { ctx.nic_names.push_back("eth0"); ctx.ib_names.push_back(""); }
   }
+
+  // Detect NIC type from the first IB device and select the matching counter table
+  NicType nic_type = NIC_UNKNOWN;
+  for (size_t i = 0; i < ctx.ib_names.size() && nic_type == NIC_UNKNOWN; i++) {
+    nic_type = NetCounterDetectNicType(ctx.ib_names[i]);
+  }
+  ctx.selected_counters = NetCounterGetCounterList(nic_type);
 
   size_t ndevs = ctx.nic_names.size();
   ctx.snapshots_before.resize(ndevs);
@@ -1175,9 +1176,6 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
         NetCounterCollectSnapshot(ctx.nic_names[i], ctx.ib_names[i],
                                   ctx.selected_counters);
   }
-
-  ctx.selected_counters =
-      NetCounterFilterByNicType(ctx.selected_counters, ctx.snapshots_before);
 
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname));
@@ -1195,9 +1193,7 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
-  bool mixed_nics = false;
-  NicType detected_nic = DetectNicTypeFromSnapshots(ctx.snapshots_before, mixed_nics);
-  printf("# NIC type: %s\n", mixed_nics ? "MIXED" : NicTypeStr(detected_nic));
+  printf("# NIC type: %s\n", NicTypeStr(nic_type));
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");

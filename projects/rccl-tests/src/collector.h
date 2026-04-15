@@ -14,12 +14,10 @@
  *
  * Environment variables:
  *   RCCL_TESTS_NET_COUNTER_ENABLE=1   – enable collection
- *   RCCL_TESTS_NIC_COUNTER_LIST=a,b   – comma-separated counter names
- *                                        (default: all known counters)
  *   NCCL_IB_HCA=ib0,ib1,...           – IB device list (primary)
  *   RCCL_TESTS_NET_COUNTER_NIC_PREFIX – NIC prefix filter for auto-discovery
  *
- * Counter sources (looked up automatically from registry):
+ * Counter sources (looked up automatically per NIC type):
  *   COUNTER_SRC_ETHTOOL  – ethtool -S <ethernet device>
  *   COUNTER_SRC_IB_HW    – /sys/class/infiniband/<dev>/ports/1/hw_counters/
  *   COUNTER_SRC_DEBUGFS  – /sys/kernel/debug/bnxt_re/<dev>/info
@@ -42,9 +40,9 @@ enum CounterSource {
 };
 
 struct CounterDescriptor {
-  std::string name;
+  std::string name;      // actual hardware key name (unique per NIC type)
   CounterSource source;
-  bool is_prefix;   // true  → prefix match (expands to name0..name7)
+  bool is_prefix;        // true -> prefix match (expands to name0..name7)
 };
 
 typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC } NicType;
@@ -83,8 +81,8 @@ const char* NicTypeStr(NicType t);
 // Check RCCL_TESTS_NET_COUNTER_ENABLE=1
 bool NetCounterIsEnabled();
 
-// Parse RCCL_TESTS_NIC_COUNTER_LIST (or return full registry)
-std::vector<CounterDescriptor> NetCounterParseCounterList();
+// Return counter list for the given NIC type
+std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type);
 
 // Parse NCCL_IB_HCA into IB device names (empty if unset)
 std::vector<std::string> NetCounterParseIbHcaList();
@@ -112,11 +110,6 @@ uint64_t NetCounterComputeDelta(
     const NetworkCounterSnapshot& before,
     const NetworkCounterSnapshot& after,
     const CounterDescriptor& desc);
-
-// Filter counter list to only those valid for the NIC types in snapshots
-std::vector<CounterDescriptor> NetCounterFilterByNicType(
-    const std::vector<CounterDescriptor>& selected,
-    const std::vector<NetworkCounterSnapshot>& snapshots);
 
 // Print one table per node to stdout
 void NetCounterPrintTable(
