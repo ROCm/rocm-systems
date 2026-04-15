@@ -1,0 +1,2 @@
+# Downloaded AITER .co kernel binaries (use fetch_aiter_kernels.py to populate)
+*.co
