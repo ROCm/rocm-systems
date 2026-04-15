@@ -112,21 +112,21 @@ public:
 
     void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                            rocprofiler_counter_config_id_t*             config,
-                           void*                                        callback_data_args);
+                           void*                                        callback_data_args) override;
 
     void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                          rocprofiler_counter_record_t*                record_data,
                          size_t                                       record_count,
-                         void*                                        callback_data_args);
+                         void*                                        callback_data_args) override;
 
-    void tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data);
+    void tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data) override;
 
 private:
-    bool is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
+    static bool is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration);
     void create_counter_collection_profile(
         tool_data_t*                                                                tool,
         rocprofiler_agent_id_t                                                      agent_id,
-        std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache);
+        std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache) const;
 
     std::shared_ptr<SdkWrapper> m_sdk_wrapper;
 };

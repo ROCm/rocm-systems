@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
+#include "test_rocprofiler_compute_tool.h"
+
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
-#include "test_rocprofiler_compute_tool.h"
 
 #include <gtest/gtest.h>
 
@@ -207,6 +208,8 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
     EXPECT_EQ(m_counters_writer->get_write_counters_args()[0].kernel_id, std::vector{kernel_id0});
 }
 
+//////////////////////////////////////////////////////////////////////////
+/// TestRocprofilerComputeTool
 void TestRocprofilerComputeTool::SetUp()
 {
     m_input_parameters = std::make_shared<MockInputParameters>();
@@ -220,15 +223,12 @@ void TestRocprofilerComputeTool::SetUp()
     test_knobs::set_csv_writer(m_counters_writer);
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// TestRocprofilerComputeTool
 void TestRocprofilerComputeTool::TearDown()
 {
     test_knobs::reset_cfg();
 }
 
-tool_data_t* TestRocprofilerComputeTool::get_tool_data(
-    const rocprofiler_tool_configure_result_t* cfg)
+tool_data_t* TestRocprofilerComputeTool::get_tool_data(const rocprofiler_tool_configure_result_t* cfg)
 {
     return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
 }
@@ -243,12 +243,11 @@ void TestRocprofilerComputeTool::compare_counter_config_ids(const std::vector<ui
     }
 }
 
-counter_info_record_t TestRocprofilerComputeTool::create_counter_record(
-    uint64_t counter_id,
-    uint64_t kernel_id)
+counter_info_record_t TestRocprofilerComputeTool::create_counter_record(uint64_t counter_id,
+                                                                        uint64_t kernel_id)
 {
     counter_info_record_t record = {};
-    record.counter_id                                      = counter_id;
-    record.kernel_id                                       = kernel_id;
+    record.counter_id            = counter_id;
+    record.kernel_id             = kernel_id;
     return record;
 }

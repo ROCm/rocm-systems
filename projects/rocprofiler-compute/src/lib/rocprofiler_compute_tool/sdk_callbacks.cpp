@@ -18,7 +18,144 @@ SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrappe
     }
 }
 
-bool SdkCallbacksImpl::is_targetted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
+
+void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                         rocprofiler_counter_config_id_t*             config,
+                                         void* callback_data_args)
+{
+    auto kernel_id = dispatch_data.dispatch_info.kernel_id;
+    auto agent_id  = dispatch_data.dispatch_info.agent_id.handle;
+
+    // create static map of kernel_id to number of dispatches (zero indexed) and
+    // update it
+    static std::unordered_map<uint64_t, uint64_t> kernel_id_iteration_map{};
+    static std::shared_mutex                      kernel_id_iteration_mutex;
+    uint64_t                                      kernel_iteration = 0;
+    {
+        // Acquire unique lock for update and ensure map is updated correctly
+        std::unique_lock<std::shared_mutex> lock(kernel_id_iteration_mutex);
+        auto&                               iter = kernel_id_iteration_map[kernel_id];
+        iter += 1;
+        kernel_iteration = iter;
+    }
+
+    // static cast tool
+    auto*        tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data_args);
+    tool_data_t* tool;
+    {
+        std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
+        tool = tool_data_ptr->get();
+    }
+
+    // kernel filtering
+    if (!is_targeted_dispatch(tool, kernel_id, kernel_iteration))
+    {
+        return;
+    }
+
+    static std::shared_mutex m_mutex = {};
+    static std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> profile_cache = {};
+    static std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> iteration_multiplexing_data = {};
+
+    // check cache for existing profile for this agent
+    auto search_profile_cache = [&]()
+    {
+        if (auto pos = profile_cache.find(agent_id); pos != profile_cache.end())
+            return true;
+        return false;
+    };
+
+    auto set_config_from_cache = [&]()
+    {
+        if (tool->iteration_multiplexing_mode != iteration_multiplexing_mode_t::DISABLED &&
+            iteration_multiplexing_data.find(agent_id) == iteration_multiplexing_data.end())
+        {
+            // First time setting up iteration multiplexing data for this agent
+            iteration_multiplexing_data[agent_id] = iteration_multiplexing_dispatch_record_t{};
+            if (tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::SIMPLE)
+            {
+                iteration_multiplexing_data[agent_id].config = -1;  // so first increment sets to 0
+            }
+        }
+
+        kernel_dispatch_info_t dispatch_info{dispatch_data.dispatch_info.kernel_id,
+                                             dispatch_data.dispatch_info.queue_id.handle,
+                                             dispatch_data.dispatch_info.workgroup_size,
+                                             dispatch_data.dispatch_info.grid_size,
+                                             dispatch_data.dispatch_info.group_segment_size};
+        switch (tool->iteration_multiplexing_mode)
+        {
+        case iteration_multiplexing_mode_t::DISABLED:
+            if (search_profile_cache())
+            {
+                *config = profile_cache[agent_id][0];
+            }
+            return;
+
+        case iteration_multiplexing_mode_t::SIMPLE:
+            iteration_multiplexing_data[agent_id].config =
+                (iteration_multiplexing_data[agent_id].config + 1) % profile_cache[agent_id].size();
+            *config = profile_cache[agent_id][iteration_multiplexing_data[agent_id].config];
+            return;
+
+        case iteration_multiplexing_mode_t::KERNEL:
+            if (iteration_multiplexing_data[agent_id].kernel_config.find(kernel_id) ==
+                iteration_multiplexing_data[agent_id].kernel_config.end())
+            {
+                // First time seeing this kernel_id for this agent
+                iteration_multiplexing_data[agent_id].kernel_config[kernel_id] = -1;  // so first increment sets to 0
+            }
+            iteration_multiplexing_data[agent_id].kernel_config[kernel_id] =
+                (iteration_multiplexing_data[agent_id].kernel_config[kernel_id] + 1) %
+                profile_cache[agent_id].size();
+            *config = profile_cache[agent_id][iteration_multiplexing_data[agent_id].kernel_config[kernel_id]];
+            return;
+
+        case iteration_multiplexing_mode_t::LAUNCH:
+            if (iteration_multiplexing_data[agent_id].dispatch_config.find(dispatch_info) ==
+                iteration_multiplexing_data[agent_id].dispatch_config.end())
+            {
+                // First time seeing this dispatch_info for this agent
+                iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info] =
+                    -1;  // so first increment sets to 0
+            }
+            iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info] =
+                (iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info] + 1) %
+                profile_cache[agent_id].size();
+            *config = profile_cache[agent_id][iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info]];
+            return;
+
+        default:
+            throw std::runtime_error("[" + std::string(__FUNCTION__) +
+                                     "] Unsupported iteration multiplexing mode");
+        }
+    };
+
+    {
+        auto rlock = std::shared_lock{m_mutex};
+        if ((tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::DISABLED) &&
+            search_profile_cache())
+        {
+            *config = profile_cache[agent_id][0];
+            return;
+        }
+    }
+
+    // get write lock to update cache
+    auto wlock = std::unique_lock{m_mutex};
+    if (search_profile_cache())
+    {
+        set_config_from_cache();
+        return;
+    }
+
+    create_counter_collection_profile(tool, dispatch_data.dispatch_info.agent_id, profile_cache);
+
+    // Return the profile to collect those counters for this dispatch
+    set_config_from_cache();
+}
+
+bool SdkCallbacksImpl::is_targeted_dispatch(const tool_data_t* tool, uint64_t kernel_id, uint64_t kernel_iteration)
 {
     if (!tool->target_kernel_ids.empty() && !tool->target_kernel_ids.count(kernel_id))
         return false;
@@ -37,7 +174,7 @@ bool SdkCallbacksImpl::is_targetted_dispatch(const tool_data_t* tool, uint64_t k
 void SdkCallbacksImpl::create_counter_collection_profile(
     tool_data_t*                                                                tool,
     rocprofiler_agent_id_t                                                      agent_id,
-    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache)
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>>& profile_cache) const
 {
     // get counters to collect
     std::set<std::set<std::string>> counters_to_collect;
@@ -141,143 +278,10 @@ void SdkCallbacksImpl::create_counter_collection_profile(
     }
 }
 
-void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                                     rocprofiler_counter_config_id_t*             config,
-                                     void* callback_data_args)
-{
-    auto kernel_id = dispatch_data.dispatch_info.kernel_id;
-    auto agent_id  = dispatch_data.dispatch_info.agent_id.handle;
-
-    // create static map of kernel_id to number of dispatches (zero indexed) and
-    // update it
-    static std::unordered_map<uint64_t, uint64_t> kernel_id_iteration_map{};
-    static std::shared_mutex                      kernel_id_iteration_mutex;
-    uint64_t                                      kernel_iteration = 0;
-    {
-        // Acquire unique lock for update and ensure map is updated correctly
-        std::unique_lock<std::shared_mutex> lock(kernel_id_iteration_mutex);
-        auto&                               iter = kernel_id_iteration_map[kernel_id];
-        iter += 1;
-        kernel_iteration = iter;
-    }
-
-    // static cast tool
-    auto*        tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data_args);
-    tool_data_t* tool;
-    {
-        std::lock_guard<std::mutex> lock(tool_data_ptr->get()->mut);
-        tool = tool_data_ptr->get();
-    }
-
-    // kernel filtering
-    if (!is_targetted_dispatch(tool, kernel_id, kernel_iteration))
-    {
-        return;
-    }
-
-    static std::shared_mutex m_mutex = {};
-    static std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> profile_cache = {};
-    static std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> iteration_multiplexing_data = {};
-
-    // check cache for existing profile for this agent
-    auto search_profile_cache = [&]()
-    {
-        if (auto pos = profile_cache.find(agent_id); pos != profile_cache.end())
-            return true;
-        return false;
-    };
-
-    auto set_config_from_cache = [&]()
-    {
-        if (tool->iteration_multiplexing_mode != iteration_multiplexing_mode_t::DISABLED &&
-            iteration_multiplexing_data.find(agent_id) == iteration_multiplexing_data.end())
-        {
-            // First time setting up iteration multiplexing data for this agent
-            iteration_multiplexing_data[agent_id] = iteration_multiplexing_dispatch_record_t{};
-            if (tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::SIMPLE)
-            {
-                iteration_multiplexing_data[agent_id].config = -1;  // so first increment sets to 0
-            }
-        }
-
-        kernel_dispatch_info_t dispatch_info{dispatch_data.dispatch_info.kernel_id,
-                                             dispatch_data.dispatch_info.queue_id.handle,
-                                             dispatch_data.dispatch_info.workgroup_size,
-                                             dispatch_data.dispatch_info.grid_size,
-                                             dispatch_data.dispatch_info.group_segment_size};
-        switch (tool->iteration_multiplexing_mode)
-        {
-        case iteration_multiplexing_mode_t::DISABLED:
-            *config = profile_cache[agent_id][0];
-            return;
-
-        case iteration_multiplexing_mode_t::SIMPLE:
-            iteration_multiplexing_data[agent_id].config =
-                (iteration_multiplexing_data[agent_id].config + 1) % profile_cache[agent_id].size();
-            *config = profile_cache[agent_id][iteration_multiplexing_data[agent_id].config];
-            return;
-
-        case iteration_multiplexing_mode_t::KERNEL:
-            if (iteration_multiplexing_data[agent_id].kernel_config.find(kernel_id) ==
-                iteration_multiplexing_data[agent_id].kernel_config.end())
-            {
-                // First time seeing this kernel_id for this agent
-                iteration_multiplexing_data[agent_id].kernel_config[kernel_id] = -1;  // so first increment sets to 0
-            }
-            iteration_multiplexing_data[agent_id].kernel_config[kernel_id] =
-                (iteration_multiplexing_data[agent_id].kernel_config[kernel_id] + 1) %
-                profile_cache[agent_id].size();
-            *config = profile_cache[agent_id][iteration_multiplexing_data[agent_id].kernel_config[kernel_id]];
-            return;
-
-        case iteration_multiplexing_mode_t::LAUNCH:
-            if (iteration_multiplexing_data[agent_id].dispatch_config.find(dispatch_info) ==
-                iteration_multiplexing_data[agent_id].dispatch_config.end())
-            {
-                // First time seeing this dispatch_info for this agent
-                iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info] =
-                    -1;  // so first increment sets to 0
-            }
-            iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info] =
-                (iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info] + 1) %
-                profile_cache[agent_id].size();
-            *config = profile_cache[agent_id][iteration_multiplexing_data[agent_id].dispatch_config[dispatch_info]];
-            return;
-
-        default:
-            throw std::runtime_error("[" + std::string(__FUNCTION__) +
-                                     "] Unsupported iteration multiplexing mode");
-        }
-    };
-
-    {
-        auto rlock = std::shared_lock{m_mutex};
-        if ((tool->iteration_multiplexing_mode == iteration_multiplexing_mode_t::DISABLED) &&
-            search_profile_cache())
-        {
-            *config = profile_cache[agent_id][0];
-            return;
-        }
-    }
-
-    // get write lock to update cache
-    auto wlock = std::unique_lock{m_mutex};
-    if (search_profile_cache())
-    {
-        set_config_from_cache();
-        return;
-    }
-
-    create_counter_collection_profile(tool, dispatch_data.dispatch_info.agent_id, profile_cache);
-
-    // Return the profile to collect those counters for this dispatch
-    set_config_from_cache();
-}
-
 void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                                   rocprofiler_counter_record_t*                record_data,
-                                   size_t                                       record_count,
-                                   void*                                        callback_data_args)
+                                       rocprofiler_counter_record_t*                record_data,
+                                       size_t                                       record_count,
+                                       void* callback_data_args)
 {
     auto*        tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data_args);
     tool_data_t* tool;
@@ -308,7 +312,8 @@ void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_dat
     }
 }
 
-void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* callback_data)
+void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                                             void*                                 callback_data)
 {
     if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
         record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
