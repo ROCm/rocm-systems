@@ -594,6 +594,10 @@ void StatCO::ResizeForDevices(size_t device_count) {
 
 // ================================================================================================
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
+  if (managedVars_.empty()) {
+    return hipSuccess;
+  }
+
   std::scoped_lock lock(sclock_);
   hipError_t err = hipSuccess;
   if (managedVarsDevicePtrInitalized_.find(deviceId) == managedVarsDevicePtrInitalized_.end() ||
