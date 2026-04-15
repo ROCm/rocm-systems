@@ -1573,8 +1573,43 @@ typedef enum hipGraphNodeType {
   hipGraphNodeTypeMemcpyFromSymbol = 12,   ///< MemcpyFromSymbol node
   hipGraphNodeTypeMemcpyToSymbol = 13,     ///< MemcpyToSymbol node
   hipGraphNodeTypeBatchMemOp = 14,         ///< BatchMemOp node
+  hipGraphNodeTypeConditional = 15,        ///< Conditional node (IF/WHILE/SWITCH)
   hipGraphNodeTypeCount
 } hipGraphNodeType;
+
+/**
+ * @brief Type of conditional graph node.
+ */
+typedef enum hipGraphConditionalType {
+  hipGraphCondTypeIf = 0,      ///< Conditional IF: execute body if condition is non-zero
+  hipGraphCondTypeWhile = 1,   ///< Conditional WHILE: loop body while condition is non-zero
+  hipGraphCondTypeSwitch = 2   ///< Conditional SWITCH: select case by condition value
+} hipGraphConditionalType;
+
+/**
+ * @brief Handle for a graph conditional variable (device-accessible).
+ */
+typedef struct hipGraphConditionalHandle_st {
+  uint64_t device_ptr;      ///< Device pointer to the condition value (uint64_t)
+  uint64_t default_value;   ///< Default value to reset to on each graph launch
+} hipGraphConditionalHandle;
+
+/**
+ * @brief Set the value of a graph conditional variable from device code.
+ *
+ * @param [in] handle - Conditional handle obtained from hipGraphConditionalHandleCreate.
+ * @param [in] value  - New value (non-zero = true, 0 = false).
+ *
+ * CUDA equivalent: cudaGraphSetConditional.
+ */
+static __host__ __device__ __inline__ void hipGraphSetConditional(
+    hipGraphConditionalHandle handle, unsigned int value) {
+#if defined(__HIP_DEVICE_COMPILE__)
+  *(volatile unsigned long long*)handle.device_ptr = (unsigned long long)value;
+#else
+  (void)handle; (void)value;
+#endif
+}
 
 typedef void (*hipHostFn_t)(void* userData);
 typedef struct hipHostNodeParams {
@@ -9453,6 +9488,47 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
  */
 hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                 const hipGraphNode_t* pDependencies, size_t numDependencies);
+
+/**
+ * @brief Create a conditional handle for use with conditional graph nodes.
+ *
+ * @param [out] pHandle - Pointer to receive the conditional handle.
+ * @param [in] graph - Graph to which the handle belongs.
+ * @param [in] defaultValue - Default value of the condition variable.
+ * @param [in] flags - Reserved, must be 0.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipGraphConditionalHandleCreate(hipGraphConditionalHandle* pHandle,
+                                           hipGraph_t graph,
+                                           unsigned int defaultValue,
+                                           unsigned int flags);
+
+/**
+ * @brief Add a conditional node to a graph.
+ *
+ * The conditional node evaluates a device-memory condition at runtime and
+ * selects which child graph(s) to execute based on the condition type.
+ *
+ * @param [out] pGraphNode - Pointer to receive the created node.
+ * @param [in] graph - The graph to add the node to.
+ * @param [in] pDependencies - Dependencies of this node.
+ * @param [in] numDependencies - Number of dependencies.
+ * @param [in] handle - Conditional handle to evaluate.
+ * @param [in] type - Type of conditional (IF, WHILE, SWITCH).
+ * @param [in] numConditionalGraphs - Number of conditional child graphs.
+ * @param [in] conditionalGraphs - Array of child graphs for each condition case.
+ * @param [in] flags - Reserved, must be 0.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipGraphAddConditionalNode(hipGraphNode_t* pGraphNode,
+                                      hipGraph_t graph,
+                                      const hipGraphNode_t* pDependencies,
+                                      size_t numDependencies,
+                                      hipGraphConditionalHandle handle,
+                                      hipGraphConditionalType type,
+                                      unsigned int numConditionalGraphs,
+                                      hipGraph_t* conditionalGraphs,
+                                      unsigned int flags);
 
 
 /**

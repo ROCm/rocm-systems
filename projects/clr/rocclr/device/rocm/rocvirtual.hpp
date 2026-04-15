@@ -612,6 +612,12 @@ class VirtualGPU : public device::VirtualDevice {
   bool ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) override;
 
   bool runGraphSchedulerKernel(void* cmd_buffer, uint32_t packet_count) override;
+  bool runGraphBlockIssue(void* exec_state_ptr, uint32_t total_graph_packets = 0) override;
+  bool runGraphWhileLoop(void* exec_state_ptr, uint64_t cond_ptr,
+                         uint32_t body_block_idx) override;
+  bool addBarrierPacket(uint64_t signal_handle) override;
+  void* getGpuQueue() override { return gpu_queue_; }
+  bool upgradeToDeviceMemQueue() override;
 
   // Return pointer to PrintfDbg
   PrintfDbg* printfDbg() const { return printfdbg_; }
@@ -873,6 +879,7 @@ class VirtualGPU : public device::VirtualDevice {
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;                //!< Active queue associated with a vgpu
   bool device_mem_ring_buf_ = false;           //!< Queue ring buffer is in device memory
+  bool device_mem_queue_ = false;              //!< Request ring buffer allocation in device VRAM
   bool use_movdir64b_ = false;                 //!< Use MOVDIR64B for AQL packet writes
   //! Cached hardware doorbell for the active queue (UC MMIO). Non-null only when
   //! DEBUG_CLR_DIRECT_DOORBELL is enabled and the doorbell id query succeeded.

@@ -1569,6 +1569,76 @@ hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   HIP_RETURN(status);
 }
 
+hipError_t hipGraphConditionalHandleCreate(hipGraphConditionalHandle* pHandle,
+                                           hipGraph_t graph,
+                                           unsigned int defaultValue,
+                                           unsigned int flags) {
+  HIP_INIT_API(NONE, pHandle, graph, defaultValue, flags);
+  if (pHandle == nullptr || graph == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Allocate condition variable in coarse-grained device memory (VRAM).
+  // GPU initializes it via graphBlockIssue; host uses hipMemcpy for fallback path.
+  void* dev_ptr = nullptr;
+  hipError_t status = hipMalloc(&dev_ptr, sizeof(uint64_t));
+  if (status != hipSuccess || dev_ptr == nullptr) {
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
+  uint64_t init_val = static_cast<uint64_t>(defaultValue);
+  status = hipMemcpy(dev_ptr, &init_val, sizeof(uint64_t), hipMemcpyHostToDevice);
+  if (status != hipSuccess) {
+    (void)hipFree(dev_ptr);
+    HIP_RETURN(status);
+  }
+
+  pHandle->device_ptr = reinterpret_cast<uint64_t>(dev_ptr);
+  pHandle->default_value = static_cast<uint64_t>(defaultValue);
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphAddConditionalNode(hipGraphNode_t* pGraphNode,
+                                      hipGraph_t graph,
+                                      const hipGraphNode_t* pDependencies,
+                                      size_t numDependencies,
+                                      hipGraphConditionalHandle handle,
+                                      hipGraphConditionalType type,
+                                      unsigned int numConditionalGraphs,
+                                      hipGraph_t* conditionalGraphs,
+                                      unsigned int flags) {
+  HIP_INIT_API(NONE, pGraphNode, graph, pDependencies,
+               numDependencies, handle, type, numConditionalGraphs, conditionalGraphs, flags);
+  if (pGraphNode == nullptr || graph == nullptr || handle.device_ptr == 0 ||
+      numConditionalGraphs == 0 || conditionalGraphs == nullptr ||
+      (numDependencies > 0 && pDependencies == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Validate conditional type requirements
+  if (type == hipGraphCondTypeIf && numConditionalGraphs != 2) {
+    HIP_RETURN(hipErrorInvalidValue);  // IF needs exactly 2 (true + false)
+  }
+  if (type == hipGraphCondTypeWhile && numConditionalGraphs != 1) {
+    HIP_RETURN(hipErrorInvalidValue);  // WHILE needs exactly 1 (loop body)
+  }
+
+  std::vector<hip::Graph*> child_graphs;
+  child_graphs.reserve(numConditionalGraphs);
+  for (unsigned int i = 0; i < numConditionalGraphs; ++i) {
+    if (conditionalGraphs[i] == nullptr) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    child_graphs.push_back(reinterpret_cast<hip::Graph*>(conditionalGraphs[i]));
+  }
+
+  hip::GraphNode* node = new hip::GraphConditionalNode(handle, type, child_graphs);
+  hipError_t status = ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
+                                       reinterpret_cast<hip::GraphNode* const*>(pDependencies),
+                                       numDependencies, false);
+  *pGraphNode = reinterpret_cast<hipGraphNode_t>(node);
+  HIP_RETURN(status);
+}
+
 hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                      const hipGraphNode_t* pDependencies, size_t numDependencies,
                                      hipGraph_t childGraph) {
@@ -1724,6 +1794,7 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
 hipError_t ihipGraphLaunch(hip::GraphExecBase* graphExec, hipStream_t stream) {
   getStreamPerThread(stream);
   hip::Stream* launch_stream = hip::getStream(stream);
+  
   return graphExec->Run(launch_stream);
 }
 

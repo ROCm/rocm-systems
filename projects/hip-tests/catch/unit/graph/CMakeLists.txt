@@ -14,6 +14,7 @@ set(TEST_SRC
   hipGraphAddEventWaitNode.cc
   hipGraph.cc
   hipSimpleGraphWithKernel.cc
+  hipGraphConditionalNode.cc
   hipGraphAddMemcpyNode.cc
   hipGraphClone.cc
   hipGraphInstantiateWithFlags.cc

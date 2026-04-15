@@ -507,7 +507,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemDiscardAndPrefetchBatchAsync = 482,
   HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync = 483,
   HIP_API_ID_hipMemGetDefaultMemPool = 484,
-  HIP_API_ID_LAST = 484,
+  HIP_API_ID_hipGraphAddConditionalNode = 485,
+  HIP_API_ID_hipGraphConditionalHandleCreate = 486,
+  HIP_API_ID_LAST = 486,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -683,6 +685,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGetSymbolSize: return "hipGetSymbolSize";
     case HIP_API_ID_hipGraphAddBatchMemOpNode: return "hipGraphAddBatchMemOpNode";
     case HIP_API_ID_hipGraphAddChildGraphNode: return "hipGraphAddChildGraphNode";
+    case HIP_API_ID_hipGraphAddConditionalNode: return "hipGraphAddConditionalNode";
     case HIP_API_ID_hipGraphAddDependencies: return "hipGraphAddDependencies";
     case HIP_API_ID_hipGraphAddEmptyNode: return "hipGraphAddEmptyNode";
     case HIP_API_ID_hipGraphAddEventRecordNode: return "hipGraphAddEventRecordNode";
@@ -703,6 +706,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphBatchMemOpNodeSetParams: return "hipGraphBatchMemOpNodeSetParams";
     case HIP_API_ID_hipGraphChildGraphNodeGetGraph: return "hipGraphChildGraphNodeGetGraph";
     case HIP_API_ID_hipGraphClone: return "hipGraphClone";
+    case HIP_API_ID_hipGraphConditionalHandleCreate: return "hipGraphConditionalHandleCreate";
     case HIP_API_ID_hipGraphCreate: return "hipGraphCreate";
     case HIP_API_ID_hipGraphDebugDotPrint: return "hipGraphDebugDotPrint";
     case HIP_API_ID_hipGraphDestroy: return "hipGraphDestroy";
@@ -1161,6 +1165,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGetSymbolSize", name) == 0) return HIP_API_ID_hipGetSymbolSize;
   if (strcmp("hipGraphAddBatchMemOpNode", name) == 0) return HIP_API_ID_hipGraphAddBatchMemOpNode;
   if (strcmp("hipGraphAddChildGraphNode", name) == 0) return HIP_API_ID_hipGraphAddChildGraphNode;
+  if (strcmp("hipGraphAddConditionalNode", name) == 0) return HIP_API_ID_hipGraphAddConditionalNode;
   if (strcmp("hipGraphAddDependencies", name) == 0) return HIP_API_ID_hipGraphAddDependencies;
   if (strcmp("hipGraphAddEmptyNode", name) == 0) return HIP_API_ID_hipGraphAddEmptyNode;
   if (strcmp("hipGraphAddEventRecordNode", name) == 0) return HIP_API_ID_hipGraphAddEventRecordNode;
@@ -1181,6 +1186,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphBatchMemOpNodeSetParams", name) == 0) return HIP_API_ID_hipGraphBatchMemOpNodeSetParams;
   if (strcmp("hipGraphChildGraphNodeGetGraph", name) == 0) return HIP_API_ID_hipGraphChildGraphNodeGetGraph;
   if (strcmp("hipGraphClone", name) == 0) return HIP_API_ID_hipGraphClone;
+  if (strcmp("hipGraphConditionalHandleCreate", name) == 0) return HIP_API_ID_hipGraphConditionalHandleCreate;
   if (strcmp("hipGraphCreate", name) == 0) return HIP_API_ID_hipGraphCreate;
   if (strcmp("hipGraphDebugDotPrint", name) == 0) return HIP_API_ID_hipGraphDebugDotPrint;
   if (strcmp("hipGraphDestroy", name) == 0) return HIP_API_ID_hipGraphDestroy;
@@ -2227,6 +2233,20 @@ typedef struct hip_api_data_s {
       hipGraph_t childGraph;
     } hipGraphAddChildGraphNode;
     struct {
+      hipGraphNode_t* pGraphNode;
+      hipGraphNode_t pGraphNode__val;
+      hipGraph_t graph;
+      const hipGraphNode_t* pDependencies;
+      hipGraphNode_t pDependencies__val;
+      size_t numDependencies;
+      hipGraphConditionalHandle handle;
+      hipGraphConditionalType type;
+      unsigned int numConditionalGraphs;
+      hipGraph_t* conditionalGraphs;
+      hipGraph_t conditionalGraphs__val;
+      unsigned int flags;
+    } hipGraphAddConditionalNode;
+    struct {
       hipGraph_t graph;
       const hipGraphNode_t* from;
       hipGraphNode_t from__val;
@@ -2407,6 +2427,13 @@ typedef struct hip_api_data_s {
       hipGraph_t pGraphClone__val;
       hipGraph_t originalGraph;
     } hipGraphClone;
+    struct {
+      hipGraphConditionalHandle* pHandle;
+      hipGraphConditionalHandle pHandle__val;
+      hipGraph_t graph;
+      unsigned int defaultValue;
+      unsigned int flags;
+    } hipGraphConditionalHandleCreate;
     struct {
       hipGraph_t* pGraph;
       hipGraph_t pGraph__val;
@@ -5143,6 +5170,18 @@ typedef struct hip_api_data_s {
   cb_data.args.hipGraphAddChildGraphNode.numDependencies = (size_t)numDependencies; \
   cb_data.args.hipGraphAddChildGraphNode.childGraph = (hipGraph_t)childGraph; \
 };
+// hipGraphAddConditionalNode[('hipGraphNode_t*', 'pGraphNode'), ('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'pDependencies'), ('size_t', 'numDependencies'), ('hipGraphConditionalHandle', 'handle'), ('hipGraphConditionalType', 'type'), ('unsigned int', 'numConditionalGraphs'), ('hipGraph_t*', 'conditionalGraphs'), ('unsigned int', 'flags')]
+#define INIT_hipGraphAddConditionalNode_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphAddConditionalNode.pGraphNode = (hipGraphNode_t*)pGraphNode; \
+  cb_data.args.hipGraphAddConditionalNode.graph = (hipGraph_t)graph; \
+  cb_data.args.hipGraphAddConditionalNode.pDependencies = (const hipGraphNode_t*)pDependencies; \
+  cb_data.args.hipGraphAddConditionalNode.numDependencies = (size_t)numDependencies; \
+  cb_data.args.hipGraphAddConditionalNode.handle = (hipGraphConditionalHandle)handle; \
+  cb_data.args.hipGraphAddConditionalNode.type = (hipGraphConditionalType)type; \
+  cb_data.args.hipGraphAddConditionalNode.numConditionalGraphs = (unsigned int)numConditionalGraphs; \
+  cb_data.args.hipGraphAddConditionalNode.conditionalGraphs = (hipGraph_t*)conditionalGraphs; \
+  cb_data.args.hipGraphAddConditionalNode.flags = (unsigned int)flags; \
+};
 // hipGraphAddDependencies[('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'from'), ('const hipGraphNode_t*', 'to'), ('size_t', 'numDependencies')]
 #define INIT_hipGraphAddDependencies_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphAddDependencies.graph = (hipGraph_t)graph; \
@@ -5299,6 +5338,13 @@ typedef struct hip_api_data_s {
 #define INIT_hipGraphClone_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphClone.pGraphClone = (hipGraph_t*)pGraphClone; \
   cb_data.args.hipGraphClone.originalGraph = (hipGraph_t)originalGraph; \
+};
+// hipGraphConditionalHandleCreate[('hipGraphConditionalHandle*', 'pHandle'), ('hipGraph_t', 'graph'), ('unsigned int', 'defaultValue'), ('unsigned int', 'flags')]
+#define INIT_hipGraphConditionalHandleCreate_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphConditionalHandleCreate.pHandle = (hipGraphConditionalHandle*)pHandle; \
+  cb_data.args.hipGraphConditionalHandleCreate.graph = (hipGraph_t)graph; \
+  cb_data.args.hipGraphConditionalHandleCreate.defaultValue = (unsigned int)defaultValue; \
+  cb_data.args.hipGraphConditionalHandleCreate.flags = (unsigned int)flags; \
 };
 // hipGraphCreate[('hipGraph_t*', 'pGraph'), ('unsigned int', 'flags')]
 #define INIT_hipGraphCreate_CB_ARGS_DATA(cb_data) { \
@@ -7907,6 +7953,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipGraphAddChildGraphNode.pGraphNode) data->args.hipGraphAddChildGraphNode.pGraphNode__val = *(data->args.hipGraphAddChildGraphNode.pGraphNode);
       if (data->args.hipGraphAddChildGraphNode.pDependencies) data->args.hipGraphAddChildGraphNode.pDependencies__val = *(data->args.hipGraphAddChildGraphNode.pDependencies);
       break;
+// hipGraphAddConditionalNode[('hipGraphNode_t*', 'pGraphNode'), ('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'pDependencies'), ('size_t', 'numDependencies'), ('hipGraphConditionalHandle', 'handle'), ('hipGraphConditionalType', 'type'), ('unsigned int', 'numConditionalGraphs'), ('hipGraph_t*', 'conditionalGraphs'), ('unsigned int', 'flags')]
+    case HIP_API_ID_hipGraphAddConditionalNode:
+      if (data->args.hipGraphAddConditionalNode.pGraphNode) data->args.hipGraphAddConditionalNode.pGraphNode__val = *(data->args.hipGraphAddConditionalNode.pGraphNode);
+      if (data->args.hipGraphAddConditionalNode.pDependencies) data->args.hipGraphAddConditionalNode.pDependencies__val = *(data->args.hipGraphAddConditionalNode.pDependencies);
+      if (data->args.hipGraphAddConditionalNode.conditionalGraphs) data->args.hipGraphAddConditionalNode.conditionalGraphs__val = *(data->args.hipGraphAddConditionalNode.conditionalGraphs);
+      break;
 // hipGraphAddDependencies[('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'from'), ('const hipGraphNode_t*', 'to'), ('size_t', 'numDependencies')]
     case HIP_API_ID_hipGraphAddDependencies:
       if (data->args.hipGraphAddDependencies.from) data->args.hipGraphAddDependencies.from__val = *(data->args.hipGraphAddDependencies.from);
@@ -8010,6 +8062,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipGraphClone[('hipGraph_t*', 'pGraphClone'), ('hipGraph_t', 'originalGraph')]
     case HIP_API_ID_hipGraphClone:
       if (data->args.hipGraphClone.pGraphClone) data->args.hipGraphClone.pGraphClone__val = *(data->args.hipGraphClone.pGraphClone);
+      break;
+// hipGraphConditionalHandleCreate[('hipGraphConditionalHandle*', 'pHandle'), ('hipGraph_t', 'graph'), ('unsigned int', 'defaultValue'), ('unsigned int', 'flags')]
+    case HIP_API_ID_hipGraphConditionalHandleCreate:
+      if (data->args.hipGraphConditionalHandleCreate.pHandle) data->args.hipGraphConditionalHandleCreate.pHandle__val = *(data->args.hipGraphConditionalHandleCreate.pHandle);
       break;
 // hipGraphCreate[('hipGraph_t*', 'pGraph'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipGraphCreate:
@@ -10271,6 +10327,22 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", childGraph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddChildGraphNode.childGraph);
       oss << ")";
     break;
+    case HIP_API_ID_hipGraphAddConditionalNode:
+      oss << "hipGraphAddConditionalNode(";
+      if (data->args.hipGraphAddConditionalNode.pGraphNode == NULL) oss << "pGraphNode=NULL";
+      else { oss << "pGraphNode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.pGraphNode__val); }
+      oss << ", graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.graph);
+      if (data->args.hipGraphAddConditionalNode.pDependencies == NULL) oss << ", pDependencies=NULL";
+      else { oss << ", pDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.pDependencies__val); }
+      oss << ", numDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.numDependencies);
+      oss << ", handle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.handle);
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.type);
+      oss << ", numConditionalGraphs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.numConditionalGraphs);
+      if (data->args.hipGraphAddConditionalNode.conditionalGraphs == NULL) oss << ", conditionalGraphs=NULL";
+      else { oss << ", conditionalGraphs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.conditionalGraphs__val); }
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddConditionalNode.flags);
+      oss << ")";
+    break;
     case HIP_API_ID_hipGraphAddDependencies:
       oss << "hipGraphAddDependencies(";
       oss << "graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddDependencies.graph);
@@ -10490,6 +10562,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipGraphClone.pGraphClone == NULL) oss << "pGraphClone=NULL";
       else { oss << "pGraphClone="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphClone.pGraphClone__val); }
       oss << ", originalGraph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphClone.originalGraph);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGraphConditionalHandleCreate:
+      oss << "hipGraphConditionalHandleCreate(";
+      if (data->args.hipGraphConditionalHandleCreate.pHandle == NULL) oss << "pHandle=NULL";
+      else { oss << "pHandle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphConditionalHandleCreate.pHandle__val); }
+      oss << ", graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphConditionalHandleCreate.graph);
+      oss << ", defaultValue="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphConditionalHandleCreate.defaultValue);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphConditionalHandleCreate.flags);
       oss << ")";
     break;
     case HIP_API_ID_hipGraphCreate:

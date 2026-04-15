@@ -1391,6 +1391,26 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //! Dispatches a graph scheduler kernel that copies pre-built packets to the HW queue
   virtual bool runGraphSchedulerKernel(void* cmd_buffer, uint32_t packet_count) { return false; }
 
+  //! Dispatches the block-based graph scheduler (graphBlockIssue)
+  //! total_graph_packets: sum of packet counts across all blocks (for host-side doorbell pre-ring)
+  virtual bool runGraphBlockIssue(void* exec_state_ptr, uint32_t total_graph_packets = 0) {
+    return false;
+  }
+
+  //! Dispatches the fused graphWhileLoop persistent kernel on the control queue
+  virtual bool runGraphWhileLoop(void* exec_state_ptr, uint64_t cond_ptr,
+                                 uint32_t body_block_idx) {
+    return false;
+  }
+
+  //! Enqueues a barrier-and packet waiting on the given signal (handle is hsa_signal_t.handle)
+  virtual bool addBarrierPacket(uint64_t signal_handle) { return false; }
+
+  //! Returns the raw HSA queue pointer for direct access
+  virtual void* getGpuQueue() { return nullptr; }
+  virtual bool upgradeToDeviceMemQueue() { return false; }
+
+
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1966,6 +1986,8 @@ class Device : public RuntimeObject {
     return NULL;
   }
 
+  virtual void deviceLocalFree(void* ptr) const {}
+
   virtual bool isXgmi() const {
     ShouldNotCallThis();
     return false;
@@ -1999,6 +2021,42 @@ class Device : public RuntimeObject {
    * @copydoc amd::Context::svmFree
    */
   virtual void svmFree(void* ptr) const = 0;
+
+  //! Create a raw HSA signal for graph completion; returns handle (0 on failure)
+  virtual uint64_t createGraphSignal(int64_t initial_value) { return 0; }
+  //! Destroy a raw graph signal by handle
+  virtual void destroyGraphSignal(uint64_t handle) {}
+  //! Store a value to a graph signal (release semantics)
+  virtual void storeGraphSignal(uint64_t handle, int64_t value) {}
+  //! Wait for a graph signal to reach the expected value (blocking)
+  virtual void waitGraphSignal(uint64_t handle, int64_t expected_value) {}
+  //! Create a completion signal wrapped as an opaque HW event (for addDepHwEvent).
+  //! Returns {signal_handle, hw_event_ptr} where hw_event_ptr can be passed to addDepHwEvent.
+  //! On ROC backend this is a ProfilingSignal*. Caller does NOT own the signal destruction
+  //! — the runtime manages it via refcount when the marker completes.
+  virtual uint64_t createGraphCompletionEvent(void** hw_event_out) {
+    if (hw_event_out) *hw_event_out = nullptr;
+    return 0;
+  }
+
+  //! Block-based graph kernel availability (overridden by roc::Device)
+  virtual bool hasGraphBlockIssueHSACO() const { return false; }
+  virtual uint64_t graphBranchKernelObject() const { return 0; }
+  virtual uint32_t graphBranchPrivateSize() const { return 0; }
+  virtual uint32_t graphBranchGroupSize() const { return 0; }
+  virtual uint64_t graphReturnKernelObject() const { return 0; }
+  virtual uint32_t graphReturnPrivateSize() const { return 0; }
+  virtual uint32_t graphReturnGroupSize() const { return 0; }
+  virtual uint64_t graphCondBranchKernelObject() const { return 0; }
+  virtual uint32_t graphCondBranchPrivateSize() const { return 0; }
+  virtual uint32_t graphCondBranchGroupSize() const { return 0; }
+  virtual uint64_t graphCondBranchWhileKernelObject() const { return 0; }
+  virtual uint32_t graphCondBranchWhilePrivateSize() const { return 0; }
+  virtual uint32_t graphCondBranchWhileGroupSize() const { return 0; }
+  virtual uint64_t graphWhileLoopKernelObject() const { return 0; }
+  virtual uint32_t graphWhileLoopPrivateSize() const { return 0; }
+  virtual uint32_t graphWhileLoopGroupSize() const { return 0; }
+  virtual bool hasGraphWhileLoopHSACO() const { return false; }
 
   /**
    * Validatates Virtual Address range between parent and sub-buffer.

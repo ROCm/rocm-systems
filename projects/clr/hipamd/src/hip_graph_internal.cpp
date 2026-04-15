@@ -5,6 +5,10 @@
  */
 
 #include "hip_graph_internal.hpp"
+#include <chrono>
+#include <cstdio>
+#include <functional>
+#include <hsa/hsa.h>
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -380,18 +384,16 @@ void Graph::ResolveSegmentDependencies() {
     }
   }
 
-  // Recursively resolve dependencies in child graphs
-  // When a parent segment depends on a segment containing a child graph node,
-  // it implicitly depends on ALL segments in that child graph completing.
+  // Recursively resolve dependencies in sub-graphs (child graphs and conditional body graphs)
   for (auto& segment : segments_) {
-    if (segment.child_graph_ptr != nullptr) {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-              "[hipGraph] Recursively resolving dependencies"
-              "for child graph %p in segment [id=%d]",
-              segment.child_graph_ptr, segment.id);
-
-      // Child graph resolves its own internal segment dependencies
-      segment.child_graph_ptr->ResolveSegmentDependencies();
+    if (segment.last_node && segment.last_node->HasSubGraphs()) {
+      for (auto* sub_exec : segment.last_node->GetSubGraphExecs()) {
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
+                "[hipGraph] Recursively resolving dependencies "
+                "for sub-graph %p in segment [id=%d]",
+                sub_exec, segment.id);
+        sub_exec->ResolveSegmentDependencies();
+      }
     }
   }
 
@@ -829,6 +831,28 @@ hipError_t Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
       continue;
     }
 
+    // Handle conditional nodes: isolate as single-node segment, recurse into body graphs
+    if (node->GetType() == hipGraphNodeTypeConditional) {
+      if (!current_path.empty()) {
+        int dev = current_path.back()->GetDeviceId();
+        savePath(std::move(current_path), dev);
+        current_path.clear();
+      }
+
+      // Create a single-node path for the conditional node (no child_graph_paths_index needed;
+      // body graphs will be processed later via GetSubGraphExecs after wrapping in Init)
+      std::vector<Node> cond_node_path = {node};
+      savePath(cond_node_path, current_device_id);
+
+      current_path.clear();
+      const auto& edges = node->GetEdges();
+      for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
+        st.push_back(edges[static_cast<size_t>(i)]);
+      }
+
+      continue;
+    }
+
     // Regular node - add to current path
     current_path.push_back(node);
 
@@ -910,13 +934,6 @@ hipError_t Graph::CreateSegmentsFromPaths(
     segment.nodes = h_path.nodes;
     segment.first_node = h_path.nodes.front();
     segment.last_node = h_path.nodes.back();
-
-    // Preserve child graph information from hierarchical path
-    if (h_path.child_graph_node != nullptr && h_path.child_graph_paths_index >= 0) {
-      // Get direct pointer to child graph from the node
-      auto childGraphNode = reinterpret_cast<hip::ChildGraphNode*>(h_path.child_graph_node);
-      segment.child_graph_ptr = childGraphNode->GetChildGraph();
-    }
 
     segments_.push_back(segment);
 
@@ -1284,57 +1301,565 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 }
 
 // ================================================================================================
-bool GraphExecSegmented::IsSingleBranchAllCaptured() const {
-  if (segments_.size() != 1) return false;
-  const auto& seg = segments_[0];
-  if (seg.child_graph_ptr != nullptr) return false;
-  //ToDo: check if segment has the info that all nodes are captured
-  for (auto& node : seg.nodes) {
-    if (!node->GraphCaptureEnabled()) return false;
-  }
-  return !seg.nodes.empty();
+bool GraphExec::IsSingleBranchAllCaptured() const {
+  return IsCommandBufferEligible();
 }
 
 // ================================================================================================
-hipError_t GraphExecSegmented::BuildCommandBuffer() {
-  // Count total kernel packets from segmentBatches_
-  size_t kernel_packets = 0;
-  auto it = segmentBatches_.find(0);
-  if (it != segmentBatches_.end()) {
-    for (auto& pb : it->second.packet_batches) {
-      kernel_packets += pb.dispatchPackets.size();
+bool GraphExec::IsAllCapturedGraph() const {
+  return IsCommandBufferEligible();
+}
+
+// ================================================================================================
+bool GraphExec::IsCommandBufferEligible() const {
+  if (segments_.empty()) return false;
+  for (const auto& seg : segments_) {
+    if (seg.nodes.empty()) return false;
+
+    // Sub-graph segments (child graph or conditional): check recursively
+    if (seg.last_node && seg.last_node->HasSubGraphs()) {
+      for (auto* sub_exec : seg.last_node->GetSubGraphExecs()) {
+        if (!sub_exec->IsCommandBufferEligible()) return false;
+      }
+      continue;
     }
+
+    // Regular segments: every node must have AQL packets captured
+    for (auto& node : seg.nodes) {
+      if (!node->GraphCaptureEnabled()) return false;
+    }
+
+    // Single branch: at most one successor
+    if (seg.segment_ids_edges.size() > 1) return false;
   }
-  if (kernel_packets == 0) return hipErrorInvalidValue;
+  return true;
+}
 
-  cmd_buffer_.kernel_packet_count = kernel_packets;
-  cmd_buffer_.total_packet_count = kernel_packets;
-  cmd_buffer_.byte_size = kernel_packets * CommandBuffer::kPacketSize;
-
-  // Allocate device-accessible memory for the command buffer (CPU + GPU visible)
+// ================================================================================================
+hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
   auto* device = g_devices[instantiateDeviceId_]->devices()[0];
-  cmd_buffer_.device_ptr = reinterpret_cast<uint8_t*>(
-      device->svmAlloc(device->context(), cmd_buffer_.byte_size, 256,
-                       CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER, nullptr));
-  if (cmd_buffer_.device_ptr == nullptr) {
-    return hipErrorOutOfMemory;
-  }
 
-  // Copy kernel packets into slots 0..N-1
-  uint8_t* dst = cmd_buffer_.device_ptr;
-  if (it != segmentBatches_.end()) {
-    for (auto& pb : it->second.packet_batches) {
-      for (auto* pkt : pb.dispatchPackets) {
-        memcpy(dst, pkt, CommandBuffer::kPacketSize);
-        dst += CommandBuffer::kPacketSize;
+  // FlatBlock: represents one command buffer block in the final flattened layout.
+  // Sub-graph segments (child graphs, conditional body graphs) are recursively
+  // expanded into FlatBlocks so the entire graph hierarchy becomes a single
+  // flat block array with CFG terminators wiring the control flow.
+  struct FlatBlock {
+    int segment_id;
+    std::vector<uint8_t*> user_packets;
+
+    enum TermType { BRANCH, COND_BRANCH, RETURN };
+    TermType term_type = RETURN;
+    uint32_t branch_target = 0;
+    uint32_t true_target = 0;
+    uint32_t false_target = 0;
+    uint64_t cond_device_ptr = 0;
+  };
+
+  // When set, body leaf blocks emit COND_BRANCH instead of BRANCH back to
+  // the while-header. This fuses the condition check into the body's last
+  // block, saving one AQL dispatch per iteration.
+  struct WhileBackEdge {
+    uint64_t cond_device_ptr;
+    uint32_t false_target;  // exit block
+    // true_target is deferred: set to the body entry block after flattenGraph returns
+  };
+
+  std::vector<FlatBlock> flat_blocks;
+  constexpr uint32_t kNoExit = UINT32_MAX;
+
+  // Recursively flatten a GraphExec's segments into flat_blocks.
+  // exit_block: block index to branch/return to when this graph finishes.
+  //             kNoExit means emit graphReturn (top-level graph leaf).
+  // while_back: if non-null, leaf blocks get COND_BRANCH self-loop terminator
+  //             instead of BRANCH to exit_block.
+  // Returns: entry block index (first block of this graph).
+  std::function<uint32_t(GraphExec*, uint32_t, WhileBackEdge*)> flattenGraph;
+  flattenGraph = [&](GraphExec* exec, uint32_t exit_block,
+                     WhileBackEdge* while_back) -> uint32_t {
+    std::vector<int> topo;
+    for (int level = 0; level <= exec->max_dependency_level_; ++level) {
+      auto it = exec->segments_per_level_.find(level);
+      if (it == exec->segments_per_level_.end()) continue;
+      for (int seg_id : it->second) {
+        topo.push_back(seg_id);
+      }
+    }
+    if (topo.empty()) return exit_block;
+
+    // Phase 1: allocate one block per segment (user packets collected now;
+    // terminators wired in phase 2 once all indices are known).
+    std::unordered_map<int, uint32_t> seg_to_block;
+    uint32_t entry_block = static_cast<uint32_t>(flat_blocks.size());
+
+    for (int seg_id : topo) {
+      auto& seg = exec->segments_[seg_id];
+      uint32_t block_idx = static_cast<uint32_t>(flat_blocks.size());
+      seg_to_block[seg_id] = block_idx;
+
+      FlatBlock fb;
+      fb.segment_id = seg_id;
+
+      if (!seg.last_node || !seg.last_node->HasSubGraphs()) {
+        auto batch_it = exec->segmentBatches_.find(seg_id);
+        if (batch_it != exec->segmentBatches_.end()) {
+          for (auto& pb : batch_it->second.packet_batches) {
+            fb.user_packets.insert(fb.user_packets.end(),
+                                   pb.dispatchPackets.begin(),
+                                   pb.dispatchPackets.end());
+          }
+        }
+      }
+      flat_blocks.push_back(std::move(fb));
+    }
+
+    // Phase 2: wire CFG terminators.
+    // IMPORTANT: do not hold references to flat_blocks elements across
+    // recursive flattenGraph calls (vector may reallocate).
+    for (int seg_id : topo) {
+      uint32_t block_idx = seg_to_block[seg_id];
+      auto& seg = exec->segments_[seg_id];
+      bool is_leaf = seg.segment_ids_edges.empty();
+      uint32_t successor = is_leaf ? exit_block
+                                   : seg_to_block[seg.segment_ids_edges[0]];
+
+      if (seg.last_node && seg.last_node->HasSubGraphs()) {
+        if (seg.last_node->GetType() == hipGraphNodeTypeConditional) {
+          auto* cond_node = static_cast<GraphConditionalNode*>(seg.last_node);
+          auto cond_type = cond_node->GetCondType();
+          const auto& sub_execs = cond_node->GetSubGraphExecs();
+          uint64_t cond_ptr = cond_node->GetHandle().device_ptr;
+
+          // 0xFFFFFFFF sentinel: graphCondBranch signals completion inline
+          // instead of issuing a block -- no separate RETURN block needed.
+          constexpr uint32_t kInlineReturn = 0xFFFFFFFFu;
+
+          if (cond_type == hipGraphCondTypeWhile && !sub_execs.empty()) {
+            // WHILE: body leaf blocks get COND_BRANCH that self-loops on
+            // true and returns inline on false. Only 2 blocks:
+            //   Block N:   [graphCondBranch → true:N+1, false:INLINE_RETURN]
+            //   Block N+1: [body pkts] [graphCondBranch → true:N+1, false:INLINE_RETURN]
+            uint32_t while_false = (successor != kNoExit) ? successor : kInlineReturn;
+            WhileBackEdge wbe;
+            wbe.cond_device_ptr = cond_ptr;
+            wbe.false_target = while_false;
+            uint32_t body_entry = flattenGraph(sub_execs[0], kNoExit, &wbe);
+            // Patch body leaf COND_BRANCH true_targets to body_entry (self-loop)
+            for (uint32_t bi = body_entry; bi < flat_blocks.size(); ++bi) {
+              if (flat_blocks[bi].term_type == FlatBlock::COND_BRANCH &&
+                  flat_blocks[bi].cond_device_ptr == cond_ptr &&
+                  flat_blocks[bi].true_target == 0) {
+                flat_blocks[bi].true_target = body_entry;
+              }
+            }
+            flat_blocks[block_idx].term_type = FlatBlock::COND_BRANCH;
+            flat_blocks[block_idx].cond_device_ptr = cond_ptr;
+            flat_blocks[block_idx].true_target = body_entry;
+            flat_blocks[block_idx].false_target = while_false;
+          } else if (cond_type == hipGraphCondTypeIf && !sub_execs.empty()) {
+            // IF needs a valid exit block for both branches to converge.
+            uint32_t cond_exit = successor;
+            if (cond_exit == kNoExit) {
+              FlatBlock exit_fb;
+              exit_fb.segment_id = -1;
+              exit_fb.term_type = FlatBlock::RETURN;
+              cond_exit = static_cast<uint32_t>(flat_blocks.size());
+              flat_blocks.push_back(std::move(exit_fb));
+            }
+            uint32_t true_entry = flattenGraph(sub_execs[0], cond_exit, nullptr);
+            uint32_t false_entry = cond_exit;
+            if (sub_execs.size() >= 2) {
+              false_entry = flattenGraph(sub_execs[1], cond_exit, nullptr);
+            }
+            flat_blocks[block_idx].term_type = FlatBlock::COND_BRANCH;
+            flat_blocks[block_idx].cond_device_ptr = cond_ptr;
+            flat_blocks[block_idx].true_target = true_entry;
+            flat_blocks[block_idx].false_target = false_entry;
+          }
+        } else {
+          // Child graph: inline its blocks, branch to child entry
+          const auto& sub_execs = seg.last_node->GetSubGraphExecs();
+          if (!sub_execs.empty()) {
+            uint32_t child_entry = flattenGraph(sub_execs[0], successor, nullptr);
+            flat_blocks[block_idx].term_type = FlatBlock::BRANCH;
+            flat_blocks[block_idx].branch_target = child_entry;
+          }
+        }
+      } else if (is_leaf && while_back) {
+        // WHILE body leaf: emit COND_BRANCH that self-loops on true, exits on false.
+        // true_target is placeholder 0 -- patched to body_entry after flattenGraph returns.
+        flat_blocks[block_idx].term_type = FlatBlock::COND_BRANCH;
+        flat_blocks[block_idx].cond_device_ptr = while_back->cond_device_ptr;
+        flat_blocks[block_idx].true_target = 0;  // patched below
+        flat_blocks[block_idx].false_target = while_back->false_target;
+      } else if (is_leaf && exit_block == kNoExit) {
+        flat_blocks[block_idx].term_type = FlatBlock::RETURN;
+      } else if (is_leaf) {
+        flat_blocks[block_idx].term_type = FlatBlock::BRANCH;
+        flat_blocks[block_idx].branch_target = exit_block;
+      } else {
+        flat_blocks[block_idx].term_type = FlatBlock::BRANCH;
+        flat_blocks[block_idx].branch_target = successor;
+      }
+    }
+    return entry_block;
+  };
+
+  // Detect simple WHILE pattern for the fused persistent kernel path.
+  // Criteria: the top-level graph has exactly one segment, that segment is a WHILE
+  // conditional node, and the fused kernel HSACO is available.
+  bool try_fused_while = false;
+  uint64_t fused_cond_ptr = 0;
+  GraphExec* fused_body_exec = nullptr;
+
+  if (device->hasGraphWhileLoopHSACO()) {
+    auto top_topo_it = segments_per_level_.find(0);
+    if (top_topo_it != segments_per_level_.end() && top_topo_it->second.size() == 1) {
+      int sole_seg = top_topo_it->second[0];
+      auto& seg = segments_[sole_seg];
+      if (seg.last_node && seg.last_node->GetType() == hipGraphNodeTypeConditional) {
+        auto* cond_node = static_cast<GraphConditionalNode*>(seg.last_node);
+        if (cond_node->GetCondType() == hipGraphCondTypeWhile) {
+          const auto& sub_execs = cond_node->GetSubGraphExecs();
+          if (!sub_execs.empty()) {
+            try_fused_while = false;
+            fused_cond_ptr = cond_node->GetHandle().device_ptr;
+            fused_body_exec = sub_execs[0];
+          }
+        }
       }
     }
   }
 
+  if (try_fused_while && fused_body_exec) {
+    // Fused WHILE path: only emit blocks for the body graph (no CFG terminators).
+    // The graphWhileLoop persistent kernel handles condition check + looping.
+    flat_blocks.clear();
+    // Flatten the body graph only. exit_block = kNoExit because the persistent
+    // kernel handles return, not a graphReturn terminator.
+    uint32_t body_entry = flattenGraph(fused_body_exec, kNoExit, nullptr);
+    uint32_t block_count_fused = static_cast<uint32_t>(flat_blocks.size());
+
+    // For the fused path, body blocks have NO CFG terminator.
+    cmd_buffer_.blocks.resize(block_count_fused);
+    size_t total_user_packets = 0;
+    for (uint32_t bi = 0; bi < block_count_fused; ++bi) {
+      uint32_t user_pkts = static_cast<uint32_t>(flat_blocks[bi].user_packets.size());
+      cmd_buffer_.blocks[bi].segment_id = flat_blocks[bi].segment_id;
+      cmd_buffer_.blocks[bi].user_packet_count = user_pkts;
+      cmd_buffer_.blocks[bi].total_packet_count = user_pkts;  // NO +1, no CFG terminator
+      total_user_packets += user_pkts;
+    }
+    size_t total_packets = total_user_packets;  // no terminators
+
+    // Record fused WHILE metadata
+    cmd_buffer_.has_fused_while = true;
+    cmd_buffer_.while_cond_ptr = fused_cond_ptr;
+    cmd_buffer_.while_body_block_idx = body_entry;
+
+    // --- Calculate memory layout (same structure, just fewer packets) ---
+    constexpr size_t kPkt = CommandBuffer::kPacketSize;
+    constexpr size_t kKAEntry = CommandBuffer::kKernargEntrySize;
+    constexpr size_t kKAAlign = CommandBuffer::kKernargAlign;
+
+    size_t block_table_size = block_count_fused * sizeof(BlockDescriptor);
+    size_t exec_state_size  = sizeof(DeviceExecutionState);
+
+    size_t offset = 0;
+    cmd_buffer_.block_table_offset = offset;
+    offset += block_table_size;
+    offset = (offset + 63) & ~63u;
+
+    cmd_buffer_.exec_state_offset = offset;
+    offset += exec_state_size;
+    offset = (offset + kKAAlign - 1) & ~(kKAAlign - 1);
+
+    cmd_buffer_.kernarg_pool_offset = offset;
+    offset += 0;  // No kernarg pool needed for fused path
+    offset = (offset + 63) & ~63u;
+
+    cmd_buffer_.packets_offset = offset;
+    size_t packets_size = total_packets * kPkt;
+    offset += packets_size;
+
+    cmd_buffer_.total_byte_size = offset;
+    cmd_buffer_.block_count = block_count_fused;
+
+    // --- Allocate device memory ---
+    if (device->info().largeBar_) {
+      cmd_buffer_.device_ptr = reinterpret_cast<uint8_t*>(
+          device->deviceLocalAlloc(cmd_buffer_.total_byte_size));
+      cmd_buffer_.device_local = true;
+    } else {
+      cmd_buffer_.device_ptr = reinterpret_cast<uint8_t*>(
+          device->svmAlloc(device->context(), cmd_buffer_.total_byte_size, kKAAlign,
+                           CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER, nullptr));
+      cmd_buffer_.device_local = false;
+    }
+    if (cmd_buffer_.device_ptr == nullptr) {
+      return hipErrorOutOfMemory;
+    }
+    memset(cmd_buffer_.device_ptr, 0, cmd_buffer_.total_byte_size);
+
+    uint8_t* base = cmd_buffer_.device_ptr;
+    auto* block_table = reinterpret_cast<BlockDescriptor*>(base + cmd_buffer_.block_table_offset);
+    auto* exec_state  = reinterpret_cast<DeviceExecutionState*>(base + cmd_buffer_.exec_state_offset);
+    uint8_t* packets_area = base + cmd_buffer_.packets_offset;
+
+    // --- Fill block table and copy body packets (no terminators) ---
+    uint32_t pkt_byte_cursor = 0;
+    for (uint32_t bi = 0; bi < block_count_fused; ++bi) {
+      auto& binfo = cmd_buffer_.blocks[bi];
+      auto& fb = flat_blocks[bi];
+      binfo.packet_byte_offset = pkt_byte_cursor;
+
+      block_table[bi].packet_offset = pkt_byte_cursor;
+      block_table[bi].packet_count  = binfo.total_packet_count;
+
+      uint8_t* dst = packets_area + pkt_byte_cursor;
+      for (auto* pkt : fb.user_packets) {
+        memcpy(dst, pkt, kPkt);
+        dst += kPkt;
+      }
+
+      pkt_byte_cursor += binfo.total_packet_count * kPkt;
+    }
+
+    // --- Fill execution state ---
+    exec_state->cmd_buffer_base   = reinterpret_cast<uint64_t>(packets_area);
+    exec_state->block_table_ptr   = reinterpret_cast<uint64_t>(block_table);
+    exec_state->block_count       = block_count_fused;
+    exec_state->current_block     = body_entry;
+    exec_state->queue_ptr         = 0;  // Filled at launch time
+    exec_state->completion_signal_ptr = 0;  // Filled at launch time
+    exec_state->kernarg_pool_ptr  = 0;
+    exec_state->doorbell_ptr      = 0;  // Filled at launch time
+    exec_state->work_queue_ptr    = 0;  // Filled at launch time
+    exec_state->work_doorbell_ptr = 0;  // Filled at launch time
+    exec_state->cached_queue_base = 0;
+    exec_state->cached_queue_size = 0;
+    exec_state->_reserved0 = 0;
+
+    cmd_buffer_.kernel_packet_count = total_user_packets;
+    cmd_buffer_.valid = true;
+
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+        "[GraphExec] Built FUSED WHILE command buffer: %u body blocks, %zu user packets, "
+        "%zu bytes (body_entry=%u, cond_ptr=0x%lx)",
+        block_count_fused, total_user_packets, cmd_buffer_.total_byte_size,
+        body_entry, fused_cond_ptr);
+
+    return hipSuccess;
+  }
+
+  // --- Standard (non-fused) multi-block path ---
+  uint32_t root_entry = flattenGraph(this, kNoExit, nullptr);
+  uint32_t block_count = static_cast<uint32_t>(flat_blocks.size());
+  if (block_count == 0) return hipErrorInvalidValue;
+
+  // --- Count packets per block ---
+  cmd_buffer_.blocks.resize(block_count);
+  size_t total_user_packets = 0;
+
+  for (uint32_t bi = 0; bi < block_count; ++bi) {
+    uint32_t user_pkts = static_cast<uint32_t>(flat_blocks[bi].user_packets.size());
+    cmd_buffer_.blocks[bi].segment_id = flat_blocks[bi].segment_id;
+    cmd_buffer_.blocks[bi].user_packet_count = user_pkts;
+    cmd_buffer_.blocks[bi].total_packet_count = user_pkts + 1;  // +1 for CFG terminator
+    total_user_packets += user_pkts;
+  }
+
+  size_t total_packets = total_user_packets + block_count;
+
+  // --- Calculate memory layout ---
+  constexpr size_t kPkt = CommandBuffer::kPacketSize;
+  constexpr size_t kKAEntry = CommandBuffer::kKernargEntrySize;
+  constexpr size_t kKAAlign = CommandBuffer::kKernargAlign;
+
+  size_t block_table_size = block_count * sizeof(BlockDescriptor);
+  size_t exec_state_size  = sizeof(DeviceExecutionState);
+
+  size_t offset = 0;
+  cmd_buffer_.block_table_offset = offset;
+  offset += block_table_size;
+  offset = (offset + 63) & ~63u;
+
+  cmd_buffer_.exec_state_offset = offset;
+  offset += exec_state_size;
+  offset = (offset + kKAAlign - 1) & ~(kKAAlign - 1);
+
+  cmd_buffer_.kernarg_pool_offset = offset;
+  size_t kernarg_pool_size = block_count * kKAEntry;
+  offset += kernarg_pool_size;
+  offset = (offset + 63) & ~63u;
+
+  cmd_buffer_.packets_offset = offset;
+  size_t packets_size = total_packets * kPkt;
+  offset += packets_size;
+
+  cmd_buffer_.total_byte_size = offset;
+  cmd_buffer_.block_count = block_count;
+
+  // --- Allocate device memory ---
+  if (device->info().largeBar_) {
+    cmd_buffer_.device_ptr = reinterpret_cast<uint8_t*>(
+        device->deviceLocalAlloc(cmd_buffer_.total_byte_size));
+    cmd_buffer_.device_local = true;
+  } else {
+    cmd_buffer_.device_ptr = reinterpret_cast<uint8_t*>(
+        device->svmAlloc(device->context(), cmd_buffer_.total_byte_size, kKAAlign,
+                         CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER, nullptr));
+    cmd_buffer_.device_local = false;
+  }
+  if (cmd_buffer_.device_ptr == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  memset(cmd_buffer_.device_ptr, 0, cmd_buffer_.total_byte_size);
+
+  uint8_t* base = cmd_buffer_.device_ptr;
+  auto* block_table = reinterpret_cast<BlockDescriptor*>(base + cmd_buffer_.block_table_offset);
+  auto* exec_state  = reinterpret_cast<DeviceExecutionState*>(base + cmd_buffer_.exec_state_offset);
+  uint8_t* kernarg_pool = base + cmd_buffer_.kernarg_pool_offset;
+  uint8_t* packets_area = base + cmd_buffer_.packets_offset;
+
+  // --- Fill block table, copy packets, and build CFG terminators ---
+  uint32_t pkt_byte_cursor = 0;
+  constexpr uint32_t kCondNE = 1;
+
+  for (uint32_t bi = 0; bi < block_count; ++bi) {
+    auto& binfo = cmd_buffer_.blocks[bi];
+    auto& fb = flat_blocks[bi];
+    binfo.packet_byte_offset = pkt_byte_cursor;
+    binfo.kernarg_offset = bi * kKAEntry;
+
+    block_table[bi].packet_offset = pkt_byte_cursor;
+    block_table[bi].packet_count  = binfo.total_packet_count;
+
+    uint8_t* dst = packets_area + pkt_byte_cursor;
+    for (auto* pkt : fb.user_packets) {
+      memcpy(dst, pkt, kPkt);
+      dst += kPkt;
+    }
+
+    // CFG terminator AQL packet
+    memset(dst, 0, kPkt);
+    *reinterpret_cast<uint16_t*>(dst + 2)  = 1;     // setup = 1 dimension
+    *reinterpret_cast<uint16_t*>(dst + 4)  = 1;     // workgroup xyz
+    *reinterpret_cast<uint16_t*>(dst + 6)  = 1;
+    *reinterpret_cast<uint16_t*>(dst + 8)  = 1;
+    *reinterpret_cast<uint32_t*>(dst + 12) = 1;     // grid xyz
+    *reinterpret_cast<uint32_t*>(dst + 16) = 1;
+    *reinterpret_cast<uint32_t*>(dst + 20) = 1;
+
+    uint8_t* ka = kernarg_pool + binfo.kernarg_offset;
+    *reinterpret_cast<uint64_t*>(dst + 40) = reinterpret_cast<uint64_t>(ka);
+
+    switch (fb.term_type) {
+      case FlatBlock::RETURN:
+        *reinterpret_cast<uint64_t*>(dst + 32) = device->graphReturnKernelObject();
+        *reinterpret_cast<uint32_t*>(dst + 24) = device->graphReturnPrivateSize();
+        *reinterpret_cast<uint32_t*>(dst + 28) = device->graphReturnGroupSize();
+        *reinterpret_cast<uint64_t*>(ka) = reinterpret_cast<uint64_t>(exec_state);
+        break;
+
+      case FlatBlock::BRANCH:
+        *reinterpret_cast<uint64_t*>(dst + 32) = device->graphBranchKernelObject();
+        *reinterpret_cast<uint32_t*>(dst + 24) = device->graphBranchPrivateSize();
+        *reinterpret_cast<uint32_t*>(dst + 28) = device->graphBranchGroupSize();
+        *reinterpret_cast<uint64_t*>(ka + 0) = reinterpret_cast<uint64_t>(exec_state);
+        *reinterpret_cast<uint32_t*>(ka + 8) = fb.branch_target;
+        *reinterpret_cast<uint32_t*>(ka + 12) = 0;
+        break;
+
+      case FlatBlock::COND_BRANCH: {
+        bool is_while_self_loop = (fb.true_target == bi) &&
+                                  device->graphCondBranchWhileKernelObject();
+        if (is_while_self_loop) {
+          *reinterpret_cast<uint64_t*>(dst + 32) = device->graphCondBranchWhileKernelObject();
+          *reinterpret_cast<uint32_t*>(dst + 24) = device->graphCondBranchWhilePrivateSize();
+          *reinterpret_cast<uint32_t*>(dst + 28) = device->graphCondBranchWhileGroupSize();
+          *reinterpret_cast<uint64_t*>(ka + 0)  = reinterpret_cast<uint64_t>(exec_state);
+          *reinterpret_cast<uint64_t*>(ka + 8)  = fb.cond_device_ptr;
+          *reinterpret_cast<uint32_t*>(ka + 16) = kCondNE;
+          *reinterpret_cast<uint32_t*>(ka + 20) = 0;
+          *reinterpret_cast<uint64_t*>(ka + 24) = 0;  // value = 0 (NE 0 means true)
+          // ka+32 (body_src) and ka+40 (body_pkt_count) deferred
+        } else {
+          *reinterpret_cast<uint64_t*>(dst + 32) = device->graphCondBranchKernelObject();
+          *reinterpret_cast<uint32_t*>(dst + 24) = device->graphCondBranchPrivateSize();
+          *reinterpret_cast<uint32_t*>(dst + 28) = device->graphCondBranchGroupSize();
+          *reinterpret_cast<uint64_t*>(ka + 0)  = reinterpret_cast<uint64_t>(exec_state);
+          *reinterpret_cast<uint64_t*>(ka + 8)  = fb.cond_device_ptr;
+          *reinterpret_cast<uint32_t*>(ka + 16) = kCondNE;
+          *reinterpret_cast<uint32_t*>(ka + 20) = 0;
+          *reinterpret_cast<uint64_t*>(ka + 24) = 0;
+          *reinterpret_cast<uint32_t*>(ka + 32) = fb.true_target;
+          *reinterpret_cast<uint32_t*>(ka + 36) = fb.false_target;
+        }
+        break;
+      }
+    }
+
+    constexpr uint16_t kCfgHeader = 2 | (1 << 8) | (1 << 9) | (1 << 11);
+    *reinterpret_cast<uint16_t*>(dst + 0) = kCfgHeader;
+
+    pkt_byte_cursor += binfo.total_packet_count * kPkt;
+  }
+
+  // --- Patch WHILE self-loop condBranch kernarg with resolved body_src / body_pkt_count. ---
+  for (uint32_t bi = 0; bi < block_count; ++bi) {
+    auto& fb = flat_blocks[bi];
+    if (fb.term_type != FlatBlock::COND_BRANCH) continue;
+    bool is_while_self_loop = (fb.true_target == bi) &&
+                              device->graphCondBranchWhileKernelObject();
+    if (!is_while_self_loop) continue;
+
+    uint8_t* ka = kernarg_pool + cmd_buffer_.blocks[bi].kernarg_offset;
+    const uint8_t* body_src = packets_area + cmd_buffer_.blocks[bi].packet_byte_offset;
+    uint32_t body_pkt_count = cmd_buffer_.blocks[bi].total_packet_count;
+
+    *reinterpret_cast<uint64_t*>(ka + 32) = reinterpret_cast<uint64_t>(body_src);
+    *reinterpret_cast<uint32_t*>(ka + 40) = body_pkt_count;
+    cmd_buffer_.has_while_cond_branch = true;
+  }
+
+  // --- Fill execution state ---
+  exec_state->cmd_buffer_base   = reinterpret_cast<uint64_t>(packets_area);
+  exec_state->block_table_ptr   = reinterpret_cast<uint64_t>(block_table);
+  exec_state->block_count       = block_count;
+  exec_state->current_block     = root_entry;
+  exec_state->queue_ptr         = 0;  // Filled at launch time
+  exec_state->completion_signal_ptr = 0;  // Filled at launch time
+  exec_state->kernarg_pool_ptr  = reinterpret_cast<uint64_t>(kernarg_pool);
+  exec_state->doorbell_ptr      = 0;  // Filled at launch time
+  exec_state->work_queue_ptr    = 0;  // Not used in standard path
+  exec_state->work_doorbell_ptr = 0;
+  exec_state->cached_queue_base = 0;  // Filled at launch time
+  exec_state->cached_queue_size = 0;  // Filled at launch time
+  exec_state->_reserved0 = 0;
+
+  // Find conditional node to populate GPU-side init for cond variable.
+  exec_state->cond_init_ptr = 0;
+  exec_state->cond_init_value = 0;
+  for (auto& seg : segments_) {
+    if (seg.last_node && seg.last_node->GetType() == hipGraphNodeTypeConditional) {
+      auto* cond_node = static_cast<GraphConditionalNode*>(seg.last_node);
+      auto handle = cond_node->GetHandle();
+      exec_state->cond_init_ptr = handle.device_ptr;
+      exec_state->cond_init_value = handle.default_value;
+      cmd_buffer_.cond_init_ptr = handle.device_ptr;
+      cmd_buffer_.cond_init_value = handle.default_value;
+      break;
+    }
+  }
+
+  cmd_buffer_.has_fused_while = false;
+  cmd_buffer_.kernel_packet_count = total_user_packets;
   cmd_buffer_.valid = true;
+
   ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-      "[GraphExec] Built command buffer: %zu kernel packets, %zu total, %zu bytes",
-      cmd_buffer_.kernel_packet_count, cmd_buffer_.total_packet_count, cmd_buffer_.byte_size);
+      "[GraphExec] Built multi-block command buffer: %u blocks, %zu user packets, "
+      "%zu total packets, %zu bytes (root_entry=%u)",
+      block_count, total_user_packets, total_packets, cmd_buffer_.total_byte_size, root_entry);
 
   return hipSuccess;
 }
@@ -1755,6 +2280,41 @@ hipError_t GraphExecSegmented::Init() {
   // skip same-stream dependency barriers.
   SelectStreamAssignment();
 
+  // Wrap conditional body graphs in GraphExecSegmented objects and schedule them into
+  // segments so the recursive CaptureAQLPackets/CaptureAndFormPacketsForGraph can capture
+  // their packets. Relocated here from the classic Init path: conditional-graph support
+  // lives on the segmented path only.
+  // NOTE: review body-graph lifetime/scheduling ordering after a build.
+  for (auto& segment : segments_) {
+    if (segment.last_node && segment.last_node->GetType() == hipGraphNodeTypeConditional) {
+      auto* cond_node = static_cast<hip::GraphConditionalNode*>(segment.last_node);
+      const auto& body_graphs = cond_node->GetChildGraphs();
+      std::vector<GraphExecSegmented*> body_execs;
+      body_execs.reserve(body_graphs.size());
+      for (auto* body_graph : body_graphs) {
+        auto* body_exec = new GraphExecSegmented(0);
+        body_graph->clone(body_exec, true);
+        if (body_exec->GetKernelArgManager() == nullptr) {
+          auto* kernArgMgr = GetKernelArgManager();
+          if (kernArgMgr != nullptr) {
+            kernArgMgr->retain();
+            body_exec->SetKernelArgManager(kernArgMgr);
+          }
+        }
+        if (body_exec->captureDeviceId_ == -1) {
+          body_exec->captureDeviceId_ = captureDeviceId_;
+        }
+        hipError_t sched_status = body_exec->ScheduleNodesIntoBatches();
+        if (sched_status != hipSuccess) {
+          ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+              "[GraphExecSegmented::Init] Failed to schedule conditional body graph");
+        }
+        body_execs.push_back(body_exec);
+      }
+      cond_node->SetBodyGraphExecs(std::move(body_execs));
+    }
+  }
+
   // For graph nodes capture AQL packets to dispatch them directly during graph launch.
   // BuildSyncPlan (inside CaptureAndFormPacketsForGraph) runs the barrier-ROI collapse
   // pass, which may fold the graph onto a single stream per device.
@@ -1790,7 +2350,7 @@ hipError_t GraphExecSegmented::Init() {
   // For single-branch all-captured graphs, build a device-memory command buffer
   // so GraphExecSegmented::Run can use the GPU scheduler fast path.
   if (IsSingleBranchAllCaptured()) {
-    hipError_t cb_status = BuildCommandBuffer();
+    hipError_t cb_status = BuildMultiBlockCommandBuffer();
     if (cb_status != hipSuccess) {
       ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
           "[GraphExec] Failed to build command buffer, falling back to normal path");
@@ -1809,21 +2369,19 @@ void GraphExecSegmented::GetKernelArgSizeForGraph(std::unordered_map<int, size_t
 
   if (!segments_.empty()) {
     for (const auto& segment : segments_) {
-      // Handle child graph segments - skip node iteration, process recursively
-      if (segment.child_graph_ptr != nullptr) {
-        auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
-        if (childGraphExec != nullptr) {
-          // Child graphs share the same kernel arg manager as parent
-          if (childGraphExec->GetKernelArgManager() == nullptr) {
+      // Handle sub-graph segments (child graphs, conditional body graphs) recursively
+      if (segment.last_node && segment.last_node->HasSubGraphs()) {
+        for (auto* sub_exec : segment.last_node->GetSubGraphExecs()) {
+          if (sub_exec->GetKernelArgManager() == nullptr) {
             auto kernArgMgr = GetKernelArgManager();
             if (kernArgMgr != nullptr) {
-              kernArgMgr->retain();  // Increment ref count for child's reference
-              childGraphExec->SetKernelArgManager(kernArgMgr);
+              kernArgMgr->retain();
+              sub_exec->SetKernelArgManager(kernArgMgr);
             }
           }
-          childGraphExec->GetKernelArgSizeForGraph(kernArgSizeForGraph);
+          sub_exec->GetKernelArgSizeForGraph(kernArgSizeForGraph);
         }
-        continue;  // Skip processing nodes in this segment
+        continue;
       }
 
       // Process regular nodes in this segment
@@ -2008,9 +2566,10 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
 
   // Process nodes from segments
   for (const auto& segment : segments_) {
-    // Child-graph segments: create a SegmentBatch with leading + trailing empty batches
-    // so BuildSyncPlan can prepend dep barriers and append a completion barrier
-    if (segment.child_graph_ptr != nullptr) {
+    // Sub-graph segments (child graphs, conditional body graphs): create a SegmentBatch
+    // with leading + trailing empty batches so BuildSyncPlan can prepend dep barriers and
+    // append a completion barrier. The sub-graph itself is processed recursively later.
+    if (segment.last_node && segment.last_node->HasSubGraphs()) {
       auto [it, inserted] = segmentBatches_.emplace(segment.id, segment.id);
       auto& childSegBatch = it->second;
       childSegBatch.node_capture_status.resize(segment.nodes.size(), false);
@@ -2127,32 +2686,25 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph() {
     }
   }
 
-  // Recursively process child graphs to capture their packets
+  // Recursively process sub-graphs (child graphs, conditional body graphs)
   for (const auto& segment : segments_) {
-    if (segment.child_graph_ptr != nullptr) {
-      auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
-      if (childGraphExec != nullptr) {
-        if (childGraphExec->captureDeviceId_ == -1) {
-          childGraphExec->captureDeviceId_ = captureDeviceId_;
+    if (segment.last_node && segment.last_node->HasSubGraphs()) {
+      for (auto* sub_exec : segment.last_node->GetSubGraphExecs()) {
+        if (sub_exec->captureDeviceId_ == -1) {
+          sub_exec->captureDeviceId_ = captureDeviceId_;
         }
-
-        // Child graphs share the same kernel arg manager as parent
-        // This is critical for packet capture to work correctly
-        if (childGraphExec->GetKernelArgManager() == nullptr) {
+        if (sub_exec->GetKernelArgManager() == nullptr) {
           auto kernArgMgr = GetKernelArgManager();
           if (kernArgMgr != nullptr) {
-            kernArgMgr->retain();  // Increment ref count for child's reference
-            childGraphExec->SetKernelArgManager(kernArgMgr);
+            kernArgMgr->retain();
+            sub_exec->SetKernelArgManager(kernArgMgr);
           }
         }
 
-        status = childGraphExec->CaptureAndFormPacketsForGraph();
+        status = sub_exec->CaptureAndFormPacketsForGraph();
         if (status != hipSuccess) {
-          ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                  "[hipGraph] Child graph packet capture failed for child graph in segment, "
-                  "status=%d",
-                  status);
-          return status;
+          LogWarning("Sub-graph packet capture failed in segment");
+          status = hipSuccess;
         }
       }
     }
@@ -2732,48 +3284,60 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     return hipSuccess;
   };
 
-  // Handle child graph segments - recursively enqueue the entire child graph
-  if (segment.child_graph_ptr != nullptr) {
-    // Dispatch dependency barriers before child graph execution
+  // Handle sub-graph segments (child graphs, conditional body graphs)
+  if (segment.last_node && segment.last_node->HasSubGraphs()) {
+    // Dispatch dependency barriers before sub-graph execution
     status = dispatchCurrentBatch();
     if (status != hipSuccess) return status;
 
-    auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
-    if (childGraphExec != nullptr) {
-      // Child graphs share the same kernel arg manager as parent (for packet capture)
-      if (childGraphExec->GetKernelArgManager() == nullptr) {
-        auto kernArgMgr = GetKernelArgManager();
-        if (kernArgMgr != nullptr) {
-          kernArgMgr->retain();
-          childGraphExec->SetKernelArgManager(kernArgMgr);
+    // For conditional nodes, implement host-side WHILE/IF logic
+    if (segment.last_node->GetType() == hipGraphNodeTypeConditional) {
+      auto* cond = static_cast<hip::GraphConditionalNode*>(segment.last_node);
+      auto handle = cond->GetHandle();
+      auto cond_type = cond->GetCondType();
+      const auto& sub_execs = cond->GetSubGraphExecs();
+      // cond_ptr is in coarse-grained device memory; use hipMemcpy for host access.
+      void* cond_dev = reinterpret_cast<void*>(handle.device_ptr);
+      uint64_t cond_val = 0;
+
+      if (cond_type == hipGraphCondTypeIf && !sub_execs.empty()) {
+        (void)hipMemcpy(&cond_val, cond_dev, sizeof(uint64_t), hipMemcpyDeviceToHost);
+        int branch_idx = (cond_val != 0) ? 0
+                       : (sub_execs.size() >= 2 ? 1 : -1);
+        if (branch_idx >= 0) {
+          hipError_t body_status = hipSuccess;
+          amd::Command* body_last_cmd =
+              sub_execs[branch_idx]->EnqueueSegmentedGraph(stream, {}, &body_status);
+          if (body_last_cmd != nullptr) body_last_cmd->release();
+          if (body_status != hipSuccess) return body_status;
         }
       }
+    } else {
+      // Child graph nodes: recursively enqueue each sub-graph exec
+      for (auto* sub_exec : segment.last_node->GetSubGraphExecs()) {
+        if (sub_exec->GetKernelArgManager() == nullptr) {
+          auto kernArgMgr = GetKernelArgManager();
+          if (kernArgMgr != nullptr) {
+            kernArgMgr->retain();
+            sub_exec->SetKernelArgManager(kernArgMgr);
+          }
+        }
 
-      // Recursively enqueue the child graph with its own dependency tracking.
-      // TODO: child graphs currently take the legacy create/destroy signal path
-      // (out_signal_set == nullptr -> recycle == false), so their pre-created
-      // signal pool (from the child's BuildSyncPlan/Prepopulate) sits unused and
-      // they pay signal_create/destroy every launch. To pool child signals too,
-      // pass an out_signal_set here and recycle it from the parent's
-      // OnLaunchComplete (the parent's accumulate completion encloses the
-      // child's work); the cleanup would carry per-pool (manager, set) pairs.
-      hipError_t child_status = hipSuccess;
-      amd::Command* child_last_cmd =
-          childGraphExec->EnqueueSegmentedGraph(stream, {}, &child_status);
-
-      if (child_status != hipSuccess) {
-        ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                "[hipGraph] EnqueueSegment: Failed to enqueue child graph, status=%d",
-                child_status);
-        return child_status;
-      }
-
-      if (child_last_cmd != nullptr) {
-        child_last_cmd->release();
+        hipError_t child_status = hipSuccess;
+        amd::Command* child_last_cmd =
+            sub_exec->EnqueueSegmentedGraph(stream, {}, &child_status);
+        if (child_status != hipSuccess) {
+          ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                  "[hipGraph] EnqueueSegment: Failed to enqueue sub-graph, status=%d",
+                  child_status);
+          return child_status;
+        }
+        if (child_last_cmd != nullptr) child_last_cmd->release();
       }
     }
 
-    // Dispatch completion barrier after child graph — signals parent's HW event
+    // Dispatch completion barrier(s) after sub-graph — drains remaining batches so
+    // the trailing completion barrier signals the parent's HW event.
     while (segBatch && batchIndex < segBatch->packet_batches.size()) {
       status = dispatchCurrentBatch();
       if (status != hipSuccess) return status;
@@ -2795,8 +3359,23 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     auto& node = segment.nodes[i];
 
-    if (segBatch && i < segBatch->node_capture_status.size() &&
-        segBatch->node_capture_status[i]) {
+    if (!node->GraphCaptureEnabled()) {
+      if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+        node->stream_id_ = stream->GetStreamId();
+        node->hw_queue_id_ = stream->getQueueID();
+      }
+      *out_attach_signal = *out_attach_signal && (i == (segment.nodes.size() - 1));
+      // Node doesn't support capture - execute individually
+      node->SetStream(stream);
+      status = node->CreateCommand(node->GetQueue());
+      if (*out_attach_signal) {
+        if (node->GetCommands().size() > 0) {
+          node->GetCommands().back()->SetProfiling();
+        }
+      }
+      node->EnqueueCommands(stream);
+    } else if (segBatch && i < segBatch->node_capture_status.size() &&
+               segBatch->node_capture_status[i]) {
       // Node was successfully captured - dispatch its batch
       if (segBatch && batchIndex < segBatch->packet_batches.size()) {
         auto& packetBatch = segBatch->packet_batches[batchIndex];
@@ -2965,6 +3544,38 @@ bool Graph::RunOneNode(Node node) {
         }
         node->GetCommands().clear();
         node->GetCommands().push_back(completion);
+      }
+    }
+  } else if (node->GetType() == hipGraphNodeTypeConditional) {
+    auto* cond = static_cast<hip::GraphConditionalNode*>(node);
+    auto handle = cond->GetHandle();
+    auto cond_type = cond->GetCondType();
+    const auto& child_graphs = cond->GetChildGraphs();
+    volatile uint64_t* cond_ptr = reinterpret_cast<volatile uint64_t*>(handle.device_ptr);
+
+    if (cond_type == hipGraphCondTypeWhile && child_graphs.size() >= 1) {
+      *cond_ptr = 1;
+      auto* body = child_graphs[0];
+      const auto& body_nodes = body->GetNodes();
+      auto* exec_stream = streams_[node->stream_id_];
+      while (*cond_ptr != 0) {
+        for (auto body_node : body_nodes) {
+          body_node->SetStream(exec_stream);
+          (void)body_node->CreateCommand(body_node->GetQueue());
+          body_node->EnqueueCommands(exec_stream);
+        }
+        exec_stream->finish();
+      }
+    } else if (cond_type == hipGraphCondTypeIf && child_graphs.size() >= 1) {
+      auto* exec_stream = streams_[node->stream_id_];
+      auto* branch = (*cond_ptr != 0) ? child_graphs[0]
+                   : (child_graphs.size() >= 2 ? child_graphs[1] : nullptr);
+      if (branch != nullptr) {
+        for (auto body_node : branch->GetNodes()) {
+          body_node->SetStream(exec_stream);
+          (void)body_node->CreateCommand(body_node->GetQueue());
+          body_node->EnqueueCommands(exec_stream);
+        }
       }
     }
   } else {
@@ -3209,16 +3820,15 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       lastLaunchStream_ = launch_stream;
     }
 
-    // Get the internal stream (first parallel stream)
     hip::Stream* internal_stream = nullptr;
-    if (streams_.size() > 0) {
-      internal_stream = streams_[0];  // ToDo: check if this is the correct stream
+    if (parallel_streams_[instantiateDeviceId_].size() > 0) {
+      internal_stream = parallel_streams_[instantiateDeviceId_][0];
     } else {
       LogError("No streams are available for the graph execution!");
       return hipErrorOutOfMemory;
     }
 
-    // 1. Create start command — enqueue on internal stream, waits for launch stream
+    // Sync internal stream with launch stream
     amd::Command::EventWaitList startWaitList;
     amd::Command* lastLaunchCmd = launch_stream->getLastQueuedCommand(true);
     if (lastLaunchCmd != nullptr) {
@@ -3230,15 +3840,123 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       lastLaunchCmd->release();
     }
 
-    // 2. Dispatch scheduler kernel on internal stream
-    //    Scheduler copies N kernel packets from cmd_buffer to same HW queue
-    bool sched_ok = internal_stream->vdev()->runGraphSchedulerKernel(
-        cmd_buffer_.device_ptr + cmd_buffer_.KernelPacketsOffset(),
-        static_cast<uint32_t>(cmd_buffer_.kernel_packet_count));
+    auto* device = g_devices[instantiateDeviceId_]->devices()[0];
+    auto* exec_state = reinterpret_cast<DeviceExecutionState*>(
+        cmd_buffer_.device_ptr + cmd_buffer_.exec_state_offset);
 
-    if (!sched_ok) {
+    // Create a fresh completion signal for this launch.
+    // Each launch needs its own signal since launches are async.
+    void* hw_event = nullptr;
+    uint64_t signal_handle = device->createGraphCompletionEvent(&hw_event);
+    if (signal_handle == 0 || hw_event == nullptr) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+          "[GraphExec::Run] Failed to create completion signal");
+      startCommand->release();
+      return hipErrorOutOfMemory;
+    }
+
+    // Upgrade graph queue to device memory for lower latency (only for WHILE loops
+    // where the condBranch kernel issues packets to this queue every iteration).
+    if (cmd_buffer_.has_while_cond_branch || cmd_buffer_.has_fused_while) {
+      internal_stream->vdev()->upgradeToDeviceMemQueue();
+    }
+
+    // Initialize per-launch execution state
+    auto* gpu_queue = reinterpret_cast<hsa_queue_t*>(
+        internal_stream->vdev()->getGpuQueue());
+    exec_state->queue_ptr = reinterpret_cast<uint64_t>(gpu_queue);
+    exec_state->current_block = 0;
+    exec_state->completion_signal_ptr = signal_handle + 8;
+
+    // Extract hardware_doorbell_ptr from the queue's doorbell signal.
+    // doorbell_signal.handle -> amd_signal_t*; hardware_doorbell_ptr at offset 8.
+    exec_state->doorbell_ptr = *reinterpret_cast<uint64_t*>(
+        gpu_queue->doorbell_signal.handle + 8);
+
+    // Pre-resolve queue metadata for fast-path condBranchWhile (avoids per-iter lookups).
+    exec_state->cached_queue_base = reinterpret_cast<uint64_t>(gpu_queue->base_address);
+    exec_state->cached_queue_size = gpu_queue->size;
+
+    // GPU-side init: graphBlockIssue writes cond_init_value to cond_init_ptr
+    // before dispatching the first block. No host-side reset needed.
+
+    bool sched_ok = false;
+
+    if (cmd_buffer_.has_fused_while) {
+      // Fused WHILE path: need a second queue for body packets.
+      // The persistent kernel runs on internal_stream's queue (Queue A / control),
+      // and issues body packets to a second queue (Queue B / work).
+      hip::Stream* work_stream = nullptr;
+      if (parallel_streams_[instantiateDeviceId_].size() > 1) {
+        work_stream = parallel_streams_[instantiateDeviceId_][1];
+      }
+
+      if (work_stream == nullptr) {
+        // Create a dedicated work stream for the fused WHILE body dispatches.
+        auto* ws = new hip::Stream(g_devices[instantiateDeviceId_],
+                                   hip::Stream::Priority::Normal,
+                                   hipStreamNonBlocking);
+        if (ws->Create()) {
+          parallel_streams_[instantiateDeviceId_].push_back(ws);
+          work_stream = ws;
+          ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[GraphExec::Run] Created work stream for fused WHILE");
+        } else {
+          hip::Stream::Destroy(ws);
+          ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[GraphExec::Run] Failed to create work stream for fused WHILE");
+        }
+      }
+
+      if (work_stream != nullptr) {
+        auto* work_gpu_queue = reinterpret_cast<hsa_queue_t*>(
+            work_stream->vdev()->getGpuQueue());
+        exec_state->work_queue_ptr = reinterpret_cast<uint64_t>(work_gpu_queue);
+        exec_state->work_doorbell_ptr = *reinterpret_cast<uint64_t*>(
+            work_gpu_queue->doorbell_signal.handle + 8);
+
+        ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[GraphExec::Run] FUSED WHILE: control_queue=%p, work_queue=%p, "
+            "cond_ptr=0x%lx, body_block=%u",
+            gpu_queue, work_gpu_queue,
+            cmd_buffer_.while_cond_ptr, cmd_buffer_.while_body_block_idx);
+
+        sched_ok = internal_stream->vdev()->runGraphWhileLoop(
+            cmd_buffer_.device_ptr + cmd_buffer_.exec_state_offset,
+            cmd_buffer_.while_cond_ptr,
+            cmd_buffer_.while_body_block_idx);
+      } else {
+        ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+            "[GraphExec::Run] FUSED WHILE: failed to get second queue, falling back");
+      }
+    } else {
+      // Standard multi-block path
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[GraphExec::Run] blocks=%u, doorbell_ptr=0x%lx",
+          cmd_buffer_.block_count, exec_state->doorbell_ptr);
+
+      exec_state->work_queue_ptr = 0;
+      exec_state->work_doorbell_ptr = 0;
+
+      sched_ok = internal_stream->vdev()->runGraphBlockIssue(
+          cmd_buffer_.device_ptr + cmd_buffer_.exec_state_offset);
+    }
+
+    if (sched_ok) {
+      // Add a barrier on the launch stream that waits on the graph's completion signal.
+      // graphReturn/graphWhileLoop sets signal to 0 when done.
+      launch_stream->vdev()->addBarrierPacket(signal_handle);
+
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[GraphExec::Run] dispatched: blocks=%u, signal=0x%lx, fused_while=%d",
+          cmd_buffer_.block_count, signal_handle, cmd_buffer_.has_fused_while);
+    } else {
+      device->destroyGraphSignal(signal_handle);
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+          "[GraphExec::Run] dispatch FAILED (fused_while=%d)", cmd_buffer_.has_fused_while);
       status = hipErrorUnknown;
     }
+
     startCommand->release();
   } else if (!cross_device_launch) {
     if (max_streams_dev_.size() == 1) {
