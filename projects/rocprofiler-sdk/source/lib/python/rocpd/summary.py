@@ -165,9 +165,12 @@ def generate_summary_query(
 
     full_view_name = f"{view_name}{view_suffix}"
 
+    # Use a different name for the CTE to avoid circular reference when view_query references the view
+    source_table_name = f"{view_name}_source" if view_query else view_name
+
     view_select = (
         f"""
-            {view_name} AS (
+            {source_table_name} AS (
                 {view_query}
             ),
     """
@@ -182,7 +185,7 @@ def generate_summary_query(
                 SELECT
                     {group_by_columns.replace(name_column, f"{name_column} AS name")},
                     AVG(duration) AS avg_duration
-                FROM {view_name}
+                FROM {source_table_name}
                 GROUP BY {group_by_columns}
             ),
             aggregated_data AS (
@@ -194,7 +197,7 @@ def generate_summary_query(
                     MIN(T.duration) AS min_duration,
                     MAX(T.duration) AS max_duration,
                     SQRT(SUM(CAST((T.duration - A.avg_duration) AS REAL) * CAST((T.duration - A.avg_duration) AS REAL)) / (COUNT(*) - 1)) AS std_dev_duration
-                FROM {view_name} T
+                FROM {source_table_name} T
                 JOIN avg_data A ON {join_condition}
                 GROUP BY {aggregation_group_by}
             ),
@@ -323,7 +326,7 @@ def create_summary_queries(
     connection: RocpdImportData,
     by_rank=False,
     only_view_categories=None,
-    truncate_kernels=False,
+    kernel_name_type=None,
 ):
     """Create summary queries for eligible temporary views in the database.
 
@@ -357,22 +360,31 @@ def create_summary_queries(
         if not required_columns.issubset(columns):
             continue
 
-        # Determine the name column to use
-        if view_name == "kernels" and truncate_kernels:
+        # Determine the name column and view query to use
+        name_column = NAME_COLUMN_MAP.get(view_name, "name")
+        view_query = ""
+
+        if view_name == "kernels" and kernel_name_type == "truncated":
+            # Join with kernel_symbols to get truncated_kernel_name
+            view_query = """
+                SELECT K.*, COALESCE(KS.truncated_kernel_name, K.name) AS truncated_name
+                FROM kernels K
+                LEFT JOIN kernel_symbols KS
+                    ON K.kernel_id = KS.id
+                    AND K.guid = KS.guid
+            """
             name_column = "truncated_name"
-        else:
-            name_column = NAME_COLUMN_MAP.get(view_name, "name")
 
         # Create regular summary query
         summary_query_name, summary_query = generate_summary_query(
-            view_name, "", name_column=name_column
+            view_name, view_query, name_column=name_column
         )
         queries[summary_query_name] = summary_query
 
         # Create per-rank summary query
         if by_rank:
             per_rank_query_name, summary_by_rank_query = generate_summary_query(
-                view_name, "", name_column=name_column, by_rank=True
+                view_name, view_query, name_column=name_column, by_rank=True
             )
             queries[per_rank_query_name] = summary_by_rank_query
 
@@ -490,6 +502,7 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     region_categories = kwargs.get("region_categories", None)
     output_format = kwargs.get("format", "console")
     truncate_kernels = kwargs.get("truncate_kernels", False)
+    kernel_name_type = "truncated" if truncate_kernels else None
 
     if not check_function_availability(connection, "sqrt"):
         connection.create_function(
@@ -516,7 +529,7 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     )
     if region_categories is None or is_none_categories:
         summary_queries.update(
-            create_summary_queries(connection, by_rank, truncate_kernels=truncate_kernels)
+            create_summary_queries(connection, by_rank, kernel_name_type=kernel_name_type)
         )
     else:
         summary_queries.update(
@@ -524,7 +537,7 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
                 connection,
                 by_rank,
                 only_view_categories=region_categories,
-                truncate_kernels=truncate_kernels,
+                kernel_name_type=kernel_name_type,
             )
         )
     summary_queries.update(
