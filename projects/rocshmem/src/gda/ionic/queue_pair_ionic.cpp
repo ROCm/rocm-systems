@@ -25,6 +25,7 @@
 #include "gda/queue_pair.hpp"
 #include "gda/endian.hpp"
 #include "util.hpp"
+#include "log.hpp"
 #include "containers/free_list_impl.hpp"
 
 namespace rocshmem {
@@ -116,7 +117,7 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
 
   /* Report if the completion indicates an error. */
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -124,8 +125,8 @@ __device__ void QueuePair::poll_wave_cqes(uint64_t activemask) {
     uint32_t status = byteswap<uint32_t>(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    printf("QUIET ERROR: %s qid %u type %u flag %#x status %u msn %u npg %lu\n",
-           dev_name, qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR: qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();
@@ -173,7 +174,7 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
   }
 
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -181,8 +182,8 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info,
     uint32_t status = byteswap<uint32_t>(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    printf("QUIET ERROR (CCQE): %s qid %u type %u flag %#x status %u msn %u npg %lu\n",
-           dev_name, qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();
@@ -203,7 +204,7 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe_single(uint32_t cons) {
   }
 
   if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
-#if defined(DEBUG)
+#if defined(BUILD_DEBUG_DEVICE)
     uint32_t qtf = byteswap<uint32_t>(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
@@ -211,8 +212,8 @@ __device__ void QueuePair::ionic_quiet_internal_ccqe_single(uint32_t cons) {
     uint32_t status = byteswap<uint32_t>(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
-    printf("QUIET ERROR (CCQE): %s qid %u type %u flag %#x status %u msn %u npg %lu\n",
-           dev_name, qid, type, flag, status, msn, npg);
+    LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
+               qid, type, flag, status, msn, npg);
 #endif
     /* No other way to signal an error, so just crash. */
     abort();

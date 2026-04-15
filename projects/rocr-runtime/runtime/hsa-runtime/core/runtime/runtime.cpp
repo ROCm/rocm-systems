@@ -827,6 +827,13 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t Runtime::GetSignalEventId(hsa_signal_t signal, uint32_t *event_id) {
+  core::Signal* coreSignal = core::Signal::Convert(signal);
+  *event_id = coreSignal->EopEvent() ? coreSignal->EopEvent()->EventId : 0;
+
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             hsa_signal_condition_t cond,
                                             hsa_signal_value_t value,

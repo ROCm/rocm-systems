@@ -376,7 +376,18 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
         auto _lines_beg = std::vector<statement_t>{};
         auto _lines_end = std::vector<statement_t>{};
 
-        if(module->getSourceLines(_base_addr, _lines_beg) && !_lines_beg.empty())
+        // Filter out DWARF line-0 entries ("no source statement") which some
+        // compilers (e.g. amdclang++) emit for compiler-generated basic blocks.
+        auto _remove_line_zero = [](std::vector<statement_t>& _lines) {
+            _lines.erase(
+                std::remove_if(_lines.begin(), _lines.end(),
+                               [](statement_t& stmt) { return stmt.lineNumber() == 0; }),
+                _lines.end());
+        };
+
+        if(module->getSourceLines(_base_addr, _lines_beg)) _remove_line_zero(_lines_beg);
+
+        if(!_lines_beg.empty())
         {
             int _row1 = _lines_beg.front().lineNumber();
             int _col1 = _lines_beg.front().lineOffset();
@@ -384,7 +395,10 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
             verbprintf(4, "size of _lines_end = %lu\n",
                        (unsigned long) _lines_end.size());
 
-            if(module->getSourceLines(_last_addr, _lines_end) && !_lines_end.empty())
+            if(module->getSourceLines(_last_addr, _lines_end))
+                _remove_line_zero(_lines_end);
+
+            if(!_lines_end.empty())
             {
                 int _row2 = _lines_end.back().lineNumber();
                 int _col2 = _lines_end.back().lineOffset();
@@ -455,20 +469,15 @@ get_source_code(module_t* module, procedure_t* func)
 
 //======================================================================================//
 //
-//  For compatibility purposes
+//  find_function: the module list overload searches only pre-parsed modules (fast).
+//  The object list overload searches objects (which map over their contained modules).
 //
-procedure_t*
-find_function(image_t* app_image, const std::string& _name, const strset_t& _extra)
+
+template <typename FinderT>
+static procedure_t*
+find_function_impl(FinderT&& _find, const std::string& _name, const strset_t& _extra)
 {
     if(_name.empty()) return nullptr;
-
-    auto _find = [app_image](const std::string& _f) -> procedure_t* {
-        // Extract the vector of functions
-        std::vector<procedure_t*> _found;
-        auto* ret = app_image->findFunction(_f.c_str(), _found, false, true, true);
-        if(ret == nullptr || _found.empty()) return nullptr;
-        return _found.at(0);
-    };
 
     procedure_t* _func = _find(_name);
     auto         itr   = _extra.begin();
@@ -490,24 +499,55 @@ find_function(image_t* app_image, const std::string& _name, const strset_t& _ext
     return _func;
 }
 
+procedure_t*
+find_function(const std::vector<module_t*>& _modules, const std::string& _name,
+              const strset_t& _extra)
+{
+    return find_function_impl(
+        [&_modules](const std::string& _f) -> procedure_t* {
+            std::vector<procedure_t*> _found;
+            for(auto* mod : _modules)
+            {
+                if(!mod) continue;
+                _found.clear();
+                auto* ret =
+                    mod->findFunction(_f.c_str(), _found, false, true, false, false);
+                if(ret && !_found.empty()) return _found.at(0);
+            }
+            return nullptr;
+        },
+        _name, _extra);
+}
+
+procedure_t*
+find_function(const std::vector<object_t*>& _objects, const std::string& _name,
+              const strset_t& _extra)
+{
+    return find_function_impl(
+        [&_objects](const std::string& _f) -> procedure_t* {
+            std::vector<procedure_t*> _found;
+            for(auto* obj : _objects)
+            {
+                if(!obj) continue;
+                _found.clear();
+                auto* ret = obj->findFunction(_f, _found, false, true, false, false);
+                if(ret && !_found.empty()) return _found.at(0);
+            }
+            return nullptr;
+        },
+        _name, _extra);
+}
+
 //======================================================================================//
 //
-//  Find undefined function symbols (external references) in the binary
+//  Find undefined function symbols (external references) across the provided objects
 //
 symtab_symbol_t*
-find_undefined_function_symbol(image_t* app_image, const std::string& _name)
+find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
+                               const std::string&                   _name)
 {
-    if(_name.empty()) return nullptr;
+    if(_name.empty() || _objects.empty()) return nullptr;
 
-    // Get all objects from the image
-    BPatch_Vector<BPatch_object*> app_objects;
-    app_image->getObjects(app_objects);
-
-    if(app_objects.empty())
-    {
-        verbprintf(3, "No objects found in image for symbol search\n");
-        return nullptr;
-    }
     // Search helper lambda for code reuse
     auto _find_symbol = [](SymTab::Symtab*    symtab,
                            const std::string& target_name) -> symtab_symbol_t* {
@@ -533,12 +573,11 @@ find_undefined_function_symbol(image_t* app_image, const std::string& _name)
         return nullptr;
     };
 
-    // Search through each object
-    for(auto* app_object : app_objects)
+    for(auto* obj : _objects)
     {
-        if(!app_object) continue;
+        if(!obj) continue;
 
-        std::string binary_path = app_object->name();
+        std::string binary_path = obj->name();
         // Open Symtab directly for comprehensive symbol access
         SymTab::Symtab* symtab = nullptr;
         if(!SymTab::Symtab::openFile(symtab, binary_path))
@@ -828,9 +867,202 @@ error_func_fake(error_level_t level, int num, const char* const* params)
 #include "internal_libs.hpp"
 
 #include <timemory/components/timing/wall_clock.hpp>
+#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
 using ::timemory::join::join;
+
+//======================================================================================//
+//
+//  Filters app_modules by removing internal and user-excluded modules.
+//  Returns a new vector containing only the modules eligible for instrumentation.
+//
+
+std::vector<module_t*>
+filter_modules(std::vector<module_t*>* app_modules)
+{
+    if(!app_modules || app_modules->empty()) return {};
+
+    auto _wc = tim::component::wall_clock{};
+    auto _pr = tim::component::peak_rss{};
+    _wc.start();
+    _pr.start();
+
+    // This does determine objects/procedures associated with a module, but it
+    // internally uses Dyninst's Symtab API (faster)
+    const auto& _internal_libs = get_internal_libs_data();
+
+    auto   _result         = std::vector<module_t*>{};
+    size_t _excluded_count = 0;
+
+    for(auto* mod : *app_modules)
+    {
+        if(!mod) continue;
+
+        auto _module_name = std::string{ get_name(mod) };
+        auto _module_base = std::string{ tim::filepath::basename(_module_name) };
+        auto _module_real = tim::filepath::realpath(_module_name, nullptr, false);
+
+        bool _is_excluded = false;
+
+        if(_internal_libs.find(_module_name) != _internal_libs.end() ||
+           _internal_libs.find(_module_real) != _internal_libs.end() ||
+           _internal_libs.find(_module_base) != _internal_libs.end())
+        {
+            _is_excluded = true;
+        }
+
+        if(!_is_excluded)
+        {
+            for(const auto& [lib_path, sub_map] : _internal_libs)
+            {
+                auto _lib_base = std::string{ tim::filepath::basename(lib_path) };
+                if(_module_base == _lib_base || _module_real == lib_path ||
+                   sub_map.find(_module_base) != sub_map.end() ||
+                   sub_map.find(_module_real) != sub_map.end() ||
+                   sub_map.find(_module_name) != sub_map.end())
+                {
+                    _is_excluded = true;
+                    break;
+                }
+            }
+        }
+
+        if(_is_excluded)
+        {
+            verbprintf(3, "Skipping internal module: '%s'\n", _module_name.c_str());
+            ++_excluded_count;
+            continue;
+        }
+
+        // -ME: skip if module matches an exclude regex
+        for(const auto& re : file_exclude)
+        {
+            if(std::regex_search(_module_name, re))
+            {
+                _is_excluded = true;
+                verbprintf(2, "[filter_modules] skipping module-exclude-regex: '%s'\n",
+                           _module_name.c_str());
+                break;
+            }
+        }
+
+        // -MR: skip if restrict is specified and module does NOT match
+        if(!_is_excluded && !file_restrict.empty())
+        {
+            bool _matched = false;
+            for(const auto& re : file_restrict)
+            {
+                if(std::regex_search(_module_name, re))
+                {
+                    _matched = true;
+                    break;
+                }
+            }
+            if(!_matched)
+            {
+                _is_excluded = true;
+                verbprintf(2, "[filter_modules] skipping module-restrict-regex: '%s'\n",
+                           _module_name.c_str());
+            }
+        }
+
+        // -MI: if module matches an include regex, force it through
+        if(_is_excluded)
+        {
+            for(const auto& re : file_include)
+            {
+                if(std::regex_search(_module_name, re))
+                {
+                    _is_excluded = false;
+                    verbprintf(2, "[filter_modules] forcing module-include-regex: '%s'\n",
+                               _module_name.c_str());
+                    break;
+                }
+            }
+        }
+
+        if(_is_excluded)
+        {
+            ++_excluded_count;
+            continue;
+        }
+
+        _result.emplace_back(mod);
+    }
+
+    _pr.stop();
+    _wc.stop();
+    verbprintf(0,
+               "Filtered modules: %zu of %zu included (%zu excluded) "
+               "(%.3f %s, %.3f %s)\n",
+               _result.size(), app_modules->size(), _excluded_count, _wc.get(),
+               _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    return _result;
+}
+
+//======================================================================================//
+//
+//  Fetches procedures from the given modules. Assumes modules have already been
+//  filtered by filter_modules(). Falls back to app_image->getProcedures() if
+//  no modules are provided.
+//
+
+std::vector<procedure_t*>*
+get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
+               bool include_uninstrumentable)
+{
+    auto _wc = tim::component::wall_clock{};
+    auto _pr = tim::component::peak_rss{};
+    _wc.start();
+    _pr.start();
+
+    // This is the original dyninst implementation. No filtering is applied
+    if(!app_modules || app_modules->empty())
+    {
+        verbprintf(2, "No modules found, falling back to "
+                      "app_image->getProcedures()...\n");
+        auto* _procs = app_image->getProcedures(include_uninstrumentable);
+
+        _pr.stop();
+        _wc.stop();
+
+        verbprintf(0,
+                   "Fetching procedures from image (no modules): "
+                   "%zu procedures found (%.3f %s, %.3f %s)\n",
+                   _procs ? _procs->size() : 0, _wc.get(), _wc.display_unit().c_str(),
+                   _pr.get(), _pr.display_unit().c_str());
+
+        return _procs;
+    }
+
+    auto* proclist = new std::vector<procedure_t*>{};
+
+    for(auto* mod : *app_modules)
+    {
+        if(!mod) continue;
+        auto* procs = mod->getProcedures(include_uninstrumentable);
+        if(procs && !procs->empty())
+            proclist->insert(proclist->end(), procs->begin(), procs->end());
+    }
+
+    _pr.stop();
+    _wc.stop();
+    verbprintf(0,
+               "Fetched procedures from %zu modules: "
+               "%zu procedures found (%.3f %s, %.3f %s)\n",
+               app_modules->size(), proclist->size(), _wc.get(),
+               _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    if(proclist->empty())
+    {
+        delete proclist;
+        return nullptr;
+    }
+
+    return proclist;
+}
 
 //======================================================================================//
 //

@@ -66,14 +66,16 @@ struct gpu_metrics_settings_t
 /// GPU metrics capabilities structure with bitfield flags
 struct gpu_metrics_capabilities_t
 {
+    struct flags_t
+    {
+        uint8_t vcn_is_device_level_only  : 1;  ///< VCN is device-level (vs per-XCP)
+        uint8_t jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
+        uint8_t reserved                  : 6;  ///< Reserved for future use
+    };
+
     union
     {
-        struct
-        {
-            uint8_t vcn_is_device_level_only  : 1;  ///< VCN is device-level (vs per-XCP)
-            uint8_t jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
-            uint8_t reserved                  : 6;  ///< Reserved for future use
-        } flags;
+        flags_t flags;
         uint8_t value;  ///< Raw byte value for easy serialization
     };
 

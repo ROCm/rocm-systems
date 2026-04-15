@@ -139,50 +139,54 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
               trace_cache::info::format_track_name<category::cpu_freq>(cpu_id).c_str(),
               "Frequency", trait::name<category::cpu_freq>::description, LONG_DESCRIPTION,
               COMPONENT, component::cpu_freq::display_unit().c_str(),
-              rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+              rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_page>::value, "Memory Usage",
           trait::name<category::process_page>::description, LONG_DESCRIPTION, COMPONENT,
-          MEMORY, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          MEMORY, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_virt>::value, "Virtual Memory Usage",
           trait::name<category::process_virt>::description, LONG_DESCRIPTION, COMPONENT,
-          MEMORY, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          MEMORY, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_peak>::value, "Peak Memory",
           trait::name<category::process_peak>::description, LONG_DESCRIPTION, COMPONENT,
-          MEMORY, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          MEMORY, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_context_switch>::value, "Context Switches",
           trait::name<category::process_context_switch>::description, LONG_DESCRIPTION,
-          COMPONENT, "", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          COMPONENT, "", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+          "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_page_fault>::value, "Page Faults",
           trait::name<category::process_page_fault>::description, LONG_DESCRIPTION,
-          COMPONENT, "", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          COMPONENT, "", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+          "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_user_mode_time>::value, "User Time",
           trait::name<category::process_user_mode_time>::description, LONG_DESCRIPTION,
-          COMPONENT, TIME, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          COMPONENT, TIME, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+          "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_kernel_mode_time>::value, "Kernel Time",
           trait::name<category::process_kernel_mode_time>::description, LONG_DESCRIPTION,
-          COMPONENT, TIME, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          COMPONENT, TIME, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+          "{}" });
 }
 
 std::vector<uint8_t>

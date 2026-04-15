@@ -123,7 +123,7 @@ resolve_schema_config(const nlohmann::json& config)
         resolve_value(result, tracing, "backend", env_vars::PERFETTO_BACKEND);
         resolve_value(result, tracing, "flush_period_ms",
                       env_vars::PERFETTO_FLUSH_PERIOD);
-        resolve_value(result, tracing, "region", env_vars::TRACE_REGION);
+        resolve_value(result, tracing, "region", env_vars::SELECTED_REGIONS);
     }
 
     // --- Profiling section ---
@@ -686,7 +686,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
                         "backend");
     export_int_value(config, env_map, env_vars::PERFETTO_FLUSH_PERIOD, "tracing",
                      "flush_period_ms");
-    export_string_value(config, env_map, env_vars::TRACE_REGION, "tracing", "region");
+    export_string_value(config, env_map, env_vars::SELECTED_REGIONS, "tracing", "region");
 
     // --- Profiling ---
     export_section_enabled(config, env_map, env_vars::PROFILE, "profiling");

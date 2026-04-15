@@ -22,8 +22,10 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine DEBUG
 #cmakedefine PROFILE
+#cmakedefine BUILD_DEBUG_TRACE_HOST
+#cmakedefine BUILD_DEBUG_TRACE_DEVICE
+#cmakedefine BUILD_DEBUG_DEVICE
 #cmakedefine USE_RO
 #cmakedefine USE_IPC
 #cmakedefine USE_GDA

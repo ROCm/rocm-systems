@@ -1732,8 +1732,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
 // ================================================================================================
 VirtualGPU::~VirtualGPU() {
   // Release SDMA engine assignment for this VirtualGPU
-  dev().ReleaseSdmaEngine(this);
-  ClearAssignedSdmaEngine();
+  ReleaseSdmaEngines();
 
   delete blitMgr_;
 
@@ -1874,14 +1873,14 @@ bool VirtualGPU::ManagedBuffer::Create(Device::MemorySegment mem_segment) {
       gpu_.dev().info().largeBar_) {
     amd::Device::AllocationFlags flags = {};
     flags.executable_ = true;
-    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_, flags));
+    pool_base_ = reinterpret_cast<address>(gpu_.dev().deviceLocalAlloc(pool_size_, flags, false));
     if (pool_base_ != nullptr) {
       // @note Workaround first access penalty.
       // KFD may update CPU page tables on the first CPU access
       *pool_base_ = 0;
     }
   } else {
-    pool_base_ = reinterpret_cast<address>(gpu_.dev().hostAlloc(pool_size_, 0, mem_segment));
+    pool_base_ = reinterpret_cast<address>(gpu_.dev().hostAlloc(pool_size_, 0, mem_segment, nullptr, false));
   }
   if (pool_base_ == nullptr) {
     return false;
@@ -1959,6 +1958,9 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 
 // ================================================================================================
 void VirtualGPU::ReleaseSdmaEngines() {
+  if (!hasAssignedSdmaEngine()) {
+    return;
+  }
   // Release SDMA engine assignment when queue is idle
   // This allows the engine to be reassigned to other active streams
   dev().ReleaseSdmaEngine(this);

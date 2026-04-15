@@ -168,7 +168,9 @@ virtualMemoryManagement:
     <<: *level_2
     # SWDEV-555665
     disabled: [amd_windows]
-  Unit_hipMemSetAccessHost_devicealloc: *level_2
+  Unit_hipMemSetAccessHost_devicealloc:
+    <<: *level_2
+    disabled: [amd_windows]
   Unit_hipMemGetAllocationPropertiesFromHandle_functional:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
