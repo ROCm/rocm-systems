@@ -306,9 +306,65 @@ def detect_counters(
     return counters, effective_blocks
 
 
+def _group_present_counters(
+    counters: list[str],
+    same_bucket_groups: list[set[str]] | None,
+) -> list[list[str]]:
+    """Return policy groups that have at least two counters present."""
+    if not same_bucket_groups:
+        return []
+
+    present = set(counters)
+    grouped: list[list[str]] = []
+    seen_groups: set[tuple[str, ...]] = set()
+
+    for group in same_bucket_groups:
+        members = sorted(counter for counter in group if counter in present)
+        if len(members) < 2:
+            continue
+
+        key = tuple(members)
+        if key in seen_groups:
+            continue
+
+        seen_groups.add(key)
+        grouped.append(members)
+
+    return grouped
+
+
+def _allocate_same_bucket_groups(
+    work: list[str],
+    perfmon_config: dict[str, int],
+    same_bucket_groups: list[set[str]] | None,
+    start_file_count: int,
+) -> tuple[list[CounterFile], list[str], int]:
+    """Allocate policy-prioritized counter groups before general first-fit placement."""
+    grouped_buckets: list[CounterFile] = []
+    remaining = list(work)
+    file_count = start_file_count
+
+    for members in _group_present_counters(remaining, same_bucket_groups):
+        bucket = CounterFile(str(file_count), perfmon_config)
+        added_members: list[str] = []
+
+        for counter in members:
+            if counter in remaining and bucket.add(counter):
+                added_members.append(counter)
+
+        if len(added_members) >= 2:
+            file_count += 1
+            grouped_buckets.append(bucket)
+            for counter in added_members:
+                remaining.remove(counter)
+
+    return grouped_buckets, remaining, file_count
+
+
 def allocate_buckets(
     counters: set[str],
     perfmon_config: dict[str, int],
+    same_bucket_groups: list[set[str]] | None = None,
 ) -> list[CounterFile]:
     """Allocate counters to perfmon bucket files."""
     output_files: list[CounterFile] = []
@@ -326,6 +382,14 @@ def allocate_buckets(
             output_files[-1].add(counter)
 
     file_count = 0
+    grouped_files, work, file_count = _allocate_same_bucket_groups(
+        work,
+        perfmon_config,
+        same_bucket_groups,
+        file_count,
+    )
+    output_files.extend(grouped_files)
+
     for ctr in work:
         added = False
         for output_file in output_files:
