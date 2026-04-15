@@ -91,7 +91,6 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GPU_RUNNER: ${{ matrix.system.runner }}
       GCC_COMPILER_VERSION: 11
-      ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
 
     steps:
     - name: Install Latest Nightly ROCm
