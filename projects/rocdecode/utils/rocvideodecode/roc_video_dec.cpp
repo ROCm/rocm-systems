@@ -305,7 +305,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     byte_per_pixel_ = bitdepth_minus_8_ > 0 ? 2 : 1;
 
     // Set the output surface format same as chroma format
-    if (video_chroma_format_ == rocDecVideoChromaFormat_420 || rocDecVideoChromaFormat_Monochrome)
+    if (video_chroma_format_ == rocDecVideoChromaFormat_420 || video_chroma_format_ == rocDecVideoChromaFormat_Monochrome)
         video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_P016 : rocDecVideoSurfaceFormat_NV12;
     else if (video_chroma_format_ == rocDecVideoChromaFormat_444)
         video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
