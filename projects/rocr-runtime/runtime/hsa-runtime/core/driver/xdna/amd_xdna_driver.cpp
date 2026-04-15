@@ -429,8 +429,8 @@ hsa_status_t XdnaDriver::FreeMemory(void *mem, size_t size) {
 
 hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                      HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
-                                     void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                     HsaQueueResource& queue_resource) const {
+                                     void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                     HsaEvent* event, HsaQueueResource& queue_resource) const {
   queue_resource.QueueId = AMDXDNA_INVALID_CTX_HANDLE;
   return HSA_STATUS_SUCCESS;
 }

@@ -71,9 +71,10 @@
  * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
+ * - 1.21 - hsa_amd_signal_get_event_id
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 20
+#define HSA_AMD_INTERFACE_VERSION_MINOR 21
 
 #ifdef __cplusplus
 extern "C" {
@@ -116,12 +117,17 @@ typedef enum {
    * queues created from AMD GPU Agents support this packet.
    */
   HSA_AMD_PACKET_TYPE_BARRIER_VALUE = 2,
+
   /**
-   * Packet used to send commands to an AIE agent's embedded runtime (ERT). The
-   * ERT is responsible for, among other things, handling dispatches. Only
-   * queues created on AIE agents support this packet.
+   * Extended kernel dispatch packet that supports clusters, an explicit
+   * dependency signal, and additional performance-oriented features.
    */
-  HSA_AMD_PACKET_TYPE_AIE_ERT = 3
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
+
+  /* Reserved for a packet that is not yet released */
+  HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
+  /* HSA_AMD_PACKET_TYPE_AIE_ERT packet was never released so value may change in the future */
+  HSA_AMD_PACKET_TYPE_AIE_ERT = 200,
 } hsa_amd_packet_type_t;
 
 /**
@@ -145,7 +151,9 @@ typedef struct hsa_amd_packet_header_s {
   hsa_amd_packet_type8_t AmdFormat;
 
   /**
-   * Reserved. Must be 0.
+   * Reserved. Must be 0 unless explicitly stated otherwise per packet.
+   *
+   * HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH uses this for the setup field.
    */
   uint8_t reserved;
 } hsa_amd_vendor_packet_header_t;
@@ -211,6 +219,209 @@ typedef struct hsa_amd_barrier_value_packet_s {
 } hsa_amd_barrier_value_packet_t;
 
 /**
+ * @brief Enumeration constants corresponding to the sub-fields of
+ * @ref hsa_amd_ext_perf_hint_t. Their values are equal to the offset (in bits)
+ * inside the overall hint structure.
+ */
+typedef enum {
+  HSA_AMD_EXT_PERF_HINT_GROUP_MEM_CARVEOUT = 0,
+  HSA_AMD_EXT_PERF_HINT_REVERSE_DISPATCH_ORDER = 7,
+} hsa_amd_ext_perf_hint_subfield_t;
+
+/**
+ * @brief Width (in bits) of the sub-fields in @ref hsa_amd_ext_perf_hint_t.
+ */
+typedef enum {
+  HSA_AMD_EXT_PERF_HINT_WIDTH_GROUP_MEM_CARVEOUT = 7,
+  HSA_AMD_EXT_PERF_HINT_WIDTH_REVERSE_DISPATCH_ORDER = 1,
+} hsa_amd_ext_perf_hint_subfield_width_t;
+
+/**
+ * @brief Performance hints used by @ref hsa_amd_ext_kernel_dispatch_packet_t.
+ *
+ * The sub-fields of this packet give performance optimization hints to
+ * an agent, associated with a grid dispatch. The values of the sub-fields in
+ * this packet are only hints; the agent may choose to ignore them.
+ */
+typedef union {
+  struct {
+    /**
+     * Group-memory-available storage in each compute unit that is requested to
+     * be reserved for group memory. In agents that can reconfigure CU storage
+     * to be used for other purposes (e.g., caches), this hints to the agent
+     * what fraction of that storage should be reserved for group memory.
+     * Increasing this value may increase the number of workgroups that can be
+     * simultaneously active on a compute unit.
+     *
+     * This 7b field can hold 0-127. A value of 0 allows the agent to decide
+     * the configuration. The remaining encodings [1, 127] represent a range
+     * from 0% (no group memory) to 100% (maximum group memory).
+     *
+     * Setting the requested amount lower than the group memory a single
+     * workgroup needs will not cause the dispatch to fail; the hint may
+     * instead be ignored or raised by the agent to a level necessary to allow
+     * at least one workgroup to run in the compute units.​
+     */
+    uint8_t group_mem_carveout : 7;
+
+    /**
+     * Boolean that hints to the hardware that the agent may benefit from
+     * making workgroups active in reverse order.
+     *
+     * The HSA Platform System Architecture Specification Version 1.2
+     * (Section 2.11) implies that agents generally launch from lowest flattened
+     * workgroup ID to higher. Setting this hint to 1 indicates that this
+     * dispatch may benefit from launching highest-to-lower.
+     *
+     * Setting this bit to 1 will remove kernel dispatch forward progress
+     * guarantees from the associated dispatch.
+     *
+     * Legal values are 0 and 1.​
+     */
+    uint8_t reverse_dispatch_order : 1;
+  };
+
+  uint8_t hint_val;
+} hsa_amd_ext_perf_hint_t;
+
+/**
+ * @brief AMD extended kernel dispatch packet.
+ */
+typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
+  /**
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_packet_header_t.
+   *
+   * The hsa_packet_type_t in this header must be
+   * HSA_PACKET_TYPE_VENDOR_SPECIFIC.​
+   */
+  uint16_t header;
+
+  /**
+   * AMD vendor-specific packet type. Used to configure which vendor packet this
+   * is. The parameters are described by hsa_amd_packet_type_t. This packet is
+   * of type HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.​
+   */
+  hsa_amd_packet_type8_t amd_format;
+
+  /**
+   * Dispatch setup parameters. Used to configure kernel dispatch parameters
+   * such as the number of dimensions in the grid. The parameters are described
+   * by hsa_kernel_dispatch_packet_setup_t.​
+   */
+  uint8_t setup;
+
+  /**
+   * X dimension of work-group, in work-items. Must be greater than 0.​
+   */
+  uint16_t workgroup_size_x;
+
+  /**
+   * Y dimension of work-group, in work-items. Must be greater than 0. If the
+   * grid has 1 dimension, the only valid value is 1.​
+   */
+  uint16_t workgroup_size_y;
+
+  /**
+   * Z dimension of work-group, in work-items. Must be greater than 0. If the
+   * grid has 1 or 2 dimensions, the only valid value is 1.​
+   */
+  uint16_t workgroup_size_z;
+
+  /**
+   * Reserved. Must be 0.​
+   */
+  uint16_t reserved0;
+
+  /**
+   * X dimension of grid, in clusters. Must be greater than 0.​
+   */
+  uint32_t cluster_count_x;
+
+  /**
+   * Y dimension of grid, in clusters. Must be greater than 0.​ If the grid has
+   * 1 dimension, the only valid value is 1.​
+   */
+  uint16_t cluster_count_y;
+
+  /**
+   * Z dimension of grid, in clusters. Must be greater than 0.​ If the grid has
+   * 1 or 2 dimensions, the only valid value is 1.​
+   */
+  uint16_t cluster_count_z;
+
+  /**
+   * X dimension of cluster, in workgroups. Must be greater than 0.​
+   */
+  uint8_t cluster_size_x;
+
+  /**
+   * Y dimension of cluster, in workgroups. Must be greater than 0.​​ If the grid
+   * has 1 dimension, the only valid value is 1.​
+   */
+  uint8_t cluster_size_y;
+
+  /**
+   * Z dimension of cluster, in workgroups. Must be greater than 0.​​ If the grid
+   * has 1 or 2 dimensions, the only valid value is 1.​
+   */
+  uint8_t cluster_size_z;
+
+  /**
+   * Performance hints for the grid dispatched using this packet. The values in
+   * these fields are only hints, and the agent may choose to do nothing with
+   * them. The parameters are described by hsa_amd_ext_perf_hint_t.​
+   */
+  hsa_amd_ext_perf_hint_t perf_hint;
+
+  /**
+   * Size in bytes of private memory allocation request (per work-item).​
+   */
+  uint32_t private_segment_size;
+
+  /**
+   * Size in bytes of group memory allocation request (per work-group).
+   *
+   * Must not be less than the sum of the group memory used by the kernel (and
+   * the functions it calls directly or indirectly) and the dynamically
+   * allocated group segment variables.​
+   */
+  uint32_t group_segment_size;
+
+  /**
+   * Opaque handle to a code object that includes an implementation-defined
+   * executable code for the kernel.​
+   */
+  uint64_t kernel_object;
+
+  /**
+   * Pointer to a buffer containing the kernel arguments. May be NULL. The
+   * buffer must be allocated using hsa_memory_allocate, and must not be
+   * modified once the kernel dispatch packet is enqueued until the dispatch
+   * has completed execution.​
+   */
+  void* kernarg_address;
+
+  /**
+   * Dependent signal object. This signal is read in the launch phase.​
+   *
+   * The packet processor does not exit the launch phase for this packet, and
+   * thus does not perform the requested acquire fence scope’s actions, until
+   * the signal has been observed with the value 0.​
+   *
+   * A signal handle value of 0 is allowed and is interpreted by the packet
+   * processor as a satisfied dependency.​
+   */
+  hsa_signal_t dep_signal;
+
+  /**
+   * Signal used to indicate completion of the job. The application can use the
+   * special signal handle 0 to indicate that no signal is used.​
+   */
+  hsa_signal_t completion_signal;
+} hsa_amd_ext_kernel_dispatch_packet_t;
+
+/*
  * State of an AIE ERT command.
  */
 typedef enum {
@@ -417,6 +628,165 @@ typedef struct hsa_amd_aie_ert_packet_s {
  */
 
 /**
+ * @brief Sub-fields of the @a header field that is present in any metadata
+ * packet. The offset (with respect to the address of @a header) of a sub-field
+ * is identical to its enumeration constant. The width of each sub-field is
+ * determined by the corresponding value in ::hsa_packet_header_width_t. The
+ * offset and the width are expressed in bits.
+ */
+typedef enum {
+  /**
+   * Packet type. The value of this sub-field must be one of
+   * ::hsa_packet_type_t. If the type is ::HSA_PACKET_TYPE_VENDOR_SPECIFIC, the
+   * packet layout is vendor-specific.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_TYPE = 0,
+  /**
+   * Reserved
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_RESERVED = 8,
+  /**
+   * Packet version major.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_VERSION_MAJOR = 24,
+  /**
+   * Packet version minor.
+   */
+  HSA_AMD_METADATA_PACKET_HEADER_VERSION_MINOR = 27,
+} hsa_amd_metadata_packet_header_t;
+
+/**
+ * @brief Width (in bits) of the sub-fields in ::hsa_amd_metadata_packet_header_t.
+ */
+typedef enum hsa_amd_metadata_packet_header_width_s {
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_TYPE = 8,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_RESERVED = 16,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_VERSION_MAJOR = 3,
+  HSA_AMD_METADATA_PACKET_HEADER_WIDTH_VERSION_MINOR = 5,
+} hsa_amd_metadata_packet_header_width_t;
+
+/**
+ * @brief Number of valid kernarg preload d-words in meta-data packet
+ */
+typedef struct hsa_amd_metadata_preload_s {
+  /* The number of dwords from the kernarg segment to preload into User SGPRs */
+  uint16_t length : 7;
+  /* Offset in dwords into the kernarg segment to begin preloading data into User SGPRs */
+  uint16_t offset : 9;
+} hsa_amd_metadata_preload_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch Descriptor fields
+ */
+typedef struct hsa_amd_metadata_kernel_descriptor_s {
+  int64_t kernel_code_entry_byte_offset;
+  uint8_t reserved1[20];
+  uint32_t compute_pgm_rsrc3;
+  uint32_t compute_pgm_rsrc1;
+  uint32_t compute_pgm_rsrc2;
+  uint16_t kernel_code_properties;
+  hsa_amd_metadata_preload_t kernarg_preload;
+  uint8_t reserved2[4];
+} hsa_amd_metadata_kernel_descriptor_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch packet.
+ */
+typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
+  /**
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_amd_metadata_packet_header_t.
+   */
+  uint32_t header0;
+  /**
+   * Event ID. HW ID of the completion signal. This corresponds to the event_id
+   * of amd_signal_t
+   */
+  uint32_t event_id;
+  /**
+   * Kernel descriptor pre-load fields
+   */
+  hsa_amd_metadata_kernel_descriptor_t kernel_descriptor;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved0[8];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header1;
+  /**
+   * Kernarg preload 0 through 14
+   */
+  uint32_t kernarg_preload_0_14[15];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header2;
+  /**
+   * Kernarg preload 15 through 29
+   */
+  uint32_t kernarg_preload_15_29[15];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header3;
+  /**
+   * Kernarg preload 30 through 31
+   */
+  uint32_t kernarg_preload_30_31[2];
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved1[52];
+} hsa_amd_metadata_kernel_dispatch_packet_t;
+
+/**
+ * @brief AMD meta-data Kernel Dispatch packet.
+ */
+typedef struct hsa_amd_metadata_barrier_packet_s {
+  /**
+   * Packet header. Used to configure multiple packet parameters such as the
+   * packet type. The parameters are described by hsa_amd_metadata_packet_header_t.
+   */
+  uint32_t header0;
+  /**
+   * Event ID. HW ID of the completion signal. This corresponds to the event_id
+   * of amd_signal_t
+   */
+  uint32_t event_id;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved0[56];
+
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header1;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved1[60];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header2;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved2[60];
+  /**
+   * Packet header. Must be same value as header0
+   */
+  uint32_t header3;
+  /**
+   * Reserved. Must be 0.
+   */
+  uint8_t reserved3[60];
+} hsa_amd_metadata_barrier_packet_t;
+
+/**
  * @brief Enumeration constants added to ::hsa_status_t.
  *
  * @remark Additions to hsa_status_t
@@ -478,6 +848,15 @@ enum {
 /** \addtogroup memory Memory
  *  @{
  */
+
+/**
+ * @brief Dispatch dimension limits
+ */
+typedef struct hsa_amd_dim3_s {
+    uint64_t x;
+    uint64_t y;
+    uint64_t z;
+} hsa_amd_dim3_t;
 
 /**
  * @brief IOMMU version supported
@@ -694,7 +1073,7 @@ typedef enum hsa_amd_agent_info_s {
    * bit is set at that position. User may use the hsa_flag_isset64 macro to verify whether a flag
    * is set. The type of this attribute is uint8_t[8].
    */
-  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115, /* Not implemented yet */
+  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115,
   /**
    * Maximum allowed value in bytes for scratch limit for this agent. This amount
    * is shared accross all queues created on this agent.
@@ -733,10 +1112,40 @@ typedef enum hsa_amd_agent_info_s {
    */
   HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
   /**
-   * Queries the secondary CUID (128-bit UUID (16 bytes) in UUIDv8 format) 
+   * Queries the secondary CUID (128-bit UUID (16 bytes) in UUIDv8 format)
    * of a CPU/GPU agent. The type of this attribute is uint8_t[16].
    */
   HSA_AMD_AGENT_INFO_CUID = 0xA11C,
+  /*
+   * Maximum number of work-groups across all dimensions for non-clustered dispatches.
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_SIZE = 0xA11D,
+  /**
+   * Maximum number of clusters in each dimension for clustered dispatches.
+   * Returns hsa_amd_dim3_t into value output.
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM = 0xA11E,
+  /*
+   * Maximum number of clusters across all dimensions for clustered dispatches
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE = 0xA11F,
+  /*
+   * Maximum number of workgroups in a cluster in each dimension
+   * Returns hsa_amd_dim3_t into value output
+   */
+  HSA_AMD_AGENT_INFO_CLUSTER_MAX_DIM = 0xA120,
+  /*
+   * Maximum number of workgroups in a cluster across all dimensions
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE = 0xA121,
+  /*
+   * Maximum number of work-groups in each dimension for non-clustered dispatches.
+   * Returns hsa_amd_dim3_t into value output.
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_DIM = 0xA122,
 } hsa_amd_agent_info_t;
 
 /**
@@ -745,6 +1154,13 @@ typedef enum hsa_amd_agent_info_s {
 typedef enum hsa_amd_agent_memory_properties_s {
   HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU = (1 << 0),
 } hsa_amd_agent_memory_properties_t;
+
+/**
+ * @brief Agent AQL info properties attributes
+ */
+typedef enum hsa_amd_agent_aql_properties_s {
+  HSA_AMD_AQL_PROPERTY_EXT_DISPATCH = (1 << 0),
+} hsa_amd_agent_aql_properties_t;
 
 /**
  * @brief SDMA engine IDs unique by single set bit position.
@@ -1270,6 +1686,21 @@ uint32_t HSA_API
                             hsa_signal_value_t* values, uint64_t timeout_hint,
                             hsa_wait_state_t wait_hint,
                             hsa_signal_value_t* satisfying_value);
+
+/**
+ * @brief Get the underlying event-id for a HSA signal
+ *
+ * @details Returns the underlying HW event ID for an existing HSA signal.
+ *
+ * @param[in] signal The HSA signal
+ * @param[out] event_id The returned event_id. The returned event_id may be 0
+ * if the HSA signal is not a HW backed signal.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The signal is invalid
+ */
+hsa_status_t HSA_API
+  hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id);
 
 /** @} */
 
@@ -4045,17 +4476,51 @@ typedef enum {
    */
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
   /*
-  * Returns how many times the underlying hardware queue has been shared.
-  * @p value will be set to -1 if this queue was not allocated using
-  * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
-  */
+   * Returns how many times the underlying hardware queue has been shared.
+   * @p value will be set to -1 if this queue was not allocated using
+   * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
+   */
   HSA_QUEUE_INFO_USE_COUNT,
   /*
-  * Returns a unique ID representing the HW resource used by a counted queue. Two queues
-  * with the same HW_ID use the same underlying hardware queue. This query can be
-  * used on counted and non-counted queues. The type of this attribute is uint32_t.
-  */
+   * Returns a unique ID representing the HW resource used by a counted queue. Two queues
+   * with the same HW_ID use the same underlying hardware queue. This query can be
+   * used on counted and non-counted queues. The type of this attribute is uint32_t.
+   */
   HSA_QUEUE_INFO_HW_ID,
+  /*
+   * Major version of metadata prefetch dispatch packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR,
+  /*
+   * Minor version of metadata prefetch dispatch packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR,
+  /*
+   * Major version of metadata prefetch barrier packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MAJOR,
+  /*
+   * Minor version of metadata prefetch barrier packet. The versioning starts at 0.
+   * Returns 0xFF if metadata prefetch is not supported.
+   * The type of this attribute is uint8_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MINOR,
+  /*
+   * If supported by the underlying HW, returns the address of the metadata ring
+   * buffer. The type of this attribute is uint64_t.
+   */
+  HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+  /*
+   * Bit-mask indicating properties of this queue.
+   * The type of this attribute is uint8_t[8].
+   */
+  HSA_AMD_QUEUE_INFO_PROPERTIES,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
