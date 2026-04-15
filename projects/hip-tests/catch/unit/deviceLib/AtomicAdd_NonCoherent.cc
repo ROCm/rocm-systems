@@ -143,7 +143,7 @@ TEST_CASE(Unit_AtomicAdd_NonCoherent) {
 
   if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_FINEGRAIN_HWSUPPORT, gfxName)) {
     if (prop.canMapHostMemory != 1) {
-      SUCCEED("Does not support HostPinned Memory");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
     } else {
       SECTION("with -mno-unsafe-atomics flag") {
         SECTION("float") { runAtomicAddNonCoherentNoUnsafeFlagTest<float>(); }
@@ -161,9 +161,6 @@ TEST_CASE(Unit_AtomicAdd_NonCoherent) {
       }
     }
   } else {
-    SUCCEED(
-        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU "
-        << device);
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFineGrainHwUnsupported);
   }
 }
