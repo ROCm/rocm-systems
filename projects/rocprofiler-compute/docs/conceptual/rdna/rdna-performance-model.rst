@@ -43,7 +43,7 @@ Workgroups and execution
 RDNA3 architecture based APUs organize compute around Workgroup Processors (WGPs) and
 Compute Units (CUs). Wavefronts are typically wave32-oriented in this
 configuration. The Workgroup processor (WGP), Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx1151 expose the dispatch, occupancy, and command-processor side metrics that complement the Instinct/CDNA
-:doc:`Compute unit page <../cdna/compute-unit>`, which use the terminology such as CU and Shader Engines (SE).
+:doc:`Compute unit page <../cdna/compute-unit>`, which uses terminology such as CU and Shader Engines (SE).
 
 Hardware block chapters
 ========================
