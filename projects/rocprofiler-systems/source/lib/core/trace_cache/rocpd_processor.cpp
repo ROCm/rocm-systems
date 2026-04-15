@@ -584,7 +584,8 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
     for(const auto& core : core_freq_samples)
     {
-        insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
+        insert_event_and_sample(get_track_name(core.id).c_str(),
+                                static_cast<double>(core.value));
     }
 }
 

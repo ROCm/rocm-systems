@@ -1507,7 +1507,8 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 }
 
 void
-handle_deprecated_setting(const std::string& _old, const std::string& _new, int _verbose)
+handle_deprecated_setting(const std::string& _old, const std::string& _new,
+                          int /*_verbose*/)
 {
     auto _config      = settings::shared_instance();
     auto _old_setting = _config->find(_old);
@@ -1524,7 +1525,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
     if(_old_setting->second->get_environ_updated() ||
        _old_setting->second->get_config_updated())
     {
-        auto _separator = [_verbose]() {
+        auto _separator = []() {
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
