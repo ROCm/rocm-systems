@@ -15,10 +15,34 @@ overview:
 
 * **Instinct (CDNA)** — :doc:`AMD CDNA architecture (CDNA-CDNA4) <cdna/cdna-performance-model>`:
   Architecture and data-type tables, top-level CDNA block diagrams, MI-series terminology,
-  and chapters for compute units, L2, shader engine, command processor, system
-  speed-of-light, and references.
+  and chapters for:
+  * :doc:`cdna/system-speed-of-light`
+  
+  * :doc:`cdna/compute-unit`
 
-* **Ryzen APU (RDNA)** — :doc:`RDNA3 <rdna/rdna-performance-model>`:
-  WGPs, TCP (GL0), GL1C, GL2C, GCEA, and gfx1151 panel layout.
+  * :doc:`cdna/l2-cache`
+
+  * :doc:`cdna/shader-engine`
+
+  * :doc:`cdna/command-processor`
+
+  * :doc:`cdna/references`
+
+* **Ryzen APU (RDNA)** — :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, GCEA, gfx1151 panel layout, and chapters for:
+  * :doc:`rdna/system-speed-of-light`
+  
+  * :doc:`rdna/wgp`
+
+  * :doc:`rdna/tcp-cache`
+
+  * :doc:`rdna/gl1-cache`
+  
+  * :doc:`rdna/gl2-cache`
+
+  * :doc:`rdna/shader-engine`
+
+  * :doc:`rdna/command-processor`
+
+  * :doc:`rdna/references`
 
 For practical profiling walkthroughs, see :doc:`/tutorial/profiling-by-example`.

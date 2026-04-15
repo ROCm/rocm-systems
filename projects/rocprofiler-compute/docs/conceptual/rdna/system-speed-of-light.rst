@@ -13,7 +13,7 @@ you profile with the shipped gfx1151 analysis configuration. The same metric
 keys appear in the RDNA3.5 (gfx1151) tab of the analysis report.
 
 .. Note::
-   For AMD Instinct accelerators (CDNA through CDNA4), see
+   For AMD Instinct accelerators (CDNA-CDNA4), see
    :doc:`../cdna/system-speed-of-light`.
 
    Other gfx1151 metric tables grouped by hardware block live under :doc:`wgp`,
