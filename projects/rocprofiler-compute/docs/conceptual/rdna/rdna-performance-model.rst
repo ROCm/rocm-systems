@@ -24,7 +24,7 @@ For more details on AMD RDNA3 architecture, see page 5 of `RDNA3 shader instruct
 
    * For details on metrics available for CDNA-CDNA4 based Instinct GPUs, see :doc:`../cdna/cdna-performance-model`.
    
-   * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU / accelerator specifications <rocm:reference/gpu-arch-specs>` and the public architecture summaries.
+   * For details on packaging, SIMD width, and generational differences between RDNA3, RDNA3.5, and later APUs, refer to :doc:`GPU hardware specifications <rocm:reference/gpu-arch-specs>` and the public architecture summaries.
 
 ROCm Compute Profiler includes analysis panels targeting RDNA3.5 parts reporting as
 gfx1151 — for example, integrated graphics on AMD Ryzen AI Max Series - Strix Halo
@@ -42,8 +42,8 @@ Workgroups and execution
 
 RDNA3 architecture based APUs organize compute around Workgroup Processors (WGPs) and
 Compute Units (CUs). Wavefronts are typically wave32-oriented in this
-configuration. The Workgroup processor (WGP), Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx1151 expose the dispatch, occupancy, and command-processor side metrics that complement the
-:doc:`Instinct / CDNA conceptual pages <../cdna/compute-unit>`, which use the terminology such as CU and Shader Engines (SE).
+configuration. The Workgroup processor (WGP), Shader Processor Input (SPI), and Command Processor Compute (CPC) panels in gfx1151 expose the dispatch, occupancy, and command-processor side metrics that complement the Instinct/CDNA
+:doc:`Compute unit page <../cdna/compute-unit>`, which use the terminology such as CU and Shader Engines (SE).
 
 Hardware block chapters
 ========================

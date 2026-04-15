@@ -12,9 +12,11 @@ ROCm Compute Profiler makes available an extensive list of metrics to better und
 achieved application performance on AMD Instinct™ MI-series GPUs
 including CDNA™ architecture based GPUs like the AMD Instinct MI100, CDNA2 architecture based GPUs such as the AMD Instinct MI210, MI250, and MI250X, CDNA3 architecture based GPUs such as the AMD Instinct MI300A, MI300X, and MI325X, and CDNA4 architecture based GPUs such as MI350X and MI355X.
 
-For AMD Radeon™ / RDNA™ APUs (e.g. gfx1151/RDNA3.5), see
-:doc:`RDNA3 <../rdna/rdna-performance-model>`. The top-level
-:doc:`../performance-model` page summarizes how the CDNA and RDNA architecture-specific details are organized.
+.. note::
+
+  * For AMD Ryzen™ / RDNA™ APUs (e.g. gfx1151/RDNA3.5), see :doc:`RDNA3 <../rdna/rdna-performance-model>`. 
+  
+  * For top-level metrics details on CDNA and RDNA architecture, see :doc:`../performance-model`.
 
 The table provides key details and support available for the different CDNA architectures:
 
@@ -170,7 +172,8 @@ to use ROCm Compute Profiler to optimize your code.
    For a comparison of AMD Instinct GPU specifications, refer to
    :doc:`Hardware specifications <rocm:reference/gpu-arch-specs>`.
 
-.. rubric:: Hardware block chapters
+Hardware block chapters
+=========================
 
 The AMD Instinct performance model is divided into the following blocks:
 
