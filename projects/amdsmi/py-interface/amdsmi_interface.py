@@ -1376,7 +1376,7 @@ def amdsmi_get_cpu_core_energy(processor_handle: processor_handle_t) -> str:
     return f"{float(penergy.value * pow(10, -6))} J"
 
 
-def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> float:
+def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 

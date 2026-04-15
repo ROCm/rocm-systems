@@ -468,8 +468,8 @@ uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index) {
                                    &socket_power_watts)))
     readSuccess = true;
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerWatt:%.3f\n",
-           readSuccess ? "Success" : "Failed", socket_index, socket_power_watts);
+    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerWatt:%u\n", readSuccess ? "Success" : "Failed",
+           socket_index, socket_power_watts);
   }
 
   return readSuccess ? (uint32_t)(socket_power_watts * 1000) : GOAMDSMI_UINT32_MAX;
@@ -483,7 +483,7 @@ uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index) {
                                        &socket_power_cap_watts)))
     readSuccess = true;
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
-    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerCapWatt:%.3f\n",
+    printf("AMDSMI, %s for Socket:%d, CpuSocketPowerCapWatt:%u\n",
            readSuccess ? "Success" : "Failed", socket_index, socket_power_cap_watts);
   }
 
