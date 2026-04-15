@@ -381,6 +381,11 @@ def allocate_buckets(
             output_files.append(CounterFile(counter, perfmon_config))
             output_files[-1].add(counter)
 
+            accum_counter = counter.replace("LEVEL", "ACCUM")
+            if accum_counter in work:
+                work.remove(accum_counter)
+            output_files[-1].add(accum_counter)
+
     file_count = 0
     grouped_files, work, file_count = _allocate_same_bucket_groups(
         work,
