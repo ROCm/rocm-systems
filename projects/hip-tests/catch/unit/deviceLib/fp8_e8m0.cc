@@ -39,6 +39,7 @@ void device_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(__hip_bfloat16) * in.size(), hipMemcpyHostToDevice));
 
   bfloat16raw_to_e8m0<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
@@ -125,6 +126,7 @@ void device_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
 
   float_to_e8m0_kernel<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
@@ -211,6 +213,7 @@ void device_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsign
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(double) * in.size(), hipMemcpyHostToDevice));
 
   double_to_e8m0_kernel<<<1, 1024>>>(in_d, out_d, in.size(), sat, round);
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
@@ -317,6 +320,7 @@ void device_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vecto
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(unsigned char) * in.size(), hipMemcpyHostToDevice));
 
   e8m0_to_bf16raw_kernel<<<1, 1024>>>(in_d, out_d, in.size());
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
 }
@@ -348,6 +352,7 @@ HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
 
 template <typename T_in, typename T_out>
 void host_e8m0_constructors(const std::vector<T_in>& in, std::vector<T_out>& out) {
+  REQUIRE(in.size() == out.size());
   for (size_t i = 0; i < in.size(); ++i) {
     __hip_fp8_e8m0 fp8(in[i]);
     out[i] = static_cast<T_out>(fp8);
@@ -368,7 +373,7 @@ template <typename T_in, typename T_out>
 void device_e8m0_constructors(const std::vector<T_in>& in, std::vector<T_out>& out) {
   T_in* in_d = nullptr;
   T_out* out_d = nullptr;
-  REQUIRE(in.size() < 1024);
+  REQUIRE(in.size() =< 1024);
 
   HIP_CHECK(hipMalloc(&in_d, sizeof(T_in) * in.size()));
   HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()));
@@ -376,6 +381,7 @@ void device_e8m0_constructors(const std::vector<T_in>& in, std::vector<T_out>& o
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(T_in) * in.size(), hipMemcpyHostToDevice));
 
   e8m0_constructors_kernel<T_in, T_out><<<1, 1024>>>(in_d, out_d, in.size());
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost));
 
@@ -493,6 +499,7 @@ void device_e8m0_float_conversions(const std::vector<float>& in, std::vector<T_o
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
 
   e8m0_float_conversions_kernel<T_out><<<1, 1024>>>(in_d, out_d, in.size());
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost));
 
@@ -593,6 +600,7 @@ void device_e8m0_saturation_conversions(const std::vector<unsigned char>& in,
   HIP_CHECK(hipMemcpy(in_d, in.data(), sizeof(unsigned char) * in.size(), hipMemcpyHostToDevice));
 
   e8m0_saturation_conversions_kernel<T_out><<<1, 1024>>>(in_d, out_d, in.size());
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(T_out) * out.size(), hipMemcpyDeviceToHost));
 
