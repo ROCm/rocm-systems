@@ -242,7 +242,7 @@ class Flag {
     image_print_srd_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_ENABLE_MWAITX");
-    enable_mwaitx_ = (var == "1") ? true : false;
+    enable_mwaitx_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
