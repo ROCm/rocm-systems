@@ -322,7 +322,7 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, [[maybe_unused]] Wave
         if (stride > 0 && d.store_data.size() >= ln * stride + 4)
           std::memcpy(&v, &d.store_data[ln * stride], 4);
         if (cnt > 0)
-          os << '\n' << std::format("[rj trace VM] ");
+          os << '\n' << std::format("[rj log VM] ");
         os << std::format("SLANE L{} @+{:#x} ={:#x} ipc={:#x} exec={:#x} wf={} wg={}", ln,
                           a - 0x4d00c00000ULL, v, d.issue_pc, d.lane_mask, wf.wf_id(), wf.wg_id());
         ++cnt;

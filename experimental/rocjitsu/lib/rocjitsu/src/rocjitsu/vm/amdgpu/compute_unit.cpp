@@ -351,7 +351,7 @@ bool ComputeUnitCore::step() {
         os << std::format("FILL_RUNTIME_CODE at {:#x}", active->pc);
         for (int i = 0; i < 128; i += 4)
           os << std::format(
-              "\n[rj trace VM]   +{:#x}: {:08x} {:08x} {:08x} {:08x}", i * 4,
+              "\n[rj log VM]   +{:#x}: {:08x} {:08x} {:08x} {:08x}", i * 4,
               memory_->fetch32(active->pc + i * 4), memory_->fetch32(active->pc + i * 4 + 4),
               memory_->fetch32(active->pc + i * 4 + 8), memory_->fetch32(active->pc + i * 4 + 12));
       }

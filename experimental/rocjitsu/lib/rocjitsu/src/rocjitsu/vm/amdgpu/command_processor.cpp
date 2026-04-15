@@ -241,7 +241,7 @@ bool CommandProcessor::step() {
       first = false;
       os << std::format("CP: {} CUs registered:", cus_.size());
       for (size_t i = 0; i < cus_.size(); ++i) {
-        os << std::format("\n[rj trace VM]   cu[{}] = {} wf_slots={}", i, cus_[i]->name(),
+        os << std::format("\n[rj log VM]   cu[{}] = {} wf_slots={}", i, cus_[i]->name(),
                           cus_[i]->num_wf_slots());
       }
     }
@@ -557,16 +557,16 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       os << std::format("CP: entry_pc code: host=[{:#x},{:#x},{:#x},{:#x}] gpu=[{:#x}]",
                         host_ptr[0], host_ptr[1], host_ptr[2], host_ptr[3], gpu_w0);
       auto *ko_ptr = reinterpret_cast<const uint32_t *>(pkt.kernel_object);
-      os << std::format(
-          "\n[rj trace VM] CP: kernel_obj data: [{:#x},{:#x},{:#x},{:#x}] code_off={}", ko_ptr[0],
-          ko_ptr[1], ko_ptr[2], ko_ptr[3], kd.kernel_code_entry_byte_offset);
+      os << std::format("\n[rj log VM] CP: kernel_obj data: [{:#x},{:#x},{:#x},{:#x}] code_off={}",
+                        ko_ptr[0], ko_ptr[1], ko_ptr[2], ko_ptr[3],
+                        kd.kernel_code_entry_byte_offset);
       auto karg_ptr = reinterpret_cast<const uint64_t *>(pkt.kernarg_address);
       if (karg_ptr) {
-        os << std::format("\n[rj trace VM] CP: kernarg q[0:5]={:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
+        os << std::format("\n[rj log VM] CP: kernarg q[0:5]={:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
                           karg_ptr[0], karg_ptr[1], karg_ptr[2], karg_ptr[3], karg_ptr[4],
                           karg_ptr[5]);
         auto karg_dw = reinterpret_cast<const uint32_t *>(pkt.kernarg_address);
-        os << std::format("\n[rj trace VM] CP: kernarg dw[16:20]={} {} {} {} {}", karg_dw[16],
+        os << std::format("\n[rj log VM] CP: kernarg dw[16:20]={} {} {} {} {}", karg_dw[16],
                           karg_dw[17], karg_dw[18], karg_dw[19], karg_dw[20]);
       }
     });
@@ -590,8 +590,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
         uint32_t gpu14 = 0;
         for (int b = 0; b < 4; ++b)
           reinterpret_cast<uint8_t *>(&gpu14)[b] = memory_->read8(karg + 0x14 + b);
-        os << std::format("\n[rj trace VM] CP: kernarg verify @0x14: host={:#x} gpu={:#x} {}",
-                          host14, gpu14, host14 == gpu14 ? "MATCH" : "MISMATCH!");
+        os << std::format("\n[rj log VM] CP: kernarg verify @0x14: host={:#x} gpu={:#x} {}", host14,
+                          gpu14, host14 == gpu14 ? "MATCH" : "MISMATCH!");
       });
     }
   }
@@ -699,8 +699,8 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       auto *ka = reinterpret_cast<const uint32_t *>(dp.kernarg_addr);
       os << "CP: kernarg dump";
       for (int i = 0; i < 256; i += 4)
-        os << std::format("\n[rj trace VM]   dw[{:3d}:{:3d}] = {:08x} {:08x} {:08x} {:08x}", i,
-                          i + 3, ka[i], ka[i + 1], ka[i + 2], ka[i + 3]);
+        os << std::format("\n[rj log VM]   dw[{:3d}:{:3d}] = {:08x} {:08x} {:08x} {:08x}", i, i + 3,
+                          ka[i], ka[i + 1], ka[i + 2], ka[i + 3]);
     }
   });
   util::Logger::vm([&](auto &os) {

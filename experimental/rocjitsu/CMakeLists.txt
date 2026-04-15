@@ -29,7 +29,7 @@ set(HSA_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_hea
 
 option(RJ_BUILD_GUI "Build the simulation GUI (requires OpenGL)" ON)
 
-include(rj_trace)
+include(rj_log)
 
 # Sanitizer and static analysis options.
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")

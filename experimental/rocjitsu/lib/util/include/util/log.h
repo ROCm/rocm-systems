@@ -14,10 +14,10 @@
 
 namespace util {
 
-/// @brief Unified tracing and debug output for rocjitsu.
+/// @brief Unified logging and debug output for rocjitsu.
 ///
-/// @details Trace groups are independently enableable via a compile-time
-/// bitmask (e.g., cmake -DRJ_TRACE_GROUPS=VM). Debug output is controlled by
+/// @details Log groups are independently enableable via a compile-time
+/// bitmask (e.g., cmake -DRJ_LOG_GROUPS=VM). Debug output is controlled by
 /// NDEBUG. All output is mutex-protected to prevent interleaved lines
 /// from concurrent threads.
 ///
@@ -36,13 +36,13 @@ namespace util {
 /// to nothing when the group is disabled.
 class Logger {
 public:
-  /// @brief Trace group IDs, independently enableable via RJ_TRACE_GROUPS.
+  /// @brief Log group IDs, independently enableable via RJ_LOG_GROUPS.
   enum Group : unsigned {
     GROUP_VM = 0, ///< Kernel dispatch, instruction execution, memory access, etc.
     // Future groups added here
   };
 
-  /// @brief Human-readable group name for trace prefixes.
+  /// @brief Human-readable group name for log prefixes.
   static constexpr std::string_view group_name(unsigned group_id) {
     switch (group_id) {
     case GROUP_VM:
@@ -52,9 +52,9 @@ public:
     }
   }
 
-  /// @brief Bitmask of enabled trace groups (compile-time, via cmake).
-#ifdef RJ_TRACE_GROUPS
-  static constexpr unsigned groups = RJ_TRACE_GROUPS;
+  /// @brief Bitmask of enabled log groups (compile-time, via cmake).
+#ifdef RJ_LOG_GROUPS
+  static constexpr unsigned groups = RJ_LOG_GROUPS;
 #else
   static constexpr unsigned groups = 0;
 #endif
@@ -70,7 +70,7 @@ public:
     return (groups & (1u << group_id)) != 0;
   }
 
-  /// @brief Returns true when any tracing is enabled.
+  /// @brief Returns true when any logging is enabled.
   static constexpr bool enabled() { return groups != 0; }
 
   /// @brief Emit debug output. Compiled to nothing in Release builds.
@@ -97,13 +97,13 @@ public:
     }
   }
 
-  /// @brief Emit trace output if the specified group is enabled.
+  /// @brief Emit log output if the specified group is enabled.
   /// @details Compiles to nothing for disabled groups. Thread-safe via
   /// shared mutex.
   template <unsigned GroupId, typename... Args> static void print(Args &&...args) {
     if constexpr ((groups & (1u << GroupId)) != 0) {
       std::ostringstream buf;
-      buf << std::format("[rj trace {}] ", group_name(GroupId));
+      buf << std::format("[rj log {}] ", group_name(GroupId));
       (buf << ... << args);
       buf << '\n';
       emit(buf.str());
@@ -117,19 +117,19 @@ public:
   static void print(Fn &&fn) {
     if constexpr ((groups & (1u << GroupId)) != 0) {
       std::ostringstream buf;
-      buf << std::format("[rj trace {}] ", group_name(GroupId));
+      buf << std::format("[rj log {}] ", group_name(GroupId));
       fn(buf);
       buf << '\n';
       emit(buf.str());
     }
   }
 
-  /// @brief Conveniencef for tracing in GROUP_VM, variadic.
+  /// @brief Convenience for logging in GROUP_VM, variadic.
   template <typename... Args> static void vm(Args &&...args) {
     print<GROUP_VM>(std::forward<Args>(args)...);
   }
 
-  /// @brief Convenience for tracing in GROUP_VM, lambda.
+  /// @brief Convenience for logging in GROUP_VM, lambda.
   template <typename Fn>
     requires std::invocable<Fn, std::ostringstream &>
   static void vm(Fn &&fn) {
