@@ -2,58 +2,11 @@
 // SPDX-License-Identifier:  MIT
 #include "mocks.h"
 #include "rocprofiler_compute_tool.h"
+#include "test_rocprifiler_compute_tool.h"
 
 #include <gtest/gtest.h>
 
 using namespace rocprofiler_compute_tool;
-
-class TestRocprofilerComputeTool : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        m_input_parameters = std::make_shared<MockInputParameters>();
-        m_sdk_callbacks    = std::make_shared<MockSdkCallbacks>();
-        m_sdk_wrapper      = std::make_shared<MockSdkWrapper>();
-        m_counters_writer  = std::make_shared<MockCountersWriter>();
-
-        test_knobs::set_input_parameters(m_input_parameters);
-        test_knobs::set_sdk_callbacks(m_sdk_callbacks);
-        test_knobs::set_sdk_wrapper(m_sdk_wrapper);
-        test_knobs::set_csv_writer(m_counters_writer);
-    }
-
-    void TearDown() override { test_knobs::reset_cfg(); }
-
-    static tool_data_t* get_tool_data(const rocprofiler_tool_configure_result_t* cfg)
-    {
-        return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
-    }
-
-    static void compare_counter_config_ids(const std::vector<uint64_t>& expected,
-                                           const std::vector<uint64_t>& actual)
-    {
-        EXPECT_EQ(expected.size(), actual.size());
-        for (size_t i = 0; i < expected.size(); ++i)
-        {
-            EXPECT_EQ(expected[i], actual[i]) << "Counter config ID at index " << i << " does not match";
-        }
-    }
-
-    static counter_info_record_t create_counter_record(uint64_t counter_id, uint64_t kernel_id)
-    {
-        counter_info_record_t record = {};
-        record.counter_id            = counter_id;
-        record.kernel_id             = kernel_id;
-        return record;
-    }
-
-    rocprofiler_client_id_t              m_client_id{};
-    std::shared_ptr<MockInputParameters> m_input_parameters;
-    std::shared_ptr<MockSdkCallbacks>    m_sdk_callbacks;
-    std::shared_ptr<MockSdkWrapper>      m_sdk_wrapper;
-    std::shared_ptr<MockCountersWriter>  m_counters_writer;
-};
 
 TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_Throws)
 {
@@ -243,8 +196,8 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
     const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
     const auto         tool_data  = get_tool_data(cfg);
     constexpr uint64_t counter_id = 20;
-    constexpr uint64_t kernel_id0  = 11;
-    constexpr uint64_t kernel_id1  = 22;
+    constexpr uint64_t kernel_id0 = 11;
+    constexpr uint64_t kernel_id1 = 22;
     tool_data->counter_records.push_back(create_counter_record(counter_id, kernel_id0));
     tool_data->counter_records.push_back(create_counter_record(counter_id, kernel_id1));
     tool_data->target_kernel_ids.insert(kernel_id0);
@@ -252,12 +205,50 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
     EXPECT_EQ(m_counters_writer->get_write_counters_args().size(), 1);
     EXPECT_EQ(m_counters_writer->get_write_counters_args()[0].counter_ids, std::vector{counter_id});
     EXPECT_EQ(m_counters_writer->get_write_counters_args()[0].kernel_id, std::vector{kernel_id0});
-
-    
 }
 
-int main(int argc, char** argv)
+void TestRocprofilerComputeTool::SetUp()
 {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+    m_input_parameters = std::make_shared<MockInputParameters>();
+    m_sdk_callbacks    = std::make_shared<MockSdkCallbacks>();
+    m_sdk_wrapper      = std::make_shared<MockSdkWrapper>();
+    m_counters_writer  = std::make_shared<MockCountersWriter>();
+
+    test_knobs::set_input_parameters(m_input_parameters);
+    test_knobs::set_sdk_callbacks(m_sdk_callbacks);
+    test_knobs::set_sdk_wrapper(m_sdk_wrapper);
+    test_knobs::set_csv_writer(m_counters_writer);
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// TestRocprofilerComputeTool
+void TestRocprofilerComputeTool::TearDown()
+{
+    test_knobs::reset_cfg();
+}
+
+tool_data_t* TestRocprofilerComputeTool::get_tool_data(
+    const rocprofiler_tool_configure_result_t* cfg)
+{
+    return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
+}
+
+void TestRocprofilerComputeTool::compare_counter_config_ids(const std::vector<uint64_t>& expected,
+                                                            const std::vector<uint64_t>& actual)
+{
+    EXPECT_EQ(expected.size(), actual.size());
+    for (size_t i = 0; i < expected.size(); ++i)
+    {
+        EXPECT_EQ(expected[i], actual[i]) << "Counter config ID at index " << i << " does not match";
+    }
+}
+
+counter_info_record_t TestRocprofilerComputeTool::create_counter_record(
+    uint64_t counter_id,
+    uint64_t kernel_id)
+{
+    counter_info_record_t record = {};
+    record.counter_id                                      = counter_id;
+    record.kernel_id                                       = kernel_id;
+    return record;
 }
