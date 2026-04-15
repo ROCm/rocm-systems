@@ -17,9 +17,9 @@ This chapter covers AMD Radeon / RDNA configurations exposed in ROCm Compute Pro
    **Figure: AMD RDNA3 generation series (block diagram).** See page 5 of
    `RDNA3 shader instruction set architecture <https://docs.amd.com/v/u/en-US/rdna3-shader-instruction-set-architecture-feb-2023_0#page=5>`__.
 
-For Instinct / CDNA naming (CU, shader engine, etc.), use the top-level :doc:`../performance-model`
-overview and :doc:`../cdna/cdna-performance-model`. Here the focus is on WGPs, TCP / GL1C / GL2C,
-GCEA, and related panels when an analysis config targets RDNA hardware.
+.. Note::
+   For Instinct / CDNA naming (CU, shader engine, etc.), use the top-level :doc:`../performance-model`
+   overview and :doc:`../cdna/cdna-performance-model`.
 
 Public architecture summaries and :doc:`GPU / accelerator specifications <rocm:reference/gpu-arch-specs>`
 remain the best reference for packaging, SIMD width, and generational differences between
