@@ -142,4 +142,3 @@ def test_counter_grouping_inspector_invalid_arch():
     assert result.returncode == 2
     err = (result.stderr or "") + (result.stdout or "")
     assert "invalid choice" in err.lower()
-
