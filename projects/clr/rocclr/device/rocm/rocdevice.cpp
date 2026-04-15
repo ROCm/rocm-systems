@@ -3114,8 +3114,6 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   Hsa::profiling_set_profiler_enabled(queue, 1);
   if (cuMask.size() != 0 || info_.globalCUMask_.size() != 0) {
-    std::stringstream ss;
-    ss << std::hex;
     std::vector<uint32_t> mask = {};
 
     // handle scenarios where cuMask (custom-defined), globalCUMask_ or both are valid and
@@ -3123,8 +3121,9 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     if (cuMask.size() != 0 && info_.globalCUMask_.size() == 0) {
       mask = cuMask;
     } else if (cuMask.size() != 0 && info_.globalCUMask_.size() != 0) {
-      for (unsigned int i = 0; i < std::min(cuMask.size(), info_.globalCUMask_.size()); i++) {
-        mask.push_back(cuMask[i] & info_.globalCUMask_[i]);
+      mask.resize(std::min(cuMask.size(), info_.globalCUMask_.size()));
+      for (unsigned int i = 0; i < mask.size(); i++) {
+        mask[i] = cuMask[i] & info_.globalCUMask_[i];
       }
       // check to make sure after ANDing cuMask (custom-defined) with global
       // CU mask, we have non-zero mask, oterwise just apply global CU mask
@@ -3143,11 +3142,16 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     }
 
 
-    for (int i = mask.size() - 1; i >= 0; i--) {
-      ss << std::setfill('0') << std::setw(8) << mask[i];
+    if (IsLogEnabled(amd::LOG_INFO, amd::LOG_QUEUE)) {
+      std::stringstream ss;
+      ss << std::hex;
+
+      for (int i = mask.size() - 1; i >= 0; i--) {
+        ss << std::setfill('0') << std::setw(8) << mask[i];
+      }
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Setting CU mask 0x%s for hardware queue %p",
+              ss.str().c_str(), queue->base_address);
     }
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Setting CU mask 0x%s for hardware queue %p",
-            ss.str().c_str(), queue->base_address);
 
     std::vector<uint32_t> final_mask = {};
     // hsa_amd_queue_cu_set_mask expects each bit in cuMask to represent each CU
