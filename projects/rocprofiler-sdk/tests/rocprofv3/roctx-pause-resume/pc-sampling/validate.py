@@ -36,9 +36,9 @@ def test_validate_pc_sampling_roctx_pause_resume(json_data):
     data = json_data["rocprofiler-sdk-tool"]
 
     pc_sampling_key = "pc_sample_host_trap"
-    assert pc_sampling_key in data["buffer_records"], (
-        f"No '{pc_sampling_key}' key found in buffer_records"
-    )
+    assert (
+        pc_sampling_key in data["buffer_records"]
+    ), f"No '{pc_sampling_key}' key found in buffer_records"
 
     samples = data["buffer_records"][pc_sampling_key]
     assert len(samples) > 0, "Expected at least one PC sampling record"
@@ -51,14 +51,14 @@ def test_validate_pc_sampling_roctx_pause_resume(json_data):
         if inst_index >= 0 and instructions[inst_index].startswith("v_mov_b32"):
             v_mov_b32_count += 1
 
-    assert v_mov_b32_count >= 100, (
-        f"Expected at least 100 samples with v_mov_b32 instruction, got {v_mov_b32_count}"
-    )
+    assert (
+        v_mov_b32_count >= 100
+    ), f"Expected at least 100 samples with v_mov_b32 instruction, got {v_mov_b32_count}"
 
     v_mov_b32_ratio = v_mov_b32_count / len(samples)
-    assert v_mov_b32_ratio >= 0.30, (
-        f"Expected v_mov_b32 samples to be at least 30% of total, got {v_mov_b32_ratio:.2%}"
-    )
+    assert (
+        v_mov_b32_ratio >= 0.30
+    ), f"Expected v_mov_b32 samples to be at least 30% of total, got {v_mov_b32_ratio:.2%}"
 
 
 if __name__ == "__main__":
