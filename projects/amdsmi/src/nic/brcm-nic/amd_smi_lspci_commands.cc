@@ -40,41 +40,36 @@ static bool is_valid_bdf(const std::string& bdf) {
   return std::regex_match(bdf, bdf_re);
 }
 
-static bool is_safe_search_key(const std::string& key) {
-  // Reject characters that could escape the shell single-quote context
-  return key.find('\'') == std::string::npos && key.find('\\') == std::string::npos;
-}
-
 amdsmi_status_t get_lspci_device_data(std::string bdf_str, std::string search_key,
                                       std::string& version) {
-  if (!is_valid_bdf(bdf_str) || !is_safe_search_key(search_key)) {
+  if (!is_valid_bdf(bdf_str)) {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | Invalid BDF or search key: " << bdf_str << ", " << search_key;
+    ss << __PRETTY_FUNCTION__ << " | Invalid BDF: " << bdf_str;
     LOG_ERROR(ss);
     return AMDSMI_STATUS_INVAL;
   }
 
   std::string lspci_data;
-  std::string command = "lspci -s " + bdf_str + " -vv | grep -i '" + search_key + "'";
+  // Only pass the validated BDF to the shell; filter by search_key in C++
+  std::string command = "lspci -s " + bdf_str + " -vv";
 
   if (smi_brcm_execute_cmd_get_data(command, &lspci_data) != AMDSMI_STATUS_SUCCESS) {
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << " | "
-       << "Failed to execute command: lspci -s " << bdf_str << " -vv | grep -i " << search_key
-       << ".";
+       << "Failed to execute command: lspci -s " << bdf_str << " -vv";
     LOG_ERROR(ss);
 
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  int pos = lspci_data.find(search_key);
+  auto pos = lspci_data.find(search_key);
   if (pos != std::string::npos) {
-    version = lspci_data.erase(0, lspci_data.find(search_key) + search_key.length());
-    if (!version.empty() && version[version.length() - 1] == '\n') {
-      version.erase(version.length() - 1);
-    }
-  } else
+    auto value_start = pos + search_key.length();
+    auto line_end = lspci_data.find('\n', value_start);
+    version = lspci_data.substr(value_start, line_end - value_start);
+  } else {
     version = "N/A";
+  }
 
   return AMDSMI_STATUS_SUCCESS;
 }
