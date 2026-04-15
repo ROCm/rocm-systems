@@ -202,6 +202,14 @@ void Timestamp::checkGpuTime(ProfilingSignal* single_signal) {
 
     if (single_signal != nullptr) {
       process_signal(single_signal);
+      // Remove the signal from the list after extracting its timing.
+      // This prevents a stale entry when ActiveSignal() recycles and re-adds
+      // the same ProfilingSignal — without this, the recycled signal appears
+      // twice in signals_ and the first (stale) entry re-reads wrong HW timestamps.
+      auto it = std::find(signals_.begin(), signals_.end(), single_signal);
+      if (it != signals_.end()) {
+        signals_.erase(it);
+      }
     } else {
       for (auto it : signals_) {
         process_signal(it);
@@ -244,6 +252,12 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
   // Lock signal for accessing engine_ and flags_
   amd::ScopedLock sig_lock(signal->LockSignalOps());
 
+  // Guard against invalid timestamps
+  if (sig_start == 0 || sig_end == 0 || sig_end < sig_start) {
+    signal->flags_.done_ = true;
+    return;
+  }
+
   // Update appropriate accumulators based on engine type
   if (IsSdmaEngine(signal->engine_)) {
     sdmaStart = std::min(sig_start, sdmaStart);
@@ -253,9 +267,11 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     end = std::max(sig_end, end);
   }
 
-  // Handle AccumulateCommand timestamps
+  // Handle AccumulateCommand timestamps (convert ticks to nanoseconds for consistency)
   if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
-    static_cast<amd::AccumulateCommand&>(command()).addTimestamps(sig_start, sig_end);
+    static_cast<amd::AccumulateCommand&>(command()).addTimestamps(
+        static_cast<uint64_t>(sig_start * ticksToTime_),
+        static_cast<uint64_t>(sig_end * ticksToTime_));
   }
 
   signal->flags_.done_ = true;
@@ -265,39 +281,6 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
 bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   Timestamp* ts = reinterpret_cast<Timestamp*>(arg);
 
-  if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
-    amd::Command* head = ts->getParsedCommand();
-    if (head == nullptr) {
-      head = ts->command().GetBatchHead();
-    }
-    while (head != nullptr) {
-      if (!head->data().empty()) {
-        for (auto i = 0; i < head->data().size(); i++) {
-          Timestamp* headTs = reinterpret_cast<Timestamp*>(head->data()[i]);
-          ts->setParsedCommand(head);
-          for (auto it : headTs->Signals()) {
-            hsa_signal_value_t complete_val = (headTs->GetCallbackSignal().handle != 0) ? 1 : 0;
-            if (int64_t val = Hsa::signal_load_relaxed(it->signal_) > complete_val) {
-              hsa_status_t result = Hsa::signal_async_handler(
-                  headTs->Signals()[0]->signal_, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
-                  &HsaAmdSignalHandler, ts);
-              if (HSA_STATUS_SUCCESS != result) {
-                LogError("hsa_amd_signal_async_handler() failed to requeue the handler!");
-              } else {
-                ClPrint(amd::LOG_INFO, amd::LOG_SIG,
-                        "Requeue handler : value(%d), timestamp(%p),"
-                        "handle(0x%lx)",
-                        static_cast<uint32_t>(val), headTs,
-                        headTs->HwProfiling() ? headTs->Signals()[0]->signal_.handle : 0);
-              }
-              return false;
-            }
-          }
-        }
-      }
-      head = head->getNext();
-    }
-  }
   ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), handle(0x%lx)",
           static_cast<uint32_t>(value), arg,
           ts->HwProfiling() ? ts->Signals()[0]->signal_.handle : 0);
