@@ -103,6 +103,25 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  TEST(AllReduce, ManagedMemGraph)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclFloat64, ncclBfloat16});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = testBed.ev.GetElements({4314});
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {true};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
   TEST(AllReduce, Channels)
   {
     TestBed testBed;
@@ -128,25 +147,6 @@ namespace RcclUnitTesting
         }
       }
     }
-  }
-
-  TEST(AllReduce, ManagedMemGraph)
-  {
-    TestBed testBed;
-
-    // Configuration
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclFloat64, ncclBfloat16});
-    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
-    std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = testBed.ev.GetElements({4314});
-    std::vector<bool>           const inPlaceList     = {false};
-    std::vector<bool>           const managedMemList  = {true};
-    std::vector<bool>           const useHipGraphList = {true};
-
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                           inPlaceList, managedMemList, useHipGraphList);
-    testBed.Finalize();
   }
 
   // This tests using custom pre-mult scalars reductions
