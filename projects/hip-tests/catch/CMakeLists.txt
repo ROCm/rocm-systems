@@ -61,9 +61,8 @@ if(NOT DEFINED ROCM_PATH)
 endif()
 
 if(UNIX)
-  if(NOT ENABLE_SPIRV)
-    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
-  endif()
+  find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED
+               PATHS ${ROCM_PATH}/bin ${ROCM_PATH})
   find_program(GCC_EXEC gcc)
   find_program(GXX_EXEC g++)
 else() # Win32
@@ -278,7 +277,7 @@ elseif(DEFINED GPU_TARGETS)
 elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
-  execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
+  execute_process(COMMAND "${ROCM_AGENT_ENUMERATOR_EXEC}"
          OUTPUT_VARIABLE HIP_GPU_ARCH
          RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
          OUTPUT_STRIP_TRAILING_WHITESPACE)

@@ -11,7 +11,13 @@ execute_process(
     ERROR_QUIET
 )
 if(NOT PY_YAML_RESULT EQUAL 0)
-    message(FATAL_ERROR "PyYAML is required in order to read the configuration file. Please install it")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m pip install PyYAML
+        RESULT_VARIABLE PyYAML_INSTALL_RESULT
+    )
+    if(NOT PyYAML_INSTALL_RESULT EQUAL 0)
+        message(FATAL_ERROR "PyYAML is required in order to read the configuration file. Please install it")
+    endif()
 endif()
 
 if(WIN32)
