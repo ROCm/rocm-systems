@@ -58,11 +58,11 @@ RUN set -euo pipefail; \
             echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/9.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
         fi; \
         dnf clean all; \
-        dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel elfutils-devel; \
+        dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel openmpi-devel elfutils-devel; \
         python3 -m pip install -U awscli pipx; \
         python3 -m venv rocprofiler-sdk; \
         source rocprofiler-sdk/bin/activate; \
-        export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}; \
+        export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:${PATH}; \
         python3 -m pip install --upgrade pip; \
         python3 -m pip install --upgrade -r /root/requirements.txt; \
         echo -e 'PKG_CONFIG_PATH="/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/amdgpu-pkg-config.sh; \
