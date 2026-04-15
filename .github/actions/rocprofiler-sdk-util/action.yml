@@ -70,6 +70,8 @@ runs:
         echo "Install ROCR-Runtime..."
         cmake -B build \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_C_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang \
+          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
           .
