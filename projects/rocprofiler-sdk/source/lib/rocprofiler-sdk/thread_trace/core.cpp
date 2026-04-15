@@ -245,7 +245,7 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
     if(sig) signal_wait(*sig);
 }
 
-std::shared_ptr<signal_t>
+std::shared_ptr<hsa_signal_t>
 ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 {
     ROCP_TRACE << "Starting thread trace for agent " << agent_id.handle;
@@ -259,7 +259,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
 
     auto unique_signal =
         att_queue_submit_and_signal_last(*queue, control_packet_copy->before_krn_pkt);
-    auto shared_signal = std::shared_ptr<signal_t>(std::move(unique_signal));
+    auto shared_signal = std::shared_ptr<hsa_signal_t>(std::move(unique_signal));
 
     if(params.triple_buffering)
     {
@@ -541,7 +541,7 @@ DeviceThreadTracer::start_context()
 
     int expected = WORKER_FLAG_STOP;
     CHECK_NOTNULL(worker_flag)->compare_exchange_strong(expected, WORKER_FLAG_RUNNING);
-    auto wait_list = std::vector<std::shared_ptr<signal_t>>{};
+    auto wait_list = std::vector<std::shared_ptr<hsa_signal_t>>{};
 
     for(auto& [_, tracer] : agents)
         wait_list.emplace_back(tracer->start_thread_trace(worker_flag));

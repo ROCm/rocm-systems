@@ -41,11 +41,10 @@ constexpr double SQTT_BANDWIDTH_DEFAULT = 70E9;  // 70GB/s, for wiggle room
 
 namespace
 {
-// RAII wrapper for signal_t used in .cpp scope (classes allowed in .cpp per CONTRIBUTING.md rule
-// #8)
+// RAII wrapper for hsa_signal_t used in .cpp scope
 struct scoped_signal_t
 {
-    signal_t sig;
+    hsa_signal_t sig;
     scoped_signal_t()
     : sig{signal_create()}
     {}
@@ -79,22 +78,21 @@ iterate_data(aqlprofile_handle_t handle)
 // Performs a synchronous GPU-to-CPU copy using the async engine, chaining the supplied dependency
 // and reusing a thread-local completion signal to avoid allocation churn.
 void
-copy_data_sync(void*       dst,
-               const void* src,
-               hsa_agent_t dst_agent,
-               hsa_agent_t src_agent,
-               size_t      size,
-               signal_t*   dependency)
+copy_data_sync(void*         dst,
+               const void*   src,
+               hsa_agent_t   dst_agent,
+               hsa_agent_t   src_agent,
+               size_t        size,
+               hsa_signal_t* dependency)
 {
     ROCP_FATAL_IF(dependency == nullptr) << "Dependency must not be null";
 
     thread_local auto signal = scoped_signal_t{};
-    auto              dep    = signal_get(*dependency);
 
     auto copy_fn = CHECK_NOTNULL(hsa::get_amd_ext_table())->hsa_amd_memory_async_copy_fn;
 
     signal_reset(signal.sig);
-    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 1, &dep, signal_get(signal.sig));
+    auto status = copy_fn(dst, dst_agent, src, src_agent, size, 1, dependency, signal.sig);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy: " << status;
     signal_wait(signal.sig);
 }

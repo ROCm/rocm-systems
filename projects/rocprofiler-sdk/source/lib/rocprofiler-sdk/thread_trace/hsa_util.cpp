@@ -37,58 +37,50 @@ namespace thread_trace
 {
 constexpr size_t QUEUE_SIZE = 256;  // Small dedicated queue for SQTT control traffic
 
-// --- signal_t free functions ---
+// --- signal free functions ---
 
-signal_t
+hsa_signal_t
 signal_create()
 {
-    auto  sig = signal_t{};
+    auto  sig = hsa_signal_t{};
     auto* ext = CHECK_NOTNULL(hsa::get_amd_ext_table());
-    CHECK_HSA(ext->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &sig.hsa_signal),
-              "failed to create signal");
+    CHECK_HSA(ext->hsa_amd_signal_create_fn(0, 0, nullptr, 0, &sig), "failed to create signal");
     return sig;
 }
 
-signal_t
+hsa_signal_t
 signal_create(hsa_ext_amd_aql_pm4_packet_t* packet)
 {
     auto sig                  = signal_create();
-    packet->completion_signal = sig.hsa_signal;
+    packet->completion_signal = sig;
     signal_reset(sig);
     return sig;
 }
 
 void
-signal_destroy(signal_t& sig)
+signal_destroy(hsa_signal_t sig)
 {
     signal_wait(sig);
-    auto _status = hsa::get_core_table()->hsa_signal_destroy_fn(sig.hsa_signal);
+    auto _status = hsa::get_core_table()->hsa_signal_destroy_fn(sig);
     ROCP_WARNING_IF(_status != HSA_STATUS_SUCCESS) << "Failed to destroy signal: " << _status;
 }
 
 void
-signal_wait(const signal_t& sig)
+signal_wait(hsa_signal_t sig)
 {
     auto wait_fn = hsa::get_core_table()->hsa_signal_wait_scacquire_fn;
-    while(wait_fn(sig.hsa_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) !=
-          0)
+    while(wait_fn(sig, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
         sched_yield();
 }
 
 void
-signal_reset(signal_t& sig)
+signal_reset(hsa_signal_t sig)
 {
-    CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(sig.hsa_signal, 1);
-}
-
-hsa_signal_t
-signal_get(const signal_t& sig)
-{
-    return sig.hsa_signal;
+    CHECK_NOTNULL(hsa::get_core_table())->hsa_signal_store_screlease_fn(sig, 1);
 }
 
 void
-signal_deleter_t::operator()(signal_t* s) const
+signal_deleter_t::operator()(hsa_signal_t* s) const
 {
     if(s)
     {
@@ -100,14 +92,14 @@ signal_deleter_t::operator()(signal_t* s) const
 signal_ptr_t
 make_signal()
 {
-    auto* s = new signal_t{signal_create()};
+    auto* s = new hsa_signal_t{signal_create()};
     return signal_ptr_t{s};
 }
 
 signal_ptr_t
 make_signal(hsa_ext_amd_aql_pm4_packet_t* packet)
 {
-    auto* s = new signal_t{signal_create(packet)};
+    auto* s = new hsa_signal_t{signal_create(packet)};
     return signal_ptr_t{s};
 }
 
@@ -116,7 +108,7 @@ make_signal(hsa_ext_amd_aql_pm4_packet_t* packet)
 namespace
 {
 void
-default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, signal_t* completion)
+default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, hsa_signal_t* completion)
 {
     auto* core = CHECK_NOTNULL(hsa::get_core_table());
 
@@ -133,7 +125,7 @@ default_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, signa
     {
         signal_reset(*completion);
         reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot)->completion_signal =
-            signal_get(*completion);
+            *completion;
     }
     auto* header = reinterpret_cast<std::atomic<uint32_t>*>(queue_slot);
 
@@ -204,7 +196,9 @@ att_queue_destroy(att_queue_t& q)
 }
 
 void
-att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, signal_t* completion)
+att_queue_submit(const att_queue_t&            q,
+                 hsa_ext_amd_aql_pm4_packet_t* packet,
+                 hsa_signal_t*                 completion)
 {
     q.submit_fn(q, packet, completion);
 }

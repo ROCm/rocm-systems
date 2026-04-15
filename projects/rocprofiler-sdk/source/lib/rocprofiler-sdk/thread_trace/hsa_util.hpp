@@ -34,38 +34,29 @@ namespace thread_trace
 {
 constexpr size_t NUM_CPU_BUFFERS = 3;
 
-/// Plain data wrapper around an HSA signal used to synchronize packet submission.
-struct signal_t
-{
-    hsa_signal_t hsa_signal{};
-};
-
 // Lifecycle
-signal_t
+hsa_signal_t
 signal_create();
 
-signal_t
+hsa_signal_t
 signal_create(hsa_ext_amd_aql_pm4_packet_t* packet);
 
 void
-signal_destroy(signal_t& sig);
+signal_destroy(hsa_signal_t sig);
 
 // Operations
 void
-signal_wait(const signal_t& sig);
+signal_wait(hsa_signal_t sig);
 
 void
-signal_reset(signal_t& sig);
-
-hsa_signal_t
-signal_get(const signal_t& sig);
+signal_reset(hsa_signal_t sig);
 
 // RAII helpers
 struct signal_deleter_t
 {
-    void operator()(signal_t* s) const;
+    void operator()(hsa_signal_t* s) const;
 };
-using signal_ptr_t = std::unique_ptr<signal_t, signal_deleter_t>;
+using signal_ptr_t = std::unique_ptr<hsa_signal_t, signal_deleter_t>;
 
 signal_ptr_t
 make_signal();
@@ -86,7 +77,7 @@ struct att_queue_t
     /// Function pointer for submit — allows test injection (replaces virtual dispatch).
     void (*submit_fn)(const att_queue_t&            self,
                       hsa_ext_amd_aql_pm4_packet_t* packet,
-                      signal_t*                     completion){nullptr};
+                      hsa_signal_t*                 completion){nullptr};
 };
 
 att_queue_t
@@ -99,7 +90,9 @@ signal_ptr_t
 att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, bool wait);
 
 void
-att_queue_submit(const att_queue_t& q, hsa_ext_amd_aql_pm4_packet_t* packet, signal_t* completion);
+att_queue_submit(const att_queue_t&            q,
+                 hsa_ext_amd_aql_pm4_packet_t* packet,
+                 hsa_signal_t*                 completion);
 
 /// Enqueues a sequence of packets and returns the completion signal of the last entry.
 template <typename VecType>
