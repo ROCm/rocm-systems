@@ -137,10 +137,13 @@ In order to build the AMD SMI Python package, the following components are requi
 
 ### Build steps
 
-1. Clone the AMD SMI repository to your local Linux machine.
+1. Clone the rocm-systems repository to your local Linux machine
+   and sparse-checkout the AMD SMI project.
 
    ```shell
-   git clone https://github.com/ROCm/amdsmi.git
+   git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
+   git -C rocm-systems sparse-checkout set projects/amdsmi
+   cd rocm-systems/projects/amdsmi
    ```
 
 2. The default installation location for the library and headers is `/opt/rocm`. Before installation, any old ROCm
@@ -188,7 +191,7 @@ on compile.
 ### Build the tests
 
 To verify the build and capabilities of AMD SMI on your system, as well as to see practical examples of its usage, you
-can build and run the available [tests in the repository](https://github.com/ROCm/amdsmi/tree/amd-staging/tests). Follow
+can build and run the available [tests in the repository](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/tests). Follow
 these steps to build the tests:
 
 ```bash
