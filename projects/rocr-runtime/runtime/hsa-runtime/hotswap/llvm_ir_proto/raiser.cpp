@@ -173,7 +173,8 @@ enum class SemOp : uint16_t {
   S_MOVK_I32, S_ADDK_I32, S_MULK_I32,
   S_CMPK_GE_I32, S_CMPK_GT_I32, S_CMPK_LE_I32, S_CMPK_LT_I32,
   S_CMPK_GE_U32, S_CMPK_GT_U32, S_CMPK_LE_U32, S_CMPK_LT_U32,
-  S_CMPK_LG_U32, S_GETREG_B32, S_SETREG_IMM32_B32,
+  S_CMPK_EQ_I32, S_CMPK_EQ_U32, S_CMPK_LG_I32, S_CMPK_LG_U32,
+  S_GETREG_B32, S_SETREG_B32, S_SETREG_IMM32_B32,
 
   // -- SOP1 --
   S_MOV_B32, S_MOV_B64, S_NOT_B32, S_NOT_B64,
@@ -230,11 +231,43 @@ enum class SemOp : uint16_t {
   // -- VOP2/VOP3 FP64 --
   V_ADD_F64, V_MUL_F64, V_FMA_F64,
 
-  // -- VOPC --
+  V_MAX_U32, V_MIN_U32, V_MAX_I32, V_MIN_I32,
+  V_PERMLANE16_B32, V_PERMLANEX16_B32, V_PERMLANE64_B32,
+
+  // -- VOPC integer --
   V_CMP_EQ_U32, V_CMP_NE_U32, V_CMP_GT_U32, V_CMP_GE_U32,
-  V_CMP_LT_U32, V_CMP_LE_U32, V_CMP_GT_U64,
-  V_CMPX_GT_I32, V_CMPX_NE_U32,
-  V_CMP_EQ_F64, V_CMP_NEQ_F64,
+  V_CMP_LT_U32, V_CMP_LE_U32,
+  V_CMP_EQ_I32, V_CMP_NE_I32, V_CMP_GT_I32, V_CMP_GE_I32,
+  V_CMP_LT_I32, V_CMP_LE_I32,
+  V_CMP_EQ_U64, V_CMP_NE_U64, V_CMP_GT_U64, V_CMP_GE_U64,
+  V_CMP_LT_U64, V_CMP_LE_U64,
+  V_CMP_GT_I64, V_CMP_GE_I64, V_CMP_LT_I64, V_CMP_LE_I64,
+
+  // -- VOPC float --
+  V_CMP_EQ_F32, V_CMP_NE_F32, V_CMP_GT_F32, V_CMP_GE_F32,
+  V_CMP_LT_F32, V_CMP_LE_F32, V_CMP_LG_F32,
+  V_CMP_NEQ_F32, V_CMP_NLT_F32, V_CMP_NLE_F32, V_CMP_NGT_F32, V_CMP_NGE_F32,
+  V_CMP_NLG_F32, V_CMP_U_F32, V_CMP_O_F32,
+  V_CMP_EQ_F16, V_CMP_NE_F16, V_CMP_GT_F16, V_CMP_GE_F16,
+  V_CMP_LT_F16, V_CMP_LE_F16, V_CMP_LG_F16,
+  V_CMP_NEQ_F16, V_CMP_NLT_F16, V_CMP_NLE_F16, V_CMP_NGT_F16, V_CMP_NGE_F16,
+  V_CMP_U_F16, V_CMP_O_F16,
+  V_CMP_EQ_F64, V_CMP_NE_F64, V_CMP_GT_F64, V_CMP_GE_F64,
+  V_CMP_LT_F64, V_CMP_LE_F64, V_CMP_LG_F64,
+  V_CMP_NEQ_F64, V_CMP_NLT_F64, V_CMP_NLE_F64, V_CMP_NGT_F64, V_CMP_NGE_F64,
+  V_CMP_U_F64, V_CMP_O_F64,
+
+  // -- CMPX --
+  V_CMPX_EQ_U32, V_CMPX_NE_U32, V_CMPX_GT_U32, V_CMPX_GE_U32,
+  V_CMPX_LT_U32, V_CMPX_LE_U32,
+  V_CMPX_EQ_I32, V_CMPX_NE_I32, V_CMPX_GT_I32, V_CMPX_GE_I32,
+  V_CMPX_LT_I32, V_CMPX_LE_I32,
+  V_CMPX_EQ_F32, V_CMPX_NE_F32, V_CMPX_GT_F32, V_CMPX_GE_F32,
+  V_CMPX_LT_F32, V_CMPX_LE_F32, V_CMPX_LG_F32,
+  V_CMPX_NEQ_F32, V_CMPX_NLT_F32, V_CMPX_NLE_F32, V_CMPX_NGT_F32, V_CMPX_NGE_F32,
+  V_CMPX_EQ_F16, V_CMPX_NE_F16, V_CMPX_GT_F16, V_CMPX_GE_F16,
+  V_CMPX_LT_F16, V_CMPX_LE_F16, V_CMPX_LG_F16,
+  V_CMPX_NEQ_F16,
 
   // -- VOP3P --
   V_PK_ADD_F32, V_PK_MUL_F32, V_PK_FMA_F32,
@@ -256,18 +289,46 @@ enum class SemOp : uint16_t {
   GLOBAL_STORE_BYTE, GLOBAL_STORE_SHORT, GLOBAL_STORE_SHORT_D16_HI,
   GLOBAL_STORE_DWORD, GLOBAL_STORE_DWORDX2, GLOBAL_STORE_DWORDX3, GLOBAL_STORE_DWORDX4,
 
+  // -- FLAT atomics --
+  FLAT_ATOMIC_ADD, FLAT_ATOMIC_SUB,
+  FLAT_ATOMIC_AND, FLAT_ATOMIC_OR, FLAT_ATOMIC_XOR,
+  FLAT_ATOMIC_SMIN, FLAT_ATOMIC_SMAX, FLAT_ATOMIC_UMIN, FLAT_ATOMIC_UMAX,
+  FLAT_ATOMIC_SWAP, FLAT_ATOMIC_CMPSWAP,
+  FLAT_ATOMIC_ADD_F32,
+
+  // -- GLOBAL atomics --
+  GLOBAL_ATOMIC_ADD, GLOBAL_ATOMIC_SUB,
+  GLOBAL_ATOMIC_AND, GLOBAL_ATOMIC_OR, GLOBAL_ATOMIC_XOR,
+  GLOBAL_ATOMIC_SMIN, GLOBAL_ATOMIC_SMAX, GLOBAL_ATOMIC_UMIN, GLOBAL_ATOMIC_UMAX,
+  GLOBAL_ATOMIC_SWAP, GLOBAL_ATOMIC_CMPSWAP,
+  GLOBAL_ATOMIC_ADD_F32,
+  GLOBAL_ATOMIC_PK_ADD_BF16, GLOBAL_ATOMIC_PK_ADD_F16,
+
   // -- DS --
   DS_READ_B32, DS_READ_B64, DS_READ_B128,
+  DS_READ2_B32, DS_READ2_B64,
   DS_READ_U16, DS_READ_I16, DS_READ_U8, DS_READ_I8,
   DS_WRITE_B32, DS_WRITE_B64, DS_WRITE_B128,
+  DS_WRITE2_B32, DS_WRITE2_B64,
   DS_WRITE_B16, DS_WRITE_B8,
   DS_BPERMUTE_B32,
 
   // -- MUBUF --
-  // (handled generically by mn.contains patterns currently)
+  BUFFER_LOAD_DWORD, BUFFER_LOAD_DWORDX2, BUFFER_LOAD_DWORDX3, BUFFER_LOAD_DWORDX4,
+  BUFFER_LOAD_UBYTE, BUFFER_LOAD_SBYTE, BUFFER_LOAD_USHORT, BUFFER_LOAD_SSHORT,
+  BUFFER_LOAD_SHORT_D16_HI,
+  BUFFER_STORE_DWORD, BUFFER_STORE_DWORDX2, BUFFER_STORE_DWORDX3, BUFFER_STORE_DWORDX4,
+  BUFFER_STORE_BYTE, BUFFER_STORE_SHORT,
+
+  // -- MUBUF atomics --
+  BUFFER_ATOMIC_ADD, BUFFER_ATOMIC_SUB,
+  BUFFER_ATOMIC_AND, BUFFER_ATOMIC_OR, BUFFER_ATOMIC_XOR,
+  BUFFER_ATOMIC_ADD_F32,
+  BUFFER_ATOMIC_PK_ADD_BF16, BUFFER_ATOMIC_PK_ADD_F16,
 
   // -- MFMA --
-  V_MFMA_SCALE_F32_16x16x128_F8F6F4,
+  V_MFMA_F32_16x16x128_F8F6F4, V_MFMA_SCALE_F32_16x16x128_F8F6F4,
+  V_MFMA_F32_32x32x64_F8F6F4, V_MFMA_SCALE_F32_32x32x64_F8F6F4,
 
   // -- VOPD -- (handled via string parsing of fullText, not opcode)
   VOPD_GENERIC,
@@ -348,8 +409,10 @@ struct OpcodeMap {
       {"S_CMPK_LE_I32", SemOp::S_CMPK_LE_I32}, {"S_CMPK_LT_I32", SemOp::S_CMPK_LT_I32},
       {"S_CMPK_GE_U32", SemOp::S_CMPK_GE_U32}, {"S_CMPK_GT_U32", SemOp::S_CMPK_GT_U32},
       {"S_CMPK_LE_U32", SemOp::S_CMPK_LE_U32}, {"S_CMPK_LT_U32", SemOp::S_CMPK_LT_U32},
-      {"S_CMPK_LG_U32", SemOp::S_CMPK_LG_U32},
-      {"S_GETREG_B32", SemOp::S_GETREG_B32}, {"S_SETREG_IMM32_B32", SemOp::S_SETREG_IMM32_B32},
+      {"S_CMPK_EQ_I32", SemOp::S_CMPK_EQ_I32}, {"S_CMPK_EQ_U32", SemOp::S_CMPK_EQ_U32},
+      {"S_CMPK_LG_I32", SemOp::S_CMPK_LG_I32}, {"S_CMPK_LG_U32", SemOp::S_CMPK_LG_U32},
+      {"S_GETREG_B32", SemOp::S_GETREG_B32},
+      {"S_SETREG_B32", SemOp::S_SETREG_B32}, {"S_SETREG_IMM32_B32", SemOp::S_SETREG_IMM32_B32},
 
       // SOP1
       {"S_MOV_B32", SemOp::S_MOV_B32}, {"S_MOV_B64", SemOp::S_MOV_B64},
@@ -446,13 +509,76 @@ struct OpcodeMap {
       {"V_ADD_F64", SemOp::V_ADD_F64}, {"V_MUL_F64", SemOp::V_MUL_F64},
       {"V_FMA_F64", SemOp::V_FMA_F64},
 
-      // VOPC
+      {"V_MAX_U32", SemOp::V_MAX_U32}, {"V_MIN_U32", SemOp::V_MIN_U32},
+      {"V_MAX_I32", SemOp::V_MAX_I32}, {"V_MIN_I32", SemOp::V_MIN_I32},
+      {"V_PERMLANE16_B32", SemOp::V_PERMLANE16_B32},
+      {"V_PERMLANEX16_B32", SemOp::V_PERMLANEX16_B32},
+      {"V_PERMLANE64_B32", SemOp::V_PERMLANE64_B32},
+
+      // VOPC integer
       {"V_CMP_EQ_U32", SemOp::V_CMP_EQ_U32}, {"V_CMP_NE_U32", SemOp::V_CMP_NE_U32},
       {"V_CMP_GT_U32", SemOp::V_CMP_GT_U32}, {"V_CMP_GE_U32", SemOp::V_CMP_GE_U32},
       {"V_CMP_LT_U32", SemOp::V_CMP_LT_U32}, {"V_CMP_LE_U32", SemOp::V_CMP_LE_U32},
-      {"V_CMP_GT_U64", SemOp::V_CMP_GT_U64},
-      {"V_CMPX_GT_I32", SemOp::V_CMPX_GT_I32}, {"V_CMPX_NE_U32", SemOp::V_CMPX_NE_U32},
-      {"V_CMP_EQ_F64", SemOp::V_CMP_EQ_F64}, {"V_CMP_NEQ_F64", SemOp::V_CMP_NEQ_F64},
+      {"V_CMP_LG_U32", SemOp::V_CMP_NE_U32},
+      {"V_CMP_EQ_I32", SemOp::V_CMP_EQ_I32}, {"V_CMP_NE_I32", SemOp::V_CMP_NE_I32},
+      {"V_CMP_GT_I32", SemOp::V_CMP_GT_I32}, {"V_CMP_GE_I32", SemOp::V_CMP_GE_I32},
+      {"V_CMP_LT_I32", SemOp::V_CMP_LT_I32}, {"V_CMP_LE_I32", SemOp::V_CMP_LE_I32},
+      {"V_CMP_LG_I32", SemOp::V_CMP_NE_I32},
+      {"V_CMP_EQ_U64", SemOp::V_CMP_EQ_U64}, {"V_CMP_NE_U64", SemOp::V_CMP_NE_U64},
+      {"V_CMP_GT_U64", SemOp::V_CMP_GT_U64}, {"V_CMP_GE_U64", SemOp::V_CMP_GE_U64},
+      {"V_CMP_LT_U64", SemOp::V_CMP_LT_U64}, {"V_CMP_LE_U64", SemOp::V_CMP_LE_U64},
+      {"V_CMP_GT_I64", SemOp::V_CMP_GT_I64}, {"V_CMP_GE_I64", SemOp::V_CMP_GE_I64},
+      {"V_CMP_LT_I64", SemOp::V_CMP_LT_I64}, {"V_CMP_LE_I64", SemOp::V_CMP_LE_I64},
+
+      // VOPC float
+      {"V_CMP_EQ_F32", SemOp::V_CMP_EQ_F32}, {"V_CMP_NE_F32", SemOp::V_CMP_NE_F32},
+      {"V_CMP_GT_F32", SemOp::V_CMP_GT_F32}, {"V_CMP_GE_F32", SemOp::V_CMP_GE_F32},
+      {"V_CMP_LT_F32", SemOp::V_CMP_LT_F32}, {"V_CMP_LE_F32", SemOp::V_CMP_LE_F32},
+      {"V_CMP_LG_F32", SemOp::V_CMP_LG_F32},
+      {"V_CMP_NEQ_F32", SemOp::V_CMP_NEQ_F32},
+      {"V_CMP_NLT_F32", SemOp::V_CMP_NLT_F32}, {"V_CMP_NLE_F32", SemOp::V_CMP_NLE_F32},
+      {"V_CMP_NGT_F32", SemOp::V_CMP_NGT_F32}, {"V_CMP_NGE_F32", SemOp::V_CMP_NGE_F32},
+      {"V_CMP_NLG_F32", SemOp::V_CMP_NLG_F32},
+      {"V_CMP_U_F32", SemOp::V_CMP_U_F32}, {"V_CMP_O_F32", SemOp::V_CMP_O_F32},
+      {"V_CMP_EQ_F16", SemOp::V_CMP_EQ_F16}, {"V_CMP_NE_F16", SemOp::V_CMP_NE_F16},
+      {"V_CMP_GT_F16", SemOp::V_CMP_GT_F16}, {"V_CMP_GE_F16", SemOp::V_CMP_GE_F16},
+      {"V_CMP_LT_F16", SemOp::V_CMP_LT_F16}, {"V_CMP_LE_F16", SemOp::V_CMP_LE_F16},
+      {"V_CMP_LG_F16", SemOp::V_CMP_LG_F16},
+      {"V_CMP_NEQ_F16", SemOp::V_CMP_NEQ_F16},
+      {"V_CMP_NLT_F16", SemOp::V_CMP_NLT_F16}, {"V_CMP_NLE_F16", SemOp::V_CMP_NLE_F16},
+      {"V_CMP_NGT_F16", SemOp::V_CMP_NGT_F16}, {"V_CMP_NGE_F16", SemOp::V_CMP_NGE_F16},
+      {"V_CMP_U_F16", SemOp::V_CMP_U_F16}, {"V_CMP_O_F16", SemOp::V_CMP_O_F16},
+      {"V_CMP_EQ_F64", SemOp::V_CMP_EQ_F64}, {"V_CMP_NE_F64", SemOp::V_CMP_NE_F64},
+      {"V_CMP_GT_F64", SemOp::V_CMP_GT_F64}, {"V_CMP_GE_F64", SemOp::V_CMP_GE_F64},
+      {"V_CMP_LT_F64", SemOp::V_CMP_LT_F64}, {"V_CMP_LE_F64", SemOp::V_CMP_LE_F64},
+      {"V_CMP_LG_F64", SemOp::V_CMP_LG_F64},
+      {"V_CMP_NEQ_F64", SemOp::V_CMP_NEQ_F64},
+      {"V_CMP_NLT_F64", SemOp::V_CMP_NLT_F64}, {"V_CMP_NLE_F64", SemOp::V_CMP_NLE_F64},
+      {"V_CMP_NGT_F64", SemOp::V_CMP_NGT_F64}, {"V_CMP_NGE_F64", SemOp::V_CMP_NGE_F64},
+      {"V_CMP_U_F64", SemOp::V_CMP_U_F64}, {"V_CMP_O_F64", SemOp::V_CMP_O_F64},
+
+      // CMPX integer
+      {"V_CMPX_EQ_U32", SemOp::V_CMPX_EQ_U32}, {"V_CMPX_NE_U32", SemOp::V_CMPX_NE_U32},
+      {"V_CMPX_GT_U32", SemOp::V_CMPX_GT_U32}, {"V_CMPX_GE_U32", SemOp::V_CMPX_GE_U32},
+      {"V_CMPX_LT_U32", SemOp::V_CMPX_LT_U32}, {"V_CMPX_LE_U32", SemOp::V_CMPX_LE_U32},
+      {"V_CMPX_LG_U32", SemOp::V_CMPX_NE_U32},
+      {"V_CMPX_EQ_I32", SemOp::V_CMPX_EQ_I32}, {"V_CMPX_NE_I32", SemOp::V_CMPX_NE_I32},
+      {"V_CMPX_GT_I32", SemOp::V_CMPX_GT_I32}, {"V_CMPX_GE_I32", SemOp::V_CMPX_GE_I32},
+      {"V_CMPX_LT_I32", SemOp::V_CMPX_LT_I32}, {"V_CMPX_LE_I32", SemOp::V_CMPX_LE_I32},
+
+      // CMPX float
+      {"V_CMPX_EQ_F32", SemOp::V_CMPX_EQ_F32}, {"V_CMPX_NE_F32", SemOp::V_CMPX_NE_F32},
+      {"V_CMPX_GT_F32", SemOp::V_CMPX_GT_F32}, {"V_CMPX_GE_F32", SemOp::V_CMPX_GE_F32},
+      {"V_CMPX_LT_F32", SemOp::V_CMPX_LT_F32}, {"V_CMPX_LE_F32", SemOp::V_CMPX_LE_F32},
+      {"V_CMPX_LG_F32", SemOp::V_CMPX_LG_F32},
+      {"V_CMPX_NEQ_F32", SemOp::V_CMPX_NEQ_F32},
+      {"V_CMPX_NLT_F32", SemOp::V_CMPX_NLT_F32}, {"V_CMPX_NLE_F32", SemOp::V_CMPX_NLE_F32},
+      {"V_CMPX_NGT_F32", SemOp::V_CMPX_NGT_F32}, {"V_CMPX_NGE_F32", SemOp::V_CMPX_NGE_F32},
+      {"V_CMPX_EQ_F16", SemOp::V_CMPX_EQ_F16}, {"V_CMPX_NE_F16", SemOp::V_CMPX_NE_F16},
+      {"V_CMPX_GT_F16", SemOp::V_CMPX_GT_F16}, {"V_CMPX_GE_F16", SemOp::V_CMPX_GE_F16},
+      {"V_CMPX_LT_F16", SemOp::V_CMPX_LT_F16}, {"V_CMPX_LE_F16", SemOp::V_CMPX_LE_F16},
+      {"V_CMPX_LG_F16", SemOp::V_CMPX_LG_F16},
+      {"V_CMPX_NEQ_F16", SemOp::V_CMPX_NEQ_F16},
 
       // VOP3P
       {"V_PK_ADD_F32", SemOp::V_PK_ADD_F32}, {"V_PK_MUL_F32", SemOp::V_PK_MUL_F32},
@@ -484,22 +610,111 @@ struct OpcodeMap {
       {"GLOBAL_STORE_DWORD", SemOp::GLOBAL_STORE_DWORD}, {"GLOBAL_STORE_DWORDX2", SemOp::GLOBAL_STORE_DWORDX2},
       {"GLOBAL_STORE_DWORDX3", SemOp::GLOBAL_STORE_DWORDX3}, {"GLOBAL_STORE_DWORDX4", SemOp::GLOBAL_STORE_DWORDX4},
 
+      // FLAT atomics
+      {"FLAT_ATOMIC_ADD", SemOp::FLAT_ATOMIC_ADD},
+      {"FLAT_ATOMIC_ADD_U32", SemOp::FLAT_ATOMIC_ADD},
+      {"FLAT_ATOMIC_SUB", SemOp::FLAT_ATOMIC_SUB},
+      {"FLAT_ATOMIC_SUB_U32", SemOp::FLAT_ATOMIC_SUB},
+      {"FLAT_ATOMIC_AND", SemOp::FLAT_ATOMIC_AND},
+      {"FLAT_ATOMIC_AND_B32", SemOp::FLAT_ATOMIC_AND},
+      {"FLAT_ATOMIC_OR", SemOp::FLAT_ATOMIC_OR},
+      {"FLAT_ATOMIC_OR_B32", SemOp::FLAT_ATOMIC_OR},
+      {"FLAT_ATOMIC_XOR", SemOp::FLAT_ATOMIC_XOR},
+      {"FLAT_ATOMIC_XOR_B32", SemOp::FLAT_ATOMIC_XOR},
+      {"FLAT_ATOMIC_SMIN", SemOp::FLAT_ATOMIC_SMIN},
+      {"FLAT_ATOMIC_SMIN_I32", SemOp::FLAT_ATOMIC_SMIN},
+      {"FLAT_ATOMIC_SMAX", SemOp::FLAT_ATOMIC_SMAX},
+      {"FLAT_ATOMIC_SMAX_I32", SemOp::FLAT_ATOMIC_SMAX},
+      {"FLAT_ATOMIC_UMIN", SemOp::FLAT_ATOMIC_UMIN},
+      {"FLAT_ATOMIC_UMIN_U32", SemOp::FLAT_ATOMIC_UMIN},
+      {"FLAT_ATOMIC_UMAX", SemOp::FLAT_ATOMIC_UMAX},
+      {"FLAT_ATOMIC_UMAX_U32", SemOp::FLAT_ATOMIC_UMAX},
+      {"FLAT_ATOMIC_SWAP", SemOp::FLAT_ATOMIC_SWAP},
+      {"FLAT_ATOMIC_SWAP_B32", SemOp::FLAT_ATOMIC_SWAP},
+      {"FLAT_ATOMIC_CMPSWAP", SemOp::FLAT_ATOMIC_CMPSWAP},
+      {"FLAT_ATOMIC_CMPSWAP_B32", SemOp::FLAT_ATOMIC_CMPSWAP},
+      {"FLAT_ATOMIC_ADD_F32", SemOp::FLAT_ATOMIC_ADD_F32},
+
+      // GLOBAL atomics
+      {"GLOBAL_ATOMIC_ADD", SemOp::GLOBAL_ATOMIC_ADD},
+      {"GLOBAL_ATOMIC_ADD_U32", SemOp::GLOBAL_ATOMIC_ADD},
+      {"GLOBAL_ATOMIC_SUB", SemOp::GLOBAL_ATOMIC_SUB},
+      {"GLOBAL_ATOMIC_SUB_U32", SemOp::GLOBAL_ATOMIC_SUB},
+      {"GLOBAL_ATOMIC_AND", SemOp::GLOBAL_ATOMIC_AND},
+      {"GLOBAL_ATOMIC_AND_B32", SemOp::GLOBAL_ATOMIC_AND},
+      {"GLOBAL_ATOMIC_OR", SemOp::GLOBAL_ATOMIC_OR},
+      {"GLOBAL_ATOMIC_OR_B32", SemOp::GLOBAL_ATOMIC_OR},
+      {"GLOBAL_ATOMIC_XOR", SemOp::GLOBAL_ATOMIC_XOR},
+      {"GLOBAL_ATOMIC_XOR_B32", SemOp::GLOBAL_ATOMIC_XOR},
+      {"GLOBAL_ATOMIC_SMIN", SemOp::GLOBAL_ATOMIC_SMIN},
+      {"GLOBAL_ATOMIC_SMIN_I32", SemOp::GLOBAL_ATOMIC_SMIN},
+      {"GLOBAL_ATOMIC_SMAX", SemOp::GLOBAL_ATOMIC_SMAX},
+      {"GLOBAL_ATOMIC_SMAX_I32", SemOp::GLOBAL_ATOMIC_SMAX},
+      {"GLOBAL_ATOMIC_UMIN", SemOp::GLOBAL_ATOMIC_UMIN},
+      {"GLOBAL_ATOMIC_UMIN_U32", SemOp::GLOBAL_ATOMIC_UMIN},
+      {"GLOBAL_ATOMIC_UMAX", SemOp::GLOBAL_ATOMIC_UMAX},
+      {"GLOBAL_ATOMIC_UMAX_U32", SemOp::GLOBAL_ATOMIC_UMAX},
+      {"GLOBAL_ATOMIC_SWAP", SemOp::GLOBAL_ATOMIC_SWAP},
+      {"GLOBAL_ATOMIC_SWAP_B32", SemOp::GLOBAL_ATOMIC_SWAP},
+      {"GLOBAL_ATOMIC_CMPSWAP", SemOp::GLOBAL_ATOMIC_CMPSWAP},
+      {"GLOBAL_ATOMIC_CMPSWAP_B32", SemOp::GLOBAL_ATOMIC_CMPSWAP},
+      {"GLOBAL_ATOMIC_ADD_F32", SemOp::GLOBAL_ATOMIC_ADD_F32},
+      {"GLOBAL_ATOMIC_PK_ADD_BF16", SemOp::GLOBAL_ATOMIC_PK_ADD_BF16},
+      {"GLOBAL_ATOMIC_PK_ADD_F16", SemOp::GLOBAL_ATOMIC_PK_ADD_F16},
+
       // DS
       {"DS_READ_B32", SemOp::DS_READ_B32}, {"DS_READ_B64", SemOp::DS_READ_B64},
       {"DS_READ_B128", SemOp::DS_READ_B128},
+      {"DS_READ2_B32", SemOp::DS_READ2_B32}, {"DS_READ2_B64", SemOp::DS_READ2_B64},
       {"DS_READ_U16", SemOp::DS_READ_U16}, {"DS_READ_I16", SemOp::DS_READ_I16},
       {"DS_READ_U8", SemOp::DS_READ_U8}, {"DS_READ_I8", SemOp::DS_READ_I8},
       {"DS_WRITE_B32", SemOp::DS_WRITE_B32}, {"DS_WRITE_B64", SemOp::DS_WRITE_B64},
       {"DS_WRITE_B128", SemOp::DS_WRITE_B128},
+      {"DS_WRITE2_B32", SemOp::DS_WRITE2_B32}, {"DS_WRITE2_B64", SemOp::DS_WRITE2_B64},
       {"DS_WRITE_B16", SemOp::DS_WRITE_B16}, {"DS_WRITE_B8", SemOp::DS_WRITE_B8},
       {"DS_BPERMUTE_B32", SemOp::DS_BPERMUTE_B32},
+
+      // MUBUF
+      {"BUFFER_LOAD_DWORD", SemOp::BUFFER_LOAD_DWORD},
+      {"BUFFER_LOAD_DWORDX2", SemOp::BUFFER_LOAD_DWORDX2},
+      {"BUFFER_LOAD_DWORDX3", SemOp::BUFFER_LOAD_DWORDX3},
+      {"BUFFER_LOAD_DWORDX4", SemOp::BUFFER_LOAD_DWORDX4},
+      {"BUFFER_LOAD_UBYTE", SemOp::BUFFER_LOAD_UBYTE},
+      {"BUFFER_LOAD_SBYTE", SemOp::BUFFER_LOAD_SBYTE},
+      {"BUFFER_LOAD_USHORT", SemOp::BUFFER_LOAD_USHORT},
+      {"BUFFER_LOAD_SSHORT", SemOp::BUFFER_LOAD_SSHORT},
+      {"BUFFER_LOAD_SHORT_D16_HI", SemOp::BUFFER_LOAD_SHORT_D16_HI},
+      {"BUFFER_STORE_DWORD", SemOp::BUFFER_STORE_DWORD},
+      {"BUFFER_STORE_DWORDX2", SemOp::BUFFER_STORE_DWORDX2},
+      {"BUFFER_STORE_DWORDX3", SemOp::BUFFER_STORE_DWORDX3},
+      {"BUFFER_STORE_DWORDX4", SemOp::BUFFER_STORE_DWORDX4},
+      {"BUFFER_STORE_BYTE", SemOp::BUFFER_STORE_BYTE},
+      {"BUFFER_STORE_SHORT", SemOp::BUFFER_STORE_SHORT},
+
+      // MUBUF atomics
+      {"BUFFER_ATOMIC_ADD", SemOp::BUFFER_ATOMIC_ADD},
+      {"BUFFER_ATOMIC_ADD_U32", SemOp::BUFFER_ATOMIC_ADD},
+      {"BUFFER_ATOMIC_SUB", SemOp::BUFFER_ATOMIC_SUB},
+      {"BUFFER_ATOMIC_SUB_U32", SemOp::BUFFER_ATOMIC_SUB},
+      {"BUFFER_ATOMIC_AND", SemOp::BUFFER_ATOMIC_AND},
+      {"BUFFER_ATOMIC_AND_B32", SemOp::BUFFER_ATOMIC_AND},
+      {"BUFFER_ATOMIC_OR", SemOp::BUFFER_ATOMIC_OR},
+      {"BUFFER_ATOMIC_OR_B32", SemOp::BUFFER_ATOMIC_OR},
+      {"BUFFER_ATOMIC_XOR", SemOp::BUFFER_ATOMIC_XOR},
+      {"BUFFER_ATOMIC_XOR_B32", SemOp::BUFFER_ATOMIC_XOR},
+      {"BUFFER_ATOMIC_ADD_F32", SemOp::BUFFER_ATOMIC_ADD_F32},
+      {"BUFFER_ATOMIC_PK_ADD_BF16", SemOp::BUFFER_ATOMIC_PK_ADD_BF16},
+      {"BUFFER_ATOMIC_PK_ADD_F16", SemOp::BUFFER_ATOMIC_PK_ADD_F16},
 
       // AGPR
       {"V_ACCVGPR_READ_B32", SemOp::V_ACCVGPR_READ_B32},
       {"V_ACCVGPR_WRITE_B32", SemOp::V_ACCVGPR_WRITE_B32},
 
       // MFMA
+      {"V_MFMA_F32_16X16X128_F8F6F4", SemOp::V_MFMA_F32_16x16x128_F8F6F4},
       {"V_MFMA_SCALE_F32_16X16X128_F8F6F4", SemOp::V_MFMA_SCALE_F32_16x16x128_F8F6F4},
+      {"V_MFMA_F32_32X32X64_F8F6F4", SemOp::V_MFMA_F32_32x32x64_F8F6F4},
+      {"V_MFMA_SCALE_F32_32X32X64_F8F6F4", SemOp::V_MFMA_SCALE_F32_32x32x64_F8F6F4},
     };
 
     // Build name → SemOp lookup
@@ -1719,15 +1934,15 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     // SOP1: single-source scalar ops
     // ================================================================
     case FormatKind::SOP1: {
-      if (mn == "s_mov_b32") {
+      if (sop == SemOp::S_MOV_B32) {
         regs.writeReg32(B, op.dst(), op.src(0));
         handled = true; break;
       }
-      if (mn == "s_mov_b64") {
+      if (sop == SemOp::S_MOV_B64) {
         regs.writeReg64(B, op.dst(), op.src64(0));
         handled = true; break;
       }
-      if (mn == "s_and_saveexec_b64" || mn == "s_and_saveexec_b32") {
+      if (sop == SemOp::S_AND_SAVEEXEC_B32) {
         Value *oldExec = regs.loadExec(B);
         Value *src = op.srcExecWidth(0);
         regs.writeRegExecWidth(B, op.dst(), oldExec);
@@ -1736,7 +1951,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         sccResult = newExec;
         handled = true; break;
       }
-      if (mn == "s_or_saveexec_b64" || mn == "s_or_saveexec_b32") {
+      if (sop == SemOp::S_OR_SAVEEXEC_B32) {
         Value *oldExec = regs.loadExec(B);
         Value *src = op.srcExecWidth(0);
         regs.writeRegExecWidth(B, op.dst(), oldExec);
@@ -1745,7 +1960,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         sccResult = newExec;
         handled = true; break;
       }
-      if (mn == "s_xor_saveexec_b64" || mn == "s_xor_saveexec_b32") {
+      if (sop == SemOp::S_XOR_SAVEEXEC_B32) {
         Value *oldExec = regs.loadExec(B);
         Value *src = op.srcExecWidth(0);
         regs.writeRegExecWidth(B, op.dst(), oldExec);
@@ -1754,8 +1969,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         sccResult = newExec;
         handled = true; break;
       }
-      if (mn == "s_and_not1_saveexec_b32" || mn == "s_and_not1_saveexec_b64" ||
-          mn == "s_andn2_saveexec_b32" || mn == "s_andn2_saveexec_b64") {
+      if (sop == SemOp::S_ANDN2_SAVEEXEC_B32) {
         Value *oldExec = regs.loadExec(B);
         Value *src = op.srcExecWidth(0);
         regs.writeRegExecWidth(B, op.dst(), oldExec);
@@ -1764,8 +1978,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         sccResult = newExec;
         handled = true; break;
       }
-      if (mn == "s_or_not1_saveexec_b32" || mn == "s_or_not1_saveexec_b64" ||
-          mn == "s_orn2_saveexec_b32" || mn == "s_orn2_saveexec_b64") {
+      if (sop == SemOp::S_ORN2_SAVEEXEC_B32) {
         Value *oldExec = regs.loadExec(B);
         Value *src = op.srcExecWidth(0);
         regs.writeRegExecWidth(B, op.dst(), oldExec);
@@ -1774,74 +1987,73 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         sccResult = newExec;
         handled = true; break;
       }
-      if (mn == "s_getpc_b64") {
+      if (sop == SemOp::S_GETPC_B64) {
         regs.writeReg64(B, op.dst(), ConstantInt::get(i64Ty, 0));
         handled = true; break;
       }
-      if (mn == "s_not_b64") {
+      if (sop == SemOp::S_NOT_B64) {
         sccResult = B.CreateNot(op.src64(0), "not64");
         regs.writeReg64(B, op.dst(), sccResult);
         handled = true; break;
       }
-      if (mn == "s_not_b32") {
+      if (sop == SemOp::S_NOT_B32) {
         sccResult = B.CreateNot(op.src(0), "not32");
         regs.writeReg32(B, op.dst(), sccResult);
         handled = true; break;
       }
-      if (mn == "s_brev_b32") {
+      if (sop == SemOp::S_BREV_B32) {
         Function *brev = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::bitreverse, {i32Ty});
         regs.writeReg32(B, op.dst(), B.CreateCall(brev, {op.src(0)}, "sbrev"));
         handled = true; break;
       }
-      if (mn == "s_ff1_i32_b32") {
+      if (sop == SemOp::S_FF1_I32_B32) {
         Function *cttz = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::cttz, {i32Ty});
         regs.writeReg32(B, op.dst(), B.CreateCall(cttz, {op.src(0), ConstantInt::getTrue(i1Ty)}, "ff1"));
         handled = true; break;
       }
-      if (mn == "s_ff1_i32_b64") {
+      if (sop == SemOp::S_FF1_I32_B64) {
         Function *cttz64 = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::cttz, {i64Ty});
         Value *r = B.CreateCall(cttz64, {op.src64(0), ConstantInt::getTrue(i1Ty)}, "ff1_64");
         regs.writeReg32(B, op.dst(), B.CreateTrunc(r, i32Ty));
         handled = true; break;
       }
-      if (mn == "s_flbit_i32_b64") {
+      if (sop == SemOp::S_FLBIT_I32_B64) {
         Function *ctlz64 = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::ctlz, {i64Ty});
         Value *r = B.CreateCall(ctlz64, {op.src64(0), ConstantInt::getTrue(i1Ty)}, "flbit64");
         regs.writeReg32(B, op.dst(), B.CreateTrunc(r, i32Ty));
         handled = true; break;
       }
-      if (mn == "s_flbit_i32_b32") {
+      if (sop == SemOp::S_FLBIT_I32_B32) {
         Function *ctlz = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::ctlz, {i32Ty});
         regs.writeReg32(B, op.dst(), B.CreateCall(ctlz, {op.src(0), ConstantInt::getTrue(i1Ty)}, "flbit"));
         handled = true; break;
       }
-      if (mn == "s_sext_i32_i8") {
+      if (sop == SemOp::S_SEXT_I32_I8) {
         Value *v = B.CreateTrunc(op.src(0), Type::getInt8Ty(C));
         regs.writeReg32(B, op.dst(), B.CreateSExt(v, i32Ty, "sext8"));
         handled = true; break;
       }
-      if (mn == "s_sext_i32_i16") {
+      if (sop == SemOp::S_SEXT_I32_I16) {
         Value *v = B.CreateTrunc(op.src(0), Type::getInt16Ty(C));
         regs.writeReg32(B, op.dst(), B.CreateSExt(v, i32Ty, "sext16"));
         handled = true; break;
       }
-      // GFX12 scalar FP conversions
-      if (mn == "s_cvt_f32_u32") {
+      if (sop == SemOp::S_CVT_F32_U32) {
         Value *r = B.CreateUIToFP(op.src(0), f32Ty, "s_cvt_f");
         regs.writeReg32(B, op.dst(), B.CreateBitCast(r, i32Ty));
         handled = true; break;
       }
-      if (mn == "s_cvt_f32_i32") {
+      if (sop == SemOp::S_CVT_F32_I32) {
         Value *r = B.CreateSIToFP(op.src(0), f32Ty, "s_cvt_f");
         regs.writeReg32(B, op.dst(), B.CreateBitCast(r, i32Ty));
         handled = true; break;
       }
-      if (mn == "s_cvt_u32_f32") {
+      if (sop == SemOp::S_CVT_U32_F32) {
         Value *s = B.CreateBitCast(op.src(0), f32Ty);
         regs.writeReg32(B, op.dst(), B.CreateFPToUI(s, i32Ty, "s_cvt_u"));
         handled = true; break;
       }
-      if (mn == "s_cvt_i32_f32") {
+      if (sop == SemOp::S_CVT_I32_F32) {
         Value *s = B.CreateBitCast(op.src(0), f32Ty);
         regs.writeReg32(B, op.dst(), B.CreateFPToSI(s, i32Ty, "s_cvt_i"));
         handled = true; break;
@@ -1873,15 +2085,14 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         sccHandled = true; handled = true; break;
       }
       // SOPK compares: s_cmpk_XX_i32 / s_cmpk_XX_u32
-      if ((sop >= SemOp::S_CMPK_GE_I32 && sop <= SemOp::S_CMPK_LG_U32) ||
-          mn == "s_cmpk_eq_i32" || mn == "s_cmpk_eq_u32" ||
-          mn == "s_cmpk_lg_i32" || mn == "s_cmpk_lg_u32") {
+      if (sop == SemOp::S_CMPK_EQ_I32 || sop == SemOp::S_CMPK_EQ_U32 ||
+          sop == SemOp::S_CMPK_LG_I32 || sop == SemOp::S_CMPK_LG_U32 ||
+          (sop >= SemOp::S_CMPK_GE_I32 && sop <= SemOp::S_CMPK_LT_U32)) {
         Value *sdst = regs.readReg32(B, op.dst());
         Value *imm = op.src(0);
         Value *cmp = nullptr;
-        if      (mn == "s_cmpk_eq_i32" || mn == "s_cmpk_eq_u32") cmp = B.CreateICmpEQ(sdst, imm, "scmpk");
-        else if (sop == SemOp::S_CMPK_LG_U32 || mn == "s_cmpk_lg_i32" ||
-                 mn == "s_cmpk_lg_u32") cmp = B.CreateICmpNE(sdst, imm, "scmpk");
+        if      (sop == SemOp::S_CMPK_EQ_I32 || sop == SemOp::S_CMPK_EQ_U32) cmp = B.CreateICmpEQ(sdst, imm, "scmpk");
+        else if (sop == SemOp::S_CMPK_LG_I32 || sop == SemOp::S_CMPK_LG_U32) cmp = B.CreateICmpNE(sdst, imm, "scmpk");
         else if (sop == SemOp::S_CMPK_GT_I32) cmp = B.CreateICmpSGT(sdst, imm, "scmpk");
         else if (sop == SemOp::S_CMPK_GE_I32) cmp = B.CreateICmpSGE(sdst, imm, "scmpk");
         else if (sop == SemOp::S_CMPK_LT_I32) cmp = B.CreateICmpSLT(sdst, imm, "scmpk");
@@ -1905,7 +2116,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
       // s_setreg_b32/s_setreg_imm32_b32: writes to a hardware config register.
       // No-op in our model.
-      if (sop == SemOp::S_SETREG_IMM32_B32 || mn == "s_setreg_b32") {
+      if (sop == SemOp::S_SETREG_IMM32_B32 || sop == SemOp::S_SETREG_B32) {
         handled = true; break;
       }
       break;
@@ -2197,9 +2408,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg32(B, op.dst(), op.src(0));
         handled = true; break;
       }
-      // Lane permutation instructions — in scalar model, identity
-      if (mn.starts_with("v_permlane") || mn == "v_permlanex16_b32") {
-        // v_permlane16_swap_b32 has dst = src0, in-place swap is identity in scalar
+      if (sop == SemOp::V_PERMLANE16_B32 || sop == SemOp::V_PERMLANEX16_B32 ||
+          sop == SemOp::V_PERMLANE64_B32) {
         if (di.numDefs >= 1 && di.numSrcs >= 1) {
           regs.writeReg32(B, op.dst(), op.src(0));
         }
@@ -2420,22 +2630,22 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg32(B, op.dst(), B.CreateXor(op.src(0), op.src(1), "vxor"));
         handled = true; break;
       }
-      if (mn == "v_max_u32") {
+      if (sop == SemOp::V_MAX_U32) {
         Value *s0 = op.src(0), *s1 = op.src(1);
         regs.writeReg32(B, op.dst(), B.CreateSelect(B.CreateICmpUGT(s0, s1), s0, s1, "vmax"));
         handled = true; break;
       }
-      if (mn == "v_min_u32") {
+      if (sop == SemOp::V_MIN_U32) {
         Value *s0 = op.src(0), *s1 = op.src(1);
         regs.writeReg32(B, op.dst(), B.CreateSelect(B.CreateICmpULT(s0, s1), s0, s1, "vmin"));
         handled = true; break;
       }
-      if (mn == "v_max_i32") {
+      if (sop == SemOp::V_MAX_I32) {
         Value *s0 = op.src(0), *s1 = op.src(1);
         regs.writeReg32(B, op.dst(), B.CreateSelect(B.CreateICmpSGT(s0, s1), s0, s1, "vmax"));
         handled = true; break;
       }
-      if (mn == "v_min_i32") {
+      if (sop == SemOp::V_MIN_I32) {
         Value *s0 = op.src(0), *s1 = op.src(1);
         regs.writeReg32(B, op.dst(), B.CreateSelect(B.CreateICmpSLT(s0, s1), s0, s1, "vmin"));
         handled = true; break;
@@ -2756,112 +2966,156 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
 
       // ---- Vector compares (VOPC e32 and VOP3 e64) ----
-      // ---- Integer vector compares ----
-      if (mn.starts_with("v_cmp_") && (mn.contains("_i32") || mn.contains("_u32") || mn.contains("_i64") || mn.contains("_u64"))) {
-        Value *s0 = op.src(0), *s1 = op.src(1);
-        if (!s0 || !s1) {
-          errs() << "ir_proto: " << mn << ": missing operand\n";
-          return result;
-        }
-        Value *cmp = nullptr;
-        // Signed integer compares
-        if      (mn.contains("_gt_i32") || mn.contains("_gt_i64")) cmp = B.CreateICmpSGT(s0, s1, "vcmp");
-        else if (mn.contains("_ge_i32") || mn.contains("_ge_i64")) cmp = B.CreateICmpSGE(s0, s1, "vcmp");
-        else if (mn.contains("_lt_i32") || mn.contains("_lt_i64")) cmp = B.CreateICmpSLT(s0, s1, "vcmp");
-        else if (mn.contains("_le_i32") || mn.contains("_le_i64")) cmp = B.CreateICmpSLE(s0, s1, "vcmp");
-        // Unsigned integer compares (also used for equality)
-        else if (mn.contains("_eq_u32") || mn.contains("_eq_i32") || mn.contains("_eq_u64")) cmp = B.CreateICmpEQ(s0, s1, "vcmp");
-        else if (mn.contains("_ne_u32") || mn.contains("_ne_i32") || mn.contains("_lg_u32") || mn.contains("_ne_u64")) cmp = B.CreateICmpNE(s0, s1, "vcmp");
-        else if (mn.contains("_gt_u32") || mn.contains("_gt_u64")) cmp = B.CreateICmpUGT(s0, s1, "vcmp");
-        else if (mn.contains("_ge_u32") || mn.contains("_ge_u64")) cmp = B.CreateICmpUGE(s0, s1, "vcmp");
-        else if (mn.contains("_lt_u32") || mn.contains("_lt_u64")) cmp = B.CreateICmpULT(s0, s1, "vcmp");
-        else if (mn.contains("_le_u32") || mn.contains("_le_u64")) cmp = B.CreateICmpULE(s0, s1, "vcmp");
-        if (cmp) {
-          if (di.numDefs >= 1) {
-            ParsedReg d = op.dst();
-            if (d.kind == ParsedReg::SGPR) regs.storeSGPR64(B, d.baseIdx, B.CreateSExt(cmp, i64Ty));
-            else                           regs.storeVCC(B, cmp);
-          } else {
-            regs.storeVCC(B, cmp);
+      // Helper lambda: map SemOp to ICmp/FCmp predicate for v_cmp_* instructions
+      {
+        auto vcmpICmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
+          switch (s) {
+          case SemOp::V_CMP_EQ_U32: case SemOp::V_CMP_EQ_I32:
+          case SemOp::V_CMP_EQ_U64: return CmpInst::ICMP_EQ;
+          case SemOp::V_CMP_NE_U32: case SemOp::V_CMP_NE_I32:
+          case SemOp::V_CMP_NE_U64: return CmpInst::ICMP_NE;
+          case SemOp::V_CMP_GT_I32: case SemOp::V_CMP_GT_I64: return CmpInst::ICMP_SGT;
+          case SemOp::V_CMP_GE_I32: case SemOp::V_CMP_GE_I64: return CmpInst::ICMP_SGE;
+          case SemOp::V_CMP_LT_I32: case SemOp::V_CMP_LT_I64: return CmpInst::ICMP_SLT;
+          case SemOp::V_CMP_LE_I32: case SemOp::V_CMP_LE_I64: return CmpInst::ICMP_SLE;
+          case SemOp::V_CMP_GT_U32: case SemOp::V_CMP_GT_U64: return CmpInst::ICMP_UGT;
+          case SemOp::V_CMP_GE_U32: case SemOp::V_CMP_GE_U64: return CmpInst::ICMP_UGE;
+          case SemOp::V_CMP_LT_U32: case SemOp::V_CMP_LT_U64: return CmpInst::ICMP_ULT;
+          case SemOp::V_CMP_LE_U32: case SemOp::V_CMP_LE_U64: return CmpInst::ICMP_ULE;
+          default: return std::nullopt;
           }
-          handled = true; break;
-        }
-      }
-      // ---- FP vector compares ----
-      if (mn.starts_with("v_cmp_") && (mn.contains("_f32") || mn.contains("_f16") || mn.contains("_f64"))) {
-        Value *s0, *s1;
-        if (mn.contains("_f64")) {
-          auto *f64Ty = Type::getDoubleTy(C);
-          s0 = B.CreateBitCast(op.src64(0), f64Ty);
-          s1 = B.CreateBitCast(op.src64(1), f64Ty);
-        } else {
-          s0 = op.srcF(0); s1 = op.srcF(1);
-          if (mn.contains("_f32")) {
-            if (s0->getType() != f32Ty) s0 = B.CreateBitCast(s0, f32Ty);
-            if (s1->getType() != f32Ty) s1 = B.CreateBitCast(s1, f32Ty);
+        };
+        auto vcmpFCmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
+          switch (s) {
+          case SemOp::V_CMP_GT_F32: case SemOp::V_CMP_GT_F16: case SemOp::V_CMP_GT_F64: return CmpInst::FCMP_OGT;
+          case SemOp::V_CMP_GE_F32: case SemOp::V_CMP_GE_F16: case SemOp::V_CMP_GE_F64: return CmpInst::FCMP_OGE;
+          case SemOp::V_CMP_LT_F32: case SemOp::V_CMP_LT_F16: case SemOp::V_CMP_LT_F64: return CmpInst::FCMP_OLT;
+          case SemOp::V_CMP_LE_F32: case SemOp::V_CMP_LE_F16: case SemOp::V_CMP_LE_F64: return CmpInst::FCMP_OLE;
+          case SemOp::V_CMP_EQ_F32: case SemOp::V_CMP_EQ_F16: case SemOp::V_CMP_EQ_F64: return CmpInst::FCMP_OEQ;
+          case SemOp::V_CMP_NE_F32: case SemOp::V_CMP_NE_F16: case SemOp::V_CMP_NE_F64:
+          case SemOp::V_CMP_NEQ_F32: case SemOp::V_CMP_NEQ_F16: case SemOp::V_CMP_NEQ_F64:
+          case SemOp::V_CMP_LG_F32: case SemOp::V_CMP_LG_F16: case SemOp::V_CMP_LG_F64: return CmpInst::FCMP_ONE;
+          case SemOp::V_CMP_NLT_F32: case SemOp::V_CMP_NLT_F16: case SemOp::V_CMP_NLT_F64: return CmpInst::FCMP_UGE;
+          case SemOp::V_CMP_NLE_F32: case SemOp::V_CMP_NLE_F16: case SemOp::V_CMP_NLE_F64: return CmpInst::FCMP_UGT;
+          case SemOp::V_CMP_NGT_F32: case SemOp::V_CMP_NGT_F16: case SemOp::V_CMP_NGT_F64: return CmpInst::FCMP_ULE;
+          case SemOp::V_CMP_NGE_F32: case SemOp::V_CMP_NGE_F16: case SemOp::V_CMP_NGE_F64: return CmpInst::FCMP_ULT;
+          case SemOp::V_CMP_U_F32: case SemOp::V_CMP_U_F16: case SemOp::V_CMP_U_F64: return CmpInst::FCMP_UNO;
+          case SemOp::V_CMP_O_F32: case SemOp::V_CMP_O_F16: case SemOp::V_CMP_O_F64: return CmpInst::FCMP_ORD;
+          case SemOp::V_CMP_NLG_F32: return CmpInst::FCMP_UEQ;
+          default: return std::nullopt;
           }
-        }
-        Value *cmp = nullptr;
-        if      (mn.contains("_gt_f"))  cmp = B.CreateFCmpOGT(s0, s1, "vcmpf");
-        else if (mn.contains("_ge_f"))  cmp = B.CreateFCmpOGE(s0, s1, "vcmpf");
-        else if (mn.contains("_lt_f"))  cmp = B.CreateFCmpOLT(s0, s1, "vcmpf");
-        else if (mn.contains("_le_f"))  cmp = B.CreateFCmpOLE(s0, s1, "vcmpf");
-        else if (mn.contains("_eq_f"))  cmp = B.CreateFCmpOEQ(s0, s1, "vcmpf");
-        else if (mn.contains("_neq_f") || mn.contains("_ne_f") || mn.contains("_lg_f")) cmp = B.CreateFCmpONE(s0, s1, "vcmpf");
-        else if (mn.contains("_nlt_f")) cmp = B.CreateFCmpUGE(s0, s1, "vcmpf");
-        else if (mn.contains("_nle_f")) cmp = B.CreateFCmpUGT(s0, s1, "vcmpf");
-        else if (mn.contains("_ngt_f")) cmp = B.CreateFCmpULE(s0, s1, "vcmpf");
-        else if (mn.contains("_nge_f")) cmp = B.CreateFCmpULT(s0, s1, "vcmpf");
-        else if (mn.contains("_u_f"))   cmp = B.CreateFCmpUNO(s0, s1, "vcmpf");
-        else if (mn.contains("_o_f"))   cmp = B.CreateFCmpORD(s0, s1, "vcmpf");
-        if (cmp) {
-          if (di.numDefs >= 1) {
-            ParsedReg d = op.dst();
-            if (d.kind == ParsedReg::SGPR) regs.storeSGPR64(B, d.baseIdx, B.CreateSExt(cmp, i64Ty));
-            else                           regs.storeVCC(B, cmp);
-          } else {
-            regs.storeVCC(B, cmp);
+        };
+        auto vcmpxICmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
+          switch (s) {
+          case SemOp::V_CMPX_EQ_U32: case SemOp::V_CMPX_EQ_I32: return CmpInst::ICMP_EQ;
+          case SemOp::V_CMPX_NE_U32: case SemOp::V_CMPX_NE_I32: return CmpInst::ICMP_NE;
+          case SemOp::V_CMPX_GT_I32: return CmpInst::ICMP_SGT;
+          case SemOp::V_CMPX_GE_I32: return CmpInst::ICMP_SGE;
+          case SemOp::V_CMPX_LT_I32: return CmpInst::ICMP_SLT;
+          case SemOp::V_CMPX_LE_I32: return CmpInst::ICMP_SLE;
+          case SemOp::V_CMPX_GT_U32: return CmpInst::ICMP_UGT;
+          case SemOp::V_CMPX_GE_U32: return CmpInst::ICMP_UGE;
+          case SemOp::V_CMPX_LT_U32: return CmpInst::ICMP_ULT;
+          case SemOp::V_CMPX_LE_U32: return CmpInst::ICMP_ULE;
+          default: return std::nullopt;
           }
-          handled = true; break;
-        }
-      }
+        };
+        auto vcmpxFCmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
+          switch (s) {
+          case SemOp::V_CMPX_GT_F32: case SemOp::V_CMPX_GT_F16: return CmpInst::FCMP_OGT;
+          case SemOp::V_CMPX_GE_F32: case SemOp::V_CMPX_GE_F16: return CmpInst::FCMP_OGE;
+          case SemOp::V_CMPX_LT_F32: case SemOp::V_CMPX_LT_F16: return CmpInst::FCMP_OLT;
+          case SemOp::V_CMPX_LE_F32: case SemOp::V_CMPX_LE_F16: return CmpInst::FCMP_OLE;
+          case SemOp::V_CMPX_EQ_F32: case SemOp::V_CMPX_EQ_F16: return CmpInst::FCMP_OEQ;
+          case SemOp::V_CMPX_NE_F32: case SemOp::V_CMPX_NE_F16:
+          case SemOp::V_CMPX_NEQ_F32: case SemOp::V_CMPX_NEQ_F16:
+          case SemOp::V_CMPX_LG_F32: case SemOp::V_CMPX_LG_F16: return CmpInst::FCMP_ONE;
+          case SemOp::V_CMPX_NLT_F32: return CmpInst::FCMP_UGE;
+          case SemOp::V_CMPX_NLE_F32: return CmpInst::FCMP_UGT;
+          case SemOp::V_CMPX_NGT_F32: return CmpInst::FCMP_ULE;
+          case SemOp::V_CMPX_NGE_F32: return CmpInst::FCMP_ULT;
+          default: return std::nullopt;
+          }
+        };
 
-      // ---- v_cmpx_*: compare and write result to EXEC mask ----
-      if (mn.starts_with("v_cmpx_") && (mn.contains("_i32") || mn.contains("_u32"))) {
-        Value *s0 = op.src(0), *s1 = op.src(1);
-        if (!s0 || !s1) { errs() << "ir_proto: " << mn << ": missing operand\n"; return result; }
-        Value *cmp = nullptr;
-        if      (mn.contains("_gt_i32")) cmp = B.CreateICmpSGT(s0, s1, "vcmpx");
-        else if (mn.contains("_ge_i32")) cmp = B.CreateICmpSGE(s0, s1, "vcmpx");
-        else if (mn.contains("_lt_i32")) cmp = B.CreateICmpSLT(s0, s1, "vcmpx");
-        else if (mn.contains("_le_i32")) cmp = B.CreateICmpSLE(s0, s1, "vcmpx");
-        else if (mn.contains("_eq_i32") || mn.contains("_eq_u32")) cmp = B.CreateICmpEQ(s0, s1, "vcmpx");
-        else if (mn.contains("_ne_u32") || mn.contains("_ne_i32") || mn.contains("_lg_u32")) cmp = B.CreateICmpNE(s0, s1, "vcmpx");
-        else if (mn.contains("_gt_u32")) cmp = B.CreateICmpUGT(s0, s1, "vcmpx");
-        else if (mn.contains("_ge_u32")) cmp = B.CreateICmpUGE(s0, s1, "vcmpx");
-        else if (mn.contains("_lt_u32")) cmp = B.CreateICmpULT(s0, s1, "vcmpx");
-        else if (mn.contains("_le_u32")) cmp = B.CreateICmpULE(s0, s1, "vcmpx");
-        if (cmp) {
+        // Determine if this is a 64-bit integer compare
+        bool is64 = sop == SemOp::V_CMP_EQ_U64 || sop == SemOp::V_CMP_NE_U64 ||
+                    sop == SemOp::V_CMP_GT_U64 || sop == SemOp::V_CMP_GE_U64 ||
+                    sop == SemOp::V_CMP_LT_U64 || sop == SemOp::V_CMP_LE_U64 ||
+                    sop == SemOp::V_CMP_GT_I64 || sop == SemOp::V_CMP_GE_I64 ||
+                    sop == SemOp::V_CMP_LT_I64 || sop == SemOp::V_CMP_LE_I64;
+        bool isF64 = sop == SemOp::V_CMP_EQ_F64 || sop == SemOp::V_CMP_NE_F64 ||
+                     sop == SemOp::V_CMP_NEQ_F64 ||
+                     sop == SemOp::V_CMP_GT_F64 || sop == SemOp::V_CMP_GE_F64 ||
+                     sop == SemOp::V_CMP_LT_F64 || sop == SemOp::V_CMP_LE_F64 ||
+                     sop == SemOp::V_CMP_LG_F64 ||
+                     sop == SemOp::V_CMP_NLT_F64 || sop == SemOp::V_CMP_NLE_F64 ||
+                     sop == SemOp::V_CMP_NGT_F64 || sop == SemOp::V_CMP_NGE_F64 ||
+                     sop == SemOp::V_CMP_U_F64 || sop == SemOp::V_CMP_O_F64;
+
+        // v_cmp_* integer
+        if (auto pred = vcmpICmpPred(sop)) {
+          Value *s0 = is64 ? op.src64(0) : op.src(0);
+          Value *s1 = is64 ? op.src64(1) : op.src(1);
+          if (!s0 || !s1) {
+            errs() << "ir_proto: " << mn << ": missing operand\n";
+            return result;
+          }
+          Value *cmp = B.CreateICmp(*pred, s0, s1, "vcmp");
+          if (di.numDefs >= 1) {
+            ParsedReg d = op.dst();
+            if (d.kind == ParsedReg::SGPR) regs.storeSGPR64(B, d.baseIdx, B.CreateSExt(cmp, i64Ty));
+            else                           regs.storeVCC(B, cmp);
+          } else {
+            regs.storeVCC(B, cmp);
+          }
+          handled = true; break;
+        }
+        // v_cmp_* float
+        if (auto pred = vcmpFCmpPred(sop)) {
+          Value *s0, *s1;
+          if (isF64) {
+            auto *f64Ty = Type::getDoubleTy(C);
+            s0 = B.CreateBitCast(op.src64(0), f64Ty);
+            s1 = B.CreateBitCast(op.src64(1), f64Ty);
+          } else {
+            s0 = op.srcF(0); s1 = op.srcF(1);
+            bool isF32 = sop >= SemOp::V_CMP_EQ_F32 && sop <= SemOp::V_CMP_O_F32;
+            if (isF32) {
+              if (s0->getType() != f32Ty) s0 = B.CreateBitCast(s0, f32Ty);
+              if (s1->getType() != f32Ty) s1 = B.CreateBitCast(s1, f32Ty);
+            }
+          }
+          Value *cmp = B.CreateFCmp(*pred, s0, s1, "vcmpf");
+          if (di.numDefs >= 1) {
+            ParsedReg d = op.dst();
+            if (d.kind == ParsedReg::SGPR) regs.storeSGPR64(B, d.baseIdx, B.CreateSExt(cmp, i64Ty));
+            else                           regs.storeVCC(B, cmp);
+          } else {
+            regs.storeVCC(B, cmp);
+          }
+          handled = true; break;
+        }
+
+        // v_cmpx_* integer: compare and write result to EXEC mask
+        if (auto pred = vcmpxICmpPred(sop)) {
+          Value *s0 = op.src(0), *s1 = op.src(1);
+          if (!s0 || !s1) { errs() << "ir_proto: " << mn << ": missing operand\n"; return result; }
+          Value *cmp = B.CreateICmp(*pred, s0, s1, "vcmpx");
           Value *mask = B.CreateSExt(cmp, regs.execTy);
           Value *curExec = regs.loadExec(B);
           regs.storeExec(B, B.CreateAnd(curExec, mask, "cmpx_exec"));
           handled = true; break;
         }
-      }
-      if (mn.starts_with("v_cmpx_") && (mn.contains("_f32") || mn.contains("_f16"))) {
-        Value *s0 = op.srcF(0), *s1 = op.srcF(1);
-        if (mn.contains("_f32")) {
-          if (s0->getType() != f32Ty) s0 = B.CreateBitCast(s0, f32Ty);
-          if (s1->getType() != f32Ty) s1 = B.CreateBitCast(s1, f32Ty);
-        }
-        Value *cmp = nullptr;
-        if      (mn.contains("_gt_f"))  cmp = B.CreateFCmpOGT(s0, s1, "vcmpxf");
-        else if (mn.contains("_ge_f"))  cmp = B.CreateFCmpOGE(s0, s1, "vcmpxf");
-        else if (mn.contains("_lt_f"))  cmp = B.CreateFCmpOLT(s0, s1, "vcmpxf");
-        else if (mn.contains("_le_f"))  cmp = B.CreateFCmpOLE(s0, s1, "vcmpxf");
-        else if (mn.contains("_eq_f"))  cmp = B.CreateFCmpOEQ(s0, s1, "vcmpxf");
-        else if (mn.contains("_neq_f") || mn.contains("_ne_f") || mn.contains("_lg_f")) cmp = B.CreateFCmpONE(s0, s1, "vcmpxf");
-        if (cmp) {
+        // v_cmpx_* float
+        if (auto pred = vcmpxFCmpPred(sop)) {
+          Value *s0 = op.srcF(0), *s1 = op.srcF(1);
+          bool isF32 = sop >= SemOp::V_CMPX_EQ_F32 && sop <= SemOp::V_CMPX_NGE_F32;
+          if (isF32) {
+            if (s0->getType() != f32Ty) s0 = B.CreateBitCast(s0, f32Ty);
+            if (s1->getType() != f32Ty) s1 = B.CreateBitCast(s1, f32Ty);
+          }
+          Value *cmp = B.CreateFCmp(*pred, s0, s1, "vcmpxf");
           Value *mask = B.CreateSExt(cmp, regs.execTy);
           Value *curExec = regs.loadExec(B);
           regs.storeExec(B, B.CreateAnd(curExec, mask, "cmpx_exec"));
@@ -3023,12 +3277,13 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
             memOffset = di.getImm(op.srcIdx(k));
         if (memOffset != 0) addr = B.CreateInBoundsGEP(i8Ty, addr, B.getInt64(memOffset));
 
-        Type *loadTy = mn.contains("short") ? Type::getInt16Ty(C) : i8Ty;
+        bool isByte = sop == SemOp::GLOBAL_LOAD_UBYTE || sop == SemOp::GLOBAL_LOAD_SBYTE;
+        Type *loadTy = isByte ? i8Ty : Type::getInt16Ty(C);
         Value *loaded = B.CreateLoad(loadTy, addr, "gload_sub");
-        Value *ext = (mn.contains("ubyte") || mn.contains("ushort"))
-                       ? B.CreateZExt(loaded, i32Ty)
-                       : B.CreateSExt(loaded, i32Ty);
-        if (mn.contains("d16_hi")) {
+        bool isUnsigned = sop == SemOp::GLOBAL_LOAD_UBYTE || sop == SemOp::GLOBAL_LOAD_USHORT;
+        Value *ext = isUnsigned ? B.CreateZExt(loaded, i32Ty)
+                                : B.CreateSExt(loaded, i32Ty);
+        if (sop == SemOp::GLOBAL_LOAD_SHORT_D16_HI) {
           Value *prev = regs.readReg32(B, dest);
           ext = B.CreateOr(B.CreateAnd(prev, ConstantInt::get(i32Ty, 0xFFFF)),
                            B.CreateShl(ext, 16), "d16hi");
@@ -3177,10 +3432,11 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
             memOffset = di.getImm(op.srcIdx(k));
         if (memOffset != 0) addr = B.CreateInBoundsGEP(i8Ty, addr, B.getInt64(memOffset));
-        Type *loadTy = mn.contains("short") ? Type::getInt16Ty(C) : i8Ty;
+        bool isByte = sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_SBYTE;
+        Type *loadTy = isByte ? i8Ty : Type::getInt16Ty(C);
         Value *loaded = B.CreateLoad(loadTy, addr, "flat_load_sub");
-        Value *ext = (mn.contains("ubyte") || mn.contains("ushort"))
-                       ? B.CreateZExt(loaded, i32Ty) : B.CreateSExt(loaded, i32Ty);
+        bool isUnsigned = sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_USHORT;
+        Value *ext = isUnsigned ? B.CreateZExt(loaded, i32Ty) : B.CreateSExt(loaded, i32Ty);
         regs.writeReg32(B, dest, ext);
         handled = true; break;
       }
@@ -3215,15 +3471,19 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         handled = true; break;
       }
 
-      if (mn.starts_with("flat_store")) {
+      if (sop == SemOp::FLAT_STORE_DWORD || sop == SemOp::FLAT_STORE_DWORDX2 ||
+          sop == SemOp::FLAT_STORE_DWORDX3 || sop == SemOp::FLAT_STORE_DWORDX4 ||
+          sop == SemOp::FLAT_STORE_BYTE || sop == SemOp::FLAT_STORE_SHORT ||
+          sop == SemOp::FLAT_STORE_SHORT_D16_HI) {
         int storeDwords = 1;
         int storeBits = 32;
-        if (mn.contains("dwordx4")) storeDwords = 4;
-        else if (mn.contains("dwordx3")) storeDwords = 3;
-        else if (mn.contains("dwordx2")) storeDwords = 2;
-        else if (mn.contains("dword")) storeDwords = 1;
-        else if (mn.contains("short")) { storeBits = 16; storeDwords = 0; }
-        else if (mn.contains("byte")) { storeBits = 8; storeDwords = 0; }
+        if (sop == SemOp::FLAT_STORE_DWORDX4) storeDwords = 4;
+        else if (sop == SemOp::FLAT_STORE_DWORDX3) storeDwords = 3;
+        else if (sop == SemOp::FLAT_STORE_DWORDX2) storeDwords = 2;
+        else if (sop == SemOp::FLAT_STORE_DWORD) storeDwords = 1;
+        else if (sop == SemOp::FLAT_STORE_SHORT ||
+                 sop == SemOp::FLAT_STORE_SHORT_D16_HI) { storeBits = 16; storeDwords = 0; }
+        else if (sop == SemOp::FLAT_STORE_BYTE) { storeBits = 8; storeDwords = 0; }
 
         Value *addr = regs.readReg64(B, op.srcReg(0));
         Type *ptrFlatTy = PointerType::get(C, 0);
@@ -3249,7 +3509,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
 
       // flat_atomic_* — same as global_atomic but flat address space
-      if (mn.starts_with("flat_atomic_")) {
+      if (sop >= SemOp::FLAT_ATOMIC_ADD && sop <= SemOp::FLAT_ATOMIC_ADD_F32) {
         ParsedReg addrReg = op.srcReg(0);
         Value *addr = regs.readReg64(B, addrReg);
         Type *ptrFlatTy = PointerType::get(C, 0);
@@ -3265,24 +3525,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         if (memOffset != 0) addr = B.CreateInBoundsGEP(i8Ty, addr, B.getInt64(memOffset));
         Value *data = regs.readReg32(B, op.srcReg(dataIdx));
 
-        AtomicRMWInst::BinOp atomicOp;
-        Type *atomicTy = i32Ty;
-        bool isFP = false;
-        if (mn.contains("_add_u32") || mn.contains("_add_i32")) atomicOp = AtomicRMWInst::Add;
-        else if (mn.contains("_sub_u32")) atomicOp = AtomicRMWInst::Sub;
-        else if (mn.contains("_and_b32")) atomicOp = AtomicRMWInst::And;
-        else if (mn.contains("_or_b32")) atomicOp = AtomicRMWInst::Or;
-        else if (mn.contains("_xor_b32")) atomicOp = AtomicRMWInst::Xor;
-        else if (mn.contains("_smin")) atomicOp = AtomicRMWInst::Min;
-        else if (mn.contains("_smax")) atomicOp = AtomicRMWInst::Max;
-        else if (mn.contains("_umin")) atomicOp = AtomicRMWInst::UMin;
-        else if (mn.contains("_umax")) atomicOp = AtomicRMWInst::UMax;
-        else if (mn.contains("_add_f32")) {
-          atomicOp = AtomicRMWInst::FAdd; isFP = true;
-          data = B.CreateBitCast(data, f32Ty); atomicTy = f32Ty;
-        }
-        else if (mn.contains("_swap_b32")) atomicOp = AtomicRMWInst::Xchg;
-        else if (mn.contains("_cmpswap_b32")) {
+        if (sop == SemOp::FLAT_ATOMIC_CMPSWAP) {
           Value *cmpVal = regs.readReg32(B, op.srcReg(dataIdx));
           ParsedReg srcPair = op.srcReg(dataIdx);
           ParsedReg newReg = srcPair; newReg.baseIdx += 1; newReg.width = 1;
@@ -3293,7 +3536,25 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           if (di.numDefs > 0) regs.writeReg32(B, op.dst(), B.CreateExtractValue(cas, 0));
           handled = true; break;
         }
-        else {
+
+        AtomicRMWInst::BinOp atomicOp;
+        Type *atomicTy = i32Ty;
+        bool isFP = false;
+        switch (sop) {
+        case SemOp::FLAT_ATOMIC_ADD:  atomicOp = AtomicRMWInst::Add; break;
+        case SemOp::FLAT_ATOMIC_SUB:  atomicOp = AtomicRMWInst::Sub; break;
+        case SemOp::FLAT_ATOMIC_AND:  atomicOp = AtomicRMWInst::And; break;
+        case SemOp::FLAT_ATOMIC_OR:   atomicOp = AtomicRMWInst::Or; break;
+        case SemOp::FLAT_ATOMIC_XOR:  atomicOp = AtomicRMWInst::Xor; break;
+        case SemOp::FLAT_ATOMIC_SMIN: atomicOp = AtomicRMWInst::Min; break;
+        case SemOp::FLAT_ATOMIC_SMAX: atomicOp = AtomicRMWInst::Max; break;
+        case SemOp::FLAT_ATOMIC_UMIN: atomicOp = AtomicRMWInst::UMin; break;
+        case SemOp::FLAT_ATOMIC_UMAX: atomicOp = AtomicRMWInst::UMax; break;
+        case SemOp::FLAT_ATOMIC_SWAP: atomicOp = AtomicRMWInst::Xchg; break;
+        case SemOp::FLAT_ATOMIC_ADD_F32:
+          atomicOp = AtomicRMWInst::FAdd; isFP = true;
+          data = B.CreateBitCast(data, f32Ty); atomicTy = f32Ty; break;
+        default:
           result.failMnemonic = di.mnemonic; result.failFormat = "FLAT";
           errs() << "ir_proto: Unhandled flat atomic: " << mn << "\n";
           return result;
@@ -3309,7 +3570,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
 
       // ---- Global atomics ----
-      if (mn.starts_with("global_atomic_")) {
+      if (sop >= SemOp::GLOBAL_ATOMIC_ADD && sop <= SemOp::GLOBAL_ATOMIC_PK_ADD_F16) {
         ParsedReg addrReg = op.srcReg(0);
         Value *addr = regs.readReg64(B, addrReg);
         if (addr->getType() != ptrGlobalTy) addr = B.CreateIntToPtr(addr, ptrGlobalTy);
@@ -3324,23 +3585,40 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         if (memOffset != 0) addr = B.CreateInBoundsGEP(i8Ty, addr, B.getInt64(memOffset));
         Value *data = regs.readReg32(B, op.srcReg(dataIdx));
 
+        if (sop == SemOp::GLOBAL_ATOMIC_CMPSWAP) {
+          Value *cmpVal = data;
+          ParsedReg srcPair = op.srcReg(dataIdx);
+          ParsedReg newReg = srcPair; newReg.baseIdx += 1; newReg.width = 1;
+          Value *newVal = regs.readReg32(B, newReg);
+          auto *cas = B.CreateAtomicCmpXchg(addr, cmpVal, newVal,
+            MaybeAlign(), AtomicOrdering::Monotonic, AtomicOrdering::Monotonic);
+          if (di.numDefs > 0) regs.writeReg32(B, op.dst(), B.CreateExtractValue(cas, 0));
+          handled = true; break;
+        }
+
         AtomicRMWInst::BinOp atomicOp;
         Type *atomicTy = i32Ty;
         bool isFP = false;
-        if (mn.contains("_add_u32") || mn.contains("_add_i32")) atomicOp = AtomicRMWInst::Add;
-        else if (mn.contains("_sub_u32")) atomicOp = AtomicRMWInst::Sub;
-        else if (mn.contains("_and_b32")) atomicOp = AtomicRMWInst::And;
-        else if (mn.contains("_or_b32")) atomicOp = AtomicRMWInst::Or;
-        else if (mn.contains("_xor_b32")) atomicOp = AtomicRMWInst::Xor;
-        else if (mn.contains("_smin")) atomicOp = AtomicRMWInst::Min;
-        else if (mn.contains("_smax")) atomicOp = AtomicRMWInst::Max;
-        else if (mn.contains("_umin")) atomicOp = AtomicRMWInst::UMin;
-        else if (mn.contains("_umax")) atomicOp = AtomicRMWInst::UMax;
-        else if (mn.contains("_swap")) atomicOp = AtomicRMWInst::Xchg;
-        else if (mn.contains("_add_f32")) { atomicOp = AtomicRMWInst::FAdd; atomicTy = f32Ty; isFP = true; }
-        else if (mn.contains("_pk_add_bf16")) { atomicOp = AtomicRMWInst::FAdd; atomicTy = FixedVectorType::get(Type::getBFloatTy(C), 2); isFP = true; }
-        else if (mn.contains("_pk_add_f16")) { atomicOp = AtomicRMWInst::FAdd; atomicTy = FixedVectorType::get(Type::getHalfTy(C), 2); isFP = true; }
-        else {
+        switch (sop) {
+        case SemOp::GLOBAL_ATOMIC_ADD:  atomicOp = AtomicRMWInst::Add; break;
+        case SemOp::GLOBAL_ATOMIC_SUB:  atomicOp = AtomicRMWInst::Sub; break;
+        case SemOp::GLOBAL_ATOMIC_AND:  atomicOp = AtomicRMWInst::And; break;
+        case SemOp::GLOBAL_ATOMIC_OR:   atomicOp = AtomicRMWInst::Or; break;
+        case SemOp::GLOBAL_ATOMIC_XOR:  atomicOp = AtomicRMWInst::Xor; break;
+        case SemOp::GLOBAL_ATOMIC_SMIN: atomicOp = AtomicRMWInst::Min; break;
+        case SemOp::GLOBAL_ATOMIC_SMAX: atomicOp = AtomicRMWInst::Max; break;
+        case SemOp::GLOBAL_ATOMIC_UMIN: atomicOp = AtomicRMWInst::UMin; break;
+        case SemOp::GLOBAL_ATOMIC_UMAX: atomicOp = AtomicRMWInst::UMax; break;
+        case SemOp::GLOBAL_ATOMIC_SWAP: atomicOp = AtomicRMWInst::Xchg; break;
+        case SemOp::GLOBAL_ATOMIC_ADD_F32:
+          atomicOp = AtomicRMWInst::FAdd; atomicTy = f32Ty; isFP = true; break;
+        case SemOp::GLOBAL_ATOMIC_PK_ADD_BF16:
+          atomicOp = AtomicRMWInst::FAdd;
+          atomicTy = FixedVectorType::get(Type::getBFloatTy(C), 2); isFP = true; break;
+        case SemOp::GLOBAL_ATOMIC_PK_ADD_F16:
+          atomicOp = AtomicRMWInst::FAdd;
+          atomicTy = FixedVectorType::get(Type::getHalfTy(C), 2); isFP = true; break;
+        default:
           errs() << "ir_proto: Unsupported global atomic variant: " << mn << "\n";
           result.failMnemonic = di.mnemonic; result.failFormat = "FLAT"; return result;
         }
@@ -3360,24 +3638,35 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     // DS: LDS load / store
     // ================================================================
     case FormatKind::DS: {
-      bool isDsRead = mn.starts_with("ds_read") || mn.starts_with("ds_load");
-      bool isDsWrite = mn.starts_with("ds_write") || mn.starts_with("ds_store");
+      // Map SemOp to {dwords, loadBits, isSigned} for DS read/write
+      auto dsClassify = [](SemOp s) -> std::tuple<int, int, bool> {
+        switch (s) {
+        case SemOp::DS_READ_B128:  case SemOp::DS_WRITE_B128:
+        case SemOp::DS_READ2_B64:  case SemOp::DS_WRITE2_B64:
+          return {4, 128, false};
+        case SemOp::DS_READ_B64:   case SemOp::DS_WRITE_B64:
+        case SemOp::DS_READ2_B32:  case SemOp::DS_WRITE2_B32:
+          return {2, 64, false};
+        case SemOp::DS_READ_B32:   case SemOp::DS_WRITE_B32:
+          return {1, 32, false};
+        case SemOp::DS_READ_U16:   case SemOp::DS_WRITE_B16:
+          return {0, 16, false};
+        case SemOp::DS_READ_I16:
+          return {0, 16, true};
+        case SemOp::DS_READ_U8:    case SemOp::DS_WRITE_B8:
+          return {0, 8, false};
+        case SemOp::DS_READ_I8:
+          return {0, 8, true};
+        default: return {-1, 0, false};
+        }
+      };
+      bool isDsRead = sop >= SemOp::DS_READ_B32 && sop <= SemOp::DS_READ_I8;
+      bool isDsWrite = sop >= SemOp::DS_WRITE_B32 && sop <= SemOp::DS_WRITE_B8;
       if (isDsRead || isDsWrite) {
-        int dwords = 1;
-        if (mn.contains("_b128") || mn.contains("2_b64")) dwords = 4;
-        else if (mn.contains("_b64") || mn.contains("2_b32")) dwords = 2;
-        else if (mn.contains("_b32") || mn.contains("_dword")) dwords = 1;
-        else if (mn.contains("_b16") || mn.contains("_u16") ||
-                 mn.contains("_i16") || mn.contains("_short")) dwords = 0;
-        else if (mn.contains("_b8") || mn.contains("_u8") ||
-                 mn.contains("_i8") || mn.contains("_byte")) dwords = 0;
+        auto [dwords, loadBits, isSigned] = dsClassify(sop);
 
-        int loadBits = (dwords > 0) ? dwords * 32 : (mn.contains("_b8") || mn.contains("_u8") || mn.contains("_i8") || mn.contains("_byte")) ? 8 : 16;
-
-        // DS addr is a 32-bit VGPR offset into LDS
         Value *addr = B.CreateZExt(op.src(0), i64Ty, "ds_addr");
 
-        // Add immediate offset if present
         for (unsigned k = 1; k < op.nSrcs(); k++) {
           if (di.isImm(op.srcIdx(k))) {
             int64_t imm = di.getImm(op.srcIdx(k));
@@ -3387,7 +3676,6 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           }
         }
 
-        // Use addrspace(3) for LDS
         Value *ptr = B.CreateIntToPtr(addr, PointerType::get(C, 3));
 
         if (isDsRead) {
@@ -3395,13 +3683,9 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           if (dwords == 0) {
             Type *memTy = Type::getIntNTy(C, loadBits);
             Value *v = B.CreateLoad(memTy, ptr, "ds_ld");
-            bool isSigned = mn.contains("_i8") || mn.contains("_i16");
             regs.writeReg32(B, dest, isSigned ? B.CreateSExt(v, i32Ty) : B.CreateZExt(v, i32Ty));
           } else if (dwords == 1) {
             regs.writeReg32(B, dest, B.CreateLoad(i32Ty, ptr, "ds_ld"));
-          } else if (dwords == 2) {
-            auto *vecTy = FixedVectorType::get(i32Ty, 2);
-            regs.writeRegVec(B, dest, B.CreateLoad(vecTy, ptr, "ds_ld"));
           } else {
             auto *vecTy = FixedVectorType::get(i32Ty, dwords);
             regs.writeRegVec(B, dest, B.CreateLoad(vecTy, ptr, "ds_ld"));
@@ -3422,9 +3706,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           handled = true; break;
         }
       }
-      // ds_bpermute_b32: cross-lane LDS permute — reads lane[src0/4]'s src1 value.
-      // In scalar model (single lane), this is an identity: dst = src1.
-      if (mn == "ds_bpermute_b32") {
+      if (sop == SemOp::DS_BPERMUTE_B32) {
         regs.writeReg32(B, op.dst(), op.src(1));
         handled = true; break;
       }
@@ -3435,22 +3717,29 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     // MUBUF: buffer_load / buffer_store
     // ================================================================
     case FormatKind::MUBUF: {
-      bool isLoad = mn.starts_with("buffer_load");
-      bool isStore = mn.starts_with("buffer_store");
+      auto mubufClassify = [](SemOp s) -> std::tuple<bool, bool, int, int, bool, bool> {
+        // returns {isLoad, isStore, dwords, loadBits, isSubDword, isSigned}
+        switch (s) {
+        case SemOp::BUFFER_LOAD_DWORD:    return {true, false, 1, 32, false, false};
+        case SemOp::BUFFER_LOAD_DWORDX2:  return {true, false, 2, 64, false, false};
+        case SemOp::BUFFER_LOAD_DWORDX3:  return {true, false, 3, 96, false, false};
+        case SemOp::BUFFER_LOAD_DWORDX4:  return {true, false, 4, 128, false, false};
+        case SemOp::BUFFER_LOAD_UBYTE:    return {true, false, 1, 8, true, false};
+        case SemOp::BUFFER_LOAD_SBYTE:    return {true, false, 1, 8, true, true};
+        case SemOp::BUFFER_LOAD_USHORT:   return {true, false, 1, 16, true, false};
+        case SemOp::BUFFER_LOAD_SSHORT:   return {true, false, 1, 16, true, true};
+        case SemOp::BUFFER_LOAD_SHORT_D16_HI: return {true, false, 1, 16, true, false};
+        case SemOp::BUFFER_STORE_DWORD:   return {false, true, 1, 32, false, false};
+        case SemOp::BUFFER_STORE_DWORDX2: return {false, true, 2, 64, false, false};
+        case SemOp::BUFFER_STORE_DWORDX3: return {false, true, 3, 96, false, false};
+        case SemOp::BUFFER_STORE_DWORDX4: return {false, true, 4, 128, false, false};
+        case SemOp::BUFFER_STORE_BYTE:    return {false, true, 1, 8, true, false};
+        case SemOp::BUFFER_STORE_SHORT:   return {false, true, 1, 16, true, false};
+        default: return {false, false, 0, 0, false, false};
+        }
+      };
+      auto [isLoad, isStore, dwords, loadBits, isSubDword, isBufSigned] = mubufClassify(sop);
       if (isLoad || isStore) {
-        int dwords = 1;
-        if (mn.contains("dwordx4")) dwords = 4;
-        else if (mn.contains("dwordx3")) dwords = 3;
-        else if (mn.contains("dwordx2")) dwords = 2;
-        else if (mn.contains("dword")) dwords = 1;
-
-        int loadBits = 32 * dwords;
-        bool isSubDword = false;
-        if (mn.contains("ubyte") || mn.contains("sbyte")) { loadBits = 8; isSubDword = true; }
-        else if (mn.contains("ushort") || mn.contains("sshort") ||
-                 mn.contains("short_d16")) { loadBits = 16; isSubDword = true; }
-        else if (mn.contains("_b8")) { loadBits = 8; isSubDword = true; }
-        else if (mn.contains("_b16")) { loadBits = 16; isSubDword = true; }
 
         // MUBUF buffer resource is a 128-bit descriptor (4 SGPRs):
         //   dword0[47:0]  = base address (low 48 bits)
@@ -3509,9 +3798,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           if (isSubDword) {
             Type *memTy = Type::getIntNTy(C, loadBits);
             Value *loaded = B.CreateLoad(memTy, gep, "buf_ld");
-            bool isSigned = mn.contains("sbyte") || mn.contains("sshort");
-            Value *ext = isSigned ? B.CreateSExt(loaded, i32Ty)
-                                  : B.CreateZExt(loaded, i32Ty);
+            Value *ext = isBufSigned ? B.CreateSExt(loaded, i32Ty)
+                                     : B.CreateZExt(loaded, i32Ty);
             regs.writeReg32(B, vdata, ext);
           } else if (dwords == 1) {
             regs.writeReg32(B, vdata, B.CreateLoad(i32Ty, gep, "buf_ld"));
@@ -3538,7 +3826,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
 
       // ---- Buffer atomics ----
-      if (mn.starts_with("buffer_atomic_")) {
+      if (sop >= SemOp::BUFFER_ATOMIC_ADD && sop <= SemOp::BUFFER_ATOMIC_PK_ADD_F16) {
         ParsedReg srsrc = op.srcReg(0);
         Value *dw0 = regs.readReg32(B, srsrc);
         ParsedReg srsrc1 = srsrc; srsrc1.baseIdx = srsrc.baseIdx + 1;
@@ -3556,15 +3844,21 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         AtomicRMWInst::BinOp atomicOp;
         Type *atomicTy = i32Ty;
         bool isFP = false;
-        if (mn.contains("_add_u32") || mn.contains("_add_i32")) atomicOp = AtomicRMWInst::Add;
-        else if (mn.contains("_sub_u32")) atomicOp = AtomicRMWInst::Sub;
-        else if (mn.contains("_and_b32")) atomicOp = AtomicRMWInst::And;
-        else if (mn.contains("_or_b32")) atomicOp = AtomicRMWInst::Or;
-        else if (mn.contains("_xor_b32")) atomicOp = AtomicRMWInst::Xor;
-        else if (mn.contains("_add_f32")) { atomicOp = AtomicRMWInst::FAdd; atomicTy = f32Ty; isFP = true; }
-        else if (mn.contains("_pk_add_bf16")) { atomicOp = AtomicRMWInst::FAdd; atomicTy = FixedVectorType::get(Type::getBFloatTy(C), 2); isFP = true; }
-        else if (mn.contains("_pk_add_f16")) { atomicOp = AtomicRMWInst::FAdd; atomicTy = FixedVectorType::get(Type::getHalfTy(C), 2); isFP = true; }
-        else {
+        switch (sop) {
+        case SemOp::BUFFER_ATOMIC_ADD: atomicOp = AtomicRMWInst::Add; break;
+        case SemOp::BUFFER_ATOMIC_SUB: atomicOp = AtomicRMWInst::Sub; break;
+        case SemOp::BUFFER_ATOMIC_AND: atomicOp = AtomicRMWInst::And; break;
+        case SemOp::BUFFER_ATOMIC_OR:  atomicOp = AtomicRMWInst::Or; break;
+        case SemOp::BUFFER_ATOMIC_XOR: atomicOp = AtomicRMWInst::Xor; break;
+        case SemOp::BUFFER_ATOMIC_ADD_F32:
+          atomicOp = AtomicRMWInst::FAdd; atomicTy = f32Ty; isFP = true; break;
+        case SemOp::BUFFER_ATOMIC_PK_ADD_BF16:
+          atomicOp = AtomicRMWInst::FAdd;
+          atomicTy = FixedVectorType::get(Type::getBFloatTy(C), 2); isFP = true; break;
+        case SemOp::BUFFER_ATOMIC_PK_ADD_F16:
+          atomicOp = AtomicRMWInst::FAdd;
+          atomicTy = FixedVectorType::get(Type::getHalfTy(C), 2); isFP = true; break;
+        default:
           errs() << "ir_proto: Unsupported buffer atomic: " << mn << "\n";
           result.failMnemonic = di.mnemonic; result.failFormat = "MUBUF"; return result;
         }
@@ -3611,10 +3905,10 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       // gfx950 scaled MFMA: v_mfma_[scale_]f32_{16x16x128,32x32x64}_f8f6f4
       // These use the llvm.amdgcn.mfma.scale intrinsic with extra scale params.
       // The non-scale version uses scale=0, op_sel=0 (identity scaling).
-      if (mn == "v_mfma_f32_16x16x128_f8f6f4" || mn == "v_mfma_scale_f32_16x16x128_f8f6f4" ||
-          mn == "v_mfma_f32_32x32x64_f8f6f4" || mn == "v_mfma_scale_f32_32x32x64_f8f6f4") {
-        bool is16x16 = mn.contains("16x16x128");
-        bool isScale = mn.contains("_scale_");
+      if (sop == SemOp::V_MFMA_F32_16x16x128_F8F6F4 || sop == SemOp::V_MFMA_SCALE_F32_16x16x128_F8F6F4 ||
+          sop == SemOp::V_MFMA_F32_32x32x64_F8F6F4 || sop == SemOp::V_MFMA_SCALE_F32_32x32x64_F8F6F4) {
+        bool is16x16 = sop == SemOp::V_MFMA_F32_16x16x128_F8F6F4 || sop == SemOp::V_MFMA_SCALE_F32_16x16x128_F8F6F4;
+        bool isScale = sop == SemOp::V_MFMA_SCALE_F32_16x16x128_F8F6F4 || sop == SemOp::V_MFMA_SCALE_F32_32x32x64_F8F6F4;
         Type *accumTy = is16x16 ? (Type*)v4f32Ty : (Type*)v16f32Ty;
         Type *srcTy = v8i32Ty;
         Intrinsic::ID intrId = is16x16
