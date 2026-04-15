@@ -110,12 +110,12 @@ public:
     struct write_counters_args
     {
         std::vector<uint64_t> counter_ids;
+        std::vector<uint64_t> kernel_id;
     };
+
     void write_counters(rocprofiler_compute_tool::tool_data_t* tool_data) override;
     const std::vector<write_counters_args>& get_write_counters_args() const;
 
 private:
     std::vector<write_counters_args> m_write_counters_args;
-    uint32_t m_writer_counters_count = 0;
 };
-
