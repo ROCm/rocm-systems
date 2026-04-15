@@ -25,8 +25,6 @@
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 #include "lib/rocprofiler-sdk/thread_trace/trace_decoder_api.h"
 
-#include <memory>
-
 namespace rocprofiler
 {
 namespace thread_trace
@@ -63,15 +61,10 @@ class AQLProfileDL
 public:
     AQLProfileDL();
     ~AQLProfileDL();
-    AQLProfileDL(const AQLProfileDL&) = delete;
-    AQLProfileDL(AQLProfileDL&&)      = delete;
-    AQLProfileDL& operator=(const AQLProfileDL&) = delete;
-    AQLProfileDL& operator=(AQLProfileDL&&) = delete;
 
     bool valid() const
     {
-        return handle != nullptr && get_buffer_packets_fn != nullptr &&
-               update_buffer_status_fn != nullptr;
+        return get_buffer_packets_fn != nullptr && update_buffer_status_fn != nullptr;
     };
 
     GetBufferPacketsFn*   get_buffer_packets_fn   = nullptr;
@@ -79,7 +72,7 @@ public:
     void*                 handle                  = nullptr;
 };
 
-std::shared_ptr<AQLProfileDL>
+AQLProfileDL*
 get_aqlprofile_dl();
 
 }  // namespace thread_trace

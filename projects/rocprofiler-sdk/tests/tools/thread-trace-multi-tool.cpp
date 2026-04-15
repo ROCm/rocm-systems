@@ -25,7 +25,7 @@
 #    undef NDEBUG
 #endif
 
-#include "trace_callbacks.hpp"
+#include "thread-trace-callbacks.hpp"
 
 constexpr size_t NUM_KERNELS = 5;
 

@@ -56,10 +56,17 @@ DL::~DL()
 
 AQLProfileDL::AQLProfileDL()
 {
-    // Try to load libhsa-amd-aqlprofile64.so.1
+    // Check if symbols are already available in the process before loading a new copy
+    get_buffer_packets_fn = reinterpret_cast<GetBufferPacketsFn*>(
+        dlsym(RTLD_DEFAULT, "aqlprofile_att_get_buffer_packets"));
+    update_buffer_status_fn = reinterpret_cast<UpdateBufferStatusFn*>(
+        dlsym(RTLD_DEFAULT, "aqlprofile_att_update_buffer_status"));
+
+    if(valid()) return;
+
     const char* lib_names[] = {
-        "libhsa-amd-aqlprofile64.so.1",
         "libhsa-amd-aqlprofile64.so",
+        "libhsa-amd-aqlprofile64.so.1",
     };
 
     for(const char* lib_name : lib_names)
@@ -85,12 +92,11 @@ AQLProfileDL::~AQLProfileDL()
     if(handle) dlclose(handle);
 }
 
-std::shared_ptr<AQLProfileDL>
+AQLProfileDL*
 get_aqlprofile_dl()
 {
-    static auto& instance = common::static_object<std::shared_ptr<AQLProfileDL>>::construct(
-        std::make_shared<AQLProfileDL>());
-    return *instance;
+    static auto& instance = common::static_object<AQLProfileDL>::construct();
+    return instance;
 }
 
 }  // namespace thread_trace
