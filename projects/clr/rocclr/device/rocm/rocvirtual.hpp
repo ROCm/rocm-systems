@@ -680,7 +680,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     // Make sure the last packet contained a completion signal
     if (last_packet_with_signal_index_ == last_write_index_) {
-      if ((last_write_index_ == 0) && (last_completion_signal_.handle == 0)) {
+      if ((last_write_index_ == std::numeric_limits<uint64_t>::max()) && (last_completion_signal_.handle == 0)) {
         return true;
       } else {
         return (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
@@ -766,8 +766,8 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
-  uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet
-  uint64_t last_packet_with_signal_index_ = 0;//!< The last HW queue write index for a packet
+  uint64_t last_write_index_ = std::numeric_limits<uint64_t>::max(); //!< The last HW queue write index for any packet
+  uint64_t last_packet_with_signal_index_ = std::numeric_limits<uint64_t>::max(); //!< The last HW queue write index for a packet
                                               //!< with a completion signal
   hsa_signal_t last_completion_signal_{};     //!< The last completion signal
 
