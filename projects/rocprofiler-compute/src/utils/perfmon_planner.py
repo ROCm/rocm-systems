@@ -182,16 +182,52 @@ def append_analysis_yaml_for_filter_token(
         return
 
     with open(config_filename_dict[file_id]) as stream:
-        file_config = yaml.safe_load(stream)
+        try:
+            file_config = yaml.safe_load(stream)
+        except yaml.YAMLError as exc:
+            print(
+                f"Warning: Skipping {block_id}: failed to parse YAML from "
+                f"{config_filename_dict[file_id]}: {exc}",
+                file=sys.stderr,
+            )
+            return
+
+    if not isinstance(file_config, dict):
+        print(
+            f"Warning: Skipping {block_id}: expected mapping at root of "
+            f"{config_filename_dict[file_id]}",
+            file=sys.stderr,
+        )
+        return
 
     if panel_id is None:
         texts.append(yaml.dump(file_config, sort_keys=False))
         return
 
+    panel_config = file_config.get("Panel Config", {})
+    if not isinstance(panel_config, dict):
+        print(
+            f"Warning: Skipping {block_id}: invalid 'Panel Config' in "
+            f"{config_filename_dict[file_id]}",
+            file=sys.stderr,
+        )
+        return
+
+    data_source = panel_config.get("data source", [])
+    if not isinstance(data_source, list):
+        print(
+            f"Warning: Skipping {block_id}: invalid 'data source' in "
+            f"{config_filename_dict[file_id]}",
+            file=sys.stderr,
+        )
+        return
+
     panel_dict = {
-        section["metric_table"]["id"]: section["metric_table"]
-        for section in file_config.get("Panel Config", {}).get("data source", [])
-        if "metric_table" in section
+        metric_table["id"]: metric_table
+        for section in data_source
+        if isinstance(section, dict)
+        for metric_table in [section.get("metric_table")]
+        if isinstance(metric_table, dict) and "id" in metric_table
     }
 
     if panel_id not in panel_dict:
@@ -207,6 +243,14 @@ def append_analysis_yaml_for_filter_token(
         return
 
     metrics = panel_dict[panel_id].get("metric", {})
+    if not isinstance(metrics, dict):
+        print(
+            f"Warning: Skipping {block_id}: invalid metric table format for "
+            f"panel id {panel_id}",
+            file=sys.stderr,
+        )
+        return
+
     metric_list = list(metrics.items())
     if metric_id >= len(metric_list):
         print(
