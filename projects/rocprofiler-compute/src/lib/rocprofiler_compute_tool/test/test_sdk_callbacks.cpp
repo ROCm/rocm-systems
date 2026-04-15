@@ -19,7 +19,6 @@ TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfiguredForColle
 
 TEST_F(TestSdkCallbacks, ProvidedKernelIds_ReturnsResultForThemOnly)
 {
-
     const std::vector<std::string> counters_pmc0 = {"counter0", "counter1"};
     const std::vector<std::string> counters_pmc1 = {"counter2"};
 
