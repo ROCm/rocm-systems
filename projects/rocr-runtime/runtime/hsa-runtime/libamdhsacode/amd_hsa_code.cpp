@@ -526,7 +526,8 @@ namespace code {
 
     void AmdHsaCode::AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping)
     {
-      size_t size = sizeof(amdgpu_hsa_note_producer_t) + vendor_name.length() + architecture_name.length() + 1;
+      // note_isa_t (not note_producer_t): includes vendor_and_architecture_name[1]
+      size_t size = sizeof(amdgpu_hsa_note_isa_t) + vendor_name.length() + architecture_name.length() + 1;
       amdgpu_hsa_note_isa_t* desc = (amdgpu_hsa_note_isa_t*) _alloca(size);
       memset(desc, 0, size);
       desc->vendor_name_size = vendor_name.length()+1;
