@@ -36,7 +36,6 @@
 #include "gda_context_proxy.hpp"
 #include "queue_pair.hpp"
 #include "bootstrap/bootstrap.hpp"
-#include "debug_gda.hpp"
 #include "gda/ionic/provider_gda_ionic.hpp"
 #include "gda/bnxt/provider_gda_bnxt.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
@@ -217,8 +216,9 @@ class GDABackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team, TeamInfo *team_info_wrt_parent,
-                       TeamInfo *team_info_wrt_world, int num_pes,
+  void create_new_team(Team *parent_team,
+                       const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes,
                        int my_pe_in_new_team, MPI_Comm team_comm,
                        rocshmem_team_t *new_team) override;
 

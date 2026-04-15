@@ -358,10 +358,16 @@ insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
              basic_block_t* basicBlock, bool allow_traps = instr_traps);
 
 procedure_t*
-find_function(image_t* appImage, const string_t& functionName, const strset_t& = {});
+find_function(const std::vector<module_t*>& modules, const string_t& functionName,
+              const strset_t& = {});
+
+procedure_t*
+find_function(const std::vector<object_t*>& objects, const string_t& functionName,
+              const strset_t& = {});
 
 symtab_symbol_t*
-find_undefined_function_symbol(image_t* app_image, const std::string& _name);
+find_undefined_function_symbol(const std::unordered_set<object_t*>& objects,
+                               const std::string&                   _name);
 
 void
 error_func_real(error_level_t level, int num, const char* const* params);
@@ -377,6 +383,13 @@ get_name(module_t*);
 
 symtab_func_t*
 get_symtab_function(procedure_t*);
+
+std::vector<module_t*>
+filter_modules(std::vector<module_t*>* app_modules);
+
+std::vector<procedure_t*>*
+get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
+               bool include_uninstrumentable);
 
 namespace std
 {

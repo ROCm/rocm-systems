@@ -137,6 +137,7 @@ enum : unsigned {
   EF_AMDGPU_MACH_AMDGCN_RESERVED_0X4D   = 0x04d,
   EF_AMDGPU_MACH_AMDGCN_GFX1201         = 0x04e,
   EF_AMDGPU_MACH_AMDGCN_GFX950          = 0x04f,
+  EF_AMDGPU_MACH_AMDGCN_GFX1250         = 0x049,
   EF_AMDGPU_MACH_AMDGCN_RESERVED_0X50   = 0x050,
   EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC    = 0x051,
   EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC = 0x052,
@@ -154,7 +155,7 @@ enum : unsigned {
   EF_AMDGPU_MACH_AMDGCN_FIRST = EF_AMDGPU_MACH_AMDGCN_GFX600,
   EF_AMDGPU_MACH_AMDGCN_LAST = EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC,
 
-  // Indicates if the "xnack" target feature is enabled for all code contained
+  // Indicates if the "xnack" target feature is enabled for all code contamained
   // in the object.
   //
   // Only valid for ELFOSABI_AMDGPU_HSA and ELFABIVERSION_AMDGPU_HSA_V2.

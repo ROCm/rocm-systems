@@ -18,6 +18,17 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # Local hook: copyright header check
+  - repo: local
+    hooks:
+      - id: copyright-header-check
+        name: Copyright header check
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/copyright_header_check.py'
+        language: system
+        files: \.(py|hip|cpp)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: hash consistency check
   - repo: local
     hooks:

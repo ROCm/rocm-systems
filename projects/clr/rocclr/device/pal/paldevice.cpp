@@ -2336,7 +2336,7 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 }
 
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agentInfo, bool allowAllAgentsAccess) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }

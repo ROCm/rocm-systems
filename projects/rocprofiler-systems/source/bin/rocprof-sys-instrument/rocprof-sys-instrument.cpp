@@ -191,6 +191,7 @@ string_t                                   print_excluded       = {};
 string_t                                   print_available      = {};
 string_t                                   print_overlapping    = {};
 strset_t                                   print_formats        = { "txt", "json" };
+bool                                       dump_info_enabled    = false;
 std::string                                modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
@@ -530,10 +531,17 @@ main(int argc, char** argv)
         .dtype("boolean")
         .action([](parser_t& p) { simulate = p.get<bool>("simulate"); });
     parser
+        .add_argument({ "--dump-info" },
+                      "Write diagnostic module function reports (available, "
+                      "instrumented, excluded, coverage, overlapping) to "
+                      "{print-dir}/instrumentation/. Includes per-function heuristic "
+                      "constraint results in {print-format} formats")
+        .max_count(0)
+        .action([](parser_t&) { dump_info_enabled = true; });
+    parser
         .add_argument({ "--print-format" },
-                      "Output format for diagnostic "
-                      "{available,instrumented,excluded,overlapping} module "
-                      "function lists, e.g. {print-dir}/available.txt")
+                      "Output file format(s) for --dump-info diagnostic reports, "
+                      "e.g. {print-dir}/instrumentation/available.txt")
         .min_count(1)
         .max_count(3)
         .dtype("string")
@@ -541,9 +549,8 @@ main(int argc, char** argv)
         .action([](parser_t& p) { print_formats = p.get<strset_t>("print-format"); });
     parser
         .add_argument({ "--print-dir" },
-                      "Output directory for diagnostic "
-                      "{available,instrumented,excluded,overlapping} module "
-                      "function lists, e.g. {print-dir}/available.txt")
+                      "Output directory for --dump-info diagnostic reports. "
+                      "Files are written to {print-dir}/instrumentation/")
         .count(1)
         .dtype("string")
         .action([](parser_t& p) {
@@ -1467,15 +1474,27 @@ main(int argc, char** argv)
     process_t*     app_thread = nullptr;
     binary_edit_t* app_binary = nullptr;
 
-    // get image
-    verbprintf(1, "Getting the address space image, modules, and procedures...\n");
-    image_t*                   app_image     = addr_space->getImage();
-    std::vector<module_t*>*    app_modules   = app_image->getModules();
-    std::vector<procedure_t*>* app_functions = app_image->getProcedures(include_uninstr);
-    std::unordered_set<module_t*>    modules = {};
+    // These take little time to execute
+    verbprintf(1, "Getting the address space image, objects, and modules...\n");
+    image_t* app_image   = addr_space->getImage();
+    auto     app_objects = std::vector<object_t*>{};
+    app_image->getObjects(app_objects);  // API does not return objects
+    std::vector<module_t*>* app_modules = app_image->getModules();
+
+    auto objects =
+        std::unordered_set<object_t*>{ app_objects.begin(), app_objects.end() };
+    std::unordered_set<module_t*>    modules   = {};
     std::unordered_set<procedure_t*> functions = {};
 
-    if(app_modules) process_modules(*app_modules);
+    // This may take a long time for modules that have many procedures
+    verbprintf(
+        2, "Filtering modules based on internal libraries and user-defined filters...\n");
+    auto filtered_modules = filter_modules(app_modules);
+    process_modules(filtered_modules);
+
+    verbprintf(1, "Getting available procedures based on filtered modules...\n");
+    std::vector<procedure_t*>* app_functions =
+        get_procedures(app_image, &filtered_modules, include_uninstr);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1516,6 +1535,8 @@ main(int argc, char** argv)
             {
                 functions.emplace(itr);
                 modules.emplace(itr->getModule());
+                if(itr->getModule()->getObject())
+                    objects.emplace(itr->getModule()->getObject());
             }
         }
         verbprintf(2, "Adding %zu procedures found in the app image...\n",
@@ -1542,7 +1563,10 @@ main(int argc, char** argv)
     if(parse_all_modules && app_modules && !app_modules->empty())
     {
         for(auto* itr : *app_modules)
+        {
             modules.emplace(itr);
+            if(itr->getObject()) objects.emplace(itr->getObject());
+        }
 
         verbprintf(2,
                    "Adding the procedures from %zu modules found in the app image...\n",
@@ -1573,8 +1597,10 @@ main(int argc, char** argv)
     }
 
     verbprintf(1, "\n");
-    verbprintf(1, "Found %zu functions in %zu modules in instrumentation target\n",
-               functions.size(), modules.size());
+    verbprintf(1, "Found %zu functions in %zu modules across %zu objects\n",
+               functions.size(), modules.size(), objects.size());
+    for(auto* obj : objects)
+        verbprintf(1, "  [object] %s\n", obj->name().c_str());
 
     if(debug_print || verbose_level > 2)
     {
@@ -1603,10 +1629,14 @@ main(int argc, char** argv)
         std::cout << '\n' << std::endl;
     }
 
-    dump_info("available", available_module_functions, 1, werror, "available",
-              print_formats);
-    dump_info("overlapping", overlapping_module_functions, 1, werror,
-              "overlapping_module_functions", print_formats);
+    // Expensive time-wise
+    if(dump_info_enabled)
+    {
+        dump_info("available", available_module_functions, 1, werror, "available",
+                  print_formats);
+        dump_info("overlapping", overlapping_module_functions, 1, werror,
+                  "overlapping_module_functions", print_formats);
+    }
 
     //----------------------------------------------------------------------------------//
     //
@@ -1705,7 +1735,7 @@ main(int argc, char** argv)
     if(main_fname == "main")
     {
         // _MAIN__, MAIN__, main_, _main_, _QQmain
-        main_func = find_function(app_image, "^_?MAIN__|^_?main_|^_QQmain");
+        main_func = find_function(filtered_modules, "^_?MAIN__|^_?main_|^_QQmain");
     }
     // Note: Some Fortran compilers (e.g. Cray) may name the Fortran main function after
     // the program name in the PROGRAM statement. E.g, "PROGRAM hello" becomes "hello_"
@@ -1714,12 +1744,16 @@ main(int argc, char** argv)
     // symbol that has the same start address, allowing Dyninst to latch onto that.
     // However, if problems persist, users should specify their main with
     // "--main-function"
+    if(!main_func) main_func = find_function(filtered_modules, main_fname.c_str());
 
-    if(!main_func) main_func = find_function(app_image, main_fname.c_str());
-    auto* user_start_func = find_function(app_image, "rocprofsys_user_start_trace",
+    if(!main_func && main_fname == "main")
+        main_func = find_function(filtered_modules, "_main");
+
+    auto* user_start_func = find_function(filtered_modules, "rocprofsys_user_start_trace",
                                           { "rocprofsys_user_start_thread_trace" });
-    auto* user_stop_func  = find_function(app_image, "rocprofsys_user_stop_trace",
+    auto* user_stop_func  = find_function(filtered_modules, "rocprofsys_user_stop_trace",
                                           { "rocprofsys_user_stop_thread_trace" });
+
 #if ROCPROFSYS_USE_MPI > 0 || ROCPROFSYS_USE_MPI_HEADERS > 0
     // if any of the below MPI functions are found, enable MPI support
     for(const auto* itr :
@@ -1727,13 +1761,13 @@ main(int argc, char** argv)
           "MPI_INIT", "mpi_init", "mpi_init_", "mpi_init__", "MPI_INIT_THREAD",
           "mpi_init_thread", "mpi_init_thread_", "mpi_init_thread__" })
     {
-        if(find_function(app_image, itr) != nullptr)
+        if(find_function(filtered_modules, itr) != nullptr)
         {
             verbprintf(0, "Found '%s' in '%s'. Enabling MPI support...\n", itr, _cmdv[0]);
             use_mpi = true;
             break;
         }
-        else if(find_undefined_function_symbol(app_image, itr) != nullptr)
+        else if(find_undefined_function_symbol(objects, itr) != nullptr)
         {
             verbprintf(0,
                        "Found undefined symbol '%s' in '%s'. Enabling MPI support...\n",
@@ -1755,6 +1789,21 @@ main(int argc, char** argv)
     for(const auto& itr : extra_libs)
         load_library(get_library_ext({ itr }));
 
+    // Refresh objects after loading libraries, track newly added ones
+    auto new_objects = std::vector<object_t*>{};
+    {
+        auto all_objs = std::vector<object_t*>{};
+        app_image->getObjects(all_objs);
+        for(auto* obj : all_objs)
+        {
+            if(objects.emplace(obj).second)
+            {
+                new_objects.emplace_back(obj);
+                verbprintf(1, "New object loaded: %s\n", obj->name().c_str());
+            }
+        }
+    }
+
     //----------------------------------------------------------------------------------//
     //
     //  Find the primary functions that will be used for instrumentation
@@ -1763,17 +1812,15 @@ main(int argc, char** argv)
 
     verbprintf(0, "Finding instrumentation functions...\n");
 
-    auto* init_func      = find_function(app_image, "rocprofsys_init");
-    auto* fini_func      = find_function(app_image, "rocprofsys_finalize");
-    auto* env_func       = find_function(app_image, "rocprofsys_set_env");
-    auto* mpi_func       = find_function(app_image, "rocprofsys_set_mpi");
-    auto* entr_trace     = find_function(app_image, "rocprofsys_push_trace");
-    auto* exit_trace     = find_function(app_image, "rocprofsys_pop_trace");
-    auto* reg_src_func   = find_function(app_image, "rocprofsys_register_source");
-    auto* reg_cov_func   = find_function(app_image, "rocprofsys_register_coverage");
-    auto* set_instr_func = find_function(app_image, "rocprofsys_set_instrumented");
-
-    if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
+    auto* init_func      = find_function(new_objects, "rocprofsys_init");
+    auto* fini_func      = find_function(new_objects, "rocprofsys_finalize");
+    auto* env_func       = find_function(new_objects, "rocprofsys_set_env");
+    auto* mpi_func       = find_function(new_objects, "rocprofsys_set_mpi");
+    auto* entr_trace     = find_function(new_objects, "rocprofsys_push_trace");
+    auto* exit_trace     = find_function(new_objects, "rocprofsys_pop_trace");
+    auto* reg_src_func   = find_function(new_objects, "rocprofsys_register_source");
+    auto* reg_cov_func   = find_function(new_objects, "rocprofsys_register_coverage");
+    auto* set_instr_func = find_function(new_objects, "rocprofsys_set_instrumented");
 
     //----------------------------------------------------------------------------------//
     //
@@ -1787,8 +1834,8 @@ main(int argc, char** argv)
                    "Attempting to find instrumentation for '%s' via '%s' and '%s'...\n",
                    _name.c_str(), _beg.c_str(), _end.c_str());
         if(_beg.empty() || _end.empty()) return false;
-        auto* _beg_func = find_function(app_image, _beg);
-        auto* _end_func = find_function(app_image, _end);
+        auto* _beg_func = find_function(new_objects, _beg);
+        auto* _end_func = find_function(new_objects, _end);
         if(_beg_func && _end_func)
         {
             use_stubs[_name] = true;
@@ -2348,17 +2395,21 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    dump_info("available", available_module_functions, 0, werror,
-              "available_module_functions", print_formats);
-    dump_info("instrumented", instrumented_module_functions, 0, werror,
-              "instrumented_module_functions", print_formats);
-    dump_info("excluded", excluded_module_functions, 0, werror,
-              "excluded_module_functions", print_formats);
-    if(coverage_mode != CODECOV_NONE)
-        dump_info("coverage", coverage_module_functions, 0, werror,
-                  "coverage_module_functions", print_formats);
-    dump_info("overlapping", overlapping_module_functions, 0, werror,
-              "overlapping_module_functions", print_formats);
+    // Expensive depending on the number of procedures
+    if(dump_info_enabled)
+    {
+        dump_info("available", available_module_functions, 0, werror,
+                  "available_module_functions", print_formats);
+        dump_info("instrumented", instrumented_module_functions, 0, werror,
+                  "instrumented_module_functions", print_formats);
+        dump_info("excluded", excluded_module_functions, 0, werror,
+                  "excluded_module_functions", print_formats);
+        if(coverage_mode != CODECOV_NONE)
+            dump_info("coverage", coverage_module_functions, 0, werror,
+                      "coverage_module_functions", print_formats);
+        dump_info("overlapping", overlapping_module_functions, 0, werror,
+                  "overlapping_module_functions", print_formats);
+    }
 
     auto _dump_info = [](const std::string& _label, const string_t& _mode,
                          const fmodset_t& _modset) {
@@ -2422,6 +2473,7 @@ main(int argc, char** argv)
         }
     };
 
+    // Print to stdout, inexpensive time-wise
     if(!print_available.empty())
         _dump_info("available", print_available, available_module_functions);
     if(!print_instrumented.empty())

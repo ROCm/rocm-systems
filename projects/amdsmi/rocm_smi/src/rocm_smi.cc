@@ -1499,6 +1499,9 @@ OD_SCLK:
 1:       1837Mhz
 OD_MCLK:
 1:       1000Mhz
+OD_FCLK:
+0:       1200Mhz
+1:       1300Mhz
 OD_VDDC_CURVE:
 0:        872Mhz        736mV
 1:       1354Mhz        860mV
@@ -1506,6 +1509,7 @@ OD_VDDC_CURVE:
 OD_RANGE:
 SCLK:     872Mhz       1900Mhz
 MCLK:     168Mhz       1200Mhz
+FCLK:     1200Mhz      1400Mhz
 VDDC_CURVE_SCLK[0]:     872Mhz       1900Mhz
 VDDC_CURVE_VOLT[0]:     737mV        1137mV
 VDDC_CURVE_SCLK[1]:     872Mhz       1900Mhz
@@ -1523,6 +1527,9 @@ MCLK:
 1: 700Mhz
 2: 1200Mhz
 3: 1600Mhz *
+FCLK:
+0: 1200Mhz
+1: 1300Mhz *
 
 For the new format, GFXCLK field will show min and max values(0/1). If the current
 frequency in neither min/max but lies within the range, this is indicated by
@@ -1544,6 +1551,8 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
   p->curr_sclk_range.upper_bound = UINT64_MAX;
   p->curr_mclk_range.lower_bound = UINT64_MAX;
   p->curr_mclk_range.upper_bound = UINT64_MAX;
+  p->curr_fclk_range.lower_bound = UINT64_MAX;
+  p->curr_fclk_range.upper_bound = UINT64_MAX;
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1559,9 +1568,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
   // Tags expected in this file
   const std::string kTAG_OD_SCLK{"OD_SCLK:"};
   const std::string KTAG_OD_MCLK{"OD_MCLK:"};
+  const std::string kTAG_OD_FCLK{"OD_FCLK:"};
   const std::string kTAG_GFXCLK{"GFXCLK:"};
   const std::string KTAG_MCLK{"MCLK:"};
   const std::string KTAG_SCLK{"SCLK:"};
+  const std::string KTAG_FCLK{"FCLK:"};
   const std::string KTAG_OD_RANGE{"OD_RANGE:"};
   const std::string KTAG_FIRST_FREQ_IDX{"0:"};
 
@@ -1589,7 +1600,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
 
   // track the number of keys found, if this goes down to 0 then that means that there is no valid
   // data
-  const uint8_t kNumStructuredKeysToCheck = 6;
+  const uint8_t kNumStructuredKeysToCheck = 9;
   uint8_t structured_key_counter = kNumStructuredKeysToCheck;
   // Validates 'OD_SCLK' is in the structure
   if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK, KTAG_FIRST_FREQ_IDX)) {
@@ -1607,6 +1618,14 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
         freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
   } else
     structured_key_counter--;
+  // Validates 'OD_FCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_FCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_fclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(kTAG_OD_FCLK), nullptr, nullptr, 0);
+    p->curr_fclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(kTAG_OD_FCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
 
   // Validates 'OD_RANGE' is in the structure
   if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_SCLK)) {
@@ -1619,6 +1638,12 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
     od_value_pair_str_to_range(
         txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
         &p->mclk_freq_limits);
+  } else
+    structured_key_counter--;
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE, KTAG_FCLK)) {
+    od_value_pair_str_to_range(
+        txt_power_dev_od_voltage.get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_FCLK),
+        &p->fclk_freq_limits);
   } else
     structured_key_counter--;
   // Validates 'GFXCLK' is in the structure
@@ -1635,6 +1660,14 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind, rsmi_od_volt_freq_dat
         freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
     p->curr_mclk_range.upper_bound =
         freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
+  } else
+    structured_key_counter--;
+  // Validates 'FCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_FCLK, KTAG_FIRST_FREQ_IDX)) {
+    p->curr_fclk_range.lower_bound =
+        freq_string_to_int(build_lower_bound(KTAG_FCLK), nullptr, nullptr, 0);
+    p->curr_fclk_range.upper_bound =
+        freq_string_to_int(build_upper_bound(KTAG_FCLK), nullptr, nullptr, 0);
   } else
     structured_key_counter--;
 
@@ -1656,7 +1689,7 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, 
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  if (clkType != RSMI_CLK_TYPE_SYS && clkType != RSMI_CLK_TYPE_MEM) {
+  if (clkType != RSMI_CLK_TYPE_SYS && clkType != RSMI_CLK_TYPE_MEM && clkType != RSMI_CLK_TYPE_DF) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   if (level != RSMI_FREQ_IND_MIN && level != RSMI_FREQ_IND_MAX) {
@@ -1666,6 +1699,7 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level, 
   std::map<rsmi_clk_type_t, std::string> clk_char_map = {
       {RSMI_CLK_TYPE_SYS, "s"},
       {RSMI_CLK_TYPE_MEM, "m"},
+      {RSMI_CLK_TYPE_DF, "f"},
   };
   DEVICE_MUTEX
 

@@ -150,10 +150,7 @@ src/utils/.config_hashes.json
 > It is used to safely modify YAML files while preserving comments, ordering,
 > and formatting. The workflow scripts will not function correctly without it.
 >
-> Install it via:
-> ```bash
-> pip install ruamel.yaml
-> ```
+> See [Development dependencies](../../README.md#development-dependencies) for install instructions.
 
 ### 1. Validate the current state
 

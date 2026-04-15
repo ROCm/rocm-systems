@@ -157,7 +157,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   case ncclFuncAllReduce: return 2;
   case ncclFuncAllGather: return nRanks;
   case ncclFuncReduceScatter: return nRanks;
-  case ncclFuncAlltoAllvGda: return nRanks;			      
+  case ncclFuncAlltoAllvGda: return nRanks;
   default: return 1;
   }
 }
@@ -244,8 +244,8 @@ static void addWorkBatchToPlan(
   batch->offsetBitset |= 1ull<<(offset/workSize);
   chan->wipBatch.workBytes += workSize;
   if (workType == ncclDevWorkTypeP2p) {
-    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1), 
-    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes), 
+    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1),
+    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes),
     // mark eligibility/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
     if(chan->wipBatch.nP2ps == 0)
       chan->wipBatch.batchP2P = batchP2P;
@@ -455,7 +455,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.currentRank = comm->rank;
       devWork.count = task->count;
     }
-    
+
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
     devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
@@ -756,6 +756,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       NCCLCHECK(calcCollChunking(comm, task, nChannels, nBytes, &chunkSize, &directFlags, &proxyOp));
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
+      // RCCL: CollNet path never set task->nChannels; profiler received 0.
+      // Clamp to UINT8_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which wraps uint8.
+      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX;
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;
@@ -2983,6 +2986,10 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+  // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
+  // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
+  // never sees garbage in eDescr->coll.nChannels.
+  t->nChannels = 0;
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
   t->recvbuff = info->recvbuff;
