@@ -13,7 +13,7 @@ find_path(HIPFILE_INCLUDE_DIR hipfile.h
     HINTS
         "${CMAKE_CURRENT_SOURCE_DIR}/../include"
         "/opt/rocm/include"
-    CACHE PATH "Path to directory containing hipfile.h"
+    PATH "Path to directory containing hipfile.h"
 )
 if(NOT HIPFILE_INCLUDE_DIR)
     message(FATAL_ERROR

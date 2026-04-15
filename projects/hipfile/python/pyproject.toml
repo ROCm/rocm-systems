@@ -10,7 +10,7 @@ classifiers = [
 ]
 description = "Python bindings for hipFile — direct-to-GPU file IO via AMD Infinity Storage (AIS)"
 keywords = ["hipfile", "rocm", "amd", "hip", "AIS"]
-license = "MIT"
+license = { text = "MIT" }
 maintainers = [
     { name = "AMD hipFile Team", email = "hipfile-maintainer@amd.com" },
     { name="Riley Dixon", email="riley.dixon@amd.com" }
@@ -19,7 +19,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 [project.urls]
-homepage = "https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile"
+Homepage = "https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile"
 
 [tool.scikit-build]
 cmake.build-type = "Release"
