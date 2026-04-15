@@ -130,7 +130,7 @@ def test_counter_file_add_and_block_mapping(perfmon_config):
 # =============================================================================
 
 
-def testflat_counters_in_perfmon_file(perfmon_config):
+def test_flat_counters_in_perfmon_file(perfmon_config):
     # Empty file returns empty list
     cf = CounterFile("0", perfmon_config)
     assert flat_counters_in_perfmon_file(cf) == []

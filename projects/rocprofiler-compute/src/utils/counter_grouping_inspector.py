@@ -488,12 +488,8 @@ def _format_bucket_markdown(
 def generate_bucket_plan(
     output_files: list[CounterFile],
     arch: str,
-) -> tuple[str, int]:
-    """Generate the bucket allocation plan as markdown tables.
-
-    Returns:
-        Tuple of (output_string, total_assignments_count)
-    """
+) -> str:
+    """Generate the bucket allocation plan as markdown tables."""
     from io import StringIO
 
     buf = StringIO()
@@ -520,12 +516,12 @@ def generate_bucket_plan(
         f"{total_assignments} counter assignment(s).\n\n"
     )
 
-    return buf.getvalue(), total_assignments
+    return buf.getvalue()
 
 
 def print_bucket_plan(output_files: list[CounterFile], arch: str) -> None:
     """Print the bucket allocation plan as markdown tables."""
-    output, _ = generate_bucket_plan(output_files, arch)
+    output = generate_bucket_plan(output_files, arch)
     print(output, end="")
 
 
@@ -875,7 +871,7 @@ Examples:
                 print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
         elif suffix == ".txt":
-            bucket_output, _ = generate_bucket_plan(output_files, arch)
+            bucket_output = generate_bucket_plan(output_files, arch)
             metrics_output = generate_multi_bucket_metrics(
                 output_files, config_dir, arch
             )
