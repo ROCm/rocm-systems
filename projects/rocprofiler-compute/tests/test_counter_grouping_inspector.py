@@ -12,8 +12,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 # Path to counter_grouping_inspector.py script
 COUNTER_GROUPING_INSPECTOR_SCRIPT = (
     Path(__file__).resolve().parent.parent
