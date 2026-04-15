@@ -209,7 +209,7 @@ be found at `build/tests/amd_smi_test/`.
 ### Build the docs
 
 To build the documentation, follow the instructions at
-[Building documentation](https://rocm.docs.amd.com/en/latest/contribute/building.html).
+[Building documentation](https://rocm.docs.amd.com/projects/amdsmi/en/develop/install/build.html#build-the-docs).
 
 ## DISCLAIMER
 
