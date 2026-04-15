@@ -36,7 +36,9 @@ class Agent : public _vdi_agent {
   static vdi_agent_capabilities potentialCapabilities() { return potentialCapabilities_; }
 
 #define AGENT_FLAG(name)                                                                           \
-  inline static bool shouldPost##name() { return enabledCapabilities_.canGenerate##name != 0; }
+  inline static bool shouldPost##name() {                                                          \
+    return list_ && enabledCapabilities_.canGenerate##name != 0;                                   \
+  }
 
   AGENT_FLAG(ContextEvents);
   AGENT_FLAG(CommandQueueEvents);
