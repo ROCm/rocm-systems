@@ -23,57 +23,59 @@
 // =====================================================================
 //
 // Each NIC type has its own table with actual hardware key names.
-// name      : counter key (used in sysfs paths and output headers)
-// source    : where to read the value
-// is_prefix : true → prefix-match (expands to name0..name7)
+// name          : counter key (used in output headers and primary sysfs path)
+// source        : where to read the value
+// is_prefix     : true → prefix-match (expands to name0..name7)
+// fallback_name : alternative sysfs key to try if 'name' is not found (or NULL)
 
 struct CounterTableEntry {
   const char*   name;
   CounterSource source;
   bool          is_prefix;
+  const char*   fallback_name;  // NULL = no fallback
 };
 
 // ----- IONIC (AINIC) counter table -----
 static const CounterTableEntry ionic_table[] = {
   // ethtool – PFC frame counters (prefix → expands to name0..name7)
-  {"frames_rx_pripause",       COUNTER_SRC_ETHTOOL,  true},
-  {"frames_tx_pripause",       COUNTER_SRC_ETHTOOL,  true},
+  {"frames_rx_pripause",       COUNTER_SRC_ETHTOOL,  true,  NULL},
+  {"frames_tx_pripause",       COUNTER_SRC_ETHTOOL,  true,  NULL},
   // IB hw_counters – CNP
-  {"rx_rdma_cnp_pkts",         COUNTER_SRC_IB_HW,    false},
-  {"tx_rdma_cnp_pkts",         COUNTER_SRC_IB_HW,    false},
+  {"rx_rdma_cnp_pkts",         COUNTER_SRC_IB_HW,    false, NULL},
+  {"tx_rdma_cnp_pkts",         COUNTER_SRC_IB_HW,    false, NULL},
   // IB hw_counters – errors & retransmits
-  {"rx_rdma_mtu_discard_pkts", COUNTER_SRC_IB_HW,    false},
-  {"resp_rx_outof_buf",        COUNTER_SRC_IB_HW,    false},
-  {"tx_rdma_ack_timeout",      COUNTER_SRC_IB_HW,    false},
-  {"req_tx_retry_excd_err",    COUNTER_SRC_IB_HW,    false},
-  {"resp_rx_outouf_seq",       COUNTER_SRC_IB_HW,    false},
-  {"req_rx_pkt_seq_err",       COUNTER_SRC_IB_HW,    false},
+  {"rx_rdma_mtu_discard_pkts", COUNTER_SRC_IB_HW,    false, NULL},
+  {"resp_rx_outof_buf",        COUNTER_SRC_IB_HW,    false, NULL},
+  {"tx_rdma_ack_timeout",      COUNTER_SRC_IB_HW,    false, NULL},
+  {"req_tx_retry_excd_err",    COUNTER_SRC_IB_HW,    false, NULL},
+  {"resp_rx_outouf_seq",       COUNTER_SRC_IB_HW,    false, NULL},
+  {"req_rx_pkt_seq_err",       COUNTER_SRC_IB_HW,    false, NULL},
   // IB hw_counters – RDMA throughput
-  {"tx_rdma_ucast_bytes",      COUNTER_SRC_IB_HW,    false},
-  {"rx_rdma_ucast_bytes",      COUNTER_SRC_IB_HW,    false},
-  {"tx_rdma_ucast_pkts",       COUNTER_SRC_IB_HW,    false},
-  {"rx_rdma_ucast_pkts",       COUNTER_SRC_IB_HW,    false},
+  {"tx_rdma_ucast_bytes",      COUNTER_SRC_IB_HW,    false, NULL},
+  {"rx_rdma_ucast_bytes",      COUNTER_SRC_IB_HW,    false, NULL},
+  {"tx_rdma_ucast_pkts",       COUNTER_SRC_IB_HW,    false, NULL},
+  {"rx_rdma_ucast_pkts",       COUNTER_SRC_IB_HW,    false, NULL},
 };
 static const int ionic_table_size = (int)(sizeof(ionic_table) / sizeof(ionic_table[0]));
 
 // ----- BNXT_RE (Thor2) counter table -----
 static const CounterTableEntry bnxt_re_table[] = {
   // ethtool – PFC frame counters (prefix → expands to name0..name7)
-  {"rx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL,  true},
-  {"tx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL,  true},
+  {"rx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL,  true,  NULL},
+  {"tx_pfc_ena_frames_pri",   COUNTER_SRC_ETHTOOL,  true,  NULL},
   // ethtool – PFC transition counters (exact)
-  {"pfc_pri3_rx_transitions", COUNTER_SRC_ETHTOOL,  false},
-  {"pfc_pri3_tx_transitions", COUNTER_SRC_ETHTOOL,  false},
-  // IB hw_counters
-  {"rp_cnp_handled",          COUNTER_SRC_IB_HW,    false},
-  {"np_cnp_sent",             COUNTER_SRC_IB_HW,    false},
-  {"rx_roce_discards",        COUNTER_SRC_IB_HW,    false},
+  {"pfc_pri3_rx_transitions", COUNTER_SRC_ETHTOOL,  false, NULL},
+  {"pfc_pri3_tx_transitions", COUNTER_SRC_ETHTOOL,  false, NULL},
+  // IB hw_counters – CNP (try rx_cnp_pkts first, fall back to rp_cnp_handled)
+  {"rx_cnp_pkts",             COUNTER_SRC_IB_HW,    false, "rp_cnp_handled"},
+  {"tx_cnp_pkts",             COUNTER_SRC_IB_HW,    false, "np_cnp_sent"},
+  {"rx_roce_discards",        COUNTER_SRC_IB_HW,    false, NULL},
   // debugfs (bnxt_re info)
-  {"rx_stat_discards",        COUNTER_SRC_DEBUGFS,  false},
-  {"to_retransmits",          COUNTER_SRC_DEBUGFS,  false},
-  {"max_retry_exceeded",      COUNTER_SRC_DEBUGFS,  false},
-  {"oos_drop_count",          COUNTER_SRC_DEBUGFS,  false},
-  {"seq_err_naks_rcvd",       COUNTER_SRC_DEBUGFS,  false},
+  {"rx_stat_discards",        COUNTER_SRC_DEBUGFS,  false, NULL},
+  {"to_retransmits",          COUNTER_SRC_DEBUGFS,  false, NULL},
+  {"max_retry_exceeded",      COUNTER_SRC_DEBUGFS,  false, NULL},
+  {"oos_drop_count",          COUNTER_SRC_DEBUGFS,  false, NULL},
+  {"seq_err_naks_rcvd",       COUNTER_SRC_DEBUGFS,  false, NULL},
 };
 static const int bnxt_re_table_size = (int)(sizeof(bnxt_re_table) / sizeof(bnxt_re_table[0]));
 
@@ -125,7 +127,8 @@ std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type) {
   int size;
   GetTable(nic_type, table, size);
   for (int i = 0; i < size; i++) {
-    result.push_back({table[i].name, table[i].source, table[i].is_prefix});
+    result.push_back({table[i].name, table[i].source, table[i].is_prefix,
+                      table[i].fallback_name ? table[i].fallback_name : ""});
   }
   return result;
 }
@@ -366,6 +369,11 @@ static void CollectIbHwCounters(const std::string& ib_device,
     std::string path = base_port + d.name;
     FILE* fp = fopen(path.c_str(), "r");
     if (!fp) fp = fopen((base_dev + d.name).c_str(), "r");
+    // If primary name not found, try fallback
+    if (!fp && !d.fallback_name.empty()) {
+      fp = fopen((base_port + d.fallback_name).c_str(), "r");
+      if (!fp) fp = fopen((base_dev + d.fallback_name).c_str(), "r");
+    }
     if (fp) {
       unsigned long long tmp = 0;
       if (fscanf(fp, "%llu", &tmp) == 1) out[d.name] = (uint64_t)tmp;

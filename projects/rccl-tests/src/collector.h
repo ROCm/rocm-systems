@@ -40,9 +40,10 @@ enum CounterSource {
 };
 
 struct CounterDescriptor {
-  std::string name;      // actual hardware key name (unique per NIC type)
+  std::string name;           // actual hardware key name (unique per NIC type)
   CounterSource source;
-  bool is_prefix;        // true -> prefix match (expands to name0..name7)
+  bool is_prefix;             // true -> prefix match (expands to name0..name7)
+  std::string fallback_name;  // alternative sysfs key if 'name' not found
 };
 
 typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC } NicType;
