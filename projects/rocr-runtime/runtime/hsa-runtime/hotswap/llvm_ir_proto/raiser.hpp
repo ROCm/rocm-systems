@@ -1,6 +1,7 @@
 #ifndef LLVM_IR_PROTO_RAISER_HPP
 #define LLVM_IR_PROTO_RAISER_HPP
 
+#include "code_object_utils.hpp"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -19,15 +20,15 @@ struct RaiseResult {
   int liftedCount = 0;
   int totalCount = 0;
   std::string irText;
+  std::string failMnemonic;
+  std::string failFormat;
   bool success = false;
 };
 
-/// Lift raw .text bytes from a gfx942 code object and raise to LLVM IR.
-/// Internally lifts to MIR (MachineFunction), then pattern-matches
-/// MachineInstrs to produce typed, SSA LLVM IR suitable for llc.
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                       const std::string &targetISA,
-                      const std::string &kernelName);
+                      const std::string &kernelName,
+                      const KernelMeta &meta);
 
 } // namespace ir_proto
 

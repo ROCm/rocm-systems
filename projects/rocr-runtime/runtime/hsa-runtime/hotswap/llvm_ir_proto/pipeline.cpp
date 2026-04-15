@@ -66,8 +66,15 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
   llvm::errs() << "ir_proto: .text section: " << text.bytes.size()
                << " bytes\n";
 
+  // Step 1b: Extract kernel metadata
+  auto meta = extractKernelMeta(codeObjectData, kernelName);
+  if (meta.args.empty()) {
+    llvm::errs() << "ir_proto: WARNING: No metadata found for '" << kernelName
+                 << "', using empty metadata\n";
+  }
+
   // Step 2: Raise to LLVM IR
-  auto raised = raiseToIR(text.bytes, targetISA, kernelName);
+  auto raised = raiseToIR(text.bytes, targetISA, kernelName, meta);
   if (!raised.success) {
     llvm::errs() << "ir_proto: Raising to LLVM IR failed\n";
     return result;

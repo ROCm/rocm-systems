@@ -94,12 +94,23 @@ target_link_libraries(llvm-ir-raiser
     LLVMObjCARCOpts
 )
 
-# --- GPU test -----------------------------------------------------------------
+# --- Batch raiser test (no HIP needed) ----------------------------------------
+add_executable(batch_raise_test
+  tests/batch_raise_test.cpp
+)
+target_link_libraries(batch_raise_test
+  PRIVATE
+    llvm-ir-raiser
+)
+
+# --- GPU tests ----------------------------------------------------------------
 find_package(hip QUIET)
 if(hip_FOUND)
   set(HOTSWAP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
   set(MVE_CO "${HOTSWAP_DIR}/build/mve_vecadd_gfx942.co")
+  set(MFMA_CO "${CMAKE_CURRENT_SOURCE_DIR}/build/mfma_gemm_gfx942_unbundled.co")
 
+  # vecadd GPU test
   add_executable(ir_gpu_test
     tests/ir_gpu_test.cpp
   )
@@ -113,7 +124,23 @@ if(hip_FOUND)
       llvm-ir-raiser
       hip::host
   )
-  message(STATUS "GPU test enabled (HIP found)")
+
+  # MFMA GPU test
+  add_executable(mfma_gpu_test
+    tests/mfma_gpu_test.cpp
+  )
+  target_compile_definitions(mfma_gpu_test PRIVATE
+    MFMA_CO_PATH="${MFMA_CO}"
+    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+  )
+  target_link_libraries(mfma_gpu_test
+    PRIVATE
+      -Wl,--exclude-libs,ALL
+      llvm-ir-raiser
+      hip::host
+  )
+
+  message(STATUS "GPU tests enabled (HIP found)")
 else()
-  message(STATUS "GPU test DISABLED (HIP not found)")
+  message(STATUS "GPU tests DISABLED (HIP not found)")
 endif()
