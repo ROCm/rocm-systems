@@ -64,14 +64,12 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - uses: actions/checkout@v6
-      with:
     - &sparse-checkout
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            projects/rocprofiler-systems/
-            .gitmodules
+      uses: actions/checkout@v6
+      with:
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          .gitmodules
 
     - name: Install Packages
       timeout-minutes: 25
