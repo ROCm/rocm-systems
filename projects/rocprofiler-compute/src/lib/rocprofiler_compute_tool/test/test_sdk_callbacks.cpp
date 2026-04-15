@@ -4,15 +4,21 @@
 
 #include "rocprofiler_compute_tool.h"
 
-TEST_F(TestSdkCallbacks, DISABLED_Simple)
+TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfiguredForCollection)
 {
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
-    dispatch_data.dispatch_info.kernel_id = 1;
+    dispatch_data.dispatch_info.kernel_id                      = 1;
     dispatch_data.dispatch_info.agent_id.handle                = 0xff;
-    m_tool_data->requested_counters = "pmc: counter0 counter1, pmc: counter 2";
+    m_tool_data->requested_counters = "pmc: counter0 counter1, pmc: counter2";
+    m_sdk_wrapper->set_available_counters({"counter0", "counter1", "counter2"});
 
-    rocprofiler_counter_config_id_t              config;
+    rocprofiler_counter_config_id_t config;
     m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
+    EXPECT_EQ(m_sdk_wrapper->get_create_counter_config_info().size(), 2);
+    EXPECT_EQ(m_sdk_wrapper->get_create_counter_config_info()[0].counter_names,
+              (std::vector<std::string>{"counter0", "counter1"}));
+    EXPECT_EQ(m_sdk_wrapper->get_create_counter_config_info()[1].counter_names,
+              std::vector<std::string>{"counter2"});
 }
 
 TEST_F(TestSdkCallbacks, ProvidedKernelIds_ReturnsResultForThemOnly)
@@ -25,11 +31,7 @@ TEST_F(TestSdkCallbacks, ProvidedKernelDispatchRanges_ReturnsResultForThemOnly)
     m_tool_data->kernel_filter_ranges.push_back({1, 2});
 }
 
-TEST_F(TestSdkCallbacks, ProvidedCountersNotSupported_DoesntReturnThem)
-{
-    
-}
-
+TEST_F(TestSdkCallbacks, ProvidedCountersNotSupported_DoesntReturnThem) {}
 
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacks

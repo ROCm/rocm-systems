@@ -133,6 +133,8 @@ void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agen
         Expects(counters_list[i].handle < m_counter_names.size());
         info.counter_names.push_back(m_counter_names[counters_list[i].handle]);
     }
+    m_create_counter_config_info.push_back(info);
+    config_id->handle = m_create_counter_config_info.size() - 1;
 }
 
 void MockSdkWrapper::query_record_counter_id(rocprofiler_counter_instance_id_t id,
