@@ -26,8 +26,8 @@ remain the best reference for packaging, SIMD width, and generational difference
 RDNA3, RDNA3.5, and later APUs. The sections below describe what the profiler measures and names
 for RDNA3.5 (gfx1151).
 
-ROCm Profiler includes analysis panels targeting RDNA3.5 parts reporting as
-gfx1151 — for example integrated graphics on AMD Ryzen AI Max Series - Strix Halo
+ROCm Compute Profiler includes analysis panels targeting RDNA3.5 parts reporting as
+gfx1151 — for example, integrated graphics on AMD Ryzen AI Max Series - Strix Halo
 processors.
 
 .. rubric:: Memory hierarchy in the tool
@@ -74,7 +74,7 @@ and embed the RDNA3.5 (gfx1151) metric tables under each block:
 Note
 ====
 
-rocprof-compute currently has limited support for WMMA on Strix Halo.
+ROCm Compute Profiler currently has limited support for WMMA on Strix Halo.
 
 Related
 =======
