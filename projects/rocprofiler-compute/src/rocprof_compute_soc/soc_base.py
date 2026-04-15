@@ -1059,5 +1059,3 @@ def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
         for block_name in counter_file.blocks
         for ctr in counter_file.blocks[block_name].elements
     ]
-
-

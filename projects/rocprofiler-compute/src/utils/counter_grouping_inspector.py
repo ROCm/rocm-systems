@@ -3,16 +3,16 @@
 # SPDX-License-Identifier:  MIT
 # Co-authored-by: @vedithal-amd
 """
-Standalone perfmon bucket planner for rocprofiler-compute.
+Counter grouping inspector for rocprofiler-compute.
 
-Parses GFX architecture YAML configs and outputs counter bucketing plan
+Parses GFX architecture YAML configs and outputs counter grouping analysis
 without requiring GPU, rocprofiler, or full rocprof-compute initialization.
 
 Usage:
-    ./src/utils/perfmon_planner.py --arch gfx942
-    ./src/utils/perfmon_planner.py --arch gfx942 --block 2 3 4
-    ./src/utils/perfmon_planner.py --arch gfx942 --output plan.txt
-    ./src/utils/perfmon_planner.py --arch gfx942 --output plan.svg
+    ./src/utils/counter_grouping_inspector.py --arch gfx942
+    ./src/utils/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
+    ./src/utils/counter_grouping_inspector.py --arch gfx942 --output plan.txt
+    ./src/utils/counter_grouping_inspector.py --arch gfx942 --output plan.svg
 """
 
 from __future__ import annotations
@@ -777,14 +777,14 @@ def main() -> None:
     supported_archs = get_supported_archs()
 
     parser = argparse.ArgumentParser(
-        description="Perfmon bucket planner for rocprofiler-compute",
+        description="Counter grouping inspector for rocprofiler-compute",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m utils.perfmon_planner --arch gfx942
-  python -m utils.perfmon_planner --arch gfx942 --block 0200 0400
-  python -m utils.perfmon_planner --arch gfx942 --output plan.txt
-  python -m utils.perfmon_planner --arch gfx942 --output plan.svg
+  python -m utils.counter_grouping_inspector --arch gfx942
+  python -m utils.counter_grouping_inspector --arch gfx942 --block 0200 0400
+  python -m utils.counter_grouping_inspector --arch gfx942 --output plan.txt
+  python -m utils.counter_grouping_inspector --arch gfx942 --output plan.svg
 """,
     )
     parser.add_argument(
@@ -879,9 +879,7 @@ Examples:
             metrics_output = generate_multi_bucket_metrics(
                 output_files, config_dir, arch
             )
-            output_path.write_text(
-                bucket_output + metrics_output, encoding="utf-8"
-            )
+            output_path.write_text(bucket_output + metrics_output, encoding="utf-8")
             print(f"Output written to {output_path}")
         else:
             print(

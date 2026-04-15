@@ -637,15 +637,15 @@ add_test(
 )
 
 # -----------------------------------
-# Perfmon planner tests
+# Counter grouping inspector tests
 # -----------------------------------
 
 add_test(
-    NAME test_perfmon_planner
+    NAME test_counter_grouping_inspector
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_perfmon_planner.xml ${COV_OPTION}
-        tests/test_perfmon_planner.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_counter_grouping_inspector.xml ${COV_OPTION}
+        tests/test_counter_grouping_inspector.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------

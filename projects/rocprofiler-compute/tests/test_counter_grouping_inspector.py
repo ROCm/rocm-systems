@@ -2,10 +2,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit test for utils/perfmon_planner.py
+"""Unit test for utils/counter_grouping_inspector.py
 
 Single test that loops through all supported architectures and verifies:
-- Return code of perfmon_planner.py script is 0
+- Return code of counter_grouping_inspector.py script is 0
 - Buckets and counter assignments are non-zero for each architecture
 """
 
@@ -15,9 +15,12 @@ from pathlib import Path
 
 import pytest
 
-# Path to perfmon_planner.py script
-PERFMON_PLANNER_SCRIPT = (
-    Path(__file__).resolve().parent.parent / "src" / "utils" / "perfmon_planner.py"
+# Path to counter_grouping_inspector.py script
+COUNTER_GROUPING_INSPECTOR_SCRIPT = (
+    Path(__file__).resolve().parent.parent
+    / "src"
+    / "utils"
+    / "counter_grouping_inspector.py"
 )
 
 # Ensure src directory is in Python path for imports
@@ -26,14 +29,14 @@ if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
 
-def test_perfmon_planner_all_supported_archs():
-    """Test perfmon_planner.py works correctly for all supported architectures.
+def test_counter_grouping_inspector_all_supported_archs():
+    """Test counter_grouping_inspector.py works for all supported architectures.
 
     For each supported architecture:
-    1. Run perfmon_planner.py --arch <arch> and verify return code is 0
+    1. Run counter_grouping_inspector.py --arch <arch> and verify return code is 0
     2. Parse output to verify buckets > 0 and counter assignments > 0
     """
-    from utils.perfmon_planner import get_supported_archs
+    from utils.counter_grouping_inspector import get_supported_archs
 
     supported_archs = get_supported_archs()
     assert len(supported_archs) > 0, "Should have at least one supported architecture"
@@ -42,9 +45,9 @@ def test_perfmon_planner_all_supported_archs():
     results = {}
 
     for arch in supported_archs:
-        # Run the perfmon_planner.py script for this architecture
+        # Run the counter_grouping_inspector.py script for this architecture
         result = subprocess.run(
-            [sys.executable, str(PERFMON_PLANNER_SCRIPT), "--arch", arch],
+            [sys.executable, str(COUNTER_GROUPING_INSPECTOR_SCRIPT), "--arch", arch],
             capture_output=True,
             text=True,
             timeout=60,
@@ -54,8 +57,7 @@ def test_perfmon_planner_all_supported_archs():
         if result.returncode != 0:
             stderr_preview = result.stderr[:500] if result.stderr else "None"
             failed_archs.append(
-                f"{arch}: Return code {result.returncode}\n"
-                f"  stderr: {stderr_preview}"
+                f"{arch}: Return code {result.returncode}\n  stderr: {stderr_preview}"
             )
             results[arch] = {
                 "return_code": result.returncode,
@@ -81,9 +83,7 @@ def test_perfmon_planner_all_supported_archs():
                         except ValueError:
                             pass
                     # Check for counter assignment pattern
-                    is_assignment = (
-                        i + 1 < len(parts) and "assignment" in parts[i + 1]
-                    )
+                    is_assignment = i + 1 < len(parts) and "assignment" in parts[i + 1]
                     if "counter" in part and is_assignment:
                         try:
                             counter_assignments = int(parts[i - 1])
@@ -104,7 +104,7 @@ def test_perfmon_planner_all_supported_archs():
 
     # Report results
     print("\n" + "=" * 60)
-    print("Perfmon Planner Test Results:")
+    print("Counter Grouping Inspector Test Results:")
     print("=" * 60)
     for arch, data in results.items():
         is_success = (
@@ -122,7 +122,7 @@ def test_perfmon_planner_all_supported_archs():
 
     # Assert no failures
     assert len(failed_archs) == 0, (
-        f"Perfmon planner failed for {len(failed_archs)} architecture(s):\n"
+        f"Counter grouping inspector failed for {len(failed_archs)} architecture(s):\n"
         + "\n".join(f"  - {err}" for err in failed_archs)
     )
 
