@@ -532,7 +532,7 @@ Viewing the setting descriptions
    | ROCPROFSYS_TIMING_SCIENTIFIC             | Set the numerical reporting format f... |
    | ROCPROFSYS_TIMING_UNITS                  | Set the units for components with u...  |
    | ROCPROFSYS_TIMING_WIDTH                  | Set the output width for components ... |
-   | ROCPROFSYS_SELECTED_REGIONS                  | Comma-separated list of roctx region... |
+   | ROCPROFSYS_SELECTED_REGIONS              | Comma-separated list of roctx region... |
    | ROCPROFSYS_TRACE_THREAD_LOCKS            | Enable tracking calls to pthread_mut... |
    | ROCPROFSYS_TREE_OUTPUT                   | Write hierarchical json output files    |
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
