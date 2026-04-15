@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
+# Co-authored-by: @vedithal-amd
 """
 Standalone perfmon bucket planner for rocprofiler-compute.
 
@@ -10,7 +11,8 @@ without requiring GPU, rocprofiler, or full rocprof-compute initialization.
 Usage:
     ./src/utils/perfmon_planner.py --arch gfx942
     ./src/utils/perfmon_planner.py --arch gfx942 --block 2 3 4
-    ./src/utils/perfmon_planner.py --arch gfx950 --config-dir ./custom_configs/
+    ./src/utils/perfmon_planner.py --arch gfx942 --output plan.txt
+    ./src/utils/perfmon_planner.py --arch gfx942 --output plan.svg
 """
 
 from __future__ import annotations
@@ -633,7 +635,8 @@ def main() -> None:
 Examples:
   python -m utils.perfmon_planner --arch gfx942
   python -m utils.perfmon_planner --arch gfx942 --block 0200 0400
-  python -m utils.perfmon_planner --arch gfx950 --config-dir ./custom_configs/
+  python -m utils.perfmon_planner --arch gfx942 --output plan.txt
+  python -m utils.perfmon_planner --arch gfx942 --output plan.svg
 """,
     )
     parser.add_argument(
@@ -667,17 +670,15 @@ Examples:
         help="Show detailed output",
     )
     parser.add_argument(
-        "--txt",
-        "-t",
+        "--output",
+        "-o",
         type=Path,
         default=None,
-        help="Output to plain text file",
-    )
-    parser.add_argument(
-        "--svg",
-        type=Path,
-        default=None,
-        help="Output to SVG image file (requires rich library)",
+        help=(
+            "Output to file. Supported formats determined by file suffix:\n"
+            "  .txt - Plain text output\n"
+            "  .svg - SVG image output (requires rich library)"
+        ),
     )
 
     args = parser.parse_args()
@@ -713,19 +714,34 @@ Examples:
     output_files = allocate_buckets(counters, perfmon_config)
 
     # Handle output formats
-    if args.svg:
-        try:
-            svg_content = render_perfmon_plan_svg(output_files, config_dir, arch)
-            args.svg.write_text(svg_content)
-            print(f"SVG saved to {args.svg}")
-        except ImportError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
-    elif args.txt:
-        bucket_output, _ = generate_bucket_plan(output_files, arch)
-        metrics_output = generate_multi_bucket_metrics(output_files, config_dir, arch)
-        args.txt.write_text(bucket_output + metrics_output)
-        print(f"Output written to {args.txt}")
+    if args.output:
+        output_path = args.output
+        suffix = output_path.suffix.lower()
+
+        if suffix == ".svg":
+            try:
+                svg_content = render_perfmon_plan_svg(output_files, config_dir, arch)
+                output_path.write_text(svg_content)
+                print(f"SVG saved to {output_path}")
+            except ImportError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                sys.exit(1)
+        elif suffix == ".txt":
+            bucket_output, _ = generate_bucket_plan(output_files, arch)
+            metrics_output = generate_multi_bucket_metrics(
+                output_files, config_dir, arch
+            )
+            output_path.write_text(bucket_output + metrics_output)
+            print(f"Output written to {output_path}")
+        else:
+            print(
+                f"Warning: Unsupported output format '{suffix}'. "
+                f"Supported formats: .txt, .svg",
+                file=sys.stderr,
+            )
+            print("Falling back to stdout output.\n", file=sys.stderr)
+            print_bucket_plan(output_files, arch)
+            print_multi_bucket_metrics(output_files, config_dir, arch)
     else:
         print_bucket_plan(output_files, arch)
         print_multi_bucket_metrics(output_files, config_dir, arch)
