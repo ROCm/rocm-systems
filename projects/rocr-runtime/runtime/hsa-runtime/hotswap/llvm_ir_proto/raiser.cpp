@@ -116,6 +116,7 @@ struct ISAProfile {
   bool hasMFMA = true;
   bool hasVOPD = false;
   bool hasScalarFP = false;
+  bool hasWMMA = false;
 
   bool isWave32() const { return waveSize == 32; }
 
@@ -134,6 +135,10 @@ struct ISAProfile {
       p.hasVOPD = true;
       p.hasScalarFP = true;
     }
+    // gfx1250 (RDNA4) — adds WMMA
+    if (isa == "gfx1250") {
+      p.hasWMMA = true;
+    }
     return p;
   }
 };
@@ -150,7 +155,7 @@ enum class SemOp : uint16_t {
   S_CBRANCH_SCC0, S_CBRANCH_SCC1,
   S_CBRANCH_VCCZ, S_CBRANCH_VCCNZ,
   S_CBRANCH_EXECZ, S_CBRANCH_EXECNZ,
-  S_WAITCNT, S_WAIT_LOADCNT, S_WAIT_KMCNT, S_WAIT_DSCNT,
+  S_WAITCNT, S_WAIT_LOADCNT, S_WAIT_KMCNT, S_WAIT_DSCNT, S_WAIT_XCNT,
   S_WAIT_LOADCNT_DSCNT, S_WAIT_ALU,
   S_CLAUSE, S_DELAY_ALU, S_SET_GPR_IDX_ON, S_SET_GPR_IDX_OFF, S_SETVSKIP,
 
@@ -185,6 +190,8 @@ enum class SemOp : uint16_t {
   S_AND_SAVEEXEC_B32, S_OR_SAVEEXEC_B32, S_XOR_SAVEEXEC_B32,
   S_ANDN2_SAVEEXEC_B32, S_ORN2_SAVEEXEC_B32,
   S_GETPC_B64,
+  S_ABS_I32,
+  S_SET_VGPR_MSB,
 
   // -- SOP2 --
   S_ADD_U32, S_ADDC_U32, S_SUB_U32, S_SUBB_U32, S_ADD_U64,
@@ -197,6 +204,7 @@ enum class SemOp : uint16_t {
   S_MIN_I32, S_MIN_U32, S_MAX_I32, S_MAX_U32,
   S_PACK_LL_B32_B16, S_PACK_LH_B32_B16,
   S_LSHL1_ADD_U32, S_LSHL2_ADD_U32, S_LSHL3_ADD_U32, S_LSHL4_ADD_U32,
+  S_ADD_NC_U64,
 
   // -- VOP1 --
   V_MOV_B32, V_NOP, V_NOT_B32, V_BFREV_B32,
@@ -204,7 +212,8 @@ enum class SemOp : uint16_t {
   V_CVT_F16_F32, V_CVT_F32_F16,
   V_CVT_F32_UBYTE0, V_CVT_F32_UBYTE1, V_CVT_F32_UBYTE2, V_CVT_F32_UBYTE3,
   V_CVT_F64_U32, V_CVT_F64_I32, V_CVT_U32_F64,
-  V_RCP_IFLAG_F32, V_RSQ_F32, V_SQRT_F32, V_EXP_F32, V_LOG_F32,
+  V_RCP_IFLAG_F32, V_RCP_F32, V_RSQ_F32, V_SQRT_F32, V_EXP_F32, V_LOG_F32,
+  V_LDEXP_F32,
   V_FLOOR_F32, V_CEIL_F32, V_TRUNC_F32, V_FRACT_F32,
   V_READFIRSTLANE_B32,
 
@@ -222,7 +231,9 @@ enum class SemOp : uint16_t {
   V_BFE_U32, V_PERM_B32,
   V_MBCNT_LO_U32_B32, V_MBCNT_HI_U32_B32,
   V_READLANE_B32, V_WRITELANE_B32,
-  V_MED3_F32, V_MAX3_F32, V_MIN3_F32,
+  V_MED3_F32, V_MAX3_F32, V_MIN3_F32, V_MAX3_NUM_F32,
+  V_MAX_NUM_F32, V_MIN_NUM_F32,
+  V_DIV_FIXUP_F32, V_DIV_FMAS_F32, V_DIV_SCALE_F32,
   V_FMA_MIX_F32,
   V_ADD_F16, V_MUL_F16,
   V_PACK_B32_F16,
@@ -273,8 +284,10 @@ enum class SemOp : uint16_t {
   V_PK_ADD_F32, V_PK_MUL_F32, V_PK_FMA_F32,
   V_PK_MAX_F32, V_PK_MIN_F32, V_PK_MOV_B32,
 
+  V_BITOP3_B32, V_BITOP3_B16,
+
   // -- 64-bit vector ops --
-  V_LSHLREV_B64, V_LSHL_ADD_U64,
+  V_LSHLREV_B64, V_LSHL_ADD_U64, V_ADD_NC_U64,
   V_MAD_U64_U32, V_MAD_CO_U64_U32,
   V_ADD_I32_legacy, V_SUB_I32_legacy,
 
@@ -305,6 +318,7 @@ enum class SemOp : uint16_t {
   GLOBAL_ATOMIC_PK_ADD_BF16, GLOBAL_ATOMIC_PK_ADD_F16,
 
   // -- DS --
+  DS_LOAD_TR16_B128,
   DS_READ_B32, DS_READ_B64, DS_READ_B128,
   DS_READ2_B32, DS_READ2_B64,
   DS_READ_U16, DS_READ_I16, DS_READ_U8, DS_READ_I8,
@@ -329,6 +343,9 @@ enum class SemOp : uint16_t {
   // -- MFMA --
   V_MFMA_F32_16x16x128_F8F6F4, V_MFMA_SCALE_F32_16x16x128_F8F6F4,
   V_MFMA_F32_32x32x64_F8F6F4, V_MFMA_SCALE_F32_32x32x64_F8F6F4,
+
+  // -- WMMA (gfx1250) --
+  V_WMMA_F32_16x16x32_F16,
 
   // -- VOPD -- (handled via string parsing of fullText, not opcode)
   VOPD_GENERIC,
@@ -362,7 +379,8 @@ struct OpcodeMap {
       {"S_CBRANCH_EXECZ", SemOp::S_CBRANCH_EXECZ}, {"S_CBRANCH_EXECNZ", SemOp::S_CBRANCH_EXECNZ},
       {"S_WAITCNT", SemOp::S_WAITCNT},
       {"S_WAIT_LOADCNT", SemOp::S_WAIT_LOADCNT}, {"S_WAIT_KMCNT", SemOp::S_WAIT_KMCNT},
-      {"S_WAIT_DSCNT", SemOp::S_WAIT_DSCNT}, {"S_WAIT_LOADCNT_DSCNT", SemOp::S_WAIT_LOADCNT_DSCNT},
+      {"S_WAIT_DSCNT", SemOp::S_WAIT_DSCNT}, {"S_WAIT_XCNT", SemOp::S_WAIT_XCNT},
+      {"S_WAIT_LOADCNT_DSCNT", SemOp::S_WAIT_LOADCNT_DSCNT},
       {"S_WAITCNT_DEPCTR", SemOp::S_WAIT_ALU},
       {"S_CLAUSE", SemOp::S_CLAUSE}, {"S_DELAY_ALU", SemOp::S_DELAY_ALU},
       {"S_SET_GPR_IDX_ON", SemOp::S_SET_GPR_IDX_ON}, {"S_SET_GPR_IDX_OFF", SemOp::S_SET_GPR_IDX_OFF},
@@ -404,6 +422,7 @@ struct OpcodeMap {
 
       // SOPK
       {"S_MOVK_I32", SemOp::S_MOVK_I32}, {"S_ADDK_I32", SemOp::S_ADDK_I32},
+      {"S_ADDK_CO_I32", SemOp::S_ADDK_I32},
       {"S_MULK_I32", SemOp::S_MULK_I32},
       {"S_CMPK_GE_I32", SemOp::S_CMPK_GE_I32}, {"S_CMPK_GT_I32", SemOp::S_CMPK_GT_I32},
       {"S_CMPK_LE_I32", SemOp::S_CMPK_LE_I32}, {"S_CMPK_LT_I32", SemOp::S_CMPK_LT_I32},
@@ -429,6 +448,8 @@ struct OpcodeMap {
       {"S_ANDN2_SAVEEXEC_B32", SemOp::S_ANDN2_SAVEEXEC_B32},
       {"S_ORN2_SAVEEXEC_B32", SemOp::S_ORN2_SAVEEXEC_B32},
       {"S_GETPC_B64", SemOp::S_GETPC_B64},
+      {"S_ABS_I32", SemOp::S_ABS_I32},
+      {"S_SET_VGPR_MSB", SemOp::S_SET_VGPR_MSB},
 
       // SOP2
       {"S_ADD_U32", SemOp::S_ADD_U32}, {"S_ADD_I32", SemOp::S_ADD_U32},
@@ -454,6 +475,7 @@ struct OpcodeMap {
       {"S_PACK_LH_B32_B16", SemOp::S_PACK_LH_B32_B16},
       {"S_LSHL1_ADD_U32", SemOp::S_LSHL1_ADD_U32}, {"S_LSHL2_ADD_U32", SemOp::S_LSHL2_ADD_U32},
       {"S_LSHL3_ADD_U32", SemOp::S_LSHL3_ADD_U32}, {"S_LSHL4_ADD_U32", SemOp::S_LSHL4_ADD_U32},
+      {"S_ADD_NC_U64", SemOp::S_ADD_NC_U64},
 
       // VOP1
       {"V_MOV_B32", SemOp::V_MOV_B32}, {"V_NOP", SemOp::V_NOP},
@@ -465,9 +487,11 @@ struct OpcodeMap {
       {"V_CVT_F32_UBYTE2", SemOp::V_CVT_F32_UBYTE2}, {"V_CVT_F32_UBYTE3", SemOp::V_CVT_F32_UBYTE3},
       {"V_CVT_F64_U32", SemOp::V_CVT_F64_U32}, {"V_CVT_F64_I32", SemOp::V_CVT_F64_I32},
       {"V_CVT_U32_F64", SemOp::V_CVT_U32_F64},
-      {"V_RCP_IFLAG_F32", SemOp::V_RCP_IFLAG_F32}, {"V_RSQ_F32", SemOp::V_RSQ_F32},
+      {"V_RCP_IFLAG_F32", SemOp::V_RCP_IFLAG_F32}, {"V_RCP_F32", SemOp::V_RCP_F32},
+      {"V_RSQ_F32", SemOp::V_RSQ_F32},
       {"V_SQRT_F32", SemOp::V_SQRT_F32}, {"V_EXP_F32", SemOp::V_EXP_F32},
       {"V_LOG_F32", SemOp::V_LOG_F32},
+      {"V_LDEXP_F32", SemOp::V_LDEXP_F32},
       {"V_FLOOR_F32", SemOp::V_FLOOR_F32}, {"V_CEIL_F32", SemOp::V_CEIL_F32},
       {"V_TRUNC_F32", SemOp::V_TRUNC_F32}, {"V_FRACT_F32", SemOp::V_FRACT_F32},
       {"V_READFIRSTLANE_B32", SemOp::V_READFIRSTLANE_B32},
@@ -477,6 +501,10 @@ struct OpcodeMap {
       {"V_SUBREV_F32", SemOp::V_SUBREV_F32}, {"V_MUL_F32", SemOp::V_MUL_F32},
       {"V_FMAC_F32", SemOp::V_FMAC_F32}, {"V_FMA_F32", SemOp::V_FMA_F32},
       {"V_MAX_F32", SemOp::V_MAX_F32}, {"V_MIN_F32", SemOp::V_MIN_F32},
+      {"V_MAX_NUM_F32", SemOp::V_MAX_NUM_F32}, {"V_MIN_NUM_F32", SemOp::V_MIN_NUM_F32},
+      {"V_DIV_FIXUP_F32", SemOp::V_DIV_FIXUP_F32},
+      {"V_DIV_FMAS_F32", SemOp::V_DIV_FMAS_F32},
+      {"V_DIV_SCALE_F32", SemOp::V_DIV_SCALE_F32},
       {"V_ADD_NC_U32", SemOp::V_ADD_NC_U32}, {"V_SUB_NC_U32", SemOp::V_SUB_NC_U32},
       {"V_SUBREV_NC_U32", SemOp::V_SUBREV_NC_U32},
       {"V_ADD_CO_U32", SemOp::V_ADD_CO_U32}, {"V_ADD_CO_CI_U32", SemOp::V_ADD_CO_CI_U32},
@@ -497,7 +525,8 @@ struct OpcodeMap {
       {"V_MBCNT_HI_U32_B32", SemOp::V_MBCNT_HI_U32_B32},
       {"V_READLANE_B32", SemOp::V_READLANE_B32}, {"V_WRITELANE_B32", SemOp::V_WRITELANE_B32},
       {"V_MED3_F32", SemOp::V_MED3_F32}, {"V_MAX3_F32", SemOp::V_MAX3_F32},
-      {"V_MIN3_F32", SemOp::V_MIN3_F32},
+      {"V_MIN3_F32", SemOp::V_MIN3_F32}, {"V_MAX3_NUM_F32", SemOp::V_MAX3_NUM_F32},
+      {"V_BITOP3_B32", SemOp::V_BITOP3_B32}, {"V_BITOP3_B16", SemOp::V_BITOP3_B16},
       {"V_FMA_MIX_F32", SemOp::V_FMA_MIX_F32},
       {"V_ADD_F16", SemOp::V_ADD_F16}, {"V_MUL_F16", SemOp::V_MUL_F16},
       {"V_PACK_B32_F16", SemOp::V_PACK_B32_F16},
@@ -588,6 +617,7 @@ struct OpcodeMap {
 
       // 64-bit vector
       {"V_LSHLREV_B64", SemOp::V_LSHLREV_B64}, {"V_LSHL_ADD_U64", SemOp::V_LSHL_ADD_U64},
+      {"V_ADD_NC_U64", SemOp::V_ADD_NC_U64}, {"V_ADD_U64", SemOp::V_ADD_NC_U64},
       {"V_MAD_U64_U32", SemOp::V_MAD_U64_U32}, {"V_MAD_CO_U64_U32", SemOp::V_MAD_CO_U64_U32},
       {"V_ADD_I32", SemOp::V_ADD_I32_legacy}, {"V_SUB_I32", SemOp::V_SUB_I32_legacy},
 
@@ -663,6 +693,7 @@ struct OpcodeMap {
       {"GLOBAL_ATOMIC_PK_ADD_F16", SemOp::GLOBAL_ATOMIC_PK_ADD_F16},
 
       // DS
+      {"DS_LOAD_TR16_B128", SemOp::DS_LOAD_TR16_B128},
       {"DS_READ_B32", SemOp::DS_READ_B32}, {"DS_READ_B64", SemOp::DS_READ_B64},
       {"DS_READ_B128", SemOp::DS_READ_B128},
       {"DS_READ2_B32", SemOp::DS_READ2_B32}, {"DS_READ2_B64", SemOp::DS_READ2_B64},
@@ -676,6 +707,11 @@ struct OpcodeMap {
 
       // MUBUF
       {"BUFFER_LOAD_DWORD", SemOp::BUFFER_LOAD_DWORD},
+      {"BUFFER_LOAD_B32", SemOp::BUFFER_LOAD_DWORD},
+      {"BUFFER_LOAD_B32_VBUFFER_OFFSET", SemOp::BUFFER_LOAD_DWORD},
+      {"BUFFER_LOAD_B32_VBUFFER_OFFEN", SemOp::BUFFER_LOAD_DWORD},
+      {"BUFFER_LOAD_B32_VBUFFER_IDXEN", SemOp::BUFFER_LOAD_DWORD},
+      {"BUFFER_LOAD_B32_VBUFFER_BOTHEN", SemOp::BUFFER_LOAD_DWORD},
       {"BUFFER_LOAD_DWORDX2", SemOp::BUFFER_LOAD_DWORDX2},
       {"BUFFER_LOAD_DWORDX3", SemOp::BUFFER_LOAD_DWORDX3},
       {"BUFFER_LOAD_DWORDX4", SemOp::BUFFER_LOAD_DWORDX4},
@@ -685,6 +721,11 @@ struct OpcodeMap {
       {"BUFFER_LOAD_SSHORT", SemOp::BUFFER_LOAD_SSHORT},
       {"BUFFER_LOAD_SHORT_D16_HI", SemOp::BUFFER_LOAD_SHORT_D16_HI},
       {"BUFFER_STORE_DWORD", SemOp::BUFFER_STORE_DWORD},
+      {"BUFFER_STORE_B32", SemOp::BUFFER_STORE_DWORD},
+      {"BUFFER_STORE_B32_VBUFFER_OFFSET", SemOp::BUFFER_STORE_DWORD},
+      {"BUFFER_STORE_B32_VBUFFER_OFFEN", SemOp::BUFFER_STORE_DWORD},
+      {"BUFFER_STORE_B32_VBUFFER_IDXEN", SemOp::BUFFER_STORE_DWORD},
+      {"BUFFER_STORE_B32_VBUFFER_BOTHEN", SemOp::BUFFER_STORE_DWORD},
       {"BUFFER_STORE_DWORDX2", SemOp::BUFFER_STORE_DWORDX2},
       {"BUFFER_STORE_DWORDX3", SemOp::BUFFER_STORE_DWORDX3},
       {"BUFFER_STORE_DWORDX4", SemOp::BUFFER_STORE_DWORDX4},
@@ -715,6 +756,9 @@ struct OpcodeMap {
       {"V_MFMA_SCALE_F32_16X16X128_F8F6F4", SemOp::V_MFMA_SCALE_F32_16x16x128_F8F6F4},
       {"V_MFMA_F32_32X32X64_F8F6F4", SemOp::V_MFMA_F32_32x32x64_F8F6F4},
       {"V_MFMA_SCALE_F32_32X32X64_F8F6F4", SemOp::V_MFMA_SCALE_F32_32x32x64_F8F6F4},
+
+      // WMMA (gfx1250)
+      {"V_WMMA_F32_16X16X32_F16", SemOp::V_WMMA_F32_16x16x32_F16},
     };
 
     // Build name → SemOp lookup
@@ -736,28 +780,25 @@ struct OpcodeMap {
 
 private:
   static StringRef stripMCIISuffix(StringRef name) {
-    // Strip target suffixes: _gfx12, _gfx1250, _gfx10, _gfx11, _vi, _si, etc.
-    for (StringRef suf : {"_gfx1250", "_gfx12", "_gfx11", "_gfx10", "_gfx9",
-                          "_gfx8", "_vi", "_si", "_ci"}) {
-      if (name.ends_with(suf))
-        name = name.drop_back(suf.size());
-    }
-    // Strip encoding suffixes: _e32, _e64, _sdwa, _dpp, _dpp8, _dpp16
-    for (StringRef suf : {"_e32", "_e64", "_sdwa", "_dpp8", "_dpp16", "_dpp"}) {
-      if (name.ends_with(suf))
-        name = name.drop_back(suf.size());
-    }
-    // Strip addressing mode suffixes: _SADDR, _IMM
-    for (StringRef suf : {"_SADDR", "_IMM"}) {
-      if (name.ends_with(suf))
-        name = name.drop_back(suf.size());
-    }
-    // Strip fake16 (FP16 emulation prefix in some LLVM versions)
-    // e.g. V_CVT_F16_F32V_CVT_F16_F32_fake16 → strip _fake16, then
-    // handle the duplicated name prefix
-    if (name.contains("_fake16")) {
-      size_t pos = name.find("_fake16");
-      name = name.substr(0, pos);
+    // Iteratively strip suffixes until no more match, since they can nest:
+    // e.g. V_BITOP3_B16_gfx1250_e64_dpp → _dpp → _e64 → _gfx1250 → V_BITOP3_B16
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (StringRef suf : {"_dpp8", "_dpp16", "_dpp", "_sdwa",
+                            "_e32", "_e64",
+                            "_gfx1250", "_gfx12", "_gfx11", "_gfx10", "_gfx9",
+                            "_gfx1170", "_gfx8", "_vi", "_si", "_ci",
+                            "_SADDR", "_IMM",
+                            "_VBUFFER_OFFSET", "_VBUFFER_OFFEN",
+                            "_VBUFFER_IDXEN", "_VBUFFER_BOTHEN",
+                            "_w32", "_w64", "_twoaddr", "_threeaddr",
+                            "_fake16", "_t16"}) {
+        if (name.ends_with(suf)) {
+          name = name.drop_back(suf.size());
+          changed = true;
+        }
+      }
     }
     // Some GFX12 names embed the mnemonic twice:
     // "V_CVT_F16_F32V_CVT_F16_F32" — take the first half
@@ -848,6 +889,23 @@ std::string canonicalizeMnemonic(StringRef mn) {
   if (mn == "ds_load_i8")    return "ds_read_i8";
   if (mn == "ds_store_b16")  return "ds_write_b16";
   if (mn == "ds_store_b8")   return "ds_write_b8";
+
+  // GFX12 buffer: buffer_load/store _bNN → _dword[xN]
+  if (mn == "buffer_load_b32")   return "buffer_load_dword";
+  if (mn == "buffer_load_b64")   return "buffer_load_dwordx2";
+  if (mn == "buffer_load_b128")  return "buffer_load_dwordx4";
+  if (mn == "buffer_store_b32")  return "buffer_store_dword";
+  if (mn == "buffer_store_b64")  return "buffer_store_dwordx2";
+  if (mn == "buffer_store_b128") return "buffer_store_dwordx4";
+
+  // GFX12 IEEE "num" renames → standard min/max
+  if (mn == "v_max_num_f32")  return "v_max_f32";
+  if (mn == "v_min_num_f32")  return "v_min_f32";
+  if (mn == "v_max3_num_f32") return "v_max3_f32";
+  if (mn == "v_min3_num_f32") return "v_min3_f32";
+
+  // GFX12 SOPK carry rename
+  if (mn == "s_addk_co_i32") return "s_addk_i32";
 
   return mn.str();
 }
@@ -1020,6 +1078,10 @@ struct AllocaRegFile {
     B.CreateStore(v, sgpr[idx]);
   }
   Value *loadSGPR32(IRBuilder<> &B, int idx) {
+    if (idx < 0 || idx >= MAX_SGPR || !sgpr[idx]) {
+      errs() << "ir_proto: BUG: loadSGPR32 idx=" << idx << " out of range or null\n";
+      return UndefValue::get(B.getInt32Ty());
+    }
     return B.CreateLoad(B.getInt32Ty(), sgpr[idx]);
   }
   void storeSGPR64(IRBuilder<> &B, int idx, Value *v) {
@@ -1153,6 +1215,10 @@ struct AllocaRegFile {
     if (pr.kind == ParsedReg::SGPR) storeSGPR32(B, pr.baseIdx, v);
     else if (pr.kind == ParsedReg::VGPR) storeVGPR32(B, pr.baseIdx, v);
     else if (pr.kind == ParsedReg::AGPR) storeAGPR32(B, pr.baseIdx, v);
+    else if (pr.kind == ParsedReg::EXEC) storeExec(B, v);
+    else if (pr.kind == ParsedReg::VCC) {
+      storeVCC(B, B.CreateICmpNE(v, Constant::getNullValue(v->getType())));
+    }
     else if (pr.kind == ParsedReg::M0) {
       if (v->getType() != B.getInt32Ty()) v = B.CreateBitCast(v, B.getInt32Ty());
       B.CreateStore(v, m0);
@@ -1420,8 +1486,17 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
       bool isEnd = (di.mnemonic == "s_endpgm");
       insts.push_back(std::move(di));
-      if (isEnd)
+      if (isEnd) {
+        // s_endpgm may appear mid-binary (early-return path); if there are
+        // known block starts at later offsets, keep disassembling.
+        uint64_t nextOff = off + instSize;
+        auto it = blockStarts.upper_bound(off);
+        if (it != blockStarts.end() && *it < textBytes.size()) {
+          off = nextOff;
+          continue;
+        }
         break;
+      }
       off += instSize;
     }
   }
@@ -1534,9 +1609,17 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   regs.storeSCC(B, ConstantInt::getFalse(i1Ty));
 
   // On RDNA3+ (gfx12xx), the hardware command processor uses TTMP registers
-  // for workgroup scheduling.  ttmp9 = workgroup_id_x (accelerated launch).
+  // for workgroup scheduling.
+  //   ttmp9 = workgroup_id_x (accelerated launch)
+  //   ttmp8[29:25] = wave_id within workgroup (subgroup ID)
   if (isa.target.find("gfx12") != std::string::npos) {
     B.CreateStore(B.CreateCall(fnWorkgroupIdX, {}, "ttmp9_wg_id"), regs.ttmp[9]);
+
+    // wave_id = workitem_id_x / wavefront_size (32 for gfx12)
+    Value *tidForTtmp = B.CreateCall(fnWorkitemIdX, {}, "ttmp8_tid");
+    Value *waveId = B.CreateLShr(tidForTtmp, B.getInt32(5), "wave_id_in_wg");
+    Value *ttmp8Val = B.CreateShl(waveId, B.getInt32(25), "ttmp8_val");
+    B.CreateStore(ttmp8Val, regs.ttmp[8]);
   }
 
   // ==== Phase 5: Raise each instruction ====
@@ -1701,7 +1784,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
     auto bbIt = offsetToBB.find(di.offset);
     if (bbIt != offsetToBB.end() && bbIt->second != currentBB) {
-      if (!currentBB->getTerminator())
+      if (currentBB->empty() || !currentBB->getTerminator())
         B.CreateBr(bbIt->second);
       currentBB = bbIt->second;
       B.SetInsertPoint(currentBB);
@@ -2058,6 +2141,19 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg32(B, op.dst(), B.CreateFPToSI(s, i32Ty, "s_cvt_i"));
         handled = true; break;
       }
+      if (sop == SemOp::S_ABS_I32) {
+        Function *absF = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::abs, {i32Ty});
+        Value *r = B.CreateCall(absF, {op.src(0), B.getFalse()}, "s_abs");
+        regs.writeReg32(B, op.dst(), r);
+        handled = true; break;
+      }
+      if (sop == SemOp::S_SET_VGPR_MSB) {
+        handled = true; break;
+      }
+      // s_barrier_signal / s_barrier_wait may be classified as SOP1 by LLVM
+      if (di.mnemonic == "s_barrier_signal" || di.mnemonic == "s_barrier_wait") {
+        handled = true; break;
+      }
       break;
     }
 
@@ -2116,7 +2212,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
       // s_setreg_b32/s_setreg_imm32_b32: writes to a hardware config register.
       // No-op in our model.
-      if (sop == SemOp::S_SETREG_IMM32_B32 || sop == SemOp::S_SETREG_B32) {
+      if (sop == SemOp::S_SETREG_IMM32_B32 || sop == SemOp::S_SETREG_B32 ||
+          sop == SemOp::S_GETREG_B32) {
         handled = true; break;
       }
       break;
@@ -2225,7 +2322,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg64(B, op.dst(), B.CreateMul(op.src64(0), op.src64(1), "smul64"));
         handled = true; break;
       }
-      if (sop == SemOp::S_ADD_U64) {
+      if (sop == SemOp::S_ADD_U64 || sop == SemOp::S_ADD_NC_U64) {
         regs.writeReg64(B, op.dst(), B.CreateAdd(op.src64(0), op.src64(1), "sadd64"));
         handled = true; break;
       }
@@ -2507,7 +2604,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg32(B, op.dst(), B.CreateNot(op.src(0), "vnot"));
         handled = true; break;
       }
-      if (sop == SemOp::V_RCP_IFLAG_F32) {
+      if (sop == SemOp::V_RCP_IFLAG_F32 || sop == SemOp::V_RCP_F32) {
         Value *s = B.CreateBitCast(op.srcF(0), f32Ty);
         Value *r = B.CreateFDiv(ConstantFP::get(f32Ty, 1.0), s, "rcp");
         regs.writeReg32(B, op.dst(), B.CreateBitCast(r, i32Ty));
@@ -2523,6 +2620,13 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         Value *s = B.CreateBitCast(op.srcF(0), f32Ty);
         Function *log2Fn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::log2, {f32Ty});
         regs.writeReg32(B, op.dst(), B.CreateBitCast(B.CreateCall(log2Fn, {s}, "log"), i32Ty));
+        handled = true; break;
+      }
+      if (sop == SemOp::V_LDEXP_F32) {
+        Value *s0 = B.CreateBitCast(op.srcF(0), f32Ty);
+        Value *s1 = op.src(1);
+        Function *ldexpFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::ldexp, {f32Ty, i32Ty});
+        regs.writeReg32(B, op.dst(), B.CreateBitCast(B.CreateCall(ldexpFn, {s0, s1}, "ldexp"), i32Ty));
         handled = true; break;
       }
       if (sop == SemOp::V_SQRT_F32) {
@@ -2801,7 +2905,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg32(B, op.dst(), B.CreateBitCast(B.CreateFSub(s1, s0, "fsubrev"), i32Ty));
         handled = true; break;
       }
-      if (sop == SemOp::V_MAX_F32) {
+      if (sop == SemOp::V_MAX_F32 || sop == SemOp::V_MAX_NUM_F32) {
         Value *s0 = op.srcF(0), *s1 = op.srcF(1);
         if (s0->getType() != f32Ty) s0 = B.CreateBitCast(s0, f32Ty);
         if (s1->getType() != f32Ty) s1 = B.CreateBitCast(s1, f32Ty);
@@ -2809,7 +2913,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg32(B, op.dst(), B.CreateBitCast(B.CreateCall(maxFn, {s0, s1}, "fmax"), i32Ty));
         handled = true; break;
       }
-      if (sop == SemOp::V_MIN_F32) {
+      if (sop == SemOp::V_MIN_F32 || sop == SemOp::V_MIN_NUM_F32) {
         Value *s0 = op.srcF(0), *s1 = op.srcF(1);
         if (s0->getType() != f32Ty) s0 = B.CreateBitCast(s0, f32Ty);
         if (s1->getType() != f32Ty) s1 = B.CreateBitCast(s1, f32Ty);
@@ -2837,6 +2941,60 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         handled = true; break;
       }
 
+      // ---- Division helpers (VOP3) ----
+      if (sop == SemOp::V_DIV_SCALE_F32) {
+        // amdgcn_div_scale(Numerator, Denominator, i1 select_quotient)
+        // src2 in the HW instruction equals either src0 or src1 to indicate
+        // which is selected. We determine select_quotient by checking if
+        // src2 and src0 refer to the same register operand.
+        Value *s0 = B.CreateBitCast(op.srcF(0), f32Ty);
+        Value *s1 = B.CreateBitCast(op.srcF(1), f32Ty);
+        bool selectNumerator = false;
+        if (op.isSrcReg(2) && op.isSrcReg(0)) {
+          ParsedReg r2 = op.srcReg(2), r0 = op.srcReg(0);
+          selectNumerator = (r2.kind == r0.kind && r2.baseIdx == r0.baseIdx);
+        }
+        Function *fn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::amdgcn_div_scale,
+                                                         {f32Ty});
+        Value *r = B.CreateCall(fn, {s0, s1,
+                     selectNumerator ? B.getTrue() : B.getFalse()}, "divscale");
+        regs.writeReg32(B, op.dst(0), B.CreateBitCast(B.CreateExtractValue(r, 0), i32Ty));
+        // Write the boolean flag to the actual SDST destination (operand 1):
+        // vcc_lo, sN, or null. The kernel saves flags to SGPRs and later
+        // restores them to VCC via s_mov_b32 before each v_div_fmas_f32.
+        Value *flag = B.CreateExtractValue(r, 1);
+        if (di.numDefs >= 2 && di.isReg(1)) {
+          ParsedReg flagDst = op.dst(1);
+          if (flagDst.kind == ParsedReg::VCC)
+            regs.storeVCC(B, flag);
+          else if (flagDst.kind == ParsedReg::SGPR && flagDst.baseIdx >= 0)
+            regs.storeSGPR32(B, flagDst.baseIdx, B.CreateZExt(flag, i32Ty));
+          // NOREG (null) or unrecognized → discard the flag
+        } else {
+          regs.storeVCC(B, flag);
+        }
+        handled = true; break;
+      }
+      if (sop == SemOp::V_DIV_FIXUP_F32) {
+        Value *s0 = B.CreateBitCast(op.srcF(0), f32Ty);
+        Value *s1 = B.CreateBitCast(op.srcF(1), f32Ty);
+        Value *s2 = B.CreateBitCast(op.srcF(2), f32Ty);
+        Function *fn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::amdgcn_div_fixup,
+                                                         {f32Ty});
+        regs.writeReg32(B, op.dst(), B.CreateBitCast(B.CreateCall(fn, {s0, s1, s2}, "divfixup"), i32Ty));
+        handled = true; break;
+      }
+      if (sop == SemOp::V_DIV_FMAS_F32) {
+        Value *s0 = B.CreateBitCast(op.srcF(0), f32Ty);
+        Value *s1 = B.CreateBitCast(op.srcF(1), f32Ty);
+        Value *s2 = B.CreateBitCast(op.srcF(2), f32Ty);
+        Function *fn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::amdgcn_div_fmas,
+                                                         {f32Ty});
+        Value *vcc = regs.loadVCC(B);
+        regs.writeReg32(B, op.dst(), B.CreateBitCast(B.CreateCall(fn, {s0, s1, s2, vcc}, "divfmas"), i32Ty));
+        handled = true; break;
+      }
+
       // ---- 3-source integer VOP3 ----
       if (sop == SemOp::V_ADD3_U32) {
         regs.writeReg32(B, op.dst(), B.CreateAdd(B.CreateAdd(op.src(0), op.src(1)), op.src(2), "vadd3"));
@@ -2858,7 +3016,49 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         regs.writeReg32(B, op.dst(), B.CreateOr(B.CreateOr(op.src(0), op.src(1)), op.src(2), "vor3"));
         handled = true; break;
       }
-      if (sop == SemOp::V_MAX3_F32) {
+      if (sop == SemOp::V_BITOP3_B32 || sop == SemOp::V_BITOP3_B16) {
+        // v_bitop3 dst, src0, src1, src2, imm8
+        // For each bit position i, dst[i] = LUT[4*src0[i] + 2*src1[i] + src2[i]]
+        // Expand as: result = OR of (minterm_i AND expand(LUT[i])) for i in 0..7
+        Value *a = op.src(0), *b = op.src(1), *c = op.src(2);
+        Value *imm = op.src(3);
+        uint64_t lutConst = 0;
+        bool lutIsConst = false;
+        if (auto *CI = dyn_cast<ConstantInt>(imm)) {
+          lutConst = CI->getZExtValue() & 0xFF;
+          lutIsConst = true;
+        }
+        Value *na = B.CreateNot(a), *nb = B.CreateNot(b), *nc = B.CreateNot(c);
+        Value *allOnes = ConstantInt::get(i32Ty, ~0U);
+        Value *result = ConstantInt::get(i32Ty, 0);
+        Value *minterms[8] = {
+          B.CreateAnd(B.CreateAnd(na, nb), nc),  // 0: ~a & ~b & ~c
+          B.CreateAnd(B.CreateAnd(na, nb), c),   // 1: ~a & ~b &  c
+          B.CreateAnd(B.CreateAnd(na, b), nc),   // 2: ~a &  b & ~c
+          B.CreateAnd(B.CreateAnd(na, b), c),    // 3: ~a &  b &  c
+          B.CreateAnd(B.CreateAnd(a, nb), nc),   // 4:  a & ~b & ~c
+          B.CreateAnd(B.CreateAnd(a, nb), c),    // 5:  a & ~b &  c
+          B.CreateAnd(B.CreateAnd(a, b), nc),    // 6:  a &  b & ~c
+          B.CreateAnd(B.CreateAnd(a, b), c),     // 7:  a &  b &  c
+        };
+        if (lutIsConst) {
+          for (int i = 0; i < 8; i++)
+            if (lutConst & (1 << i))
+              result = B.CreateOr(result, minterms[i]);
+        } else {
+          for (int i = 0; i < 8; i++) {
+            Value *bit = B.CreateAnd(B.CreateLShr(imm, ConstantInt::get(i32Ty, i)),
+                                     ConstantInt::get(i32Ty, 1));
+            Value *mask = B.CreateSub(ConstantInt::get(i32Ty, 0), bit);
+            result = B.CreateOr(result, B.CreateAnd(minterms[i], mask));
+          }
+        }
+        if (sop == SemOp::V_BITOP3_B16)
+          result = B.CreateAnd(result, ConstantInt::get(i32Ty, 0xFFFF));
+        regs.writeReg32(B, op.dst(), result);
+        handled = true; break;
+      }
+      if (sop == SemOp::V_MAX3_F32 || sop == SemOp::V_MAX3_NUM_F32) {
         Value *s0 = op.srcF(0), *s1 = op.srcF(1), *s2 = op.srcF(2);
         if (s0->getType() != f32Ty) s0 = B.CreateBitCast(s0, f32Ty);
         if (s1->getType() != f32Ty) s1 = B.CreateBitCast(s1, f32Ty);
@@ -2953,6 +3153,13 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         Value *shamtExt = B.CreateZExt(shamt, i64Ty);
         Value *shifted = B.CreateShl(src0, shamtExt);
         regs.writeReg64(B, op.dst(), B.CreateAdd(shifted, src2, "lshl_add"));
+        handled = true; break;
+      }
+      if (sop == SemOp::V_ADD_NC_U64) {
+        Value *s0 = op.src64(0), *s1 = op.src64(1);
+        if (s0->getType() != i64Ty) s0 = B.CreateBitOrPointerCast(s0, i64Ty);
+        if (s1->getType() != i64Ty) s1 = B.CreateBitOrPointerCast(s1, i64Ty);
+        regs.writeReg64(B, op.dst(), B.CreateAdd(s0, s1, "vadd64"));
         handled = true; break;
       }
 
@@ -3064,8 +3271,12 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           Value *cmp = B.CreateICmp(*pred, s0, s1, "vcmp");
           if (di.numDefs >= 1) {
             ParsedReg d = op.dst();
-            if (d.kind == ParsedReg::SGPR) regs.storeSGPR64(B, d.baseIdx, B.CreateSExt(cmp, i64Ty));
-            else                           regs.storeVCC(B, cmp);
+            if (d.kind == ParsedReg::SGPR) {
+              Value *mask = B.CreateSExt(cmp, regs.execTy);
+              regs.writeRegExecWidth(B, d, mask);
+            } else {
+              regs.storeVCC(B, cmp);
+            }
           } else {
             regs.storeVCC(B, cmp);
           }
@@ -3089,8 +3300,12 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           Value *cmp = B.CreateFCmp(*pred, s0, s1, "vcmpf");
           if (di.numDefs >= 1) {
             ParsedReg d = op.dst();
-            if (d.kind == ParsedReg::SGPR) regs.storeSGPR64(B, d.baseIdx, B.CreateSExt(cmp, i64Ty));
-            else                           regs.storeVCC(B, cmp);
+            if (d.kind == ParsedReg::SGPR) {
+              Value *mask = B.CreateSExt(cmp, regs.execTy);
+              regs.writeRegExecWidth(B, d, mask);
+            } else {
+              regs.storeVCC(B, cmp);
+            }
           } else {
             regs.storeVCC(B, cmp);
           }
@@ -3124,62 +3339,123 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
 
       // ---- VOP3P packed ops (2x fp32 in 2 dwords) ----
-      if (sop == SemOp::V_PK_MUL_F32) {
-        auto *v2f32 = FixedVectorType::get(f32Ty, 2);
-        if (!op.isSrcReg(0) || !op.isSrcReg(1)) {
-          errs() << "ir_proto: " << mn << ": non-register source (immediate in VOP3P not supported)\n";
-          result.failMnemonic = di.mnemonic; result.failFormat = "VOP3P"; return result;
+      // Handle op_sel_hi, neg_lo, neg_hi modifiers.
+      if (sop >= SemOp::V_PK_ADD_F32 && sop <= SemOp::V_PK_MOV_B32) {
+        if (sop == SemOp::V_PK_MOV_B32) {
+          regs.writeReg64(B, op.dst(), op.src64(0));
+          handled = true; break;
         }
-        regs.writeRegVec(B, op.dst(), B.CreateFMul(
-            regs.readRegVec(B, op.srcReg(0), v2f32), regs.readRegVec(B, op.srcReg(1), v2f32), "pk_mul"));
+
+        auto *v2f32 = FixedVectorType::get(f32Ty, 2);
+
+        // Parse VOP3P modifiers from disassembly text.
+        int opSelHi[3] = {1, 1, 1};  // default: high lane reads high element
+        int negLo[3] = {0, 0, 0};
+        int negHi[3] = {0, 0, 0};
+        StringRef text(di.fullText);
+
+        auto parseBracketList3 = [](StringRef text, StringRef key, int out[3]) {
+          auto pos = text.find(key);
+          if (pos == StringRef::npos) return;
+          auto brk = text.find('[', pos);
+          if (brk == StringRef::npos) return;
+          auto end = text.find(']', brk);
+          if (end == StringRef::npos) return;
+          StringRef inner = text.slice(brk + 1, end);
+          SmallVector<StringRef, 3> parts;
+          inner.split(parts, ',');
+          for (unsigned i = 0; i < parts.size() && i < 3; i++) {
+            int val = 0;
+            if (!parts[i].trim().getAsInteger(10, val))
+              out[i] = val;
+          }
+        };
+
+        parseBracketList3(text, "op_sel_hi:", opSelHi);
+        parseBracketList3(text, "neg_lo:", negLo);
+        parseBracketList3(text, "neg_hi:", negHi);
+
+        // Read each source as <2 x f32>, apply element selection and negation.
+        // readPkSrc: returns a <2 x f32> with modifiers applied.
+        auto readPkSrc = [&](unsigned i) -> Value * {
+          if (!op.isSrcReg(i)) {
+            errs() << "ir_proto: " << mn << ": non-register source "
+                   << i << " (immediate in VOP3P not supported)\n";
+            return nullptr;
+          }
+          Value *vec = regs.readRegVec(B, op.srcReg(i), v2f32);
+          Value *lo = B.CreateExtractElement(vec, (uint64_t)0);
+          Value *hi = B.CreateExtractElement(vec, (uint64_t)1);
+          // op_sel_hi: if 0, high lane uses low element (broadcast)
+          if (opSelHi[i] == 0)
+            hi = lo;
+          // Apply negation
+          if (negLo[i])
+            lo = B.CreateFNeg(lo);
+          if (negHi[i])
+            hi = B.CreateFNeg(hi);
+          Value *r = UndefValue::get(v2f32);
+          r = B.CreateInsertElement(r, lo, (uint64_t)0);
+          r = B.CreateInsertElement(r, hi, (uint64_t)1);
+          return r;
+        };
+
+        Value *s0 = readPkSrc(0);
+        Value *s1 = readPkSrc(1);
+        if (!s0 || !s1) {
+          result.failMnemonic = di.mnemonic; result.failFormat = "VOP3P";
+          return result;
+        }
+
+        Value *res = nullptr;
+        if (sop == SemOp::V_PK_ADD_F32) {
+          res = B.CreateFAdd(s0, s1, "pk_add");
+        } else if (sop == SemOp::V_PK_MUL_F32) {
+          res = B.CreateFMul(s0, s1, "pk_mul");
+        } else if (sop == SemOp::V_PK_MAX_F32) {
+          Function *fn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::maxnum, {v2f32});
+          res = B.CreateCall(fn, {s0, s1}, "pk_max");
+        } else if (sop == SemOp::V_PK_MIN_F32) {
+          Function *fn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::minnum, {v2f32});
+          res = B.CreateCall(fn, {s0, s1}, "pk_min");
+        } else if (sop == SemOp::V_PK_FMA_F32) {
+          Value *s2 = readPkSrc(2);
+          if (!s2) {
+            result.failMnemonic = di.mnemonic; result.failFormat = "VOP3P";
+            return result;
+          }
+          Function *fn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::fma, {v2f32});
+          res = B.CreateCall(fn, {s0, s1, s2}, "pk_fma");
+        }
+        regs.writeRegVec(B, op.dst(), res);
         handled = true; break;
       }
-      if (sop == SemOp::V_PK_ADD_F32) {
-        auto *v2f32 = FixedVectorType::get(f32Ty, 2);
-        if (!op.isSrcReg(0) || !op.isSrcReg(1)) {
-          errs() << "ir_proto: " << mn << ": non-register source (immediate in VOP3P not supported)\n";
-          result.failMnemonic = di.mnemonic; result.failFormat = "VOP3P"; return result;
-        }
-        regs.writeRegVec(B, op.dst(), B.CreateFAdd(
-            regs.readRegVec(B, op.srcReg(0), v2f32), regs.readRegVec(B, op.srcReg(1), v2f32), "pk_add"));
-        handled = true; break;
-      }
-      if (sop == SemOp::V_PK_FMA_F32) {
-        auto *v2f32 = FixedVectorType::get(f32Ty, 2);
-        if (!op.isSrcReg(0) || !op.isSrcReg(1) || !op.isSrcReg(2)) {
-          errs() << "ir_proto: " << mn << ": non-register source (immediate in VOP3P not supported)\n";
-          result.failMnemonic = di.mnemonic; result.failFormat = "VOP3P"; return result;
-        }
-        Function *fma = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::fma, {v2f32});
-        regs.writeRegVec(B, op.dst(), B.CreateCall(fma, {
-            regs.readRegVec(B, op.srcReg(0), v2f32), regs.readRegVec(B, op.srcReg(1), v2f32),
-            regs.readRegVec(B, op.srcReg(2), v2f32)}, "pk_fma"));
-        handled = true; break;
-      }
-      if (sop == SemOp::V_PK_MAX_F32) {
-        auto *v2f32 = FixedVectorType::get(f32Ty, 2);
-        if (!op.isSrcReg(0) || !op.isSrcReg(1)) {
-          errs() << "ir_proto: " << mn << ": non-register source (immediate in VOP3P not supported)\n";
-          result.failMnemonic = di.mnemonic; result.failFormat = "VOP3P"; return result;
-        }
-        Function *maxFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::maxnum, {v2f32});
-        regs.writeRegVec(B, op.dst(), B.CreateCall(maxFn, {
-            regs.readRegVec(B, op.srcReg(0), v2f32), regs.readRegVec(B, op.srcReg(1), v2f32)}, "pk_max"));
-        handled = true; break;
-      }
-      if (sop == SemOp::V_PK_MIN_F32) {
-        auto *v2f32 = FixedVectorType::get(f32Ty, 2);
-        if (!op.isSrcReg(0) || !op.isSrcReg(1)) {
-          errs() << "ir_proto: " << mn << ": non-register source (immediate in VOP3P not supported)\n";
-          result.failMnemonic = di.mnemonic; result.failFormat = "VOP3P"; return result;
-        }
-        Function *minFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::minnum, {v2f32});
-        regs.writeRegVec(B, op.dst(), B.CreateCall(minFn, {
-            regs.readRegVec(B, op.srcReg(0), v2f32), regs.readRegVec(B, op.srcReg(1), v2f32)}, "pk_min"));
-        handled = true; break;
-      }
-      if (sop == SemOp::V_PK_MOV_B32) {
-        regs.writeReg64(B, op.dst(), op.src64(0));
+
+      // ---- WMMA (gfx1250 RDNA4, VOP3P encoding) ----
+      // v_wmma_f32_16x16x32_f16: A and B are v16f16, C/D are v8f32
+      // Intrinsic signature: (i1 A_mod, v16f16 A, i1 B_mod, v16f16 B,
+      //                       i16 C_mod, v8f32 C, i1 a_reuse, i1 b_reuse) → v8f32
+      if (sop == SemOp::V_WMMA_F32_16x16x32_F16) {
+        Type *v16f16Ty = FixedVectorType::get(Type::getHalfTy(C), 16);
+        Type *v8f32Ty = FixedVectorType::get(f32Ty, 8);
+
+        ParsedReg dest = op.dst();
+        ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
+        ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
+
+        Value *a = regs.readRegVec(B, srcA, v16f16Ty);
+        Value *b = regs.readRegVec(B, srcB, v16f16Ty);
+        Value *c = regs.readRegVec(B, srcC, v8f32Ty);
+
+        Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
+            &M, Intrinsic::amdgcn_wmma_f32_16x16x32_f16, {v8f32Ty, v16f16Ty});
+        Value *result_val = B.CreateCall(wmmaFn, {
+            B.getFalse(), a,
+            B.getFalse(), b,
+            ConstantInt::get(Type::getInt16Ty(C), 0), c,
+            B.getFalse(), B.getFalse()
+        }, "wmma");
+        regs.writeRegVec(B, dest, result_val);
         handled = true; break;
       }
 
@@ -3660,6 +3936,29 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         default: return {-1, 0, false};
         }
       };
+      // ds_load_tr16_b128: LDS transpose load — reads 128 bits with transpose
+      // Semantically equivalent to a 4-dword LDS read for the purposes of
+      // binary translation.
+      if (sop == SemOp::DS_LOAD_TR16_B128) {
+        Value *addr = B.CreateZExt(op.src(0), i64Ty, "ds_addr");
+        for (unsigned k = 1; k < op.nSrcs(); k++) {
+          if (di.isImm(op.srcIdx(k))) {
+            int64_t imm = di.getImm(op.srcIdx(k));
+            if (imm != 0)
+              addr = B.CreateAdd(addr, ConstantInt::get(i64Ty, imm), "ds_off");
+            break;
+          }
+        }
+        Value *ptr = B.CreateIntToPtr(addr, PointerType::get(C, 3));
+        Type *v4i32Ty = FixedVectorType::get(i32Ty, 4);
+        Value *loaded = B.CreateLoad(v4i32Ty, ptr, "ds_tr16");
+        ParsedReg dest = op.dst();
+        for (unsigned i = 0; i < 4; i++) {
+          Value *elem = B.CreateExtractElement(loaded, i);
+          regs.storeVGPR32(B, dest.baseIdx + i, elem);
+        }
+        handled = true; break;
+      }
       bool isDsRead = sop >= SemOp::DS_READ_B32 && sop <= SemOp::DS_READ_I8;
       bool isDsWrite = sop >= SemOp::DS_WRITE_B32 && sop <= SemOp::DS_WRITE_B8;
       if (isDsRead || isDsWrite) {
@@ -3741,85 +4040,173 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       auto [isLoad, isStore, dwords, loadBits, isSubDword, isBufSigned] = mubufClassify(sop);
       if (isLoad || isStore) {
 
-        // MUBUF buffer resource is a 128-bit descriptor (4 SGPRs):
-        //   dword0[47:0]  = base address (low 48 bits)
-        //   dword1[29:16] = stride
-        //   dword2        = num_records
-        //   dword3        = flags (swizzle, format, etc.)
-        // We read all 4 dwords. If stride != 0, fail loudly (structured buffers
-        // need index*stride address math we don't model).
+        // Scan source operands by register kind to handle both MUBUF and
+        // VBUFFER encodings (where vaddr and srsrc order may differ).
         ParsedReg vdata = op.dst(0);
-        ParsedReg srsrc = op.srcReg(0);
+        ParsedReg srsrc{}, vaddrReg{}, soffReg{};
+        bool haveSrsrc = false, haveVaddr = false, haveSoff = false;
+        int64_t immOff = 0;
+        int vgprSrcCount = 0;
+
+        for (unsigned k = 0; k < op.nSrcs(); k++) {
+          unsigned idx = op.srcIdx(k);
+          if (di.isReg(idx)) {
+            ParsedReg pr = op.srcReg(k);
+            if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSrsrc) {
+              srsrc = pr; haveSrsrc = true;
+            } else if (pr.kind == ParsedReg::VGPR) {
+              vgprSrcCount++;
+              // For stores (numDefs==0), the first VGPR source is vdata
+              // (the stored value, already captured via op.dst(0)).
+              // The second VGPR source is the actual buffer offset (vaddr).
+              if (isStore && vgprSrcCount == 1)
+                continue;
+              if (!haveVaddr) {
+                vaddrReg = pr; haveVaddr = true;
+              }
+            } else if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSoff) {
+              soffReg = pr; haveSoff = true;
+            }
+          } else if (di.isImm(idx)) {
+            int64_t v = di.getImm(idx);
+            if (v != 0 && immOff == 0)
+              immOff = v;
+          }
+        }
+
+        if (!haveSrsrc) {
+          errs() << "ir_proto: MUBUF: no SRSRC found for " << mn << "\n";
+          return result;
+        }
+
+        // Use gfx942 buffer intrinsics directly. The hardware handles
+        // OOB: loads return 0, stores are silently dropped. This avoids
+        // the flat-memory lowering that requires conditional branches
+        // (which break under LLVM -O1+ SIMT optimizations).
         Value *dw0 = regs.readReg32(B, srsrc);
         ParsedReg srsrc1 = srsrc; srsrc1.baseIdx = srsrc.baseIdx + 1;
+        ParsedReg srsrc2 = srsrc; srsrc2.baseIdx = srsrc.baseIdx + 2;
         Value *dw1 = regs.readReg32(B, srsrc1);
-        if (!dw0 || !dw1) {
+        Value *dw2 = regs.readReg32(B, srsrc2);
+        if (!dw0 || !dw1 || !dw2) {
           errs() << "ir_proto: MUBUF: cannot read SRSRC for " << mn << "\n";
           return result;
         }
-        // Extract 48-bit base address
-        Value *lo = B.CreateZExt(dw0, i64Ty);
-        Value *hi = B.CreateAnd(B.CreateZExt(dw1, i64Ty), ConstantInt::get(i64Ty, 0xFFFF));
-        Value *ptr = B.CreateOr(lo, B.CreateShl(hi, 32), "buf_base");
 
-        // Add vaddr if present and non-zero
-        if (op.nSrcs() >= 2 && di.isReg(op.srcIdx(1))) {
-          ParsedReg vaddr = op.srcReg(1);
-          if (vaddr.kind == ParsedReg::VGPR) {
-            Value *voff = B.CreateZExt(regs.readReg32(B, vaddr), i64Ty);
-            ptr = B.CreateAdd(ptr, voff, "buf_vaddr");
-          }
-        }
+        // Build a gfx942-compatible raw buffer descriptor <4 x i32>.
+        // Word 0: base_lo
+        // Word 1: base_hi (only low 16 bits are address; clear stride/flags)
+        // Word 2: num_records (byte count)
+        // Word 3: 0 (raw buffer, TYPE=0, no format conversion)
+        // Use readfirstlane to force SRD words into SGPRs, avoiding
+        // the costly waterfall loop and incorrect register allocation.
+        Function *readfirstlane = Intrinsic::getOrInsertDeclaration(
+            B.GetInsertBlock()->getModule(),
+            Intrinsic::amdgcn_readfirstlane, {i32Ty});
+        Value *cleanDw1 = B.CreateAnd(dw1, ConstantInt::get(i32Ty, 0xFFFF));
+        Value *srdW0 = B.CreateCall(readfirstlane, {dw0}, "srd_w0");
+        Value *srdW1 = B.CreateCall(readfirstlane, {cleanDw1}, "srd_w1");
+        Value *srdW2 = B.CreateCall(readfirstlane, {dw2}, "srd_w2");
+        Value *word3 = ConstantInt::get(i32Ty, 0);
+        Value *srd = UndefValue::get(FixedVectorType::get(i32Ty, 4));
+        srd = B.CreateInsertElement(srd, srdW0, (uint64_t)0);
+        srd = B.CreateInsertElement(srd, srdW1, (uint64_t)1);
+        srd = B.CreateInsertElement(srd, srdW2, (uint64_t)2);
+        srd = B.CreateInsertElement(srd, word3, (uint64_t)3);
 
-        // Add soffset
-        if (op.nSrcs() >= 3) {
-          if (di.isReg(op.srcIdx(2))) {
-            ParsedReg soff = op.srcReg(2);
-            if (soff.kind == ParsedReg::SGPR) {
-              Value *sv = B.CreateZExt(regs.readReg32(B, soff), i64Ty);
-              ptr = B.CreateAdd(ptr, sv, "buf_soff");
-            }
-          }
-        }
+        // Compute the per-lane VGPR offset (i32)
+        Value *voffset = ConstantInt::get(i32Ty, 0);
+        if (haveVaddr)
+          voffset = B.CreateAdd(voffset, regs.readReg32(B, vaddrReg));
+        if (immOff != 0)
+          voffset = B.CreateAdd(voffset, ConstantInt::get(i32Ty, (int32_t)immOff));
 
-        // Add immediate offset
-        for (unsigned k = 2; k < op.nSrcs(); k++) {
-          if (di.isImm(op.srcIdx(k))) {
-            int64_t imm = di.getImm(op.srcIdx(k));
-            if (imm != 0)
-              ptr = B.CreateAdd(ptr, ConstantInt::get(i64Ty, imm), "buf_off");
-            break;
-          }
-        }
+        // SGPR offset
+        Value *soffset = ConstantInt::get(i32Ty, 0);
+        if (haveSoff)
+          soffset = regs.readReg32(B, soffReg);
 
-        Value *gep = B.CreateIntToPtr(ptr, PointerType::get(C, 0));
+        Value *auxFlags = ConstantInt::get(i32Ty, 0);
 
         if (isLoad) {
           if (isSubDword) {
-            Type *memTy = Type::getIntNTy(C, loadBits);
-            Value *loaded = B.CreateLoad(memTy, gep, "buf_ld");
-            Value *ext = isBufSigned ? B.CreateSExt(loaded, i32Ty)
-                                     : B.CreateZExt(loaded, i32Ty);
-            regs.writeReg32(B, vdata, ext);
+            if (loadBits == 8) {
+              Function *bufLdI8 = Intrinsic::getOrInsertDeclaration(
+                  B.GetInsertBlock()->getModule(),
+                  Intrinsic::amdgcn_raw_buffer_load,
+                  {Type::getInt8Ty(C)});
+              Value *loaded = B.CreateCall(bufLdI8,
+                  {srd, voffset, soffset, auxFlags}, "buf_ld");
+              Value *ext = isBufSigned ? B.CreateSExt(loaded, i32Ty)
+                                       : B.CreateZExt(loaded, i32Ty);
+              regs.writeReg32(B, vdata, ext);
+            } else {
+              Function *bufLdI16 = Intrinsic::getOrInsertDeclaration(
+                  B.GetInsertBlock()->getModule(),
+                  Intrinsic::amdgcn_raw_buffer_load,
+                  {Type::getInt16Ty(C)});
+              Value *loaded = B.CreateCall(bufLdI16,
+                  {srd, voffset, soffset, auxFlags}, "buf_ld");
+              Value *ext = isBufSigned ? B.CreateSExt(loaded, i32Ty)
+                                       : B.CreateZExt(loaded, i32Ty);
+              regs.writeReg32(B, vdata, ext);
+            }
           } else if (dwords == 1) {
-            regs.writeReg32(B, vdata, B.CreateLoad(i32Ty, gep, "buf_ld"));
+            Function *bufLd = Intrinsic::getOrInsertDeclaration(
+                B.GetInsertBlock()->getModule(),
+                Intrinsic::amdgcn_raw_buffer_load,
+                {i32Ty});
+            Value *loaded = B.CreateCall(bufLd,
+                {srd, voffset, soffset, auxFlags}, "buf_ld");
+            regs.writeReg32(B, vdata, loaded);
           } else {
             auto *vecTy = FixedVectorType::get(i32Ty, dwords);
-            regs.writeRegVec(B, vdata, B.CreateLoad(vecTy, gep, "buf_ld"));
+            Function *bufLd = Intrinsic::getOrInsertDeclaration(
+                B.GetInsertBlock()->getModule(),
+                Intrinsic::amdgcn_raw_buffer_load,
+                {vecTy});
+            Value *loaded = B.CreateCall(bufLd,
+                {srd, voffset, soffset, auxFlags}, "buf_ld");
+            regs.writeRegVec(B, vdata, loaded);
           }
           handled = true; break;
         }
         if (isStore) {
+          // Flat store with OOB sink: redirect out-of-bounds writes to
+          // private scratch memory to avoid illegal memory access faults.
+          Value *lo = B.CreateZExt(dw0, i64Ty);
+          Value *hi = B.CreateAnd(B.CreateZExt(dw1, i64Ty),
+                                   ConstantInt::get(i64Ty, 0xFFFF));
+          Value *basePtr = B.CreateOr(lo, B.CreateShl(hi, 32), "buf_base");
+          Value *totalOff = B.CreateZExt(voffset, i64Ty);
+          if (haveSoff)
+            totalOff = B.CreateAdd(totalOff, B.CreateZExt(soffset, i64Ty));
+          Value *numRec = B.CreateZExt(dw2, i64Ty);
+          Value *oob = B.CreateICmpUGE(totalOff, numRec, "buf_oob");
+
+          Value *realAddr = B.CreateAdd(basePtr, totalOff, "buf_addr");
+          Value *realPtr = B.CreateIntToPtr(realAddr, PointerType::get(C, 0));
+
+          Function *F = B.GetInsertBlock()->getParent();
+          IRBuilder<> entryB(&F->getEntryBlock(),
+                              F->getEntryBlock().getFirstInsertionPt());
+          AllocaInst *sink = entryB.CreateAlloca(i32Ty, /*AddrSpace=*/5,
+                                                  nullptr, "oob_sink");
+          sink->setAlignment(Align(4));
+          Value *sinkFlat = B.CreateAddrSpaceCast(sink, PointerType::get(C, 0));
+          Value *storePtr = B.CreateSelect(oob, sinkFlat, realPtr,
+                                            "store_ptr");
+
           ParsedReg storeData = op.dst(0);
           if (isSubDword) {
             Type *memTy = Type::getIntNTy(C, loadBits);
             Value *val = B.CreateTrunc(regs.readReg32(B, storeData), memTy);
-            B.CreateStore(val, gep);
+            B.CreateStore(val, storePtr);
           } else if (dwords == 1) {
-            B.CreateStore(regs.readReg32(B, storeData), gep);
+            B.CreateStore(regs.readReg32(B, storeData), storePtr);
           } else {
             auto *vecTy = FixedVectorType::get(i32Ty, dwords);
-            B.CreateStore(regs.readRegVec(B, storeData, vecTy), gep);
+            B.CreateStore(regs.readRegVec(B, storeData, vecTy), storePtr);
           }
           handled = true; break;
         }
@@ -4071,15 +4458,21 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           baseMn = baseMn.drop_front(7); // "v_dual_" = 7 chars
         std::string vopMn = ("v_" + baseMn).str();
 
-        // Parse comma-separated operands
-        SmallVector<StringRef, 4> operands;
+        // Parse comma-separated operands, then further split on spaces
+        // to separate modifiers like "bitop3:0x40" from register names
+        SmallVector<StringRef, 8> operands;
         StringRef remaining = argsPart.ltrim();
         while (!remaining.empty()) {
-          // Handle "//" comments (from disassembly output)
           if (remaining.starts_with("//")) break;
           auto [tok, rest] = remaining.split(',');
           tok = tok.trim();
-          if (!tok.empty()) operands.push_back(tok);
+          if (!tok.empty()) {
+            // Split further on spaces to handle "v0 bitop3:0x40" → "v0", "bitop3:0x40"
+            SmallVector<StringRef, 4> subToks;
+            tok.split(subToks, ' ', -1, false);
+            for (auto &st : subToks)
+              operands.push_back(st);
+          }
           remaining = rest.ltrim();
         }
         if (operands.empty()) return false;
@@ -4097,19 +4490,35 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         int dstIdx = parseVRegIdx(operands[0]);
         if (dstIdx < 0) return false;
 
-        // Generic VOPD operand reader: VGPR, SGPR, or literal immediate
+        // Generic VOPD operand reader: VGPR, SGPR, or literal immediate.
+        // Handles source modifiers: -v0 (fneg), |v0| (fabs), -|v0| (fneg+fabs)
         auto readVOPDSrc = [&](StringRef name) -> Value * {
+          bool neg = false, absmod = false;
+          if (name.starts_with("-")) { neg = true; name = name.drop_front(1); }
+          if (name.starts_with("|") && name.ends_with("|")) {
+            absmod = true; name = name.drop_front(1).drop_back(1);
+          }
+          Value *v = nullptr;
           int vidx = parseVRegIdx(name);
-          if (vidx >= 0) return regs.loadVGPR32(B, vidx);
-          if (name.starts_with("s")) {
+          if (vidx >= 0) { v = regs.loadVGPR32(B, vidx); }
+          else if (name.starts_with("s")) {
             int sidx = -1;
             if (!name.drop_front(1).getAsInteger(10, sidx))
-              return regs.loadSGPR32(B, sidx);
+              v = regs.loadSGPR32(B, sidx);
           }
-          int64_t imm;
-          if (!name.getAsInteger(0, imm))
-            return ConstantInt::get(i32Ty, (uint32_t)(imm & 0xFFFFFFFF));
-          return nullptr;
+          if (!v) {
+            int64_t imm;
+            if (!name.getAsInteger(0, imm))
+              v = ConstantInt::get(i32Ty, (uint32_t)(imm & 0xFFFFFFFF));
+          }
+          if (!v) return nullptr;
+          if (neg || absmod) {
+            v = B.CreateBitCast(v, f32Ty);
+            if (absmod) v = B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::fabs, {f32Ty}), {v});
+            if (neg) v = B.CreateFNeg(v);
+            v = B.CreateBitCast(v, i32Ty);
+          }
+          return v;
         };
 
         if (vopMn == "v_mov_b32") {
@@ -4218,6 +4627,77 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           return true;
         }
 
+        if (vopMn == "v_fma_f32") {
+          if (operands.size() < 4) return false;
+          Value *s0 = readVOPDSrc(operands[1]);
+          Value *s1 = readVOPDSrc(operands[2]);
+          Value *s2 = readVOPDSrc(operands[3]);
+          if (!s0 || !s1 || !s2) return false;
+          s0 = B.CreateBitCast(s0, f32Ty); s1 = B.CreateBitCast(s1, f32Ty);
+          s2 = B.CreateBitCast(s2, f32Ty);
+          Function *fma = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::fma, {f32Ty});
+          regs.storeVGPR32(B, dstIdx, B.CreateBitCast(B.CreateCall(fma, {s0, s1, s2}, "vopd_fma"), i32Ty));
+          return true;
+        }
+
+        if (vopMn == "v_max_num_f32" || vopMn == "v_max_f32") {
+          if (operands.size() < 3) return false;
+          Value *s0 = readVOPDSrc(operands[1]);
+          Value *s1 = readVOPDSrc(operands[2]);
+          if (!s0 || !s1) return false;
+          s0 = B.CreateBitCast(s0, f32Ty); s1 = B.CreateBitCast(s1, f32Ty);
+          Function *maxFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::maxnum, {f32Ty});
+          regs.storeVGPR32(B, dstIdx, B.CreateBitCast(B.CreateCall(maxFn, {s0, s1}, "vopd_fmax"), i32Ty));
+          return true;
+        }
+
+        if (vopMn == "v_min_num_f32" || vopMn == "v_min_f32") {
+          if (operands.size() < 3) return false;
+          Value *s0 = readVOPDSrc(operands[1]);
+          Value *s1 = readVOPDSrc(operands[2]);
+          if (!s0 || !s1) return false;
+          s0 = B.CreateBitCast(s0, f32Ty); s1 = B.CreateBitCast(s1, f32Ty);
+          Function *minFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::minnum, {f32Ty});
+          regs.storeVGPR32(B, dstIdx, B.CreateBitCast(B.CreateCall(minFn, {s0, s1}, "vopd_fmin"), i32Ty));
+          return true;
+        }
+
+        // v_bitop2_b32 / v_bitop3_b32 in VOPD context
+        // The truth table immediate is appended as "bitop3:0xNN"
+        if (vopMn == "v_bitop2_b32" || vopMn == "v_bitop3_b32") {
+          if (operands.size() < 3) return false;
+          Value *a = readVOPDSrc(operands[1]);
+          Value *b = readVOPDSrc(operands[2]);
+          if (!a || !b) return false;
+          uint32_t lut = 0;
+          for (unsigned k = 3; k < operands.size(); k++) {
+            if (operands[k].starts_with("bitop3:")) {
+              StringRef hex = operands[k].drop_front(7);
+              hex.getAsInteger(0, lut);
+              break;
+            }
+          }
+          // bitop2: src2 = 0, so only even-indexed LUT entries (0,2,4,6) matter
+          Value *c = ConstantInt::get(i32Ty, 0);
+          Value *na = B.CreateNot(a), *nb = B.CreateNot(b), *nc = B.CreateNot(c);
+          Value *result = ConstantInt::get(i32Ty, 0);
+          Value *minterms[8] = {
+            B.CreateAnd(B.CreateAnd(na, nb), nc),
+            B.CreateAnd(B.CreateAnd(na, nb), c),
+            B.CreateAnd(B.CreateAnd(na, b), nc),
+            B.CreateAnd(B.CreateAnd(na, b), c),
+            B.CreateAnd(B.CreateAnd(a, nb), nc),
+            B.CreateAnd(B.CreateAnd(a, nb), c),
+            B.CreateAnd(B.CreateAnd(a, b), nc),
+            B.CreateAnd(B.CreateAnd(a, b), c),
+          };
+          for (int i = 0; i < 8; i++)
+            if (lut & (1 << i))
+              result = B.CreateOr(result, minterms[i]);
+          regs.storeVGPR32(B, dstIdx, result);
+          return true;
+        }
+
         errs() << "ir_proto: VOPD: unhandled sub-operation '" << vopMn << "'\n";
         return false;
       };
@@ -4260,8 +4740,13 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     return result;
   }
 
-  if (currentBB && !currentBB->getTerminator())
-    B.CreateUnreachable();
+  // Ensure all BBs have terminators
+  for (auto &BB : *F) {
+    if (BB.empty() || !BB.getTerminator()) {
+      B.SetInsertPoint(&BB);
+      B.CreateUnreachable();
+    }
+  }
 
   result.liftedCount = raisedCount;
 

@@ -88,8 +88,9 @@ struct TempDir {
     }
   }
   ~TempDir() {
-    if (valid)
-      llvm::sys::fs::remove_directories(path);
+    // Keep temp dirs for debugging
+    // if (valid)
+    //   llvm::sys::fs::remove_directories(path);
   }
   TempDir(const TempDir &) = delete;
   TempDir &operator=(const TempDir &) = delete;
@@ -168,6 +169,8 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
     llvm::errs() << "ir_proto: Failed to write IR file\n";
     return result;
   }
+  // Debug: also save a copy for inspection
+  writeFile("/tmp/gfx1250_debug_" + kernelName + ".ll", raised.irText);
 
   // Step 4: llc — compile LLVM IR to assembly
   std::string llcBin = std::string(LLVM_TOOLS_DIR) + "/llc";
@@ -183,6 +186,8 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
     auto asmData = readFile(asmPath);
     result.asmText.assign(asmData.begin(), asmData.end());
     LLVM_DEBUG(llvm::dbgs() << "--- llc output assembly ---\n" << result.asmText << "\n");
+    // Debug: save asm for inspection
+    writeFile("/tmp/gfx1250_debug_" + kernelName + ".s", result.asmText);
   }
 
   // Step 5: llvm-mc — assemble to object file

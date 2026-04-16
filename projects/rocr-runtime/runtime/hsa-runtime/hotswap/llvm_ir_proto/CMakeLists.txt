@@ -162,6 +162,22 @@ if(hip_FOUND)
       hip::host
   )
 
+  # gfx1250 → gfx942 end-to-end GPU test
+  set(GFX1250_TEST_DATA "${CMAKE_CURRENT_SOURCE_DIR}/../test_data/gfx1250")
+  add_executable(gfx1250_gpu_test
+    tests/gfx1250_gpu_test.cpp
+  )
+  target_compile_definitions(gfx1250_gpu_test PRIVATE
+    GFX1250_TEST_DATA_DIR="${GFX1250_TEST_DATA}"
+    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+  )
+  target_link_libraries(gfx1250_gpu_test
+    PRIVATE
+      -Wl,--exclude-libs,ALL
+      llvm-ir-raiser
+      hip::host
+  )
+
   message(STATUS "GPU tests enabled (HIP found)")
 else()
   message(STATUS "GPU tests DISABLED (HIP not found)")
