@@ -31,6 +31,8 @@ typedef struct {
     int                client_sock;  /* current consumer's socket (-1 if none) */
     pthread_t          bg_thread;
     int                bg_thread_ok;
+    pthread_mutex_t    ring_write_lock;
+    int                ring_write_lock_ok;
     _Atomic int        shutdown;
 } shim_ipc_target_t;
 

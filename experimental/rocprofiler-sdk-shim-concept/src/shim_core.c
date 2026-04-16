@@ -204,6 +204,12 @@ shim_configure_services(shim_tool_data_t* data)
     if(shim_expect_status(rocprofiler_create_buffer(data->context,
                                                     SHIM_BUFFER_SIZE_BYTES,
                                                     SHIM_BUFFER_WATERMARK_BYTES,
+                                                    /* DISCARD matches the long-term design goal, but
+                                                     * the current ROCm stack on our validation host
+                                                     * emits repeated "buffer too small (size=0)"
+                                                     * errors for HIP EXT records under DISCARD. Keep
+                                                     * LOSSLESS in the concept until that behavior is
+                                                     * resolved upstream. */
                                                     ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                     &shim_sdk_buffer_callback,
                                                     data,

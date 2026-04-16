@@ -3,7 +3,7 @@
  *
  * Target side: memfd_create + seal + abstract socket + bg thread.
  * Consumer side: connect + SO_PEERCRED + SCM_RIGHTS + mmap.
- * Ring buffer: SPSC, drop-on-full, eventfd wake at watermark.
+ * Ring buffer: multi-producer/single-consumer, drop-on-full, eventfd wake at watermark.
  *
  * Matches SHIM_MEMFD_SOCK_DESIGN.md §4, §5, §6, §10.4, §11.
  */
@@ -153,25 +153,38 @@ static size_t get_ring_size(void)
 int shim_ring_write(shim_ipc_target_t* ipc, const shim_record_t* rec)
 {
     shim_ring_header_t* h = ipc->ring_hdr;
-    uint64_t head = atomic_load_explicit(&h->head, memory_order_relaxed);
-    uint64_t tail = atomic_load_explicit(&h->tail, memory_order_acquire);
-    uint64_t next = (head + h->record_size) & h->mask;
+    uint64_t capacity = h->mask + 1;
+    uint64_t head;
+    uint64_t tail;
+    uint64_t used_before;
+    uint64_t used_after;
 
-    if (next == (tail & h->mask)) {
+    pthread_mutex_lock(&ipc->ring_write_lock);
+
+    head = atomic_load_explicit(&h->head, memory_order_relaxed);
+    tail = atomic_load_explicit(&h->tail, memory_order_acquire);
+    used_before = head - tail;
+
+    if ((used_before + h->record_size) > capacity) {
+        pthread_mutex_unlock(&ipc->ring_write_lock);
         atomic_fetch_add_explicit(&ipc->ctrl->events_dropped, 1,
                                   memory_order_relaxed);
         return -1;
     }
 
     memcpy(ipc->ring_data + (head & h->mask), rec, h->record_size);
+    used_after = used_before + h->record_size;
     atomic_store_explicit(&h->head, head + h->record_size,
                           memory_order_release);
     atomic_fetch_add_explicit(&ipc->ctrl->events_traced, 1,
                               memory_order_relaxed);
 
-    /* Watermark kick */
+    /* Watermark kick on threshold crossing, not exact modulo hits. */
     uint64_t wm = ipc->ctrl->watermark_bytes;
-    if (wm > 0 && ((head + h->record_size) % wm) == 0) {
+    int kick = (wm > 0 && used_before < wm && used_after >= wm);
+    pthread_mutex_unlock(&ipc->ring_write_lock);
+
+    if (kick) {
         uint64_t one = 1;
         ssize_t rc = write(ipc->eventfd, &one, sizeof(one));
         (void)rc;
@@ -252,6 +265,13 @@ int shim_ipc_init(shim_ipc_target_t* ipc)
     ipc->eventfd     = -1;
     ipc->listen_sock = -1;
     ipc->client_sock = -1;
+    ipc->ring_write_lock_ok = 0;
+
+    if (pthread_mutex_init(&ipc->ring_write_lock, NULL) != 0) {
+        fprintf(stderr, "[shim] pthread_mutex_init failed\n");
+        return -1;
+    }
+    ipc->ring_write_lock_ok = 1;
 
     size_t ring_data_size = get_ring_size();
     size_t ring_offset    = sizeof(shim_ctrl_t);
@@ -365,6 +385,10 @@ void shim_ipc_destroy(shim_ipc_target_t* ipc)
     }
     if (ipc->eventfd >= 0)  { close(ipc->eventfd);  ipc->eventfd = -1; }
     if (ipc->memfd >= 0)    { close(ipc->memfd);    ipc->memfd = -1; }
+    if (ipc->ring_write_lock_ok) {
+        pthread_mutex_destroy(&ipc->ring_write_lock);
+        ipc->ring_write_lock_ok = 0;
+    }
 }
 
 /* ---- Consumer-side attach (§4) ---- */
