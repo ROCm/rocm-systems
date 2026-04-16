@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <iostream>
 #include <map>
+#include <cxxabi.h>
+#include <regex>
+#include <sstream>
 
 using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
@@ -18,7 +21,6 @@ SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrappe
     }
 }
 
-
 void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                          rocprofiler_counter_config_id_t*             config,
                                          void* callback_data_args)
@@ -26,7 +28,7 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id.handle;
 
-    uint64_t                                      kernel_dispatch_count = 0;
+    uint64_t kernel_dispatch_count = 0;
     {
         // Acquire unique lock for update and ensure map is updated correctly
         std::unique_lock<std::shared_mutex> lock(m_kernel_id_iteration_mutex);
@@ -48,7 +50,6 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
     {
         return;
     }
-
 
     // check cache for existing profile for this agent
     auto search_profile_cache = [&]()
@@ -87,8 +88,10 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
 
         case iteration_multiplexing_mode_t::SIMPLE:
             m_iteration_multiplexing_per_agent[agent_id].config =
-                (m_iteration_multiplexing_per_agent[agent_id].config + 1) % m_profile_cache_per_agent[agent_id].size();
-            *config = m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id].config];
+                (m_iteration_multiplexing_per_agent[agent_id].config + 1) %
+                m_profile_cache_per_agent[agent_id].size();
+            *config =
+                m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id].config];
             return;
 
         case iteration_multiplexing_mode_t::KERNEL:
@@ -96,16 +99,19 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
                 m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index.end())
             {
                 // First time seeing this kernel_id for this agent
-                m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id] = -1;  // so first increment sets to 0
+                m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id] =
+                    -1;  // so first increment sets to 0
             }
             m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id] =
                 (m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id] + 1) %
                 m_profile_cache_per_agent[agent_id].size();
-            *config = m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id].kernel_id_to_profile_index[kernel_id]];
+            *config = m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id]
+                                                              .kernel_id_to_profile_index[kernel_id]];
             return;
 
         case iteration_multiplexing_mode_t::LAUNCH:
-            if (m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index.find(dispatch_info) ==
+            if (m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index.find(
+                    dispatch_info) ==
                 m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index.end())
             {
                 // First time seeing this dispatch_info for this agent
@@ -113,9 +119,11 @@ void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_d
                     -1;  // so first increment sets to 0
             }
             m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index[dispatch_info] =
-                (m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index[dispatch_info] + 1) %
+                (m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index[dispatch_info] +
+                 1) %
                 m_profile_cache_per_agent[agent_id].size();
-            *config = m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id].kernel_params_to_profile_index[dispatch_info]];
+            *config = m_profile_cache_per_agent[agent_id][m_iteration_multiplexing_per_agent[agent_id]
+                                                              .kernel_params_to_profile_index[dispatch_info]];
             return;
 
         default:
@@ -171,7 +179,7 @@ void SdkCallbacksImpl::create_counter_collection_profile(
 {
     // get counters to collect
     std::set<std::set<std::string>> counters_to_collect;
-    for (const std::string& counters_str : helper_utils::split_by_regex(tool->requested_counters, "[,]"))
+    for (const std::string& counters_str : split_by_regex(tool->requested_counters, "[,]"))
     {
         if (!counters_str.empty())
         {
@@ -314,8 +322,8 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
     {
         auto* data            = static_cast<kernel_symbol_data_t*>(record.payload);
         int   demangle_status = 0;
-        auto  kernel_name     = helper_utils::cxa_demangle(data->kernel_name, &demangle_status);
-        kernel_name           = helper_utils::truncate_name(kernel_name);
+        auto  kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
+        kernel_name           = truncate_name(kernel_name);
 
         // check if regex can be found in kernel name matches regex from tool data,
         // if matches store kernel id
@@ -346,4 +354,152 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
             tool->target_kernel_ids.insert(data->kernel_id);
         }
     }
+}
+
+std::string SdkCallbacksImpl::truncate_name(std::string_view name)
+{
+    // The function extracts the kernel name from
+    // input string. By using the iterators it finds the
+    // window in the string which contains only the kernel name.
+    // For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'
+    auto     rit         = name.rbegin();
+    auto     rend        = name.rend();
+    uint32_t counter     = 0;
+    char     open_token  = 0;
+    char     close_token = 0;
+    while (rit != rend)
+    {
+        if (counter == 0)
+        {
+            switch (*rit)
+            {
+            case ')':
+                counter     = 1;
+                open_token  = ')';
+                close_token = '(';
+                break;
+            case '>':
+                counter     = 1;
+                open_token  = '>';
+                close_token = '<';
+                break;
+            case ']':
+                counter     = 1;
+                open_token  = ']';
+                close_token = '[';
+                break;
+            case ' ':
+                ++rit;
+                continue;
+            }
+            if (counter == 0)
+                break;
+        }
+        else
+        {
+            if (*rit == open_token)
+                counter++;
+            if (*rit == close_token)
+                counter--;
+        }
+        ++rit;
+    }
+    auto rbeg = rit;
+    while ((rit != rend) && (*rit != ' ') && (*rit != ':'))
+        rit++;
+    return std::string{name.substr(rend - rit, rit - rbeg)};
+}
+
+std::string SdkCallbacksImpl::cxa_demangle(std::string_view _mangled_name, int* _status)
+{
+    // return the mangled since there is no buffer
+    if (_mangled_name.empty())
+    {
+        *_status = -2;
+        return std::string{};
+    }
+
+    auto _demangled_name = std::string{_mangled_name};
+
+    // PARAMETERS to __cxa_demangle
+    //  mangled_name:
+    //      A NULL-terminated character string containing the name to be
+    //      demangled.
+    //  buffer:
+    //      A region of memory, allocated with malloc, of *length bytes, into
+    //      which the demangled name is stored. If output_buffer is not long
+    //      enough, it is expanded using realloc. output_buffer may instead be
+    //      NULL; in that case, the demangled name is placed in a region of memory
+    //      allocated with malloc.
+    //  _buflen:
+    //      If length is non-NULL, the length of the buffer containing the
+    //      demangled name is placed in *length.
+    //  status:
+    //      *status is set to one of the following values
+    size_t _demang_len = 0;
+    char*  _demang = abi::__cxa_demangle(_demangled_name.c_str(), nullptr, &_demang_len, _status);
+    switch (*_status)
+    {
+    //  0 : The demangling operation succeeded.
+    // -1 : A memory allocation failure occurred.
+    // -2 : mangled_name is not a valid name under the C++ ABI mangling rules.
+    // -3 : One of the arguments is invalid.
+    case 0:
+    {
+        if (_demang)
+            _demangled_name = std::string{_demang};
+        break;
+    }
+    case -1:
+    {
+        std::clog << "[rocprofiler-compute] memory allocation failure occurred "
+                     "demangling "
+                  << _demangled_name << std::endl;
+        break;
+    }
+    case -2:
+    {
+        break;
+    }
+    case -3:
+    {
+        std::clog << "[rocprofiler-compute] Invalid argument in: (\"" << _demangled_name
+                  << "\", nullptr, nullptr, " << static_cast<void*>(_status) << ")" << std::endl;
+        break;
+    }
+    default:
+        break;
+    };
+
+    // if it "demangled" but the length is zero, set the status to -2
+    if (_demang_len == 0 && *_status == 0)
+        *_status = -2;
+
+    // free allocated buffer
+    ::free(_demang);
+    return _demangled_name;
+}
+
+std::vector<std::string> SdkCallbacksImpl::split_by_regex(const std::string& s,
+                                                          const std::string& regex_pattern)
+{
+    std::vector<std::string> tokens;
+    std::regex               re(regex_pattern);
+
+    // -1 indicates to return the submatches that are not part of the delimiter
+    // itself
+    std::sregex_token_iterator iter(s.begin(), s.end(), re, -1);
+    std::sregex_token_iterator end;
+
+    while (iter != end)
+    {
+        // Ensure that empty strings resulting from consecutive delimiters are not
+        // added
+        if (!iter->str().empty())
+        {
+            tokens.push_back(*iter);
+        }
+        ++iter;
+    }
+    return tokens;
 }

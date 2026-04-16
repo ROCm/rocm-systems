@@ -2,19 +2,15 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
-#include "helper.hpp"
 #include "sdk_wrapper.h"
 
-#include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <shared_mutex>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -131,8 +127,12 @@ private:
     std::shared_ptr<SdkWrapper>            m_sdk_wrapper;
     std::unordered_map<uint64_t, uint64_t> m_kernel_dispatch_count_by_kernel_id{};
     std::shared_mutex                      m_kernel_id_iteration_mutex;
-    std::shared_mutex                      m_mutex                                             = {};
+    std::shared_mutex                      m_mutex = {};
     std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> m_profile_cache_per_agent = {};
     std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_per_agent = {};
+
+    static std::string truncate_name(std::string_view name);
+    static std::string cxa_demangle(std::string_view _mangled_name, int* _status);
+    static std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern);
 };
 }  // namespace rocprofiler_compute_tool

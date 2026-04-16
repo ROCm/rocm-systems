@@ -8,8 +8,7 @@ add_library(${target} SHARED
     counters_writer.cpp
     sdk_callbacks.h
     sdk_callbacks.cpp
-    helper.hpp
-    helper.cpp
+    
     input_parameters.h
     input_parameters.cpp
     sdk_wrapper.h

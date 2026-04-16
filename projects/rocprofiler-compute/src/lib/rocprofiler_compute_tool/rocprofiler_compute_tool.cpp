@@ -12,6 +12,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 using namespace rocprofiler_compute_tool;
 
