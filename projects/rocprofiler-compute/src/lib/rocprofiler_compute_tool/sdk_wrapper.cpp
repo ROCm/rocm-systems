@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 #include "sdk_wrapper.h"
 
-#include <exception>
 #include <iostream>
 #include <sstream>
 #include <string>

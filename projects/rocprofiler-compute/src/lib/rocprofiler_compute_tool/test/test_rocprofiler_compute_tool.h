@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "mocks.h"
+#include "rocprofiler_compute_tool.h"
 
 #include <memory>
 

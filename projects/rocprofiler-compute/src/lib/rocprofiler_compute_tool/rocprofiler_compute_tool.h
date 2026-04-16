@@ -3,8 +3,9 @@
 #pragma once
 #include "counters_writer.h"
 #include "input_parameters.h"
-#include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
+
+#include <rocprofiler-sdk/registration.h>
 
 #include <memory>
 
@@ -19,4 +20,4 @@ void set_input_parameters(const std::shared_ptr<InputParameters>& parameters);
 void set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper);
 void set_csv_writer(const std::shared_ptr<CountersWriter>& csv_writer);
 void reset_cfg();
-}
+}  // namespace rocprofiler_compute_tool::test_knobs

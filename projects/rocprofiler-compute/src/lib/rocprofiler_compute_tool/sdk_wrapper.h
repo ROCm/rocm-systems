@@ -1,7 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
-#include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofiler_compute_tool
