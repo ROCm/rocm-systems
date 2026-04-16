@@ -322,6 +322,7 @@ jobs:
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
           echo "Install rocprof-trace-decoder..."
+          rm -f ${{ env.ROCM_PATH }}/lib/librocprof-trace-decoder*
           cmake -B build-rocprof-trace-decoder \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
@@ -653,6 +654,7 @@ jobs:
         working-directory: projects/rocprof-trace-decoder
         run: |
           echo "Install rocprof-trace-decoder..."
+          rm -f ${{ env.ROCM_PATH }}/lib/librocprof-trace-decoder*
           python3 -m venv ${{ env.PYTHON_VENV_PATH }}
           source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
