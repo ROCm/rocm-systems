@@ -49,6 +49,12 @@ public:
         std::vector<std::string> counter_names;
     };
 
+    struct query_counter_record_info
+    {
+        uint64_t counter_instance_id = 0;
+        uint64_t counter_id          = 0;
+    };
+
     ~MockSdkWrapper() override = default;
     void create_context(rocprofiler_context_id_t* context_id) override;
     void configure_callback_dispatch_counting_service(
@@ -83,6 +89,7 @@ public:
     const std::vector<uint64_t>&                       get_started_contexts() const;
     const std::vector<dispatch_counting_service_info>& get_dispatch_counting_service_info() const;
     const std::vector<create_counter_config_info>&     get_create_counter_config_info() const;
+    const std::vector<query_counter_record_info>&      get_query_counter_record_info() const;
 
 private:
     std::vector<rocprofiler_counter_id_t> get_counters() const;
@@ -91,6 +98,7 @@ private:
     std::vector<uint64_t>                       m_started_contexts;
     std::vector<dispatch_counting_service_info> m_dispatch_counting_service_info;
     std ::vector<create_counter_config_info>    m_create_counter_config_info;
+    std::vector<query_counter_record_info>      m_query_counter_record_info;
     std::vector<std::string>                    m_counter_names;
 };
 

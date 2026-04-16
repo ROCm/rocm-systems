@@ -70,10 +70,10 @@ void MockSdkWrapper::configure_callback_dispatch_counting_service(
 {
     m_dispatch_counting_service_info.push_back(
         dispatch_counting_service_info{context_id.handle,
-                                            reinterpret_cast<void*>(dispatch_callback),
-                                            dispatch_callback_args,
-                                            reinterpret_cast<void*>(record_callback),
-                                            record_callback_args});
+                                       reinterpret_cast<void*>(dispatch_callback),
+                                       dispatch_callback_args,
+                                       reinterpret_cast<void*>(record_callback),
+                                       record_callback_args});
 }
 
 void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t context_id,
@@ -140,6 +140,8 @@ void MockSdkWrapper::create_counter_config(rocprofiler_agent_id_t           agen
 void MockSdkWrapper::query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                              rocprofiler_counter_id_t*         counter_id)
 {
+    m_query_counter_record_info.push_back({id, id});
+    counter_id->handle = id;
 }
 
 void MockSdkWrapper::set_available_counters(const std::vector<std::string>& counter_names)
@@ -157,7 +159,8 @@ const std::vector<uint64_t>& MockSdkWrapper::get_started_contexts() const
     return m_started_contexts;
 }
 
-const std::vector<MockSdkWrapper::dispatch_counting_service_info>& MockSdkWrapper::get_dispatch_counting_service_info() const
+const std::vector<MockSdkWrapper::dispatch_counting_service_info>&
+    MockSdkWrapper::get_dispatch_counting_service_info() const
 {
     return m_dispatch_counting_service_info;
 }
@@ -165,6 +168,11 @@ const std::vector<MockSdkWrapper::dispatch_counting_service_info>& MockSdkWrappe
 const std::vector<MockSdkWrapper::create_counter_config_info>& MockSdkWrapper::get_create_counter_config_info() const
 {
     return m_create_counter_config_info;
+}
+
+const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::get_query_counter_record_info() const
+{
+    return m_query_counter_record_info;
 }
 
 /////////////////////////////////////////////////////////////////////////

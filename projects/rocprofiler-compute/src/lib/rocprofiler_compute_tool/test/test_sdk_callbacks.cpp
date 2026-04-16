@@ -110,20 +110,49 @@ TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfigured)
     EXPECT_EQ(created_config_info[1].counter_names, m_counters_pmc1);
 }
 
+TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
+{
+    constexpr uint64_t                           counter_id    = 10;
+    const std::string                            counter_name  = "counter10";
+    constexpr double                             counter_value = 11.;
+    rocprofiler_dispatch_counting_service_data_t dispatch_data;
+    dispatch_data.dispatch_info.dispatch_id        = 100;
+    dispatch_data.dispatch_info.agent_id.handle    = 200;
+    dispatch_data.dispatch_info.kernel_id          = 300;
+    dispatch_data.dispatch_info.group_segment_size = 400;
+
+    std::vector<rocprofiler_counter_record_t> record_data(2);
+    record_data[0].counter_value = counter_value;
+    record_data[0].id            = counter_id;
+
+    m_tool_data->counter_id_name_map[counter_id] = counter_name;
+
+    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), &m_tool_data);
+
+    auto query_record_info = m_sdk_wrapper->get_query_counter_record_info();
+    EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
+    EXPECT_EQ(m_tool_data->counter_records.size(), query_record_info.size());
+    EXPECT_EQ(m_tool_data->counter_records[0].dispatch_id, dispatch_data.dispatch_info.dispatch_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].agent_id, dispatch_data.dispatch_info.agent_id.handle);
+    EXPECT_EQ(m_tool_data->counter_records[0].kernel_id, dispatch_data.dispatch_info.kernel_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].LDS_memory_size,
+              dispatch_data.dispatch_info.group_segment_size);
+    EXPECT_EQ(m_tool_data->counter_records[0].counter_id, query_record_info[0].counter_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].counter_name, counter_name);
+    EXPECT_EQ(m_tool_data->counter_records[0].counter_value, counter_value);
+}
+
 TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_DispatchCbReturnsNoConfig)
 {
     // FIXME: This test currently disabled because current implementation of dispatch_callback
     // tries to create counters config even if there are no counters available for it.
     m_tool_data->requested_counters = convert_counters_per_pmc_to_str({m_counters_pmc0, m_counters_pmc1});
 
-    rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
-    dispatch_data.dispatch_info.kernel_id                      = 1;
-    dispatch_data.dispatch_info.agent_id.handle                = 0xff;
-    rocprofiler_counter_config_id_t config{m_invalid_config_id};
+    constexpr rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
+    rocprofiler_counter_config_id_t                        config{m_invalid_config_id};
     m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
 
     EXPECT_EQ(config.handle, m_invalid_config_id);
-    
 }
 
 TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_DispatchCbReturnsResultForThemOnly)
