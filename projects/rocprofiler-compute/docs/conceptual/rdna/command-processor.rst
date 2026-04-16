@@ -11,7 +11,7 @@ Command processor (CP)
 The command processor (CP) connects the host and kernel driver to on-GPU
 scheduling. During the process it pulls work from HSA queues, decodes packets, and dispatches the kernel
 launches to the front-end (SPI / WGP path). On Instinct GPUs, the profiler
-often seperates the metrics into command processor fetcher (CPF) and command processor packet processor (CPC). The
+often seperates the metrics into command processor fetcher (CPF) and command processor compute (CPC). The
 gfx1151 analysis panels emphasize CPC and ME (Micro Engine) activity, including utilization,
 interface utilization, stall cycles, memory requests, and instruction cache.
 
