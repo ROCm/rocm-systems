@@ -46,3 +46,37 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
                       rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
                       rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
+
+struct kernel_filtering_test_params_t
+{
+    std::string mangled_kernel_name;
+    std::string demangled_kernel_name;
+    std::string kernel_regex;
+};
+
+class TestSdkCallbacksKernelFiltering
+    : public TestSdkCallbacks
+    , public ::testing::WithParamInterface<kernel_filtering_test_params_t>
+{
+protected:
+    void SetUp() override;
+    kernel_filtering_test_params_t m_filtering_params = {};
+};
+
+INSTANTIATE_TEST_SUITE_P(Kernelfiltering,
+                         TestSdkCallbacksKernelFiltering,
+                         ::testing::Values(kernel_filtering_test_params_t{"_Z10my_kernelv",
+                                                                          "my_kernel()",
+                                                                          ".*my_kernel.*"}));
+
+//{"_ZN3hip12vector_add_1Ev", "hip::vector_add_1()", ".*vector_add.*"},
+
+//{"_Z6kernelIiEvv", "void kernel<int>()", ".*kernel.*"},
+
+//{"_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_15gpu_kernel_implIZZZNS0_31direct_copy_"
+// "kernel_cuda_gpu_nuERKNS_10TensorIterEEENKUlvE_clEvEUlvE_EEvS5_T_EUlfE_EEvS5_SB_",
+// "void at::native::elementwise_kernel<128, 4, "
+// "at::native::gpu_kernel_impl<direct_copy_kernel_cuda_gpu_nu(at::TensorIter "
+// "const&)::{lambda()#1}::operator()() const::{lambda()#1}>(at::TensorIter const&, "
+// "{lambda()#1})::{lambda(float)#1}>(at::TensorIter const&, {lambda(float)#1})",
+// ".*elementwise_kernel.*"}));

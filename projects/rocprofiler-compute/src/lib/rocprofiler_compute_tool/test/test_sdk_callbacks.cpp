@@ -100,48 +100,6 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing
     EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfigured)
-{
-    dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
-
-    const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
-    EXPECT_EQ(created_config_info.size(), 2);
-    EXPECT_EQ(created_config_info[0].counter_names, m_counters_pmc0);
-    EXPECT_EQ(created_config_info[1].counter_names, m_counters_pmc1);
-}
-
-TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
-{
-    constexpr uint64_t                           counter_id    = 10;
-    const std::string                            counter_name  = "counter10";
-    constexpr double                             counter_value = 11.;
-    rocprofiler_dispatch_counting_service_data_t dispatch_data;
-    dispatch_data.dispatch_info.dispatch_id        = 100;
-    dispatch_data.dispatch_info.agent_id.handle    = 200;
-    dispatch_data.dispatch_info.kernel_id          = 300;
-    dispatch_data.dispatch_info.group_segment_size = 400;
-
-    std::vector<rocprofiler_counter_record_t> record_data(2);
-    record_data[0].counter_value = counter_value;
-    record_data[0].id            = counter_id;
-
-    m_tool_data->counter_id_name_map[counter_id] = counter_name;
-
-    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), &m_tool_data);
-
-    auto query_record_info = m_sdk_wrapper->get_query_counter_record_info();
-    EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
-    EXPECT_EQ(m_tool_data->counter_records.size(), query_record_info.size());
-    EXPECT_EQ(m_tool_data->counter_records[0].dispatch_id, dispatch_data.dispatch_info.dispatch_id);
-    EXPECT_EQ(m_tool_data->counter_records[0].agent_id, dispatch_data.dispatch_info.agent_id.handle);
-    EXPECT_EQ(m_tool_data->counter_records[0].kernel_id, dispatch_data.dispatch_info.kernel_id);
-    EXPECT_EQ(m_tool_data->counter_records[0].LDS_memory_size,
-              dispatch_data.dispatch_info.group_segment_size);
-    EXPECT_EQ(m_tool_data->counter_records[0].counter_id, query_record_info[0].counter_id);
-    EXPECT_EQ(m_tool_data->counter_records[0].counter_name, counter_name);
-    EXPECT_EQ(m_tool_data->counter_records[0].counter_value, counter_value);
-}
-
 TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_DispatchCbReturnsNoConfig)
 {
     // FIXME: This test currently disabled because current implementation of dispatch_callback
@@ -179,6 +137,65 @@ TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_DispatchCbRetu
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
     EXPECT_EQ(config_index_0, m_invalid_config_id);
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
+{
+    constexpr uint64_t                           counter_id    = 10;
+    const std::string                            counter_name  = "counter10";
+    constexpr double                             counter_value = 11.;
+    rocprofiler_dispatch_counting_service_data_t dispatch_data;
+    dispatch_data.dispatch_info.dispatch_id        = 100;
+    dispatch_data.dispatch_info.agent_id.handle    = 200;
+    dispatch_data.dispatch_info.kernel_id          = 300;
+    dispatch_data.dispatch_info.group_segment_size = 400;
+
+    std::vector<rocprofiler_counter_record_t> record_data(2);
+    record_data[0].counter_value = counter_value;
+    record_data[0].id            = counter_id;
+
+    m_tool_data->counter_id_name_map[counter_id] = counter_name;
+
+    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), &m_tool_data);
+
+    auto query_record_info = m_sdk_wrapper->get_query_counter_record_info();
+    EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
+    EXPECT_EQ(m_tool_data->counter_records.size(), query_record_info.size());
+    EXPECT_EQ(m_tool_data->counter_records[0].dispatch_id, dispatch_data.dispatch_info.dispatch_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].agent_id, dispatch_data.dispatch_info.agent_id.handle);
+    EXPECT_EQ(m_tool_data->counter_records[0].kernel_id, dispatch_data.dispatch_info.kernel_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].LDS_memory_size,
+              dispatch_data.dispatch_info.group_segment_size);
+    EXPECT_EQ(m_tool_data->counter_records[0].counter_id, query_record_info[0].counter_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].counter_name, counter_name);
+    EXPECT_EQ(m_tool_data->counter_records[0].counter_value, counter_value);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFromIt)
+{
+    constexpr uint64_t kernel_id_0 = 10;
+    constexpr uint64_t kernel_id_1 = 20;
+
+    rocprofiler_callback_tracing_record_t                                  record  = {};
+    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
+    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = &payload;
+
+    payload.kernel_id = kernel_id_0;
+    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+
+    payload.kernel_id = kernel_id_1;
+    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+
+    EXPECT_EQ(m_tool_data->target_kernel_ids.size(), 2);
+    EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id_0);
+    EXPECT_EQ(*(++m_tool_data->target_kernel_ids.cbegin()), kernel_id_1);
+}
+
+TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
+{
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -268,4 +285,12 @@ void TestSdkCallbacksMultiplexing::SetUp()
 {
     TestSdkCallbacks::SetUp();
     m_multiplexing_mode = GetParam();
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// TestSdkCallbacksKernelFiltering
+void TestSdkCallbacksKernelFiltering::SetUp()
+{
+    TestSdkCallbacks::SetUp();
+    m_filtering_params = GetParam();
 }

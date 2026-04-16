@@ -132,7 +132,7 @@ private:
     std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_per_agent = {};
 
     static std::string truncate_name(std::string_view name);
-    static std::string cxa_demangle(std::string_view _mangled_name, int* _status);
+    static std::string cxa_demangle(const std::string& mangled_name, int* status);
     static std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern);
 };
 }  // namespace rocprofiler_compute_tool

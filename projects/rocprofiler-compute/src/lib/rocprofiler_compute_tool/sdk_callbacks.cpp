@@ -2,13 +2,15 @@
 // SPDX-License-Identifier:  MIT
 #include "sdk_callbacks.h"
 
+#include "gsl_assert.h"
+
+#include <cxxabi.h>
+
 #include <algorithm>
 #include <iostream>
 #include <map>
-#include <cxxabi.h>
 #include <regex>
 #include <sstream>
-#include "gsl_assert.h"
 
 using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
@@ -318,11 +320,7 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
         record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        auto* data            = static_cast<kernel_symbol_data_t*>(record.payload);
-        int   demangle_status = 0;
-        auto  kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
-        kernel_name           = truncate_name(kernel_name);
-
+        auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
         // check if regex can be found in kernel name matches regex from tool data,
         // if matches store kernel id
         auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(callback_data);
@@ -333,6 +331,10 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         {
             try
             {
+                int  demangle_status = 0;
+                auto kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
+                kernel_name          = truncate_name(kernel_name);
+
                 std::regex re(tool->kernel_filter_include_regex);
                 if (!kernel_name.empty() && std::regex_search(kernel_name, re))
                 {
@@ -408,16 +410,16 @@ std::string SdkCallbacksImpl::truncate_name(std::string_view name)
     return std::string{name.substr(rend - rit, rit - rbeg)};
 }
 
-std::string SdkCallbacksImpl::cxa_demangle(std::string_view _mangled_name, int* _status)
+std::string SdkCallbacksImpl::cxa_demangle(const std::string& mangled_name, int* status)
 {
     // return the mangled since there is no buffer
-    if (_mangled_name.empty())
+    if (mangled_name.empty())
     {
-        *_status = -2;
+        *status = -2;
         return std::string{};
     }
 
-    auto _demangled_name = std::string{_mangled_name};
+    auto _demangled_name = std::string{mangled_name};
 
     // PARAMETERS to __cxa_demangle
     //  mangled_name:
@@ -435,8 +437,8 @@ std::string SdkCallbacksImpl::cxa_demangle(std::string_view _mangled_name, int* 
     //  status:
     //      *status is set to one of the following values
     size_t _demang_len = 0;
-    char*  _demang = abi::__cxa_demangle(_demangled_name.c_str(), nullptr, &_demang_len, _status);
-    switch (*_status)
+    char*  _demang = abi::__cxa_demangle(_demangled_name.c_str(), nullptr, &_demang_len, status);
+    switch (*status)
     {
     //  0 : The demangling operation succeeded.
     // -1 : A memory allocation failure occurred.
@@ -462,7 +464,7 @@ std::string SdkCallbacksImpl::cxa_demangle(std::string_view _mangled_name, int* 
     case -3:
     {
         std::clog << "[rocprofiler-compute] Invalid argument in: (\"" << _demangled_name
-                  << "\", nullptr, nullptr, " << static_cast<void*>(_status) << ")" << std::endl;
+                  << "\", nullptr, nullptr, " << static_cast<void*>(status) << ")" << std::endl;
         break;
     }
     default:
@@ -470,8 +472,8 @@ std::string SdkCallbacksImpl::cxa_demangle(std::string_view _mangled_name, int* 
     };
 
     // if it "demangled" but the length is zero, set the status to -2
-    if (_demang_len == 0 && *_status == 0)
-        *_status = -2;
+    if (_demang_len == 0 && *status == 0)
+        *status = -2;
 
     // free allocated buffer
     ::free(_demang);
