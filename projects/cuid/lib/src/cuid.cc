@@ -219,6 +219,7 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
         || dev_path_str.find("/sys/class/net/") != std::string::npos
         || dev_path_str.find("/sys/class/drm/") != std::string::npos
         || dev_path_str.find("/sys/class/accel/") != std::string::npos
+        || dev_path_str.find("/sys/bus/pci/devices/") != std::string::npos
         || dev_path_str.find("/sys/devices/system/cpu/") != std::string::npos) {
         real_dev_path = dev_path_str;
     } else {
