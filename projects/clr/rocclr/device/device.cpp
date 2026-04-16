@@ -673,12 +673,17 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
+  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+    // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
+    // Without this, roc::Device::init() returns true & disables PAL path in below code
+    GPU_ENABLE_PAL = 1;
+  }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
 // GPU stack. The order of initialization is signiicant and if changed
 // amd::Device::registerDevice() must be accordingly modified.
 #if defined(WITH_HSA_DEVICE)
-  if ((GPU_ENABLE_PAL != 1) || flagIsDefault(GPU_ENABLE_PAL)) {
+  if ((GPU_ENABLE_PAL == 0) || (GPU_ENABLE_PAL == 2)) {
     // Return value of roc::Device::init()
     // If returned false, error initializing HSA stack.
     // If returned true, either HSA not installed or HSA stack
