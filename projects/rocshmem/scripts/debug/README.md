@@ -8,7 +8,9 @@ AMD's ROCm debugger (`rocgdb`).
 | File | Purpose |
 |---|---|
 | `rocgdb_deadlock_analysis.py` | rocgdb Python script: coalesces GPU wavefront backtraces, identifies rocSHMEM API entry points, and provides deadlock hints |
-| `attach_deadlock_analysis.sh` | Shell wrapper: finds all running instances of an executable, attaches to each, saves per-process output, prints a compact summary |
+| `attach_deadlock_analysis.sh` | Shell wrapper: finds all running instances of an executable on the local node, attaches to each, saves per-process output, prints a compact summary |
+| `mpiexec_deadlock_analysis.sh` | Multi-node wrapper: deploys `attach_deadlock_analysis.sh` to every node via mpiexec, then runs cross-rank coalescing |
+| `cross_rank_deadlock_analysis.py` | Cross-rank coalescer: reads per-rank output files, groups identical backtrace patterns across ranks, highlights patterns uncommon among ranks |
 | `deadlock_test.cc` | Intentional-deadlock test program used to validate the scripts |
 
 ---
