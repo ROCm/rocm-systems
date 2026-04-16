@@ -1762,15 +1762,14 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
   switch (attribute_u) {
     case HSA_AGENT_INFO_NAME: {
-      std::string name = isa_->GetProcessorName();
-      assert(name.size() <= hsa_name_size);
-      std::memset(value, 0, hsa_name_size);
-      char* temp = reinterpret_cast<char*>(value);
-      std::strcpy(temp, name.c_str());
+      const std::string& name = isa_->GetProcessorName();
+      const size_t n = std::min(name.size(), hsa_name_size);
+      std::memset(value, 0, hsa_name_size + 1);
+      std::memcpy(value, name.data(), n);
       break;
     }
     case HSA_AGENT_INFO_VENDOR_NAME:
-      std::memset(value, 0, hsa_name_size);
+      std::memset(value, 0, hsa_name_size + 1);
       std::memcpy(value, "AMD", sizeof("AMD"));
       break;
     case HSA_AGENT_INFO_FEATURE:
