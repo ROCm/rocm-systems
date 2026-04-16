@@ -339,6 +339,11 @@ def create_summary_queries(
         "scratch_memory": "operation",
     }
 
+    KERNEL_NAME_TYPE_MAP = {
+        "truncated": "truncated_kernel_name",
+        "mangled": "kernel_name",
+    }
+
     avoid_view_pattern = ("rocpd", "region", "counter", "pmc")
     required_columns = {"duration"}
 
@@ -364,16 +369,19 @@ def create_summary_queries(
         name_column = NAME_COLUMN_MAP.get(view_name, "name")
         view_query = ""
 
-        if view_name == "kernels" and kernel_name_type == "truncated":
-            # Join with kernel_symbols to get truncated_kernel_name
-            view_query = """
-                SELECT K.*, COALESCE(KS.truncated_kernel_name, K.name) AS truncated_name
+        if view_name == "kernels" and kernel_name_type is not None:
+            # Use display_name as fallback if kernel_name_type is not in the map
+            display_name_column = KERNEL_NAME_TYPE_MAP.get(
+                kernel_name_type, "display_name"
+            )
+            view_query = f"""
+                SELECT K.*, COALESCE(KS.{display_name_column}, K.name) AS display_name
                 FROM kernels K
                 LEFT JOIN kernel_symbols KS
                     ON K.kernel_id = KS.id
                     AND K.guid = KS.guid
             """
-            name_column = "truncated_name"
+            name_column = "display_name"
 
         # Create regular summary query
         summary_query_name, summary_query = generate_summary_query(
@@ -501,8 +509,15 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     output_path = kwargs.get("output_path", "./rocpd-output-data")
     region_categories = kwargs.get("region_categories", None)
     output_format = kwargs.get("format", "console")
+    mangled_kernels = kwargs.get("mangled_kernels", False)
     truncate_kernels = kwargs.get("truncate_kernels", False)
-    kernel_name_type = "truncated" if truncate_kernels else None
+
+    if mangled_kernels:
+        kernel_name_type = "mangled"
+    elif truncate_kernels:
+        kernel_name_type = "truncated"
+    else:
+        kernel_name_type = None
 
     if not check_function_availability(connection, "sqrt"):
         connection.create_function(
@@ -598,6 +613,12 @@ def add_args(parser):
         help="Specify region categories to include in the summary (example: HIP, HSA, RCCL, ROCDECODE, ROCJPEG, MARKER). If not specified, categories will be automatically retrieved from the database.",
     )
     summary_options.add_argument(
+        "--mangled-kernels",
+        action="store_true",
+        default=False,
+        help="Display mangled kernel names (do not demangle)",
+    )
+    summary_options.add_argument(
         "--truncate-kernels",
         action="store_true",
         default=False,
@@ -610,6 +631,7 @@ def add_args(parser):
             "domain_summary",
             "summary_by_rank",
             "region_categories",
+            "mangled_kernels",
             "truncate_kernels",
         ]
 

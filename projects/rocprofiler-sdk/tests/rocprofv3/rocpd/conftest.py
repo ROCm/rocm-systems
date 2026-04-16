@@ -97,6 +97,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to full kernels summary CSV file.",
     )
+    parser.addoption(
+        "--csv-input-mangled",
+        action="store",
+        help="Path to mangled kernels summary CSV file.",
+    )
 
     pd.set_option("display.width", 2000)
     # increase debug display of pandas dataframes
@@ -239,4 +244,15 @@ def csv_kernels_full(request):
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
 
+    return pd.read_csv(filename)
+
+
+@pytest.fixture
+def csv_kernels_mangled(request):
+    """Load mangled kernels summary CSV file"""
+    filename = request.config.getoption("--csv-input-mangled")
+    if not filename:
+        pytest.skip("--csv-input-mangled not provided")
+    if not os.path.exists(filename):
+        raise FileExistsError(f"{filename} does not exist")
     return pd.read_csv(filename)

@@ -182,58 +182,117 @@ def test_summary_region_category_none(summary_none_dir):
     )
 
 
+def _kernel_names(df):
+    """Extract kernel names from dataframe as list of strings."""
+    return [str(name) for name in df["Name"].tolist()]
+
+
+def _looks_demangled(name: str) -> bool:
+    """Check if kernel name appears to be demangled (has C++ syntax)."""
+    return "(" in name or "<" in name
+
+
+def _looks_mangled_cpp(name: str) -> bool:
+    """Check if kernel name appears to be C++ mangled (starts with _Z)."""
+    return name.startswith("_Z")
+
+
+def _assert_demangled_names(df):
+    """Verify that at least one kernel name is demangled."""
+    names = _kernel_names(df)
+
+    assert any(
+        _looks_demangled(name) for name in names
+    ), "Expected at least one demangled kernel name, but none contained '(' or '<'."
+
+
+def _assert_truncated_names(df):
+    """Verify that all kernel names are truncated."""
+    names = _kernel_names(df)
+
+    invalid_names = [name for name in names if _looks_demangled(name)]
+    assert not invalid_names, (
+        "Expected all kernel names to be truncated, "
+        f"but found non-truncated name: {invalid_names[0]}"
+    )
+
+
+def _assert_mangled_names(df):
+    """Verify that kernel names remain mangled/raw."""
+    names = _kernel_names(df)
+
+    demangled_names = [name for name in names if _looks_demangled(name)]
+    assert not demangled_names, (
+        "Expected no demangled kernel names when mangled names are requested, "
+        f"but found: {demangled_names[0]}"
+    )
+
+    mangled_names = [name for name in names if _looks_mangled_cpp(name)]
+    assert mangled_names, (
+        "Expected at least one C++ mangled kernel name starting with '_Z', "
+        "but none were found."
+    )
+
+
+def _assert_statistics_match(df1, df2, name1, name2):
+    """
+    Helper function to verify that statistics match between two kernel summaries.
+
+    Args:
+        df1: First dataframe
+        df2: Second dataframe (reference)
+        name1: Label for first dataframe (e.g., "truncated")
+        name2: Label for second dataframe (e.g., "full")
+    """
+    # Verify we have data
+    assert len(df1) > 0, f"No kernels found in {name1} summary"
+    assert len(df2) > 0, f"No kernels found in {name2} summary"
+
+    # Verify same number of entries
+    assert len(df1) == len(
+        df2
+    ), f"Mismatch in number of kernels: {name1}={len(df1)}, {name2}={len(df2)}"
+
+    # Verify statistics are preserved
+    total_calls_1 = df1["Calls"].sum()
+    total_calls_2 = df2["Calls"].sum()
+    assert (
+        total_calls_1 == total_calls_2
+    ), f"Total call count mismatch: {name1}={total_calls_1}, {name2}={total_calls_2}"
+
+    total_duration_1 = df1["Duration (Nsec)"].sum()
+    total_duration_2 = df2["Duration (Nsec)"].sum()
+    assert (
+        total_duration_1 == total_duration_2
+    ), f"Total duration mismatch: {name1}={total_duration_1}, {name2}={total_duration_2}"
+
+
 def test_summary_truncate_kernels(csv_kernels_truncated, csv_kernels_full):
     """
     Test that --truncate-kernels flag only affects kernel names, not statistics.
 
     This test verifies:
-    1. Full kernel names contain template parameters
-    2. Truncated kernel names don't contain template parameters
-    3. Both summaries have the same number of kernel entries
-    4. Statistics (calls, duration) are preserved between truncated and full summaries
+    1. Full kernel names and truncated kernel names are valid
+    2. Statistics (calls, duration) are preserved between truncated and full summaries
     """
-    truncated_kernels = csv_kernels_truncated
-    full_kernels = csv_kernels_full
 
-    # Verify we have data
-    assert len(truncated_kernels) > 0, "No kernels found in truncated summary"
-    assert len(full_kernels) > 0, "No kernels found in full summary"
+    _assert_demangled_names(csv_kernels_full)
+    _assert_truncated_names(csv_kernels_truncated)
+    _assert_statistics_match(csv_kernels_truncated, csv_kernels_full, "truncated", "full")
 
-    # Verify we have the same number of kernel entries
-    assert len(truncated_kernels) == len(
-        full_kernels
-    ), f"Mismatch in number of kernels: truncated={len(truncated_kernels)}, full={len(full_kernels)}"
 
-    # Verify full kernel names have template parameters
-    assert any(
-        "(" in str(row["Name"]) or "<" in str(row["Name"])
-        for idx, row in full_kernels.iterrows()
-    ), (
-        "No kernels with template parameters found. "
-        "Expected full kernel names to contain template parameters like '(unsigned int)' or '<T>'"
-    )
+def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full):
+    """
+    Test that --mangled-kernels flag only affects kernel names, not statistics.
 
-    # Verify truncated kernel names don't have template parameters
-    for idx, row in truncated_kernels.iterrows():
-        kernel_name = row["Name"]
-        assert (
-            "(" not in kernel_name and "<" not in kernel_name
-        ), f"Truncated kernel name still contains template parameters: {kernel_name}"
+    This test verifies:
+    1. Full kernel names and mangled kernel names are valid
+    2. Statistics (calls, duration) are preserved between mangled and demangled summaries
+    """
 
-    # Verify statistics are preserved (calls and duration)
-    total_calls_truncated = truncated_kernels["Calls"].sum()
-    total_calls_full = full_kernels["Calls"].sum()
-    assert total_calls_truncated == total_calls_full, (
-        f"Total call count mismatch: "
-        f"truncated={total_calls_truncated}, full={total_calls_full}"
-    )
-
-    total_duration_truncated = truncated_kernels["Duration (Nsec)"].sum()
-    total_duration_full = full_kernels["Duration (Nsec)"].sum()
-    assert total_duration_truncated == total_duration_full, (
-        f"Total duration mismatch: "
-        f"truncated={total_duration_truncated}, full={total_duration_full}"
-    )
+    _assert_demangled_names(csv_kernels_full)
+    _assert_mangled_names(csv_kernels_mangled)
+    _assert_statistics_match(csv_kernels_mangled, csv_kernels_full, "mangled", "full")
 
 
 if __name__ == "__main__":

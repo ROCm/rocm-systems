@@ -224,6 +224,20 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-generation-mangled
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank
+        --mangled-kernels -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary
+        -o out_mangled -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
 #########################################################################################
 #
 # Region category filtering tests
@@ -322,12 +336,27 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
+
+# Validate kernel name format tests (truncated, mangled)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-kernel-name-validation
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_summary_truncate_kernels
+         validate.py::test_summary_mangled_kernels
          --csv-input-summary
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary.csv
          --csv-input-truncated
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_trunc_kernels_summary.csv
-    TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+         --csv-input-mangled
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_mangled_kernels_summary.csv
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd;kernel-name"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
 # Validate region category filtering
