@@ -160,6 +160,11 @@ main(int argc, char** argv)
     float* Matrix             = nullptr;
 
     Matrix = (float*) malloc(NUM * sizeof(float));
+    if(!Matrix)
+    {
+        std::cerr << "roctx-pause-resume: malloc failed for Matrix\n";
+        return EXIT_FAILURE;
+    }
     // initialize the input data
     for(auto i = 0; i < NUM; i++)
     {
@@ -236,7 +241,8 @@ main(int argc, char** argv)
     checkHipErrors(hipStreamSynchronize(stream));
 
     // free the resources on device side
-    checkHipErrors(hipFree(result));
+    checkHipErrors(hipFreeAsync(result, stream));
+    checkHipErrors(hipStreamSynchronize(stream));
     checkHipErrors(hipFree(gpuMatrix));
     checkHipErrors(hipFree(gpuTransposeMatrix));
 
