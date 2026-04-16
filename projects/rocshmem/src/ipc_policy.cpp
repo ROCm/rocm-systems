@@ -32,7 +32,7 @@
 #include "envvar.hpp"
 #include "util.hpp"
 #include "log.hpp"
-#include "fabric/pod_detection.hpp"
+#include "memfabric/pod_detection.hpp"
 
 namespace rocshmem {
 

@@ -42,13 +42,13 @@ AmdsmiLoader::AmdsmiLoader()
   // Try to load the AMD SMI library
   amdsmi_handle = dlopen("libamd_smi.so", RTLD_LAZY);
   if (!amdsmi_handle) {
-    DPRINTF("Failed to load libamd_smi.so: %s\n", dlerror());
+    LOG_TRACE("Failed to load libamd_smi.so: %s", dlerror());
     return;
   }
 
   int err = init_function_table();
   if (err != ROCSHMEM_SUCCESS) {
-    DPRINTF("Could not construct AMD SMI function table\n");
+    LOG_TRACE("Could not construct AMD SMI function table");
   }
 }
 

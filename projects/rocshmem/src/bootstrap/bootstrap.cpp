@@ -35,8 +35,8 @@
 #include "utils.hpp"
 #include "util.hpp"
 #include "socket.hpp"
-#include "fabric/amdsmi_loader.hpp"
-#include "fabric/pod_detection.hpp"
+#include "memfabric/amdsmi_loader.hpp"
+#include "memfabric/pod_detection.hpp"
 
 namespace rocshmem {
 
@@ -589,26 +589,26 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
   PodIds localPodIds = detectLocalPodIds();
   if (IS_PODIDS_ZERO(localPodIds)) {
     // Detection failed, return empty (will fallback to localRanks_)
-    DPRINTF("Rank %d: Pod detection failed, returning empty\n", rank_);
+    LOG_TRACE("Rank %d: Pod detection failed, returning empty", rank_);
     return ipcCapableRanks;
   }
 
-  DPRINTF("Rank %d: ppod_id[0-3]=%02x%02x%02x%02x, vpod_id=%u\n",
-          rank_, localPodIds.physicalPodId[0], localPodIds.physicalPodId[1],
-          localPodIds.physicalPodId[2], localPodIds.physicalPodId[3],
-          localPodIds.virtualPodId);
+  LOG_TRACE("Rank %d: ppod_id[0-3]=%02x%02x%02x%02x, vpod_id=%u",
+            rank_, localPodIds.physicalPodId[0], localPodIds.physicalPodId[1],
+            localPodIds.physicalPodId[2], localPodIds.physicalPodId[3],
+            localPodIds.virtualPodId);
 
   // AllGather pod IDs across all ranks using Bootstrap's allGather
   std::vector<PodIds> allPodIds(nRanks_);
   allPodIds[rank_] = localPodIds;
   allGather(allPodIds.data(), sizeof(PodIds));
 
-  DPRINTF("Rank %d completed allGather of PodIds\n", rank_);
+  LOG_TRACE("Rank %d completed allGather of PodIds", rank_);
 
   // Match IPC-capable ranks using the shared utility function
   ipcCapableRanks = matchIpcCapableRanks(rank_, allPodIds);
 
-  DPRINTF("Rank %d found %zu IPC-capable ranks\n", rank_, ipcCapableRanks.size());
+  LOG_TRACE("Rank %d found %zu IPC-capable ranks", rank_, ipcCapableRanks.size());
 
   return ipcCapableRanks;
 }
