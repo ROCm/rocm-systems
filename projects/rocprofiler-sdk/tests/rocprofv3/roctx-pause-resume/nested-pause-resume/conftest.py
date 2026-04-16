@@ -27,7 +27,7 @@ import os
 import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import collapse_dict_list, read_json_with_glob
 
 
 def pytest_addoption(parser):
@@ -41,6 +41,6 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    data = read_json_with_glob(filename_pattern, "JSON file")
+    return dotdict(collapse_dict_list(data))

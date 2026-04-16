@@ -32,7 +32,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input.txt extra_counters.yaml
     CONFIG pytest.ini
     ARGS --input
-         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1_extra/pmc_1/pmc1_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1_extra/pmc_1/pmc1_*_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc1-extra-counters)

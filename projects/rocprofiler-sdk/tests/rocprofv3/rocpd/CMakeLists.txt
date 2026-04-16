@@ -90,9 +90,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-otf2-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -104,10 +103,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-otf2-generation-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o rocpd-mp-output-test -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o rocpd-mp-output-test -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -126,9 +123,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-perfetto-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename --annotate-args
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename --annotate-args -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -140,11 +136,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-perfetto-generation-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f perfetto --kernel-rename
-        --group-by-queue -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o
-        out_mp -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f perfetto --kernel-rename --group-by-queue -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-multiproc -o out_mp -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -163,9 +156,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-csv-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -183,9 +175,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
@@ -197,10 +188,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-generation-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary -o out_mp -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_0_results.db
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary -o out_mp -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -248,9 +237,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-kernel
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories KERNEL -f csv -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd summary --region-categories KERNEL -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
@@ -263,9 +251,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-hip
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP -f csv -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
@@ -278,9 +265,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-multiple
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP KERNEL -f csv -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP KERNEL -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
@@ -293,9 +279,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-none
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories NONE -f csv -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd summary --region-categories NONE -f csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
@@ -323,19 +308,19 @@ rocprofiler_add_integration_validate_test(
          validate.py::test_arg_annotations_exist
          validate.py::test_event_id_annotations
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.json
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_results.otf2
          --otf2-sys-tree-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_results.otf2
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_results.pftrace
          --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_agent_info.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_counter_collection_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_regions_trace.csv
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
@@ -403,9 +388,8 @@ rocprofiler_add_integration_validate_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-package-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out*.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_*.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -417,9 +401,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-package-generation-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out*.db
+        sh -c
+        "${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi -i ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_*_*.db"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"

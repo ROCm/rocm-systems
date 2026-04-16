@@ -22,13 +22,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import json
 import pytest
 import pandas as pd
 import re
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    read_json_with_glob,
+    find_single_file,
+)
 
 
 def pytest_addoption(parser):
@@ -80,36 +83,42 @@ def extract_iteration_list(jobs, pass_):
     return tokenize(kernel_iteration_range)
 
 
-def process_config(out_file, input_config, pass_):
+def process_config(out_file_pattern, input_config_pattern, pass_):
 
     ret_dict = {}
 
-    with open(out_file, "r") as inp:
-        ret_dict["json_data"] = dotdict(collapse_dict_list(json.load(inp)))
+    ret_dict["json_data"] = dotdict(
+        collapse_dict_list(
+            read_json_with_glob(
+                out_file_pattern, f"pass {pass_+1} counter collection JSON"
+            )
+        )
+    )
 
-    with open(input_config, "r") as inp:
-        jobs = dotdict(collapse_dict_list(json.load(inp)))["jobs"]
-        ret_dict["iteration_range"] = extract_iteration_list(jobs, pass_)
+    jobs = dotdict(
+        collapse_dict_list(read_json_with_glob(input_config_pattern, "input config JSON"))
+    )["jobs"]
+    ret_dict["iteration_range"] = extract_iteration_list(jobs, pass_)
 
     return ret_dict
 
 
 @pytest.fixture
 def input_json_pass1(request):
-    out_file = request.config.getoption("--input-json-pass1")
-    input_config = request.config.getoption("--json-config")
-    return process_config(out_file, input_config, 0)
+    out_file_pattern = request.config.getoption("--input-json-pass1")
+    input_config_pattern = request.config.getoption("--json-config")
+    return process_config(out_file_pattern, input_config_pattern, 0)
 
 
 @pytest.fixture
 def input_json_pass2(request):
-    out_file = request.config.getoption("--input-json-pass2")
-    input_config = request.config.getoption("--json-config")
-    return process_config(out_file, input_config, 1)
+    out_file_pattern = request.config.getoption("--input-json-pass2")
+    input_config_pattern = request.config.getoption("--json-config")
+    return process_config(out_file_pattern, input_config_pattern, 1)
 
 
 @pytest.fixture
 def input_json_pass3(request):
-    out_file = request.config.getoption("--input-json-pass3")
-    input_config = request.config.getoption("--json-config")
-    return process_config(out_file, input_config, 2)
+    out_file_pattern = request.config.getoption("--input-json-pass3")
+    input_config_pattern = request.config.getoption("--json-config")
+    return process_config(out_file_pattern, input_config_pattern, 2)

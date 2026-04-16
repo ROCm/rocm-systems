@@ -32,21 +32,21 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k _pass
     ARGS --input-csv-pass1
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_1/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_1/out_*_counter_collection.csv
          --input-json-pass1
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_1/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_1/out_*_results.json
          --input-csv-pass2
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_2/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_2/out_*_counter_collection.csv
          --input-json-pass2
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_2/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_2/out_*_results.json
          --input-csv-pass3
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_3/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_3/out_*_counter_collection.csv
          --input-json-pass3
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_3/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_3/out_*_results.json
          --input-csv-pass4
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_*_counter_collection.csv
          --input-json-pass4
-         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_*_results.json
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-json)
@@ -71,7 +71,7 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_validate_counter_collection_csv_pmc1
     ARGS --input-csv-pmc1
-         ${CMAKE_CURRENT_BINARY_DIR}/cmd_input/pmc_1/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/cmd_input/pmc_1/out_*_counter_collection.csv
     TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-cmd)
@@ -95,21 +95,21 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k _pass
     ARGS --input-csv-pass1
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_1/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_1/out_*_counter_collection.csv
          --input-json-pass1
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_1/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_1/out_*_results.json
          --input-csv-pass2
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_2/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_2/out_*_counter_collection.csv
          --input-json-pass2
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_2/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_2/out_*_results.json
          --input-csv-pass3
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_3/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_3/out_*_counter_collection.csv
          --input-json-pass3
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_3/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_3/out_*_results.json
          --input-csv-pass4
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_*_counter_collection.csv
          --input-json-pass4
-         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_*_results.json
     TIMEOUT 120
     LABELS "integration-tests" FIXTURES
            rocprofv3-test-counter-collection-kernel-filtering-input-yaml)

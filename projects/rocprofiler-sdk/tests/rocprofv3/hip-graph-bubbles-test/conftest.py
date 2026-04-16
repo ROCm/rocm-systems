@@ -22,8 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import csv
 import pytest
+
+from rocprofiler_sdk.pytest_utils import read_csv_with_glob
 
 
 def pytest_addoption(parser):
@@ -54,17 +55,13 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def kernel_input_data(request):
-    filename = request.config.getoption("--kernel-input")
-    if filename is None:
+    filename_pattern = request.config.getoption("--kernel-input")
+    if filename_pattern is None:
         pytest.fail("--kernel-input argument is required but was not provided")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
+    data = read_csv_with_glob(filename_pattern, "kernel trace CSV")
     assert (
         len(data) > 0
-    ), f"CSV file '{filename}' contained no data rows. The profiler may have failed to produce output."
+    ), f"CSV file matching pattern '{filename_pattern}' contained no data rows. The profiler may have failed to produce output."
     return data
 
 

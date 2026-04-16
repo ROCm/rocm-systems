@@ -28,7 +28,12 @@ import pytest
 import json
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    find_single_file,
+    read_csv_with_glob,
+    read_json_with_glob,
+)
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
 
@@ -103,143 +108,95 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def agent_info_input_data(request):
-    filename = request.config.getoption("--agent-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--agent-input")
+    return read_csv_with_glob(filename_pattern, "agent info CSV file")
 
 
 @pytest.fixture
 def hsa_input_data(request):
-    filename = request.config.getoption("--hsa-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--hsa-input")
+    return read_csv_with_glob(filename_pattern, "HSA API trace CSV file")
 
 
 @pytest.fixture
 def kernel_input_data(request):
-    filename = request.config.getoption("--kernel-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--kernel-input")
+    return read_csv_with_glob(filename_pattern, "kernel trace CSV file")
 
 
 @pytest.fixture
 def memory_copy_input_data(request):
-    filename = request.config.getoption("--memory-copy-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--memory-copy-input")
+    return read_csv_with_glob(filename_pattern, "memory copy trace CSV file")
 
 
 @pytest.fixture
 def marker_input_data(request):
-    filename = request.config.getoption("--marker-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--marker-input")
+    return read_csv_with_glob(filename_pattern, "marker API trace CSV file")
 
 
 @pytest.fixture
 def hip_input_data(request):
-    filename = request.config.getoption("--hip-input")
-    data = []
-    if os.path.exists(filename):
-        with open(filename, "r") as inp:
-            reader = csv.DictReader(inp)
-            for row in reader:
-                data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--hip-input")
+    try:
+        return read_csv_with_glob(filename_pattern, "HIP API trace CSV file")
+    except:
+        return []
 
 
 @pytest.fixture
 def hip_stats_data(request):
-    filename = request.config.getoption("--hip-stats")
-    data = []
-    if os.path.exists(filename):
-        with open(filename, "r") as inp:
-            reader = csv.DictReader(inp)
-            for row in reader:
-                data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--hip-stats")
+    try:
+        return read_csv_with_glob(filename_pattern, "HIP stats CSV file")
+    except:
+        return []
 
 
 @pytest.fixture
 def hsa_stats_data(request):
-    filename = request.config.getoption("--hsa-stats")
-    data = []
-    if os.path.exists(filename):
-        with open(filename, "r") as inp:
-            reader = csv.DictReader(inp)
-            for row in reader:
-                data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--hsa-stats")
+    try:
+        return read_csv_with_glob(filename_pattern, "HSA stats CSV file")
+    except:
+        return []
 
 
 @pytest.fixture
 def kernel_stats_data(request):
-    filename = request.config.getoption("--kernel-stats")
-    data = []
-    if os.path.exists(filename):
-        with open(filename, "r") as inp:
-            reader = csv.DictReader(inp)
-            for row in reader:
-                data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--kernel-stats")
+    try:
+        return read_csv_with_glob(filename_pattern, "kernel stats CSV file")
+    except:
+        return []
 
 
 @pytest.fixture
 def memory_copy_stats_data(request):
-    filename = request.config.getoption("--memory-copy-stats")
-    data = []
-    if os.path.exists(filename):
-        with open(filename, "r") as inp:
-            reader = csv.DictReader(inp)
-            for row in reader:
-                data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--memory-copy-stats")
+    try:
+        return read_csv_with_glob(filename_pattern, "memory copy stats CSV file")
+    except:
+        return []
 
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    data = read_json_with_glob(filename_pattern, "JSON file")
+    return dotdict(collapse_dict_list(data))
 
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    filename = find_single_file(filename_pattern, "Perfetto trace file")
     return PerfettoReader(filename).read()[0]
 
 
 @pytest.fixture
 def otf2_data(request):
-    filename = request.config.getoption("--otf2-input")
+    filename_pattern = request.config.getoption("--otf2-input")
+    filename = find_single_file(filename_pattern, "OTF2 trace file")
     return OTF2Reader(filename).read()[0]

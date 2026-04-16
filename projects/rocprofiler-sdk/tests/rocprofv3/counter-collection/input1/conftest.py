@@ -22,12 +22,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import json
 import pytest
 import pandas as pd
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    read_json_with_glob,
+    find_single_file,
+)
 
 
 def pytest_addoption(parser):
@@ -41,13 +44,17 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_data(request):
-    filename = request.config.getoption("--input")
+    filename_pattern = request.config.getoption("--input")
+    filename = find_single_file(filename_pattern, "counter collection CSV")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    return dotdict(
+        collapse_dict_list(
+            read_json_with_glob(filename_pattern, "counter collection JSON")
+        )
+    )

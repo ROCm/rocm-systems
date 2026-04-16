@@ -35,9 +35,9 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input.txt
     CONFIG pytest.ini
     ARGS --input
-         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1/pmc_1/pmc1_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1/pmc_1/pmc1_*_counter_collection.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1/pmc_1/pmc1_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1/pmc_1/pmc1_*_results.json
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc1)

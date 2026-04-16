@@ -30,7 +30,12 @@ import os
 import io
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    find_single_file,
+    read_csv_with_glob,
+    read_json_with_glob,
+)
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
 
@@ -115,14 +120,15 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    data = read_json_with_glob(filename_pattern, "JSON file")
+    return dotdict(collapse_dict_list(data))
 
 
 @pytest.fixture
 def pftrace_reader(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    filename = find_single_file(filename_pattern, "Perfetto trace file")
     return PerfettoReader(filename)
 
 
@@ -133,7 +139,8 @@ def pftrace_data(pftrace_reader):
 
 @pytest.fixture
 def otf2_data(request):
-    filename = request.config.getoption("--otf2-input")
+    filename_pattern = request.config.getoption("--otf2-input")
+    filename = find_single_file(filename_pattern, "OTF2 trace file")
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]
@@ -141,7 +148,8 @@ def otf2_data(request):
 
 @pytest.fixture
 def otf2_system_tree_node_data(request):
-    filename = request.config.getoption("--otf2-sys-tree-input")
+    filename_pattern = request.config.getoption("--otf2-sys-tree-input")
+    filename = find_single_file(filename_pattern, "OTF2 system tree file")
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]
@@ -149,9 +157,10 @@ def otf2_system_tree_node_data(request):
 
 @pytest.fixture
 def csv_data(request):
-    filenames = request.config.getoption("--csv-input")
+    filename_patterns = request.config.getoption("--csv-input")
     return [
-        (filename, list(csv.DictReader(open(filename, "r")))) for filename in filenames
+        (filename, read_csv_with_glob(filename, "CSV file"))
+        for filename in filename_patterns
     ]
 
 

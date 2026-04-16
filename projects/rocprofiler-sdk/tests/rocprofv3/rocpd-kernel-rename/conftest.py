@@ -30,7 +30,11 @@ import os
 import io
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    read_csv_with_glob,
+    read_json_with_glob,
+)
 
 
 def pytest_addoption(parser):
@@ -63,43 +67,27 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    data = read_json_with_glob(filename_pattern, "JSON file")
+    return dotdict(collapse_dict_list(data))
 
 
 @pytest.fixture
 def rename_csv_data(request):
-    filename = request.config.getoption("--rename-csv-input")
-    data = []
-    if not os.path.isfile(filename):
-        raise FileExistsError(f"{filename} does not exist")
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-    return data
+    filename_pattern = request.config.getoption("--rename-csv-input")
+    return read_csv_with_glob(filename_pattern, "kernel rename CSV file")
 
 
 @pytest.fixture
 def no_rename_csv_data(request):
-    filename = request.config.getoption("--no-rename-csv-input")
-    data = []
-    if not os.path.isfile(filename):
-        raise FileExistsError(f"{filename} does not exist")
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-    return data
+    filename_pattern = request.config.getoption("--no-rename-csv-input")
+    return read_csv_with_glob(filename_pattern, "no-rename CSV file")
 
 
 @pytest.fixture
 def generated_rename_csv_data(request):
     filename = request.config.getoption("--generated-rename-csv-input")
     data = []
-    if not os.path.isfile(filename):
-        raise FileExistsError(f"{filename} does not exist")
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
@@ -111,8 +99,6 @@ def generated_rename_csv_data(request):
 def generated_no_rename_csv_data(request):
     filename = request.config.getoption("--generated-no-rename-csv-input")
     data = []
-    if not os.path.isfile(filename):
-        raise FileExistsError(f"{filename} does not exist")
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:

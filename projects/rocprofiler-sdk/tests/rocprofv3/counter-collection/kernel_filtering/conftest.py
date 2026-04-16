@@ -22,12 +22,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import json
 import pytest
 import pandas as pd
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    read_json_with_glob,
+    find_single_file,
+)
 
 
 def pytest_addoption(parser):
@@ -89,62 +92,79 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_csv_pass1(request):
-    filename = request.config.getoption("--input-csv-pass1")
+    filename_pattern = request.config.getoption("--input-csv-pass1")
+    filename = find_single_file(filename_pattern, "pass 1 counter collection CSV")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pass2(request):
-    filename = request.config.getoption("--input-csv-pass2")
+    filename_pattern = request.config.getoption("--input-csv-pass2")
+    filename = find_single_file(filename_pattern, "pass 2 counter collection CSV")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pass3(request):
-    filename = request.config.getoption("--input-csv-pass3")
+    filename_pattern = request.config.getoption("--input-csv-pass3")
+    filename = find_single_file(filename_pattern, "pass 3 counter collection CSV")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pass4(request):
-    filename = request.config.getoption("--input-csv-pass4")
+    filename_pattern = request.config.getoption("--input-csv-pass4")
+    filename = find_single_file(filename_pattern, "pass 4 counter collection CSV")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_csv_pmc1(request):
-    filename = request.config.getoption("--input-csv-pmc1")
+    filename_pattern = request.config.getoption("--input-csv-pmc1")
+    filename = find_single_file(filename_pattern, "pmc1 counter collection CSV")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_json_pass1(request):
-    filename = request.config.getoption("--input-json-pass1")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--input-json-pass1")
+    return dotdict(
+        collapse_dict_list(
+            read_json_with_glob(filename_pattern, "pass 1 counter collection JSON")
+        )
+    )
 
 
 @pytest.fixture
 def input_json_pass2(request):
-    filename = request.config.getoption("--input-json-pass2")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--input-json-pass2")
+    return dotdict(
+        collapse_dict_list(
+            read_json_with_glob(filename_pattern, "pass 2 counter collection JSON")
+        )
+    )
 
 
 @pytest.fixture
 def input_json_pass3(request):
-    filename = request.config.getoption("--input-json-pass3")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--input-json-pass3")
+    return dotdict(
+        collapse_dict_list(
+            read_json_with_glob(filename_pattern, "pass 3 counter collection JSON")
+        )
+    )
 
 
 @pytest.fixture
 def input_json_pass4(request):
-    filename = request.config.getoption("--input-json-pass4")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--input-json-pass4")
+    return dotdict(
+        collapse_dict_list(
+            read_json_with_glob(filename_pattern, "pass 4 counter collection JSON")
+        )
+    )

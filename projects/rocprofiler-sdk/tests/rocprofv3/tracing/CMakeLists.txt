@@ -41,21 +41,21 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_systrace.json input_trace.json
     CONFIG pytest.ini
     ARGS --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_hsa_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_hsa_api_trace.csv
          --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_kernel_trace.csv
          --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_memory_copy_trace.csv
          --marker-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_marker_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_marker_api_trace.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_agent_info.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_results.pftrace
          --rocpd-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_*_results.db
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-trace)
@@ -82,21 +82,21 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_systrace.json input_trace.json
     CONFIG pytest.ini
     ARGS --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_hsa_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_hsa_api_trace.csv
          --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_kernel_trace.csv
          --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_memory_copy_trace.csv
          --marker-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_marker_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_marker_api_trace.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_agent_info.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_results.pftrace
          --rocpd-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.db
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_*_results.db
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-trace-input-json)
@@ -126,21 +126,21 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k "not test_hsa_api_trace"
     ARGS --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_hsa_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_hsa_api_trace.csv
          --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_kernel_trace.csv
          --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_memory_copy_trace.csv
          --marker-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_marker_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_marker_api_trace.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_agent_info.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_results.pftrace
          --rocpd-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.db
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_*_results.db
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-systrace)
@@ -167,21 +167,21 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     DISCOVERY_ARGS -k "not test_hsa_api_trace"
     ARGS --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_hsa_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_hsa_api_trace.csv
          --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_kernel_trace.csv
          --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_memory_copy_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_memory_copy_trace.csv
          --marker-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_marker_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_marker_api_trace.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_agent_info.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_results.pftrace
          --rocpd-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.db
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_*_results.db
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-systrace-input-json)

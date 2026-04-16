@@ -28,7 +28,11 @@ import pytest
 import pandas as pd
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    find_single_file,
+    read_json_with_glob,
+)
 
 
 def pytest_addoption(parser):
@@ -41,7 +45,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--input-json",
         action="store",
-        help="Path to CSV file.",
+        help="Path to JSON file.",
     )
 
     parser.addoption(
@@ -53,7 +57,8 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_csv(request):
-    filename = request.config.getoption("--input-csv")
+    filename_pattern = request.config.getoption("--input-csv")
+    filename = find_single_file(filename_pattern, "PC sampling CSV file")
     if not os.path.isfile(filename):
         # The CSV file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.
@@ -75,18 +80,18 @@ def input_csv(request):
 
 @pytest.fixture
 def input_json(request):
-    filename = request.config.getoption("--input-json")
-    if not os.path.isfile(filename):
-        # The CSV file is not generated, because the dependency test
+    filename_pattern = request.config.getoption("--input-json")
+    data = read_json_with_glob(filename_pattern, "PC sampling JSON file")
+    if not data:
+        # The JSON file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.
         # Thus emit the message to skip this test as well.
         print("PC sampling unavailable")
     else:
-        with open(filename, "r") as inp:
-            # Significant overhead of 5-6secs observed when feeding
-            # data into the dotdict.
-            # Using plain python dict instead
-            return collapse_dict_list(json.load(inp))
+        # Significant overhead of 5-6secs observed when feeding
+        # data into the dotdict.
+        # Using plain python dict instead
+        return collapse_dict_list(data)
 
 
 @pytest.fixture

@@ -36,7 +36,7 @@ export ROCP_TOOL_ATTACH=1
 
 # Set output directory based on format
 OUTPUT_SUBDIR="attachment-output"
-EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
+EXPECTED_FILES=("${OUTPUT_FILENAME}_*_results.json" "${OUTPUT_FILENAME}_*_results.db")
 OUTPUT_FORMAT="csv json rocpd"
 
 # Clean up any existing output
@@ -215,10 +215,11 @@ else
     echo "Found $CSV_COUNT CSV file(s)"
 fi
 
-# For other formats, check specific expected files
-for expected_file in "${EXPECTED_FILES[@]}"; do
-    if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file}" ]; then
-        echo "Error: Expected output file ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_file} not found"
+# For other formats, check specific expected files (using glob patterns to handle PIDs)
+for expected_pattern in "${EXPECTED_FILES[@]}"; do
+    files_matching=(${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_pattern})
+    if [ ! -e "${files_matching[0]}" ]; then
+        echo "Error: Expected output file matching pattern ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${expected_pattern} not found"
         exit 1
     fi
 done

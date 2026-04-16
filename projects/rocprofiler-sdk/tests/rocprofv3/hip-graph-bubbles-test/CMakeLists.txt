@@ -43,7 +43,7 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
         COPY conftest.py
         CONFIG pytest.ini
         ARGS --kernel-input
-             ${CMAKE_CURRENT_BINARY_DIR}/hip-graph-bubbles-${SUFFIX}/out_kernel_trace.csv
+             ${CMAKE_CURRENT_BINARY_DIR}/hip-graph-bubbles-${SUFFIX}/out_*_kernel_trace.csv
              --expected-dispatch-count
              ${EXPECTED_DISPATCH_COUNT}
              --expected-kernels

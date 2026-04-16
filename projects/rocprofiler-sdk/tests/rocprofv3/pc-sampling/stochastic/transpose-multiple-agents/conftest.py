@@ -28,7 +28,11 @@ import pytest
 import pandas as pd
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    find_single_file,
+    read_json_with_glob,
+)
 
 
 def pytest_addoption(parser):
@@ -59,7 +63,8 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def input_samples_csv(request):
-    filename = request.config.getoption("--input-samples-csv")
+    filename_pattern = request.config.getoption("--input-samples-csv")
+    filename = find_single_file(filename_pattern, "PC samples CSV file")
     if not os.path.isfile(filename):
         # The CSV file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.
@@ -84,14 +89,16 @@ def input_samples_csv(request):
 
 @pytest.fixture
 def input_kernel_trace_csv(request):
-    filename = request.config.getoption("--input-kernel-trace-csv")
+    filename_pattern = request.config.getoption("--input-kernel-trace-csv")
+    filename = find_single_file(filename_pattern, "kernel trace CSV file")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
 
 
 @pytest.fixture
 def input_agent_info_csv(request):
-    filename = request.config.getoption("--input-agent-info-csv")
+    filename_pattern = request.config.getoption("--input-agent-info-csv")
+    filename = find_single_file(filename_pattern, "agent info CSV file")
     with open(filename, "r") as inp:
         return pd.read_csv(
             inp,
@@ -105,15 +112,15 @@ def input_agent_info_csv(request):
 
 @pytest.fixture
 def input_samples_json(request):
-    filename = request.config.getoption("--input-samples-json")
-    if not os.path.isfile(filename):
-        # The CSV file is not generated, because the dependency test
+    filename_pattern = request.config.getoption("--input-samples-json")
+    data = read_json_with_glob(filename_pattern, "PC samples JSON file")
+    if not data:
+        # The JSON file is not generated, because the dependency test
         # responsible to generate this file was skipped or failed.
         # Thus emit the message to skip this test as well.
         print("PC sampling unavailable")
     else:
-        with open(filename, "r") as inp:
-            # Significant overhead of 5-6secs observed when feeding
-            # data into the dotdict.
-            # Using plain python dict instead
-            return collapse_dict_list(json.load(inp))
+        # Significant overhead of 5-6secs observed when feeding
+        # data into the dotdict.
+        # Using plain python dict instead
+        return collapse_dict_list(data)

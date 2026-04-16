@@ -28,7 +28,12 @@ import json
 
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    find_single_file,
+    read_csv_with_glob,
+    read_json_with_glob,
+)
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
 
@@ -57,36 +62,25 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def agent_info_input_data(request):
-    filename = request.config.getoption("--agent-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--agent-input")
+    return read_csv_with_glob(filename_pattern, "agent info CSV file")
 
 
 @pytest.fixture
 def marker_input_data(request):
-    filename = request.config.getoption("--marker-input")
-    data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
-
-    return data
+    filename_pattern = request.config.getoption("--marker-input")
+    return read_csv_with_glob(filename_pattern, "marker API trace CSV file")
 
 
 @pytest.fixture
 def json_data(request):
-    filename = request.config.getoption("--json-input")
-    with open(filename, "r") as inp:
-        return dotdict(collapse_dict_list(json.load(inp)))
+    filename_pattern = request.config.getoption("--json-input")
+    data = read_json_with_glob(filename_pattern, "JSON file")
+    return dotdict(collapse_dict_list(data))
 
 
 @pytest.fixture
 def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
+    filename_pattern = request.config.getoption("--pftrace-input")
+    filename = find_single_file(filename_pattern, "Perfetto trace file")
     return PerfettoReader(filename).read()[0]

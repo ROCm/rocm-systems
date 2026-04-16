@@ -25,6 +25,7 @@ from __future__ import absolute_import
 import glob
 import csv
 import json
+import os
 
 
 def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
@@ -49,7 +50,10 @@ def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
 
 def find_single_file(pattern, description="file"):
     """
-    Find a single file matching the glob pattern.
+    Find a file matching the glob pattern.
+
+    If multiple files match (e.g., from multiple test runs with different PIDs),
+    returns the most recently modified file.
 
     Args:
         pattern: Glob pattern to match (e.g., "out_*_results.csv")
@@ -59,12 +63,17 @@ def find_single_file(pattern, description="file"):
         str: Path to the matched file
 
     Raises:
-        AssertionError: If pattern doesn't match exactly one file
+        AssertionError: If pattern doesn't match at least one file
     """
     matches = glob.glob(pattern)
     assert (
-        len(matches) == 1
-    ), f"Expected 1 {description} matching {pattern}, found {len(matches)}: {matches}"
+        len(matches) >= 1
+    ), f"Expected at least 1 {description} matching {pattern}, found {len(matches)}"
+
+    # If multiple files match, pick the most recently modified one
+    if len(matches) > 1:
+        matches.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+
     return matches[0]
 
 

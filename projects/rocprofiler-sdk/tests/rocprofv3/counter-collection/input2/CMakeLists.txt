@@ -32,13 +32,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input.txt
     CONFIG pytest.ini
     ARGS --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_*_agent_info.csv
          --counter-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_*_counter_collection.csv
          --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_*_agent_info.csv
          --counter-input
-         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_*_counter_collection.csv
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-txt-pmc2)

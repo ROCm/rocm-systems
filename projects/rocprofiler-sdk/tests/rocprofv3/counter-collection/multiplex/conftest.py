@@ -22,12 +22,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import json
 import pytest
 import csv
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import (
+    collapse_dict_list,
+    read_json_with_glob,
+    find_single_file,
+)
 
 
 def pytest_addoption(parser):
@@ -45,7 +48,8 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def agent_info_input_data(request):
-    filename = request.config.getoption("--agent-input")
+    filename_pattern = request.config.getoption("--agent-input")
+    filename = find_single_file(filename_pattern, "agent info CSV")
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
@@ -57,7 +61,8 @@ def agent_info_input_data(request):
 
 @pytest.fixture
 def counter_input_data(request):
-    filename = request.config.getoption("--counter-input")
+    filename_pattern = request.config.getoption("--counter-input")
+    filename = find_single_file(filename_pattern, "counter collection CSV")
     data = []
     with open(filename, "r") as inp:
         reader = csv.DictReader(inp)

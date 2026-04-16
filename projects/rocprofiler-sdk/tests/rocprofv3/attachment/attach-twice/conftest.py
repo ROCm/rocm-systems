@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import csv
+import glob
 import json
 import pytest
 import os
@@ -51,9 +52,16 @@ def get_data(request, field, section_name):
         return get_csv_data(inp_data)
 
 
-def get_json_data(file_path, section_name):
+def get_json_data(file_path_pattern, section_name):
     """Load data from JSON file and extract specific section"""
     try:
+        # Use glob to find the file matching the pattern
+        matches = glob.glob(file_path_pattern)
+        if not matches:
+            print(f"No JSON file found matching pattern: {file_path_pattern}")
+            return []
+        file_path = matches[0]
+
         with open(file_path, "r") as inp:
             data = json.load(inp)
 
@@ -207,14 +215,21 @@ def convert_agents_to_csv_format(agents):
     return csv_records
 
 
-def get_csv_data(file_path):
+def get_csv_data(file_path_pattern):
     """Load data from CSV file"""
     try:
+        # Use glob to find the file matching the pattern
+        matches = glob.glob(file_path_pattern)
+        if not matches:
+            print(f"No CSV file found matching pattern: {file_path_pattern}")
+            return []
+        file_path = matches[0]
+
         with open(file_path, "r") as inp:
             csv_reader = csv.DictReader(inp)
             return [row for row in csv_reader]
     except FileNotFoundError as e:
-        print(f"Error loading CSV file {file_path}: {e}")
+        print(f"Error loading CSV file {file_path_pattern}: {e}")
         return []
 
 
