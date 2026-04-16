@@ -2705,10 +2705,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         static auto profile_map = profile_map_t{};
         profile_map.clear();
 
-        auto null_buffer     = rocprofiler_buffer_id_t{ 0 };
-        auto agent_ids       = std::vector<uint64_t>{};
-        auto profile_configs = std::vector<uint64_t>{};
-        auto device_indices  = std::vector<size_t>{};
+        auto null_buffer             = rocprofiler_buffer_id_t{ 0 };
+        auto agent_ids               = std::vector<uint64_t>{};
+        auto profile_configs         = std::vector<uint64_t>{};
+        auto device_indices          = std::vector<size_t>{};
+        auto counter_names_per_agent = std::vector<std::vector<std::string>>{};
 
         auto set_profile = [](rocprofiler_context_id_t ctx, rocprofiler_agent_id_t agent,
                               rocprofiler_device_counting_agent_cb_t set_config,
@@ -2740,6 +2741,26 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             profile_configs.push_back(profile.handle);
             device_indices.push_back(itr.device_id);
 
+            // Resolve counter IDs back to names for the SDK PMC device
+            auto  agent_info_it = _data->agent_counter_info.find(_agent_id);
+            auto& counter_ids   = events_it->second;
+            auto  names         = std::vector<std::string>{};
+            if(agent_info_it != _data->agent_counter_info.end())
+            {
+                for(const auto& cid : counter_ids)
+                {
+                    for(const auto& ci : agent_info_it->second)
+                    {
+                        if(ci.id.handle == cid.handle && ci.name != nullptr)
+                        {
+                            names.emplace_back(ci.name);
+                            break;
+                        }
+                    }
+                }
+            }
+            counter_names_per_agent.push_back(std::move(names));
+
             ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
                 _data->sdk_pmc_ctx, null_buffer, _agent_id, set_profile, &profile_map));
         }
@@ -2747,7 +2768,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         if(!agent_ids.empty())
         {
             pmc::register_sdk_pmc_source(_data->sdk_pmc_ctx.handle, agent_ids,
-                                         profile_configs, device_indices);
+                                         profile_configs, device_indices,
+                                         counter_names_per_agent);
         }
     }
 

@@ -1462,6 +1462,37 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
+perfetto_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
+{
+    const auto* counter_names = m_metadata.get_sdk_pmc_counter_names(_sdk_pmc.device_id);
+    if(!counter_names) return;
+
+    auto _ts        = _sdk_pmc.timestamp;
+    auto _device_id = _sdk_pmc.device_id;
+
+    for(size_t idx = 0; idx < _sdk_pmc.values.size() && idx < counter_names->size();
+        ++idx)
+    {
+        const auto& entry = (*counter_names)[idx];
+        auto        track_key =
+            std::hash<std::string>{}(entry.track_name + std::to_string(_device_id));
+        auto track_name = fmt::format("GPU [{}] {} (S)", _device_id, entry.pmc_info_name);
+
+        auto track_it = m_pmc_track_map.find(static_cast<size_t>(
+            category_enum_id<category::rocm_counter_collection>::value));
+        if(track_it != m_pmc_track_map.end())
+        {
+            const auto& track_info = track_it->second;
+            if(!track_info.exists_fn(track_key))
+            {
+                track_info.emplace_fn(track_key, track_name, track_info.default_units);
+            }
+            track_info.trace_fn(track_key, 0, _ts, _sdk_pmc.values[idx]);
+        }
+    }
+}
+
+void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
 {
     // Dispatch based on category_enum_id using the category type mapping

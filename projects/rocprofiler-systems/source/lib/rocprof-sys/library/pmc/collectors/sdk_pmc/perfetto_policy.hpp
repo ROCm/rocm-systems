@@ -97,8 +97,7 @@ struct perfetto_policy
         {
             if(it->second.counter_tracks.find(cv.name) == it->second.counter_tracks.end())
             {
-                auto track_name =
-                    fmt::format("GPU SDK PMC [{}] {} (S)", device_index, cv.name);
+                auto track_name = fmt::format("GPU [{}] {} (S)", device_index, cv.name);
                 auto track_id = counter_track::emplace(device_index, track_name, "count");
                 it->second.counter_tracks[cv.name] = track_id;
                 LOG_DEBUG("Created Perfetto counter track: {}", track_name);

@@ -45,7 +45,7 @@ protected:
 TEST_F(SdkPmcDeviceTest, DeviceProperties)
 {
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index);
+                           test_index, {});
 
     EXPECT_EQ(dev.get_index(), 0u);
     EXPECT_EQ(dev.get_name(), "GPU0");
@@ -59,7 +59,7 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
 TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
 {
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           3);
+                           3, {});
 
     EXPECT_EQ(dev.get_index(), 3u);
     EXPECT_EQ(dev.get_name(), "GPU3");
@@ -69,7 +69,7 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
 TEST_F(SdkPmcDeviceTest, SampleReturnsCounters)
 {
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index);
+                           test_index, {});
 
     // Setup: sample returns 2 counter records
     rocprofiler_counter_record_t records[2];
@@ -134,7 +134,7 @@ TEST_F(SdkPmcDeviceTest, SampleReturnsCounters)
 TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 {
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index);
+                           test_index, {});
 
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
         .WillOnce(Return(ROCPROFILER_STATUS_ERROR));
@@ -150,7 +150,7 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
 {
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index);
+                           test_index, {});
 
     EXPECT_CALL(*mock_driver, sample_device_counting_service(_, _, _, _, _))
         .WillOnce([](rocprofiler_context_id_t, rocprofiler_user_data_t,
@@ -171,7 +171,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
 TEST_F(SdkPmcDeviceTest, SampleSkipsFailedCounterIdQuery)
 {
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index);
+                           test_index, {});
 
     rocprofiler_counter_record_t records[1];
     records[0].id            = { 10 };

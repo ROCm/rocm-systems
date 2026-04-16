@@ -25,6 +25,7 @@ struct agent_info
     rocprofiler_agent_id_t          agent_id       = {};
     rocprofiler_counter_config_id_t profile_config = {};
     size_t                          device_index   = 0;
+    std::vector<std::string>        counter_names  = {};
 };
 
 /**
@@ -98,9 +99,9 @@ public:
 
         for(const auto& info : m_agents)
         {
-            devices.push_back(std::make_shared<Device>(m_driver_api, m_context,
-                                                       info.agent_id, info.profile_config,
-                                                       info.device_index));
+            devices.push_back(std::make_shared<Device>(
+                m_driver_api, m_context, info.agent_id, info.profile_config,
+                info.device_index, info.counter_names));
         }
 
         return devices;

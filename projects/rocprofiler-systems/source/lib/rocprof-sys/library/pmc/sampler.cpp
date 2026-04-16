@@ -340,9 +340,11 @@ postfork_child_reset_sampler_lock()
     ::new(static_cast<void*>(&_m)) mutex_type{};
 }
 
-register_sdk_pmc_source(uint64_t context_handle, const std::vector<uint64_t>& agent_ids,
-                        const std::vector<uint64_t>& profile_configs,
-                        const std::vector<size_t>&   device_indices)
+register_sdk_pmc_source(
+    uint64_t context_handle, const std::vector<uint64_t>& agent_ids,
+    const std::vector<uint64_t>&                 profile_configs,
+    const std::vector<size_t>&                   device_indices,
+    const std::vector<std::vector<std::string>>& counter_names_per_agent)
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
@@ -356,10 +358,13 @@ register_sdk_pmc_source(uint64_t context_handle, const std::vector<uint64_t>& ag
 
         for(size_t i = 0; i < agent_ids.size(); ++i)
         {
+            auto names = (i < counter_names_per_agent.size())
+                             ? counter_names_per_agent[i]
+                             : std::vector<std::string>{};
             agents.push_back(
                 agent_info{ rocprofiler_agent_id_t{ agent_ids[i] },
                             rocprofiler_counter_config_id_t{ profile_configs[i] },
-                            device_indices[i] });
+                            device_indices[i], std::move(names) });
         }
 
         g_sdk_pmc_provider =

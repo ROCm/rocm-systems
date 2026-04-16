@@ -9,6 +9,7 @@
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
+#include "library/pmc/collectors/sdk_pmc/sample.hpp"
 
 #include <rocprofiler-sdk/version.h>
 
@@ -37,7 +38,7 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     void handle(const memory_allocate_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -59,6 +60,8 @@ struct processor_t
 
     void handle(const cpu_pmc_sample& sample) { static_cast<T*>(this)->handle(sample); }
 
+    void handle(const sdk_pmc_sample& sample) { static_cast<T*>(this)->handle(sample); }
+
     void handle(const backtrace_region_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -79,7 +82,7 @@ struct processor_view_t
     using kernel_dispatch_fn_t = void (*)(void*, const kernel_dispatch_sample&) noexcept;
     using scratch_memory_fn_t  = void (*)(void*, const scratch_memory_sample&) noexcept;
     using memory_copy_fn_t     = void (*)(void*, const memory_copy_sample&) noexcept;
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     using memory_allocate_fn_t = void (*)(void*, const memory_allocate_sample&) noexcept;
 #endif
     using region_fn_t           = void (*)(void*, const region_sample&) noexcept;
@@ -88,6 +91,7 @@ struct processor_view_t
     using gpu_pmc_sample_fn_t   = void (*)(void*, const gpu_pmc_sample&) noexcept;
     using ainic_pmc_sample_fn_t = void (*)(void*, const ainic_pmc_sample&) noexcept;
     using cpu_pmc_sample_fn_t   = void (*)(void*, const cpu_pmc_sample&) noexcept;
+    using sdk_pmc_sample_fn_t   = void (*)(void*, const sdk_pmc_sample&) noexcept;
     using backtrace_region_fn_t = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
     using kfd_sample_fn_t       = void (*)(void*, const kfd_sample&) noexcept;
@@ -99,7 +103,7 @@ struct processor_view_t
         kernel_dispatch_fn_t handle_kernel_dispatch;
         scratch_memory_fn_t  handle_scratch_memory;
         memory_copy_fn_t     handle_memory_copy;
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
         memory_allocate_fn_t handle_memory_allocate;
 #endif
         region_fn_t                 handle_region;
@@ -108,6 +112,7 @@ struct processor_view_t
         gpu_pmc_sample_fn_t         handle_gpu_pmc_sample;
         ainic_pmc_sample_fn_t       handle_ainic_pmc_sample;
         cpu_pmc_sample_fn_t         handle_cpu_pmc_sample;
+        sdk_pmc_sample_fn_t         handle_sdk_pmc_sample;
         backtrace_region_fn_t       handle_backtrace_region;
         kfd_sample_fn_t             handle_kfd_sample;
         prepare_for_processing_fn_t prepare_for_processing;
@@ -143,7 +148,7 @@ struct processor_view_t
         m_vtable->handle_memory_copy(m_object, sample);
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     ROCPROFSYS_INLINE void handle(const memory_allocate_sample& sample) const noexcept
     {
         m_vtable->handle_memory_allocate(m_object, sample);
@@ -172,6 +177,11 @@ struct processor_view_t
     ROCPROFSYS_INLINE void handle(const ainic_pmc_sample& sample) const noexcept
     {
         m_vtable->handle_ainic_pmc_sample(m_object, sample);
+    }
+
+    ROCPROFSYS_INLINE void handle(const sdk_pmc_sample& sample) const noexcept
+    {
+        m_vtable->handle_sdk_pmc_sample(m_object, sample);
     }
 
     ROCPROFSYS_INLINE void handle(const cpu_pmc_sample& sample) const noexcept
@@ -213,7 +223,7 @@ private:
             +[](void* obj, const memory_copy_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             +[](void* obj, const memory_allocate_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
@@ -231,6 +241,9 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const ainic_pmc_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const sdk_pmc_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const cpu_pmc_sample& sample) noexcept {
@@ -322,6 +335,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::cpu_pmc_sample:
                 handle_sample(static_cast<const cpu_pmc_sample&>(sample));
+                break;
+            case type_identifier_t::sdk_pmc_sample:
+                handle_sample(static_cast<const sdk_pmc_sample&>(sample));
                 break;
             case type_identifier_t::backtrace_region_sample:
                 handle_sample(static_cast<const backtrace_region_sample&>(sample));

@@ -38,7 +38,7 @@ auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
 #else
     return code_object.rocp_agent.handle;
@@ -201,7 +201,7 @@ rocpd_processor_t::handle(const memory_copy_sample& _mcs)
 void
 rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -525,6 +525,31 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
     insert_metric(enabled.bits.tx_rdma_cnp_pkts,
                   trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                   "ainic_tx_rdma_cnp_pkts", m.tx_rdma_cnp_pkts);
+}
+
+void
+rocpd_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
+{
+    const auto* counter_names = m_metadata->get_sdk_pmc_counter_names(_sdk_pmc.device_id);
+    if(!counter_names) return;
+
+    const auto* _name            = "rocm_counter_collection";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+
+    auto base_id =
+        m_agent_manager->get_agent_by_type_index(_sdk_pmc.device_id, agent_type::GPU)
+            .base_id;
+
+    for(size_t idx = 0; idx < _sdk_pmc.values.size() && idx < counter_names->size();
+        ++idx)
+    {
+        const auto& entry = (*counter_names)[idx];
+        m_data_processor->insert_pmc_event(event_id, base_id, entry.pmc_info_name.c_str(),
+                                           _sdk_pmc.values[idx]);
+        m_data_processor->insert_sample(entry.track_name.c_str(), _sdk_pmc.timestamp,
+                                        event_id);
+    }
 }
 
 void

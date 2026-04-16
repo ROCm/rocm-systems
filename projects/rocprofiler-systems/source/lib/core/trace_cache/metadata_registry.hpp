@@ -157,6 +157,18 @@ struct kernel_symbol_less
     }
 };
 
+/**
+ * @brief Maps a sample value index to its pmc_info and track names.
+ *
+ * Stored in metadata_registry per device. Processors use these to
+ * emit pmc_events and samples from batched sdk_pmc_sample values.
+ */
+struct sdk_pmc_name_entry
+{
+    std::string pmc_info_name;  ///< Counter name, e.g. "SQ_WAVES"
+    std::string track_name;     ///< Device-qualified, e.g. "sdk_pmc_SQ_WAVES [GPU 0]"
+};
+
 }  // namespace info
 
 struct metadata_registry
@@ -207,6 +219,27 @@ struct metadata_registry
     rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
     rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
 
+    /**
+     * @brief Set the ordered counter names for a device's batched PMC sample.
+     *
+     * Defines the mapping from sample value index to counter/track name
+     * for a given device. Called during config().
+     *
+     * @param device_id Device index.
+     * @param entries Ordered list of counter name entries matching sample value order.
+     */
+    void set_sdk_pmc_counter_names(uint32_t                              device_id,
+                                   std::vector<info::sdk_pmc_name_entry> entries);
+
+    /**
+     * @brief Get the ordered counter names for a device's batched PMC sample.
+     *
+     * @param device_id Device index.
+     * @return Pointer to the entry vector, or nullptr if not registered.
+     */
+    const std::vector<info::sdk_pmc_name_entry>* get_sdk_pmc_counter_names(
+        uint32_t device_id) const;
+
 private:
     common::synchronized<info::process> m_process{};
     common::synchronized<
@@ -231,6 +264,9 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+
+    // SDK PMC counter name ordering: device_id -> ordered name entries
+    std::map<uint32_t, std::vector<info::sdk_pmc_name_entry>> m_sdk_pmc_counter_names{};
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;

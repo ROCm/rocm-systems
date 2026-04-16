@@ -7,13 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace sdk_pmc
+namespace rocprofsys::pmc::collectors::sdk_pmc
 {
 
 /**
@@ -31,7 +25,7 @@ struct counter_value
  *
  * Unlike the GPU collector's fixed metrics struct, SDK PMC counters are dynamic
  * and user-specified. The counter list is determined at runtime from the
- * ROCPROFSYS_SDK_PMC_EVENTS setting.
+ * ROCPROFSYS_ROCM_EVENTS setting.
  */
 struct metrics
 {
@@ -51,7 +45,4 @@ struct enabled_metrics
     uint32_t                 value = 0;
 };
 
-}  // namespace sdk_pmc
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::sdk_pmc
