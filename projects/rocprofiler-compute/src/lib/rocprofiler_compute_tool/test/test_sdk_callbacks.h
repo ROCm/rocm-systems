@@ -8,9 +8,9 @@ class TestSdkCallbacks : public ::testing::Test
 protected:
     void SetUp() override;
 
-    void dispatch_kernel(uint64_t                        kernel_id,
-                         const std::vector<std::string>& counters_pmc0,
-                         const std::vector<std::string>& counters_pmc1 = {});
+    uint64_t dispatch_kernel(uint64_t                        kernel_id,
+                             const std::vector<std::string>& counters_pmc0,
+                             const std::vector<std::string>& counters_pmc1 = {});
 
     static std::string convert_counters_per_pmc_to_str(const std::vector<std::vector<std::string>>& counters_per_pmc);
     static std::string convert_counters_to_str(const std::vector<std::string>& counters);
@@ -21,4 +21,7 @@ protected:
     std::shared_ptr<MockSdkWrapper>                             m_sdk_wrapper;
     std::shared_ptr<rocprofiler_compute_tool::SdkCallbacksImpl> m_sdk_callbacks;
     std::unique_ptr<rocprofiler_compute_tool::tool_data_t>      m_tool_data;
+    const std::vector<std::string> m_counters_pmc0     = {"counter0", "counter1"};
+    const std::vector<std::string> m_counters_pmc1     = {"counter2"};
+    const uint64_t                 m_invalid_config_id = ~0u;
 };
