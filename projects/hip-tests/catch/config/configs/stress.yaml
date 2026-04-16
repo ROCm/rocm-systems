@@ -24,12 +24,8 @@ stress:
   Stress_hipMallocManaged_MultiKrnlHmmAccess: *level_2
   Stress_hipMallocManaged_ExtremeSizes: *level_2
   Stress_hipMemPrefetchAsyncOneToAll: *level_2
-  Stress_hipHostMalloc_MaxAllocation:
-    <<: *level_2
-    tags: [P0]
-  Stress_hipHostMalloc_MaxAllocation_AllGpu:
-    <<: *level_2
-    tags: [P0]
+  Stress_hipHostMalloc_MaxAllocation: *level_2
+  Stress_hipHostMalloc_MaxAllocation_AllGpu: *level_2
   Stress_hipHostRegister_Oversubscription: *level_2
   Stress_hipMalloc_HighSizeAlloc:
     <<: *level_2
