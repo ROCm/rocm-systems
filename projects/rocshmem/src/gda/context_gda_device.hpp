@@ -356,6 +356,13 @@ class GDAContext : public Context {
       const ActiveWFInfo& wf_info);
 
   /**
+   * @brief Implement amo_fetch_op using a compare-and-swap loop.
+   * op is a Callable returning T with arguments (T prior_value, T new_value).
+   */
+  template <typename T, typename Op>
+  __device__ T internal_amo_fetch_op(void *dst, T value, int pe, Op op);
+
+  /**
    * @brief Get the Queue Pair index to use for a given PE
    */
   __device__ __forceinline__ uint32_t get_qp_index(int pe, const ActiveWFInfo& wf_info);
