@@ -176,7 +176,22 @@ class Stats {
     memset(&stats, 0, sizeof(StatType) * I);
   }
 
-  __host__ __device__ StatType getStat(int index) const { return stats[index]; }
+  __host__ __device__ StatType getStat(int index) const {
+#ifdef __HIP_DEVICE_COMPILE__
+    return stats[index];
+#else
+    // On weak-memory-order hosts (e.g. ARM/AArch64) the compiler or CPU may
+    // reorder or cache a plain load of this array, whose elements are written
+    // by GPU wavefronts via atomicAdd into hipHostMalloc-mapped host memory.
+    // Use an atomic acquire load so the host always observes the most recent
+    // GPU write: on x86 (TSO) this compiles to a plain MOV; on ARM it emits
+    // LDAR (load-acquire), which prevents later loads from being speculated
+    // before this one and ensures the value is read from the coherent memory
+    // subsystem rather than a stale CPU register or store buffer.
+    return __atomic_load_n(const_cast<StatType *>(&stats[index]),
+                           __ATOMIC_ACQUIRE);
+#endif
+  }
 };
 
 template <int I>
