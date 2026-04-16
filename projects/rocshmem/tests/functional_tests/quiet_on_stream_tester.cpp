@@ -85,10 +85,6 @@ void QuietOnStreamTester::preLaunchKernel() {
 }
 
 void QuietOnStreamTester::postLaunchKernel() {
-  // Synchronize all streams to ensure operations are complete
-  for (int i = 0; i < num_streams; i++) {
-    CHECK_HIP(hipStreamSynchronize(streams[i]));
-  }
 }
 
 void QuietOnStreamTester::resetBuffers([[maybe_unused]] size_t size) {
@@ -113,6 +109,11 @@ void QuietOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
     rocshmem_putmem_on_stream(&dest_buf[stream_id], &source_buf[stream_id],
                               sizeof(int), next_pe, streams[stream_id]);
     rocshmem_quiet_on_stream(streams[stream_id]);
+  }
+
+  // Synchronize all streams to ensure operations are complete
+  for (int i = 0; i < num_streams; i++) {
+    CHECK_HIP(hipStreamSynchronize(streams[i]));
   }
 }
 
