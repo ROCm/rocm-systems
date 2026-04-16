@@ -327,6 +327,12 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         B.CreateBr(bbIt->second);
       currentBB = bbIt->second;
       B.SetInsertPoint(currentBB);
+      // LLVM's AMDGPULowerVGPREncoding pass resets VGPR MSB mode at every
+      // basic-block boundary (both before terminators and at BB fall-through
+      // exits).  Mirror that behaviour so we do not inherit stale MSB state
+      // from a previous linear instruction that does not control-flow into
+      // this BB.
+      ctx.vgprMSBs = 0;
     }
 
     ctx.computeVGPRAdjust(di);

@@ -85,12 +85,11 @@ HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   if (sop == SemOp::S_SET_VGPR_MSB) {
+    // Only the low 8 bits of the immediate carry runtime meaning; the high
+    // 8 bits record the previous mode for compiler bookkeeping (see
+    // AMDGPULowerVGPREncoding::setMode in LLVM).  The hardware ignores them.
     int64_t imm = di.getImm(0);
     ctx.vgprMSBs = static_cast<uint8_t>(imm & 0xFF);
-    llvm::errs() << "transpiler: s_set_vgpr_msb 0x"
-                 << llvm::format_hex(imm, 4)
-                 << " → vgprMSBs=0x" << llvm::format_hex(ctx.vgprMSBs, 4)
-                 << " at offset 0x" << llvm::format_hex(di.offset, 1) << "\n";
     hr.handled = true;
     return hr;
   }

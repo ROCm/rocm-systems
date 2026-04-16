@@ -44,9 +44,25 @@ struct RaiseContext {
   std::map<unsigned, llvm::AllocaInst *> laneParking;
   llvm::AllocaInst *getOrCreateLaneParking(unsigned vgprIdx);
 
-  // gfx1250 s_set_vgpr_msb state: 8-bit encoding provides 2-bit MSB values
-  // for each operand slot. Format: src0[1:0], src1[3:2], src2[5:4], dst[7:6].
+  // gfx1250 s_set_vgpr_msb state: only the LOW 8 bits of the instruction's
+  // 16-bit immediate carry runtime meaning.  They encode the MSB bit pair for
+  // every operand slot of the next ALU instruction:
+  //
+  //   [1:0]  src0 MSB        [3:2]  src1 MSB
+  //   [5:4]  src2 MSB        [7:6]  vdst MSB
+  //
   // Each 2-bit field adds (value * 256) to the corresponding VGPR index.
+  //
+  // The HIGH 8 bits of the `s_set_vgpr_msb` immediate record the PREVIOUS
+  // mode value for compiler bookkeeping (see LLVM's AMDGPULowerVGPREncoding
+  // pass, `setMode()`: "Record previous mode into high 8 bits of the
+  // immediate."). The hardware ignores them, so we mask to 8 bits on store.
+  //
+  // For VOPD dual-issue instructions, the X-op and Y-op share the same MSB
+  // pair per operand slot: LLVM asserts that if X-op and Y-op both reference
+  // the same slot, they must carry identical MSBs ("Invalid VOPD pair was
+  // created" in `computeMode`).  So applying the same 8-bit state to both
+  // halves is correct.
   uint8_t vgprMSBs = 0;
 
   // Per-instruction VGPR index adjustment, indexed by MCInst operand index.

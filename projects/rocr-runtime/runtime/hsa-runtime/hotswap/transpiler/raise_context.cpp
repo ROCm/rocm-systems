@@ -41,13 +41,9 @@ void RaiseContext::computeVGPRAdjust(const DecodedInst &di) {
   std::memset(currentVGPRAdjust, 0, sizeof(currentVGPRAdjust));
   if (vgprMSBs == 0)
     return;
-  llvm::errs() << "transpiler: computeVGPRAdjust: vgprMSBs=0x"
-               << llvm::format_hex(vgprMSBs, 4)
-               << " numDefs=" << di.numDefs
-               << " numSrcs=" << di.numSrcs
-               << " mnemonic=" << di.mnemonic
-               << " at 0x" << llvm::format_hex(di.offset, 1) << "\n";
 
+  // vgprMSBs is an 8-bit state shared by single-issue instructions and both
+  // halves of a VOPD pair.  Layout: src0[1:0], src1[3:2], src2[5:4], dst[7:6].
   unsigned dstMsb = ((unsigned)(vgprMSBs >> 6) & 0x3u) * 256u;
   unsigned srcMsb[3] = {
       ((unsigned)(vgprMSBs >> 0) & 0x3u) * 256u,

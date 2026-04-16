@@ -41,6 +41,11 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
 
   // Parse "v_dual_<op> vDST, vSRC0, vSRC1" for each half.
   // Extract mnemonic and register operands from printed text.
+  //
+  // Both halves share the same 8-bit s_set_vgpr_msb state: LLVM's
+  // AMDGPULowerVGPREncoding pass asserts that the X-op and Y-op of a VOPD
+  // pair must carry identical MSB values per operand slot (see
+  // "Invalid VOPD pair was created").  So we apply `ctx.vgprMSBs` directly.
   auto parseVOPDHalf = [&](StringRef part) -> bool {
     part = part.ltrim();
     auto [mnPart, argsPart] = part.split(' ');
@@ -79,7 +84,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       return -1;
     };
 
-    // s_set_vgpr_msb offset for a given slot (0=src0, 1=src1, 2=src2, 3=dst)
+    // s_set_vgpr_msb offset for a given slot (0=src0, 1=src1, 2=src2, 3=dst).
     auto msbOffset = [&](unsigned slot) -> int {
       return ((ctx.vgprMSBs >> (slot * 2)) & 0x3) * 256;
     };

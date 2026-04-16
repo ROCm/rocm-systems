@@ -157,11 +157,6 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     }
 
     ParsedReg dest = op.dst();
-    llvm::errs() << "transpiler: DS_LOAD_TR16_B128 dest.baseIdx=" << dest.baseIdx
-                 << " dest.kind=" << (int)dest.kind
-                 << " vgprMSBs=0x" << llvm::format_hex(ctx.vgprMSBs, 4)
-                 << " adj[0]=" << ctx.currentVGPRAdjust[0]
-                 << " at 0x" << llvm::format_hex(di.offset, 1) << "\n";
     for (unsigned j = 0; j < 4; j++)
       ctx.regs.storeVGPR32(ctx.B, dest.baseIdx + j, outDw[j]);
 
