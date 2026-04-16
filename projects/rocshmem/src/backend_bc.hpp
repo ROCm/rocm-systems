@@ -193,6 +193,21 @@ class Backend {
   virtual void ctx_destroy(Context* ctx) = 0;
 
   /**
+   * @brief Register a user buffer.
+   */
+  int buffer_register([[maybe_unused]] void *addr,
+                      [[maybe_unused]] size_t length) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  /**
+   * @brief Unregister a user buffer.
+   */
+  int buffer_unregister([[maybe_unused]] void *addr) {
+    return ROCSHMEM_SUCCESS;
+  }
+
+  /**
    * @brief High level device stats that do not depend on backend type.
    */
   ROCStats globalStats{};

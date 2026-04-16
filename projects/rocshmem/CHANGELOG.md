@@ -11,6 +11,8 @@
    * `rocshmem_barrier`
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
+   * `rocshmem_buffer_register`
+   * `rocshmem_buffer_unregister`
 * Added `ROCSHMEM_TEAM_WORLD` for the device code
 * Added new environment variables:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
