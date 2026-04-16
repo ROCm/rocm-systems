@@ -19,8 +19,8 @@ namespace meta::comms {
 DeviceBuffer::DeviceBuffer(std::size_t size) : size_(size) {
   cudaError_t err = cudaMalloc(&ptr_, size);
   if (err != cudaSuccess) {
-    WARN("DeviceBuffer: cudaMalloc failed (%s)", cudaGetErrorString(err));
-    std::abort();
+    ERROR("DeviceBuffer: cudaMalloc failed (%s)", cudaGetErrorString(err));
+    //std::abort();
   }
 }
 
@@ -37,10 +37,6 @@ DeviceBuffer::DeviceBuffer(DeviceBuffer&& other) noexcept
 }
 
 DeviceBuffer& DeviceBuffer::operator=(DeviceBuffer&& other) noexcept {
-  /*ptr_ = other.ptr_;
-  size_ = other.size_;
-  other.ptr_ = nullptr;
-  other.size_ = 0;*/
   if (this != &other) {
     if (ptr_) {
       CUDACHECKIGNORE(cudaFree(ptr_));

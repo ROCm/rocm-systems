@@ -28,6 +28,10 @@ DeviceMailbox::mallocAndInit(int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
   auto flagBuf =
       std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
+  if (flagBuf == nullptr) {
+    ERROR("DeviceMailbox::mallocAndInit: allocation failed");
+    return {nullptr, DeviceMailbox{}};
+  }
   cudaError_t err = cudaMemset(
       flagBuf->get(), 0, nRanks * nBlocks * sizeof(FlagType));
   if (err != cudaSuccess) {

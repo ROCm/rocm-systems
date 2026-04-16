@@ -17,9 +17,10 @@
 #include <new>
 #define DDA_IPC_MAXBLOCKS 24
 #define DDA_IPC_BUFFER_SIZE 67108864
+
 namespace nccl_dda_ipc_detail {
 
-constexpr int kDdaNranks = 8;
+constexpr int kDdaNranks = meta::comms::NRANKS;
 
 struct DdaIpcBarrierState {
   std::unique_ptr<meta::comms::IpcGpuBarrierResources> resources;
@@ -30,18 +31,5 @@ inline int ddaMaxNBlocksForScratch() {
   unsigned maxBlocks = DDA_IPC_MAXBLOCKS;
   return static_cast<int>(maxBlocks);
 }
-
-/*inline size_t ddaIpcScratchBytesFromEnv() {
-  const char* e = getenv("RCCL_DDA_IPC_BYTES");
-  if (e == nullptr || e[0] == '\0') {
-    return 64ULL * 1024 * 1024;
-  }
-  char* end = nullptr;
-  unsigned long long v = strtoull(e, &end, 0);
-  if (end == e) {
-    return 64ULL * 1024 * 1024;
-  }
-  return static_cast<size_t>(v);
-}*/
 
 } // namespace nccl_dda_ipc_detail

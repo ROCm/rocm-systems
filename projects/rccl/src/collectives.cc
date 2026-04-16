@@ -384,7 +384,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   size_t ddaThreshold =  rcclParamDdaThreshold();
 
-  if ((count * ncclTypeSize(datatype) <= ddaThreshold) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+  if ((count * ncclTypeSize(datatype) <= ddaThreshold) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
     NCCLCHECK(ncclAllReduceDdaIpc(
         sendbuff,
         recvbuff,
