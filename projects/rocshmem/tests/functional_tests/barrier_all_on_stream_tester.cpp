@@ -33,8 +33,9 @@
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-BarrierAllOnStreamTester::BarrierAllOnStreamTester(TesterArguments args)
-    : Tester(args) {
+BarrierAllOnStreamTester::BarrierAllOnStreamTester(TesterArguments args,
+                                                   CollectiveOnStreamOp op)
+    : Tester(args), collective_op(op) {
   my_pe = rocshmem_my_pe();
   n_pes = rocshmem_n_pes();
 
@@ -81,7 +82,7 @@ BarrierAllOnStreamTester::~BarrierAllOnStreamTester() {
 }
 
 void BarrierAllOnStreamTester::preLaunchKernel() {
-  // No specific setup needed for barrier
+  // No specific setup needed for collective operations
 }
 
 void BarrierAllOnStreamTester::postLaunchKernel() {
@@ -122,7 +123,11 @@ void BarrierAllOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[ma
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
-      rocshmem_barrier_all_on_stream(streams[stream_id]);
+      if (collective_op == BARRIER_ALL_OP) {
+        rocshmem_barrier_all_on_stream(streams[stream_id]);
+      } else {
+        rocshmem_sync_all_on_stream(streams[stream_id]);
+      }
     }
   }
 
@@ -134,7 +139,11 @@ void BarrierAllOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[ma
                                  streams[stream_id]));
       }
 
-      rocshmem_barrier_all_on_stream(streams[stream_id]);
+      if (collective_op == BARRIER_ALL_OP) {
+        rocshmem_barrier_all_on_stream(streams[stream_id]);
+      } else {
+        rocshmem_sync_all_on_stream(streams[stream_id]);
+      }
 
       // Record stop event for this stream on last iteration
       if (i == loop - 1) {
