@@ -169,14 +169,10 @@ bool NullDevice::init() {
         (isa->xnack() == amd::Isa::Feature::Any)) {
       continue;
     }
-    bool isOnline = false;
+
     // Check if the particular device is online
-    for (size_t i = 0; i < devices.size(); i++) {
-      if (&(devices[i]->isa()) == isa) {
-        isOnline = true;
-        break;
-      }
-    }
+    bool isOnline = std::any_of(devices.begin(), devices.end(),
+                                [isa](Device* device) { return &(device->isa()) == isa; });
     if (isOnline) {
       continue;
     }
@@ -970,8 +966,7 @@ bool Device::create(Pal::IDevice* device) {
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));
 
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -2336,7 +2331,7 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 }
 
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agentInfo, bool allowAllAgentsAccess) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
@@ -2709,8 +2704,7 @@ bool Device::createBlitProgram() {
   // note: It's not critical for runtime functionality to fail trap handler initialization
   auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
   if (asm_program != nullptr) {
-    std::vector<amd::Device*> devices;
-    devices.push_back(this);
+    std::vector<amd::Device*> devices{this};
     std::string opt = "-cl-internal-kernel ";
     if (auto retval =
             asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {

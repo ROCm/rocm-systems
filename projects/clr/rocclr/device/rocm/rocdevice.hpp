@@ -429,7 +429,7 @@ class Device : public NullDevice {
   virtual bool globalFreeMemory(size_t* freeMemory) const override;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
-                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
+                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const override;
 
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
@@ -444,7 +444,7 @@ class Device : public NullDevice {
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
   void* deviceLocalAlloc(size_t size,
-                        const AllocationFlags& flags = AllocationFlags{}) const override;
+                        const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;

@@ -331,7 +331,7 @@ jobs:
         run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
       - name: Configure, Build, and Test
-        timeout-minutes: 30
+        timeout-minutes: 45
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
@@ -647,7 +647,7 @@ jobs:
           ls -la
 
       - name: Configure, Build, and Test
-        timeout-minutes: 30
+        timeout-minutes: 45
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
