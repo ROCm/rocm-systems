@@ -6,6 +6,7 @@ This directory hosts a transport-only shim concept built around the real
 What is real in this concept:
 
 - the tool is loaded through the normal `ROCP_TOOL_LIBRARIES` path
+- the tool is inert unless `ROCP_SHIM_CONCEPT_ENABLE=1` is set
 - `rocprofiler-sdk` creates the context, buffer, and tracing services
 - `rocprofiler-sdk` produces the HIP/HSA/runtime-initialization records
 - the shim only snapshots those SDK buffer records into a memfd-backed ring
@@ -38,6 +39,7 @@ cmake --build build/shim-concept -j
 ```bash
 export LD_LIBRARY_PATH=$PWD/build/shim-concept/lib:/opt/rocm/lib:$LD_LIBRARY_PATH
 export ROCP_TOOL_LIBRARIES=$PWD/build/shim-concept/lib/librocprofiler-sdk-shim-concept.so
+export ROCP_SHIM_CONCEPT_ENABLE=1
 
 ./build/shim-concept/bin/real_hip_probe_test &
 TARGET_PID=$!
@@ -50,6 +52,7 @@ wait $TARGET_PID
 ```bash
 export LD_LIBRARY_PATH=$PWD/build/shim-concept/lib:/opt/rocm/lib:$LD_LIBRARY_PATH
 export ROCP_TOOL_LIBRARIES=$PWD/build/shim-concept/lib/librocprofiler-sdk-shim-concept.so
+export ROCP_SHIM_CONCEPT_ENABLE=1
 
 ./build/shim-concept/bin/real_hsa_probe_test &
 TARGET_PID=$!
@@ -61,3 +64,7 @@ The external consumer can attach after the target has started. Once attached, it
 enables transport capture by flipping a single shared-memory flag. The tracing
 remains owned by `rocprofiler-sdk`; the shim only forwards already-produced
 records.
+
+If `ROCP_SHIM_CONCEPT_ENABLE` is unset, the library returns `NULL` from
+`rocprofiler_configure` and does not initialize the transport layer, so existing
+in-process tools and normal application runs are unaffected.

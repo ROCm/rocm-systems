@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -29,7 +30,33 @@ static shim_ipc_target_t g_ipc;
 static int               g_ipc_ok = 0;
 static shim_tool_data_t  g_tool_data;
 static pthread_mutex_t   g_runtime_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t   g_ipc_lock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic uint64_t  g_sequence_counter = 0;
+
+static int
+shim_is_enabled(void)
+{
+    const char* env = getenv("ROCP_SHIM_CONCEPT_ENABLE");
+    return (env != NULL && strcmp(env, "1") == 0);
+}
+
+static int
+shim_ensure_ipc_ready(void)
+{
+    int rc = 0;
+
+    pthread_mutex_lock(&g_ipc_lock);
+    if(!g_ipc_ok)
+    {
+        rc = shim_ipc_init(&g_ipc);
+        if(rc == 0)
+            g_ipc_ok = 1;
+        else
+            fprintf(stderr, "[shim] failed to initialize IPC transport\n");
+    }
+    pthread_mutex_unlock(&g_ipc_lock);
+    return rc;
+}
 
 static const char*
 shim_status_name(rocprofiler_status_t status)
@@ -221,6 +248,7 @@ shim_tool_init(rocprofiler_client_finalize_t finalize_func, void* tool_data)
     shim_tool_data_t* data = (shim_tool_data_t*) tool_data;
 
     if(data == NULL) return -1;
+    if(shim_ensure_ipc_ready() != 0) return -1;
 
     data->finalize_func = finalize_func;
     return shim_configure_services(data);
@@ -256,17 +284,12 @@ rocprofiler_configure(uint32_t                 version,
     (void) version;
     (void) runtime_version;
 
+    if(!shim_is_enabled()) return NULL;
     if(priority > 0) return NULL;
     if(client_id == NULL || client_id->size < sizeof(*client_id)) return NULL;
 
     client_id->name = "rocprofiler-sdk-shim-concept";
     return &g_configure_result;
-}
-
-__attribute__((constructor)) static void
-shim_register_ctor(void)
-{
-    if(shim_ipc_init(&g_ipc) == 0) g_ipc_ok = 1;
 }
 
 __attribute__((destructor)) static void
