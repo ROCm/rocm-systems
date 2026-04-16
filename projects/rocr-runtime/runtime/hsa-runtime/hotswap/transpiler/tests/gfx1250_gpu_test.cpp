@@ -168,11 +168,24 @@ static bool testMatmul(const char *hsacoFile, int M, int N, int K, const char *l
   HIP_CHECK(hipModuleGetFunction(&func, mod, "matmul_kernel"));
 
   // Row-major: A is MxK (stride_am=K, stride_ak=1), B is KxN (stride_bk=N, stride_bn=1)
-  struct {
+  // The Triton-generated kernel declares 14 kernel args; args 12 and 13 are
+  // pointer-sized but unused by the kernel body.  They must still be present
+  // (and correctly aligned) in the kernarg buffer for the hidden args to land
+  // at the right offset.
+  struct alignas(8) Args {
     __half *a, *b; float *c;
     int m, n, k;
     int stride_am, stride_ak, stride_bk, stride_bn, stride_cm, stride_cn;
-  } args = {dA, dB, dC, M, N, K, K, 1, N, 1, N, 1};
+    int _pad_60_63;
+    void *unused12;
+    void *unused13;
+  };
+  // kernarg_segment_size in the Triton-compiled HSACO is 80 bytes for the
+  // explicit args (plus hidden args appended by the runtime).  If the
+  // struct layout ever drifts from the kernel ABI, catch it at compile
+  // time instead of at kernel launch.
+  static_assert(sizeof(Args) == 80, "matmul_kernel kernarg layout mismatch");
+  Args args = {dA, dB, dC, M, N, K, K, 1, N, 1, N, 1, 0, nullptr, nullptr};
   size_t argSz = sizeof(args);
   void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz, HIP_LAUNCH_PARAM_END};
@@ -200,10 +213,11 @@ static bool testMatmul(const char *hsacoFile, int M, int N, int K, const char *l
   int ldsRequired = (blockM >= 128) ? 65536 : 32768;
   auto transpMeta = transpiler::extractKernelMeta(result.hsaco, "matmul_kernel");
   int dynamicLds = std::max(0, ldsRequired - transpMeta.groupSegmentFixedSize);
-  printf("  launch: grid=(%d,1,1) wg=(%d,1,1) sharedMem=%d (static=%d + dynamic=%d)\n",
-         gridX, wgSize, meta.groupSegmentFixedSize + dynamicLds,
-         meta.groupSegmentFixedSize, dynamicLds);
-
+  printf("  launch: grid=(%d,1,1) wg=(%d,1,1) sharedMem=%d "
+         "(src static=%d / transp static=%d + dynamic=%d)\n",
+         gridX, wgSize, transpMeta.groupSegmentFixedSize + dynamicLds,
+         meta.groupSegmentFixedSize, transpMeta.groupSegmentFixedSize,
+         dynamicLds);
   HIP_CHECK(hipModuleLaunchKernel(func, gridX, 1, 1, wgSize, 1, 1,
                                    dynamicLds, nullptr, nullptr, config));
   HIP_CHECK(hipDeviceSynchronize());
