@@ -251,7 +251,7 @@ typedef Stats<NUM_STATS> ROCStats;
 typedef HostStats<NUM_HOST_STATS> ROCHostStats;
 #else
 typedef NullStats<NUM_STATS> ROCStats;
-typedef NullStats<NUM_STATS> ROCHostStats;
+typedef NullStats<NUM_HOST_STATS> ROCHostStats;
 #endif
 
 }  // namespace rocshmem
