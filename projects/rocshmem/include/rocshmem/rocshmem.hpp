@@ -235,7 +235,7 @@ __host__ void rocshmem_free(void *ptr);
 __host__ int rocshmem_buffer_register(void *addr, size_t length);
 
 /**
- * @brief Deregisters previously reigstered user memory
+ * @brief Deregisters previously registered user memory
  *
  * @param[in] addr Pointer to previously registered memory
  */

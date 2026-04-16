@@ -41,7 +41,7 @@ ROCSHMEM_BUFFER_REGISTER
 
   :param addr:   Pointer to previously allocated memory
   :param length: Length of addr
-  :returns: ROCSHMEM_SUCESS or an error.
+  :returns: ROCSHMEM_SUCCESS or an error.
 
 **Description:**
 Registers a user allocated user buffer. This buffer can be used as a local
@@ -56,7 +56,7 @@ ROCSHMEM_BUFFER_UNREGISTER
 .. cpp:function:: __host__ int rocshmem_buffer_unregister(void *addr);
 
   :param addr:   Pointer to previously registered memory
-  :returns: ROCSHMEM_SUCESS or an error.
+  :returns: ROCSHMEM_SUCCESS or an error.
 
 **Description:**
 Deregisters a previously reigstered buffer that was registered using

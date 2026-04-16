@@ -123,7 +123,7 @@ int main (int argc, char **argv)
     int npes =  rocshmem_n_pes();
 
     int *source;
-    int buffer_size = nelem * sizeof(int) * npes;
+    size_t buffer_size = nelem * sizeof(int) * npes;
 
     CHECK_HIP(hipMalloc(&source, buffer_size));
 
