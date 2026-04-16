@@ -26,6 +26,8 @@
 
 #include "lib/common/static_object.hpp"
 
+#include <atomic>
+#include <cstdlib>
 #include <mutex>
 
 namespace
@@ -54,7 +56,50 @@ struct queue_registration_t
     decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn) hsa_amd_queue_intercept_register_fn =
         nullptr;
     decltype(CoreApiTable::hsa_status_string_fn) hsa_status_string_fn = nullptr;
+
+    // Original (non-intercept) create/destroy, captured before being replaced by our
+    // shim. Used when ROCP_TOOL_ATTACH=1 is set but no tool has yet attached -- we
+    // forward directly so users pay zero intercept-queue overhead until an attach
+    // actually happens. destroy must forward for these native queues because the
+    // attach shim would otherwise leak them.
+    decltype(CoreApiTable::hsa_queue_create_fn)  orig_hsa_queue_create_fn  = nullptr;
+    decltype(CoreApiTable::hsa_queue_destroy_fn) orig_hsa_queue_destroy_fn = nullptr;
 };
+
+// Cached "a tool has attached" flag. Latches true once observed; a tool detach does not
+// downgrade existing intercept queues, so this only ever transitions false -> true. This
+// means a detach+reattach cycle keeps the intercept-queue overhead paid forever; that is
+// intentional (we cannot promote native queues to intercept queues after the fact).
+std::atomic<bool> g_tool_attached{false};
+
+// Serializes the std::getenv probe below with potential concurrent setenv from attach.
+// POSIX leaves getenv/setenv concurrency undefined; narrowing the window with a mutex
+// does not fully eliminate the race (libc may still touch environ under the hood) but
+// removes the case where multiple threads probe simultaneously on first touch.
+std::mutex g_env_probe_mutex;
+
+// Check whether a tool is currently attached. Acquire load on the fast path (pairs with
+// the release store on first observation) publishes any data written before the store.
+// On the slow path, probes ROCPROFILER_REGISTER_TOOL_ATTACHED (set to "1" by
+// rocprofiler-register's rocprofiler_register_attach() when a tool is ptraced in; see
+// projects/rocprofiler-register/source/lib/rocprofiler-register/rocprofiler_register.cpp).
+bool
+is_tool_attached()
+{
+    if(g_tool_attached.load(std::memory_order_acquire)) return true;
+
+    std::lock_guard<std::mutex> lock(g_env_probe_mutex);
+    // Re-check under the lock in case another thread latched the flag while we waited.
+    if(g_tool_attached.load(std::memory_order_relaxed)) return true;
+
+    const char* attached = std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
+    if(attached != nullptr && attached[0] == '1' && attached[1] == '\0')
+    {
+        g_tool_attached.store(true, std::memory_order_release);
+        return true;
+    }
+    return false;
+}
 
 queue_registration_t*
 get_queue_registration()
@@ -124,6 +169,31 @@ create_queue(hsa_agent_t        agent,
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
+    // Fast path: no tool is attached yet, so there is no consumer for the proxy-queue
+    // packet stream. Skip the intercept-queue wrapping entirely and hand the caller a
+    // native HSA queue -- zero per-submission overhead. A tool that attaches later
+    // sees queues created after the attach point as intercept queues; queues created
+    // during this fast-path window remain native and are not upgraded, so a
+    // late-attaching tool will not see them.
+    if(!is_tool_attached())
+    {
+        ROCP_FATAL_IF(!registration->orig_hsa_queue_create_fn)
+            << "Queue registration was not initialized before create queue was called!";
+        hsa_status_t status = registration->orig_hsa_queue_create_fn(agent,
+                                                                     size,
+                                                                     type,
+                                                                     callback,
+                                                                     data,
+                                                                     private_segment_size,
+                                                                     group_segment_size,
+                                                                     queue);
+        // Surface failures to match the slow path's error visibility.
+        ROCP_ERROR_IF(status != HSA_STATUS_SUCCESS)
+            << "orig_hsa_queue_create_fn returned non-zero status code " << status << " :: "
+            << get_hsa_status_string(status);
+        return status;
+    }
+
     // Create new queue in HSA
     hsa_queue_t* new_queue = nullptr;
     ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn ||
@@ -185,10 +255,30 @@ destroy_queue(hsa_queue_t* hsa_queue)
     auto* registration = get_queue_registration();
     if(registration)
     {
-        std::lock_guard lg(registration->queues_mutex);
-        size_t          erase_count = registration->queues.erase(hsa_queue);
-        ROCP_WARNING_IF(erase_count == 0)
-            << "Destroy queue was called for a handle that was not in queues: " << hsa_queue;
+        size_t erase_count = 0;
+        {
+            std::lock_guard lg(registration->queues_mutex);
+            erase_count = registration->queues.erase(hsa_queue);
+        }
+        if(erase_count == 0)
+        {
+            // Not an intercept queue we tracked -> either this was handed out by the
+            // fast path as a native queue, or the application passed a bad handle.
+            // Forward to the original destroy function so native queues don't leak
+            // and bad handles surface an HSA error to the caller.
+            if(registration->orig_hsa_queue_destroy_fn != nullptr)
+            {
+                return registration->orig_hsa_queue_destroy_fn(hsa_queue);
+            }
+            // Neither tracked in our map nor destroyable via the original fn means
+            // either queue_registration_init never ran (invariant broken elsewhere)
+            // or the caller passed a handle this library never knew about.  Return
+            // an error rather than lying about success: the queue was not destroyed.
+            ROCP_ERROR << "Destroy queue was called for an untracked handle and no "
+                          "original destroy function is available: "
+                       << hsa_queue;
+            return HSA_STATUS_ERROR_INVALID_QUEUE;
+        }
     }
     return HSA_STATUS_SUCCESS;
 }
@@ -235,6 +325,22 @@ queue_registration_init(HsaApiTable* table)
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
     CoreApiTable& core_table = *table->core_;
+
+    // Capture the original (non-intercept) create/destroy functions before replacing
+    // them. Used by the no-tool-attached fast path in create_queue() to hand out and
+    // tear down native HSA queues without intercept-queue overhead.
+    //
+    // Guard against double-install: if core_table.hsa_queue_create_fn already points
+    // at our shim (e.g. this init was driven twice), saving it as "original" would
+    // cause the fast path to recurse into itself.  Only capture when the current
+    // entries are distinct from our shims.
+    if(core_table.hsa_queue_create_fn != &create_queue)
+    {
+        ROCP_FATAL_IF(!core_table.hsa_queue_create_fn || !core_table.hsa_queue_destroy_fn)
+            << "HSA core API table is missing queue create/destroy entries at init";
+        registration->orig_hsa_queue_create_fn  = core_table.hsa_queue_create_fn;
+        registration->orig_hsa_queue_destroy_fn = core_table.hsa_queue_destroy_fn;
+    }
 
     core_table.hsa_queue_create_fn  = create_queue;
     core_table.hsa_queue_destroy_fn = destroy_queue;
