@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""
+AegisBit CLI — runtime profiler for AMD GPU kernels.
+
+Wraps LD_PRELOAD of libaegisbit.so with a friendly interface.
+Produces human-readable stderr output (live) and optional structured JSON.
+
+Usage:
+    aegisbit [OPTIONS] -- COMMAND [ARGS...]
+
+Examples:
+    aegisbit -- python3 my_script.py
+    aegisbit --filter="matmul*" -- python3 my_script.py
+    aegisbit --triton --json -- python3 my_triton_script.py
+"""
+
+import argparse
+import ast
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+
+def find_libaegisbit():
+    """Locate libaegisbit.so via fallback chain."""
+    # 1. Explicit env var
+    env_path = os.environ.get("AEGISBIT_LIB")
+    if env_path:
+        if os.path.isfile(env_path):
+            return os.path.abspath(env_path)
+        print(f"aegisbit: error: AEGISBIT_LIB={env_path} does not exist",
+              file=sys.stderr)
+        sys.exit(1)
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 2. Dev build: ../build/src/libaegisbit.so relative to script
+    dev_path = os.path.normpath(
+        os.path.join(script_dir, "..", "build", "src", "libaegisbit.so"))
+    if os.path.isfile(dev_path):
+        return dev_path
+
+    # 3. Install layout: ../lib/libaegisbit.so relative to script
+    install_path = os.path.normpath(
+        os.path.join(script_dir, "..", "lib", "libaegisbit.so"))
+    if os.path.isfile(install_path):
+        return install_path
+
+    print("aegisbit: error: cannot find libaegisbit.so\n"
+          "  Searched:\n"
+          f"    {dev_path}\n"
+          f"    {install_path}\n"
+          "  Set AEGISBIT_LIB to the full path, or build with cmake first.",
+          file=sys.stderr)
+    sys.exit(1)
+
+
+def discover_triton_kernels(script_path):
+    """Scan a Python file for @triton.jit decorated functions.
+
+    Returns kernel filter patterns like 'add_kernel_kernel.kd'.
+    Triton names the GPU kernel <function_name>_kernel.kd when there
+    isn't already a _kernel suffix, otherwise just <function_name>.kd.
+    We generate both variants and let the pattern matcher sort it out.
+    """
+    if not os.path.isfile(script_path):
+        return []
+
+    try:
+        with open(script_path, "r") as f:
+            source = f.read()
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    # AST-based detection: find functions decorated with triton.jit or @jit
+    names = []
+    try:
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for dec in node.decorator_list:
+                dec_name = _decorator_name(dec)
+                if dec_name in ("triton.jit", "jit", "triton.autotune"):
+                    names.append(node.name)
+                    break
+    except SyntaxError:
+        # Fallback: regex for @triton.jit
+        for m in re.finditer(
+                r"@(?:triton\.jit|triton\.autotune[^)]*\))\s*\ndef\s+(\w+)",
+                source):
+            names.append(m.group(1))
+
+    # Build kernel name patterns
+    patterns = []
+    for name in names:
+        patterns.append(f"{name}_kernel.kd")
+        patterns.append(f"{name}.kd")
+    return patterns
+
+
+def _decorator_name(node):
+    """Extract dotted name from a decorator AST node."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _decorator_name(node.value)
+        if parent:
+            return f"{parent}.{node.attr}"
+        return node.attr
+    if isinstance(node, ast.Call):
+        return _decorator_name(node.func)
+    return None
+
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="aegisbit",
+        description="AegisBit — runtime memory profiler for AMD GPU kernels.",
+        usage="aegisbit [OPTIONS] -- COMMAND [ARGS...]",
+    )
+    p.add_argument("--filter", default=None,
+                   help="Comma-separated kernel name patterns (glob)")
+    p.add_argument("--triton", action="store_true",
+                   help="Auto-discover @triton.jit kernels from the target script")
+    p.add_argument("--json", action="store_true",
+                   help="Emit structured JSON output")
+    p.add_argument("--output", "-o", default=None,
+                   help="Write JSON to this file (implies --json)")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="Enable verbose library logging (AEGISBIT_LOG=1)")
+    p.add_argument("--max-sites", type=int, default=None,
+                   help="Cap on instrumentation sites per kernel")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print environment and command, don't execute")
+    return p
+
+
+def main():
+    # Split on '--': our flags before, target command after
+    try:
+        sep = sys.argv.index("--")
+    except ValueError:
+        # No separator found — show help
+        build_parser().parse_args(["--help"])
+        return
+
+    our_args = sys.argv[1:sep]
+    target_cmd = sys.argv[sep + 1:]
+
+    if not target_cmd:
+        print("aegisbit: error: no command given after '--'", file=sys.stderr)
+        sys.exit(1)
+
+    parser = build_parser()
+    args = parser.parse_args(our_args)
+
+    if args.output:
+        args.json = True
+
+    # Locate library
+    lib_path = find_libaegisbit()
+
+    # Build env
+    env = os.environ.copy()
+
+    # LD_PRELOAD: prepend our library
+    existing_preload = env.get("LD_PRELOAD", "")
+    if existing_preload:
+        env["LD_PRELOAD"] = f"{lib_path}:{existing_preload}"
+    else:
+        env["LD_PRELOAD"] = lib_path
+
+    env["AEGISBIT_ENABLED"] = "1"
+    env["AEGISBIT_MODE"] = "MEMORY_ONLY"
+    env["AEGISBIT_STRATEGY"] = "on_gpu_reduce"
+
+    # Kernel filter
+    kernel_patterns = []
+    if args.filter:
+        kernel_patterns = [p.strip() for p in args.filter.split(",") if p.strip()]
+
+    if args.triton:
+        # Find the python script in the target command
+        script_path = None
+        for arg in target_cmd:
+            if arg.endswith(".py") and os.path.isfile(arg):
+                script_path = arg
+                break
+        if script_path:
+            triton_patterns = discover_triton_kernels(script_path)
+            if triton_patterns:
+                kernel_patterns.extend(triton_patterns)
+                print(f"aegisbit: auto-discovered {len(triton_patterns)} "
+                      f"Triton kernel patterns from {script_path}",
+                      file=sys.stderr)
+            else:
+                print(f"aegisbit: warning: no @triton.jit functions found "
+                      f"in {script_path}", file=sys.stderr)
+        else:
+            print("aegisbit: warning: --triton specified but no .py file "
+                  "found in command", file=sys.stderr)
+
+    if kernel_patterns:
+        env["AEGISBIT_KERNELS"] = ",".join(kernel_patterns)
+
+    if args.verbose:
+        env["AEGISBIT_LOG"] = "1"
+
+    if args.max_sites is not None:
+        env["AEGISBIT_MAX_SITES"] = str(args.max_sites)
+
+    # Always create a temp file for JSON output so we can read structured data
+    json_tmpfile = tempfile.NamedTemporaryFile(
+        prefix="aegisbit_", suffix=".json", delete=False)
+    json_path = json_tmpfile.name
+    json_tmpfile.close()
+    env["AEGISBIT_JSON_OUTPUT"] = json_path
+
+    # Dry run: show config and exit
+    if args.dry_run:
+        print("aegisbit: DRY RUN — would execute:\n")
+        aegis_vars = sorted(
+            k for k in env if k.startswith("AEGISBIT_") or k == "LD_PRELOAD")
+        for k in aegis_vars:
+            print(f"  {k}={env[k]}")
+        print(f"\n  Command: {' '.join(target_cmd)}")
+        _cleanup_temp(json_path)
+        return
+
+    # Run the target
+    try:
+        result = subprocess.run(target_cmd, env=env)
+    except FileNotFoundError:
+        print(f"aegisbit: error: command not found: {target_cmd[0]}",
+              file=sys.stderr)
+        _cleanup_temp(json_path)
+        sys.exit(127)
+    except KeyboardInterrupt:
+        _cleanup_temp(json_path)
+        sys.exit(130)
+
+    # Read JSON results
+    json_data = None
+    try:
+        with open(json_path, "r") as f:
+            content = f.read()
+        if content.strip():
+            json_data = json.loads(content)
+    except (OSError, json.JSONDecodeError) as e:
+        if args.json:
+            print(f"aegisbit: warning: could not read JSON output: {e}",
+                  file=sys.stderr)
+
+    _cleanup_temp(json_path)
+
+    # Output JSON if requested
+    if args.json and json_data is not None:
+        formatted = json.dumps(json_data, indent=2)
+        if args.output:
+            try:
+                with open(args.output, "w") as f:
+                    f.write(formatted)
+                    f.write("\n")
+                print(f"aegisbit: JSON report written to {args.output}",
+                      file=sys.stderr)
+            except OSError as e:
+                print(f"aegisbit: error writing {args.output}: {e}",
+                      file=sys.stderr)
+        else:
+            print(formatted)
+
+    sys.exit(result.returncode)
+
+
+def _cleanup_temp(path):
+    """Remove temp file, ignoring errors."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+if __name__ == "__main__":
+    main()

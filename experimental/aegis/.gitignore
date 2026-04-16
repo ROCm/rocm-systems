@@ -1,0 +1,42 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.o
+*.a
+*.so
+*.dylib
+
+# Test outputs
+Testing/
+test_output/
+
+# Trace files (large binaries)
+*.trace
+*.trace.gz
+traces/
+
+# Kernel binaries
+*.co
+*.hsaco
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+
+# Editor backups
+*~
+.*.swp
+.*.swo

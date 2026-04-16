@@ -1,0 +1,40 @@
+# AegisBit @CMAKE_PROJECT_VERSION@ — Portable Binary
+
+## Prerequisites
+
+- **ROCm 6.x or 7.x** installed at `/opt/rocm` (provides HSA runtime and HIP runtime)
+- **Python 3.8+** (for the `aegisbit` CLI wrapper)
+- **AMD GPU** with CDNA2/CDNA3/CDNA4 architecture (MI210, MI300X, MI350X)
+
+## Installation
+
+```bash
+tar xzf aegisbit-@CMAKE_PROJECT_VERSION@-linux-x86_64.tar.gz
+cd aegisbit-@CMAKE_PROJECT_VERSION@-linux-x86_64
+
+# Option A: copy to a system location
+sudo cp lib/libaegisbit.so /opt/rocm/lib/
+sudo cp bin/aegisbit /usr/local/bin/
+
+# Option B: use from this directory
+export PATH=$PWD/bin:$PATH
+export AEGISBIT_LIB=$PWD/lib/libaegisbit.so
+```
+
+## Quick test
+
+```bash
+aegisbit -- python3 -c "import torch; x=torch.randn(128,128,device='cuda'); print(x@x)"
+```
+
+## What's bundled
+
+- `lib/libaegisbit.so` — self-contained shared library with LLVM 23 AMDGPU
+  backend statically linked. LLVM symbols are hidden to avoid conflicts.
+- `bin/aegisbit` — Python CLI wrapper.
+
+## Runtime dependencies (NOT bundled)
+
+These are provided by your ROCm installation:
+- `libhsa-runtime64.so` — HSA runtime
+- `libamdhip64.so` — HIP runtime
