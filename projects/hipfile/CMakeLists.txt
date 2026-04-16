@@ -241,7 +241,7 @@ else()
     message(NOTICE "find_package did NOT find hip")
 endif()
 
-# Find libmount (required for AMD builds)
+# Find libmount and Boost.Program_options (required for AMD builds)
 if(AIS_BUILD_AMD_DETAIL)
     find_path(LIBMOUNT_INCLUDE_DIR
         NAMES libmount/libmount.h
@@ -265,6 +265,10 @@ if(AIS_BUILD_AMD_DETAIL)
     endif()
     message(STATUS "libmount include dir: ${LIBMOUNT_INCLUDE_DIR}")
     message(STATUS "libmount library:     ${LIBMOUNT_LIBRARY}")
+
+    find_package(Boost REQUIRED COMPONENTS program_options)
+    message(STATUS "Boost include dir:    ${Boost_INCLUDE_DIRS}")
+    message(STATUS "Boost libraries:      ${Boost_LIBRARIES}")
 endif()
 
 # Find the cuFile library and headers on NVIDIA
