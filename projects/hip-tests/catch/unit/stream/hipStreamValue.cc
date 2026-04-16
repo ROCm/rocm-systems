@@ -662,8 +662,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
 
 TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_Default", "", uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
   }
 
   hipStream_t stream{nullptr};
@@ -688,8 +687,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Increment_Default", "", uint32_t, u
 
 TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_Default", "", uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
   }
 
   hipStream_t stream{nullptr};
@@ -714,8 +712,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Decrement_Default", "", uint32_t, u
 template <typename TestType>
 void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
   if (!streamWaitValueSupported()) {
-    HipTest::HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
-    return;
+    HIP_SKIP_TEST("hipStreamWriteValue not supported on this device.");
   }
 
   constexpr size_t streams_per_device = 2;
