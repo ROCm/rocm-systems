@@ -66,7 +66,7 @@ __global__ void user_mem_test(int *source, int *dest, size_t nelem, rocshmem_tea
 
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
-  rocshmem_ctx_int_user_mem_wg(ctx, team, dest, source, nelem);
+  rocshmem_ctx_int_alltoall_wg(ctx, team, dest, source, nelem);
 
   rocshmem_ctx_quiet(ctx);
   __syncthreads();
