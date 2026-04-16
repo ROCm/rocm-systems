@@ -184,6 +184,14 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
   result.totalCount = (int)insts.size();
 
+  {
+    raw_string_ostream disOS(result.disasmText);
+    for (const auto &di : insts) {
+      disOS << format_hex_no_prefix(di.offset, 8) << ":  " << di.fullText
+            << "\n";
+    }
+  }
+
   // ==== Phase 2: Build LLVM IR module + function ====
   result.ctx = std::make_unique<LLVMContext>();
   LLVMContext &C = *result.ctx;

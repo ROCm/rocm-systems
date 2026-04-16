@@ -20,6 +20,7 @@ struct RaiseResult {
   int liftedCount = 0;
   int totalCount = 0;
   std::string irText;
+  std::string disasmText;
   std::string failMnemonic;
   std::string failFormat;
   bool success = false;

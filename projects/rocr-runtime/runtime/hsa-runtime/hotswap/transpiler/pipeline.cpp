@@ -12,6 +12,7 @@
 #include "llvm/ADT/StringExtras.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <string>
 
@@ -78,24 +79,50 @@ int runTool(llvm::StringRef program, llvm::ArrayRef<llvm::StringRef> args) {
   return rc;
 }
 
-struct TempDir {
+struct DumpDir {
   llvm::SmallString<128> path;
   bool valid = false;
+  bool persistent = false;
 
-  TempDir() {
-    if (auto ec = llvm::sys::fs::createUniqueDirectory("transpiler", path)) {
-      llvm::errs() << "transpiler: failed to create temp dir: " << ec.message() << "\n";
-    } else {
+  DumpDir() {
+    static const char *envDir = std::getenv("HSA_SALMON_DUMP_DIR");
+    if (envDir && envDir[0]) {
+      persistent = true;
+      path = envDir;
+      if (auto ec = llvm::sys::fs::create_directories(path)) {
+        llvm::errs() << "salmon: failed to create dump dir '"
+                     << path << "': " << ec.message() << "\n";
+        return;
+      }
+      // Create a unique subdirectory per invocation so parallel runs
+      // don't clobber each other.
+      llvm::SmallString<128> sub;
+      if (auto ec = llvm::sys::fs::createUniqueDirectory(
+              path + "/salmon", sub)) {
+        llvm::errs() << "salmon: failed to create subdir in '"
+                     << path << "': " << ec.message() << "\n";
+        return;
+      }
+      path = sub;
       valid = true;
+    } else {
+      if (auto ec =
+              llvm::sys::fs::createUniqueDirectory("transpiler", path)) {
+        llvm::errs() << "salmon: failed to create temp dir: "
+                     << ec.message() << "\n";
+      } else {
+        valid = true;
+      }
     }
   }
-  ~TempDir() {
-    // Keep temp dirs for debugging
-    // if (valid)
-    //   llvm::sys::fs::remove_directories(path);
+
+  ~DumpDir() {
+    if (valid && !persistent)
+      llvm::sys::fs::remove_directories(path);
   }
-  TempDir(const TempDir &) = delete;
-  TempDir &operator=(const TempDir &) = delete;
+
+  DumpDir(const DumpDir &) = delete;
+  DumpDir &operator=(const DumpDir &) = delete;
 
   std::string filePath(llvm::StringRef name) const {
     llvm::SmallString<256> p(path);
@@ -119,7 +146,7 @@ static bool raiseAndCompileKernel(const TextSection &text,
                                   const std::string &kernelName,
                                   const std::string &sourceISA,
                                   const std::string &targetISA,
-                                  const TempDir &tmpDir,
+                                  const DumpDir &tmpDir,
                                   const std::string &objPath,
                                   PipelineResult &result) {
   auto meta = extractKernelMeta(codeObjectData, kernelName);
@@ -164,6 +191,10 @@ static bool raiseAndCompileKernel(const TextSection &text,
 
   if (!writeFile(irPath, raised.irText))
     return false;
+
+  static const char *s_dumpInput = std::getenv("HSA_SALMON_DUMP_INPUT");
+  if (s_dumpInput && s_dumpInput[0] == '1' && !raised.disasmText.empty())
+    writeFile(tmpDir.filePath(kernelName + ".dis"), raised.disasmText);
 
   std::string llcBin = std::string(LLVM_TOOLS_DIR) + "/llc";
   if (runTool(llcBin, {llcBin, "-march=amdgcn",
@@ -221,9 +252,15 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
     return result;
   }
 
-  TempDir tmpDir;
+  DumpDir tmpDir;
   if (!tmpDir.valid)
     return result;
+
+  {
+    static const char *s_dumpInput = std::getenv("HSA_SALMON_DUMP_INPUT");
+    if (s_dumpInput && s_dumpInput[0] == '1')
+      writeFile(tmpDir.filePath("input.co"), codeObjectData);
+  }
 
   std::string objPath   = tmpDir.filePath("kernel.o");
   std::string hsacoPath = tmpDir.filePath("kernel.hsaco");
@@ -268,9 +305,13 @@ PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
     return result;
   }
 
-  TempDir tmpDir;
+  DumpDir tmpDir;
   if (!tmpDir.valid)
     return result;
+
+  static const char *s_dumpInput = std::getenv("HSA_SALMON_DUMP_INPUT");
+  if (s_dumpInput && s_dumpInput[0] == '1')
+    writeFile(tmpDir.filePath("input.co"), codeObjectData);
 
   std::vector<std::string> objPaths;
   for (size_t i = 0; i < kernelNames.size(); ++i) {

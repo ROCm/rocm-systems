@@ -294,23 +294,29 @@ configuring.
 
 ### Intermediates
 
-Every Salmon invocation writes intermediate files to a temp directory under
-`/tmp/transpiler-XXXXXX/`.  These are intentionally kept for debugging and
-contain:
-
-| File | Contents |
-|------|----------|
-| `<kernel>.ll` | Raised LLVM IR |
-| `<kernel>.s` | Target assembly (output of `llc`) |
-| `k<N>.o` | Assembled object file |
-| `merged.hsaco` | Linked HSACO (final code object) |
-
-To inspect the raised IR for a specific run, look at the most recent temp dir:
+By default, Salmon writes intermediate files to a temp directory that is
+**cleaned up** when the pipeline finishes.  To persist them for debugging, set
+`HSA_SALMON_DUMP_DIR`:
 
 ```bash
-ls -td /tmp/transpiler-* | head -1   # most recent
-cat /tmp/transpiler-XXXXXX/<kernel_name>.ll
+HSA_SALMON_DUMP_DIR=/tmp/salmon_dumps \
+HSA_SALMON_DUMP_INPUT=1 \
+HSA_HOTSWAP_ISA_OVERRIDE=gfx942 HSA_HOTSWAP_IR_RAISER=1 \
+HSA_HOTSWAP_RULES=/dev/null \
+LD_LIBRARY_PATH=$ROCR_BUILD/rocr/lib \
+./my_program
 ```
+
+Each invocation creates a unique subdirectory (e.g. `salmon_dumps/salmon-a1b2c3/`):
+
+| File | Always? | Contents |
+|------|:-------:|----------|
+| `<kernel>.ll` | Yes | Raised LLVM IR |
+| `<kernel>.s` | Yes | Target assembly (output of `llc`) |
+| `k<N>.o` | Yes | Assembled object file |
+| `merged.hsaco` | Yes | Linked HSACO (final code object) |
+| `input.co` | `DUMP_INPUT=1` | Original input code object (binary) |
+| `<kernel>.dis` | `DUMP_INPUT=1` | Disassembly of the input kernel |
 
 ---
 
@@ -492,6 +498,8 @@ reuses the surrounding integration infrastructure.  Specifically:
 | `HSA_HOTSWAP_ISA_OVERRIDE` | **Yes** | Target ISA (e.g. `gfx942`).  Enables the hotswap hook. |
 | `HSA_HOTSWAP_IR_RAISER` | **Yes** | Set to `1` to activate Salmon.  Without this, the legacy transpiler handles mismatches. |
 | `HSA_HOTSWAP_RULES` | No | Path to JSON rules file.  Set to `/dev/null` if no rules are needed but the engine must be enabled. |
+| `HSA_SALMON_DUMP_DIR` | No | Directory for intermediate files.  Each invocation creates a unique `salmon-XXXXXX/` subdirectory.  When unset, intermediates go to a temp dir that is cleaned up on exit. |
+| `HSA_SALMON_DUMP_INPUT` | No | Set to `1` to also save the input code object (`input.co`) and per-kernel disassembly (`.dis`) alongside the raised IR. |
 
 ### Running PyTorch with Salmon
 
