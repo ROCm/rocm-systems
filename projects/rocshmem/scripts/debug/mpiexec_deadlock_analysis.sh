@@ -34,13 +34,18 @@
 # Options:
 #   --directory <dir>      Shared output directory visible from all nodes
 #                          (default: ./rocshmem_deadlock_analysis_<timestamp>)
-#   --nodes N              Number of nodes to analyze (auto-detected from
-#                          SLURM/PBS environment if not given)
 #   --cull                 Cull groups stuck in GPU barriers / gridsync
 #   --cull=p1,p2,...       Cull groups matching any of the given substrings
+#   --check-lanes          Enable per-lane register divergence check inside each group
+#   --color                Force ANSI color output
+#   --no-color             Disable ANSI color output
 #   --no-coalesce          Skip the cross-rank coalescing pass
 #   -- <mpiexec-args>...   All arguments after -- are forwarded verbatim to
-#                          mpiexec (e.g. -H node1,node2 --hostfile hosts.txt)
+#                          mpiexec (e.g. -np 4 -H node1,node2 --hostfile hosts.txt)
+#
+# mpiexec is invoked with -pernode, placing exactly one rank per allocated
+# node.  The node set is determined by the scheduler allocation (SLURM, PBS)
+# or by the arguments supplied after --.
 #
 # Environment variables:
 #   MPIEXEC                mpiexec binary to use (default: mpiexec)
@@ -51,12 +56,13 @@
 # accessible with the same path from all nodes.
 #
 # Examples:
-#   ./mpiexec_deadlock_analysis.sh rocshmem_functional_tests --nodes 4 \
+#   ./mpiexec_deadlock_analysis.sh rocshmem_functional_tests \
 #       --directory /shared/analysis --cull
+#   # Explicit node list via mpiexec arguments:
 #   ./mpiexec_deadlock_analysis.sh rocshmem_functional_tests \
-#       --directory /shared/analysis -- -H node1,node2,node3,node4
+#       --directory /shared/analysis -- -np 4 -H node1,node2,node3,node4
 #   ./mpiexec_deadlock_analysis.sh rocshmem_functional_tests \
-#       -- --hostfile /etc/mpi/hosts --map-by node:pe=2
+#       -- --hostfile /etc/mpi/hosts
 ###############################################################################
 
 set -o pipefail
@@ -71,14 +77,15 @@ COALESCE_SCRIPT="${SCRIPT_DIR}/cross_rank_deadlock_analysis.py"
 
 EXECUTABLE="${1:-}"
 if [[ -z "${EXECUTABLE}" ]]; then
-    echo "Usage: $0 <executable_name> [--directory <dir>] [--nodes N] [--cull[=...]]" >&2
+    echo "Usage: $0 <executable_name> [--directory <dir>] [--cull[=...]] [-- <mpiexec-args>...]" >&2
     exit 1
 fi
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_DIR=""
-NUM_NODES=""
 CULL_ARG=""
+CHECK_LANES_ARG=""
+COLOR_ARG=""
 RUN_COALESCE=1
 MPIEXEC_EXTRA_ARGS=()
 
@@ -96,16 +103,17 @@ while [[ ${_i} -lt ${#_args[@]} ]]; do
         [[ -z "${OUTPUT_DIR}" ]] && { echo "ERROR: --directory requires an argument." >&2; exit 1; }
     elif [[ "${_arg}" == --directory=* ]]; then
         OUTPUT_DIR="${_arg#--directory=}"
-    elif [[ "${_arg}" == "--nodes" ]]; then
-        (( _i++ ))
-        NUM_NODES="${_args[${_i}]:-}"
-        [[ -z "${NUM_NODES}" ]] && { echo "ERROR: --nodes requires an argument." >&2; exit 1; }
-    elif [[ "${_arg}" == --nodes=* ]]; then
-        NUM_NODES="${_arg#--nodes=}"
+        [[ -z "${OUTPUT_DIR}" ]] && { echo "ERROR: --directory= requires a value." >&2; exit 1; }
     elif [[ "${_arg}" == "--cull" ]]; then
         CULL_ARG="--cull"
     elif [[ "${_arg}" == --cull=* ]]; then
         CULL_ARG="${_arg}"
+    elif [[ "${_arg}" == "--check-lanes" ]]; then
+        CHECK_LANES_ARG="--check-lanes"
+    elif [[ "${_arg}" == "--color" ]]; then
+        COLOR_ARG="--color"
+    elif [[ "${_arg}" == "--no-color" ]]; then
+        COLOR_ARG="--no-color"
     elif [[ "${_arg}" == "--no-coalesce" ]]; then
         RUN_COALESCE=0
     else
@@ -117,27 +125,6 @@ done
 
 OUTPUT_DIR="${OUTPUT_DIR:-./rocshmem_deadlock_analysis_${TIMESTAMP}}"
 MPIEXEC="${MPIEXEC:-mpiexec}"
-
-# ---------------------------------------------------------------------------
-# Auto-detect node count
-# ---------------------------------------------------------------------------
-
-if [[ -z "${NUM_NODES}" ]]; then
-    if [[ -n "${SLURM_JOB_NUM_NODES}" ]]; then
-        NUM_NODES="${SLURM_JOB_NUM_NODES}"
-        echo "Auto-detected ${NUM_NODES} node(s) from SLURM_JOB_NUM_NODES."
-    elif [[ -n "${PBS_NUM_NODES}" ]]; then
-        NUM_NODES="${PBS_NUM_NODES}"
-        echo "Auto-detected ${NUM_NODES} node(s) from PBS_NUM_NODES."
-    elif [[ -n "${PBS_NODEFILE}" && -f "${PBS_NODEFILE}" ]]; then
-        NUM_NODES="$(sort -u "${PBS_NODEFILE}" | wc -l)"
-        echo "Auto-detected ${NUM_NODES} unique node(s) from PBS_NODEFILE."
-    else
-        echo "ERROR: Cannot auto-detect node count." >&2
-        echo "       Set --nodes N, or run inside a SLURM/PBS allocation." >&2
-        exit 1
-    fi
-fi
 
 # ---------------------------------------------------------------------------
 # Prerequisite checks
@@ -167,24 +154,27 @@ mkdir -p "${OUTPUT_DIR}" || { echo "ERROR: Cannot create output directory: ${OUT
 # Deploy attach_deadlock_analysis.sh on each node via mpiexec
 # ---------------------------------------------------------------------------
 
-echo "Deploying deadlock analysis on ${NUM_NODES} node(s)..."
+echo "Deploying deadlock analysis..."
 echo "Executable:       ${EXECUTABLE}"
 echo "Output directory: ${OUTPUT_DIR}"
-[[ -n "${CULL_ARG}" ]] && echo "Cull option:      ${CULL_ARG}"
+[[ -n "${CULL_ARG}" ]]         && echo "Cull option:      ${CULL_ARG}"
+[[ -n "${CHECK_LANES_ARG}" ]]  && echo "Check lanes:      yes"
+[[ -n "${COLOR_ARG}" ]]        && echo "Color:            ${COLOR_ARG}"
 [[ ${#MPIEXEC_EXTRA_ARGS[@]} -gt 0 ]] && echo "mpiexec args:     ${MPIEXEC_EXTRA_ARGS[*]}"
 echo ""
 
 # Build the attach script argument list
 _attach_args=("${EXECUTABLE}" "--directory" "${OUTPUT_DIR}")
-[[ -n "${CULL_ARG}" ]] && _attach_args+=("${CULL_ARG}")
+[[ -n "${CULL_ARG}" ]]        && _attach_args+=("${CULL_ARG}")
+[[ -n "${CHECK_LANES_ARG}" ]] && _attach_args+=("${CHECK_LANES_ARG}")
+[[ -n "${COLOR_ARG}" ]]       && _attach_args+=("${COLOR_ARG}")
 
-# Run one instance per node.  --map-by node (OpenMPI) places one rank per
-# node; --bind-to none avoids CPU affinity restrictions on the shell process.
-# The ROCGDB and ROCSHMEM_GDB_TIMEOUT env vars are forwarded automatically
-# since mpiexec inherits the caller's environment.
-# MPIEXEC_EXTRA_ARGS (populated from arguments after --) are inserted before
-# the -np flag so they can include topology flags like -H, --hostfile, -N.
-"${MPIEXEC}" "${MPIEXEC_EXTRA_ARGS[@]}" -np "${NUM_NODES}" --map-by node --bind-to none \
+# -pernode launches exactly one process per allocated node (supported by
+# OpenMPI, MPICH, and Intel MPI).  ROCGDB and ROCSHMEM_GDB_TIMEOUT are
+# forwarded automatically via the inherited environment.
+# MPIEXEC_EXTRA_ARGS (from arguments after --) supply the node list / count,
+# e.g. -np 4 -H node1,node2 or --hostfile hosts.txt.
+"${MPIEXEC}" "${MPIEXEC_EXTRA_ARGS[@]}" -pernode \
     bash "${ATTACH_SCRIPT}" "${_attach_args[@]}"
 MPIEXEC_EXIT=$?
 
@@ -201,5 +191,7 @@ fi
 if [[ ${RUN_COALESCE} -eq 1 ]]; then
     echo "Running cross-rank coalescing pass..."
     echo ""
-    python3 "${COALESCE_SCRIPT}" "${OUTPUT_DIR}"
+    _coalesce_args=("${OUTPUT_DIR}")
+    [[ -n "${COLOR_ARG}" ]] && _coalesce_args+=("${COLOR_ARG}")
+    python3 "${COALESCE_SCRIPT}" "${_coalesce_args[@]}"
 fi

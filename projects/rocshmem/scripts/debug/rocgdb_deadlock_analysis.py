@@ -1146,6 +1146,13 @@ def _auto_analyzer_kwargs():
       unset / empty  — culling disabled (default)
       "1"            — cull using _DEFAULT_CULL_PATTERNS
       "pat1,pat2,…"  — cull using the supplied comma-separated patterns
+
+    ROCSHMEM_DEADLOCK_CHECK_LANES:
+      "1"            — enable lane-level parameter mismatch detection
+
+    ROCSHMEM_DEADLOCK_COLOR:
+      handled by _color_enabled_default(); not overridden here so the
+      DeadlockAnalyzer constructor auto-detects it as usual.
     """
     kwargs = {}
     cull_env = os.environ.get('ROCSHMEM_DEADLOCK_CULL', '')
@@ -1153,6 +1160,8 @@ def _auto_analyzer_kwargs():
         kwargs['cull_patterns'] = []        # triggers _DEFAULT_CULL_PATTERNS
     elif cull_env:
         kwargs['cull_patterns'] = [p for p in cull_env.split(',') if p]
+    if os.environ.get('ROCSHMEM_DEADLOCK_CHECK_LANES', '0') == '1':
+        kwargs['lane_check'] = True
     return kwargs
 
 
