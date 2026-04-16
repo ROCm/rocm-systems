@@ -39,11 +39,6 @@ struct RaiseContext {
 
   std::map<uint64_t, llvm::BasicBlock *> &offsetToBB;
 
-  // Per-lane storage for v_writelane/v_readlane "register parking" pattern.
-  // Key: VGPR index. Value: alloca of [64 x i32] in private memory.
-  std::map<unsigned, llvm::AllocaInst *> laneParking;
-  llvm::AllocaInst *getOrCreateLaneParking(unsigned vgprIdx);
-
   // gfx1250 s_set_vgpr_msb state: only the LOW 8 bits of the instruction's
   // 16-bit immediate carry runtime meaning.  They encode the MSB bit pair for
   // every operand slot of the next ALU instruction:

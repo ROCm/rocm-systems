@@ -10,6 +10,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstring>
 #include <map>
@@ -623,38 +624,73 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  // v_writelane_b32 vDST, sSRC, lane: write scalar value to a specific lane
-  // of a VGPR. Used for "register parking" — storing multiple scalar values
-  // in different lanes of one VGPR to free up SGPRs.
-  // Emulated with a private-memory array indexed by lane number.
+  // v_writelane_b32 vDST, sSRC, lane: write sSRC into ONE specific lane
+  // of vDST.  On hardware, only the lane whose id matches the `lane` operand
+  // has its vDST updated; every other lane keeps its vDST unchanged.
+  //
+  // Used by the compiler as a "register parking" mechanism: SGPR values are
+  // stashed in individual lanes of a single VGPR and later recovered by
+  // v_readlane_b32.  Because this is a cross-lane communication primitive,
+  // it CANNOT be emulated via per-thread private scratch (each lane has its
+  // own scratch) nor via a single scalar SSA value (that would clobber the
+  // other lanes' content).
+  //
+  // We emit `llvm.amdgcn.writelane(val, lane, old)` which lowers directly to
+  // the hardware v_writelane_b32 on gfx942.  Our per-lane IR model treats a
+  // VGPR as a scalar SSA value; the intrinsic returns the new "per-lane
+  // scalar" for this lane (either `val` if lane_id==lane, else `old`), so
+  // the VGPR's SSA slot carries the correct value for whichever lane we are.
   if (sop == SemOp::V_WRITELANE_B32) {
     ParsedReg dst = op.dst();
     Value *val = op.src(0);
     Value *lane = op.src(1);
-    auto *arr = ctx.getOrCreateLaneParking(dst.baseIdx);
-    Value *gep = ctx.B.CreateInBoundsGEP(
-        arr->getAllocatedType(), arr,
-        {ConstantInt::get(ctx.i32Ty, 0), lane}, "wrlane_gep");
-    ctx.B.CreateStore(val, gep);
+    lane = ctx.B.CreateZExtOrTrunc(lane, ctx.i32Ty, "wrlane_idx");
+
+    // First-write pattern: if the compiler's writelane is the first ever
+    // assignment to vDst, the non-selected lanes legitimately hold whatever
+    // vDst contained before (hardware semantics).  PoisonValue is the correct
+    // IR encoding for "unobservable by any correct program" — any downstream
+    // use of those lanes before they are written is itself undefined on
+    // hardware, so poisoning them cannot introduce a miscompile.
+    Value *oldVal = ctx.regs.readReg32(ctx.B, dst);
+    if (!oldVal)
+      oldVal = PoisonValue::get(ctx.i32Ty);
+
+    Function *wl = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_writelane, {ctx.i32Ty});
+    Value *newVal = ctx.B.CreateCall(wl, {val, lane, oldVal}, "writelane");
+    ctx.regs.writeReg32(ctx.B, dst, newVal);
     hr.handled = true;
     return hr;
   }
-  // v_readlane_b32 sDST, vSRC, lane: read a specific lane from a VGPR
-  // into a scalar register. Reverse of writelane parking.
+  // v_readlane_b32 sDST, vSRC, lane: read a specific lane of a VGPR into a
+  // scalar register.  Reverse of writelane parking; also cross-lane, so it
+  // must use the native intrinsic (lowers to hardware v_readlane_b32).
   if (sop == SemOp::V_READLANE_B32) {
     ParsedReg srcReg = op.srcReg(0);
     Value *lane = op.src(1);
-    auto it = ctx.laneParking.find(srcReg.baseIdx);
-    if (it != ctx.laneParking.end()) {
-      auto *arr = it->second;
-      Value *gep = ctx.B.CreateInBoundsGEP(
-          arr->getAllocatedType(), arr,
-          {ConstantInt::get(ctx.i32Ty, 0), lane}, "rdlane_gep");
-      Value *val = ctx.B.CreateLoad(ctx.i32Ty, gep, "rdlane_val");
-      ctx.regs.writeReg32(ctx.B, op.dst(), val);
-    } else {
-      ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    lane = ctx.B.CreateZExtOrTrunc(lane, ctx.i32Ty, "rdlane_idx");
+
+    // Reading from a VGPR that the raiser has never observed being written
+    // is a raising bug — the program would read hardware-level garbage.  Do
+    // not paper over it with poison; fail loudly so the missing write is
+    // noticed and fixed.
+    Value *src = ctx.regs.readReg32(ctx.B, srcReg);
+    if (!src) {
+      std::string msg;
+      raw_string_ostream os(msg);
+      os << "transpiler: v_readlane_b32 from uninitialized v"
+         << srcReg.baseIdx << " at offset 0x";
+      os.write_hex(di.offset);
+      os << "; raiser missed a prior write.";
+      errs() << os.str() << "\n";
+      report_fatal_error(StringRef(msg));
     }
+
+    Function *rl = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_readlane, {ctx.i32Ty});
+    Value *val = ctx.B.CreateCall(rl, {src, lane}, "readlane");
+    ctx.regs.writeReg32(ctx.B, op.dst(), val);
     hr.handled = true;
     return hr;
   }
@@ -1392,14 +1428,6 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     ParsedReg dest = op.dst();
     ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
     ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
-
-    llvm::errs() << "transpiler: WMMA dest.baseIdx=" << dest.baseIdx
-                 << " srcA.baseIdx=" << srcA.baseIdx
-                 << " srcB.baseIdx=" << srcB.baseIdx
-                 << " srcC.baseIdx=" << srcC.baseIdx
-                 << " vgprMSBs=0x" << llvm::format_hex(ctx.vgprMSBs, 4)
-                 << " adj[0]=" << ctx.currentVGPRAdjust[0]
-                 << " at 0x" << llvm::format_hex(di.offset, 1) << "\n";
 
     Value *a = ctx.regs.readRegVec(ctx.B, srcA, v16f16Ty);
     Value *b = ctx.regs.readRegVec(ctx.B, srcB, v16f16Ty);

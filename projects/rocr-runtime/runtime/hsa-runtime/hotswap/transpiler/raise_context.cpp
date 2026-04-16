@@ -12,19 +12,6 @@ using namespace llvm;
 
 namespace transpiler {
 
-AllocaInst *RaiseContext::getOrCreateLaneParking(unsigned vgprIdx) {
-  auto it = laneParking.find(vgprIdx);
-  if (it != laneParking.end())
-    return it->second;
-  IRBuilder<>::InsertPointGuard guard(B);
-  B.SetInsertPoint(&kernel->getEntryBlock(), kernel->getEntryBlock().begin());
-  auto *arrTy = ArrayType::get(i32Ty, 64);
-  auto *alloca = B.CreateAlloca(arrTy, nullptr, "lane_park_v" + Twine(vgprIdx));
-  alloca->setAlignment(Align(4));
-  laneParking[vgprIdx] = alloca;
-  return alloca;
-}
-
 BasicBlock *RaiseContext::lookupBB(uint64_t addr) {
   auto it = offsetToBB.find(addr);
   if (it != offsetToBB.end())
