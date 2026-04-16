@@ -331,7 +331,10 @@ flush_all_agents_buffers(std::optional<rocprofiler_client_id_t> client_id = std:
                 // Filter by client if specified
                 if(client_id && agent_session->client_idx != client_id->handle) continue;
 
-                status = flush_internal_agent_buffers(agent_session->buffer_id);
+                // Directly flush the agent's internal HSA buffers rather than going
+                // through flush_internal_agent_buffers(), which would re-acquire rlock
+                // on this same mutex (undefined behavior with std::shared_mutex).
+                status = hsa::flush_internal_agent_buffers(agent_session.get());
                 if(status != ROCPROFILER_STATUS_SUCCESS)
                 {
                     ROCP_ERROR << "Failed to flush internal HSA buffers tied to rocp buffer "
