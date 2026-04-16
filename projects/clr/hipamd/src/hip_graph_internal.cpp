@@ -924,9 +924,8 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
   parallel_streams_[devId].reserve(max_streams);
   std::unordered_set<uint64_t> exclude_queue_ids;
   for (uint32_t i = 0; i < max_streams; ++i) {
-    constexpr bool kDedicatedQueue = true;
     auto stream = new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal,
-                                  hipStreamNonBlocking, kDedicatedQueue);
+                                  hipStreamNonBlocking);
     stream->setExcludeQueueIds(&exclude_queue_ids);
 
     if (!stream->Create()) {
