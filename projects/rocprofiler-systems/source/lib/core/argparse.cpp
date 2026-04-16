@@ -508,6 +508,24 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("periods");
     }
 
+    if(_data.environ_filter("selected_regions", _data))
+    {
+        _parser
+            .add_argument(
+                { "--selected-regions" },
+                "Comma-separated list of roctx region names. When set, only "
+                "activity inside matching roctx regions is traced (matched against "
+                "roctxRangeStartA message)")
+            .count(1)
+            .dtype("string")
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_SELECTED_REGIONS",
+                           p.get<std::string>("selected-regions"));
+            });
+
+        _data.processed_environs.emplace("selected_regions");
+    }
+
     if(_data.environ_filter("rank_filter_id", _data))
     {
         _parser

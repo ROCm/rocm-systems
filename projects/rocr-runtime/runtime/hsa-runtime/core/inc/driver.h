@@ -157,12 +157,14 @@ public:
   /// if @p type is one of the SDMA queue types.
   /// @param[in] queue_addr Address of the queue's ring buffer.
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
+  /// @param[in] queue_metadata_addr Address of the queue's metadata ring buffer.
+  /// @param[in] queue_metadata_size_bytes Size of the queue's metadata ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
   virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                    HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
-                                   void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                   HsaQueueResource& queue_resource) const = 0;
+                                   void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                   HsaEvent* event, HsaQueueResource& queue_resource) const = 0;
 
   /// @brief Destroy a queue.
   /// @param queue_id Kernel-mode driver's assigned queue ID.

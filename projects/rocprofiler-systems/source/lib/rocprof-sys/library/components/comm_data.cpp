@@ -121,23 +121,23 @@ metadata_initialize_comm_data_pmc()
         { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::mpi_send::label, "Tracks MPI communication data sizes",
           trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::mpi_recv::label, "Tracks MPI communication data sizes",
           trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 #endif
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::ucx_send::label, "Tracks UCX communication data sizes",
           trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           comm_data::ucx_recv::label, "Tracks UCX communication data sizes",
           trait::name<category::ucx>::description, LONG_DESCRIPTION, COMPONENT, MSG,
-          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 }
 
 template <typename Track>

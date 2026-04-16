@@ -27,7 +27,7 @@ bool Hart::advance(simdojo::Tick /*now*/) {
 
   set_current_memory(&memory_);
 
-  static_cast<IsaInstruction<risc_v::Isa> *>(inst.get())->execute(state_);
+  inst->execute(*inst, &state_);
 
   state_.pc = state_.next_pc;
   return !state_.halted;

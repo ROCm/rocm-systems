@@ -17,7 +17,7 @@ namespace detail {
 
 class RType : public IsaInstruction<Isa> {
 public:
-  RType(const std::string &mnemonic, uint32_t raw);
+  RType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn);
 
 protected:
   const RTypeMachineInst inst_;
@@ -25,7 +25,7 @@ protected:
 
 class IType : public IsaInstruction<Isa> {
 public:
-  IType(const std::string &mnemonic, uint32_t raw);
+  IType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn);
   int32_t imm() const;
 
 protected:
@@ -34,7 +34,7 @@ protected:
 
 class SType : public IsaInstruction<Isa> {
 public:
-  SType(const std::string &mnemonic, uint32_t raw);
+  SType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn);
   int32_t imm() const;
 
 protected:
@@ -43,7 +43,7 @@ protected:
 
 class BType : public IsaInstruction<Isa> {
 public:
-  BType(const std::string &mnemonic, uint32_t raw);
+  BType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn);
   int32_t imm() const;
 
 protected:
@@ -52,7 +52,7 @@ protected:
 
 class UType : public IsaInstruction<Isa> {
 public:
-  UType(const std::string &mnemonic, uint32_t raw);
+  UType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn);
   int32_t imm() const;
 
 protected:
@@ -61,7 +61,7 @@ protected:
 
 class JType : public IsaInstruction<Isa> {
 public:
-  JType(const std::string &mnemonic, uint32_t raw);
+  JType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn);
   int32_t imm() const;
 
 protected:
@@ -70,7 +70,7 @@ protected:
 
 class R4Type : public IsaInstruction<Isa> {
 public:
-  R4Type(const std::string &mnemonic, uint32_t raw);
+  R4Type(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn);
 
 protected:
   const R4TypeMachineInst inst_;

@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_gda.hpp"
+#include "log.hpp"
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
 
@@ -341,7 +342,7 @@ __device__ void GDAContext::putmem_signal(void *dest, const void *source,
       qp_index, wf_info);
     break;
   default:
-    DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+    LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
     break;
   }
   //TODO: missing quiet_pe?
@@ -364,7 +365,7 @@ __device__ void GDAContext::putmem_signal_wg(void *dest, const void *source,
         qp_index, wf_info);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
     //TODO: missing quiet_pe?
@@ -388,7 +389,7 @@ __device__ void GDAContext::putmem_signal_wave(void *dest, const void *source,
         qp_index, wf_info);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
     //TODO: missing quiet_pe?

@@ -21,9 +21,10 @@ main(int argc, char** argv)
     {
         auto _arg = std::string_view{ argv[i] };
         if(_arg == "--" || _arg == "-?" || _arg == "-h" || _arg == "--help" ||
-           _arg == "--version" || _arg == "--export-config" ||
-           _arg.find("--export-config=") == 0 || _arg == "--list-presets" ||
-           _arg == "--explain" || _arg.find("--explain=") == 0)
+           _arg.find("--help=") == 0 || _arg == "--version" ||
+           _arg == "--export-config" || _arg.find("--export-config=") == 0 ||
+           _arg == "--list-presets" || _arg == "--explain" ||
+           _arg.find("--explain=") == 0)
             _has_double_hyphen = true;
     }
 

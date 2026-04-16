@@ -8,6 +8,7 @@
 
 #include <vector>
 #include <string>
+#include <string_view>
 
 
 #include "vdi_common.hpp"
@@ -83,43 +84,43 @@ typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
 }  // namespace comgr_helper
 
 namespace helpers {
-bool UnbundleBitCode(const std::vector<char>& bundled_bit_code, const std::string& isa,
-                     size_t& co_offset, size_t& co_size);
-bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, const std::vector<char>& source,
+bool UnbundleBitCode(std::string_view bundled_bit_code, const std::string& isa, size_t& co_offset,
+                     size_t& co_size);
+bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
                     const std::string& name, const amd_comgr_data_kind_t type);
 bool extractBuildLog(comgr_helper::ComgrDataSetUniqueHandle& dataSet, std::string& buildLog);
 bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataSet,
                            const amd_comgr_data_kind_t dataKind, std::vector<char>& bin);
 bool createAction(comgr_helper::ComgrActionInfoUniqueHandle& action,
-                  std::vector<std::string>& options, const std::string& isa,
+                  const std::vector<std::string>& options, const std::string& isa,
                   const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_NONE);
 bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                         const std::string& isa, std::vector<std::string>& compileOptions,
-                         std::vector<std::string>& linkOptions, std::string& buildLog,
+                         const std::string& isa, const std::vector<std::string>& compileOptions,
+                         const std::vector<std::string>& linkOptions, std::string& buildLog,
                          std::vector<char>& exe);
 bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                      const std::string& isa, std::vector<std::string>& compileOptions,
+                      const std::string& isa, const std::vector<std::string>& compileOptions,
                       std::string& buildLog, std::vector<char>& LLVMBitcode);
 bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                     const std::string& isa, std::vector<std::string>& linkOptions,
+                     const std::string& isa, const std::vector<std::string>& linkOptions,
                      std::string& buildLog, std::vector<char>& LinkedLLVMBitcode);
 bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                      const std::string& isa, std::vector<std::string>& exeOptions,
+                      const std::string& isa, const std::vector<std::string>& exeOptions,
                       std::string& buildLog, std::vector<char>& executable, bool spirv_bc = false);
 bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                          const std::string& isa, std::vector<std::string>& linkOptions,
+                          const std::string& isa, const std::vector<std::string>& linkOptions,
                           std::string& buildLog, std::vector<char>& linkedSPIRVBitcode);
 bool demangleName(const std::string& mangledName, std::string& demangledName);
 std::string handleMangledName(std::string loweredName);
-bool fillMangledNames(std::vector<char>& executable,
+bool fillMangledNames(const std::vector<char>& executable,
                       std::map<std::string, std::string>& mangledNames, bool isBitcode);
 void GenerateUniqueFileName(std::string& name);
 
-bool CheckIfBundled(std::vector<char>& llvm_bitcode);
+bool CheckIfBundled(std::string_view llvm_bitcode);
 
-bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
-                        std::vector<std::string>& linkOptions, std::string& buildLog,
-                        std::vector<char>& unbundled_spirv_bitcode, const char* bundleEntryIDs,
+bool UnbundleUsingComgr(std::string_view source, const std::string& isa,
+                        const std::vector<std::string>& linkOptions, std::string& buildLog,
+                        std::vector<char>& unbundled_spirv_bitcode, const char* bundleEntryIDs[],
                         size_t bundleEntryIDsCount);
 
 // Mapping from targets to generic targets
@@ -216,7 +217,7 @@ class LinkProgram : public RTCProgram {
   std::vector<std::string> link_options_;
   static std::unordered_set<LinkProgram*> linker_set_;
 
-  bool AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputType input_type,
+  bool AddLinkerDataImpl(std::string_view link_data, hipJitInputType input_type,
                          const std::string& link_file_name);
 
  public:
@@ -228,8 +229,8 @@ class LinkProgram : public RTCProgram {
   // Public Member Functions
   bool AddLinkerOptions(unsigned int num_options, hipJitOption* options_ptr,
                         void** options_vals_ptr);
-  bool AddLinkerFile(const std::string &file_path, hipJitInputType input_type);
-  bool AddLinkerData(void* image_ptr, size_t image_size, const std::string &link_file_name,
+  bool AddLinkerFile(const std::string& file_path, hipJitInputType input_type);
+  bool AddLinkerData(const void* image_ptr, size_t image_size, const std::string& link_file_name,
                      hipJitInputType input_type);
   bool LinkComplete(void** bin_out, size_t* size_out);
   void AppendLinkerOptions() { AppendOptions(HIPRTC_LINK_OPTIONS_APPEND, &link_options_); }
