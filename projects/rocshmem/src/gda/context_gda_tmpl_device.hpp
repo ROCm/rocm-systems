@@ -37,6 +37,7 @@
 #include "backend_gda.hpp"
 
 #include <hip/hip_runtime.h>
+#include <type_traits>
 
 namespace rocshmem {
 
@@ -91,22 +92,41 @@ __device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int
 }
 
 // Atomics
+template <typename T, typename Op>
+__device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, Op op) {
+  static_assert(std::is_invocable_v<Op, T, T>, "Op must be invocable with arguments (T, T)");
+  static_assert(std::is_same_v<T, std::invoke_result_t<Op, T, T>>, "Op must return T");
+  static_assert(sizeof(T) == 8, "gda::internal_amo_fetch_op only implemented for 64-bit types");
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+
+  /**
+   * Guess that the remote memory is zero by setting condition to zero.
+   * The compare-and-swap loop will execute at least twice if wrong.
+   * It may run additional times if contention on memory location.
+   */
+  T prior_val = 0;
+  T fetch_val = 0;
+  do {
+    ActiveWFInfo loop_wf_info{pe};
+    prior_val = fetch_val;
+    T desired_val = op(prior_val, value);
+    fetch_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, prior_val, loop_wf_info);
+  } while (fetch_val != prior_val);
+  return fetch_val;
+}
+
 template <typename T>
 __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_add only implemented for 64-bit types");
   }
 }
 
@@ -117,67 +137,26 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  T ret_val;
-  T cond = 0;
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      /**
-       * Guess that the remote memory is zero by setting condition to zero.
-       * The compare-and-swap loop will execute at least twice if wrong.
-       * It may run additional times if contention on memory location.
-       */
-      while (true) {
-        ActiveWFInfo wf_info{pe};
-        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
-        if (ret_val == cond) {
-          break;
-        }
-        cond = ret_val;
-      }
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    return internal_amo_fetch_op(dst, value, pe,
+                                 []([[maybe_unused]] T prior_val, T value) { return value; });
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_swap only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
 }
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_and not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  T ret_val;
-  T cond = 0;
-  T desired_val = cond & value;
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      while (true) {
-        ActiveWFInfo wf_info{pe};
-        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, cond, wf_info);
-        if (ret_val == cond) {
-          break;
-        }
-        cond = ret_val;
-        desired_val = ret_val & value;
-      }
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    return internal_amo_fetch_op(dst, value, pe,
+                                 [](T prior_val, T value) { return prior_val & value; });
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_fetch_and only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
 }
 
 template <typename T>
@@ -187,33 +166,14 @@ __device__ void GDAContext::amo_and(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_or not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  T ret_val;
-  T cond = 0;
-  T desired_val = cond | value;
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      while (true) {
-        ActiveWFInfo wf_info{pe};
-        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, cond, wf_info);
-        if (ret_val == cond) {
-          break;
-        }
-        cond = ret_val;
-        desired_val = ret_val | value;
-      }
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    return internal_amo_fetch_op(dst, value, pe,
+                                 [](T prior_val, T value) { return prior_val | value; });
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_fetch_or only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
 }
 
 template <typename T>
@@ -223,33 +183,14 @@ __device__ void GDAContext::amo_or(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_xor not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  T ret_val;
-  T cond = 0;
-  T desired_val = cond ^ value;
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      while (true) {
-        ActiveWFInfo wf_info{pe};
-        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, cond, wf_info);
-        if (ret_val == cond) {
-          break;
-        }
-        cond = ret_val;
-        desired_val = ret_val ^ value;
-      }
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    return internal_amo_fetch_op(dst, value, pe,
+                                 [](T prior_val, T value) { return prior_val ^ value; });
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_fetch_xor only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
 }
 
 template <typename T>
@@ -259,63 +200,43 @@ __device__ void GDAContext::amo_xor(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_cas not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, wf_info);
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, wf_info);
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_cas only implemented for 64-bit types");
   }
 }
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  T ret_val = 0;
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      ret_val =  qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    return qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_fetch_add only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
 }
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fcas not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info(pe);
-  int qp_index = get_qp_index(pe, wf_info);
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  T ret_val;
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+  if constexpr (sizeof(T) == 8) {
+    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    return qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
+  } else {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:amo_fetch_cas only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
 }
 
 // Collectives TODO: loosely adapted from IPC, needs review
@@ -975,74 +896,51 @@ GDA_CONTEXT_PUT_SIGNAL_DEF(_wave)
 
 // Internal functions used by collective and signal operations
 template <typename T>
-__device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
-    int qp_index, const ActiveWFInfo& wf_info) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+__device__ void GDAContext::internal_amo_add(void *dst, T value, int pe, int qp_index,
+                                             const ActiveWFInfo& wf_info) {
+  if constexpr (sizeof(T) != 8) {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:internal_amo_add only implemented for 64-bit types");
   }
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
-__device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
-    int qp_index, const ActiveWFInfo& wf_info) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  T ret_val = 0;
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      ret_val =  qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+__device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe, int qp_index,
+                                                const ActiveWFInfo& wf_info) {
+  if constexpr (sizeof(T) != 8) {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:internal_amo_fetch_add only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  return qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
-__device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
-    int qp_index, const ActiveWFInfo& wf_info) {
-  if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  bool need_turn {true};
-  uint64_t turns = __ballot(need_turn);
-  T ret_val;
-  T cond = 0;
-  while (turns) {
-    uint8_t lane = __ffsll((unsigned long long)turns) - 1;
-    int pe_turn = __shfl(pe, lane);
-    if (pe_turn == pe) {
-      /**
-       * Guess that the remote memory is zero by setting condition to zero.
-       * The compare-and-swap loop will execute at least twice if wrong.
-       * It may run additional times if contention on memory location.
-       */
-      while (true) {
-        ActiveWFInfo wf_info{pe};
-        ret_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
-        if (ret_val == cond) {
-          break;
-        }
-        cond = ret_val;
-      }
-      need_turn = false;
-    }
-    turns = __ballot(need_turn);
+__device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe, int qp_index,
+                                           [[maybe_unused]] const ActiveWFInfo& wf_info) {
+  if constexpr (sizeof(T) != 8) {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda:internal_amo_swap only implemented for 64-bit types");
+    return T{};
   }
-  return ret_val;
+  /**
+   * Guess that the remote memory is zero by setting condition to zero.
+   * The compare-and-swap loop will execute at least twice if wrong.
+   * It may run additional times if contention on memory location.
+   */
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  T prior_val = 0;
+  T fetch_val = 0;
+  do {
+    ActiveWFInfo loop_wf_info{pe};
+    prior_val = fetch_val;
+    T desired_val = value;
+    fetch_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, prior_val, loop_wf_info);
+  } while (fetch_val != prior_val);
+  return fetch_val;
 }
 
 /******************************************************************************
