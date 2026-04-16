@@ -205,7 +205,9 @@ class HostStats {
     incStat(index, wtime() - start);
   }
 
-  __host__ void incStat(int index, int value = 1) { stats[index] += value; }
+  __host__ void incStat(int index, int value = 1) {
+    stats[index].fetch_add(value, std::memory_order_relaxed);
+  }
 
   __host__ void accumulateStats(const HostStats<I> &otherStats) {
     for (int i = 0; i < I; i++) incStat(i, otherStats.getStat(i));
