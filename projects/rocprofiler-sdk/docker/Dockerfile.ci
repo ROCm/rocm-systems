@@ -14,7 +14,7 @@ ENV HIP_RUNTIME=rocclr
 ENV HIP_COMPILER=amdclang++
 ENV LLVM_PATH=/opt/rocm/llvm
 ENV CMAKE_PREFIX_PATH=/opt/rocm
-ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
+ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
 ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
 
 # Debian/Ubuntu
@@ -62,7 +62,7 @@ RUN set -euo pipefail; \
         python3 -m pip install -U awscli pipx; \
         python3 -m venv rocprofiler-sdk; \
         source rocprofiler-sdk/bin/activate; \
-        export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:${PATH}; \
+        export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}; \
         python3 -m pip install --upgrade pip; \
         python3 -m pip install --upgrade -r /root/requirements.txt; \
         echo -e 'PKG_CONFIG_PATH="/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/amdgpu-pkg-config.sh; \
