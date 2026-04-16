@@ -648,7 +648,24 @@ jobs:
           cmake --build build-aqlprofile --target install
           echo "✅ AQLProfile Installation complete!"
 
-      - *build_and_install_rocprof_trace_decoder
+      - name: Build and Install rocprof-trace-decoder
+        shell: bash
+        working-directory: projects/rocprof-trace-decoder
+        run: |
+          echo "Install rocprof-trace-decoder..."
+          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          cmake -B build-rocprof-trace-decoder \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/local/bin/sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/local/bin/sccache \
+            .
+          cmake --build build-rocprof-trace-decoder --target all --parallel 16
+          cmake --build build-rocprof-trace-decoder --target install
+          echo "✅ rocprof-trace-decoder Installation complete!"
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
