@@ -7,7 +7,7 @@
 
 using namespace rocprofiler_compute_tool;
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_ReturnsFirstPmcForCollection)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
     m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -18,7 +18,7 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_ReturnsFirst
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_ReturnsFirstPmcForCollection)
+TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
     m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -29,7 +29,7 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_Return
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelWithKernelMultiplexing_ReturnsEachPmcForCollection)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelWithKernelMultiplexing_DispatchCbReturnsEachPmc)
 {
     m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -42,7 +42,7 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelWithKernelMultiplexing_ReturnsEachPmc
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithKernelMultiplexing_ReturnsFirstPmcForCollection)
+TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithKernelMultiplexing_DispatchCbReturnsFirstPmc)
 {
     m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -57,7 +57,7 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithKernelMultiplexing_ReturnsF
     EXPECT_EQ(created_config_info[config_index_3].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_ReturnsEachPmcForCollection)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_DispatchCbReturnsEachPmc)
 {
     m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::LAUNCH;
     constexpr kernel_dispatch_info_t info    = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
@@ -70,7 +70,7 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_Retu
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_ReturnsSamePmcForCollection)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
 {
     m_tool_data->iteration_multiplexing_mode   = iteration_multiplexing_mode_t::LAUNCH;
     kernel_dispatch_info_t info                = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
@@ -100,7 +100,7 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing
     EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfiguredForCollection)
+TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfigured)
 {
     dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
@@ -110,7 +110,7 @@ TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfiguredForColle
     EXPECT_EQ(created_config_info[1].counter_names, m_counters_pmc1);
 }
 
-TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_ReturnsNoConfig)
+TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_DispatchCbReturnsNoConfig)
 {
     // FIXME: This test currently disabled because current implementation of dispatch_callback
     // tries to create counters config even if there are no counters available for it.
@@ -126,7 +126,7 @@ TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_Retur
     
 }
 
-TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_ReturnsResultForThemOnly)
+TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_DispatchCbReturnsResultForThemOnly)
 {
     m_tool_data->target_kernel_ids.insert(2);
 
@@ -139,7 +139,7 @@ TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_ReturnsResultFo
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_ReturnsResultForThemOnly)
+TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_DispatchCbReturnsResultForThemOnly)
 {
     m_tool_data->kernel_filter_ranges.emplace_back(2, 2);
 

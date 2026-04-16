@@ -41,7 +41,7 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    Multiplexing_,
+    Multiplexing,
     TestSdkCallbacksMultiplexing,
     ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
                       rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
