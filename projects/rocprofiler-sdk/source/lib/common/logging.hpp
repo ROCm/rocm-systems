@@ -42,6 +42,16 @@
 #define ROCP_LOG_LEVEL_ERROR   1
 #define ROCP_LOG_LEVEL_NONE    0
 
+// Abseil does not provide VLOG_IF or LOG_ASSERT. Define compatibility macros.
+#ifndef VLOG_IF
+#    define VLOG_IF(level, condition)                                                               \
+        if(VLOG_IS_ON(level) && (condition)) VLOG(level)
+#endif
+
+#ifndef LOG_ASSERT
+#    define LOG_ASSERT(condition) CHECK(condition)
+#endif
+
 #define ROCP_TRACE   VLOG(ROCP_LOG_LEVEL_TRACE)
 #define ROCP_INFO    LOG(INFO)
 #define ROCP_WARNING LOG(WARNING)
