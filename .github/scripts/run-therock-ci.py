@@ -18,17 +18,102 @@ import sys
 import uuid
 from pathlib import Path
 
-# Paths match test_rocprofiler_sdk.py (resolved from THEROCK_BIN_DIR / default install).
-from test_rocprofiler_sdk import (
-    ROCPROFILER_SDK_PATH,
-    ROCPROFILER_SDK_TESTS_PATH,
-    THEROCK_BIN_PATH,
-    THEROCK_CLANG_PATH,
-    THEROCK_CLANG_PLUS_PATH,
-    THEROCK_LIB_PATH,
-    THEROCK_SYSDEPS_LIB_PATH,
-    THEROCK_SYSDEPS_PATH,
-    THEROCK_PATH,
+
+parser = argparse.ArgumentParser(
+    description="CDash dashboard run for ROCProfiler SDK tests in TheRock.",
+)
+parser.add_argument(
+    "--configure-cmd",
+    metavar="CMD",
+    help="Full configure command line (CTEST_CONFIGURE_COMMAND), shell form",
+)
+parser.add_argument(
+    "--build-cmd",
+    metavar="CMD",
+    help="Full build command line (CTEST_BUILD_COMMAND), shell form",
+)
+parser.add_argument(
+    "--ctest-args",
+    metavar="ARGS",
+    help="Arguments for ctest (CMAKE_CTEST_ARGUMENTS), without leading 'ctest'",
+)
+    parser.add_argument(
+    "--rocprofiler-sdk-path",
+    type=Path,
+    default=_DEFAULT_ROCPROFILER_SDK_PATH,
+    help="ROCProfiler SDK share tree (metrics, etc.)",
+)
+parser.add_argument(
+    "--rocprofiler-sdk-tests-path",
+    type=Path,
+    default=_DEFAULT_ROCPROFILER_SDK_TESTS_PATH,
+    help="ROCProfiler SDK tests source directory (-S for CMake)",
+)
+parser.add_argument(
+    "--therock-bin-path",
+    type=Path,
+    default=_DEFAULT_THEROCK_BIN_PATH,
+    help="TheRock install bin directory (THEROCK_BIN_DIR)",
+)
+parser.add_argument(
+    "--therock-clang-path",
+    type=Path,
+    default=_DEFAULT_THEROCK_CLANG_PATH,
+    help="Path to amdclang",
+)
+parser.add_argument(
+    "--therock-clang-plus-path",
+    type=Path,
+    default=_DEFAULT_THEROCK_CLANG_PLUS_PATH,
+    help="Path to amdclang++",
+)
+parser.add_argument(
+    "--therock-lib-path",
+    type=Path,
+    default=_DEFAULT_THEROCK_LIB_PATH,
+    help="TheRock install lib directory",
+)
+parser.add_argument(
+    "--therock-sysdeps-lib-path",
+    type=Path,
+    default=_DEFAULT_THEROCK_SYSDEPS_LIB_PATH,
+    help="rocm_sysdeps lib directory (for LD_LIBRARY_PATH)",
+)
+parser.add_argument(
+    "--therock-sysdeps-path",
+    type=Path,
+    default=_DEFAULT_THEROCK_SYSDEPS_PATH,
+    help="rocm_sysdeps prefix (CMAKE_PREFIX_PATH)",
+)
+parser.add_argument(
+    "--therock-path",
+    type=Path,
+    default=_DEFAULT_THEROCK_PATH,
+    help="TheRock ROCm install root (ROCM_PATH, HIP_PATH, CMAKE_PREFIX_PATH)",
+)
+args = parser.parse_args(argv)
+
+
+
+(ROCPROFILER_SDK_PATH,
+ROCPROFILER_SDK_TESTS_PATH,
+THEROCK_BIN_PATH,
+THEROCK_CLANG_PATH,
+THEROCK_CLANG_PLUS_PATH,
+THEROCK_LIB_PATH,
+THEROCK_SYSDEPS_LIB_PATH,
+THEROCK_SYSDEPS_PATH,
+THEROCK_PATH,
+) = (
+args.rocprofiler_sdk_path,
+args.rocprofiler_sdk_tests_path,
+args.therock_bin_path,
+args.therock_clang_path,
+args.therock_clang_plus_path,
+args.therock_lib_path,
+args.therock_sysdeps_lib_path,
+args.therock_sysdeps_path,
+args.therock_path,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -243,12 +328,9 @@ def _generate_dashboard(cmake_cmd: str) -> str:
     group = "TheRock"  # Group for the dashboard
     ARGN = "${ARGN}"  # Arguments for dashboard submission
 
-    REPO_SOURCE_DIR = (
-        os.path.dirname(os.path.dirname((SOURCE_DIR)))
-        if not os.path.exists(os.path.join(SOURCE_DIR, ".git"))
-        else SOURCE_DIR
-    )
-
+    REPO_SOURCE_DIR = Path(__file__).resolve().parent
+    print(f"REPO_SOURCE_DIR: {REPO_SOURCE_DIR}")
+    sys.exit(1)
     # Generate initial dashboard.cmake content with minimum necessary version and dashboard_submit macro
     _script = f"""
     cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
@@ -328,26 +410,6 @@ def main(argv: list[str] | None = None) -> int:
     Returns:
         Exit code from ctest (0 on success).
     """
-
-    parser = argparse.ArgumentParser(
-        description="CDash dashboard run for ROCProfiler SDK tests in TheRock.",
-    )
-    parser.add_argument(
-        "--configure-cmd",
-        metavar="CMD",
-        help="Full configure command line (CTEST_CONFIGURE_COMMAND), shell form",
-    )
-    parser.add_argument(
-        "--build-cmd",
-        metavar="CMD",
-        help="Full build command line (CTEST_BUILD_COMMAND), shell form",
-    )
-    parser.add_argument(
-        "--ctest-args",
-        metavar="ARGS",
-        help="Arguments for ctest (CMAKE_CTEST_ARGUMENTS), without leading 'ctest'",
-    )
-    args = parser.parse_args(argv)
 
     # Get path to cmake executable
     cmake_cmd = _which_cmake()
