@@ -1,0 +1,379 @@
+# rocSHMEM Deadlock Analysis Tools
+
+Scripts for identifying and diagnosing deadlocks in rocSHMEM applications using
+AMD's ROCm debugger (`rocgdb`).
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `rocgdb_deadlock_analysis.py` | rocgdb Python script: coalesces GPU wavefront backtraces, identifies rocSHMEM API entry points, and provides deadlock hints |
+| `attach_and_analyze.sh` | Shell wrapper: finds all running instances of an executable, attaches to each, saves per-process output, prints a compact summary |
+| `deadlock_test.cc` | Intentional-deadlock test program used to validate the scripts |
+
+---
+
+## Prerequisites
+
+- `rocgdb` in `PATH` (provided by ROCm; override path with `ROCGDB` env var)
+- `timeout` command (standard on Linux)
+- Python support in rocgdb (built-in for ROCm 6+)
+
+For meaningful backtraces the application and rocSHMEM library should be built
+with debug symbols.  A `RelWithDebInfo` build (CMake `-DCMAKE_BUILD_TYPE=RelWithDebInfo`)
+gives full inlined call chains while keeping optimized performance.  A `Release`
+build will still show the outermost non-inlined API frame but not the internal
+wait loops.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Start your (deadlocked) application
+mpirun -np 4 ./my_rocshmem_app &
+
+# 2. Attach to all instances, analyze, save output
+./scripts/debug/attach_and_analyze.sh my_rocshmem_app
+
+# Output is written to ./rocshmem_deadlock_<timestamp>/
+# A compact summary is printed to stdout.
+```
+
+---
+
+## `attach_and_analyze.sh`
+
+### Usage
+
+```
+attach_and_analyze.sh <executable_name> [output_dir]
+```
+
+| Argument | Description |
+|---|---|
+| `executable_name` | Exact process name to search for (matched with `pgrep -x`) |
+| `output_dir` | Directory for per-process output files (default: `./rocshmem_deadlock_<timestamp>/`) |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `ROCGDB` | `rocgdb` | Path to the rocgdb binary |
+| `ROCSHMEM_GDB_TIMEOUT` | `120` | Per-process timeout in seconds |
+| `ROCSHMEM_DEADLOCK_COLOR` | `always` | Color mode for output files (see [Color Support](#color-support)) |
+
+### Output Files
+
+Each analyzed process produces a file named:
+
+```
+<output_dir>/analysis_pe<PE_RANK>_pid_<PID>.txt
+```
+
+The MPI PE rank is read from the process's `OMPI_COMM_WORLD_RANK` environment
+variable.  If the variable is not set (non-MPI process or already exited), the
+rank is shown as `unknown`.
+
+### Stdout Summary
+
+After all processes are analyzed, a compact summary is printed:
+
+```
+=== Attach and Analyze Summary ===
+Processes analyzed: 2 / 2
+
+  PE 0     PID 12345   groups=?    (no GPU threads found)
+  PE 1     PID 12346   groups=1    Waiting for remote PE memory update...
+
+Full output in: ./rocshmem_deadlock_20260416_143022/
+```
+
+- **groups** — number of distinct backtrace groups found in that process
+- **dominant** — the most frequent `[HINT]` line across all groups, or a
+  status string if no deadlock was detected
+
+### Error Handling
+
+| Situation | Behavior |
+|---|---|
+| Process exits before attach | Logged as SKIP, counted as failure |
+| `rocgdb` exceeds timeout | Logged as TIMEOUT; output file kept for inspection |
+| `rocgdb` exits non-zero but produced analysis | Still counted as success |
+| `rocgdb` not found in `PATH` | Fatal error with hint to set `ROCGDB` |
+
+---
+
+## `rocgdb_deadlock_analysis.py`
+
+The Python script can be used in three modes.
+
+### Mode 1: Batch attach (used by `attach_and_analyze.sh`)
+
+Attach `rocgdb` to a running process and analyze immediately:
+
+```bash
+ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1 \
+    rocgdb -batch -p <pid> -x scripts/debug/rocgdb_deadlock_analysis.py
+```
+
+The `ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1` variable tells the script to run the
+analysis as soon as the process is stopped (which happens automatically on
+attach).
+
+### Mode 2: Interactive session
+
+Attach `rocgdb` manually, then source and run the script:
+
+```
+rocgdb -p <pid>
+(rocgdb) source scripts/debug/rocgdb_deadlock_analysis.py
+(rocgdb) rocshmem-deadlock-analyze
+```
+
+Write the report to a file:
+
+```
+(rocgdb) rocshmem-deadlock-analyze /tmp/analysis.txt
+```
+
+Force colored output in the file:
+
+```
+(rocgdb) rocshmem-deadlock-analyze --color /tmp/analysis.txt
+```
+
+### Mode 3: Launch mode
+
+Run the application under rocgdb from the start; analysis triggers on first stop:
+
+```bash
+ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1 \
+    rocgdb -batch \
+        -x scripts/debug/rocgdb_deadlock_analysis.py \
+        --args ./my_rocshmem_app arg1 arg2
+```
+
+### GDB Command Reference
+
+After sourcing the script, the `rocshmem-deadlock-analyze` command is available:
+
+```
+(rocgdb) rocshmem-deadlock-analyze [--color|--no-color] [output_file]
+```
+
+| Option | Description |
+|---|---|
+| `--color` | Force ANSI color codes on, even when writing to a file |
+| `--no-color` | Disable color codes, even on a TTY |
+| `output_file` | Write report to this file instead of stdout |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `ROCSHMEM_DEADLOCK_AUTO_ANALYZE` | `0` | Set to `1` to trigger analysis automatically on process stop |
+| `ROCSHMEM_DEADLOCK_COLOR` | `always` | Color mode (see [Color Support](#color-support)) |
+
+---
+
+## Output Format
+
+```
+=== rocSHMEM Deadlock Analysis ===
+Process(es): 12346
+Total GPU wavefronts analyzed: 64
+Unique backtrace groups: 2
+
+--- Group 1 (63 wavefront(s)) ---
+  WGs: (0,0,0),(1,0,0),(2,0,0),...  WFs: 0,1,2,...
+  Backtrace:
+    #0  rocshmem::uncached_load<long volatile> (...) at src/assembly.hpp:125
+    #1  rocshmem::Context::test<long> (...) at src/context_tmpl_device.hpp:432
+    #2  rocshmem::Context::wait_until<long> (...) at src/context_tmpl_device.hpp:224
+    #3  rocshmem::IPCContext::internal_direct_barrier (...) at ...
+    ...
+    #7  rocshmem::Context::barrier_all_wg (...) at src/context_device.cpp:151
+    #8  my_kernel () at my_app.cpp:42
+  [HINT] Waiting for remote PE memory update (barrier/sync or user
+         rocshmem_wait_until). Check if the remote PE is alive and making
+         progress.
+
+--- Group 2 (1 wavefront(s)) ---
+  WGs: (0,0,0)  WFs: 0
+  Backtrace:
+    #0  rocshmem::acquire_lock (...) at src/gda/mlx5/queue_pair_mlx5.cpp:53
+    #1  rocshmem::QueuePair::mlx5_post_wqe_rma (...) at ...
+    #2  rocshmem::GDAContext::put (...) at ...
+    #3  rocshmem::rocshmem_ctx_put (...) at ...    <<< rocSHMEM API entry
+    #4  my_kernel () at my_app.cpp:38
+  [rocSHMEM] Stuck in: rocshmem_ctx_put
+  [HINT] Waiting for SQ spinlock held by another wavefront. The lock holder
+         may itself be deadlocked in mlx5_poll_cq_until.
+
+=== Summary ===
+  1 wavefront(s) stuck in rocSHMEM API calls
+  63 wavefront(s) in user code / other
+```
+
+### Reading the Output
+
+**Groups** — Wavefronts with identical backtraces (after stripping runtime-variable
+parts like addresses and argument values) are coalesced into a single group.
+Each group shows which workgroups (WGs) and wavefronts (WFs) share that call
+stack.  Template parameters and source file locations are kept in the key, so
+`wait_until<int>` and `wait_until<long>` at different call sites produce
+separate groups.
+
+**`<<< rocSHMEM API entry`** — Marks the outermost rocSHMEM public API function
+in the backtrace: the call the application made that led to the deadlock.  This
+frame is highlighted in bold yellow when color is enabled.
+
+**`[rocSHMEM] Stuck in:`** — Names the matched API function for easy grepping.
+Printed in bold red when color is enabled.
+
+**`[HINT]`** — A short diagnosis of the likely deadlock cause based on the
+innermost recognized frame.  Printed in bold magenta when color is enabled.
+
+The innermost deadlock frame (the actual spinning loop) is printed in bold
+regardless of color mode.
+
+### Recognized Deadlock Patterns and Hints
+
+#### mlx5 (Mellanox/ConnectX) backend
+
+| Innermost frame | Hint |
+|---|---|
+| `mlx5_poll_cq_until` | Waiting for NIC completion (CQ polling). Check if NIC is responsive and if the remote PE is also stuck. |
+| `acquire_lock` | Waiting for SQ spinlock held by another wavefront. The lock holder may itself be deadlocked in `mlx5_poll_cq_until`. |
+| `mlx5_quiet` | Quiet operation waiting for all outstanding RMA ops to complete. Check NIC health. |
+
+#### bnxt (Broadcom) backend
+
+| Innermost frame | Hint |
+|---|---|
+| `bnxt_poll_cq_until` | Waiting for NIC completion (CQ polling). Check if the bnxt NIC is responsive and if the remote PE is also stuck. |
+| `bnxt_post_wqe_rma` | Waiting for bnxt SQ spinlock held by another wavefront. The lock holder is likely itself deadlocked in `bnxt_poll_cq_until`. |
+| `bnxt_quiet` | Quiet operation waiting for all outstanding RMA ops to complete (bnxt). Check NIC health. |
+
+#### ionic (AMD/Pensando) backend
+
+| Innermost frame | Hint |
+|---|---|
+| `ionic_quiet_internal_ccqe_single` | Waiting for NIC completion in CCQE mode (single-thread path). Check if the ionic NIC is responsive and if the remote PE is also stuck. |
+| `ionic_quiet_internal_ccqe` | Waiting for NIC completion in CCQE mode. Check if the ionic NIC is responsive and if the remote PE is also stuck. |
+| `ionic_quiet_internal` | Waiting for NIC completion (CQ polling). Check if the ionic NIC is responsive and if the remote PE is also stuck. |
+| `spin_lock_acquire_unique` | Waiting for ionic SQ doorbell spinlock (exclusive) held by another wavefront. The lock holder may itself be stuck in `ionic_quiet_internal`. |
+| `spin_lock_acquire_shared` | Waiting for ionic CQ spinlock (shared) held by another wavefront. The lock holder may itself be stuck in `ionic_quiet_internal`. |
+| `ionic_quiet` | Quiet operation waiting for all outstanding RMA ops to complete (ionic). Check NIC health. |
+
+#### Shared / IPC / user-level waits (all backends)
+
+| Innermost frame | Hint |
+|---|---|
+| `wait_until_any` | Waiting for any element of a multi-element condition. Check if the remote PE is alive. |
+| `wait_until_all` | Waiting for all elements of a multi-element condition. Check if the remote PE is alive. |
+| `wait_until_some` | Waiting for some elements of a multi-element condition. Check if the remote PE is alive. |
+| `wait_until` | Waiting for remote PE memory update (barrier/sync or user wait). Check if the remote PE is alive. |
+
+---
+
+## Color Support
+
+Color is controlled by the `ROCSHMEM_DEADLOCK_COLOR` environment variable:
+
+| Value | Behavior |
+|---|---|
+| `always` (default) | Always enable ANSI color codes |
+| `auto` | Enable color when the output is a TTY; disable for files |
+| `1`, `yes`, `true` | Always enable ANSI color codes |
+| `0`, `no`, `false`, `never` | Always disable color codes |
+
+Color can also be forced per-invocation with the `--color` / `--no-color`
+flags of the interactive `rocshmem-deadlock-analyze` command.
+
+The shell script's stdout summary is always plain text; ANSI codes are
+stripped from the per-process output files before extracting the dominant hint.
+
+### Color Scheme
+
+| Element | Color |
+|---|---|
+| Section headers (`=== ... ===`) | Bold blue |
+| Group headers (`--- Group N ---`) | Bold bright blue |
+| Innermost deadlock frame | Bold cyan |
+| `<<< rocSHMEM API entry` annotation | Bold green |
+| `[rocSHMEM] Stuck in:` line | Bold bright red |
+| `[HINT]` line | Bold cyan |
+| Stuck-wavefront count in summary | Bold bright red |
+| Not-stuck count in summary | Bold green |
+| "No GPU threads found" notice | Red |
+
+---
+
+## Building with Debug Symbols
+
+Full call-chain visibility requires debug symbols in the rocSHMEM library and
+the application.  Use `RelWithDebInfo` for the best balance of performance and
+debuggability:
+
+```bash
+# Configure the rocSHMEM build tree
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo <source_dir>
+cmake --build . --target rocshmem --parallel 8
+
+# Compile the application with matching flags
+hipcc -O2 -g -fgpu-rdc -x hip my_app.cc \
+      --offload-arch=<target> \
+      -I<rocshmem_include> -I<mpi_include> \
+      -c -o my_app.o
+
+hipcc -fgpu-rdc --hip-link my_app.o \
+      --offload-arch=<target> \
+      <rocshmem_lib>/librocshmem.a <mpi_lib>/libmpi.so \
+      -L/opt/rocm/lib -lamdhip64 -lhsa-runtime64 \
+      -o my_app
+```
+
+Without debug symbols only the outermost non-inlined frame is visible.  The
+`<<< rocSHMEM API entry` annotation still works (those functions are marked
+`__attribute__((noinline))`), but the `[HINT]` requires the inner frames
+(`wait_until`, `mlx5_poll_cq_until`, etc.) to be present.
+
+> **ROCm 7.2.1 note:** Two bitcode objects in the `RelWithDebInfo` library
+> (`rocshmem_gpu.cpp.o` and `team.cpp.o`) contain invalid `DIExpression` DWARF
+> that crashes lld's LTO verifier when linking external test programs with
+> `-fgpu-rdc`.  Workaround: strip debug info from those two objects before
+> linking (this does not affect the other ~50 objects which retain full debug
+> info):
+>
+> ```bash
+> cp librocshmem.a /tmp/librocshmem_fixed.a
+> ar x /tmp/librocshmem_fixed.a rocshmem_gpu.cpp.o team.cpp.o
+> /opt/rocm/lib/llvm/bin/llvm-objcopy --strip-debug rocshmem_gpu.cpp.o
+> /opt/rocm/lib/llvm/bin/llvm-objcopy --strip-debug team.cpp.o
+> ar d /tmp/librocshmem_fixed.a rocshmem_gpu.cpp.o team.cpp.o
+> ar rcs /tmp/librocshmem_fixed.a rocshmem_gpu.cpp.o team.cpp.o
+> # Then link against /tmp/librocshmem_fixed.a
+> ```
+> Applications built entirely within the rocSHMEM CMake build system are not
+> affected.
+
+---
+
+## Known Limitations
+
+- **IPC backend**: `rocshmem_barrier_all_wg` and related functions are fully
+  inlined in the IPC backend even at `RelWithDebInfo`.  The `[rocSHMEM] Stuck in:`
+  line will not appear, but the `[HINT]` fires from the inner `wait_until` frame.
+
+- **Release builds**: Without debug symbols, internal frames (`wait_until`,
+  `mlx5_poll_cq_until`, etc.) are invisible and no `[HINT]` is generated.
+  The API entry frame is still detected when it is non-inlined.
+
+- **Single GPU per process**: The script handles one GPU device per MPI rank.
+  Multi-GPU-per-rank configurations are untested.
+
+- **GPU thread format**: Tested with rocgdb from ROCm 7.2.  Earlier ROCm versions
+  use a different thread name format (`AMDGPU Thread X.Y (GPU, WG (...), WF (N))`);
+  the script includes a regex for this legacy format but it is untested.
