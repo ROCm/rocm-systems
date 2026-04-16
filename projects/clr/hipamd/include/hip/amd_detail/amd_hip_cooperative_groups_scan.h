@@ -11,6 +11,8 @@
 #include <type_traits>
 #endif
 
+extern "C" __device__ __attribute__((const)) int __ockl_wfscan_add_i32(int x, bool inclusive);
+
 namespace cooperative_groups {
 template <typename TyGroup, typename TyVal, typename TyFn>
 __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
@@ -42,8 +44,14 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
   // for tiled groups, it is legal for some threads in a tile to not participate so we also
   // need to apply the active mask
   mask &= __activemask();
-
   maskNumBits = __popcll(mask);
+
+#ifdef __OPTIMIZE__  // at the time of this writing the ockl wfred functions do not compile when
+                     // using -O0
+  if (maskNumBits == warpSize) {
+    return __ockl_wfscan_add_i32(val, true);
+  }
+#endif
 
   if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value || 
                 sizeof(Val) > 4) {
@@ -61,9 +69,12 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
 
     // the number of iterations needs to be at least log2(number of bits on)
     numIterations = sizeof(int) * 8 - __clz(maskNumBits);
-    if (!(maskNumBits & (maskNumBits - 1)))
+
+    if (!(maskNumBits & (maskNumBits - 1))) {
       // the number of bits in the mask is a power of 2
       numIterations -= 1;
+    }
+
     laneId = __lane_id();
 
     for (int laneDelta = 1; laneDelta < warpSize; laneDelta <<= 1) {
@@ -74,8 +85,9 @@ __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val, TyFn&& o
        remoteIdx = (remoteIdx < (laneId & ~(warpSize - 1))) ? laneId : remoteIdx;
        rhs = backwardPermute(remoteIdx << 2, result);
 
-       if (insideLanes)
+       if (insideLanes) {
          result = op(result, rhs);
+       }
      }
      return result;
   } else {
