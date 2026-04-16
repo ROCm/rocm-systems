@@ -3947,10 +3947,10 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Failed "
        << " | Device #: " << dv_ind
-       << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics)
+       << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
        << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
-       << " | Returning = " << amd::smi::getRSMIStatusString(ret) << " |";
-    LOG_ERROR(ss);
+       << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
+    LOG_WARN(ss);
     return ret;
   }
 
@@ -3963,7 +3963,7 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
      << " | Success "
      << " | Device #: " << dv_ind
-     << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics)
+     << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
      << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
      << " | Data: " << *power
      << " | Timestamp: " << *timestamp

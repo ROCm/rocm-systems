@@ -1082,12 +1082,7 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string* line) {
 
   std::getline(fs, *line);
 
-  // Build the sysfs file path for logging
-  auto sysfs_path = path_;
-  sysfs_path += "/device/";
-  sysfs_path += kDevAttribNameMap.at(type);
-
-  ss << __PRETTY_FUNCTION__ << " | Success | Read SYSFS file: " << sysfs_path
+  ss << __PRETTY_FUNCTION__ << " | Success | Read SYSFS file: " << get_sys_file_path_by_type(type, true)
      << " | Type: " << get_type_string(type) << " | Data: " << *line
      << " | Returning: " << std::to_string(ret) << " | ";
   LOG_INFO(ss);
