@@ -14,6 +14,7 @@ protected:
     uint64_t dispatch_kernel_with_id(uint64_t                        kernel_id,
                                      const std::vector<std::string>& counters_pmc0,
                                      const std::vector<std::string>& counters_pmc1 = {});
+    void invoke_record_callback(uint64_t counter_id, const std::string& counter_name, double counter_value);
 
     static std::string convert_counters_per_pmc_to_str(const std::vector<std::vector<std::string>>& counters_per_pmc);
     static std::string convert_counters_to_str(const std::vector<std::string>& counters);
@@ -59,11 +60,11 @@ class TestSdkCallbacksKernelFiltering
     , public ::testing::WithParamInterface<kernel_filtering_test_params_t>
 {
 protected:
-    void SetUp() override;
+    void                           SetUp() override;
     kernel_filtering_test_params_t m_filtering_params = {};
 };
 
-INSTANTIATE_TEST_SUITE_P(Kernelfiltering,
+INSTANTIATE_TEST_SUITE_P(KernelFiltering,
                          TestSdkCallbacksKernelFiltering,
                          ::testing::Values(kernel_filtering_test_params_t{"_Z10my_kernelv",
                                                                           "my_kernel()",

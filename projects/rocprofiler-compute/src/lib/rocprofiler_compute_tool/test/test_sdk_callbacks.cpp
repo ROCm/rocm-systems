@@ -141,32 +141,13 @@ TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_DispatchCbRetu
 
 TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
 {
-    constexpr uint64_t                           counter_id    = 10;
-    const std::string                            counter_name  = "counter10";
-    constexpr double                             counter_value = 11.;
-    rocprofiler_dispatch_counting_service_data_t dispatch_data;
-    dispatch_data.dispatch_info.dispatch_id        = 100;
-    dispatch_data.dispatch_info.agent_id.handle    = 200;
-    dispatch_data.dispatch_info.kernel_id          = 300;
-    dispatch_data.dispatch_info.group_segment_size = 400;
+    constexpr uint64_t counter_id    = 10;
+    const std::string  counter_name  = "counter10";
+    constexpr double   counter_value = 11.;
 
-    std::vector<rocprofiler_counter_record_t> record_data(2);
-    record_data[0].counter_value = counter_value;
-    record_data[0].id            = counter_id;
+    invoke_record_callback(counter_id, counter_name, counter_value);
 
-    m_tool_data->counter_id_name_map[counter_id] = counter_name;
-
-    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), &m_tool_data);
-
-    auto query_record_info = m_sdk_wrapper->get_query_counter_record_info();
-    EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
-    EXPECT_EQ(m_tool_data->counter_records.size(), query_record_info.size());
-    EXPECT_EQ(m_tool_data->counter_records[0].dispatch_id, dispatch_data.dispatch_info.dispatch_id);
-    EXPECT_EQ(m_tool_data->counter_records[0].agent_id, dispatch_data.dispatch_info.agent_id.handle);
-    EXPECT_EQ(m_tool_data->counter_records[0].kernel_id, dispatch_data.dispatch_info.kernel_id);
-    EXPECT_EQ(m_tool_data->counter_records[0].LDS_memory_size,
-              dispatch_data.dispatch_info.group_segment_size);
-    EXPECT_EQ(m_tool_data->counter_records[0].counter_id, query_record_info[0].counter_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].counter_id, counter_id);
     EXPECT_EQ(m_tool_data->counter_records[0].counter_name, counter_name);
     EXPECT_EQ(m_tool_data->counter_records[0].counter_value, counter_value);
 }
@@ -234,6 +215,34 @@ uint64_t TestSdkCallbacks::dispatch_kernel_with_id(uint64_t                     
     kernel_dispatch_info_t dispatch_info = {};
     dispatch_info.kernel_id              = kernel_id;
     return dispatch_kernel_with_dispatch_info(dispatch_info, counters_pmc0, counters_pmc1);
+}
+
+void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
+                                              const std::string& counter_name,
+                                              double             counter_value)
+{
+    rocprofiler_dispatch_counting_service_data_t dispatch_data;
+    dispatch_data.dispatch_info.dispatch_id        = 100;
+    dispatch_data.dispatch_info.agent_id.handle    = 200;
+    dispatch_data.dispatch_info.kernel_id          = 300;
+    dispatch_data.dispatch_info.group_segment_size = 400;
+
+    std::vector<rocprofiler_counter_record_t> record_data(2);
+    record_data[0].counter_value = counter_value;
+    record_data[0].id            = counter_id;
+
+    m_tool_data->counter_id_name_map[counter_id] = counter_name;
+
+    m_sdk_callbacks->record_callback(dispatch_data, record_data.data(), record_data.size(), &m_tool_data);
+
+    const auto query_record_info = m_sdk_wrapper->get_query_counter_record_info();
+    EXPECT_EQ(m_tool_data->counter_records.size(), record_data.size());
+    EXPECT_EQ(m_tool_data->counter_records.size(), query_record_info.size());
+    EXPECT_EQ(m_tool_data->counter_records[0].dispatch_id, dispatch_data.dispatch_info.dispatch_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].agent_id, dispatch_data.dispatch_info.agent_id.handle);
+    EXPECT_EQ(m_tool_data->counter_records[0].kernel_id, dispatch_data.dispatch_info.kernel_id);
+    EXPECT_EQ(m_tool_data->counter_records[0].LDS_memory_size,
+              dispatch_data.dispatch_info.group_segment_size);
 }
 
 std::string TestSdkCallbacks::convert_counters_per_pmc_to_str(
