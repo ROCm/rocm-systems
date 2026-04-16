@@ -67,7 +67,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          .gitmodules
 
     - name: Install Packages
       timeout-minutes: 25
@@ -113,7 +115,7 @@ jobs:
         TAG=""
         python3 ./scripts/run-ci.py -B build \
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-debian-${{matrix.os-release}}-${{ matrix.compiler }}${TAG} \
-          --build-jobs 2 \
+          --build-jobs $(nproc) \
           --site GitHub \
           -- \
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
@@ -164,7 +166,7 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run: |
-        cmake --build build --target install --parallel 2
+        cmake --build build --target install --parallel $(nproc)
         rm -rf /opt/rocprofiler-systems
 
     - name: CPack and Install

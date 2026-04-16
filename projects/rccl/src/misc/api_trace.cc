@@ -2,6 +2,9 @@
 #include "api_trace.h"
 #include "core.h"
 #include "nccl.h"
+#include "collectives.h"
+#include "nvtx_payload_schemas.h"
+#include "recorder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -138,20 +141,6 @@ ncclResult_t
 ncclMemFree_impl(void* ptr);
 
 ncclResult_t
-mscclLoadAlgo_impl(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle,
-                   int rank);
-
-ncclResult_t
-mscclRunAlgo_impl(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
-                  void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
-                  size_t count, ncclDataType_t dataType, int root, int peer,
-                  ncclRedOp_t op, mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm,
-                  hipStream_t stream);
-
-ncclResult_t
-mscclUnloadAlgo_impl(mscclAlgoHandle_t mscclAlgoHandle);
-
-ncclResult_t
 ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle);
 
 ncclResult_t
@@ -167,6 +156,53 @@ ncclResult_t
 ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count,
                    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
                    cudaStream_t stream, const void* acc);
+
+ncclResult_t
+mscclLoadAlgo_impl(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank)
+{
+  (void)mscclAlgoFilePath;
+  (void)mscclAlgoHandle;
+  (void)rank;
+  rccl::Recorder::instance().record("mscclLoadAlgo");
+  WARN("MSCCL support has been removed from RCCL; mscclLoadAlgo has no effect.");
+  return ncclSuccess;
+}
+
+ncclResult_t
+mscclRunAlgo_impl(const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
+                  void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
+                  size_t count, ncclDataType_t dataType, int root, int peer, ncclRedOp_t op,
+                  mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream)
+{
+  (void)sendBuff;
+  (void)sendCounts;
+  (void)sDisPls;
+  (void)recvBuff;
+  (void)recvCounts;
+  (void)rDisPls;
+  (void)count;
+  (void)dataType;
+  (void)root;
+  (void)peer;
+  (void)op;
+  (void)mscclAlgoHandle;
+  (void)comm;
+  (void)stream;
+  rccl::Recorder::instance().record("mscclRunAlgo");
+  NVTX3_FUNC_WITH_PARAMS(MSCCL, NcclNvtxParamsMSCCL,
+    NVTX3_PAYLOAD(0, count * ncclTypeSize(dataType), op, dataType));
+  WARN("MSCCL support has been removed from RCCL; mscclRunAlgo has no effect.");
+  return ncclSuccess;
+}
+
+ncclResult_t
+mscclUnloadAlgo_impl(mscclAlgoHandle_t mscclAlgoHandle)
+{
+  (void)mscclAlgoHandle;
+  rccl::Recorder::instance().record("mscclUnloadAlgo");
+  WARN("MSCCL support has been removed from RCCL; mscclUnloadAlgo has no effect.");
+  return ncclSuccess;
+}
 
 namespace rccl
 {

@@ -159,22 +159,29 @@ inspectorResult_t inspectorPluginCollInfoRefSafe(struct inspectorCollInfo *collI
   inspectorUnlockRWLock(&collInfo->guard);
   return inspectorSuccess;
 }
-
+// RCCL: DeRef no longer calls free; caller unlocks first then calls CollInfoFree.
+// Fixes POSIX UB of destroying a locked rwlock. Careful when syncing.
 inspectorResult_t inspectorPluginCollInfoDeRef(struct inspectorCollInfo *collInfo) {
   collInfo->refCount -= 1;
   if (collInfo->refCount == 0) {
-    inspectorLockDestroy(&collInfo->guard);
-    memset(collInfo, 0, sizeof(struct inspectorCollInfo));
-    free(collInfo);
     return inspectorReturn;
   }
   return inspectorSuccess;
+}
+
+static void inspectorPluginCollInfoFree(struct inspectorCollInfo *collInfo) {
+  inspectorLockDestroy(&collInfo->guard);
+  memset(collInfo, 0, sizeof(struct inspectorCollInfo));
+  free(collInfo);
 }
 
 inspectorResult_t inspectorPluginCollInfoDeRefSafe(struct inspectorCollInfo *collInfo) {
   inspectorLockWr(&collInfo->guard);
   inspectorResult_t res = inspectorPluginCollInfoDeRef(collInfo);
   inspectorUnlockRWLock(&collInfo->guard);
+  if (res == inspectorReturn) {
+    inspectorPluginCollInfoFree(collInfo);
+  }
   return res;
 }
 
@@ -214,7 +221,10 @@ static void inspectorPluginCollInfoInit(struct inspectorCollInfo **collInfo,
   inspectorPluginCollInfoRef(collInfoPtr); //self ref; no locks needed
   collInfoPtr->func = eDescr->coll.func;
   collInfoPtr->sn = eDescr->coll.seqNumber;
-  collInfoPtr->nChannels = eDescr->coll.nChannels;
+  // RCCL: clamp nChannels to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
+  collInfoPtr->nChannels = (eDescr->coll.nChannels < MAX_CHANNELS)
+                             ? eDescr->coll.nChannels
+                             : MAX_CHANNELS;
   if (collInfoPtr->nChannels > 0) {
     inspectorPluginCollInfoRef(collInfoPtr); //extra ref for kernel completion
   }
@@ -366,14 +376,18 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
 
   if (type == ncclProfileColl) {
     struct inspectorCollInfo *collInfo = (struct inspectorCollInfo *)eHandle;
-    // Record collective stop event
+    // Record collective stop event and mark that CollStop has fired.
+    // KernelCh stop events arrive via the proxy thread after CollStop,
+    // so they use collStopFired to know when it is safe to trigger the dump.
     inspectorLockWr(&collInfo->guard);
+    collInfo->collStopFired = true; // RCCL: guards dump trigger ordering vs KernelCh stop
     inspectorRecordEventTrace(collInfo->collEvtTrk.evntTrace,
                               NCCL_INSP_EVT_TRK_COLL_STOP,
                               collInfo);
     res = inspectorPluginCollInfoDeRef(collInfo);
     if (res == inspectorReturn) {
-      // WARN("NCCL Inspector unnatural return: inspectorPluginStopEvent:ncclProfileColl");
+      inspectorUnlockRWLock(&collInfo->guard);
+      inspectorPluginCollInfoFree(collInfo);
       return ncclSuccess;
     }
     inspectorUnlockRWLock(&collInfo->guard);
@@ -383,6 +397,8 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
       = (struct inspectorKernelChInfo *)eHandle;
     struct inspectorCollInfo *collInfo = kernelChInfo->collInfo;
     if (collInfo && collInfo->type == ncclProfileColl) {
+      // RCCL: guard against channelId >= MAX_CHANNELS; RCCL MAXCHANNELS can exceed 64.
+      if (kernelChInfo->channelId >= MAX_CHANNELS) return ncclSuccess;
       inspectorLockWr(&collInfo->guard);
       struct inspectorEventTraceInfo *krnlEvtTrk =
         collInfo->collEvtTrk.kernelCh[kernelChInfo->channelId].evntTrace;
@@ -395,18 +411,27 @@ __hidden ncclResult_t inspectorPluginStopEvent(void *eHandle) {
       res = inspectorPluginCollInfoDeRef(collInfo);
       if (res == inspectorReturn) {
         WARN("NCCL Inspector unnatural return: inspectorPluginStopEvent:ncclProfileKernelCh");
+        inspectorUnlockRWLock(&collInfo->guard);
+        inspectorPluginCollInfoFree(collInfo);
         return ncclSuccess;
       }
-      if ((collInfo->nKernelChCompleted == collInfo->nKernelChStarted)
+      // Dump when all kernel channels have completed. nChannels is now reliably set
+      // by enqueue.cc (ncclTaskColl::nChannels initialized to 0 before allocation,
+      // then overwritten by scheduleCollTasksToPlan with the correct value).
+      // collStopFired guards against firing before CollStop is recorded.
+      if (collInfo->collStopFired
+          && (collInfo->nKernelChCompleted == collInfo->nKernelChStarted)
           && (collInfo->nKernelChCompleted == collInfo->nChannels)) {
         struct inspectorCompletedCollInfo completedColl;
         struct inspectorCommInfo *commInfo = collInfo->commInfo;
         collInfo->tsCompletedUsec = kernelChInfo->tsCompletedUsec;
+        collInfo->collEvtTrk.nChannels = collInfo->nChannels;
         inspectorUpdateCollPerf(&completedColl, collInfo);
 
         res = inspectorPluginCollInfoDeRef(collInfo);
-        if (res != inspectorReturn) {
-          inspectorUnlockRWLock(&collInfo->guard);
+        inspectorUnlockRWLock(&collInfo->guard);
+        if (res == inspectorReturn) {
+          inspectorPluginCollInfoFree(collInfo);
         }
         if (commInfo != nullptr) {
           inspectorLockWr(&commInfo->guard);
@@ -463,6 +488,8 @@ __hidden ncclResult_t inspectorPluginRecordEventState(void* eHandle,
     struct inspectorCollInfo *collInfo = kernelChInfo->collInfo;
     inspectorResult_t res = inspectorSuccess;
     if (collInfo && collInfo->type == ncclProfileColl) {
+      // RCCL: guard against channelId >= MAX_CHANNELS; RCCL MAXCHANNELS can exceed 64.
+      if (kernelChInfo->channelId >= MAX_CHANNELS) return ncclSuccess;
       inspectorLockWr(&collInfo->guard);
       struct inspectorEventTraceInfo *krnlEvtTrk
         = collInfo->collEvtTrk.kernelCh[kernelChInfo->channelId].evntTrace;
@@ -474,6 +501,8 @@ __hidden ncclResult_t inspectorPluginRecordEventState(void* eHandle,
         res = inspectorPluginCollInfoDeRef(collInfo);
         if (res == inspectorReturn) {
           WARN("NCCL Inspector unnatural return: inspectorPluginRecordEventState");
+          inspectorUnlockRWLock(&collInfo->guard);
+          inspectorPluginCollInfoFree(collInfo);
           return ncclSuccess;
         }
       }

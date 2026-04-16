@@ -102,6 +102,12 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSetTrapHandler(HSAuint32 NodeId, void* TrapHandle
                                               HSAuint64 TrapHandlerSizeInBytes,
                                               void* TrapBufferBaseAddress,
                                               HSAuint64 TrapBufferSizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueV2(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
+                                                HSAuint32 QueuePercentage,
+                                                HSA_QUEUE_PRIORITY Priority, HSAuint32 SdmaEngineId,
+                                                void* QueueAddress, HSAuint64 QueueSizeInBytes,
+                                                HSAuint64 MetaDataQueueSizeInBytes,
+                                                HsaEvent* Event, HsaQueueResource* QueueResource);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                                               HSAuint32 QueuePercentage,
                                               HSA_QUEUE_PRIORITY Priority, HSAuint32 SdmaEngineId,

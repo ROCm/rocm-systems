@@ -35,6 +35,7 @@
 #include "memory/std_allocator.hpp"
 #include "util.hpp"
 #include "bootstrap/bootstrap.hpp"
+#include "atomic.hpp"
 
 namespace rocshmem {
 
@@ -82,7 +83,11 @@ class IpcOnImpl {
 
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size);
 
-  __device__ void ipcFence() { __threadfence_system(); }
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence() {
+    detail::atomic::threadfence<scope, order>();
+  }
 
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
@@ -192,7 +197,9 @@ class IpcOffImpl {
 
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {}
 
-  __device__ void ipcFence() {}
+  template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
+            detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
+  __device__ __forceinline__ void ipcFence() {}
 
   template <typename T>
   __device__ T ipcAMOFetchAdd(T *val, T value) {

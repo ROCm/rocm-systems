@@ -36,6 +36,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "constants.hpp"
 #include "assembly.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
@@ -50,14 +51,10 @@ namespace rocshmem {
  * @param[in] fn_str   String describing checked function
  *
  */
-#define CHECK_NNULL(value, fn_str) do {                \
-  if (UNLIKELY(nullptr == (value))) {                  \
-    fprintf(stderr,                                    \
-      "Error: %s: %s (%d) at RocSHMEM::%s:%d\n",       \
-      fn_str, strerror(errno), errno,                  \
-      __FILE__, __LINE__);                             \
-    abort();                                           \
-  }                                                    \
+#define CHECK_NNULL(value, fn_str) do {                                        \
+  if (UNLIKELY(nullptr == (value))) {                                          \
+    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
+  }                                                                            \
 } while(0)
 
 /**
@@ -68,14 +65,10 @@ namespace rocshmem {
  * @param[in] fn_str   String describing checked function
  *
  */
-#define CHECK_ZERO(value, fn_str) do {                 \
-  if (UNLIKELY(0 != (value))) {                        \
-    fprintf(stderr,                                    \
-      "Error: %s: %s (%d) at RocSHMEM::%s:%d\n",       \
-      fn_str, strerror(errno), errno,             \
-      __FILE__, __LINE__);                             \
-    abort();                                           \
-  }                                                    \
+#define CHECK_ZERO(value, fn_str) do {                                         \
+  if (UNLIKELY(0 != (value))) {                                                \
+    LOG_ERROR_ABORT("%s: %s (%d)", fn_str, strerror(errno), errno);            \
+  }                                                                            \
 } while(0)
 
 /**
@@ -85,54 +78,26 @@ namespace rocshmem {
  * @param[in] instr    HIP function to run and check
  *
  */
-#define CHECK_HIP(instr) do {                               \
-  hipError_t error = (instr);                               \
-  if (error != hipSuccess) {                                \
-    fprintf(stderr,                                         \
-      "Error: " #instr ": %s (%d) at RocSHMEM::%s:%d\n",    \
-      hipGetErrorString(error), error, __FILE__, __LINE__); \
-    abort();                                                \
-  }                                                         \
+#define CHECK_HIP(instr) do {                                                  \
+  hipError_t error = (instr);                                                  \
+  if (error != hipSuccess) {                                                   \
+    LOG_ERROR_ABORT(#instr ": %s (%d)", hipGetErrorString(error), error);       \
+  }                                                                            \
 } while(0)
 
 /**
  * @name CHECK_HSA
- * @brief Checks if HSA command succeeded. If it is not not success then it exits the program.
+ * @brief Checks if HSA command succeeded. If it is not success then it exits the program.
  *
  * @param[in] cmd HSA function to run and check
  *
  */
-#define CHECK_HSA(cmd)                                                           \
-  do {                                                                           \
-    hsa_status_t error = cmd;                                                    \
-    if (error != HSA_STATUS_SUCCESS) {                                           \
-      fprintf(stderr, "Error: " #cmd ": %d at RocSHMEM::%s:%d\n",                \
-              error, __FILE__, __LINE__);                                        \
-      exit(EXIT_FAILURE);                                                        \
-    }                                                                            \
+#define CHECK_HSA(cmd) do {                                                    \
+  hsa_status_t error = cmd;                                                    \
+  if (error != HSA_STATUS_SUCCESS) {                                           \
+    LOG_ERROR_EXIT(#cmd ": %d", error);                                        \
+  }                                                                            \
 } while (0)
-
-#ifdef DEBUG
-#define DPRINTF(...)     \
-  do {                   \
-    printf(__VA_ARGS__); \
-  } while (0);
-#else
-#define DPRINTF(...) \
-  do {               \
-  } while (0);
-#endif
-
-#ifdef DEBUG
-#define GPU_DPRINTF(...)                                         \
-  do {                                                           \
-    gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u) " __VA_ARGS__); \
-  } while (0);
-#else
-#define GPU_DPRINTF(...) \
-  do {                   \
-  } while (0);
-#endif
 
 /* Helper Macros for handling dynamic libraries */
 #define PPCAT_NX(prefix, func_name) prefix##func_name
@@ -150,7 +115,7 @@ do {                                                                            
 do {                                                                                        \
   *(void **) (&func_struct.func_name) = dlsym(handle, STRINGIFY(PPCAT(prefix, func_name))); \
   if (!func_struct.func_name) {                                                             \
-    DPRINTF("Failed to find function %s \n",  STRINGIFY(PPCAT(prefix, func_name)));         \
+    LOG_WARN("Failed to find function %s",  STRINGIFY(PPCAT(prefix, func_name)));           \
     dlclose(handle);                                                                        \
     handle = nullptr;                                                                       \
     return ROCSHMEM_ERROR;                                                                  \
@@ -161,7 +126,7 @@ do {                                                                            
 do {                                                                        \
   *(void **) (&func_struct.var_name) = dlsym(handle, STRINGIFY(var_name));  \
   if (!func_struct.var_name) {                                             \
-    DPRINTF("Failed to find function %s \n",  STRINGIFY(var_name));        \
+    LOG_WARN("Failed to find function %s",  STRINGIFY(var_name));          \
     dlclose(handle);                                                        \
     handle = nullptr;                                                       \
     return ROCSHMEM_ERROR;                                                  \
@@ -180,17 +145,17 @@ typedef struct device_prop {
 extern std::vector<device_prop_t> device_properties;
 
 [[maybe_unused]] static int get_threads_per_block(int device_id) {
-  assert(device_properties.size() > device_id);
+  assert(static_cast<int>(device_properties.size()) > device_id);
   return device_properties[device_id].maxThreadsPerBlock;
 }
 
 [[maybe_unused]] static int get_wf_size(int device_id) {
-  assert(device_properties.size() > device_id);
+  assert(static_cast<int>(device_properties.size()) > device_id);
   return device_properties[device_id].warpSize;
 }
 
 [[maybe_unused]] static const char* get_arch_name(int device_id) {
-  assert(device_properties.size() > device_id);
+  assert(static_cast<int>(device_properties.size()) > device_id);
   return device_properties[device_id].gcnArchName;
 }
 
@@ -412,31 +377,6 @@ __device__ __forceinline__ bool is_last_active_lane() {
   }
 }
 
-extern __constant__ int* print_lock;
-
-template <typename... Args>
-[[maybe_unused]] __device__ void gpu_dprintf(const char* fmt, const Args&... args) {
-  for (int i{0}; i < WF_SIZE; i++) {
-    if ((get_flat_block_id() % WF_SIZE) == i) {
-      /*
-       * GPU-wide global lock that ensures that both prints are executed
-       * by a single thread atomically.  We deliberately break control
-       * flow so that only a single thread in a WF accesses the lock at a
-       * time.  If multiple threads in the same WF attempt to gain the
-       * lock at the same time, you have a classic GPU control flow
-       * deadlock caused by threads in the same WF waiting on each other.
-       */
-      while (atomicCAS(print_lock, 0, 1) == 1) {
-      }
-
-      printf(fmt, hipBlockIdx_x, hipBlockIdx_y, hipBlockIdx_z,
-                  hipThreadIdx_x, hipThreadIdx_y, hipThreadIdx_z,
-                  args...);
-
-      *print_lock = 0;
-    }
-  }
-}
 
 #define LOAD(VAR) __atomic_load_n((VAR), __ATOMIC_SEQ_CST)
 #define STORE(DST, SRC) __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST)
@@ -445,7 +385,7 @@ template <typename... Args>
   uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
   uint8_t* src_bytes{static_cast<uint8_t*>(src)};
 
-  for (size_t i = 8; i > 1; i >>= 1) {
+  for (size_t i = 16; i > 1; i >>= 1) {
     while (size >= i) {
       store_asm(src_bytes, dst_bytes, i);
       src_bytes += i;
@@ -474,9 +414,9 @@ template <typename... Args>
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j{8}; j > 1; j >>= 1) {
+  for (int j = 16; j > 1; j >>= 1) {
     cpy_size = size / j;
-    for (int i{thread_id}; i < cpy_size; i += block_size) {
+    for (int i = thread_id; i < cpy_size; i += block_size) {
       dst_bytes = dst_def;
       src_bytes = src_def;
 
@@ -512,9 +452,9 @@ template <typename... Args>
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j{8}; j > 1; j >>= 1) {
+  for (int j = 16; j > 1; j >>= 1) {
     cpy_size = size / j;
-    for (int i{wave_tid}; i < cpy_size; i += wave_size) {
+    for (int i = wave_tid; i < cpy_size; i += wave_size) {
       dst_bytes = dst_def;
       src_bytes = src_def;
 

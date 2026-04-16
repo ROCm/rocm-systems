@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /// @file instruction.h
@@ -10,12 +10,13 @@
 #include "rocjitsu/isa/operand.h"
 #include "util/intrusive_list.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -57,15 +58,52 @@ protected:
 /// @brief Abstract base class that defines the API for an instruction.
 class Instruction : public util::IListNode<Instruction, util::IListParent<BasicBlock>> {
 public:
+  /// @brief Function pointer type for direct (non-virtual) execute dispatch.
+  /// @param self The instruction instance.
+  /// @param ctx  ISA-specific execution context (cast to concrete type by impl).
+  using ExecuteFn = void (*)(Instruction &self, void *ctx);
+
   /// @brief Construct an instruction with the given mnemonic.
-  /// @param[in] mnemonic Human-readable mnemonic string (e.g. "v_add_f32").
-  Instruction(std::string mnemonic) : mnemonic_(std::move(mnemonic)) {}
+  /// @param[in] mnemonic Human-readable mnemonic (must point to static storage
+  ///            or storage that outlives the instruction — typically a string
+  ///            literal or a member of the encoding base class).
+  Instruction(std::string_view mnemonic, ExecuteFn exec) : execute(exec), mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
+
+  /// @brief Pool allocator hooks, set by the decoder's enable_pool().
+  /// Thread-local because each CU partition thread has its own decoder/pool.
+  /// Instructions are wholly owned by their CU and always allocated/freed
+  /// on the same thread.
+  using AllocFn = void *(*)(void *pool, size_t size);
+  using DeallocFn = void (*)(void *pool, void *ptr);
+  static thread_local inline AllocFn alloc_fn_;
+  static thread_local inline DeallocFn dealloc_fn_;
+  static thread_local inline void *alloc_pool_;
+
+  static void *operator new(size_t size) {
+    if (alloc_fn_)
+      return alloc_fn_(alloc_pool_, size);
+    return ::operator new(size);
+  }
+
+  static void operator delete(void *ptr) noexcept {
+    if (dealloc_fn_) {
+      dealloc_fn_(alloc_pool_, ptr);
+      return;
+    }
+    ::operator delete(ptr);
+  }
 
   Instruction(const Instruction &) = delete;
   Instruction &operator=(const Instruction &) = delete;
   Instruction(Instruction &&) = delete;
   Instruction &operator=(Instruction &&) = delete;
+
+  /// @brief Direct execute dispatch.  Callers invoke as:
+  ///   ``inst->execute(*inst, &ctx)``
+  /// Each derived instruction class sets this to a trampoline that calls
+  /// its ``execute_impl()`` method.  No virtual dispatch.
+  const ExecuteFn execute;
 
   /// @brief Access the attached dynamic state, or nullptr if none.
   /// @returns Pointer to the dynamic state, or nullptr.
@@ -92,7 +130,7 @@ public:
 
   /// @brief The instruction's human-readable mnemonic.
   /// @returns Reference to the mnemonic string.
-  const std::string &mnemonic() const { return mnemonic_; }
+  std::string_view mnemonic() const { return mnemonic_; }
 
   /// @brief The instruction's total number of operands.
   /// @returns Sum of source and destination operand counts.
@@ -100,11 +138,11 @@ public:
 
   /// @brief The instruction's number of source operands.
   /// @returns Source operand count.
-  int num_src_operands() const { return src_operands_.size(); }
+  int num_src_operands() const { return num_src_; }
 
   /// @brief The instruction's number of destination operands.
   /// @returns Destination operand count.
-  int num_dst_operands() const { return dst_operands_.size(); }
+  int num_dst_operands() const { return num_dst_; }
 
   /// @brief Size of the instruction's encoding in bytes.
   /// @returns Encoding size in bytes.
@@ -129,18 +167,17 @@ public:
     if (disassembly_.empty()) {
       disassembly_ = mnemonic_;
       bool first = true;
-      for (auto *opnd : dst_operands_) {
+      for (uint8_t i = 0; i < num_dst_; ++i) {
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += opnd->name();
+        disassembly_ += dst_operands_[i]->name();
         first = false;
       }
-      for (auto *opnd : src_operands_) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += opnd->name();
+        disassembly_ += src_operands_[i]->name();
         first = false;
       }
-      if (!modifiers_.empty())
-        disassembly_ += modifiers_;
+      build_modifiers(disassembly_);
     }
     return disassembly_;
   }
@@ -148,20 +185,24 @@ public:
 protected:
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
-  /// @brief Instruction's source operands.
-  std::vector<Operand *> src_operands_;
-  /// @brief Instruction's destination operands.
-  std::vector<Operand *> dst_operands_;
-  /// @brief Modifier flags appended after operands (e.g. "offset:80 sc0 sc1").
-  std::string modifiers_;
+  /// @brief Instruction's source operands (max 4).
+  std::array<Operand *, 4> src_operands_{};
+  uint8_t num_src_ = 0;
+  /// @brief Instruction's destination operands (max 2).
+  std::array<Operand *, 2> dst_operands_{};
+  uint8_t num_dst_ = 0;
+  /// @brief Append modifier flags to the disassembly string (e.g. " sc0 sc1").
+  /// Overridden by memory encoding bases that have flag bits to display.
+  /// Default: no modifiers. Called lazily by disassemble().
+  virtual void build_modifiers(std::string & /*out*/) const {}
   /// @brief Cached disassembly string.
   mutable std::string disassembly_;
   /// @brief Instruction property flags bitmask.
   uint64_t flags_ = 0;
   std::unique_ptr<DynamicInstState> data_;
 
-private:
-  const std::string mnemonic_;
+protected:
+  std::string_view mnemonic_;
 };
 
 /// @brief Abstract class that holds static ISA state for a specific instruction instance.
@@ -173,11 +214,22 @@ template <typename Isa> class IsaInstruction : public Instruction {
 public:
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
-  IsaInstruction(std::string mnemonic) : Instruction(std::move(mnemonic)) {}
+  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn) : Instruction(mnemonic, exec_fn) {}
 
-  /// @brief Execute this instruction in the given ISA context.
-  /// @param[in,out] ctx ISA-specific execution context (e.g. wavefront state).
-  virtual void execute(typename Isa::Context &ctx) = 0;
+  /// @brief Helper to create an execute dispatch trampoline for a concrete type.
+  ///
+  /// The returned function pointer casts the base ``Instruction&`` to the
+  /// concrete ``Derived&`` and calls ``execute_impl()`` on it.
+  ///
+  /// Usage in a constructor init-list:
+  /// @code
+  ///   AddInst(...) : RType("add", raw, make_exec_fn<AddInst>()) {}
+  /// @endcode
+  template <typename Derived> static constexpr ExecuteFn make_exec_fn() {
+    return [](Instruction &self, void *ctx) {
+      static_cast<Derived &>(self).execute_impl(*static_cast<typename Isa::Context *>(ctx));
+    };
+  }
 };
 
 } // namespace rocjitsu

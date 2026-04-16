@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -162,7 +162,10 @@ struct nic_traits
                              entry.device->get_product_name().c_str(),
                              entry.device->get_vendor_name().c_str(),
                              "AI NIC",
-                             "AI NIC" };
+                             "AI NIC",
+                             0,
+                             0,
+                             {} };
 
             get_agent_manager_instance().insert_agent(cur_agent);
             nic_index++;
