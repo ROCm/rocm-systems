@@ -25,7 +25,6 @@
 import re
 import sys
 import pytest
-import json
 
 target_kernel_regex = re.compile(r"target_kernel|pc_sampling_kernel")
 paused_kernel_regex = re.compile(r"kernel_add|kernel_mult")
