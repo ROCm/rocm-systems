@@ -63,7 +63,6 @@ target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_h
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
-add_subdirectory(rocpd)
 add_subdirectory(trace_cache)
 
 target_include_directories(
@@ -90,7 +89,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocpdsna>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>

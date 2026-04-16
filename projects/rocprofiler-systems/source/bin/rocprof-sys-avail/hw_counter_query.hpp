@@ -22,36 +22,14 @@
 
 #pragma once
 
-#include "insert_query_builders.hpp"
+#include <timemory/backends/hardware_counters.hpp>
+#include <vector>
 
 namespace rocprofsys
 {
-namespace rocpd
+namespace avail
 {
-namespace data_storage
-{
-namespace queries
-{
-
-struct table_insert_query
-{
-    table_insert_query()
-    : _query_columns_builder{ _ss }
-    {}
-
-    query_builders::query_columns_builder& set_table_name(const std::string& tableName)
-    {
-        _ss.str("");
-        _ss << "INSERT INTO " << tableName << " ";
-        return _query_columns_builder;
-    }
-
-private:
-    std::stringstream                     _ss;
-    query_builders::query_columns_builder _query_columns_builder;
-};
-
-}  // namespace queries
-}  // namespace data_storage
-}  // namespace rocpd
+std::vector<tim::hardware_counters::info>
+query_gpu_hw_counters();
+}  // namespace avail
 }  // namespace rocprofsys

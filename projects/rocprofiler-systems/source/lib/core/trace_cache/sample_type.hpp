@@ -541,7 +541,8 @@ struct pmc_event_with_sample : in_time_sample
                           size_t _stack_id, size_t _parent_stack_id,
                           size_t _correlation_id, std::string _call_stack,
                           std::string _line_info, uint32_t _device_id,
-                          uint8_t _device_type, std::string _pmc_info_name, double _value)
+                          uint8_t _device_type, std::string _pmc_info_name, double _value,
+                          std::optional<int64_t> _system_tid)
     : in_time_sample(_category_enum_id, std::move(_track_name), _timestamp_ns,
                      std::move(_event_metadata), _stack_id, _parent_stack_id,
                      _correlation_id, std::move(_call_stack), std::move(_line_info))
@@ -549,12 +550,14 @@ struct pmc_event_with_sample : in_time_sample
     , device_type(_device_type)
     , pmc_info_name(std::move(_pmc_info_name))
     , value(_value)
+    , system_tid(_system_tid)
     {}
 
-    uint32_t    device_id;
-    uint8_t     device_type;
-    std::string pmc_info_name;
-    double      value;
+    uint32_t               device_id;
+    uint8_t                device_type;
+    std::string            pmc_info_name;
+    double                 value;
+    std::optional<int64_t> system_tid;
 };
 
 template <>
@@ -567,7 +570,7 @@ serialize(uint8_t* buffer, const pmc_event_with_sample& item)
         static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value);
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 template <>
@@ -582,7 +585,8 @@ deserialize(uint8_t*& buffer)
     utility::parse_value(buffer, category_enum_id, track_name_view, timestamp_ns,
                          event_metadata_view, stack_id, parent_stack_id, correlation_id,
                          call_stack_view, line_info_view, item.device_id,
-                         item.device_type, pmc_info_name_view, item.value);
+                         item.device_type, pmc_info_name_view, item.value,
+                         item.system_tid);
     item.category_enum_id = category_enum_id;
     item.track_name       = std::string(track_name_view);
     item.timestamp_ns     = timestamp_ns;
@@ -606,7 +610,7 @@ get_size(const pmc_event_with_sample& item)
         static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),
         std::string_view(item.line_info), item.device_id, item.device_type,
-        std::string_view(item.pmc_info_name), item.value);
+        std::string_view(item.pmc_info_name), item.value, item.system_tid);
 }
 
 struct amd_smi_sample : cacheable_t

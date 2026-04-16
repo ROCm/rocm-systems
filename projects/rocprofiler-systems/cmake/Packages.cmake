@@ -59,9 +59,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-python
 rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
     "Enables Perfetto support"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
-    "Use SQLite3 for rocpd data storage"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
 )
@@ -167,52 +164,45 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_ROCM)
-    find_package(ROCmVersion)
+find_package(ROCmVersion)
 
-    if(NOT ROCmVersion_FOUND)
-        find_package(
-            hip
-            ${rocprofiler_systems_FIND_QUIETLY}
-            REQUIRED
-            HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-            PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        )
-        find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-    endif()
-
-    if(NOT ROCmVersion_FOUND)
-        rocm_version_compute("${hip_VERSION}" _local)
-
-        foreach(_V ${ROCmVersion_VARIABLES})
-            set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-            set(_LOCAL_VAR _local_${_V}_VERSION)
-            set(ROCmVersion_${_V}_VERSION
-                "${${_LOCAL_VAR}}"
-                CACHE STRING
-                "ROCm ${_V} version"
-            )
-            rocm_version_watch_for_change(${_CACHE_VAR})
-        endforeach()
-    else()
-        list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
-    endif()
-
-    set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
-
-    rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
-        "ROCm version used by rocprofiler-systems"
+if(NOT ROCmVersion_FOUND)
+    find_package(
+        hip
+        ${rocprofiler_systems_FIND_QUIETLY}
+        REQUIRED
+        HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+        PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
     )
-else()
-    set(ROCPROFSYS_ROCM_VERSION "0.0.0")
-    set(ROCPROFSYS_ROCM_VERSION_MAJOR 0)
-    set(ROCPROFSYS_ROCM_VERSION_MINOR 0)
-    set(ROCPROFSYS_ROCM_VERSION_PATCH 0)
+    find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
 endif()
+
+if(NOT ROCmVersion_FOUND)
+    rocm_version_compute("${hip_VERSION}" _local)
+
+    foreach(_V ${ROCmVersion_VARIABLES})
+        set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
+        set(_LOCAL_VAR _local_${_V}_VERSION)
+        set(ROCmVersion_${_V}_VERSION
+            "${${_LOCAL_VAR}}"
+            CACHE STRING
+            "ROCm ${_V} version"
+        )
+        rocm_version_watch_for_change(${_CACHE_VAR})
+    endforeach()
+else()
+    list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
+endif()
+
+set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
+set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
+
+rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
+    "ROCm version used by rocprofiler-systems"
+)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -220,163 +210,70 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_ROCM)
-    # ROCProfiler SDK
-    find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
-        INTERFACE ROCPROFSYS_USE_ROCM
-    )
-    target_link_libraries(
-        rocprofiler-systems-rocm
-        INTERFACE rocprofiler-sdk::rocprofiler-sdk
-    )
+# ROCProfiler SDK
+find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+target_link_libraries(rocprofiler-systems-rocm INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
-    # AMD SMI
-    find_package(
-        amd_smi
-        ${rocprofiler_systems_FIND_QUIETLY}
+# AMD SMI
+find_package(
+    amd_smi
+    ${rocprofiler_systems_FIND_QUIETLY}
+    HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+    REQUIRED
+)
+
+# amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
+# This is no longer the case in ROCm 7.0.
+if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
+    # Find drm library
+    find_library(
+        drm_LIBRARY
+        NAMES drm
         HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
         PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
+        REQUIRED
+    )
+    # Find drm_amdgpu library
+    find_library(
+        drm_amdgpu_LIBRARY
+        NAMES drm_amdgpu
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
         REQUIRED
     )
 
-    # amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
-    # This is no longer the case in ROCm 7.0.
-    if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
-        # Find drm library
-        find_library(
-            drm_LIBRARY
-            NAMES drm
-            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATH_SUFFIXES lib lib64
-            REQUIRED
-        )
-        # Find drm_amdgpu library
-        find_library(
-            drm_amdgpu_LIBRARY
-            NAMES drm_amdgpu
-            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATH_SUFFIXES lib lib64
-            REQUIRED
-        )
+    get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
+    get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
 
-        get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
-        get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
+    set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
+    list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
 
-        set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
-        list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
-
-        target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
-    endif()
-
-    # When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
-    # expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
-    if(ROCPROFSYS_USE_AINIC)
-        if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
-            target_compile_definitions(
-                rocprofiler-systems-compile-definitions
-                INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
-            )
-        endif()
-    endif()
-
-    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
+    target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
 endif()
+
+# When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
+# expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
+if(ROCPROFSYS_USE_AINIC)
+    if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+        target_compile_definitions(
+            rocprofiler-systems-compile-definitions
+            INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
+        )
+    endif()
+endif()
+
+target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
 # ----------------------------------------------------------------------------------------#
 #
-# ROCpd
+# RocpdSna
 #
 # ----------------------------------------------------------------------------------------#
 
-function(ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES)
-    rocprofiler_systems_target_compile_definitions(
-        rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=0
-    )
-
-    set(SCHEMA_FILES
-        "rocpd_tables.sql"
-        "rocpd_views.sql"
-        "data_views.sql"
-        "marker_views.sql"
-        "summary_views.sql"
-    )
-
-    set(SCHEMA_SOURCE_DIR
-        "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(SCHEMA_BINARY_DIR
-        "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
-
-    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
-
-    foreach(SCHEMA_FILE ${SCHEMA_FILES})
-        file(READ "${SCHEMA_SOURCE_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
-
-        string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
-        string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
-
-        get_filename_component(SCHEMA_NAME ${SCHEMA_FILE} NAME_WE)
-        string(TOUPPER ${SCHEMA_NAME} SCHEMA_NAME_UPPER)
-
-        configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
-    endforeach()
-
-    target_include_directories(
-        rocprofiler-systems-headers
-        INTERFACE
-            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
-    )
-endfunction()
-
-set(ROCPROFSYS_USE_ROCPD_LIBRARY OFF CACHE BOOL "Use rocpd library" FORCE)
-find_package(rocprofiler-sdk-rocpd ${rocprofiler_systems_FIND_QUIETLY})
-
-if(rocprofiler-sdk-rocpd_FOUND)
-    set(ROCPROFSYS_ROCPD_HAS_SQL_H FALSE)
-
-    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
-        set(_INCLUDE_PATH "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd")
-        message(STATUS "${_INCLUDE_PATH}/sql.h")
-        if(EXISTS "${_INCLUDE_PATH}/sql.h")
-            set(ROCPROFSYS_ROCPD_HAS_SQL_H TRUE)
-        endif()
-    endif()
-
-    if(ROCPROFSYS_ROCPD_HAS_SQL_H)
-        set(ROCPROFSYS_USE_ROCPD_LIBRARY ON CACHE BOOL "Use rocpd library" FORCE)
-
-        rocprofiler_systems_target_compile_definitions(
-            rocprofiler-systems-rocm INTERFACE ROCPROFSYS_USE_ROCPD_LIBRARY=1
-        )
-
-        target_link_libraries(
-            rocprofiler-systems-rocm
-            INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-        )
-
-        message(
-            STATUS
-            "rocprofiler-sdk-rocpd found with sql.h - using latest schema files"
-        )
-    else()
-        message(
-            STATUS
-            "rocprofiler-sdk-rocpd found but sql.h missing - using local schema files"
-        )
-    endif()
-else()
-    message(STATUS "rocprofiler-sdk-rocpd not found - using local schema files")
-endif()
-
-if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
-    rocprofsys_configure_rocpd_schema_files()
-endif()
+include(RocpdSna)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -683,14 +580,6 @@ rocprofiler_systems_checkout_git_submodule(
 )
 
 include(Perfetto)
-
-# ----------------------------------------------------------------------------------------#
-#
-# SQLite3
-#
-# ----------------------------------------------------------------------------------------#
-
-include(SQLite3)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -1087,10 +976,18 @@ if(ROCPROFSYS_USE_PYTHON)
     include(PyBind11Tools)
 
     rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_ROOT_DIRS _PYTHON_DIRS_CHANGED)
+    rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_VERSIONS _PYTHON_VERS_CHANGED)
 
     if(_PYTHON_DIRS_CHANGED)
         unset(ROCPROFSYS_PYTHON_VERSION CACHE)
-        unset(ROCPROFSYS_PYTHON_VERSIONS CACHE)
+        # Only discard cached versions if the user did not explicitly
+        # provide/change them on this configure run. This prevents a fresh
+        # build (where watch_for_change treats all new values as "changed")
+        # from discarding user-supplied versions while still allowing
+        # re-discovery when only root dirs change between reconfigures.
+        if(NOT _PYTHON_VERS_CHANGED OR NOT ROCPROFSYS_PYTHON_VERSIONS)
+            unset(ROCPROFSYS_PYTHON_VERSIONS CACHE)
+        endif()
         unset(ROCPROFSYS_INSTALL_PYTHONDIR CACHE)
     else()
         foreach(_VAR PREFIX ENVS)
@@ -1123,7 +1020,9 @@ if(ROCPROFSYS_USE_PYTHON)
         set(ROCPROFSYS_PYTHON_VERSIONS "${ROCPROFSYS_PYTHON_VERSION}")
 
         if(NOT ROCPROFSYS_PYTHON_ROOT_DIRS)
-            rocprofiler_systems_find_python(_PY VERSION ${ROCPROFSYS_PYTHON_VERSION})
+            rocprofiler_systems_find_python(_PY VERSION ${ROCPROFSYS_PYTHON_VERSION}
+                COMPONENTS Interpreter
+            )
             set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
         endif()
 
@@ -1137,7 +1036,9 @@ if(ROCPROFSYS_USE_PYTHON)
         set(_PY_VERSIONS)
 
         foreach(_DIR ${ROCPROFSYS_PYTHON_ROOT_DIRS})
-            rocprofiler_systems_find_python(_PY ROOT_DIR ${_DIR})
+            rocprofiler_systems_find_python(_PY ROOT_DIR ${_DIR}
+                COMPONENTS Interpreter
+            )
 
             if(NOT _PY_FOUND)
                 continue()
@@ -1154,7 +1055,7 @@ if(ROCPROFSYS_USE_PYTHON)
         AND NOT ROCPROFSYS_PYTHON_VERSION
         AND NOT ROCPROFSYS_PYTHON_ROOT_DIRS
     )
-        rocprofiler_systems_find_python(_PY REQUIRED)
+        rocprofiler_systems_find_python(_PY REQUIRED COMPONENTS Interpreter)
         set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
         set(ROCPROFSYS_PYTHON_VERSIONS "${_PY_VERSION}" CACHE INTERNAL "" FORCE)
     endif()

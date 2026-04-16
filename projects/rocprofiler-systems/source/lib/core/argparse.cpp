@@ -521,13 +521,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-    _backend_choices.erase("amd-smi");
-    _backend_choices.erase("rocm");
-    _backend_choices.erase("rcclp");
-    _backend_choices.erase("ompt");
-#endif
-
     if(gpu::device_count() == 0)
     {
         // remove GPU-specific backends
@@ -536,10 +529,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _backend_choices.erase("rocm");
         _backend_choices.erase("ompt");
 
-#if defined(ROCPROFSYS_USE_ROCM)
         update_env(_data, "ROCPROFSYS_USE_AMD_SMI", false);
-        update_env(_data, "ROCPROFSYS_USE_ROCM", false);
-#endif
     }
 
     _parser.start_group("BACKEND OPTIONS",
@@ -561,7 +551,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
                 _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
                 _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-                _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
                 _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
                 _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
                 _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
@@ -591,7 +580,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
                 _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
                 _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-                _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
                 _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
                 _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
                 _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);

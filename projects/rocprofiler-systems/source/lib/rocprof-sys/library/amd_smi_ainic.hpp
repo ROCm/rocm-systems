@@ -10,10 +10,8 @@
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include "core/amd_smi.hpp"
-#    include <amd_smi/amdsmi.h>
-#endif
+#include "core/amd_smi.hpp"
+#include <amd_smi/amdsmi.h>
 
 #include <chrono>
 #include <cstdint>
