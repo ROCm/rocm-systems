@@ -768,6 +768,69 @@ def get_supported_archs() -> list[str]:
     return list(mi_gpu_specs.get_gpu_series_dict().keys())
 
 
+def load_grouping_policy(
+    config_dir: Path,
+    arch: str,
+) -> list[set[str]]:
+    """Load same-bucket priority groups from profiling_counter_grouping_policy.yaml.
+
+    Reads the policy file and extracts counters for metrics listed in
+    same_bucket_priority_metric_ids for the given architecture.
+
+    Returns:
+        List of counter sets where counters in each set should be co-located.
+    """
+    policy_file = config_dir / "profiling_counter_grouping_policy.yaml"
+    if not policy_file.is_file():
+        return []
+
+    try:
+        with open(policy_file, encoding="utf-8") as f:
+            policy = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        print(f"Warning: Could not load grouping policy: {e}", file=sys.stderr)
+        return []
+
+    if not isinstance(policy, dict):
+        return []
+
+    architectures = policy.get("architectures", {})
+    if not isinstance(architectures, dict):
+        return []
+
+    arch_policy = architectures.get(arch, {})
+    if not isinstance(arch_policy, dict):
+        return []
+
+    priority_ids = arch_policy.get("same_bucket_priority_metric_ids", {})
+    if not isinstance(priority_ids, dict) or not priority_ids:
+        return []
+
+    # Collect all counters from priority metrics into one group
+    all_priority_counters: set[str] = set()
+    config_files = {f.name.split("_")[0]: f for f in (config_dir / arch).glob("*.yaml")}
+
+    for metric_id in priority_ids:
+        texts: list[str] = []
+        panel_alias_dict = get_panel_alias()
+        append_analysis_yaml_for_filter_token(
+            metric_id,
+            config_files,
+            config_dir / arch,
+            texts,
+            panel_alias_dict,
+        )
+        if texts:
+            counters = parse_counters("\n".join(texts))
+            all_priority_counters.update(counters)
+
+    if not all_priority_counters:
+        return []
+
+    # Return as a single group (all priority metrics go in same bucket)
+    return [all_priority_counters]
+
+
 def main() -> None:
     # Get supported architectures dynamically from mi_gpu_specs
     supported_archs = get_supported_archs()
@@ -849,13 +912,20 @@ Examples:
         print("No counters found!", file=sys.stderr)
         sys.exit(1)
 
+    same_bucket_groups = load_grouping_policy(config_dir, arch)
+
     if args.verbose:
         print(f"Collected {len(counters)} unique counters:")
         for c in sorted(counters):
             print(f"  - {c}")
         print()
+        if same_bucket_groups:
+            print(f"Loaded grouping policy with {len(same_bucket_groups)} group(s):")
+            for i, group in enumerate(same_bucket_groups):
+                print(f"  Group {i}: {len(group)} counters")
+            print()
 
-    output_files = allocate_buckets(counters, perfmon_config)
+    output_files = allocate_buckets(counters, perfmon_config, same_bucket_groups)
 
     # Handle output formats
     if args.output:
