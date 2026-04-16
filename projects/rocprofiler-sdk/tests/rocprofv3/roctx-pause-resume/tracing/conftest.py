@@ -22,15 +22,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from __future__ import annotations
+
 import json
-import os
 import pytest
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
 
 
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--json-input",
         action="store",
@@ -40,7 +41,7 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def json_data(request):
-    filename = request.config.getoption("--json-input")
+def json_data(request: pytest.FixtureRequest) -> dotdict:
+    filename: str = request.config.getoption("--json-input")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
