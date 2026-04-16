@@ -195,15 +195,15 @@ class Backend {
   /**
    * @brief Register a user buffer.
    */
-  int buffer_register([[maybe_unused]] void *addr,
-                      [[maybe_unused]] size_t length) {
+  virtual int buffer_register([[maybe_unused]] void *addr,
+                              [[maybe_unused]] size_t length) {
     return ROCSHMEM_SUCCESS;
   }
 
   /**
    * @brief Unregister a user buffer.
    */
-  int buffer_unregister([[maybe_unused]] void *addr) {
+  virtual int buffer_unregister([[maybe_unused]] void *addr) {
     return ROCSHMEM_SUCCESS;
   }
 

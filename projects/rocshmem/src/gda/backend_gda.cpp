@@ -497,12 +497,12 @@ void GDABackend::ctx_destroy(Context *ctx) {
 
 int GDABackend::buffer_register([[maybe_unused]] void *addr,
                                 [[maybe_unused]] size_t length) {
-  LOG_ERROR_EXIT("GDABackend::buffer_register not supported");
+  LOG_ERROR("GDABackend::buffer_register not supported");
   return ROCSHMEM_ERROR;
 }
 
 int GDABackend::buffer_unregister([[maybe_unused]] void *addr) {
-  LOG_ERROR_EXIT("GDABackend::buffer_unregister not supported");
+  LOG_ERROR("GDABackend::buffer_unregister not supported");
   return ROCSHMEM_ERROR;
 }
 

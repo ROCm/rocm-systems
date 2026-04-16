@@ -59,7 +59,7 @@ ROCSHMEM_BUFFER_UNREGISTER
   :returns: ROCSHMEM_SUCCESS or an error.
 
 **Description:**
-Deregisters a previously reigstered buffer that was registered using
+Deregisters a previously registered buffer that was registered using
 `rocshmem_buffer_register`.
 Currently, this call is only implemented for IPC and RO, GDA is
 not supported.

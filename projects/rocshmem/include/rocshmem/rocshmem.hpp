@@ -227,7 +227,7 @@ __host__ void *rocshmem_malloc(size_t size);
 __host__ void rocshmem_free(void *ptr);
 
 /**
- * @brief Registers a non-symetric buffer
+ * @brief Registers a non-symmetric buffer
  *
  * @param[in] addr Pointer to previously allocated user memory
  * @param[in] length Length of addr

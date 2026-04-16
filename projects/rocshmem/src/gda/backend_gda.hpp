@@ -235,12 +235,12 @@ class GDABackend : public Backend {
   /**
    * @brief Register a user buffer.
    */
-  int buffer_register(void *addr, size_t length);
+  int buffer_register(void *addr, size_t length) override;
 
   /**
    * @brief Unregister a user buffer.
    */
-  int buffer_unregister(void *addr);
+  int buffer_unregister(void *addr) override;
 
   /**
    * @brief Abort the application.
