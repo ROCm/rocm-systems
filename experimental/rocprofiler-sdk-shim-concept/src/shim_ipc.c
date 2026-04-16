@@ -209,8 +209,8 @@ static void* shim_bg_main(void* arg)
         shim_hello_t hello;
         memcpy(hello.magic, SHIM_HELLO_MAGIC, 4);
         hello.struct_version  = SHIM_CTRL_VERSION;
-        hello.n_registrations = ipc->ctrl->n_registrations;
-        hello.total_ops       = ipc->ctrl->total_ops;
+        hello.n_runtime_registrations = ipc->ctrl->n_runtime_registrations;
+        hello.active_services         = ipc->ctrl->active_services;
         hello.watermark_bytes = ipc->ctrl->watermark_bytes;
         hello.start_time      = ipc->ctrl->start_time;
 
@@ -226,17 +226,13 @@ static void* shim_bg_main(void* arg)
         ipc->client_sock = client;
 
         /* Monitor consumer liveness via POLLHUP. When the consumer
-         * dies or disconnects, zero all op_mode slots immediately. */
+         * dies or disconnects, disable transport capture immediately. */
         struct pollfd pfd = { .fd = client, .events = 0 };
         while (!atomic_load(&ipc->shutdown)) {
             int r = poll(&pfd, 1, 1000);
             if (r > 0 && (pfd.revents & (POLLHUP | POLLERR))) {
-                /* Consumer died — zero all modes (§10.4). */
-                for (uint32_t i = 0; i < ipc->ctrl->total_ops; i++)
-                    atomic_store_explicit(&ipc->ctrl->op_mode[i],
-                                          ROCP_SHIM_MODE_OFF,
-                                          memory_order_release);
-                fprintf(stderr, "[shim] consumer disconnected, slots zeroed\n");
+                atomic_store_explicit(&ipc->ctrl->capture_enabled, 0, memory_order_release);
+                fprintf(stderr, "[shim] consumer disconnected, transport capture disabled\n");
                 break;
             }
         }
@@ -440,8 +436,8 @@ connected:;
     con->ring_hdr  = (shim_ring_header_t*)((uint8_t*)map + ring_off);
     con->ring_data = (uint8_t*)con->ring_hdr + sizeof(shim_ring_header_t);
 
-    fprintf(stderr, "[consumer] attached to pid=%d, total_ops=%u, ring_mask=0x%lx\n",
-            con->ctrl->pid, con->ctrl->total_ops,
+    fprintf(stderr, "[consumer] attached to pid=%d, services=%u, ring_mask=0x%lx\n",
+            con->ctrl->pid, con->ctrl->active_services,
             (unsigned long)con->ring_hdr->mask);
     return 0;
 
@@ -452,12 +448,9 @@ fail:
 
 void shim_consumer_detach(shim_ipc_consumer_t* con)
 {
-    /* Zero all modes before disconnecting (clean detach §10.3) */
+    /* Disable transport capture before disconnecting. */
     if (con->ctrl) {
-        for (uint32_t i = 0; i < con->ctrl->total_ops; i++)
-            atomic_store_explicit(&con->ctrl->op_mode[i],
-                                  ROCP_SHIM_MODE_OFF,
-                                  memory_order_release);
+        atomic_store_explicit(&con->ctrl->capture_enabled, 0, memory_order_release);
         munmap(con->ctrl, con->mmap_size);
         con->ctrl = NULL;
     }

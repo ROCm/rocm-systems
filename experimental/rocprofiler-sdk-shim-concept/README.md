@@ -1,38 +1,30 @@
 # rocprofiler-sdk-shim-concept
 
-This directory hosts an isolated proof-of-concept for the current shim design in
-`docs/dispatch-tracer/SHIM_MEMFD_SOCK_DESIGN.md`.
+This directory hosts a transport-only shim concept built around the real
+`rocprofiler-sdk` tool architecture.
 
-It is intentionally standalone so you can build and test it without patching the
-existing `rocprofiler-register`, `rocprofiler-sdk`, CLR/HIP, or ROCR/HSA projects.
+What is real in this concept:
 
-What this concept targets for real:
+- the tool is loaded through the normal `ROCP_TOOL_LIBRARIES` path
+- `rocprofiler-sdk` creates the context, buffer, and tracing services
+- `rocprofiler-sdk` produces the HIP/HSA/runtime-initialization records
+- the shim only snapshots those SDK buffer records into a memfd-backed ring
+- the consumer decodes the transported records with the real `rocprofiler-sdk`
 
-- the real `rocprofiler-register` API-table hook ABI via
-  `rocprofiler_set_api_table` and `rocprofiler_attach_set_api_table`
-- the real `rocprofiler-sdk` tool ABI via `rocprofiler_configure`
-- the real HIP/CLR registration path using `hip_api_trace.hpp`
-- the real ROCR/HSA registration path using `hsa.h`
+What this concept is meant to validate:
 
-What it does today:
+- a target-side SDK tool can export records to an external consumer without the
+  consumer living in the target process
+- the shim can stay transport-focused instead of owning dispatch wrappers
+- real HIP and real HSA activity can be observed through SDK-produced records
+- runtime-load metadata is published from real
+  `ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION` records
 
-- captures real `hip` and `hsa` dispatch-table registrations
-- allocates real per-table slot ranges and op metadata
-- wraps a tiny real subset of ops:
-  - HIP: `hipGetDeviceCount`, `hipMalloc`, `hipFree`
-  - HSA: `hsa_init`, `hsa_iterate_agents`, `hsa_shut_down`
-- exports the shim/SDK layering helpers:
-  - `shim_get_runtime_original`
-  - `shim_get_next_in_chain`
-  - `shim_set_next_in_chain`
-- exposes the memfd + abstract-socket + SCM_RIGHTS + ring-buffer transport
-- provides external attach/stream/detach validation via `shim_consumer_test`
+Services configured by the prototype:
 
-Current limitation:
-
-- this does not yet patch `projects/rocprofiler-sdk` to make the in-tree SDK wrapper
-  installation shim-aware. The concept exports the layering seam, but the actual SDK
-  integration work is still separate.
+- `ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION`
+- `ROCPROFILER_BUFFER_TRACING_HSA_CORE_API`
+- `ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT`
 
 ## Build
 
@@ -44,9 +36,8 @@ cmake --build build/shim-concept -j
 ## Run: HIP
 
 ```bash
-export LD_LIBRARY_PATH=$PWD/build/shim-concept/lib:$LD_LIBRARY_PATH
-export ROCPROFILER_REGISTER_FORCE_LOAD=1
-export ROCPROFILER_REGISTER_LIBRARY=$PWD/build/shim-concept/lib/librocprofiler-sdk-shim-concept.so
+export LD_LIBRARY_PATH=$PWD/build/shim-concept/lib:/opt/rocm/lib:$LD_LIBRARY_PATH
+export ROCP_TOOL_LIBRARIES=$PWD/build/shim-concept/lib/librocprofiler-sdk-shim-concept.so
 
 ./build/shim-concept/bin/real_hip_probe_test &
 TARGET_PID=$!
@@ -57,9 +48,8 @@ wait $TARGET_PID
 ## Run: HSA
 
 ```bash
-export LD_LIBRARY_PATH=$PWD/build/shim-concept/lib:$LD_LIBRARY_PATH
-export ROCPROFILER_REGISTER_FORCE_LOAD=1
-export ROCPROFILER_REGISTER_LIBRARY=$PWD/build/shim-concept/lib/librocprofiler-sdk-shim-concept.so
+export LD_LIBRARY_PATH=$PWD/build/shim-concept/lib:/opt/rocm/lib:$LD_LIBRARY_PATH
+export ROCP_TOOL_LIBRARIES=$PWD/build/shim-concept/lib/librocprofiler-sdk-shim-concept.so
 
 ./build/shim-concept/bin/real_hsa_probe_test &
 TARGET_PID=$!
@@ -67,6 +57,7 @@ TARGET_PID=$!
 wait $TARGET_PID
 ```
 
-The HSA probe intentionally uses the shim's test-only helper export to call through the
-registered `HsaApiTable`, because direct public `hsa_*` entry points do not reliably
-exercise that table on every runtime path.
+The external consumer can attach after the target has started. Once attached, it
+enables transport capture by flipping a single shared-memory flag. The tracing
+remains owned by `rocprofiler-sdk`; the shim only forwards already-produced
+records.

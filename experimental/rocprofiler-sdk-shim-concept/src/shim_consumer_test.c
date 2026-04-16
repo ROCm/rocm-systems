@@ -1,170 +1,276 @@
-/*
- * shim_consumer_test.c — minimal OOP consumer for the shim mock.
- *
- * Usage: shim_consumer_test <target_pid> [duration_sec]
- *
- * Validates the end-to-end path: socket connect → SO_PEERCRED →
- * SCM_RIGHTS memfd+eventfd → mmap → enable ops → poll ring → print
- * records → detach. Matches SHIM_MEMFD_SOCK_DESIGN §4, §10, §13.
- */
 #define _GNU_SOURCE
+
 #include <inttypes.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
-#include "shim_protocol.h"
+#include "shim_sdk_compat.h"
+
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include "shim_ipc.h"
+#include "shim_protocol.h"
 
 static volatile int g_stop = 0;
-static void on_sigint(int sig) { (void)sig; g_stop = 1; }
 
-/* Global ctrl pointer for op_info name lookup inside the callback. */
-static shim_ctrl_t* g_con_ctrl = NULL;
-
-typedef struct { uintptr_t count_ptr; int32_t count_value; int32_t result; } packed_hip_get_device_count_t;
-typedef struct { uintptr_t out_ptr; uintptr_t allocated_ptr; uint64_t size; int32_t result; } packed_hip_malloc_t;
-typedef struct { uintptr_t ptr; int32_t result; } packed_hip_free_t;
-typedef struct { uint32_t result; } packed_hsa_init_t;
-typedef struct { uintptr_t callback; uintptr_t data; uint32_t result; } packed_hsa_iterate_agents_t;
-typedef struct { uint32_t result; } packed_hsa_shutdown_t;
-
-/* Find which table a global slot_idx belongs to, return the table name
- * and the local op index within that table. */
-static const char* find_table_for_op(uint32_t slot_idx, uint32_t* local_op)
+static void
+on_sigint(int sig)
 {
-    if (!g_con_ctrl) return NULL;
-    for (uint32_t i = 0; i < g_con_ctrl->n_registrations; i++) {
-        const shim_table_registration_t* t = &g_con_ctrl->registrations[i];
-        if (slot_idx >= t->slot_base && slot_idx < t->slot_base + t->n_ops) {
-            *local_op = slot_idx - t->slot_base;
-            return t->name;
-        }
-    }
-    return NULL;
+    (void) sig;
+    g_stop = 1;
 }
 
-static void print_args(const shim_record_t* rec)
+typedef struct
 {
-    /* Args are captured on EXIT (after orig() returns) so output params
-     * like out_queue, prop, etc. have their final values. */
-    if (rec->phase != SHIM_PHASE_EXIT || rec->arg_bytes == 0) return;
+    char   buffer[512];
+    size_t length;
+} shim_arg_string_t;
 
-    uint32_t local_op = 0;
-    const char* tbl = find_table_for_op(rec->op, &local_op);
-    if (!tbl) return;
+static void
+shim_appendf(shim_arg_string_t* out, const char* fmt, ...)
+{
+    va_list args;
+    int     written = 0;
 
-    if (strcmp(tbl, "hip") == 0) {
-        if (local_op == 0 && rec->arg_bytes >= sizeof(packed_hip_get_device_count_t)) {
-            const packed_hip_get_device_count_t* a = (const packed_hip_get_device_count_t*)rec->args;
-            printf("  args(count_ptr=%p, count=%d, ret=%d)",
-                   (void*)a->count_ptr, a->count_value, a->result);
-        } else if (local_op == 1 && rec->arg_bytes >= sizeof(packed_hip_malloc_t)) {
-            const packed_hip_malloc_t* a = (const packed_hip_malloc_t*)rec->args;
-            printf("  args(out_ptr=%p, alloc=%p, size=%" PRIu64 ", ret=%d)",
-                   (void*)a->out_ptr, (void*)a->allocated_ptr, a->size, a->result);
-        } else if (local_op == 2 && rec->arg_bytes >= sizeof(packed_hip_free_t)) {
-            const packed_hip_free_t* a = (const packed_hip_free_t*)rec->args;
-            printf("  args(ptr=%p, ret=%d)", (void*)a->ptr, a->result);
-        }
-    } else if (strcmp(tbl, "hsa") == 0) {
-        if (local_op == 0 && rec->arg_bytes >= sizeof(packed_hsa_init_t)) {
-            const packed_hsa_init_t* a = (const packed_hsa_init_t*)rec->args;
-            printf("  args(ret=%u)", a->result);
-        } else if (local_op == 1 && rec->arg_bytes >= sizeof(packed_hsa_iterate_agents_t)) {
-            const packed_hsa_iterate_agents_t* a = (const packed_hsa_iterate_agents_t*)rec->args;
-            printf("  args(callback=%p, data=%p, ret=%u)",
-                   (void*)a->callback, (void*)a->data, a->result);
-        } else if (local_op == 2 && rec->arg_bytes >= sizeof(packed_hsa_shutdown_t)) {
-            const packed_hsa_shutdown_t* a = (const packed_hsa_shutdown_t*)rec->args;
-            printf("  args(ret=%u)", a->result);
-        }
+    if(out == NULL || out->length >= sizeof(out->buffer)) return;
+
+    va_start(args, fmt);
+    written = vsnprintf(out->buffer + out->length, sizeof(out->buffer) - out->length, fmt, args);
+    va_end(args);
+
+    if(written <= 0) return;
+
+    if((size_t) written >= sizeof(out->buffer) - out->length)
+        out->length = sizeof(out->buffer) - 1;
+    else
+        out->length += (size_t) written;
+}
+
+static int
+shim_record_args_cb(rocprofiler_buffer_tracing_kind_t kind,
+                    rocprofiler_tracing_operation_t   operation,
+                    uint32_t                          arg_number,
+                    const void* const                 arg_value_addr,
+                    int32_t                           arg_indirection_count,
+                    const char*                       arg_type,
+                    const char*                       arg_name,
+                    const char*                       arg_value_str,
+                    void*                             data)
+{
+    shim_arg_string_t* out = (shim_arg_string_t*) data;
+
+    (void) kind;
+    (void) operation;
+    (void) arg_value_addr;
+    (void) arg_indirection_count;
+    (void) arg_type;
+
+    if(out == NULL) return 0;
+    if(arg_number == 0) shim_appendf(out, " args=");
+    else shim_appendf(out, ", ");
+
+    shim_appendf(out, "%s=%s", (arg_name != NULL) ? arg_name : "arg",
+                 (arg_value_str != NULL) ? arg_value_str : "?");
+    return 0;
+}
+
+static const char*
+shim_kind_name(uint32_t category, uint32_t kind)
+{
+    const char* name = NULL;
+
+    if(category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+       rocprofiler_query_buffer_tracing_kind_name((rocprofiler_buffer_tracing_kind_t) kind, &name, NULL) ==
+           ROCPROFILER_STATUS_SUCCESS &&
+       name != NULL)
+        return name;
+
+    return "unknown-kind";
+}
+
+static const char*
+shim_operation_name(rocprofiler_buffer_tracing_kind_t kind, rocprofiler_tracing_operation_t operation)
+{
+    const char* name = NULL;
+
+    if(rocprofiler_query_buffer_tracing_kind_operation_name(kind, operation, &name, NULL) ==
+           ROCPROFILER_STATUS_SUCCESS &&
+       name != NULL)
+        return name;
+
+    return "unknown-op";
+}
+
+static void
+shim_print_runtime_registrations(const shim_ctrl_t* ctrl)
+{
+    if(ctrl == NULL) return;
+
+    printf("=== Runtime registrations: %u ===\n", ctrl->n_runtime_registrations);
+    for(uint32_t i = 0; i < ctrl->n_runtime_registrations; ++i)
+    {
+        const shim_runtime_registration_t* reg = &ctrl->runtime_registrations[i];
+        printf("  [%u] %s v%u.%u.%u instance=%" PRIu64 "\n",
+               i,
+               reg->common_name,
+               reg->major_version,
+               reg->minor_version,
+               reg->patch_version,
+               reg->instance);
     }
 }
 
-static void on_record(const shim_record_t* rec, void* user_data)
+static void
+shim_print_trace_record(const shim_record_t* rec)
 {
-    uint64_t* count = (uint64_t*)user_data;
+    rocprofiler_record_header_t hdr = {
+        .category = rec->category,
+        .kind     = rec->kind,
+        .payload  = (void*) rec->payload.bytes,
+    };
+    shim_arg_string_t args = {{0}, 0};
+
+    if(rec->category == ROCPROFILER_BUFFER_CATEGORY_TRACING)
+    {
+        switch((rocprofiler_buffer_tracing_kind_t) rec->kind)
+        {
+            case ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION:
+            {
+                const rocprofiler_buffer_tracing_runtime_initialization_record_t* record =
+                    (const rocprofiler_buffer_tracing_runtime_initialization_record_t*) rec->payload.bytes;
+                printf("[#%" PRIu64 "] %s :: %s tid=%" PRIu64
+                       " ts=%" PRIu64 " version=%" PRIu64 " instance=%" PRIu64 "\n",
+                       rec->sequence,
+                       shim_kind_name(rec->category, rec->kind),
+                       shim_operation_name((rocprofiler_buffer_tracing_kind_t) rec->kind, record->operation),
+                       record->thread_id,
+                       record->timestamp,
+                       record->version,
+                       record->instance);
+                return;
+            }
+            case ROCPROFILER_BUFFER_TRACING_HSA_CORE_API:
+            {
+                const rocprofiler_buffer_tracing_hsa_api_record_t* record =
+                    (const rocprofiler_buffer_tracing_hsa_api_record_t*) rec->payload.bytes;
+                (void) rocprofiler_iterate_buffer_tracing_record_args(hdr, &shim_record_args_cb, &args);
+                printf("[#%" PRIu64 "] %s :: %s tid=%" PRIu64
+                       " cid={i=%" PRIu64 " e=%" PRIu64 " a=%" PRIu64 "}"
+                       " start=%" PRIu64 " end=%" PRIu64 "%s\n",
+                       rec->sequence,
+                       shim_kind_name(rec->category, rec->kind),
+                       shim_operation_name((rocprofiler_buffer_tracing_kind_t) rec->kind, record->operation),
+                       record->thread_id,
+                       record->correlation_id.internal,
+                       record->correlation_id.external.value,
+                       record->correlation_id.ancestor,
+                       record->start_timestamp,
+                       record->end_timestamp,
+                       args.buffer);
+                return;
+            }
+            case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
+            {
+                const rocprofiler_buffer_tracing_hip_api_ext_record_t* record =
+                    (const rocprofiler_buffer_tracing_hip_api_ext_record_t*) rec->payload.bytes;
+                (void) rocprofiler_iterate_buffer_tracing_record_args(hdr, &shim_record_args_cb, &args);
+                printf("[#%" PRIu64 "] %s :: %s tid=%" PRIu64
+                       " cid={i=%" PRIu64 " e=%" PRIu64 " a=%" PRIu64 "}"
+                       " start=%" PRIu64 " end=%" PRIu64 "%s\n",
+                       rec->sequence,
+                       shim_kind_name(rec->category, rec->kind),
+                       shim_operation_name((rocprofiler_buffer_tracing_kind_t) rec->kind, record->operation),
+                       record->thread_id,
+                       record->correlation_id.internal,
+                       record->correlation_id.external.value,
+                       record->correlation_id.ancestor,
+                       record->start_timestamp,
+                       record->end_timestamp,
+                       args.buffer);
+                return;
+            }
+            default: break;
+        }
+    }
+
+    printf("[#%" PRIu64 "] category=%u kind=%u payload=%u truncated=%u\n",
+           rec->sequence,
+           rec->category,
+           rec->kind,
+           rec->payload_bytes,
+           rec->payload_truncated);
+}
+
+static void
+on_record(const shim_record_t* rec, void* user_data)
+{
+    uint64_t* count = (uint64_t*) user_data;
+
+    if(rec->sequence == 0 || rec->category == 0) return;
+
     (*count)++;
-    if (*count > 40 && (*count % 10000) != 0) return;
+    if(*count > 40 && (*count % 5000) != 0) return;
 
-    const char* name = "?";
-    if (g_con_ctrl && rec->op < g_con_ctrl->total_ops)
-        name = g_con_ctrl->op_info[rec->op].name;
-
-    const char* phase = rec->phase == SHIM_PHASE_ENTER ? "ENTER" :
-                        rec->phase == SHIM_PHASE_EXIT  ? "EXIT " : "UNRCH";
-
-    printf("[tsc=%" PRIu64 "] %s  %s  tid=%" PRIu64
-           "  corr={i=%" PRIu64 " e=%" PRIu64 " a=%" PRIu64 "}",
-           rec->tsc, phase, name, rec->thread_id,
-           rec->correlation_id.internal,
-           rec->correlation_id.external,
-           rec->correlation_id.ancestor);
-
-    print_args(rec);
-    printf("\n");
+    shim_print_trace_record(rec);
 }
 
-int main(int argc, char** argv)
+int
+main(int argc, char** argv)
 {
-    if (argc < 2) {
+    shim_ipc_consumer_t con;
+    uint64_t            total_records = 0;
+    uint64_t            traced        = 0;
+    uint64_t            dropped       = 0;
+    uint64_t            sdk_dropped   = 0;
+    pid_t               target        = 0;
+    int                 duration      = 5;
+
+    if(argc < 2)
+    {
         fprintf(stderr, "usage: %s <pid> [duration_sec]\n", argv[0]);
         return 2;
     }
-    pid_t target = atoi(argv[1]);
-    int duration = argc > 2 ? atoi(argv[2]) : 5;
+
+    target = (pid_t) atoi(argv[1]);
+    if(argc > 2) duration = atoi(argv[2]);
+
     signal(SIGINT, on_sigint);
 
-    /* 1. Attach (§4) */
-    shim_ipc_consumer_t con;
-    int rc = shim_consumer_attach(target, &con);
-    if (rc) {
-        fprintf(stderr, "attach(%d) failed\n", target);
+    if(shim_consumer_attach(target, &con) != 0)
+    {
+        fprintf(stderr, "attach(%d) failed\n", (int) target);
         return 1;
     }
 
-    g_con_ctrl = con.ctrl;
+    printf("=== Attached to pid=%u, services=%u ===\n", con.ctrl->pid, con.ctrl->active_services);
+    shim_print_runtime_registrations(con.ctrl);
 
-    /* Print registrations (§13.6) */
-    printf("=== Attached to pid=%u, %u registrations, %u total_ops ===\n",
-           con.ctrl->pid, con.ctrl->n_registrations, con.ctrl->total_ops);
-    for (uint32_t i = 0; i < con.ctrl->n_registrations; i++) {
-        const shim_table_registration_t* t = &con.ctrl->registrations[i];
-        printf("  table[%u]: name=\"%s\" instance=%u v%u.%u slots=[%u..%u)\n",
-               i, t->name, t->lib_instance,
-               t->major_version, t->minor_version,
-               t->slot_base, t->slot_base + t->n_ops);
-    }
+    atomic_store_explicit(&con.ctrl->capture_enabled, 1, memory_order_release);
+    printf("=== Transport capture enabled ===\n");
 
-    /* 2. Enable all ops with RECORD mode (§5.1 install-while-off) */
-    for (uint32_t i = 0; i < con.ctrl->total_ops; i++) {
-        atomic_store_explicit(&con.ctrl->op_mode[i],
-                              ROCP_SHIM_MODE_RECORD,
-                              memory_order_release);
-    }
-    atomic_fetch_add(&con.ctrl->gen_counter, 1);
-    printf("=== Enabled %u ops, mode=RECORD ===\n", con.ctrl->total_ops);
-
-    /* 3. Poll loop */
-    uint64_t total_records = 0;
     time_t start = time(NULL);
-    while (!g_stop && (time(NULL) - start) < duration) {
-        int n = shim_consumer_poll(&con, on_record, &total_records, 500);
-        (void)n;
+    while(!g_stop && (time(NULL) - start) < duration)
+    {
+        (void) shim_consumer_poll(&con, &on_record, &total_records, 500);
     }
 
-    /* 4. Stats (§13.2) */
-    uint64_t traced  = atomic_load(&con.ctrl->events_traced);
-    uint64_t dropped = atomic_load(&con.ctrl->events_dropped);
-    printf("=== Stats: traced=%" PRIu64 " dropped=%" PRIu64
-           " consumer_read=%" PRIu64 " ===\n",
-           traced, dropped, total_records);
+    traced      = atomic_load_explicit(&con.ctrl->events_traced, memory_order_relaxed);
+    dropped     = atomic_load_explicit(&con.ctrl->events_dropped, memory_order_relaxed);
+    sdk_dropped = atomic_load_explicit(&con.ctrl->sdk_drop_count, memory_order_relaxed);
 
-    /* 5. Detach (§10.3) — zeros all op_mode slots */
+    shim_print_runtime_registrations(con.ctrl);
+    printf("=== Stats: traced=%" PRIu64 " transport_dropped=%" PRIu64
+           " sdk_drop_count=%" PRIu64 " consumer_read=%" PRIu64 " ===\n",
+           traced,
+           dropped,
+           sdk_dropped,
+           total_records);
+
     shim_consumer_detach(&con);
     printf("=== Detached ===\n");
     return 0;
