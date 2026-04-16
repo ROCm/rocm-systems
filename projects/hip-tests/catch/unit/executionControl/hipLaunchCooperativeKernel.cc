@@ -148,7 +148,13 @@ HIP_TEST_CASE(Unit_hipLaunchCooperativeKernel_Negative_Parameters) {
                                                            reinterpret_cast<void*>(kernel), 1, 0));
     const unsigned int multiproc_count =
         GetDeviceAttribute(hipDeviceAttributeMultiprocessorCount, 0);
-    const unsigned int dim = std::ceil(std::cbrt(max_blocks * multiproc_count));
+    unsigned int dim = std::ceil(std::cbrt(max_blocks * multiproc_count));
+    // When the product is a perfect cube, dim^3 == limit (not exceeding it).
+    // Bump dim to guarantee we exceed the cooperative launch block limit.
+    if (static_cast<unsigned long long>(dim) * dim * dim <=
+        static_cast<unsigned long long>(max_blocks) * multiproc_count) {
+      dim++;
+    }
     HIP_CHECK_ERROR(hipLaunchCooperativeKernel(reinterpret_cast<void*>(kernel), dim3{dim, dim, dim},
                                                dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorCooperativeLaunchTooLarge);
