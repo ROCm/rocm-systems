@@ -1470,7 +1470,12 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->latency = 0; // Not set
   props->port = ibDev->portNum + ibDev->realPort;
   props->maxComms = ibDev->maxQp;
-  props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+
+  if (rcclCtsOffloadEnabled) {
+      props->maxRecvs = 1; 
+  } else {
+      props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
+  }
   props->netDeviceType    = NCCL_NET_DEVICE_HOST;
   props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
