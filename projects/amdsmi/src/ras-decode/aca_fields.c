@@ -43,9 +43,9 @@
 #define EXTRACT_BITS(value, start, count, type) \
   ((type)(((value) >> (start)) & ((1ULL << (count)) - 1)))
 
-uint64_t aca_fields_read(const aca_fields_t *fields) { return fields->raw_value; }
+uint64_t aca_fields_read(const aca_fields_t* fields) { return fields->raw_value; }
 
-void aca_status_init(aca_status_fields_t *fields, uint64_t status_reg) {
+void aca_status_init(aca_status_fields_t* fields, uint64_t status_reg) {
   fields->base.raw_value = status_reg;
   fields->error_code = EXTRACT_BITS(status_reg, 0, 16, uint16_t);
   fields->error_code_ext = EXTRACT_BITS(status_reg, 16, 6, uint8_t);
@@ -74,7 +74,7 @@ void aca_status_init(aca_status_fields_t *fields, uint64_t status_reg) {
   fields->val = EXTRACT_BITS(status_reg, 63, 1, uint8_t);
 }
 
-void aca_ipid_init(aca_ipid_fields_t *fields, uint64_t ipid_reg) {
+void aca_ipid_init(aca_ipid_fields_t* fields, uint64_t ipid_reg) {
   fields->base.raw_value = ipid_reg;
   fields->instance_id_lo = EXTRACT_BITS(ipid_reg, 0, 32, uint32_t);
   fields->hardware_id = EXTRACT_BITS(ipid_reg, 32, 12, uint16_t);
@@ -82,7 +82,7 @@ void aca_ipid_init(aca_ipid_fields_t *fields, uint64_t ipid_reg) {
   fields->aca_type = EXTRACT_BITS(ipid_reg, 48, 16, uint16_t);
 }
 
-void aca_synd_init(aca_synd_fields_t *fields, uint64_t synd_reg) {
+void aca_synd_init(aca_synd_fields_t* fields, uint64_t synd_reg) {
   fields->base.raw_value = synd_reg;
   fields->error_information = EXTRACT_BITS(synd_reg, 0, 18, uint32_t);
   fields->length = EXTRACT_BITS(synd_reg, 18, 6, uint8_t);
@@ -92,7 +92,7 @@ void aca_synd_init(aca_synd_fields_t *fields, uint64_t synd_reg) {
   fields->reserved39 = EXTRACT_BITS(synd_reg, 39, 25, uint32_t);
 }
 
-void aca_addr_init(aca_addr_fields_t *fields, uint64_t addr_reg) {
+void aca_addr_init(aca_addr_fields_t* fields, uint64_t addr_reg) {
   fields->base.raw_value = addr_reg;
   fields->error_addr = EXTRACT_BITS(addr_reg, 0, 56, uint64_t);
   fields->reserved = EXTRACT_BITS(addr_reg, 56, 8, uint8_t);

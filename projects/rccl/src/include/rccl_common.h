@@ -61,8 +61,6 @@ typedef enum {
 
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
-  RCCL_MSCCL,
-  RCCL_MSCCLPP,
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif
@@ -119,7 +117,7 @@ NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
 NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName);
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
-bool rcclUseAllToAllGda(struct ncclComm* comm);
+bool rcclUseAlltoAllGda(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
@@ -129,12 +127,15 @@ bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, 
 
 // Direct ReduceScatter Limit
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
+// Hierarchical AllGather enabled
+RCCL_PARAM_DECLARE(HierarchicalAllGather);
+#define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
-void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
+ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);
 #endif

@@ -35,6 +35,25 @@ if(NOT _VALID_GPU)
     return()
 endif()
 
+# Skip if system has fewer than 2 GPUs (transferBench tests GPU-to-GPU transfers)
+check_rocminfo("Name:[ \t]+gfx[0-9A-Fa-f][0-9A-Fa-f]+" _RAW_GPU_LIST GET_OUTPUT)
+set(_GPU_COUNT 0)
+if(_RAW_GPU_LIST)
+    foreach(_match IN LISTS _RAW_GPU_LIST)
+        string(REGEX MATCH "gfx[0-9A-Fa-f]+" _arch "${_match}")
+        if(_arch AND NOT _arch STREQUAL "gfx000")
+            math(EXPR _GPU_COUNT "${_GPU_COUNT} + 1")
+        endif()
+    endforeach()
+endif()
+if(_GPU_COUNT LESS 2)
+    rocprofiler_systems_message(
+        STATUS
+        "transferBench requires multiple GPUs (found ${_GPU_COUNT}); skipping GPU connect tests"
+    )
+    return()
+endif()
+
 # Skip if transferBench target is not available
 if(NOT TARGET transferBench)
     message(WARNING "transferBench not available; GPU connect tests will be skipped")

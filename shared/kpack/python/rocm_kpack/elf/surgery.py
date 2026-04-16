@@ -148,6 +148,85 @@ class ElfSurgery:
         data = bytearray(path.read_bytes())
         return cls(data, path)
 
+    @staticmethod
+    def has_fatbin_section(file_path: Path) -> bool:
+        """Fast check for .hip_fatbin section without loading the full binary.
+
+        Reads only the ELF header, section header table, and section name
+        string table — typically a few KB total even for multi-GB binaries.
+        Returns False for non-ELF files (wrong magic, too small, 32-bit).
+        Raises on I/O errors or corrupt ELF headers.
+        """
+        file_size = os.path.getsize(file_path)
+        if file_size < ELF64_EHDR_SIZE:
+            return False
+
+        with open(file_path, "rb") as f:
+            ehdr = f.read(ELF64_EHDR_SIZE)
+            if len(ehdr) < ELF64_EHDR_SIZE:
+                return False
+            if ehdr[:4] != b"\x7fELF":
+                return False
+            if ehdr[4] != 2:  # ELFCLASS64
+                return False
+
+            # All offsets and sizes below follow the System V ABI for ELF64.
+            # e_shoff:    offset 40 — file offset to section header table
+            # e_shentsize: offset 58 — size of each section header entry
+            # e_shnum:    offset 60 — number of section header entries
+            # e_shstrndx: offset 62 — index of the .shstrtab section header
+            e_shoff = struct.unpack_from("<Q", ehdr, 40)[0]
+            e_shentsize = struct.unpack_from("<H", ehdr, 58)[0]
+            e_shnum = struct.unpack_from("<H", ehdr, 60)[0]
+            e_shstrndx = struct.unpack_from("<H", ehdr, 62)[0]
+
+            if e_shoff == 0 or e_shnum == 0 or e_shstrndx >= e_shnum:
+                return False
+
+            # Bounds check section header table against file size
+            total_sht_size = e_shentsize * e_shnum
+            if (
+                e_shoff > file_size
+                or total_sht_size > file_size
+                or e_shoff + total_sht_size > file_size
+            ):
+                return False
+
+            # Read section header table
+            f.seek(e_shoff)
+            shtab = f.read(total_sht_size)
+            if len(shtab) < total_sht_size:
+                return False
+
+            # Read .shstrtab
+            strtab_entry = e_shstrndx * e_shentsize
+            sh_offset = struct.unpack_from("<Q", shtab, strtab_entry + 24)[0]
+            sh_size = struct.unpack_from("<Q", shtab, strtab_entry + 32)[0]
+
+            # Bounds check .shstrtab region against file size
+            if (
+                sh_offset > file_size
+                or sh_size > file_size
+                or sh_offset + sh_size > file_size
+            ):
+                return False
+
+            f.seek(sh_offset)
+            shstrtab = f.read(sh_size)
+
+            # Search for ".hip_fatbin" in section names
+            target = b".hip_fatbin\x00"
+            if target not in shstrtab:
+                return False
+
+            target_offset = shstrtab.index(target)
+            for i in range(e_shnum):
+                sh_name = struct.unpack_from("<I", shtab, i * e_shentsize)[0]
+                if sh_name == target_offset:
+                    return True
+
+            return False
+
     # =========================================================================
     # Properties
     # =========================================================================

@@ -105,11 +105,17 @@ enum EINST
     img_wr_7,
     img_wr_8,
 
-    other_simd_start = 79,
-    other_simd_lds_end = 84,
-    other_simd_flat_end = 89,
-    other_simd_end = 102,
-    raytrace8,
+    lds_other_simd_1 = 80,
+    lds_other_simd_2,
+    lds_other_simd_3,
+    lds_other_simd_4,
+    lds_other_simd_5,
+    flat_other_simd_2,
+    flat_other_simd_3,
+    flat_other_simd_4,
+    flat_other_simd_5,
+    flat_other_simd_6,
+    raytrace8 = 103,
     raytrace9,
     raytrace11,
     raytrace12,
@@ -145,150 +151,148 @@ enum EINST
     einst_final
 };
 
-static const std::unordered_map<int, std::pair<WaveInstCategory, uint16_t>> table_map_to_common_type{
-    {(int) EINST::salu,             {WaveInstCategory::SALU, 1} },
-    {(int) EINST::smem_rd,          {WaveInstCategory::SMEM, 1} },
-    {(int) EINST::smem_wr,          {WaveInstCategory::SMEM, 1} },
-    {(int) EINST::branch_taken,     {WaveInstCategory::JUMP, 1} },
-    {(int) EINST::branch_not_taken, {WaveInstCategory::NEXT, 1} },
-    {(int) EINST::jump,             {WaveInstCategory::SALU, 1} },
-    {(int) EINST::trap,             {WaveInstCategory::TRAP, 1} },
-    {(int) EINST::salu_no_exec,     {WaveInstCategory::SALU, 1} },
-    {(int) EINST::fatal_halt,       {WaveInstCategory::TRAP, 1} },
-    {(int) EINST::message,          {WaveInstCategory::MSG, 1}  },
-    {(int) EINST::valu_1,           {WaveInstCategory::VALU, 1} },
-    {(int) EINST::valut_4,          {WaveInstCategory::VALU, 4} },
-    {(int) EINST::valub_1,          {WaveInstCategory::VALU, 1} },
-    {(int) EINST::valub_2,          {WaveInstCategory::VALU, 2} },
-    {(int) EINST::valub_4,          {WaveInstCategory::VALU, 4} },
-    {(int) EINST::valub_16,         {WaveInstCategory::VALU, 16}},
-    {(int) EINST::vinterp,          {WaveInstCategory::VALU, 1} },
-    {(int) EINST::barrier_wait,     {WaveInstCategory::IMMED, 1}},
-    {(int) EINST::flat_rd_2,        {WaveInstCategory::FLAT, 2} },
-    {(int) EINST::flat_wr_3,        {WaveInstCategory::FLAT, 3} },
-    {(int) EINST::flat_wr_4,        {WaveInstCategory::FLAT, 4} },
-    {(int) EINST::flat_wr_5,        {WaveInstCategory::FLAT, 5} },
-    {(int) EINST::flat_wr_6,        {WaveInstCategory::FLAT, 6} },
-    {(int) EINST::sgmem_rd_1,       {WaveInstCategory::VMEM, 1} },
-    {(int) EINST::sgmem_rd_2,       {WaveInstCategory::VMEM, 2} },
-    {(int) EINST::sgmem_wr_1,       {WaveInstCategory::VMEM, 1} },
-    {(int) EINST::sgmem_wr_2,       {WaveInstCategory::VMEM, 2} },
-    {(int) EINST::sgmem_wr_3,       {WaveInstCategory::VMEM, 3} },
-    {(int) EINST::sgmem_wr_4,       {WaveInstCategory::VMEM, 4} },
-    {(int) EINST::sgmem_wr_5,       {WaveInstCategory::VMEM, 5} },
-    {(int) EINST::sgmem_wr_6,       {WaveInstCategory::VMEM, 6} },
-    {(int) EINST::lds_rd,           {WaveInstCategory::LDS, 1}  },
-    {(int) EINST::lds_wr_1,         {WaveInstCategory::LDS, 1}  },
-    {(int) EINST::lds_wr_2,         {WaveInstCategory::LDS, 2}  },
-    {(int) EINST::lds_wr_3,         {WaveInstCategory::LDS, 3}  },
-    {(int) EINST::lds_wr_4,         {WaveInstCategory::LDS, 4}  },
-    {(int) EINST::lds_wr_5,         {WaveInstCategory::LDS, 5}  },
-    {(int) EINST::buf_rd_1,         {WaveInstCategory::VMEM, 1} },
-    {(int) EINST::buf_rd_2,         {WaveInstCategory::VMEM, 2} },
-    {(int) EINST::buf_wr_1,         {WaveInstCategory::VMEM, 1} },
-    {(int) EINST::buf_wr_2,         {WaveInstCategory::VMEM, 2} },
-    {(int) EINST::buf_wr_3,         {WaveInstCategory::VMEM, 3} },
-    {(int) EINST::buf_wr_4,         {WaveInstCategory::VMEM, 4} },
-    {(int) EINST::buf_wr_5,         {WaveInstCategory::VMEM, 5} },
-    {(int) EINST::buf_wr_6,         {WaveInstCategory::VMEM, 6} },
-    {(int) EINST::img_sample_1,     {WaveInstCategory::VMEM, 1} },
-    {(int) EINST::img_sample_2,     {WaveInstCategory::VMEM, 2} },
-    {(int) EINST::img_sample_3,     {WaveInstCategory::VMEM, 3} },
-    {(int) EINST::img_sample_4,     {WaveInstCategory::VMEM, 4} },
-    {(int) EINST::img_sample_5,     {WaveInstCategory::VMEM, 5} },
-    {(int) EINST::img_sample_6,     {WaveInstCategory::VMEM, 6} },
-    {(int) EINST::img_sample_7,     {WaveInstCategory::VMEM, 7} },
-    {(int) EINST::img_sample_8,     {WaveInstCategory::VMEM, 8} },
-    {(int) EINST::img_sample_9,     {WaveInstCategory::VMEM, 9} },
-    {(int) EINST::img_sample_10,    {WaveInstCategory::VMEM, 10}},
-    {(int) EINST::img_sample_11,    {WaveInstCategory::VMEM, 11}},
-    {(int) EINST::img_sample_12,    {WaveInstCategory::VMEM, 12}},
+static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
+    {(int) EINST::salu,              {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::smem_rd,           {WaveInstCategory::SMEM, 1}           },
+    {(int) EINST::smem_wr,           {WaveInstCategory::SMEM, 1}           },
+    {(int) EINST::branch_taken,      {WaveInstCategory::JUMP, 1}           },
+    {(int) EINST::branch_not_taken,  {WaveInstCategory::NEXT, 1}           },
+    {(int) EINST::jump,              {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::trap,              {WaveInstCategory::TRAP, 1}           },
+    {(int) EINST::salu_no_exec,      {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::fatal_halt,        {WaveInstCategory::TRAP, 1}           },
+    {(int) EINST::message,           {WaveInstCategory::MSG, 1}            },
+    {(int) EINST::valu_1,            {WaveInstCategory::VALU, 1}           },
+    {(int) EINST::valut_4,           {WaveInstCategory::VALU, 4}           },
+    {(int) EINST::valub_1,           {WaveInstCategory::VALU, 1}           },
+    {(int) EINST::valub_2,           {WaveInstCategory::VALU, 2}           },
+    {(int) EINST::valub_4,           {WaveInstCategory::VALU, 4}           },
+    {(int) EINST::valub_16,          {WaveInstCategory::VALU, 16}          },
+    {(int) EINST::vinterp,           {WaveInstCategory::VALU, 1}           },
+    {(int) EINST::barrier_wait,      {WaveInstCategory::IMMED, 1}          },
+    {(int) EINST::flat_rd_2,         {WaveInstCategory::FLAT, 2}           },
+    {(int) EINST::flat_wr_3,         {WaveInstCategory::FLAT, 3}           },
+    {(int) EINST::flat_wr_4,         {WaveInstCategory::FLAT, 4}           },
+    {(int) EINST::flat_wr_5,         {WaveInstCategory::FLAT, 5}           },
+    {(int) EINST::flat_wr_6,         {WaveInstCategory::FLAT, 6}           },
+    {(int) EINST::sgmem_rd_1,        {WaveInstCategory::VMEM, 1}           },
+    {(int) EINST::sgmem_rd_2,        {WaveInstCategory::VMEM, 2}           },
+    {(int) EINST::sgmem_wr_1,        {WaveInstCategory::VMEM, 1}           },
+    {(int) EINST::sgmem_wr_2,        {WaveInstCategory::VMEM, 2}           },
+    {(int) EINST::sgmem_wr_3,        {WaveInstCategory::VMEM, 3}           },
+    {(int) EINST::sgmem_wr_4,        {WaveInstCategory::VMEM, 4}           },
+    {(int) EINST::sgmem_wr_5,        {WaveInstCategory::VMEM, 5}           },
+    {(int) EINST::sgmem_wr_6,        {WaveInstCategory::VMEM, 6}           },
+    {(int) EINST::lds_rd,            {WaveInstCategory::LDS, 1}            },
+    {(int) EINST::lds_wr_1,          {WaveInstCategory::LDS, 1}            },
+    {(int) EINST::lds_wr_2,          {WaveInstCategory::LDS, 2}            },
+    {(int) EINST::lds_wr_3,          {WaveInstCategory::LDS, 3}            },
+    {(int) EINST::lds_wr_4,          {WaveInstCategory::LDS, 4}            },
+    {(int) EINST::lds_wr_5,          {WaveInstCategory::LDS, 5}            },
+    {(int) EINST::buf_rd_1,          {WaveInstCategory::VMEM, 1}           },
+    {(int) EINST::buf_rd_2,          {WaveInstCategory::VMEM, 2}           },
+    {(int) EINST::buf_wr_1,          {WaveInstCategory::VMEM, 1}           },
+    {(int) EINST::buf_wr_2,          {WaveInstCategory::VMEM, 2}           },
+    {(int) EINST::buf_wr_3,          {WaveInstCategory::VMEM, 3}           },
+    {(int) EINST::buf_wr_4,          {WaveInstCategory::VMEM, 4}           },
+    {(int) EINST::buf_wr_5,          {WaveInstCategory::VMEM, 5}           },
+    {(int) EINST::buf_wr_6,          {WaveInstCategory::VMEM, 6}           },
+    {(int) EINST::img_sample_1,      {WaveInstCategory::VMEM, 1}           },
+    {(int) EINST::img_sample_2,      {WaveInstCategory::VMEM, 2}           },
+    {(int) EINST::img_sample_3,      {WaveInstCategory::VMEM, 3}           },
+    {(int) EINST::img_sample_4,      {WaveInstCategory::VMEM, 4}           },
+    {(int) EINST::img_sample_5,      {WaveInstCategory::VMEM, 5}           },
+    {(int) EINST::img_sample_6,      {WaveInstCategory::VMEM, 6}           },
+    {(int) EINST::img_sample_7,      {WaveInstCategory::VMEM, 7}           },
+    {(int) EINST::img_sample_8,      {WaveInstCategory::VMEM, 8}           },
+    {(int) EINST::img_sample_9,      {WaveInstCategory::VMEM, 9}           },
+    {(int) EINST::img_sample_10,     {WaveInstCategory::VMEM, 10}          },
+    {(int) EINST::img_sample_11,     {WaveInstCategory::VMEM, 11}          },
+    {(int) EINST::img_sample_12,     {WaveInstCategory::VMEM, 12}          },
 
-    {(int) EINST::img_rd_1,         {WaveInstCategory::VMEM, 1} },
-    {(int) EINST::img_rd_2,         {WaveInstCategory::VMEM, 2} },
-    {(int) EINST::img_rd_3,         {WaveInstCategory::VMEM, 3} },
-    {(int) EINST::img_rd_4,         {WaveInstCategory::VMEM, 4} },
-    {(int) EINST::img_wr_2,         {WaveInstCategory::VMEM, 2} },
-    {(int) EINST::img_wr_3,         {WaveInstCategory::VMEM, 3} },
-    {(int) EINST::img_wr_4,         {WaveInstCategory::VMEM, 4} },
-    {(int) EINST::img_wr_5,         {WaveInstCategory::VMEM, 5} },
-    {(int) EINST::img_wr_6,         {WaveInstCategory::VMEM, 6} },
-    {(int) EINST::img_wr_7,         {WaveInstCategory::VMEM, 7} },
-    {(int) EINST::img_wr_8,         {WaveInstCategory::VMEM, 8} },
+    {(int) EINST::img_rd_1,          {WaveInstCategory::VMEM, 1}           },
+    {(int) EINST::img_rd_2,          {WaveInstCategory::VMEM, 2}           },
+    {(int) EINST::img_rd_3,          {WaveInstCategory::VMEM, 3}           },
+    {(int) EINST::img_rd_4,          {WaveInstCategory::VMEM, 4}           },
+    {(int) EINST::img_wr_2,          {WaveInstCategory::VMEM, 2}           },
+    {(int) EINST::img_wr_3,          {WaveInstCategory::VMEM, 3}           },
+    {(int) EINST::img_wr_4,          {WaveInstCategory::VMEM, 4}           },
+    {(int) EINST::img_wr_5,          {WaveInstCategory::VMEM, 5}           },
+    {(int) EINST::img_wr_6,          {WaveInstCategory::VMEM, 6}           },
+    {(int) EINST::img_wr_7,          {WaveInstCategory::VMEM, 7}           },
+    {(int) EINST::img_wr_8,          {WaveInstCategory::VMEM, 8}           },
 
-    {(int) EINST::raytrace8,        {WaveInstCategory::BVH, 8}  },
-    {(int) EINST::raytrace9,        {WaveInstCategory::BVH, 9}  },
-    {(int) EINST::raytrace11,       {WaveInstCategory::BVH, 11} },
-    {(int) EINST::raytrace12,       {WaveInstCategory::BVH, 12} },
+    {(int) EINST::raytrace8,         {WaveInstCategory::BVH, 8}            },
+    {(int) EINST::raytrace9,         {WaveInstCategory::BVH, 9}            },
+    {(int) EINST::raytrace11,        {WaveInstCategory::BVH, 11}           },
+    {(int) EINST::raytrace12,        {WaveInstCategory::BVH, 12}           },
 
-    {(int) EINST::lds_dir_load,     {WaveInstCategory::LDS, 1}  },
-    {(int) EINST::lds_param_load,   {WaveInstCategory::LDS, 1}  },
-    {(int) EINST::salu_wr_exec,     {WaveInstCategory::SALU, 1} },
-    {(int) EINST::valu1_wr_exec,    {WaveInstCategory::VALU, 1} },
-    {(int) EINST::valu_b2_wr_exec,  {WaveInstCategory::VALU, 2} },
+    {(int) EINST::lds_dir_load,      {WaveInstCategory::LDS, 1}            },
+    {(int) EINST::lds_param_load,    {WaveInstCategory::LDS, 1}            },
+    {(int) EINST::salu_wr_exec,      {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::valu1_wr_exec,     {WaveInstCategory::VALU, 1}           },
+    {(int) EINST::valu_b2_wr_exec,   {WaveInstCategory::VALU, 2}           },
 
-    {(int) EINST::rfe,              {WaveInstCategory::SALU, 1} },
-    {(int) EINST::lds_bvh_6,        {WaveInstCategory::BVH, 6}  },
-    {(int) EINST::lds_bvh_10,       {WaveInstCategory::BVH, 10} },
-    {(int) EINST::barrier_signal,   {WaveInstCategory::MSG, 1}  },
-    {(int) EINST::dyn_vgpr,         {WaveInstCategory::SALU, 1} },
-    {(int) EINST::try_lock,         {WaveInstCategory::SALU, 1} },
-    {(int) EINST::unlock,           {WaveInstCategory::SALU, 1} },
-    {(int) EINST::barrier_join,     {WaveInstCategory::MSG, 1}  },
+    {(int) EINST::rfe,               {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::lds_bvh_6,         {WaveInstCategory::BVH, 6}            },
+    {(int) EINST::lds_bvh_10,        {WaveInstCategory::BVH, 10}           },
+    {(int) EINST::barrier_signal,    {WaveInstCategory::MSG, 1}            },
+    {(int) EINST::dyn_vgpr,          {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::try_lock,          {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::unlock,            {WaveInstCategory::SALU, 1}           },
+    {(int) EINST::barrier_join,      {WaveInstCategory::MSG, 1}            },
 
-    {(int) EINST::wmma8,            {WaveInstCategory::VALU, 8} },
-    {(int) EINST::wmma16,           {WaveInstCategory::VALU, 16}},
-    {(int) EINST::wmma32,           {WaveInstCategory::VALU, 32}},
-    {(int) EINST::wmma64,           {WaveInstCategory::VALU, 64}},
+    {(int) EINST::wmma8,             {WaveInstCategory::VALU, 8}           },
+    {(int) EINST::wmma16,            {WaveInstCategory::VALU, 16}          },
+    {(int) EINST::wmma32,            {WaveInstCategory::VALU, 32}          },
+    {(int) EINST::wmma64,            {WaveInstCategory::VALU, 64}          },
 
-    {(int) EINST::icpref,           {WaveInstCategory::SMEM, 1} },
-    {(int) EINST::kcpref,           {WaveInstCategory::SMEM, 1} },
-    {(int) EINST::salu_float3,      {WaveInstCategory::SALU, 3} },
+    {(int) EINST::icpref,            {WaveInstCategory::SMEM, 1}           },
+    {(int) EINST::kcpref,            {WaveInstCategory::SMEM, 1}           },
+    {(int) EINST::salu_float3,       {WaveInstCategory::SALU, 3}           },
 
-    {(int) EINST::valu_scl_trans,   {WaveInstCategory::VALU, 1} },
-    {(int) EINST::salu2,            {WaveInstCategory::SALU, 2} },
-    {(int) EINST::salu5,            {WaveInstCategory::SALU, 5} },
-    {(int) EINST::valu_scl_trans,   {WaveInstCategory::VALU, 1} },
+    {(int) EINST::valu_scl_trans,    {WaveInstCategory::VALU, 1}           },
+    {(int) EINST::salu2,             {WaveInstCategory::SALU, 2}           },
+    {(int) EINST::salu5,             {WaveInstCategory::SALU, 5}           },
+    {(int) EINST::valu_scl_trans,    {WaveInstCategory::VALU, 1}           },
+
+    {(int) EINST::lds_other_simd_1,  {WaveInstCategory::LDS_OTHER_SIMD, 1} },
+    {(int) EINST::lds_other_simd_2,  {WaveInstCategory::LDS_OTHER_SIMD, 2} },
+    {(int) EINST::lds_other_simd_3,  {WaveInstCategory::LDS_OTHER_SIMD, 3} },
+    {(int) EINST::lds_other_simd_4,  {WaveInstCategory::LDS_OTHER_SIMD, 4} },
+    {(int) EINST::lds_other_simd_5,  {WaveInstCategory::LDS_OTHER_SIMD, 5} },
+    {(int) EINST::lds_other_simd_6,  {WaveInstCategory::LDS_OTHER_SIMD, 6} },
+    {(int) EINST::lds_other_simd_10, {WaveInstCategory::LDS_OTHER_SIMD, 10}},
+
+    {(int) EINST::flat_other_simd_2, {WaveInstCategory::FLAT_OTHER_SIMD, 2}},
+    {(int) EINST::flat_other_simd_3, {WaveInstCategory::FLAT_OTHER_SIMD, 3}},
+    {(int) EINST::flat_other_simd_4, {WaveInstCategory::FLAT_OTHER_SIMD, 4}},
+    {(int) EINST::flat_other_simd_5, {WaveInstCategory::FLAT_OTHER_SIMD, 5}},
+    {(int) EINST::flat_other_simd_6, {WaveInstCategory::FLAT_OTHER_SIMD, 6}}
 };
 
-std::pair<WaveInstCategory, uint16_t> wave_t::map_to_common_type(int einst, int dprate, int derate)
+mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
 {
-    static thread_local auto empty = std::pair<WaveInstCategory, uint16_t>{WaveInstCategory::NONE, 0};
-
     {
         auto it = table_map_to_common_type.find(einst);
         if (it != table_map_to_common_type.end()) return it->second;
     }
 
-    if (einst >= (int) EINST::other_simd_start && einst <= (int) EINST::other_simd_end) { return empty; }
-    else if (einst >= (int) EINST::vmem_other_simd_start)
+    if (einst >= (int) EINST::vmem_other_simd_start)
     {
-        if (einst < (int) EINST::block_store) return empty;
-        return {WaveInstCategory::VMEM, einst + 1 - (int) EINST::block_store};
+        if (einst < (int) EINST::block_store)
+            return {WaveInstCategory::VMEM_OTHER_SIMD, einst + 1 - (int) EINST::vmem_other_simd_start};
+        else
+            return {WaveInstCategory::VMEM, einst + 1 - (int) EINST::block_store};
     }
     else if (einst == (int) EINST::valu_dpfp || einst == (int) EINST::valu_derate)
     {
-        auto inst = std::pair<WaveInstCategory, uint16_t>{WaveInstCategory::VALU, dprate};
-        if (einst == (int) EINST::valu_derate) inst.second *= derate;
+        auto inst = mapped_inst_t{WaveInstCategory::VALU, dprate};
+        if (einst == (int) EINST::valu_derate) inst.cycles *= derate;
         return inst;
     }
 
-    return empty;
-}
-
-std::pair<WaveInstCategory, int> wave_t::get_other_simd(int einst)
-{
-    if (einst <= other_simd_start || einst >= block_store) return {WaveInstCategory::NONE, 0};
-
-    if (einst <= other_simd_lds_end) return {WaveInstCategory::LDS, einst - other_simd_start};
-    if (einst <= other_simd_flat_end) return {WaveInstCategory::LDS, einst + 1 - other_simd_lds_end};
-
-    if (einst >= vmem_other_simd_start && einst < block_store)
-        return {WaveInstCategory::VMEM, einst + 1 - vmem_other_simd_start};
-
-    if (einst == lds_other_simd_6) return {WaveInstCategory::LDS, 6};
-    if (einst == lds_other_simd_10) return {WaveInstCategory::LDS, 10};
-    return {WaveInstCategory::NONE, 0};
+    return mapped_inst_t{WaveInstCategory::NONE, 0};
 }
 
 } // namespace gfx12

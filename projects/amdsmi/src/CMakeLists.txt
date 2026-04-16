@@ -33,15 +33,9 @@ if(BRCM_NIC)
     )
 endif()
 
-set(NIC_SOURCES ${NIC_SOURCES}
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc"
-)
-set(NIC_INCLUDES ${NIC_INCLUDES}
-    ${INC_DIR}/impl/nic/amd_smi_ainic_device.h
-)
-set(NIC_INCLUDE_DIRS
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/"
-)
+set(NIC_SOURCES ${NIC_SOURCES} "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc")
+set(NIC_INCLUDES ${NIC_INCLUDES} ${INC_DIR}/impl/nic/amd_smi_ainic_device.h)
+set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
@@ -83,7 +77,8 @@ if(GIT_FOUND)
         COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_SRC_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/src ${RAS_DECODE_SRC_DIR}
         COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_INC_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/include ${RAS_DECODE_INC_DIR}
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/include ${RAS_DECODE_INC_DIR}
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Cloning ${RAS_DECODE_REPO} from GitHub"
         VERBATIM
@@ -110,33 +105,80 @@ set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_subdirectory(nic/ai-nic/amdsmi_unified)
-add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
-target_link_libraries(${AMD_SMI} PRIVATE
-    rt
-    Threads::Threads
-    ${CMAKE_DL_LIBS}
-    amdsminic
-    ${FILESYSTEM_LIB}
-)
-target_link_directories(${AMD_SMI} PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/
-)
-target_include_directories(${AMD_SMI} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../
-    ${PROJECT_SOURCE_DIR}/rocm_smi/include
-    ${PROJECT_SOURCE_DIR}/common/shared_mutex
-    ${RAS_DECODE_INC_DIR}
-    ${DRM_INCLUDE_DIRS}
-    ${DRM_AMDGPU_INCLUDE_DIRS}
-    ${NIC_INCLUDE_DIRS}
-)
 
-# use the target_include_directories() command to specify the include directories for the target
-target_include_directories(${AMD_SMI} PUBLIC 
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
-                                             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+#
+#   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
+#   Otherwise: build one library (BUILD_SHARED_LIBS).
+#
+if(BUILD_BOTH_LIBS)
+    add_library(${AMD_SMI} SHARED ${SRC_LIST} ${INC_LIST})
+    add_library(${AMD_SMI}_static STATIC ${SRC_LIST} ${INC_LIST})
+    set(AMD_SMI_TARGET ${AMD_SMI}_static PARENT_SCOPE)
+    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} ${AMD_SMI}_static amdsminic PARENT_SCOPE)
+    set(_AMD_SMI_ALL_TARGETS ${AMD_SMI} ${AMD_SMI}_static)
+else()
+    add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
+    set(AMD_SMI_TARGET ${AMD_SMI} PARENT_SCOPE)
+    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} amdsminic PARENT_SCOPE)
+    set(_AMD_SMI_ALL_TARGETS ${AMD_SMI})
+endif()
+
+foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
+    target_link_libraries(
+        ${_TARGET}
+        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB}
+    )
+    target_include_directories(
+        ${_TARGET}
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../
+            ${PROJECT_SOURCE_DIR}/rocm_smi/include
+            ${PROJECT_SOURCE_DIR}/common/shared_mutex
+            ${RAS_DECODE_INC_DIR}
+            ${DRM_INCLUDE_DIRS}
+            ${DRM_AMDGPU_INCLUDE_DIRS}
+            ${NIC_INCLUDE_DIRS}
+    )
+    target_include_directories(
+        ${_TARGET}
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
+            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    )
+    target_link_directories(${_TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
+endforeach()
+
+#
+#   --- When building the shared library ---
+#   Use a linker version script to export only the public C API (amdsmi_*).
+#   All other symbols (including internal C++ amd::smi::* and rsmi_*) are hidden
+#   by the version script's "local: *;" directive at link time.
+#   This prevents symbol collisions when libamd_smi.so and librocm_smi64.so
+#   are loaded in the same process (see TheRock#3487).
+#
+if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
+    set(VERSION_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/libamd_smi.map")
+    file(
+        WRITE ${VERSION_SCRIPT}
+        "# All public API functions MUST use the amdsmi_ prefix\n"
+        "# or be explicitly listed below to be exported.\n"
+        "AMDSMI_1 {\n"
+        "    global:\n"
+        "        amdsmi_*;\n"
+        "        # rsmi_init and rsmi_is_P2P_accessible are kept visible\n"
+        "        # for external libs that already depend on them\n"
+        "        # through libamd_smi.so (e.g. rocm_smi compatibility layer).\n"
+        "        rsmi_init;\n"
+        "        rsmi_is_P2P_accessible;\n"
+        "    local:\n"
+        "        *;\n"
+        "};\n"
+    )
+    target_link_options(${AMD_SMI} PRIVATE "LINKER:--version-script=${VERSION_SCRIPT}")
+    set_property(TARGET ${AMD_SMI} APPEND PROPERTY LINK_DEPENDS "${VERSION_SCRIPT}")
+endif()
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${MAJOR}")
@@ -144,47 +186,49 @@ set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 
 ## If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    if(${BUILD_SHARED_LIBS}) #stripping only for .so
-        add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING})
+    if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
+        if(TARGET ${AMD_SMI})
+            add_custom_command(
+                TARGET ${AMD_SMI}
+                POST_BUILD
+                COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING}
+            )
+        endif()
     endif()
 endif()
 
 ## Add the install directives for the runtime library.
-install(
-    TARGETS ${AMD_SMI}
-    EXPORT amd_smiTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
+set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)
+if(BUILD_BOTH_LIBS)
+    list(APPEND _INSTALL_TARGETS ${AMD_SMI}_static)
+endif()
 
 install(
-    TARGETS ${AMD_SMI}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
+    TARGETS ${_INSTALL_TARGETS}
+    EXPORT amd_smiTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+)
+
+install(TARGETS ${AMD_SMI} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
 
 install(
     FILES ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
-    COMPONENT dev)
-
-install(
-    FILES ${IMPL_HEADERS} 
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/
-    COMPONENT dev)
-
-install(
-    FILES ${NIC_INCLUDES}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
-    COMPONENT dev)
-
-set(UNIFIED_NIC_INCLUDES
-    ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h
+    COMPONENT dev
 )
-install(
-    FILES ${UNIFIED_NIC_INCLUDES}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
-    COMPONENT dev)
+
+install(FILES ${IMPL_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/ COMPONENT dev)
+
+install(FILES ${NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
+
+set(UNIFIED_NIC_INCLUDES ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h)
+install(FILES ${UNIFIED_NIC_INCLUDES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/ COMPONENT dev)
 install(
     FILES ${UNIFIED_NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
-    COMPONENT dev)
+    COMPONENT dev
+)
 set(UNIFIED_NIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
@@ -196,20 +240,14 @@ set(UNIFIED_NIC_INCLUDES
 install(
     FILES ${UNIFIED_NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/inc/
-    COMPONENT dev)
+    COMPONENT dev
+)
 
 file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h")
-install(
-    FILES ${ESMI_HEADERS}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/e_smi/
-    COMPONENT dev)
+install(FILES ${ESMI_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/e_smi/ COMPONENT dev)
 
 install(
     FILES "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_logger.h"
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi/
-    COMPONENT dev)
-
-install(
-    FILES "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_logger.h"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi/
-    COMPONENT dev)
+    COMPONENT dev
+)

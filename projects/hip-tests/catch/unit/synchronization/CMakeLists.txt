@@ -1,9 +1,13 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     copy_coherency.cc
 )
 if (HIP_PLATFORM MATCHES "amd")
-  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
                   ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
@@ -34,4 +38,3 @@ hip_add_exe_to_target(NAME synchronizationTests
                       COMPILE_OPTIONS -std=c++14)
 
 add_dependencies(synchronizationTests memcpyInt.hsaco)
-

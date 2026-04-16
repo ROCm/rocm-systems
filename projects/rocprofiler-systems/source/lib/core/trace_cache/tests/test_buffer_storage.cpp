@@ -295,6 +295,43 @@ TEST_F(buffer_storage_test, MixedSampleTypes)
     EXPECT_EQ(buffer_pos, buffer_data.size());
 }
 
+TEST_F(buffer_storage_test, mixed_sample_types_with_optional)
+{
+    rocprofsys::trace_cache::buffer_storage<mock_worker_factory_t, test_type_identifier_t>
+        storage(test_file_path);
+    SetUpStartStopOnCall();
+    EXPECT_CALL(*g_mock_worker, start).Times(1);
+    EXPECT_CALL(*g_mock_worker, stop).Times(1);
+
+    storage.start();
+    test_sample_1 sample1(42, "event_data");
+    test_sample_5 sample5_with_value(std::optional<uint32_t>{ 99 });
+    test_sample_5 sample5_nullopt(std::nullopt);
+    test_sample_2 sample2(2.71828, 1002);
+
+    EXPECT_NO_THROW(storage.store(sample1));
+    EXPECT_NO_THROW(storage.store(sample5_with_value));
+    EXPECT_NO_THROW(storage.store(sample5_nullopt));
+    EXPECT_NO_THROW(storage.store(sample2));
+
+    g_mock_worker->execute_flush(true);
+
+    EXPECT_NO_THROW(storage.shutdown());
+
+    std::string buffer_data = g_mock_worker->m_output_string_stream.str();
+    ASSERT_FALSE(buffer_data.empty());
+
+    const uint8_t* buffer     = reinterpret_cast<const uint8_t*>(buffer_data.data());
+    size_t         buffer_pos = 0;
+
+    verify_buffer_contains(sample1, buffer, buffer_pos);
+    verify_buffer_contains(sample5_with_value, buffer, buffer_pos);
+    verify_buffer_contains(sample5_nullopt, buffer, buffer_pos);
+    verify_buffer_contains(sample2, buffer, buffer_pos);
+
+    EXPECT_EQ(buffer_pos, buffer_data.size());
+}
+
 TEST_F(buffer_storage_test, large_payload_handling)
 {
     rocprofsys::trace_cache::buffer_storage<mock_worker_factory_t, test_type_identifier_t>

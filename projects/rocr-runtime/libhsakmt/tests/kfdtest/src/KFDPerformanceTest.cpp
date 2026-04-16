@@ -80,13 +80,13 @@ testNodeToNodes(HSAuint32 n1, const HSAuint32 *const n2Array, int n, P2PDirectio
     std::vector<SDMACopyParams> copyArray;
     int i;
 
-    ASSERT_SUCCESS(hsaKmtAllocMemory(n1, alloc_size, memFlags, &n1Mem));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(n1Mem, alloc_size, NULL));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, n1, alloc_size, memFlags, &n1Mem));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, n1Mem, alloc_size, NULL));
 
     for (i = 0; i < n; i++) {
         n2[i] = n2Array[i];
-        ASSERT_SUCCESS(hsaKmtAllocMemory(n2[i], alloc_size, memFlags, &n2Mem[i]));
-        ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(n2Mem[i], alloc_size, NULL));
+        ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, n2[i], alloc_size, memFlags, &n2Mem[i]));
+        ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, n2Mem[i], alloc_size, NULL));
     }
 
     for (i = 0; i < n; i++) {
@@ -127,12 +127,12 @@ testNodeToNodes(HSAuint32 n1, const HSAuint32 *const n2Array, int n, P2PDirectio
         /* It did not respect the group id we set above.*/
         sdma_multicopy(array, array_count, speed, speed2, msg);
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(n1Mem));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(n1Mem, alloc_size));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, n1Mem));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, n1Mem, alloc_size));
 
     for (i = 0; i < n; i++) {
-        EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(n2Mem[i]));
-        EXPECT_SUCCESS(hsaKmtFreeMemory(n2Mem[i], alloc_size));
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, n2Mem[i]));
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, n2Mem[i], alloc_size));
     }
 }
 

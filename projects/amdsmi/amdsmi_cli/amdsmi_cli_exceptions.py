@@ -23,18 +23,18 @@ import json
 
 
 AMDSMI_ERROR_MESSAGES = {
-    0: "Sucess",
+    0: "Success",
     1: "Invalid parameters",
     2: "Command not supported",
     3: "Command not yet implemented",
     4: "Failed load module",
-    5: "Failed load symbole",
+    5: "Failed load symbol",
     6: "Drm error",
     7: "API call failed",
     8: "Timeout in API call",
     9: "Retry operation",
     10: "Permission Denied",
-    11: "Interrupt ocurred during execution",
+    11: "Interrupt occurred during execution",
     12: "I/O Error",
     13: "Address fault",
     14: "Error opening file",
@@ -69,8 +69,9 @@ AMDSMI_ERROR_MESSAGES = {
     54: "AMDGPU restart error",
     55: "Setting is not available",
     0xFFFFFFFE: "AMD-SMI Library error did not map to a status code",
-    0xFFFFFFFF: "Unknown error"
+    0xFFFFFFFF: "Unknown error",
 }
+
 
 def _get_error_message(error_code):
     if abs(error_code) in AMDSMI_ERROR_MESSAGES:
@@ -81,17 +82,17 @@ def _get_error_message(error_code):
 class AmdSmiException(Exception):
     def __init__(self):
         self.json_message = {}
-        self.csv_message = ''
-        self.stdout_message = ''
-        self.message = ''
-        self.output_format = ''
-        self.device_type = ''
+        self.csv_message = ""
+        self.stdout_message = ""
+        self.message = ""
+        self.output_format = ""
+        self.device_type = ""
 
     def __str__(self):
         # Return message according to the current output format
-        if self.output_format == 'json':
+        if self.output_format == "json":
             self.message = json.dumps(self.json_message)
-        elif self.output_format == 'csv':
+        elif self.output_format == "csv":
             self.message = self.csv_message
         else:
             self.message = self.stdout_message
@@ -125,7 +126,9 @@ class AmdSmiInvalidParameterException(AmdSmiException):
         self.arg = arg
         self.output_format = outputformat
 
-        common_message = f"Parameter '{self.arg}' is invalid. Run 'amd-smi {self.command} -h' for more info."
+        common_message = (
+            f"Parameter '{self.arg}' is invalid. Run 'amd-smi {self.command} -h' for more info."
+        )
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -176,7 +179,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterValueException(AmdSmiException):
-    def __init__(self, command, arg, outputformat: str):
+    def __init__(self, command, arg, outputformat: str, hint: str = None):
         super().__init__()
         self.value = -5
         self.command = command
@@ -184,6 +187,8 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
         self.output_format = outputformat
 
         common_message = f"Value '{self.arg}' is not of valid type or format. Run 'amd-smi {self.command} -h' for more info."
+        if hint:
+            common_message += f" {hint}"
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -213,7 +218,9 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
+        common_message = (
+            f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
+        )
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -273,7 +280,9 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
+        common_message = (
+            f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
+        )
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

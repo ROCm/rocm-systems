@@ -18,6 +18,7 @@
 #include "register.h"
 #include "graph.h"
 #include "nvmlwrap.h"
+#include "amdsmi_wrap.h"
 #include "profiler.h"
 #include "allocator.h"
 #include "dev_runtime.h"
@@ -217,6 +218,9 @@ struct ncclTaskColl {
   bool useWarpSpeed;
 #else
   int32_t nMaxChannels:8;
+#endif
+#ifdef ENABLE_ROCSHMEM
+  size_t* sizes;
 #endif
   int32_t nWarps:8;
   int32_t algorithm:8, protocol:8, pipeline:8;
@@ -464,8 +468,12 @@ struct ncclPeerInfo {
   struct ncclComm* comm;
   int cudaCompCap;
   size_t totalGlobalMem;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  amdsmiFabricDeviceInfo fabricInfo;
+#else
   // MNNVL support
   nvmlGpuFabricInfoV_t fabricInfo;
+#endif
   int cuMemSupport;
   int version;
 };
@@ -544,6 +552,18 @@ struct ncclComm {
   int* localRankToRank;
   // localRanks and localRanktoRank for all nodes
   struct ncclNodeRanks* nodeRanks;
+
+  // Hierarchical AG sub-communicators
+  struct ncclComm* hierarchicalIntraComm;
+  struct ncclComm* hierarchicalInterComm;
+  bool hierarchicalCommsInitialized;
+
+  // Hierarchical AG temporary buffers
+  void* hierarchicalAGTempBuffer;
+
+  // Force PAT algorithm for this communicator
+  bool forcePatEnable;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
@@ -705,16 +725,6 @@ struct ncclComm {
   // shared structures for finalization
   int finalizeRankCnt;
 
-#if defined(ENABLE_MSCCLPP)
-  // Whether this comm is compatible with MSCCLPP
-  bool mscclppCompatible;
-  struct mscclppComm* mscclpp_comm;
-  size_t mscclpp_threshold;
-  bool mscclppForceEnable;
-#endif
-
-  // Whether this comm is compatible with MSCCL
-  bool mscclCompatible;
   // group job to support multi-thread FT
   struct ncclGroupJob *groupJob;
 
@@ -734,7 +744,7 @@ struct ncclComm {
   // CE Collective
   struct ncclCeColl ceColl;
   struct ncclIntruQueue<struct ncclCeInitTask, &ncclCeInitTask::next> ceInitTaskQueue;
-  
+
   // buffer registration cache
   struct ncclRegCache regCache;
   int isAllNvlink;
@@ -758,13 +768,15 @@ struct ncclComm {
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
-  void** sourceRshmem;
-  void** destRshmem;
+  void* sourceRshmem;
+  void* destRshmem;
+
   rocshmem::rocshmem_team_t team_reduce_world_dup;
   int enableRocshmem;
   int rocshmemThreshold;
   int numSymBuf;
   int symId;
+  size_t bufThreshold;
 #endif
 
   // Direct Reduce Scatter [RCCL]

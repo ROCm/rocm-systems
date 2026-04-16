@@ -13,7 +13,6 @@
 #include "rings.h"
 #include "topo.h"
 
-#include "msccl/msccl_lifecycle.h"
 
 /******************************************************************/
 /********************* Internode connection ***********************/
@@ -289,7 +288,6 @@ static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* 
   const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 2*CHANNEL_LIMIT : CHANNEL_LIMIT;
   const int nChannels = (comm->nChannels > channelLimit) ? comm->nChannels / 2 : comm->nChannels;
   const int nNodes = comm->nNodes, node = comm->node;
-
   // Compute tree depth. Not an exact value but a good approximation in most
   // cases
   int depth = comm->nRanks/nNodes - 1 + log2i(nNodes);
@@ -817,6 +815,18 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   maxChannels = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
                  IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
                  ? std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) : 2*CHANNEL_LIMIT;
+                 
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes > 1) {
+    int userMax = ncclParamMaxNchannels();
+    if (userMax != -2) {
+      maxChannels = std::max(std::min(userMax, 64), 1);
+      INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %d", maxChannels);
+    } else {
+      maxChannels = 48;
+      INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
+    }
+  }
+                     
 #ifdef ENABLE_WARP_SPEED
   if (!wsEnabled && (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1)) {
     maxChannels = std::min(64, maxChannels);
@@ -922,14 +932,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   if (minNchannels > maxChannels) {
     minNchannels = 2;
     WARN("NCCL_MIN_NCHANNELS set by environment is ignored due to greater than max allowed %d channels.", maxChannels);
-  }
-
-  if (mscclEnabled() && (comm->topo->mscclEnabled || mscclForceEnabled())) {
-    int mscclNumChannelsRequired = maxNchannels;
-    mscclSchedulerInit(comm, &mscclNumChannelsRequired);
-    if (comm->mscclCompatible) {
-      minNchannels = std::max(minNchannels, mscclNumChannelsRequired);
-    }
   }
 
   // Honor NCCL_MIN_NRINGS/NCCL_MAX_NRINGS.

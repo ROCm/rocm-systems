@@ -32,12 +32,12 @@
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
-#include "library/amd_smi.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -76,6 +76,7 @@
 #include "logger/debug.hpp"
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -1044,6 +1045,28 @@ store_sampling_data_in_cache(int64_t                                    _tid,
 
 auto static_strings = std::set<std::string>{};
 
+struct pause_interval_t
+{
+    uint64_t pause_ts  = 0;
+    uint64_t resume_ts = 0;
+};
+
+auto sampling_paused  = std::atomic<bool>{ false };
+auto pause_mutex      = std::mutex{};
+auto pause_intervals  = std::vector<pause_interval_t>{};
+auto pending_pause_ts = std::atomic<uint64_t>{ 0 };
+
+bool
+spans_pause_interval(uint64_t _beg, uint64_t _end)
+{
+    if(pause_intervals.empty()) return false;
+
+    const auto _it = std::lower_bound(
+        pause_intervals.cbegin(), pause_intervals.cend(), _beg,
+        [](const auto& _interval, uint64_t _val) { return _interval.resume_ts < _val; });
+
+    return _it != pause_intervals.cend() && _it->pause_ts <= _end;
+}
 }  // namespace
 
 unique_ptr_t<std::set<int>>&
@@ -1078,12 +1101,14 @@ shutdown()
 void
 block_samples()
 {
+    LOG_DEBUG("Blocking sampling...");
     trait::runtime_enabled<sampler_t>::set(false);
 }
 
 void
 unblock_samples()
 {
+    LOG_DEBUG("Unblocking sampling...");
     trait::runtime_enabled<sampler_t>::set(true);
 }
 
@@ -1291,10 +1316,11 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
         if(!_bt_data || !_bt_time || _bt_data->empty() || _bt_time->get_tid() != _tid)
             continue;
 
-        auto _ret    = timer_sampling_data{};
-        _ret.m_tid   = _bt_time->get_tid();
-        _ret.m_beg   = _last->get<backtrace_timestamp>()->get_timestamp();
-        _ret.m_end   = _bt_time->get_timestamp();
+        auto _ret  = timer_sampling_data{};
+        _ret.m_tid = _bt_time->get_tid();
+        _ret.m_beg = _last->get<backtrace_timestamp>()->get_timestamp();
+        _ret.m_end = _bt_time->get_timestamp();
+
         _ret.m_stack = backtrace::filter_and_patch(_bt_data->get());
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
@@ -1311,7 +1337,10 @@ parse_timer_data(int64_t _tid, const bundle_t* _init, const std::vector<bundle_t
             }
         }
 
-        _results.emplace_back(std::move(_ret));
+        if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+        {
+            _results.emplace_back(std::move(_ret));
+        }
         _last = itr;
     }
 
@@ -1345,13 +1374,17 @@ parse_overflow_data(int64_t _tid, const bundle_t*, const std::vector<bundle_t*>&
                 continue;
             }
 
-            auto _ret     = overflow_sampling_data{};
-            _ret.m_tid    = _bt_time->get_tid();
-            _ret.m_beg    = _last_call_ts + _perf_ts_offset;
-            _ret.m_end    = pitr.first + _perf_ts_offset;
+            auto _ret  = overflow_sampling_data{};
+            _ret.m_tid = _bt_time->get_tid();
+            _ret.m_beg = _last_call_ts + _perf_ts_offset;
+            _ret.m_end = pitr.first + _perf_ts_offset;
+
             _ret.m_stack  = pitr.second;
             _last_call_ts = pitr.first;
-            _results.emplace_back(std::move(_ret));
+            if(!spans_pause_interval(_ret.m_beg, _ret.m_end))
+            {
+                _results.emplace_back(std::move(_ret));
+            }
         }
     }
 
@@ -1805,11 +1838,8 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 }
 
 void
-cache_backtrace_metrics(
-    [[maybe_unused]] int64_t                                 _tid,
-    [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
+cache_backtrace_metrics(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
 
     for(const auto& itr : _timer_data)
@@ -1827,19 +1857,15 @@ cache_backtrace_metrics(
         for(const auto& itr : _timer_data)
             itr.m_metrics.cache_backtrace_data(_tid, 0.5 * (itr.m_beg + itr.m_end));
     }
-#endif
 }
 
 void
-store_sampling_data_in_cache(
-    [[maybe_unused]] int64_t                                    _tid,
-    [[maybe_unused]] const std::vector<timer_sampling_data>&    _timer_data,
-    [[maybe_unused]] const std::vector<overflow_sampling_data>& _overflow_data)
+store_sampling_data_in_cache(int64_t                                    _tid,
+                             const std::vector<timer_sampling_data>&    _timer_data,
+                             const std::vector<overflow_sampling_data>& _overflow_data)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     cache_sampling_data(_tid, _timer_data, _overflow_data);
     cache_backtrace_metrics(_tid, _timer_data);
-#endif
 }
 
 struct sampling_initialization
@@ -1911,15 +1937,53 @@ void
 postfork_parent_reinit()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_parent_reinit();
+        pmc::postfork_parent_reinit();
 }
 
 void
 postfork_child_cleanup()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_child_cleanup();
+        pmc::postfork_child_cleanup();
 }
+
+void
+pause()
+{
+    bool _expected = false;
+    if(!sampling_paused.compare_exchange_strong(_expected, true))
+    {
+        LOG_WARNING("sampling::pause() called but sampling is already paused");
+        return;
+    }
+
+    LOG_DEBUG("Pausing sampling...");
+    pending_pause_ts.store(tim::get_clock_real_now<uint64_t, std::nano>());
+    block_samples();
+}
+
+void
+resume()
+{
+    bool _expected = true;
+    if(!sampling_paused.compare_exchange_strong(_expected, false))
+    {
+        LOG_WARNING("sampling::resume() called but sampling is not paused");
+        return;
+    }
+
+    LOG_DEBUG("Resuming sampling...");
+    auto _pause_ts  = pending_pause_ts.exchange(0);
+    auto _resume_ts = tim::get_clock_real_now<uint64_t, std::nano>();
+    if(_pause_ts > 0)
+    {
+        auto _lk = std::lock_guard<std::mutex>{ pause_mutex };
+        pause_intervals.push_back(pause_interval_t{ _pause_ts, _resume_ts });
+    }
+
+    unblock_samples();
+}
+
 }  // namespace sampling
 }  // namespace rocprofsys
 

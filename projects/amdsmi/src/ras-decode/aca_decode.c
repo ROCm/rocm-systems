@@ -46,12 +46,12 @@
  * @param[out] bank_name Pointer to a string containing the bank name
  * @return 0 on success, -1 on failure
  */
-static int aca_decoder_get_bank(const aca_decoder_t *decoder, const char **bank_name) {
+static int aca_decoder_get_bank(const aca_decoder_t* decoder, const char** bank_name) {
   if (!decoder || !bank_name) {
     return -1;
   }
 
-  const aca_ipid_fields_t *ipid = &decoder->ipid;
+  const aca_ipid_fields_t* ipid = &decoder->ipid;
   return find_bank_name(ipid->hardware_id, ipid->aca_type, bank_name);
 }
 
@@ -61,7 +61,7 @@ static int aca_decoder_get_bank(const aca_decoder_t *decoder, const char **bank_
  * @return String indicating error severity: "Fatal", "Uncorrected, Non-fatal", "Corrected", or
  * "UNKNOWN"
  */
-static const char *get_error_severity(const aca_status_fields_t *status) {
+static const char* get_error_severity(const aca_status_fields_t* status) {
   if (status->poison) return RAS_DECODE_SEVERITY_UNCORRECTED_NON_FATAL;
   if (status->pcc) return RAS_DECODE_SEVERITY_FATAL;
   if (!status->pcc && status->uc && status->tcc) return RAS_DECODE_SEVERITY_FATAL;
@@ -80,7 +80,7 @@ static const char *get_error_severity(const aca_status_fields_t *status) {
  * @return String indicating error category: "HBM Errors", "Off-Package Link Errors", or "Device
  * Internal Errors"
  */
-static const char *get_error_category(const char *bank, const char *error_type) {
+static const char* get_error_category(const char* bank, const char* error_type) {
   if (!bank || !error_type) {
     return RAS_DECODE_SEVERITY_UNKNOWN;
   }
@@ -114,9 +114,9 @@ static const char *get_error_category(const char *bank, const char *error_type) 
  * @param[out] service_error_type Pointer to store the resulting service error type string
  * @return 0 on success, non-zero on failure
  */
-static int get_service_error_type(const char *error_category, const char *error_bank,
-                                  const char *error_type, const char *error_severity,
-                                  const char **service_error_type) {
+static int get_service_error_type(const char* error_category, const char* error_bank,
+                                  const char* error_type, const char* error_severity,
+                                  const char** service_error_type) {
   if (!error_category || !error_type || !error_severity || !service_error_type ||
       strcmp(error_category, RAS_DECODE_SEVERITY_UNKNOWN) == 0 ||
       strcmp(error_type, RAS_DECODE_SEVERITY_UNKNOWN) == 0 ||
@@ -172,10 +172,10 @@ static int get_service_error_type(const char *error_category, const char *error_
  * @param[in] decoder Pointer to the ACA decoder structure
  * @param[out] info Pointer to the error info structure to be populated
  */
-static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_info_t *info) {
-  const char *bank;
-  const char *error_type;
-  const char *instance_name;
+static void aca_decoder_get_error_info(const aca_decoder_t* decoder, aca_error_info_t* info) {
+  const char* bank;
+  const char* error_type;
+  const char* instance_name;
   int result;
 
   info->raw_status = decoder->aca_status;
@@ -255,7 +255,7 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
     info->category_ref = get_error_category(bank, info->error_type_ref);
   }
 
-  const char *service_error;
+  const char* service_error;
   if (get_service_error_type(info->category_ref, info->bank_ref, info->error_type_ref,
                              info->severity_ref, &service_error) != 0) {
     service_error = info->error_type_ref;
@@ -271,7 +271,7 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
  * @param[in] ipid_reg Raw IPID register value
  * @param[in] synd_reg Raw syndrome register value
  */
-static void aca_decoder_init(aca_decoder_t *decoder, uint16_t hw_revision, uint32_t flags,
+static void aca_decoder_init(aca_decoder_t* decoder, uint16_t hw_revision, uint32_t flags,
                              uint64_t status_reg, uint64_t ipid_reg, uint64_t synd_reg) {
   memset(decoder, 0, sizeof(aca_decoder_t));
 
@@ -291,7 +291,7 @@ static void aca_decoder_init(aca_decoder_t *decoder, uint16_t hw_revision, uint3
  * @param[in] raw_data Pointer to structure containing raw ACA error data
  * @return JsonValue* containing the decoded error information, or NULL on failure
  */
-JsonValue *aca_decode(const aca_raw_data_t *raw_data) {
+JsonValue* aca_decode(const aca_raw_data_t* raw_data) {
   if (!raw_data) {
     return NULL;
   }
@@ -305,7 +305,7 @@ JsonValue *aca_decode(const aca_raw_data_t *raw_data) {
   aca_decoder_get_error_info(&decoder, &info);
 
   // Create the main JSON object
-  JsonValue *json_obj = json_create_object();
+  JsonValue* json_obj = json_create_object();
   if (!json_obj) {
     return NULL;
   }
@@ -314,7 +314,7 @@ JsonValue *aca_decode(const aca_raw_data_t *raw_data) {
   json_object_set(json_obj, "bank", json_create_string(info.bank_ref));
 
   // Create error_location object
-  JsonValue *error_location = json_create_object();
+  JsonValue* error_location = json_create_object();
   if (error_location) {
     char oam_str[16], aid_str[16];
     snprintf(oam_str, sizeof(oam_str), "%d", info.oam);

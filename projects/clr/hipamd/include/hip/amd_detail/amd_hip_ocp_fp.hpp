@@ -1,36 +1,19 @@
 /*
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
-
-SPDX-License-Identifier: MIT
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
-#if !defined(__HIPCC_RTC__)
-#include "amd_hip_common.h"
-#include "host_defines.h"
-#include "amd_hip_ocp_types.h"
-#include "amd_hip_bf16.h"
-#include "amd_hip_ocp_host.hpp"
+#include <hip/amd_detail/amd_hip_bf16.h>
 
+#if !defined(__HIPCC_RTC__)
+#include <hip/amd_detail/amd_hip_common.h>
+#include <hip/amd_detail/host_defines.h>
+#include <hip/amd_detail/amd_hip_ocp_types.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_bf16.h>
 #include <climits>
 #include <cstdio>
 
@@ -39,6 +22,8 @@ static_assert(sizeof(uint16_t) * CHAR_BIT == 16);
 static_assert(sizeof(uint32_t) * CHAR_BIT == 32);
 static_assert(sizeof(uint64_t) * CHAR_BIT == 64);
 #endif  // !defined(__HIPCC_RTC__)
+
+#include <hip/amd_detail/amd_hip_ocp_host.hpp>  // Host Conversion
 
 // HW Detection
 #if defined(__gfx950__)

@@ -1,26 +1,15 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #define HIP_ENABLE_WARP_SYNC_BUILTINS
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
 #include "warp_common.hh"
 #include <hip/hip_runtime.h>
+#include <hip/cooperative_groups/hip_reduce.h>
 #include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
 #include <performance_common.hh>
@@ -71,8 +60,8 @@ template <class T> struct AtomicXorOp {
 // @output   to store the result, one per warp
 // @numItems must be a multiple of warpSize
 template <class T, template <typename> class Op>
-__global__ void reduceAllAtomics(T* __restrict__ output, const T* __restrict__ input,
-                                 unsigned long long mask) {
+__global__ void reduceAtomics(T* __restrict__ output, const T* __restrict__ input,
+                              unsigned long long mask) {
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   extern __shared__ uint8_t shared_mem[];
   T* result = reinterpret_cast<T*>(shared_mem);  // one per warp
@@ -126,6 +115,31 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
   }
 }
 
+template <size_t TileSize, bool ExcludeFirst, class Functor, class T>
+__global__ void reduceCoop(T* __restrict__ output, const T* __restrict__ input)
+{
+  namespace cg = cooperative_groups;
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<TileSize>(mygroup);
+  T result;
+  int idx = threadIdx.x + blockIdx.x * kBlockDim;
+  const int numTiles = warpSize / TileSize;
+  int laneId = threadIdx.x % warpSize;
+
+  if constexpr (ExcludeFirst) {
+    if (laneId == 0) {
+      return;
+    }
+  }
+
+  result = cg::reduce(mytile, input[idx], Functor());
+
+  if (laneId / TileSize  == numTiles - 1) {
+    // it's always the higher order tile reduction the one that gets calculated
+    output[idx / warpSize] = result;
+  }
+}
+
 template <class T, template <typename> class Op> class AtomicBenchmark
     : public Benchmark<AtomicBenchmark<T, Op>> {
  public:
@@ -138,21 +152,23 @@ template <class T, template <typename> class Op> class AtomicBenchmark
     int warpSize = props.warpSize;
     int numWarpsPerBlock = kBlockDim / warpSize;
     size_t sharedSize = numWarpsPerBlock * sizeof(T);
+
     TIMED_SECTION(kTimerTypeEvent) {
-      if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
-        reduceAllAtomics<T, AtomicAddOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
-        reduceAllAtomics<T, AtomicMinOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
-        reduceAllAtomics<T, AtomicMaxOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
-        reduceAllAtomics<T, AtomicAndOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
-        reduceAllAtomics<T, AtomicOrOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
-        reduceAllAtomics<T, AtomicXorOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else
+      if constexpr (std::is_same<Op<T>, std::plus<T>>::value) {
+        reduceAtomics<T, AtomicAddOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
+      } else if constexpr (std::is_same<Op<T>, MinOp<T>>::value) {
+        reduceAtomics<T, AtomicMinOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
+      } else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value) {
+        reduceAtomics<T, AtomicMaxOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
+      } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
+        reduceAtomics<T, AtomicAndOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
+      } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
+        reduceAtomics<T, AtomicOrOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
+      } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
+        reduceAtomics<T, AtomicXorOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
+      } else {
         static_assert(std::is_void<T>::value, "Unsupported operator");
+      }
 
       HIP_CHECK(hipDeviceSynchronize());
     }
@@ -166,7 +182,6 @@ template <class T, template <typename> class Op> class ReduceSyncBenchmark
     dim3 blockDim = {kBlockDim};
     dim3 gridDim = {static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x)))};
 
-
     TIMED_SECTION(kTimerTypeEvent) {
       reduceOpSync<T, Op><<<gridDim, blockDim>>>(output, input, mask);
       HIP_CHECK(hipDeviceSynchronize());
@@ -175,31 +190,68 @@ template <class T, template <typename> class Op> class ReduceSyncBenchmark
 };
 
 template <class T, template <typename> class Op>
-void checkResults(T* d_atomicsResult, T* d_reduceResult, size_t numBytes, unsigned long long mask) {
+void checkResults(T* d_lhs, T* d_rhs, size_t numBytes, unsigned long long mask) {
   using namespace Catch::Matchers;
-  LinearAllocGuard<T> outputAtomic(LinearAllocs::malloc, numBytes);
-  LinearAllocGuard<T> outputReduce(LinearAllocs::malloc, numBytes);
-  bool memcmpResult = std::memcmp(outputAtomic.ptr(), outputReduce.ptr(), numBytes);
+  LinearAllocGuard<T> h_lhs(LinearAllocs::malloc, numBytes);
+  LinearAllocGuard<T> h_rhs(LinearAllocs::malloc, numBytes);
+  bool memcmpResult;
 
   assert(numBytes % sizeof(T) == 0 && "numBytes needs to be a multiple of sizeof(T)");
-  HIP_CHECK(hipMemcpy(outputAtomic.ptr(), d_atomicsResult, numBytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(outputReduce.ptr(), d_reduceResult, numBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_lhs.ptr(), d_lhs, numBytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_rhs.ptr(), d_rhs, numBytes, hipMemcpyDeviceToHost));
+  memcmpResult = std::memcmp(h_lhs.ptr(), h_rhs.ptr(), numBytes);
 
   if (memcmpResult) {
     for (int i = 0; i < numBytes / sizeof(T); i++) {
-      auto& atomicResult = outputAtomic.ptr()[i];
-      auto& reduceResult = outputReduce.ptr()[i];
+      auto& lhsResult = h_lhs.ptr()[i];
+      auto& rhsResult = h_rhs.ptr()[i];
 
       if constexpr (std::is_integral<T>::value || std::is_same<Op<T>, MinOp<T>>::value ||
                     std::is_same<Op<T>, MaxOp<T>>::value)
         // for integral types or min/max the result should match exactly
-        REQUIRE(atomicResult == reduceResult);
+        REQUIRE(lhsResult == rhsResult);
       else
         // floating point types or operations which are lossy in terms of precision
-        REQUIRE_THAT(reduceResult, WithinRel(atomicResult));
+        REQUIRE_THAT(rhsResult, WithinRel(lhsResult));
     }
   }
 }
+
+// in this case, instead of using masks, the TileSize would define the mask
+// at compile time
+template <size_t TileSize, bool ExcludeFirst, class T, template <typename> class Op> class CoopBenchmark
+  : public Benchmark<CoopBenchmark<TileSize, ExcludeFirst, T, Op>> {
+public:
+  void operator()(T* output, const T* input, int numItems)
+  {
+    namespace cg = cooperative_groups;
+    dim3 blockDim = {kBlockDim};
+    dim3 gridDim = {static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x)))};
+
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, 0));
+
+    TIMED_SECTION(kTimerTypeEvent) {
+      if constexpr (std::is_same<Op<T>, std::plus<T>>::value) {
+        reduceCoop<TileSize, ExcludeFirst, cg::plus<T>, T><<<gridDim, blockDim>>>(output, input);
+      } else if constexpr (std::is_same<Op<T>, MinOp<T>>::value) {
+        reduceCoop<TileSize, ExcludeFirst, cg::less<T>, T><<<gridDim, blockDim>>>(output, input);
+      } else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value) {
+        reduceCoop<TileSize, ExcludeFirst, cg::greater<T>, T><<<gridDim, blockDim>>>(output, input);
+      } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
+        reduceCoop<TileSize, ExcludeFirst, cg::bit_and<T>, T><<<gridDim, blockDim>>>(output, input);
+      } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
+        reduceCoop<TileSize, ExcludeFirst, cg::bit_or<T>, T><<<gridDim, blockDim>>>(output, input);
+      } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
+        reduceCoop<TileSize, ExcludeFirst, cg::bit_xor<T>, T><<<gridDim, blockDim>>>(output, input);
+      } else {
+        static_assert(std::is_void<T>::value, "Unsupported operator");
+      }
+
+      HIP_CHECK(hipDeviceSynchronize());
+    }
+  }
+};
 
 template <class T, template <typename> class Op> struct IsLogicalOp {
   static constexpr bool value = false;
@@ -244,8 +296,10 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
     LinearAllocGuard<T> d_input(LinearAllocs::hipMalloc, inputSize);
     LinearAllocGuard<T> d_outputsAtomic[numMasks];
     LinearAllocGuard<T> d_outputsReduce[numMasks];
+    LinearAllocGuard<T> d_outputsCoop[numMasks];
     LinearAllocGuard<T>* d_outputAtomic = &d_outputsAtomic[0];
     LinearAllocGuard<T>* d_outputReduce = &d_outputsReduce[0];
+    LinearAllocGuard<T>* d_outputCoop = &d_outputsCoop[0];
     std::mt19937_64 gen(123);
     distribution dist;
     int halfWaveSize = wavefrontSize / 2;
@@ -255,7 +309,7 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
                        high8BitsOn = halfBitsOn << (wavefrontSize - 8),
                        high4BitsOn = halfBitsOn << (wavefrontSize - 4), allButOne = -1 & ~1;
     const char* typeStr = typeToString<T>();
-    const char* opStr = opToString<T, Op>();
+    const char* opStr = opToString<T, Op<T>>();
     std::map<std::string, unsigned long long> masks;
     std::pair<std::string, unsigned long long> masksPairs[] = {
         {"full mask", fullMask},
@@ -270,6 +324,7 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       // don't use 'halfHighBitsOn' on warp size 32; it's the same as high16BitsOn
       if (wavefrontSize != 32 || mask.second != halfHighBitsOn) {
         masks.emplace(std::to_string(numMask) + " - " + mask.first,
+                      // if on warp size 32; remove excess bits
                       wavefrontSize == 64 ? mask.second : mask.second & 0xFFFFFFFF);
         numMask++;
       }
@@ -292,6 +347,10 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       buffer = LinearAllocGuard<T>(LinearAllocs::hipMalloc, outputNumBytes);
     }
 
+    for (auto& buffer : d_outputsCoop) {
+      buffer = LinearAllocGuard<T>(LinearAllocs::hipMalloc, outputNumBytes);
+    }
+
     HIP_CHECK(hipMemcpy(d_input.ptr(), input.ptr(), inputSize, hipMemcpyHostToDevice));
 
     if constexpr (HasAtomicOps<T>::value) {
@@ -305,11 +364,49 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       }
     }
 
-    printf("\n--- reduce %s %s--- \n", opStr, typeStr);
+    printf("\n--- reduce warp intrinsics %s %s--- \n", opStr, typeStr);
 
     for (const auto& mask : masks) {
       printf("%s %llx\n", mask.first.c_str(), mask.second);
       benchmarkReduce.Run((d_outputReduce++)->ptr(), d_input.ptr(), numItems, mask.second);
+    }
+
+    printf("\n--- reduce cooperative groups %s %s--- \n", opStr, typeStr);
+
+    for (const auto& mask : masks) {
+      printf("%s %llx\n", mask.first.c_str(), mask.second);
+      unsigned long warpMask = wavefrontSize == 64? ~0ull : 0xFFFFFFFF;
+
+      if (mask.second == (fullMask & warpMask)) {
+
+        if (wavefrontSize == 64) {
+          CoopBenchmark<64, false, T, Op> benchmarkCoop;
+          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+        } else {
+          CoopBenchmark<32, false, T, Op> benchmarkCoop;
+          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+        }
+      } else if (wavefrontSize == 64 && mask.second == (halfHighBitsOn & warpMask)) {
+        CoopBenchmark<32, false, T, Op> benchmarkCoop;
+        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+      } else if (mask.second == (high16BitsOn & warpMask)) {
+        CoopBenchmark<16, false, T, Op> benchmarkCoop;
+        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+      } else if (mask.second == (high8BitsOn & warpMask)) {
+        CoopBenchmark<8, false, T, Op> benchmarkCoop;
+        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+      } else if (mask.second == (high4BitsOn & warpMask)) {
+        CoopBenchmark<4, false, T, Op> benchmarkCoop;
+        benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+      } else if (mask.second == (allButOne & warpMask)) {
+        if (wavefrontSize == 64) {
+          CoopBenchmark<64, true, T, Op> benchmarkCoop; 
+          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+        } else {
+          CoopBenchmark<32, true, T, Op> benchmarkCoop; 
+          benchmarkCoop.Run((d_outputCoop++)->ptr(), d_input.ptr(), numItems);
+        }
+      }
     }
 
     printf("\n");
@@ -320,48 +417,50 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       for (const auto& mask : masks) {
         checkResults<T, Op>(d_outputsAtomic[pos].ptr(), d_outputsReduce[pos].ptr(), outputNumBytes,
                             mask.second);
+        checkResults<T, Op>(d_outputsReduce[pos].ptr(), d_outputsCoop[pos].ptr(), outputNumBytes,
+                            mask.second);
         pos++;
       }
     }
   }
 };
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Add", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Add, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, std::plus> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Min", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Min, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, MinOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Max", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Max, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, MaxOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_And", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_And, int, unsigned int, unsigned long long,
                    long long) {
   ReduceBenchmark<TestType, AndOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Or", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Or, int, unsigned int, unsigned long long,
                    long long) {
   ReduceBenchmark<TestType, OrOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Xor", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Xor, int, unsigned int, unsigned long long,
                    long long) {
   ReduceBenchmark<TestType, XorOp> benchmark;
 

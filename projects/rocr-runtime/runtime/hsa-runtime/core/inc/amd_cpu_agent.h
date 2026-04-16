@@ -103,10 +103,13 @@ class CpuAgent : public core::Agent {
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
   // @brief Override from core::Agent.
+  void InitDerivedCuid() override;
+
+  // @brief Override from core::Agent.
   hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
-                           core::Queue** queue) override;
+                           bool metadata_queue, core::Queue** queue) override;
 
   // @brief Override from core::Agent.
   hsa_status_t DmaCopy(void* dst, core::Agent& dst_agent, const void* src, core::Agent& src_agent,

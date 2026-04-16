@@ -454,7 +454,7 @@ hsa_status_t AllocAndSetKernArgs(RdcRocrBase* test, void* args, size_t arg_size)
   assert(test != nullptr);
 
   req_align = test->kernarg_align();
-  // Allocate enough extra space for alignment adjustments if ncessary
+  // Allocate enough extra space for alignment adjustments if necessary
   buf_size = arg_size + (req_align << 1);
 
   err = hsa_amd_memory_pool_allocate(test->kern_arg_pool(), buf_size, 0,

@@ -42,6 +42,7 @@
 #include "mpi_transport.hpp"
 #include "ro_net_team.hpp"
 #include "util.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
@@ -107,8 +108,9 @@ ROBackend::ROBackend(MPI_Comm comm)
       this, transport_->get_world_comm(), my_pe, num_pes);
   team_tracker.set_team_world(team_world_proxy_->get());
 
-  ROCSHMEM_TEAM_WORLD =
+  host::ROCSHMEM_TEAM_WORLD =
       reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
+  set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 
   default_block_handle_proxy_ = DefaultBlockHandleProxyT(
                                 g_ret_buffer_.get(),
@@ -136,7 +138,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 int ROBackend::backend_can_run() {
   auto handle = dlopen("libmpi.so", RTLD_LAZY);
   if (!handle) {
-    printf("Could not open libmpi.so. Returning\n");
+    LOG_TRACE("Could not open libmpi.so");
     return ROCSHMEM_ERROR;
   }
   //TODO dlsym MPI_Get_library_version and verify compat when HAVE_EXTERNAL_MPI is undef
@@ -183,7 +185,7 @@ ROBackend::~ROBackend() {
   CHECK_HIP(hipFree(ctx_array));
 }
 
-__device__ bool ROBackend::create_ctx(int64_t options, rocshmem_ctx_t *ctx) {
+__device__ bool ROBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
   ROContext *ctx_;
 
   auto pop_result = ctx_free_list.get()->pop_front();
@@ -204,13 +206,14 @@ void ROBackend::team_destroy(rocshmem_team_t team) {
   ROTeam *team_obj{get_internal_ro_team(team)};
 
   team_obj->~ROTeam();
-  // CHECK_HIP(hipFree(team_obj));
+  CHECK_HIP(hipFree(team_obj));
 }
 
 void ROBackend::create_new_team(Team *parent_team,
-                                TeamInfo *team_info_wrt_parent,
-                                TeamInfo *team_info_wrt_world, int num_pes,
-                                int my_pe_in_new_team, MPI_Comm team_comm,
+                                const TeamInfo& team_info_wrt_parent,
+                                const TeamInfo& team_info_wrt_world,
+                                int num_pes, int my_pe_in_new_team,
+                                MPI_Comm team_comm,
                                 rocshmem_team_t *new_team) {
   transport_->createNewTeam(this, parent_team, team_info_wrt_parent,
                             team_info_wrt_world, num_pes, my_pe_in_new_team,
@@ -247,7 +250,6 @@ void ROBackend::dump_backend_stats() {
   }
 
   int device_id;
-  hipDeviceProp_t device_props;
   CHECK_HIP(hipGetDevice(&device_id));
   int wallClockMhz;
   CHECK_HIP(hipDeviceGetAttribute(&wallClockMhz, hipDeviceAttributeWallClockRate, device_id));

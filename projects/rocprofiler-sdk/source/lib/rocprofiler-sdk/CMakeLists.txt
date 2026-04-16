@@ -56,6 +56,7 @@ add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
 add_subdirectory(details)
 add_subdirectory(ompt)
+add_subdirectory(registration)
 
 target_link_libraries(
     rocprofiler-sdk-object-library

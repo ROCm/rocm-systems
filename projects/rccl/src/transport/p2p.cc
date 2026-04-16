@@ -292,10 +292,11 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
       // Send cuMem handle to remote for conversion to an fd
       NCCLCHECK(ncclProxyClientGetFdBlocking(comm, peer, &cuDesc->data, &fd));
       INFO(NCCL_P2P, "UDS converted handle 0x%lx to fd %d on remote peer %d", *(uint64_t*)&cuDesc->data, fd, peer);
-      CUCHECK(cuMemImportFromShareableHandle(&handle, &fd, type));
+      // For POSIX_FD, pass the fd value (not a pointer to fd) cast as void*
+      CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
       SYSCHECK(close(fd), "close");
     } else {
-      CUCHECK(cuMemImportFromShareableHandle(&handle, cuDesc, type));
+      CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)cuDesc, type));
     }
     CUCHECK(cuMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
     CUCHECK(cuMemMap(dptr, size, /* offset */ 0, handle, /* flags */ 0));
@@ -872,7 +873,14 @@ ncclResult_t ret = ncclSuccess;
 
         if (baseAddr == NULL) {
           CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr*)&baseAddr, &baseSize, (CUdeviceptr)userbuff), ret, fail);
+#if HIP_VERSION >= 71260540
           CUCHECKGOTO(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr)baseAddr), ret, fail);
+#else
+          // Legacy CUDA IPC support
+          if (ncclParamLegacyCudaRegister()) {
+            legacyIpcCap = 1;
+          }
+#endif
         }
         if (comm->gproxyConn[peerRank].initialized == false)
           NCCLCHECKGOTO(ncclProxyConnect(comm, TRANSPORT_P2P, 1, peerRank, &comm->gproxyConn[peerRank]), ret, fail);
@@ -1085,7 +1093,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   struct p2pIpcExpInfo* ipcExpInfo = (struct p2pIpcExpInfo*)reqBuff;
   void* regAddr = NULL;
   ncclResult_t ret = ncclSuccess;
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
   bool mapped = false;
   bool imported = false;
   CUmemGenericAllocationHandle handle;
@@ -1110,7 +1118,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
       memcpy(&handle, &ipcExpInfo->ipcDesc.memHandle, sizeof(CUmemGenericAllocationHandle));
     } else {
       if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, &ipcExpInfo->impFd, ncclCuMemHandleType), ret, fail);
+        // For POSIX_FD, pass the fd value (not a pointer to fd) cast as void*
+        CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)ipcExpInfo->impFd, ncclCuMemHandleType), ret, fail);
         SYSCHECKGOTO(close(ipcExpInfo->impFd), "close", ret, fail);
       } else {
         CUCHECKGOTO(cuMemImportFromShareableHandle(&handle, (void*)&ipcExpInfo->ipcDesc.cuDesc, ncclCuMemHandleType), ret, fail);

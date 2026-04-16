@@ -59,6 +59,7 @@
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
+#include "suites/functional/time_stamp.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #if ENABLE_COPY_NUMA
@@ -66,6 +67,7 @@
 #endif
 #include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
+#include "suites/performance/agent_preload.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
 #include "suites/negative/queue_validation.h"
 #include "suites/stress/memory_concurrent_tests.h"
@@ -79,6 +81,7 @@
 #include "suites/functional/concurrent_shutdown.h"
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
+#include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
@@ -87,6 +90,7 @@
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
+#include "suites/functional/cuid.h"
 #include "common/os.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
@@ -143,6 +147,12 @@ TEST(rocrtst, Test_Example) {
 TEST(rocrtst, Test_Example_InterruptDisabled) {
   TestExample tst;
   rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, Test_MetadataPrefetchPacket) {
+  MetadataPrefetch tst;
+
   RunGenericTest(&tst);
 }
 
@@ -322,6 +332,13 @@ TEST(rocrtstFunc, Memory_Available) {
     mt.MemAvailableTest();
     RunCustomTestEpilog(&mt);
   );
+}
+
+TEST(rocrtstFunc, Time_Stamp) {
+  TimeStamp ts;
+  RunCustomTestProlog(&ts);
+  ts.TimeStampTest();
+  RunCustomTestEpilog(&ts);
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
@@ -520,6 +537,16 @@ TEST(rocrtstFunc, SvmMemory_Basic_Test) {
     RunCustomTestProlog(&smt);
     smt.TestCreateDestroy();
     smt.TestSVMPrefetch();
+    smt.TestSVMBatchDiscard();
+    RunCustomTestEpilog(&smt);
+  );
+}
+
+TEST(rocrtstFunc, SvmMemory_Negative_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    SvmMemoryTestBasic smt;
+    RunCustomTestProlog(&smt);
+    smt.TestSVMDiscardNegative();
     RunCustomTestEpilog(&smt);
   );
 }
@@ -554,6 +581,16 @@ TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
 
     RunCustomTestProlog(&vmt);
     vmt.MemoryAccountingTest();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
+TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.TestVirtAddressAlias();
     RunCustomTestEpilog(&vmt);
   );
 }
@@ -637,6 +674,15 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   cq.CountedQueuesOverflowWrapAroundTest();
   RunCustomTestEpilog(&cq);
 }
+
+#ifdef HSA_ENABLE_AMDCUID_SUPPORT
+TEST(rocrtstFunc, Cuid_GPU_Validation_Test) {
+  CuidTest ct;
+  RunCustomTestProlog(&ct);
+  ct.ValidateGpuCuidTest();
+  RunCustomTestEpilog(&ct);
+}
+#endif
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
   RUN_IF_NOT_EMU_MODE(
@@ -803,6 +849,11 @@ TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_SpinWait) {
 TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_Interrupt) {
   DispatchTime dt(false, false);
   RunGenericTest(&dt);
+}
+
+TEST(rocrtstPerf, Agent_Preload_Latency) {
+  AgentPreloadTest apt;
+  RunGenericTest(&apt);
 }
 
 int main(int argc, char** argv) {

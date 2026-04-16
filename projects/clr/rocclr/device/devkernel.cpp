@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/runtime.hpp"
 #include "platform/program.hpp"
@@ -831,11 +817,13 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
   status = amd::Comgr::get_metadata_list_size(printfMeta, &printfSize);
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    std::string buf;
+    size_t originalSize = printfStr->size();
+    printfStr->reserve(originalSize + printfSize);
     for (size_t i = 0; i < printfSize; ++i) {
       amd_comgr_metadata_node_t str;
       status = amd::Comgr::index_list_metadata(printfMeta, i, &str);
 
+      std::string buf;
       if (status == AMD_COMGR_STATUS_SUCCESS) {
         status = getMetaBuf(str, &buf);
         amd::Comgr::destroy_metadata(str);
@@ -845,10 +833,11 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
                 "Comgr API failed with status: %d \n", status);
         amd::Comgr::destroy_metadata(printfMeta);
+        printfStr->resize(originalSize);  // restore the original size of the vector
         return false;
       }
 
-      printfStr->push_back(buf);
+      printfStr->push_back(std::move(buf));
     }
   }
 

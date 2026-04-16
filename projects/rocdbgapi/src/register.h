@@ -47,35 +47,25 @@ enum class amdgpu_regnum_t : uint32_t
 
   /* Raw registers.  */
   first_vgpr = first_raw,
-  first_vgpr_64 = first_vgpr,
 
   /* 32-bit Vector registers (vgprs) for wave64 wavefronts.  */
-  v0_64 = first_vgpr_64,
+  v0_64 = first_vgpr,
   v255_64 = v0_64 + 255,
 
-  last_vgpr_64 = v255_64,
-  first_accvgpr_64 = last_vgpr_64 + 1,
-
   /* 64-bit Accumulation Vector registers (accvgprs) for wave64 wavefronts  */
-  a0_64 = first_accvgpr_64,
+  a0_64 = v255_64 + 1,
   a255_64 = a0_64 + 255,
 
-  last_accvgpr_64 = a255_64,
-  first_vgpr_32 = last_accvgpr_64 + 1,
-
   /* 32-bit Vector registers (vgprs) for wave32 wavefronts.  */
-  v0_32 = first_vgpr_32,
+  v0_32 = a255_64 + 1,
   v255_32 = v0_32 + 255,
-
-  last_vgpr_32 = v255_32,
-  first_accvgpr_32 = last_vgpr_32 + 1,
+  v1023_32 = v0_32 + 1023,
 
   /* 32-bit Accumulation Vector registers (accvgprs) for wave64 wavefronts  */
-  a0_32 = first_accvgpr_32,
+  a0_32 = v1023_32 + 1,
   a255_32 = a0_32 + 255,
 
-  last_accvgpr_32 = a255_32,
-  last_vgpr = last_accvgpr_32,
+  last_vgpr = a255_32,
   first_sgpr = last_vgpr + 1,
 
   /* 32-bit Scalar registers (sgprs).  */
@@ -182,29 +172,40 @@ enum class amdgpu_regnum_t : uint32_t
   last_regnum = last_pseudo
 };
 
-constexpr size_t
+/* Distance between two amdgpu_regnum_t.  A difference between two
+   enumerators is not an enumerator, it's the distance between them.
+   This is signed following the std::distance /
+   iterator_traits<It>::difference_type / ptrdiff_t model: distance
+   can be negative if rhs > lhs.  */
+using amdgpu_regdiff_t
+  = std::make_signed_t<std::underlying_type_t<amdgpu_regnum_t>>;
+
+constexpr amdgpu_regdiff_t
 operator- (amdgpu_regnum_t lhs, amdgpu_regnum_t rhs)
 {
-  return static_cast<std::underlying_type_t<decltype (lhs)>> (lhs)
-         - static_cast<std::underlying_type_t<decltype (rhs)>> (rhs);
+  using u = std::underlying_type_t<decltype (lhs)>;
+  /* Use static_cast, not utils::narrow, so 'u(0) - u(1) = u(-1)'
+     becomes -1 instead of an error.  */
+  return static_cast<amdgpu_regdiff_t> (static_cast<u> (lhs)
+                                        - static_cast<u> (rhs));
 }
 
 constexpr amdgpu_regnum_t
-operator+ (amdgpu_regnum_t lhs, int rhs)
+operator+ (amdgpu_regnum_t lhs, amdgpu_regdiff_t rhs)
 {
-  return static_cast<amdgpu_regnum_t> (
-    static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) + rhs);
+  return static_cast<amdgpu_regnum_t> (static_cast<amdgpu_regdiff_t> (lhs)
+                                       + rhs);
 }
 
 constexpr amdgpu_regnum_t
-operator- (amdgpu_regnum_t lhs, int rhs)
+operator- (amdgpu_regnum_t lhs, amdgpu_regdiff_t rhs)
 {
-  return static_cast<amdgpu_regnum_t> (
-    static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) - rhs);
+  return static_cast<amdgpu_regnum_t> (static_cast<amdgpu_regdiff_t> (lhs)
+                                       - rhs);
 }
 
 constexpr std::underlying_type_t<amdgpu_regnum_t>
-operator& (amdgpu_regnum_t lhs, int rhs)
+operator& (amdgpu_regnum_t lhs, std::underlying_type_t<amdgpu_regnum_t> rhs)
 {
   return static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) & rhs;
 }
@@ -230,19 +231,6 @@ is_pseudo_register (amdgpu_regnum_t regnum)
   return regnum >= amdgpu_regnum_t::first_pseudo
          && regnum <= amdgpu_regnum_t::last_pseudo;
 }
-
-constexpr size_t amdgpu_vgprs_32_count
-  = amdgpu_regnum_t::last_vgpr_32 - amdgpu_regnum_t::first_vgpr_32 + 1;
-constexpr size_t amdgpu_vgprs_64_count
-  = amdgpu_regnum_t::last_vgpr_64 - amdgpu_regnum_t::first_vgpr_64 + 1;
-constexpr size_t amdgpu_accvgprs_64_count
-  = amdgpu_regnum_t::last_accvgpr_64 - amdgpu_regnum_t::first_accvgpr_64 + 1;
-constexpr size_t amdgpu_sgprs_count
-  = amdgpu_regnum_t::last_sgpr - amdgpu_regnum_t::first_sgpr + 1;
-constexpr size_t amdgpu_hwregs_count
-  = amdgpu_regnum_t::last_hwreg - amdgpu_regnum_t::first_hwreg + 1;
-constexpr size_t amdgpu_ttmps_count
-  = amdgpu_regnum_t::last_ttmp - amdgpu_regnum_t::first_ttmp + 1;
 
 /* Register class.  */
 

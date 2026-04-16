@@ -41,7 +41,7 @@
 #include <rocshmem/rocshmem.hpp>
 #endif
 
-extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3];
+extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4];
 
 extern const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS];
 
@@ -96,6 +96,10 @@ struct ncclDevRedOpFull {
   uint64_t scalarArg;
 };
 
+#ifdef __HIP_DEVICE_COMPILE__
+#include "device/rccl_ptr.h"
+#endif
+
 union ncclLLFifoLine {
   /* Flags have to be *after* data, because otherwise, an incomplete receive
     from the network may receive the flag but not the data.
@@ -109,6 +113,9 @@ union ncclLLFifoLine {
   };
   uint64_t v[2];
   int4 i4;
+#if defined(__HIP_DEVICE_COMPILE__) && RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  v4u v4u;  /* same layout as data1,flag1,data2,flag2 for b128 load/store */
+#endif
 };
 
 #if __HIP_DEVICE_COMPILE__
@@ -428,6 +435,12 @@ struct alignas(16) ncclDevWorkColl {
   void* tempbuff;
   void* sndbuff;
   int size;
+  int rank;
+  size_t *sizes;
+  size_t *sendSizes;
+  size_t *sendDispls;
+  size_t *recvSizes;
+  size_t *recvDispls;
 #endif
 };
 
@@ -785,7 +798,7 @@ extern void* const ncclDevKernelForFunc[/*funcIndex*/];
 extern bool const ncclDevKernelForFuncIsSpecialized[/*funcIndex*/];
 
 // Launch a one-rank reduction on stream.
-ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp, ncclDataType_t type, cudaStream_t stream);
+ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp, ncclDataType_t type, cudaStream_t stream, void const* acc = nullptr);
 
 // `ncclNvlsSupported()` needs to be in sync with "func_valid" in "src/device/generate.py"
 inline bool ncclNvlsSupported(int devRedOp, int type) {
@@ -818,7 +831,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   if (coll == ncclFuncBroadcast) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |
           ((uint64_t)(proto    & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
-  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAllToAllGda) {
+  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT );
   } else {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |

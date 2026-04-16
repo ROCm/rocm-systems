@@ -46,9 +46,11 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_bc.hpp"
+#include "constmem.hpp"
 #include "context_incl.hpp"
 #include "team.hpp"
 #include "templates.hpp"
+#include "log.hpp"
 #include "util.hpp"
 
 #if defined(USE_GDA)
@@ -73,11 +75,23 @@
 
 namespace rocshmem {
 
-__device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
+__device__  rocshmem_ctx_t
+__attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
+
+__constant__  rocshmem_ctx_t *rocshmem_ctx_array;
 
 __constant__ Backend *device_backend_proxy;
 
+__constant__ constmem_t constmem;
+
 __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
+
+__constant__ struct logd_constants logd_constants;
+
+namespace device {
+    extern "C" __constant__ rocshmem_team_t
+    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
+}
 
 #if defined(ENABLE_IPC_BITCODE)
   typedef IPCContext ContextTy;
@@ -125,67 +139,68 @@ __host__ void * rocshmem_get_device_ctx() {
   return ctx.ctx_opaque;
 }
 
+/**
+ * Copies a device symbol from rocSHMEM to the user's HIP module
+ * via device-to-device memcpy (graph-capture compatible).
+ * Returns 0 on success, ROCSHMEM_ERROR on failure.
+ */
+template <typename Symbol>
+static int copy_device_symbol_to_module(Symbol &builtin_symbol,
+    const char *module_symbol_name, size_t expected_size, hipModule_t module,
+    hipStream_t stream, const char *label) {
+  void *source {nullptr};
+  hipError_t err = hipGetSymbolAddress(&source, HIP_SYMBOL(builtin_symbol));
+  if (err != hipSuccess) {
+    LOG_ERROR("Failed to get address of built-in %s: %s",
+              label, hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+  if (source == nullptr) {
+    LOG_ERROR("Built-in %s has null address", label);
+    return ROCSHMEM_ERROR;
+  }
+
+  void *target {nullptr};
+  size_t symbol_size {0};
+  err = hipModuleGetGlobal(&target, &symbol_size, module, module_symbol_name);
+  if (err != hipSuccess) {
+    LOG_ERROR("Failed to get %s symbol from module: %s", 
+              label, hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+  if (symbol_size != expected_size) {
+    LOG_ERROR("Symbol size mismatch for %s. Expected %zu, got %zu",
+              label, expected_size, symbol_size);
+    return ROCSHMEM_ERROR;
+  }
+
+  err = hipMemcpyAsync(target, source, expected_size,
+                       hipMemcpyDeviceToDevice, stream);
+  if (err != hipSuccess) {
+    LOG_ERROR("Failed to copy %s to device: %s",
+              label, hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+  return ROCSHMEM_SUCCESS;
+}
+
 __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
-  // Step 1: Get device address of rocSHMEM's built-in ROCSHMEM_CTX_DEFAULT symbol
-  // Use hipGetSymbolAddress for graph-capture compatibility (device-to-device path)
-  void *source_ctx_device = nullptr;
-  hipError_t err = hipGetSymbolAddress(&source_ctx_device, HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT));
-
-  if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to get address of built-in ROCSHMEM_CTX_DEFAULT: %s\n",
-            hipGetErrorString(err));
-    return ROCSHMEM_ERROR;
-  }
-
-  if (source_ctx_device == nullptr) {
-    fprintf(stderr, "[rocSHMEM] Error: Built-in ROCSHMEM_CTX_DEFAULT has null address\n");
-    return ROCSHMEM_ERROR;
-  }
-
-  // Step 2: Query the device symbol address from the user's HIP module
-  void *target_ctx_device = nullptr;
-  size_t symbol_size = 0;
-
-  err = hipModuleGetGlobal(
-      &target_ctx_device,
-      &symbol_size,
-      module,
-      "ROCSHMEM_CTX_DEFAULT"
-  );
-
-  if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to get ROCSHMEM_CTX_DEFAULT symbol from module: %s\n",
-            hipGetErrorString(err));
-    return ROCSHMEM_ERROR;
-  }
-
-  if (symbol_size != sizeof(rocshmem_ctx_t)) {
-    fprintf(stderr, "[rocSHMEM] Error: Symbol size mismatch. Expected %zu, got %zu\n",
-            sizeof(rocshmem_ctx_t), symbol_size);
-    return ROCSHMEM_ERROR;
-  }
-
-  // Step 3: Device-to-device copy using stream-ordered memcpy
-  // This is fully graph-capture compatible since both source and target are device memory
   if (stream == nullptr) {
     stream = hipStreamPerThread;
   }
 
-  err = hipMemcpyAsync(
-      target_ctx_device,
-      source_ctx_device,
-      sizeof(rocshmem_ctx_t),
-      hipMemcpyDeviceToDevice,  // Device-to-device copy for graph capture compatibility
-      stream
-  );
-
-  if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to copy context to device: %s\n",
-            hipGetErrorString(err));
+  if (copy_device_symbol_to_module(ROCSHMEM_CTX_DEFAULT, "ROCSHMEM_CTX_DEFAULT",
+                                   sizeof(rocshmem_ctx_t), module, stream,
+                                   "ROCSHMEM_CTX_DEFAULT") != ROCSHMEM_SUCCESS) {
     return ROCSHMEM_ERROR;
   }
-
-  return 0;
+  if (copy_device_symbol_to_module(device::ROCSHMEM_TEAM_WORLD,
+                                   "ROCSHMEM_TEAM_WORLD",
+                                   sizeof(rocshmem_team_t), module, stream,
+                                   "ROCSHMEM_TEAM_WORLD") != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
+  return ROCSHMEM_SUCCESS;
 }
 
 /******************************************************************************
@@ -335,6 +350,18 @@ __device__ void rocshmem_atomic_xor(T *dest, T value, int pe) {
   rocshmem_atomic_xor(ROCSHMEM_CTX_DEFAULT, dest, value, pe);
 }
 
+__device__ void rocshmem_barrier() {
+  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
+__device__ void rocshmem_barrier_wave() {
+  rocshmem_ctx_barrier_wave(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
+__device__ void rocshmem_barrier_wg() {
+  rocshmem_ctx_barrier_wg(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
 #define ROCSHMEM_PUTMEM_SIGNAL_DEF(SUFFIX)                                                      \
   __device__ void rocshmem_putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems, \
                                                   uint64_t *sig_addr, uint64_t signal,           \
@@ -379,12 +406,18 @@ __host__ void set_internal_ctx(rocshmem_ctx_t *ctx) {
                               hipMemcpyHostToDevice));
 }
 
+__host__ void set_team_world_device(rocshmem_team_t team_world) {
+  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), &team_world,
+                              sizeof(rocshmem_team_t), 0,
+                              hipMemcpyHostToDevice));
+}
+
 __device__ ContextTy *get_internal_ctx(rocshmem_ctx_t ctx) {
   return reinterpret_cast<ContextTy *>(ctx.ctx_opaque);
 }
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
-  GPU_DPRINTF("Function: rocshmem_wg_ctx_create (options=%ld)\n", options);
+  LOGD_API("device::wg_ctx_create (options=%ld)", options);
   bool result{true};
   if (get_flat_block_id() == 0) {
     ctx->team_opaque = reinterpret_cast<TeamInfo *>(ROCSHMEM_CTX_DEFAULT.team_opaque);
@@ -399,7 +432,7 @@ __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
 
 __device__ int rocshmem_wg_team_create_ctx(rocshmem_team_t team, long options,
                                            rocshmem_ctx_t *ctx) {
-  GPU_DPRINTF("Function: rocshmem_wg_team_create_ctx (team=%zd, options=%ld)\n",
+  LOGD_API("device::wg_team_create_ctx (team=%zd, options=%ld)",
     (intptr_t)team, options);
   if (team == ROCSHMEM_TEAM_INVALID) {
     return -1;
@@ -422,7 +455,7 @@ __device__ int rocshmem_wg_team_create_ctx(rocshmem_team_t team, long options,
 
 __device__ void rocshmem_wg_ctx_destroy(
     [[maybe_unused]] rocshmem_ctx_t *ctx) {
-  GPU_DPRINTF("Function: rocshmem_wg_ctx_destroy (ctx=%zd)\n",
+  LOGD_API("device::wg_ctx_destroy (ctx=%zd)",
     ctx->ctx_opaque);
 
   if (get_flat_block_id() == 0 && *ctx != ROCSHMEM_CTX_INVALID) {
@@ -431,7 +464,7 @@ __device__ void rocshmem_wg_ctx_destroy(
 }
 
 __device__ void rocshmem_ctx_threadfence_system(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_threadfence_system (ctx=%zd)\n",
+  LOGD_API("device::ctx_threadfence_system (ctx=%zd)",
     ctx.ctx_opaque);
 
   get_internal_ctx(ctx)->threadfence_system();
@@ -441,7 +474,7 @@ __device__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
                                      const void *source, size_t nelems,
                                      int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_ctx_putmem (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::ctx_putmem (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->putmem(dest, source, nelems, pe_in_world);
@@ -451,7 +484,7 @@ template <typename T>
 __device__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
                               size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_put (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::put (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->put(dest, source, nelems, pe_in_world);
@@ -460,8 +493,8 @@ __device__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
 template <typename T>
 __device__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_p (ctx=%zd, dest=%p, value=%g, pe=%d w%d)\n",
-    ctx.ctx_opaque, dest, value, pe, pe_in_world);
+  LOGD_API("device::p (ctx=%zd, dest=%p, value=%g, pe=%d w%d)",
+    ctx.ctx_opaque, dest, (double)value, pe, pe_in_world);
 
   get_internal_ctx(ctx)->p(dest, value, pe_in_world);
 }
@@ -469,7 +502,7 @@ __device__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
 template <typename T>
 __device__ T rocshmem_g(rocshmem_ctx_t ctx, const T *source, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_g (ctx=%zd, source=%p, pe=%d w%d)\n",
+  LOGD_API("device::g (ctx=%zd, source=%p, pe=%d w%d)",
     ctx.ctx_opaque, source, pe, pe_in_world);
 
   return get_internal_ctx(ctx)->g(source, pe_in_world);
@@ -479,7 +512,7 @@ __device__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
                                      const void *source, size_t nelems,
                                      int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_ctx_getmem (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::ctx_getmem (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->getmem(dest, source, nelems, pe_in_world);
@@ -489,7 +522,7 @@ template <typename T>
 __device__ void rocshmem_get(rocshmem_ctx_t ctx, T *dest, const T *source,
                               size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_get (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::get (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->get(dest, source, nelems, pe_in_world);
@@ -499,7 +532,7 @@ __device__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void *dest,
                                          const void *source, size_t nelems,
                                          int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_ctx_putmem_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::ctx_putmem_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->putmem_nbi(dest, source, nelems, pe_in_world);
@@ -509,7 +542,7 @@ template <typename T>
 __device__ void rocshmem_put_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
                                   size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_put_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::put_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->put_nbi(dest, source, nelems, pe_in_world);
@@ -519,7 +552,7 @@ __device__ void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx, void *dest,
                                          const void *source, size_t nelems,
                                          int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_ctx_getmem_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::ctx_getmem_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->getmem_nbi(dest, source, nelems, pe_in_world);
@@ -529,14 +562,14 @@ template <typename T>
 __device__ void rocshmem_get_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
                                   size_t nelems, int pe) {
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_get_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)\n",
+  LOGD_API("device::get_nbi (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
 
   get_internal_ctx(ctx)->get_nbi(dest, source, nelems, pe_in_world);
 }
 
 __device__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_fence (ctx=%zd)\n", ctx.ctx_opaque);
+  LOGD_API("device::ctx_fence (ctx=%zd)", ctx.ctx_opaque);
 
   get_internal_ctx(ctx)->fence();
 }
@@ -544,31 +577,31 @@ __device__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx) {
 __device__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx, int pe) {
 
   int pe_in_world = translate_pe(ctx, pe);
-  GPU_DPRINTF("Function: rocshmem_ctx_fence (ctx=%zd, pe=%d w%d))\n",
+  LOGD_API("device::ctx_fence (ctx=%zd, pe=%d w%d))",
     ctx.ctx_opaque, pe, pe_in_world);
 
   get_internal_ctx(ctx)->fence(pe_in_world);
 }
 
 __device__ void rocshmem_ctx_quiet(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_quiet (ctx=%zd)\n",
+  LOGD_API("device::ctx_quiet (ctx=%zd)",
     ctx.ctx_opaque);
 
   get_internal_ctx(ctx)->quiet();
 }
 
 __device__ void rocshmem_ctx_pe_quiet(rocshmem_ctx_t ctx, const int *target_pes, size_t npes) {
-  GPU_DPRINTF("Function: %s (ctx=%zd)\n", __func__, ctx.ctx_opaque);
+  LOGD_API("device::ctx_pe_quiet (ctx=%zd)", ctx.ctx_opaque);
 
   ContextTy *internal_ctx = get_internal_ctx(ctx);
 
-  for (int i = 0; i < npes;  i++) {
+  for (size_t i = 0; i < npes;  i++) {
     internal_ctx->pe_quiet(translate_pe(ctx, target_pes[i]));
   }
 }
 
 __device__ void *rocshmem_ptr(const void *dest, int pe) {
-  GPU_DPRINTF("Function: rocshmem_ptr (dest=%p, pe=%d w%d\n",
+  LOGD_API("device::ptr (dest=%p, pe=%d w%d",
     dest, pe, pe);
 
   return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->shmem_ptr(dest, pe);
@@ -577,7 +610,7 @@ __device__ void *rocshmem_ptr(const void *dest, int pe) {
 template <typename T, ROCSHMEM_OP Op>
 __device__ int rocshmem_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
                                    T *dest, const T *source, int nreduce) {
-  GPU_DPRINTF("Function: rocshmem_reduce_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nreduce=%d\n",
+  LOGD_API("device::reduce_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nreduce=%d",
     ctx.ctx_opaque, team, dest, source, nreduce);
 
   return get_internal_ctx(ctx)->reduce<T, Op>(team, dest, source, nreduce);
@@ -588,7 +621,7 @@ __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
                                        rocshmem_team_t team, T *dest,
                                        const T *source, int nelem,
                                        int pe_root) {
-  GPU_DPRINTF("Function: Team-based rocshmem_broadcast_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d, root=%d)\n",
+  LOGD_API("device::broadcast_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d, root=%d)",
     ctx.ctx_opaque, team, dest, source, nelem, pe_root);
 
   get_internal_ctx(ctx)->broadcast<T>(team, dest, source, nelem, pe_root);
@@ -598,7 +631,7 @@ template <typename T>
 __device__ void rocshmem_ctx_alltoall_wg(rocshmem_ctx_t ctx,
                                          rocshmem_team_t team, T *dest,
                                          const T *source, int nelem) {
-  GPU_DPRINTF("Function: rocshmem_ctx_alltoall_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d\n",
+  LOGD_API("device::ctx_alltoall_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d)",
               ctx.ctx_opaque, team, dest, source, nelem);
 
   get_internal_ctx(ctx)->alltoall<T>(team, dest, source, nelem);
@@ -607,7 +640,7 @@ __device__ void rocshmem_ctx_alltoall_wg(rocshmem_ctx_t ctx,
 template <typename T>
 __device__ void rocshmem_alltoall_wg(rocshmem_team_t team, T *dest,
                                      const T *source, int nelem) {
-  GPU_DPRINTF("Function: rocshmem_alltoall_wg (team=%zd, dest=%p, source=%p, nelem=%d\n",
+  LOGD_API("device::alltoall_wg (team=%zd, dest=%p, source=%p, nelem=%d)",
               team, dest, source, nelem);
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->alltoall<T>(team, dest, source, nelem);
@@ -619,7 +652,7 @@ __device__ void rocshmem_alltoallv_wg(rocshmem_team_t team,
                                       const size_t dest_displs[],
                                       T *source, const size_t source_nelems[],
                                       const size_t source_displs[]) {
-  GPU_DPRINTF("Function: rocshmem_alltoallv_wg(team=%zd, dest=%p, source=%p\n",
+  LOGD_API("device::alltoallv_wg(team=%zd, dest=%p, source=%p)",
               team, dest, source);
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->alltoallv<T>(team,
@@ -631,7 +664,7 @@ template <typename T>
 __device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
                                       rocshmem_team_t team, T *dest,
                                       const T *source, int nelem) {
-  GPU_DPRINTF("Function: rocshmem_fcollect_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d\n",
+  LOGD_API("device::fcollect_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelem=%d",
     ctx.ctx_opaque, team, dest, source, nelem);
 
   get_internal_ctx(ctx)->fcollect<T>(team, dest, source, nelem);
@@ -639,7 +672,7 @@ __device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
 
 template <typename T>
 __device__ void rocshmem_wait_until(T *ivars, int cmp, T val) {
-  GPU_DPRINTF("Function: rocshmem_wait_until (ivars=%p, cmp=%d, val=%g)\n",
+  LOGD_API("device::wait_until (ivars=%p, cmp=%d, val=%g)",
     ivars, cmp, (double)val);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -650,7 +683,7 @@ __device__ void rocshmem_wait_until(T *ivars, int cmp, T val) {
 template <typename T>
 __device__ void rocshmem_wait_until_all(T *ivars, size_t nelems, const int* status,
                                          int cmp, T val) {
-  GPU_DPRINTF("Function: rocshmem_wait_until_all (ivars=%p, nelems=%zd cmp=%d, val=%g)\n",
+  LOGD_API("device::wait_until_all (ivars=%p, nelems=%zd cmp=%d, val=%g)",
     ivars, nelems, cmp, (double)val);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -661,7 +694,7 @@ __device__ void rocshmem_wait_until_all(T *ivars, size_t nelems, const int* stat
 template <typename T>
 __device__ size_t rocshmem_wait_until_any(T *ivars, size_t nelems, const int* status,
                                            int cmp, T val) {
-  GPU_DPRINTF("Function: rocshmem_wait_until_any (ivars=%p, nelems=%zd cmp=%d, val=%g)\n",
+  LOGD_API("device::wait_until_any (ivars=%p, nelems=%zd cmp=%d, val=%g)",
     ivars, nelems, cmp, (double)val);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -673,7 +706,7 @@ template <typename T>
 __device__ size_t rocshmem_wait_until_some(T *ivars, size_t nelems, size_t* indices,
                                           const int* status, int cmp,
                                           T val) {
-  DPRINTF("Function: rocshmem_wait_until_some (ivars=%p, nelems=%zd cmp=%d, val=%g)\n",
+  LOGD_API("device::wait_until_some (ivars=%p, nelems=%zd cmp=%d, val=%g)",
     ivars, nelems, cmp, (double)val);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -684,7 +717,7 @@ __device__ size_t rocshmem_wait_until_some(T *ivars, size_t nelems, size_t* indi
 template <typename T>
 __device__ size_t rocshmem_wait_until_any_vector(T *ivars, size_t nelems, const int* status,
                                                   int cmp, T* vals) {
-  DPRINTF("Function: rocshmem_wait_until_any_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)\n",
+  LOGD_API("device::wait_until_any_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)",
     ivars, nelems, cmp, vals);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -695,7 +728,7 @@ __device__ size_t rocshmem_wait_until_any_vector(T *ivars, size_t nelems, const 
 template <typename T>
 __device__ void rocshmem_wait_until_all_vector(T *ivars, size_t nelems, const int* status,
                                                 int cmp, T* vals) {
-  DPRINTF("Function: rocshmem_wait_until_all_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)\n",
+  LOGD_API("device::wait_until_all_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)",
     ivars, nelems, cmp, vals);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -708,7 +741,7 @@ __device__ size_t rocshmem_wait_until_some_vector(T *ivars, size_t nelems,
                                                  size_t* indices,
                                                  const int* status,
                                                  int cmp, T* vals) {
-  DPRINTF("Function: rocshmem_wait_until_some_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)\n",
+  LOGD_API("device::wait_until_some_vector (ivars=%p, nelems=%zd cmp=%d, vals=%p)",
     ivars, nelems, cmp, vals);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -718,7 +751,7 @@ __device__ size_t rocshmem_wait_until_some_vector(T *ivars, size_t nelems,
 
 template <typename T>
 __device__ int rocshmem_test(T *ivars, int cmp, T val) {
-  GPU_DPRINTF("Function: rocshmem_test (ivars=%p, cmp=%d, val=%g)\n",
+  LOGD_API("device::test (ivars=%p, cmp=%d, val=%g)",
     ivars, cmp, (double)val);
 
   Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
@@ -810,63 +843,63 @@ __global__ ATTR_NO_INLINE void rocshmem_signal_wait_until_kernel(
 }
 
 __device__ void rocshmem_barrier_all() {
-  GPU_DPRINTF("Function: rocshmem_barrier_all (ctx=%zd)\n",
+  LOGD_API("device::barrier_all (ctx=%zd)",
     get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->barrier_all();
 }
 
 __device__ void rocshmem_barrier_all_wave() {
-  GPU_DPRINTF("Function: rocshmem_barrier_all_wave (ctx=%zd)\n",
+  LOGD_API("device::barrier_all_wave (ctx=%zd)",
     get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->barrier_all_wave();
 }
 
 __device__ void rocshmem_barrier_all_wg() {
-  GPU_DPRINTF("Function: rocshmem_barrier_all_wg (ctx=%zd)\n",
+  LOGD_API("device::barrier_all_wg (ctx=%zd)",
     get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->barrier_all_wg();
 }
 
 __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_ctx_barrier (ctx=%zd, team=%zd)\n",
+  LOGD_API("device::ctx_barrier (ctx=%zd, team=%zd)",
     ctx.ctx_opaque, team);
 
   get_internal_ctx(ctx)->barrier(team);
 }
 
 __device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_ctx_barrier_wave (ctx=%zd, team=%zd)\n",
+  LOGD_API("device::ctx_barrier_wave (ctx=%zd, team=%zd)",
     ctx.ctx_opaque, team);
 
   get_internal_ctx(ctx)->barrier_wave(team);
 }
 
 __device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_ctx_barrier_wg (ctx=%zd, team=%zd)\n",
+  LOGD_API("device::ctx_barrier_wg (ctx=%zd, team=%zd)",
     ctx.ctx_opaque, team);
 
   get_internal_ctx(ctx)->barrier_wg(team);
 }
 
 __device__ void rocshmem_sync_all() {
-  GPU_DPRINTF("Function: rocshmem_sync_all (ctx=%zd)\n",
+  LOGD_API("device::sync_all (ctx=%zd)",
     get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->sync_all();
 }
 
 __device__ void rocshmem_sync_all_wave() {
-  GPU_DPRINTF("Function: rocshmem_sync_all_wave (ctx=%zd)\n",
+  LOGD_API("device::sync_all_wave (ctx=%zd)",
     get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->sync_all_wave();
 }
 
 __device__ void rocshmem_sync_all_wg() {
-  GPU_DPRINTF("Function: rocshmem_sync_all_wg (ctx=%zd)\n",
+  LOGD_API("device::sync_all_wg (ctx=%zd)",
     get_internal_ctx(ROCSHMEM_CTX_DEFAULT));
 
   get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->sync_all_wg();
@@ -874,7 +907,7 @@ __device__ void rocshmem_sync_all_wg() {
 
 __device__ void rocshmem_ctx_sync(rocshmem_ctx_t ctx,
                                   rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_ctx_sync (ctx=%zd, team=%zd)\n",
+  LOGD_API("device::ctx_sync (ctx=%zd, team=%zd)",
     ctx.ctx_opaque, team);
 
   get_internal_ctx(ctx)->sync_wg(team);
@@ -882,7 +915,7 @@ __device__ void rocshmem_ctx_sync(rocshmem_ctx_t ctx,
 
 __device__ void rocshmem_ctx_sync_wave(rocshmem_ctx_t ctx,
                                        rocshmem_team_t team) {
-GPU_DPRINTF("Function: rocshmem_ctx_sync_wave (ctx=%zd, team=%zd)\n",
+LOGD_API("device::ctx_sync_wave (ctx=%zd, team=%zd)",
     ctx.ctx_opaque, team);
 
 get_internal_ctx(ctx)->sync_wg(team);
@@ -890,14 +923,14 @@ get_internal_ctx(ctx)->sync_wg(team);
 
 __device__ void rocshmem_ctx_sync_wg(rocshmem_ctx_t ctx,
                                      rocshmem_team_t team) {
-GPU_DPRINTF("Function: rocshmem_ctx_sync_wg (ctx=%zd, team=%zd)\n",
+LOGD_API("device::ctx_sync_wg (ctx=%zd, team=%zd)",
     ctx.ctx_opaque, team);
 
 get_internal_ctx(ctx)->sync_wg(team);
 }
 
 __device__ int rocshmem_ctx_n_pes(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_n_pes (ctx=%zd)\n",
+  LOGD_API("device::ctx_n_pes (ctx=%zd)",
     ctx.ctx_opaque);
 
   TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
@@ -909,7 +942,7 @@ __device__ int rocshmem_n_pes() {
 }
 
 __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_my_pe (ctx=%zd)\n",
+  LOGD_API("device::ctx_my_pe (ctx=%zd)",
     ctx.ctx_opaque);
 
   TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
@@ -934,7 +967,7 @@ __device__ int rocshmem_my_pe() {
 }
 
 __device__ int rocshmem_team_n_pes(rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_team_n_pes (team=%zd)\n", team);
+  LOGD_API("device::team_n_pes (team=%zd)", team);
   if (team == ROCSHMEM_TEAM_INVALID) {
     return -1;
   } else {
@@ -943,7 +976,7 @@ __device__ int rocshmem_team_n_pes(rocshmem_team_t team) {
 }
 
 __device__ int rocshmem_team_my_pe(rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_team_my_pe (team=%zd)\n", team);
+  LOGD_API("device::team_my_pe (team=%zd)", team);
   if (team == ROCSHMEM_TEAM_INVALID) {
     return -1;
   } else {
@@ -954,7 +987,7 @@ __device__ int rocshmem_team_my_pe(rocshmem_team_t team) {
 template <typename T>
 __device__ T rocshmem_atomic_fetch_add(rocshmem_ctx_t ctx, T *dest, T val,
                                         int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_fetch_add (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_fetch_add (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_fetch_add<T>(dest, val, pe);
@@ -963,7 +996,7 @@ __device__ T rocshmem_atomic_fetch_add(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ T rocshmem_atomic_compare_swap(rocshmem_ctx_t ctx, T *dest, T cond,
                                            T val, int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_compare_swap (ctx=%zd, dest=%p, cond=%g, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_compare_swap (ctx=%zd, dest=%p, cond=%g, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, cond, (double)val, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_fetch_cas(dest, val, cond, pe);
@@ -971,7 +1004,7 @@ __device__ T rocshmem_atomic_compare_swap(rocshmem_ctx_t ctx, T *dest, T cond,
 
 template <typename T>
 __device__ T rocshmem_atomic_fetch_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_fetch_inc (ctx=%zd, dest=%p, pe=%d w%d)\n",
+  LOGD_API("device::atomic_fetch_inc (ctx=%zd, dest=%p, pe=%d w%d)",
     ctx.ctx_opaque, dest, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_fetch_add<T>(dest, 1, pe);
@@ -979,7 +1012,7 @@ __device__ T rocshmem_atomic_fetch_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
 
 template <typename T>
 __device__ T rocshmem_atomic_fetch(rocshmem_ctx_t ctx, T *source, int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_fetch (ctx=%zd, source=%p, pe=%d w%d)\n",
+  LOGD_API("device::atomic_fetch (ctx=%zd, source=%p, pe=%d w%d)",
     ctx.ctx_opaque, source, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_fetch_add<T>(source, 0, pe);
@@ -988,7 +1021,7 @@ __device__ T rocshmem_atomic_fetch(rocshmem_ctx_t ctx, T *source, int pe) {
 template <typename T>
 __device__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T *dest, T val,
                                      int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_add (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_add (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->amo_add<T>(dest, val, pe);
@@ -996,7 +1029,7 @@ __device__ void rocshmem_atomic_add(rocshmem_ctx_t ctx, T *dest, T val,
 
 template <typename T>
 __device__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_inc (ctx=%zd, dest=%p, pe=%d w%d)\n",
+  LOGD_API("device::atomic_inc (ctx=%zd, dest=%p, pe=%d w%d)",
     ctx.ctx_opaque, dest, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->amo_add<T>(dest, 1, pe);
@@ -1005,7 +1038,7 @@ __device__ void rocshmem_atomic_inc(rocshmem_ctx_t ctx, T *dest, int pe) {
 template <typename T>
 __device__ void rocshmem_atomic_set(rocshmem_ctx_t ctx, T *dest, T val,
                                      int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_set (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_set (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->amo_set(dest, val, pe);
@@ -1014,7 +1047,7 @@ __device__ void rocshmem_atomic_set(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ T rocshmem_atomic_swap(rocshmem_ctx_t ctx, T *dest, T val,
                                    int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_swap (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_swap (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_swap(dest, val, pe);
@@ -1023,7 +1056,7 @@ __device__ T rocshmem_atomic_swap(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ T rocshmem_atomic_fetch_and(rocshmem_ctx_t ctx, T *dest, T val,
                                         int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_fetch_and (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_fetch_and (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_fetch_and(dest, val, pe);
@@ -1032,7 +1065,7 @@ __device__ T rocshmem_atomic_fetch_and(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ void rocshmem_atomic_and(rocshmem_ctx_t ctx, T *dest, T val,
                                      int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_and (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_and (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->amo_and(dest, val, pe);
@@ -1041,7 +1074,7 @@ __device__ void rocshmem_atomic_and(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ T rocshmem_atomic_fetch_or(rocshmem_ctx_t ctx, T *dest, T val,
                                        int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_fetch_or (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_fetch_or (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_fetch_or(dest, val, pe);
@@ -1050,7 +1083,7 @@ __device__ T rocshmem_atomic_fetch_or(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ void rocshmem_atomic_or(rocshmem_ctx_t ctx, T *dest, T val,
                                     int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_or (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_or (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->amo_or(dest, val, pe);
@@ -1059,7 +1092,7 @@ __device__ void rocshmem_atomic_or(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ T rocshmem_atomic_fetch_xor(rocshmem_ctx_t ctx, T *dest, T val,
                                         int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_fetch_xor (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_fetch_xor (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   return get_internal_ctx(ctx)->amo_fetch_xor(dest, val, pe);
@@ -1068,7 +1101,7 @@ __device__ T rocshmem_atomic_fetch_xor(rocshmem_ctx_t ctx, T *dest, T val,
 template <typename T>
 __device__ void rocshmem_atomic_xor(rocshmem_ctx_t ctx, T *dest, T val,
                                      int pe) {
-  GPU_DPRINTF("Function: rocshmem_atomic_xor (ctx=%zd, dest=%p, val=%g, pe=%d w%d)\n",
+  LOGD_API("device::atomic_xor (ctx=%zd, dest=%p, val=%g, pe=%d w%d)",
     ctx.ctx_opaque, dest, (double)val, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->amo_xor(dest, val, pe);
@@ -1080,7 +1113,7 @@ __device__ void rocshmem_atomic_xor(rocshmem_ctx_t ctx, T *dest, T val,
 __device__ void rocshmem_ctx_putmem_wave(rocshmem_ctx_t ctx, void *dest,
                                           const void *source, size_t nelems,
                                           int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_putmem_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_putmem_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->putmem_wave(dest, source, nelems, pe);
@@ -1089,7 +1122,7 @@ __device__ void rocshmem_ctx_putmem_wave(rocshmem_ctx_t ctx, void *dest,
 __device__ void rocshmem_ctx_putmem_wg(rocshmem_ctx_t ctx, void *dest,
                                         const void *source, size_t nelems,
                                         int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_putmem_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_putmem_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->putmem_wg(dest, source, nelems, pe);
@@ -1098,7 +1131,7 @@ __device__ void rocshmem_ctx_putmem_wg(rocshmem_ctx_t ctx, void *dest,
 __device__ void rocshmem_ctx_putmem_nbi_wave(rocshmem_ctx_t ctx, void *dest,
                                               const void *source,
                                               size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_putmem_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_putmem_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->putmem_nbi_wave(dest, source, nelems, pe);
@@ -1107,7 +1140,7 @@ __device__ void rocshmem_ctx_putmem_nbi_wave(rocshmem_ctx_t ctx, void *dest,
 __device__ void rocshmem_ctx_putmem_nbi_wg(rocshmem_ctx_t ctx, void *dest,
                                             const void *source, size_t nelems,
                                             int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_putmem_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_putmem_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->putmem_nbi_wg(dest, source, nelems, pe);
@@ -1116,7 +1149,7 @@ __device__ void rocshmem_ctx_putmem_nbi_wg(rocshmem_ctx_t ctx, void *dest,
 template <typename T>
 __device__ void rocshmem_put_wave(rocshmem_ctx_t ctx, T *dest,
                                    const T *source, size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_put_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::put_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->put_wave(dest, source, nelems, pe);
@@ -1125,7 +1158,7 @@ __device__ void rocshmem_put_wave(rocshmem_ctx_t ctx, T *dest,
 template <typename T>
 __device__ void rocshmem_put_wg(rocshmem_ctx_t ctx, T *dest, const T *source,
                                  size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_put_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::put_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->put_wg(dest, source, nelems, pe);
@@ -1135,7 +1168,7 @@ template <typename T>
 __device__ void rocshmem_put_nbi_wave(rocshmem_ctx_t ctx, T *dest,
                                        const T *source, size_t nelems,
                                        int pe) {
-  GPU_DPRINTF("Function: rocshmem_put_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::put_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->put_nbi_wave(dest, source, nelems, pe);
@@ -1144,7 +1177,7 @@ __device__ void rocshmem_put_nbi_wave(rocshmem_ctx_t ctx, T *dest,
 template <typename T>
 __device__ void rocshmem_put_nbi_wg(rocshmem_ctx_t ctx, T *dest,
                                      const T *source, size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_put_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::put_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->put_nbi_wg(dest, source, nelems, pe);
@@ -1153,7 +1186,7 @@ __device__ void rocshmem_put_nbi_wg(rocshmem_ctx_t ctx, T *dest,
 __device__ void rocshmem_ctx_getmem_wg(rocshmem_ctx_t ctx, void *dest,
                                         const void *source, size_t nelems,
                                         int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_getmem_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_getmem_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->getmem_wg(dest, source, nelems, pe);
@@ -1162,7 +1195,7 @@ __device__ void rocshmem_ctx_getmem_wg(rocshmem_ctx_t ctx, void *dest,
 __device__ void rocshmem_ctx_getmem_wave(rocshmem_ctx_t ctx, void *dest,
                                           const void *source, size_t nelems,
                                           int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_getmem_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_getmem_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->getmem_wave(dest, source, nelems, pe);
@@ -1171,7 +1204,7 @@ __device__ void rocshmem_ctx_getmem_wave(rocshmem_ctx_t ctx, void *dest,
 template <typename T>
 __device__ void rocshmem_get_wg(rocshmem_ctx_t ctx, T *dest, const T *source,
                                  size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_get_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::get_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->get_wg(dest, source, nelems, pe);
@@ -1180,7 +1213,7 @@ __device__ void rocshmem_get_wg(rocshmem_ctx_t ctx, T *dest, const T *source,
 template <typename T>
 __device__ void rocshmem_get_wave(rocshmem_ctx_t ctx, T *dest,
                                    const T *source, size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_get_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::get_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->get_wave(dest, source, nelems, pe);
@@ -1189,7 +1222,7 @@ __device__ void rocshmem_get_wave(rocshmem_ctx_t ctx, T *dest,
 __device__ void rocshmem_ctx_getmem_nbi_wg(rocshmem_ctx_t ctx, void *dest,
                                             const void *source, size_t nelems,
                                             int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_getmem_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_getmem_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->getmem_nbi_wg(dest, source, nelems, pe);
@@ -1198,7 +1231,7 @@ __device__ void rocshmem_ctx_getmem_nbi_wg(rocshmem_ctx_t ctx, void *dest,
 template <typename T>
 __device__ void rocshmem_get_nbi_wg(rocshmem_ctx_t ctx, T *dest,
                                      const T *source, size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_get_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::get_nbi_wg (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->get_nbi_wg(dest, source, nelems, pe);
@@ -1207,7 +1240,7 @@ __device__ void rocshmem_get_nbi_wg(rocshmem_ctx_t ctx, T *dest,
 __device__ void rocshmem_ctx_getmem_nbi_wave(rocshmem_ctx_t ctx, void *dest,
                                               const void *source,
                                               size_t nelems, int pe) {
-  GPU_DPRINTF("Function: rocshmem_ctx_getmem_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::ctx_getmem_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->getmem_nbi_wave(dest, source, nelems, pe);
@@ -1217,7 +1250,7 @@ template <typename T>
 __device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T *dest,
                                        const T *source, size_t nelems,
                                        int pe) {
-  GPU_DPRINTF("Function: rocshmem_get_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)\n",
+  LOGD_API("device::get_nbi_wave (ctx=%zd, dest=%p, source=%p, nelems=%d, pe=%d w%d)",
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->get_nbi_wave(dest, source, nelems, pe);
@@ -1230,7 +1263,7 @@ __device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T *dest,
                                                       uint64_t *sig_addr, uint64_t signal, \
                                                       int sig_op,                          \
                                                       int pe) {                            \
-    GPU_DPRINTF("Function: rocshmem_ctx_putmem_signal##SUFFIX (ctx=%zd, dest=%p, "         \
+    LOGD_API("device::ctx_putmem_signal##SUFFIX (ctx=%zd, dest=%p, "             \
       "source=%p, nelems=%d, sig_addr=%p, signal=%ld, sig_op=%d, pe=%d w%d)\n",            \
       ctx.ctx_opaque, dest, source, nelems,                                                \
       sig_addr, signal, sig_op, pe, translate_pe(ctx, pe));                                \
@@ -1245,7 +1278,7 @@ __device__ void rocshmem_get_nbi_wave(rocshmem_ctx_t ctx, T *dest,
                                                    size_t nelems,                          \
                                                    uint64_t *sig_addr, uint64_t signal,    \
                                                    int sig_op, int pe) {                   \
-    GPU_DPRINTF("Function: rocshmem_ctx_put_signal##SUFFIX (ctx=%zd, dest=%p, "            \
+    LOGD_API("device::ctx_put_signal##SUFFIX (ctx=%zd, dest=%p, "                \
       "source=%p, nelems=%d, sig_addr=%p, signal=%ld, sig_op=%d, pe=%d w%d)\n",            \
       ctx.ctx_opaque, dest, source, nelems,                                                \
       sig_addr, signal, sig_op, pe, translate_pe(ctx, pe));                                \

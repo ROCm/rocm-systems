@@ -103,7 +103,8 @@ int main(int, char**) {
 
   // (2) start to run short diagnostic.
   rdc_diag_response_t response;
-  result = rdc_diagnostic_run(rdc_handle, group_id, RDC_DIAG_LVL_SHORT, nullptr, 0, &response, nullptr);
+  result =
+      rdc_diagnostic_run(rdc_handle, group_id, RDC_DIAG_LVL_SHORT, nullptr, 0, &response, nullptr);
 
   if (result != RDC_ST_OK) {
     std::cout << "Error run RDC_DIAG_LVL_SHORT diagnostic. Return: " << rdc_status_string(result);
@@ -136,8 +137,8 @@ int main(int, char**) {
   // (5) run one test case
   std::cout << " ============== Run individual diagnostic test ===========\n";
   rdc_diag_test_result_t test_result;
-  result =
-      rdc_test_case_run(rdc_handle, group_id, RDC_DIAG_COMPUTE_PROCESS, nullptr, 0, &test_result, nullptr);
+  result = rdc_test_case_run(rdc_handle, group_id, RDC_DIAG_COMPUTE_PROCESS, nullptr, 0,
+                             &test_result, nullptr);
 
   if (result != RDC_ST_OK) {
     std::cout << "Error run RDC_DIAG_COMPUTE_PROCESS diagnostic. Return: "

@@ -19,25 +19,26 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "power_read.h"
 
-#include <stdint.h>
-#include <stddef.h>
 #include <gtest/gtest.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "power_read.h"
 
 TestPowerRead::TestPowerRead() : TestBase() {
   set_title("AMDSMI Power Read Test");
-  set_description("The Power Read tests verifies that "
-                                "power related values can be read properly.");
+  set_description(
+      "The Power Read tests verifies that "
+      "power related values can be read properly.");
 }
 
-TestPowerRead::~TestPowerRead(void) {
-}
+TestPowerRead::~TestPowerRead(void) {}
 
 void TestPowerRead::SetUp(void) {
   TestBase::SetUp();
@@ -45,9 +46,7 @@ void TestPowerRead::SetUp(void) {
   return;
 }
 
-void TestPowerRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPowerRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPowerRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -60,11 +59,11 @@ void TestPowerRead::Close() {
   TestBase::Close();
 }
 
-
 void TestPowerRead::Run(void) {
   amdsmi_status_t err;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -75,21 +74,22 @@ void TestPowerRead::Run(void) {
       PrintDeviceHeader(processor_handles_[i]);
 
       amdsmi_power_cap_info_t info;
+      DISPLAY_AMDSMI_API("amdsmi_get_power_cap_info", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_power_cap_info(processor_handles_[i], 0, &info);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Power Cap not supported on this device." << std::endl;
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
         continue;
       }
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\t**Current Power Cap: " << info.power_cap << "uW" <<std::endl;
+        std::cout << "\t**Current Power Cap: " << info.power_cap << "uW" << std::endl;
       }
 
       IF_VERB(STANDARD) {
-        std::cout << "\t**Default Power Cap: " << info.default_power_cap << "uW" <<std::endl;
-        std::cout << "\t**Power Cap Range: " << info.min_power_cap << " to " <<
-                                                 info.max_power_cap << " uW" << std::endl;
+        std::cout << "\t**Default Power Cap: " << info.default_power_cap << "uW" << std::endl;
+        std::cout << "\t**Power Cap Range: " << info.min_power_cap << " to " << info.max_power_cap
+                  << " uW" << std::endl;
       }
       // TODO(amdsmi_team): Add current_socket_power tests
     }

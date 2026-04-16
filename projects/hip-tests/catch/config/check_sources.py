@@ -1,3 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+import argparse
 import os
 import re
 import sys
@@ -17,8 +22,11 @@ def find_source_test_cases(source_root, group, is_unit):
         return set()
 
     test_names = set()
+    # NOTE: This regex does not skip commented-out test cases (// or /* */).
+    # A commented-out HIP_TEST_CASE will still be detected as a source test
+    # and flagged as missing if it has no YAML entry.
     pattern = re.compile(
-        r'(?:TEST_CASE|TEMPLATE_TEST_CASE)\(\s*"([^"]+)"\s*[,)]'
+        r'(?:HIP_TEST_CASE|HIP_TEMPLATE_TEST_CASE)\(\s*(\w+)\s*[,)]'
     )
     for root, _, files in os.walk(source_dir):
         for filename in files:
@@ -37,16 +45,31 @@ def is_unit_group(group):
     return group not in NON_UNIT_GROUPS
 
 
-def main():
-    if not len(sys.argv) == 2:
-        raise ValueError("1 argument expected")
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Check that every Catch2 test case found in the source "
+        "tree has a corresponding entry in the YAML configs.",
+    )
+    parser.add_argument(
+        "configs_path",
+        help="Path to the directory containing YAML config files.",
+    )
+    parser.add_argument(
+        "source_root",
+        help="Root directory of the Catch2 test source files.",
+    )
+    return parser.parse_args()
 
-    config_path = sys.argv[1]
-    source_root = os.path.dirname(config_path)
+
+def main():
+    args = parse_args()
+
+    configs_path = args.configs_path
+    source_root = args.source_root
 
     missing = []
 
-    for group, cases in iter_group_configs(config_path):
+    for group, cases in iter_group_configs(configs_path):
         yaml_names = set(cases.keys())
         source_names = find_source_test_cases(
             source_root, group, is_unit=is_unit_group(group)

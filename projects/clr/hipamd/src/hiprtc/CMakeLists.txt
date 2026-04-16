@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # This project builds hiprtc
 # If ever this is to be a different lib living in different folder
@@ -95,6 +79,9 @@ endif()
 
 if(WIN32)
   target_link_libraries(hiprtc PRIVATE Dbghelp.lib)
+  set(DLL_NAME "hiprtc")
+  configure_file(hiprtc_in.rc.in  hiprtc_info.rc @ONLY)
+  target_sources(hiprtc PRIVATE  hiprtc_info.rc)
 endif()
 
 target_link_libraries(hiprtc PUBLIC ${CMAKE_DL_LIBS})
@@ -173,16 +160,13 @@ ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_device_functions.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_warp_sync_functions.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/hip_cooperative_groups_helper.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_cooperative_groups_reduce.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_unsafe_atomics.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_atomic.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/math_fwd.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/hip_fp16_math_fwd.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp16.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_math_functions.h
-${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_bf16.h
-${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_types.h
-${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_mx_common.h
-${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp8.h
 )
 
 # Generate required HIPRTC files.
@@ -218,6 +202,10 @@ set_target_properties(hiprtc-builtins PROPERTIES
 if(WIN32)
   # Windows uses DEF file to determine which symbols to expose.
   target_sources(hiprtc-builtins PRIVATE hiprtc-builtins.def)
+  target_include_directories(hiprtc-builtins PRIVATE $<TARGET_PROPERTY:rocclr,INCLUDE_DIRECTORIES>)
+  set(DLL_NAME "hiprtc-builtins")
+  configure_file(hiprtc_in.rc.in  hiprtc-builtins_info.rc @ONLY)
+  target_sources(hiprtc-builtins PRIVATE  hiprtc-builtins_info.rc)
   set_target_properties(hiprtc-builtins PROPERTIES
     OUTPUT_NAME "hiprtc-builtins${HIP_MAJOR_VERSION}${HIP_MINOR_VERSION}"
     ARCHIVE_OUTPUT_NAME "hiprtc-builtins")

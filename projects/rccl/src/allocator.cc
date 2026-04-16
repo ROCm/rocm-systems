@@ -43,10 +43,17 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     memprop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
     memprop.location.id = currentDev;
-    // Query device to see if RDMA support is available
-    flag = 0;
+#if HIP_VERSION > 70000000
+    // ROCM-2550: Use cuDeviceGetAttribute to check if RDMA support is available
+    // TODO: Remove once ROCM-2550 is fixed
+    // Always enable gpuDirectRDMACapable: the non-RDMA VMM code path in
+    // HIP crashes (SIGSEGV in hipMemMap) after many allocations.
+    memprop.allocFlags.gpuDirectRDMACapable = 1;
+    // // Query device to see if RDMA support is available
+    // flag = 0;
     // CUCHECK(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, currentDev));
-    if (flag) memprop.allocFlags.gpuDirectRDMACapable = 1;
+    // if (flag) memprop.allocFlags.gpuDirectRDMACapable = 1;
+#endif
     CUCHECK(cuMemGetAllocationGranularity(&memGran, &memprop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
     CUDACHECK(cudaGetDeviceCount(&dcnt));
     ALIGN_SIZE(handleSize, memGran);

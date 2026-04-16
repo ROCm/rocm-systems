@@ -67,7 +67,7 @@ jobs:
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
-      extra_cmake_options: >
+      cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF 
         -DTHEROCK_BUILD_TESTING=ON 
         -DTHEROCK_BUNDLE_SYSDEPS=ON 

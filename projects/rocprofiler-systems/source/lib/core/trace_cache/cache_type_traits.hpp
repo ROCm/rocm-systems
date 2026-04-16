@@ -22,7 +22,9 @@
 
 #pragma once
 #include "common/span.hpp"
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -104,13 +106,35 @@ template <typename T>
 inline constexpr bool is_vector_v = is_vector<T>::value;
 
 template <typename T>
+struct is_array : std::false_type
+{};
+
+template <typename T, size_t N>
+struct is_array<std::array<T, N>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_array_v = is_array<T>::value;
+
+template <typename T>
 static constexpr bool is_string_view_v =
     std::is_same_v<std::decay_t<T>, std::string_view>;
 
 template <typename T>
+struct is_optional : std::false_type
+{};
+
+template <typename T>
+struct is_optional<std::optional<T>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_optional_v = is_optional<T>::value;
+
+template <typename T>
 inline constexpr bool is_supported_type_v =
     is_span_v<T> || std::is_integral_v<T> || std::is_floating_point_v<T> ||
-    is_string_view_v<T> || is_vector_v<T>;
+    is_string_view_v<T> || is_vector_v<T> || is_optional_v<T> || is_array_v<T>;
 
 template <typename T>
 struct is_enum_class

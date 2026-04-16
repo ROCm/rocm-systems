@@ -93,6 +93,12 @@ else()
 endif(BUILD_FROM_SOURCE)
 find_package(FFmpeg QUIET)
 
+# Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
+set(USING_THE_ROCK OFF)
+if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  set(USING_THE_ROCK ON)
+endif()
+
 # 1 - videoDecodeRaw HEVC
 add_test(
   NAME
@@ -170,7 +176,7 @@ add_test(
             --test-command "rocdecodenegativetest"
 )
 
-if(FFMPEG_FOUND)
+if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
   message("-- ${Green}${PROJECT_NAME} FFmpeg found - rocdecode tests requiring FFmpeg added")
   # 7 - videoDecode HEVC
   add_test(
@@ -308,4 +314,4 @@ if(FFMPEG_FOUND)
   endif(rocdecode-host_FOUND)
 else()
   message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")
-endif(FFMPEG_FOUND)
+endif(FFMPEG_FOUND AND NOT USING_THE_ROCK)

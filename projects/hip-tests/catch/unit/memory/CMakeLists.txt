@@ -1,22 +1,6 @@
-# Copyright (c) 2024 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # Common Tests - Test independent of all platforms
 set(COMMON_SHARED_SRC DriverContext.cc)
@@ -27,8 +11,6 @@ set(COMMON_SHARED_SRC DriverContext.cc)
 # But this exposes several problems with hipcc and build system on windows.
 # While those are fixed, this hack should allow us to pass windows CI.
 set(TEST_SRC
-    malloc.cc
-    hipMemsetBasic.cc
     hipMemcpy2DToArray.cc
     hipMemcpy2DToArray_old.cc
     hipMemcpy2DToArrayAsync.cc
@@ -38,7 +20,6 @@ set(TEST_SRC
     hipMemcpy3DAsync.cc
     hipMemcpy3DAsync_old.cc
     hipMemcpyParam2D.cc
-    hipMemcpyParam2D_old.cc
     hipMemcpyParam2DAsync.cc
     hipMemcpyParam2DAsync_old.cc
     hipMemcpy2D.cc
@@ -97,14 +78,10 @@ set(TEST_SRC
     hipMemsetD2D32Async.cc
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
-    )
-
-if(UNIX)
-  set(TEST_SRC ${TEST_SRC} hipMemPoolExportPointer.cc
-  hipMemPoolExportToShareableHandle.cc
-  hipMemPoolImportFromShareableHandle.cc
-  hipMemPoolImportPointer.cc)
-endif()
+    hipMemPoolExportPointer.cc
+    hipMemPoolExportToShareableHandle.cc
+    hipMemPoolImportFromShareableHandle.cc
+    hipMemPoolImportPointer.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -140,8 +117,14 @@ if(UNIX)
     set(NUMA "${NUMA_LIBRARIES}")
   else()
     find_library(NUMA NAMES numa REQUIRED)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+  endif()
+  if(NUMA_INCLUDE_DIR)
+    target_include_directories(MemoryTest1 PRIVATE ${NUMA_INCLUDE_DIR})
   endif()
   target_link_libraries(MemoryTest1 ${NUMA})
+  # link rt for shm_open/shm_unlink used by cross-platform IPC helpers
+  target_link_libraries(MemoryTest1 rt)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd" AND UNIX)
@@ -167,7 +150,6 @@ set(TEST_SRC
     hipMemPoolTrimTo.cc
     hipMallocFromPoolAsync.cc
     hipMemcpyPeer.cc
-    hipMemcpyPeer_old.cc
     hipMemcpyPeerAsync.cc
     hipMemcpyPeerAsync_old.cc
     hipMemcpyWithStream_old.cc
@@ -196,6 +178,7 @@ set(TEST_SRC
     hipPointerGetAttribute.cc
     hipDrvPtrGetAttributes.cc
     hipMemPrefetchAsync.cc
+    hipMemPrefetchBatchAsync.cc
     hipMemGetInfo.cc
     hipFree.cc
     hipFreeArray.cc
@@ -210,7 +193,6 @@ set(TEST_SRC
     hipFreeHost.cc
     hipMallocAsync.cc
     hipStreamAttachMemAsync.cc
-    hipMemRangeGetAttributes_old.cc
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
