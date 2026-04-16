@@ -276,8 +276,8 @@ struct_amdsmi_hsmp_driver_version_t._fields_ = [
 
 amdsmi_hsmp_driver_version_t = struct_amdsmi_hsmp_driver_version_t
 
-# values for enumeration 'processor_type_t'
-processor_type_t__enumvalues = {
+# values for enumeration 'amdsmi_processor_type_t'
+amdsmi_processor_type_t__enumvalues = {
     0: 'AMDSMI_PROCESSOR_TYPE_UNKNOWN',
     1: 'AMDSMI_PROCESSOR_TYPE_AMD_GPU',
     2: 'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
@@ -299,7 +299,10 @@ AMDSMI_PROCESSOR_TYPE_AMD_APU = 6
 AMDSMI_PROCESSOR_TYPE_AMD_NIC = 7
 AMDSMI_PROCESSOR_TYPE_BRCM_NIC = 8
 AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH = 9
-processor_type_t = ctypes.c_uint32 # enum
+amdsmi_processor_type_t = ctypes.c_uint32 # enum
+# Backward-compatibility alias; new code should use amdsmi_processor_type_t.
+processor_type_t = amdsmi_processor_type_t
+processor_type_t__enumvalues = amdsmi_processor_type_t__enumvalues
 
 # values for enumeration 'amdsmi_status_t'
 amdsmi_status_t__enumvalues = {
@@ -2878,7 +2881,7 @@ except AttributeError:
 try:
     amdsmi_get_processor_type = _libraries['libamd_smi.so'].amdsmi_get_processor_type
     amdsmi_get_processor_type.restype = amdsmi_status_t
-    amdsmi_get_processor_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(processor_type_t)]
+    amdsmi_get_processor_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_processor_type_t)]
 except AttributeError:
     pass
 try:
@@ -2896,7 +2899,7 @@ except AttributeError:
 try:
     amdsmi_get_processor_handles_by_type = _libraries['libamd_smi.so'].amdsmi_get_processor_handles_by_type
     amdsmi_get_processor_handles_by_type.restype = amdsmi_status_t
-    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
+    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, amdsmi_processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -4837,7 +4840,8 @@ __all__ = \
     'amdsmi_voltage_type_t', 'amdsmi_vram_info_t',
     'amdsmi_vram_type_t', 'amdsmi_vram_usage_t', 'amdsmi_xgmi_info_t',
     'amdsmi_xgmi_link_status_t', 'amdsmi_xgmi_link_status_type_t',
-    'amdsmi_xgmi_status_t', 'processor_type_t', 'size_t',
+    'amdsmi_xgmi_status_t', 'amdsmi_processor_type_t', 'processor_type_t',
+    'size_t',
     'struct__links', 'struct_amd_metrics_table_header_t',
     'struct_amdsmi_accelerator_partition_profile_config_t',
     'struct_amdsmi_accelerator_partition_profile_t',
