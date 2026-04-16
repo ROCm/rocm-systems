@@ -43,7 +43,8 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --kernel-trace
         --selected-regions-ref-count --selected-regions -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-nested-trace -o out --output-format json
-        --log-level info -- $<TARGET_FILE:roctx-pause-resume>
+        --log-level info --
+        $<TARGET_FILE:roctx-pause-resume> --num-blocks 512 --iterations 8192
     DEPENDS roctx-pause-resume
     TIMEOUT 60
     LABELS "integration-tests;pause-resume"
@@ -69,7 +70,8 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --selected-regions --kernel-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-selected-kernel -o out --output-format json
-        --log-level info -- $<TARGET_FILE:roctx-pause-resume>
+        --log-level info --
+        $<TARGET_FILE:roctx-pause-resume> --num-blocks 512 --iterations 8192
     DEPENDS roctx-pause-resume
     TIMEOUT 60
     LABELS "integration-tests;pause-resume;selected-regions"

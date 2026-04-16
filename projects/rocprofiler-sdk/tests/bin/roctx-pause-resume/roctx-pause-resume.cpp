@@ -25,7 +25,12 @@
 // hip header file
 #include <hip/hip_runtime.h>
 
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <string_view>
 
 #define WIDTH 1024
 
@@ -111,19 +116,34 @@ nested_kernel(float* out, float* in, const int width)
     REPEAT_4(X)  // 64+32+4=100
 
 __global__ void
-pc_sampling_kernel(const int c)
+pc_sampling_kernel(const int c, const int iters)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < PC_SAMPLING_ITERS; i++)
+    for(int i = 0; i < iters; i++)
     {
         REPEAT_100(ASM_LINE);
     }
 }
 
 int
-main()
+main(int argc, char** argv)
 {
+    // Parse optional CLI arguments for parametrized testing
+    uint32_t num_blocks      = NUM_BLOCKS;
+    int      pc_sample_iters = PC_SAMPLING_ITERS;
+    for(int arg = 1; arg < argc; ++arg)
+    {
+        auto sv = std::string_view{argv[arg]};
+        if(sv == "--num-blocks" && arg + 1 < argc)
+            num_blocks = static_cast<uint32_t>(std::stoi(argv[++arg]));
+        else if(sv == "--iterations" && arg + 1 < argc)
+            pc_sample_iters = std::stoi(argv[++arg]);
+    }
+
+    std::cerr << "roctx-pause-resume: num_blocks=" << num_blocks
+              << " iterations=" << pc_sample_iters << "\n";
+
     auto tid = roctx_thread_id_t{};
     // get the thread id recognized by rocprofiler-sdk from roctx
     roctxGetThreadId(&tid);
@@ -161,7 +181,6 @@ main()
     float*           result                   = nullptr;
     float            varA                     = 5.5;
     float            varB                     = 11.7;
-    uint32_t         num_blocks               = NUM_BLOCKS;
     checkHipErrors(hipMallocAsync(&result, sizeof(float), stream));
     for(auto i = 0; i < NUM_KERNELS; ++i)
     {
@@ -181,7 +200,8 @@ main()
                                WIDTH);
             // Use max(i, 1) to ensure at least 1 thread per block (i=0 would be invalid)
             int threads_per_block = (i > 0 ? i : 1);
-            pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block);
+            pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block,
+                                                                  pc_sample_iters);
             // Check for kernel launch errors
             checkHipErrors(hipGetLastError());
             roctxProfilerPause(tid);

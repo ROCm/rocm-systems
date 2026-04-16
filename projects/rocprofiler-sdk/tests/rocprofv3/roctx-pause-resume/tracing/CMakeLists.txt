@@ -37,26 +37,43 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(roctx-pause-resume-env "${PRELOAD_ENV}")
 
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-roctx-pause-resume-tracing
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --kernel-trace --pmc
-        SQ_WAVES -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json
-        --log-level info -- $<TARGET_FILE:roctx-pause-resume>
-    DEPENDS roctx-pause-resume
-    TIMEOUT 60
-    LABELS "integration-tests;pause-resume"
-    ENVIRONMENT "${roctx-pause-resume-env}"
-    FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-tracing)
+# Test matrix: (num_blocks, iterations, timeout)
+# Workload is kept roughly constant by reducing iterations as grid size grows.
+set(ROCTX_TRACING_TEST_MATRIX
+    "256;8192;60"
+    "512;8192;60"
+    "1024;4096;60"
+    "2048;2048;90"
+    "4096;1024;120")
 
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-roctx-pause-resume-tracing
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-trace/out_results.json
-    TIMEOUT 45
-    LABELS "integration-tests;pause-resume"
-    FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-tracing
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+foreach(_CONFIG ${ROCTX_TRACING_TEST_MATRIX})
+    list(GET _CONFIG 0 _NUM_BLOCKS)
+    list(GET _CONFIG 1 _ITERATIONS)
+    list(GET _CONFIG 2 _TIMEOUT)
+
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-roctx-pause-resume-tracing-blocks-${_NUM_BLOCKS}
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --kernel-trace --pmc
+            SQ_WAVES -d ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace-${_NUM_BLOCKS} -o out
+            --output-format json --log-level info --
+            $<TARGET_FILE:roctx-pause-resume> --num-blocks ${_NUM_BLOCKS}
+            --iterations ${_ITERATIONS}
+        DEPENDS roctx-pause-resume
+        TIMEOUT ${_TIMEOUT}
+        LABELS "integration-tests;pause-resume"
+        ENVIRONMENT "${roctx-pause-resume-env}"
+        FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-tracing-blocks-${_NUM_BLOCKS})
+
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-roctx-pause-resume-tracing-blocks-${_NUM_BLOCKS}
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        ARGS --json-input
+             ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-trace-${_NUM_BLOCKS}/out_results.json
+        TIMEOUT 45
+        LABELS "integration-tests;pause-resume"
+        FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-tracing-blocks-${_NUM_BLOCKS}
+        FAIL_REGULAR_EXPRESSION "AssertionError")
+endforeach()
