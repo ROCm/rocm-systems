@@ -148,7 +148,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
   uint64_t event_age = core::Runtime::runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
   if (!event_age && prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
 
-  static const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
+  const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
   static const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
   static const uint32_t &signal_abort_timeout =
     core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
