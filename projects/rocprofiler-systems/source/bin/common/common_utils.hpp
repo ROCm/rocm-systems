@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -43,10 +44,16 @@ struct translated_args
 
 /**
  * Translate legacy preset flags (e.g., --balanced -> --preset=balanced)
+ * and deprecated flag aliases (e.g., --cputime -> --sample-cputime)
  * and split argv into parser args and command args (separated by "--").
+ *
+ * Also maps old flag names to new canonical names.
+ * Flags with '=' values (e.g. --freq=100) are handled by splitting on '=' before lookup.
  */
 [[nodiscard]] translated_args
-translate_arguments(int argc, char** argv, preset_registry& registry);
+translate_arguments(
+    int argc, char** argv, preset_registry& registry,
+    const std::unordered_map<std::string, std::string>& deprecated_flags = {});
 
 /**
  * Export configuration to JSON file or stdout.
@@ -85,15 +92,23 @@ const domain_help_map&
 get_domain_help_map();
 
 void
-print_compact_help(std::string_view tool_name, std::ostream& os = std::cout);
+print_compact_help(std::string_view tool_name, std::ostream& out = std::cout);
 
 bool
 print_help_for_topic(const std::string& captured_help, std::string_view topic,
-                     std::string_view tool_name, std::ostream& os = std::cout);
+                     std::string_view tool_name, std::ostream& out = std::cout);
 
 bool
 print_help_for_domain(const std::string& captured_help, std::string_view domain,
-                      std::string_view tool_name, std::ostream& os = std::cout);
+                      std::string_view tool_name, std::ostream& out = std::cout);
+
+void
+print_command(const std::vector<char*>& argv, std::string_view prefix = {});
+
+void
+print_environment(const std::vector<char*>&                   env,
+                  const std::unordered_set<std::string_view>& updated_envs,
+                  bool include_general_vars = false, std::string_view prefix = {});
 
 template <typename ParserT>
 std::string
@@ -145,7 +160,7 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
                       << "Available topics (use --help=<topic>):\n";
 
             std::cerr << "\n  Group topics:\n";
-            for(const auto& [name, _] : get_help_topic_map())
+            for(const auto& [name, groups] : get_help_topic_map())
                 std::cerr << "    " << name << "\n";
 
             std::cerr << "\n  Domain topics:\n";
