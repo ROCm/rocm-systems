@@ -916,17 +916,13 @@ class DeadlockAnalyzer:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_wg_list(wg_set):
-        wg_list = sorted(wg_set)
-        parts = [f'({x},{y},{z})' for (x, y, z) in wg_list[:_MAX_WGS_SHOWN]]
+    def _format_wgwf_list(wgwf_set):
+        wgwf_list = sorted(wgwf_set)
+        parts = [f'({x},{y},{z})/{wf}' for (x, y, z, wf) in wgwf_list[:_MAX_WGS_SHOWN]]
         result = ','.join(parts)
-        if len(wg_list) > _MAX_WGS_SHOWN:
-            result += f' ... (+{len(wg_list) - _MAX_WGS_SHOWN} more)'
+        if len(wgwf_list) > _MAX_WGS_SHOWN:
+            result += f' ... (+{len(wgwf_list) - _MAX_WGS_SHOWN} more)'
         return result
-
-    @staticmethod
-    def _format_wf_list(wf_set):
-        return ','.join(str(w) for w in sorted(wf_set))
 
     # ------------------------------------------------------------------
     # Main report
@@ -984,17 +980,15 @@ class DeadlockAnalyzer:
             entries = group_data['entries']   # list of (inf, thread, wg, wf)
             frames  = group_data['frames']
 
-            wg_set = {wg for (_, _, wg, _) in entries}
-            wf_set = {wf for (_, _, _, wf) in entries}
+            wgwf_set = {(wg[0], wg[1], wg[2], wf) for (_, _, wg, wf) in entries}
 
             api_frame = self.detect_rocshmem_api_frame(frames)
             hint = self.detect_hint(frames)
 
-            wg_str = self._format_wg_list(wg_set)
-            wf_str = self._format_wf_list(wf_set)
+            wgwf_str = self._format_wgwf_list(wgwf_set)
 
             print(f'{c.GROUP}--- Group {group_num} ({len(entries)} wavefront(s)) ---{c.RESET}', file=out)
-            print(f'  WGs: {wg_str}  WFs: {wf_str}', file=out)
+            print(f'  WFs: {wgwf_str}', file=out)
             print('  Backtrace:', file=out)
 
             # The innermost deadlock frame is frame #0 when a known hint pattern
@@ -1143,6 +1137,25 @@ RocshmemDeadlockCommand()
 _analysis_done = False
 
 
+def _auto_analyzer_kwargs():
+    """
+    Build DeadlockAnalyzer keyword arguments from environment variables for
+    the auto-analyze path (ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1).
+
+    ROCSHMEM_DEADLOCK_CULL:
+      unset / empty  — culling disabled (default)
+      "1"            — cull using _DEFAULT_CULL_PATTERNS
+      "pat1,pat2,…"  — cull using the supplied comma-separated patterns
+    """
+    kwargs = {}
+    cull_env = os.environ.get('ROCSHMEM_DEADLOCK_CULL', '')
+    if cull_env == '1':
+        kwargs['cull_patterns'] = []        # triggers _DEFAULT_CULL_PATTERNS
+    elif cull_env:
+        kwargs['cull_patterns'] = [p for p in cull_env.split(',') if p]
+    return kwargs
+
+
 def _on_stop_once(event):
     """Stop-event handler: run analysis exactly once, then disconnect."""
     global _analysis_done
@@ -1153,7 +1166,7 @@ def _on_stop_once(event):
         gdb.events.stop.disconnect(_on_stop_once)
     except Exception:
         pass
-    DeadlockAnalyzer().report()
+    DeadlockAnalyzer(**_auto_analyzer_kwargs()).report()
 
 
 def _setup_auto_analysis():
@@ -1169,7 +1182,7 @@ def _setup_auto_analysis():
 
     if inf.is_valid() and inf.pid != 0 and inf.threads():
         # Already stopped (attach mode): analyze now
-        DeadlockAnalyzer().report()
+        DeadlockAnalyzer(**_auto_analyzer_kwargs()).report()
     else:
         # Running or not yet started: wait for the first stop event
         gdb.events.stop.connect(_on_stop_once)

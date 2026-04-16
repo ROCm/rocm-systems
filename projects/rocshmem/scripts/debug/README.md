@@ -8,7 +8,7 @@ AMD's ROCm debugger (`rocgdb`).
 | File | Purpose |
 |---|---|
 | `rocgdb_deadlock_analysis.py` | rocgdb Python script: coalesces GPU wavefront backtraces, identifies rocSHMEM API entry points, and provides deadlock hints |
-| `attach_and_analyze.sh` | Shell wrapper: finds all running instances of an executable, attaches to each, saves per-process output, prints a compact summary |
+| `attach_deadlock_analysis.sh` | Shell wrapper: finds all running instances of an executable, attaches to each, saves per-process output, prints a compact summary |
 | `deadlock_test.cc` | Intentional-deadlock test program used to validate the scripts |
 
 ---
@@ -34,7 +34,7 @@ wait loops.
 mpirun -np 4 ./my_rocshmem_app &
 
 # 2. Attach to all instances, analyze, save output
-./scripts/debug/attach_and_analyze.sh my_rocshmem_app
+./scripts/debug/attach_deadlock_analysis.sh my_rocshmem_app --directory /tmp/analysis
 
 # Output is written to ./rocshmem_deadlock_<timestamp>/
 # A compact summary is printed to stdout.
@@ -42,18 +42,20 @@ mpirun -np 4 ./my_rocshmem_app &
 
 ---
 
-## `attach_and_analyze.sh`
+## `attach_deadlock_analysis.sh`
 
 ### Usage
 
 ```
-attach_and_analyze.sh <executable_name> [output_dir]
+attach_deadlock_analysis.sh <executable_name> [--directory <dir>] [--cull[=p1,p2,...]]
 ```
 
 | Argument | Description |
 |---|---|
-| `executable_name` | Exact process name to search for (matched with `pgrep -x`) |
-| `output_dir` | Directory for per-process output files (default: `./rocshmem_deadlock_<timestamp>/`) |
+| `executable_name` | Exact process name to search for |
+| `--directory <dir>` | Directory for per-process output files (default: `./rocshmem_deadlock_<timestamp>/`) |
+| `--cull` | Cull groups stuck in GPU barriers / gridsync using the built-in default pattern list |
+| `--cull=p1,p2,...` | Cull groups whose backtrace contains any of the comma-separated substrings |
 
 ### Environment Variables
 
@@ -68,7 +70,7 @@ attach_and_analyze.sh <executable_name> [output_dir]
 Each analyzed process produces a file named:
 
 ```
-<output_dir>/analysis_pe<PE_RANK>_pid_<PID>.txt
+<output_dir>/pe<PE_RANK>_pid_<PID>.txt
 ```
 
 The MPI PE rank is read from the process's `OMPI_COMM_WORLD_RANK` environment
@@ -108,7 +110,7 @@ Full output in: ./rocshmem_deadlock_20260416_143022/
 
 The Python script can be used in three modes.
 
-### Mode 1: Batch attach (used by `attach_and_analyze.sh`)
+### Mode 1: Batch attach (used by `attach_deadlock_analysis.sh`)
 
 Attach `rocgdb` to a running process and analyze immediately:
 
@@ -214,7 +216,7 @@ Total GPU wavefronts analyzed: 64
 Unique backtrace groups: 2
 
 --- Group 1 (63 wavefront(s)) ---
-  WGs: (0,0,0),(1,0,0),(2,0,0),...  WFs: 0,1,2,...
+  WFs: (0,0,0)/0,(1,0,0)/0,(2,0,0)/0,...
   Backtrace:
     #0  rocshmem::uncached_load<long volatile> (...) at src/assembly.hpp:125
     #1  rocshmem::Context::test<long> (...) at src/context_tmpl_device.hpp:432
@@ -409,25 +411,6 @@ Without debug symbols only the outermost non-inlined frame is visible.  The
 `<<< rocSHMEM API entry` annotation still works (those functions are marked
 `__attribute__((noinline))`), but the `[HINT]` requires the inner frames
 (`wait_until`, `mlx5_poll_cq_until`, etc.) to be present.
-
-> **ROCm 7.2.1 note:** Two bitcode objects in the `RelWithDebInfo` library
-> (`rocshmem_gpu.cpp.o` and `team.cpp.o`) contain invalid `DIExpression` DWARF
-> that crashes lld's LTO verifier when linking external test programs with
-> `-fgpu-rdc`.  Workaround: strip debug info from those two objects before
-> linking (this does not affect the other ~50 objects which retain full debug
-> info):
->
-> ```bash
-> cp librocshmem.a /tmp/librocshmem_fixed.a
-> ar x /tmp/librocshmem_fixed.a rocshmem_gpu.cpp.o team.cpp.o
-> /opt/rocm/lib/llvm/bin/llvm-objcopy --strip-debug rocshmem_gpu.cpp.o
-> /opt/rocm/lib/llvm/bin/llvm-objcopy --strip-debug team.cpp.o
-> ar d /tmp/librocshmem_fixed.a rocshmem_gpu.cpp.o team.cpp.o
-> ar rcs /tmp/librocshmem_fixed.a rocshmem_gpu.cpp.o team.cpp.o
-> # Then link against /tmp/librocshmem_fixed.a
-> ```
-> Applications built entirely within the rocSHMEM CMake build system are not
-> affected.
 
 ---
 
