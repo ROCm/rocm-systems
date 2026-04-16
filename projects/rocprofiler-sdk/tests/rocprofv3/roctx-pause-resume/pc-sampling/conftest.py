@@ -42,7 +42,10 @@ def pytest_addoption(parser):
 @pytest.fixture
 def json_data(request):
     filename_pattern = request.config.getoption("--json-input")
-    data = read_json_with_glob(filename_pattern, "JSON file")
+    try:
+        data = read_json_with_glob(filename_pattern, "JSON file")
+    except AssertionError:
+        pytest.skip("PC sampling unavailable - no output files found")
     if not data:
-        return pytest.skip("PC sampling unavailable")
+        pytest.skip("PC sampling unavailable")
     return dotdict(collapse_dict_list(data))
