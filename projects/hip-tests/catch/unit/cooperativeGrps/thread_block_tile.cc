@@ -611,18 +611,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
   }
 }
 
-template <size_t TileSize>
-void __global__ partialSum(int* result)
-{
-   int sum = 1;
-   cg::thread_block mygroup = cg::this_thread_block();
-   auto mytile = cg::tiled_partition<TileSize>(mygroup);
-
-  if (threadIdx.x != warpSize - 1) {
-     *result = cg::reduce(mytile, sum, cg::plus<int>());
-  }
-}
-
 // @extraMasks  when testing coalesced_threads, this can be use to simulate
 //              divergence
 template <size_t TileSize, class Functor, class T>
