@@ -1725,6 +1725,9 @@ bool Device::populateOCLDeviceConstants() {
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
 
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
+
   if (isa().versionMajor() < 8) {
     info_.sgprsPerSimd_ = 512;
   } else if (isa().versionMajor() < 10) {

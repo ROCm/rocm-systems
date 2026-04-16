@@ -92,7 +92,7 @@ The local data share (LDS, a.k.a., "shared memory") is fast on-CU scratchpad
 that can be explicitly managed by software to effectively share data and to
 coordinate between wavefronts in a workgroup.
 
-.. figure:: ../data/performance-model/lds.*
+.. figure:: ../../data/performance-model/lds.*
    :align: center
    :alt: Performance model of the local data share (LDS) on AMD Instinct
          accelerators
@@ -288,8 +288,7 @@ instructions (``v_accvgpr_*``). These data movement instructions may be
 used by the compiler to implement lower-cost register-spill/fills on
 architectures with AGPRs.
 
-AGPRs are not available on all AMD Instinct™ accelerators. GCN GPUs,
-such as the AMD Instinct MI50 had a 256 KiB VGPR file. The AMD
+AGPRs are not available on all AMD Instinct™ accelerators. The AMD
 Instinct MI100 (CDNA) has a 2x256 KiB register file, where one half
 is available as general-purpose VGPRs, and the other half is for matrix
 math accumulation VGPRs (AGPRs). The AMD Instinct :ref:`MI2XX <mixxx-note>`

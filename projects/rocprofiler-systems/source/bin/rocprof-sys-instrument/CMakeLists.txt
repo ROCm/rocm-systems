@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems-instrument target (formerly rocprofiler-systems-exe target prior to 1.8.1)

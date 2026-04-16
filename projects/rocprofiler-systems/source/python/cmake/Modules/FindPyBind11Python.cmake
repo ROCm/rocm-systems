@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # * Find python libraries This module finds the libraries corresponding to the Python
 #   interpreter FindPythonInterp provides. This code sets the following variables:
 #
