@@ -18,14 +18,6 @@
 
 include_guard(GLOBAL)
 
-if(NOT ROCPROFSYS_BUILD_TBB)
-    find_package(TBB)
-endif()
-
-if(TBB_FOUND AND NOT ROCPROFSYS_BUILD_TBB)
-    return()
-endif()
-
 set(_tbb_components tbb tbbmalloc tbbmalloc_proxy)
 
 if(ROCPROFSYS_BUILD_TBB)
@@ -211,7 +203,10 @@ else()
 endif()
 
 set(TBB_ROOT "${TBB_ROOT_DIR}" CACHE PATH "TBB root for Dyninst" FORCE)
-rocprofiler_systems_message(STATUS "TBB root: ${TBB_ROOT_DIR}")
+rocprofiler_systems_message(STATUS "TBB include dirs: ${TBB_INCLUDE_DIRS}")
+rocprofiler_systems_message(STATUS "TBB library dirs: ${TBB_LIBRARY_DIRS}")
+rocprofiler_systems_message(STATUS "TBB libraries: ${TBB_LIBRARIES}")
+rocprofiler_systems_message(STATUS "TBB version: ${TBB_VERSION}")
 
 # =============================================================================
 # Dyninst::TBB — aggregated target for Dyninst's consumption
