@@ -28,13 +28,14 @@
  */
 
 #include <rocprofiler-sdk-rocpd/rocpd.h>
-
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <sstream>
 #include <vector>
 
 namespace
@@ -250,11 +251,153 @@ load_schema(rocpd_version_triplet_t requested_version)
     std::cout << "\n\n";
     return EXIT_SUCCESS;
 }
+
+std::vector<std::string> version_splitter(const std::string& version)
+{
+    auto version_parts = std::vector<std::string>{};
+    auto stream_version = std::istringstream{version};
+    auto part = std::string{};
+    while(std::getline(stream_version, part, '.'))
+    {
+        version_parts.push_back(part);
+    }
+    return version_parts;
+}
+
 }  // namespace
 
+// #define VERSION_TO_TRIPLET(version) (rocpd_version_triplet_t{version[0], version[1], version[2]})
+#define VERSION_STRING_TO_TRIPLET(version) (rocpd_version_triplet_t{(uint32_t)std::stoi(version[0]), (uint32_t)std::stoi(version[1]), (uint32_t)std::stoi(version[2])}) // NOLINT(readability-magic-numbers)
+
 int
-main()
+main( int argc, char** argv )
 {
+    auto list_versions = true;
+    auto load_latest_schema = true;
+    auto load_all_schemas = true;
+    auto load_requested_schema = false;
+    auto requested_schema_version = rocpd_version_triplet_t{0, 0, 0};
+
+    auto supported_commands = std::vector<std::string>{
+        "--help",
+        "-h",
+        "--list",
+        "-l",
+        "--get-all",
+        "-a",
+        "--get-version",
+        "-g",
+        "--get-latest",
+        "-L",
+    };
+
+    auto get_version_error = [](const char* name)
+    {
+        std::cerr << "rocpd-api-test: --get-version requires a rocpd schema version argument in the format <major>.<minor>.<patch>\n";
+        std::cout << "Use --list to list all supported schema versions, then example usage:\n";
+        std::cout << "   " << name << " --get-version 3.0.0\n";
+    };
+
+    auto check_version_parts = [](const std::vector<std::string>& version_parts)
+    {
+        for(const auto& part : version_parts)
+        {
+            if(!std::all_of(part.begin(), part.end(), ::isdigit))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    for(auto i = 1; i < argc; ++i)
+    {
+        //iterate over supported_commands and check if argv[i] is in the list, if --get-version, then skip the next argument
+        if(strcmp(argv[i], "--get-version") == 0)
+        {
+            i++;
+            continue;
+        }
+        if(std::find(supported_commands.begin(), supported_commands.end(), argv[i]) == supported_commands.end())
+        {
+            std::cerr << "rocpd-api-test: unsupported command: " << argv[i] << "\n";
+            return EXIT_FAILURE;
+        }
+    }
+
+    if(argc > 1)
+    {
+        if(strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)
+        {
+            std::cout << "Usage: " << argv[0] << " [--help] [--list] [--get-all] [--get-latest] [--get-version <version>]\n";
+            std::cout << "Options:\n";
+            std::cout << "  -h, --help                  : display this help message\n";
+            std::cout << "  -l, --list                  : list all supported schema versions\n";
+            std::cout << "  -a, --get-all               : get list of all schema and load all schema versions\n";
+            std::cout << "  -L, --get-latest            : load the latest schema version\n";
+            std::cout << "  -g, --get-version <version> : load the specified schema version\n\n";
+            std::cout << "Example usage:\n";
+            std::cout << "  " << argv[0] << " (no arguments)      - lists all schemas, loads latest, and iterate over all schemas\n";
+            std::cout << "  " << argv[0] << " --list              - lists all schemas\n";
+            std::cout << "  " << argv[0] << " --get-all           - iterate over all supported schema versions\n";
+            std::cout << "  " << argv[0] << " --get-latest        - loads the latest schema version\n";
+            std::cout << "  " << argv[0] << " --get-version 3.0.0 - loads the schema version 3.0.0\n";
+            return EXIT_SUCCESS;
+        }
+
+        if(strcmp(argv[1], "--list") == 0 || strcmp(argv[1], "-l") == 0)
+        {
+            list_versions = true;
+            load_latest_schema = false;
+            load_all_schemas = false;
+            load_requested_schema = false;
+        }
+
+        if(strcmp(argv[1], "--get-all") == 0 || strcmp(argv[1], "-a") == 0)
+        {
+            list_versions = false;
+            load_latest_schema = false;
+            load_all_schemas = true;
+            load_requested_schema = false;
+        }
+
+        if(strcmp(argv[1], "--get-latest") == 0 || strcmp(argv[1], "-L") == 0)
+        {
+            list_versions = false;
+            load_latest_schema = true;
+            load_all_schemas = false;
+            load_requested_schema = false;
+        }
+
+        if(strcmp(argv[1], "--get-version") == 0 || strcmp(argv[1], "-g") == 0)
+        {
+            if(argc < 3)
+            {
+                get_version_error(argv[0]);
+                return EXIT_FAILURE;
+            }
+            auto version = std::string{argv[2]};
+            //count the number of '.' in the version string
+            if(std::count(version.begin(), version.end(), '.') != 2)
+            {
+                get_version_error(argv[0]);
+                return EXIT_FAILURE;
+            }
+            auto version_parts = version_splitter(version);
+            if(check_version_parts(version_parts) == false)
+            {
+                get_version_error(argv[0]);
+                return EXIT_FAILURE;
+            }
+            requested_schema_version = VERSION_STRING_TO_TRIPLET(version_parts);
+            list_versions = false;
+            load_latest_schema = false;
+            load_all_schemas = false;
+            load_requested_schema = true;
+        }
+    }
+
+    // Get the rocpd module version
     auto major  = uint32_t{};
     auto minor  = uint32_t{};
     auto patch  = uint32_t{};
@@ -271,40 +414,59 @@ main()
     auto schema_versions_list          = rocpd_sql_schema_versions_list_t{};
     auto local_list_of_schema_versions = std::vector<rocpd_version_triplet_t>{};
 
-    status =
-        rocpd_sql_list_schema_versions(ROCPD_SQL_ENGINE_SQLITE3, nullptr, 0, &schema_versions_list);
-    if(status != ROCPD_STATUS_SUCCESS)
+    if(list_versions || load_all_schemas)
     {
-        std::cerr << "rocpd-api-test: rocpd_sql_list_schema_versions failed: "
-                  << rocpd_get_status_name(status) << "\n";
-        return EXIT_FAILURE;
-    }
-    std::cout << "rocpd-api-test: rocpd_sql_list_schema_versions OK (" << schema_versions_list.count
-              << " versions)\n";
-    for(auto i = uint64_t{0}; i < schema_versions_list.count; ++i)
-    {
-        std::cout << "  Version " << i << ": " << schema_versions_list.versions[i].major << "."
-                  << schema_versions_list.versions[i].minor << "."
-                  << schema_versions_list.versions[i].patch << "\n";
-        local_list_of_schema_versions.push_back(schema_versions_list.versions[i]);
-    }
-    rocpd_sql_free_schema_versions_list(&schema_versions_list);
-
-    std::cout << "\nLoading latest schema version (requesting 0.0.0)...\n";
-    auto latest_schema_version = rocpd_version_triplet_t{0, 0, 0};
-    if(load_schema(latest_schema_version) != EXIT_SUCCESS)
-    {
-        return EXIT_FAILURE;
+        status =
+            rocpd_sql_list_schema_versions(ROCPD_SQL_ENGINE_SQLITE3, nullptr, 0, &schema_versions_list);
+        if(status != ROCPD_STATUS_SUCCESS)
+        {
+            std::cerr << "rocpd-api-test: rocpd_sql_list_schema_versions failed: "
+                    << rocpd_get_status_name(status) << "\n";
+            return EXIT_FAILURE;
+        }
+        std::cout << "rocpd-api-test: rocpd_sql_list_schema_versions OK (" << schema_versions_list.count
+                << " versions)\n";
+        for(auto i = uint64_t{0}; i < schema_versions_list.count; ++i)
+        {
+            std::cout << "  Version " << i << ": " << schema_versions_list.versions[i].major << "."
+                    << schema_versions_list.versions[i].minor << "."
+                    << schema_versions_list.versions[i].patch << "\n";
+            local_list_of_schema_versions.push_back(schema_versions_list.versions[i]);
+        }
+        rocpd_sql_free_schema_versions_list(&schema_versions_list);
     }
 
-    std::cout << "\nNow iterating over the entire list of schema versions:\n";
-    for(const auto& version : local_list_of_schema_versions)
+    if(load_latest_schema)
     {
-        std::cout << "  For schema version: " << version.major << "." << version.minor << "."
-                  << version.patch << ", load schema...\n";
-        if(load_schema(version) != EXIT_SUCCESS)
+        std::cout << "\nLoading latest schema version (requesting 0.0.0)...\n";
+        auto latest_schema_version = rocpd_version_triplet_t{0, 0, 0};
+        if(load_schema(latest_schema_version) != EXIT_SUCCESS)
         {
             return EXIT_FAILURE;
+        }
+    }
+
+    if(load_requested_schema)
+    {
+        std::cout << "\nLoading requested schema version: " << requested_schema_version.major << "." << requested_schema_version.minor << "." << requested_schema_version.patch << "\n";
+        if(load_schema(requested_schema_version) != EXIT_SUCCESS)
+        {
+            std::cerr << "rocpd-api-test: load_schema failed. Use --list for a list of supported schema versions.\n";
+            return EXIT_FAILURE;
+        }
+    }
+
+    if(load_all_schemas)
+    {
+        std::cout << "\nNow iterating over the entire list of schema versions:\n";
+        for(const auto& version : local_list_of_schema_versions)
+        {
+            std::cout << "  For schema version: " << version.major << "." << version.minor << "."
+                    << version.patch << ", load schema...\n";
+            if(load_schema(version) != EXIT_SUCCESS)
+            {
+                return EXIT_FAILURE;
+            }
         }
     }
 
