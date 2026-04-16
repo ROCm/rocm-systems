@@ -4408,8 +4408,15 @@ class CodeGenerator:
         'vector_readlane', 'vector_writelane', 'vector_readfirstlane',
     })
 
-    def _can_share_execute(self, mnemonic: str) -> bool:
+    def _can_share_execute(self, mnemonic: str, encoding_name: str) -> bool:
         """Check if an instruction's execute() body can be shared across ISAs.
+
+        Args:
+            mnemonic: Instruction mnemonic (e.g., 'v_mov_b32')
+            encoding_name: Encoding name (e.g., 'ENC_VOP1', 'ENC_VOP3')
+
+        Returns:
+            True if instruction is universal or family_shared on ≥2 ISAs.
 
         An instruction is shareable if:
         1. It exists on 2+ ISAs with the same semantic class (family_shared
@@ -4426,13 +4433,15 @@ class CodeGenerator:
             if info.semantic_class in self._NON_SHAREABLE_CLASSES:
                 return False
             return arch in info.isa_names and len(info.isa_names) >= 2
-        # Check family_shared
+        # Check family_shared (now uses composite key)
         for fam_insts in self.shared_plan.family_shared.values():
-            if mnemonic in fam_insts:
-                info = fam_insts[mnemonic]
-                if info.semantic_class in self._NON_SHAREABLE_CLASSES:
-                    return False
-                return arch in info.isa_names and len(info.isa_names) >= 2
+            for (inst_mnem, inst_enc), info in fam_insts.items():
+                if inst_mnem == mnemonic and inst_enc == encoding_name:
+                    if info.semantic_class in self._NON_SHAREABLE_CLASSES:
+                        return False
+                    if arch in info.isa_names and len(info.isa_names) >= 2:
+                        return True
+                    # Continue searching other families (same mnemonic+encoding can appear in multiple families)
         return False
 
     def gen_insts(self) -> None:
@@ -4740,7 +4749,7 @@ class CodeGenerator:
                                 '    src_operands_[0] = dpp_src0_.get();\n'
                                 '  }\n'
                             )
-                        can_share = self._can_share_execute(inst.mnemonic)
+                        can_share = self._can_share_execute(inst.mnemonic, enc.enc_name)
                         if can_share:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
@@ -4838,7 +4847,7 @@ class CodeGenerator:
                 # any instruction in this encoding delegates to a template.
                 if self.shared_plan is not None:
                     has_shared = any(
-                        self._can_share_execute(i.mnemonic)
+                        self._can_share_execute(i.mnemonic, enc.enc_name)
                         for i in all_insts
                         if self.semantics and i.name in self.semantics.instructions
                     )

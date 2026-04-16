@@ -118,3 +118,28 @@ class TestCrossIsaAnalyzer:
         assert len(universal_set & family_set) == 0, (
             f"Overlap: {universal_set & family_set}"
         )
+
+    def test_multi_encoding_instruction_no_collision(self):
+        """Instructions with same mnemonic but different encodings should not collide."""
+        # Parse CDNA1 and CDNA4 which have v_mov_b32 in both VOP1 and VOP3
+        specs = _parse_specs(['cdna1', 'cdna4'])
+        plan = CrossIsaAnalyzer().analyze(specs)
+
+        # Verify composite keys in family_shared - extract mnemonics
+        for family, fam_insts in plan.family_shared.items():
+            # Check if any v_mov_b32 variants exist
+            v_mov_entries = [
+                (mnem, enc) for (mnem, enc) in fam_insts.keys()
+                if mnem == 'v_mov_b32'
+            ]
+
+            # If v_mov_b32 exists, ensure encoding names are unique (no overwrites)
+            if v_mov_entries:
+                encodings = [enc for _, enc in v_mov_entries]
+                assert len(encodings) == len(set(encodings)), (
+                    f"Duplicate encodings in family '{family}' for v_mov_b32: {encodings}"
+                )
+                # At least VOP1 should be present
+                assert any('VOP1' in enc for enc in encodings), (
+                    f"Expected VOP1 encoding for v_mov_b32 in family '{family}'"
+                )

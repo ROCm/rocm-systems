@@ -43,7 +43,7 @@ class SharedInstructionPlan:
     """Result of cross-ISA analysis.  Consumed by the codegen."""
 
     universal: dict[str, SharedInstInfo] = field(default_factory=dict)
-    family_shared: dict[str, dict[str, SharedInstInfo]] = field(default_factory=dict)
+    family_shared: dict[str, dict[tuple[str, str], SharedInstInfo]] = field(default_factory=dict)
     isa_exclusive: dict[str, set[str]] = field(default_factory=dict)
 
     @property
@@ -193,7 +193,7 @@ class CrossIsaAnalyzer:
                 # Determine which family this belongs to.
                 family_name = self._classify_family(present_isas)
                 _, enc0, inst0, sem0 = entries[0]
-                plan.family_shared.setdefault(family_name, {})[mnemonic] = SharedInstInfo(
+                plan.family_shared.setdefault(family_name, {})[(mnemonic, enc0.enc_name)] = SharedInstInfo(
                     mnemonic=mnemonic,
                     encoding_name=enc0.enc_name,
                     field_layout=_field_signature(enc0),
@@ -211,13 +211,18 @@ class CrossIsaAnalyzer:
                 key = (_field_signature(enc), _sem_key(sem), _operand_signature(inst))
                 groups.setdefault(key, []).append(isa_name)
 
-            for (fsig, skey, _osig), group_isas in groups.items():
+            for (fsig, skey, osig), group_isas in groups.items():
                 if len(group_isas) >= 2:
+                    # Shareable across 2+ ISAs
                     family_name = self._classify_family(set(group_isas))
+                    # Find an entry that matches this group's signatures
                     _, enc0, inst0, sem0 = next(
-                        e for e in entries if e[0] == group_isas[0]
+                        e for e in entries
+                        if e[0] == group_isas[0]
+                        and _field_signature(e[1]) == fsig
+                        and _operand_signature(e[2]) == osig
                     )
-                    plan.family_shared.setdefault(family_name, {})[mnemonic] = SharedInstInfo(
+                    plan.family_shared.setdefault(family_name, {})[(mnemonic, enc0.enc_name)] = SharedInstInfo(
                         mnemonic=mnemonic,
                         encoding_name=enc0.enc_name,
                         field_layout=fsig,
@@ -227,6 +232,7 @@ class CrossIsaAnalyzer:
                         isa_names=sorted(group_isas),
                     )
                 else:
+                    # ISA-exclusive (single ISA) - gets inline code
                     plan.isa_exclusive.setdefault(group_isas[0], set()).add(mnemonic)
 
         return plan
