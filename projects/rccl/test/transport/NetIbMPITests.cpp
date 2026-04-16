@@ -3788,6 +3788,12 @@ TEST_F(NetIbMPITest, PerfSingleNicVsFourNicMerged) {
     const int mergedDev = CreateMergedDevice(4, rank);
     ASSERT_GE(mergedDev, 0);
 
+    // Read NCCL_IB_QPS_PER_CONNECTION so labels reflect the actual QP count in use.
+    const char* qpsEnv = getenv("NCCL_IB_QPS_PER_CONNECTION");
+    const int qpsPerConn = (qpsEnv && atoi(qpsEnv) > 0) ? atoi(qpsEnv) : 1;
+    char singleLabel[32];
+    snprintf(singleLabel, sizeof(singleLabel), "SingleNIC_%dQP", qpsPerConn);
+
     struct PerfResult {
         double gbps = 0.0;
         double seconds = 0.0;
@@ -4109,8 +4115,8 @@ auto RunPerfCase = [&](int dev, const char* label, int tagBase) -> PerfResult {
         return result;
     };
 
-    PerfResult singleLocalPerf = RunPerfCase(singleDev, "SingleNIC", 1000);
-    CaseSummary singleLocal = BuildCaseSummary(singleDev, "SingleNIC", singleLocalPerf);
+    PerfResult singleLocalPerf = RunPerfCase(singleDev, singleLabel, 1000);
+    CaseSummary singleLocal = BuildCaseSummary(singleDev, singleLabel, singleLocalPerf);
     CaseSummary singlePeer = ReceivePeerCaseSummaryOnRank0(singleLocal, 7001);
 
     PerfResult mergedLocalPerf = RunPerfCase(mergedDev, "Merged4NIC", 2000);
@@ -4118,13 +4124,9 @@ auto RunPerfCase = [&](int dev, const char* label, int tagBase) -> PerfResult {
     CaseSummary mergedPeer = ReceivePeerCaseSummaryOnRank0(mergedLocal, 7002);
 
     if (rank == 0) {
-        double localRatio =
-            (singleLocal.perf.gbps > 0.0) ? (mergedLocal.perf.gbps / singleLocal.perf.gbps) : 0.0;
-        double peerRatio =
-            (singlePeer.perf.gbps > 0.0) ? (mergedPeer.perf.gbps / singlePeer.perf.gbps) : 0.0;
         double singleAvg = 0.5 * (singleLocal.perf.gbps + singlePeer.perf.gbps);
         double mergedAvg = 0.5 * (mergedLocal.perf.gbps + mergedPeer.perf.gbps);
-        double avgRatio = (singleAvg > 0.0) ? (mergedAvg / singleAvg) : 0.0;
+        double ratio = (singleAvg > 0.0) ? mergedAvg / singleAvg : 0.0;
 
         fprintf(stderr,
                 "[ PERF ][rank0] %s dev=%d name=%s speed=%d bytes=%zu time=%.6f s bw=%.3f Gbit/s\n",
@@ -4145,19 +4147,13 @@ auto RunPerfCase = [&](int dev, const char* label, int tagBase) -> PerfResult {
                 mergedPeer.perf.bytes, mergedPeer.perf.seconds, mergedPeer.perf.gbps);
 
         fprintf(stderr,
-                "[ PERF ][rank0] ratio %s/%s = %.3fx\n",
-                mergedLocal.label, singleLocal.label, localRatio);
-        fprintf(stderr,
-                "[ PERF ][rank1] ratio %s/%s = %.3fx\n",
-                mergedPeer.label, singlePeer.label, peerRatio);
-        fprintf(stderr,
-                "[ PERF ][avg  ] %s=%.3f Gbit/s, %s=%.3f Gbit/s, ratio=%.3fx\n",
-                singleLocal.label, singleAvg, mergedLocal.label, mergedAvg, avgRatio);
+                "[ PERF ][avg  ] %s=%.3f Gbit/s, Merged4NIC=%.3f Gbit/s, ratio=%.3fx\n",
+                singleLabel, singleAvg, mergedAvg, ratio);
 
         EXPECT_GT(singleLocal.perf.gbps, 0.0);
         EXPECT_GT(mergedLocal.perf.gbps, 0.0);
-        EXPECT_GT(singlePeer.perf.gbps, 0.0);
-        EXPECT_GT(mergedPeer.perf.gbps, 0.0);
+        EXPECT_GT(singlePeer.perf.gbps,  0.0);
+        EXPECT_GT(mergedPeer.perf.gbps,  0.0);
 
         EXPECT_GT(mergedLocal.perf.gbps, 0.5 * singleLocal.perf.gbps)
             << "Merged 4-NIC bandwidth is unexpectedly much worse than single NIC on rank 0";
