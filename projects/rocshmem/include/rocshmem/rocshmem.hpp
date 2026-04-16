@@ -245,6 +245,38 @@ __host__ int rocshmem_n_pes();
 __host__ int rocshmem_my_pe();
 
 /**
+ * @brief Query the OpenSHMEM specification version this library implements.
+ *
+ * @param[out] major  ROCSHMEM_MAJOR_VERSION.
+ * @param[out] minor  ROCSHMEM_MINOR_VERSION.
+ */
+__host__ void rocshmem_info_get_version(int *major, int *minor);
+
+/**
+ * @brief Returns the vendor-defined string identifying this library.
+ *
+ * Copies ROCSHMEM_VENDOR_STRING into @p name. The caller must provide
+ * a buffer of at least ROCSHMEM_MAX_NAME_LEN bytes.
+ *
+ * @param[out] name  Buffer to receive the vendor string.
+ */
+__host__ void rocshmem_info_get_name(char *name);
+
+/**
+ * @brief Returns the vendor-specific library version of rocSHMEM.
+ *
+ * Writes ROCSHMEM_VENDOR_MAJOR_VERSION into @p major,
+ * ROCSHMEM_VENDOR_MINOR_VERSION into @p minor, and
+ * ROCSHMEM_VENDOR_PATCH_VERSION into @p patch.
+ *
+ * @param[out] major  Vendor major version.
+ * @param[out] minor  Vendor minor version.
+ * @param[out] patch  Vendor patch version.
+ */
+__host__ void rocshmem_vendor_get_version_info(int *major, int *minor,
+                                               int *patch);
+
+/**
  * @brief Creates an OpenSHMEM context.
  *
  * @param[in] options Options for context creation. Ignored in current design.
