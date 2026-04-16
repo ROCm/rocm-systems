@@ -344,13 +344,18 @@ register_sdk_pmc_source(
     uint64_t context_handle, const std::vector<uint64_t>& agent_ids,
     const std::vector<uint64_t>&                 profile_configs,
     const std::vector<size_t>&                   device_indices,
-    const std::vector<std::vector<std::string>>& counter_names_per_agent)
+    const std::vector<std::vector<std::string>>& counter_names_per_agent,
+    const std::vector<
+        std::vector<device_providers::rocprofiler_sdk::counter_instance_info>>&
+        instance_infos_per_agent)
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     try
     {
         using agent_info = pmc::device_providers::rocprofiler_sdk::agent_info;
+        using instance_info_t =
+            pmc::device_providers::rocprofiler_sdk::counter_instance_info;
 
         auto context = rocprofiler_context_id_t{ context_handle };
         auto agents  = std::vector<agent_info>{};
@@ -358,13 +363,16 @@ register_sdk_pmc_source(
 
         for(size_t i = 0; i < agent_ids.size(); ++i)
         {
-            auto names = (i < counter_names_per_agent.size())
-                             ? counter_names_per_agent[i]
-                             : std::vector<std::string>{};
+            auto names     = (i < counter_names_per_agent.size())
+                                 ? counter_names_per_agent[i]
+                                 : std::vector<std::string>{};
+            auto instances = (i < instance_infos_per_agent.size())
+                                 ? instance_infos_per_agent[i]
+                                 : std::vector<instance_info_t>{};
             agents.push_back(
                 agent_info{ rocprofiler_agent_id_t{ agent_ids[i] },
                             rocprofiler_counter_config_id_t{ profile_configs[i] },
-                            device_indices[i], std::move(names) });
+                            device_indices[i], std::move(names), std::move(instances) });
         }
 
         g_sdk_pmc_provider =

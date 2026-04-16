@@ -18,6 +18,7 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
+#include "library/pmc/collectors/sdk_pmc/types.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -2705,11 +2706,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         static auto profile_map = profile_map_t{};
         profile_map.clear();
 
-        auto null_buffer             = rocprofiler_buffer_id_t{ 0 };
-        auto agent_ids               = std::vector<uint64_t>{};
-        auto profile_configs         = std::vector<uint64_t>{};
-        auto device_indices          = std::vector<size_t>{};
-        auto counter_names_per_agent = std::vector<std::vector<std::string>>{};
+        auto null_buffer = rocprofiler_buffer_id_t{ 0 };
+        using instance_info_t =
+            pmc::device_providers::rocprofiler_sdk::counter_instance_info;
+
+        auto agent_ids                = std::vector<uint64_t>{};
+        auto profile_configs          = std::vector<uint64_t>{};
+        auto device_indices           = std::vector<size_t>{};
+        auto counter_names_per_agent  = std::vector<std::vector<std::string>>{};
+        auto instance_infos_per_agent = std::vector<std::vector<instance_info_t>>{};
 
         auto set_profile = [](rocprofiler_context_id_t ctx, rocprofiler_agent_id_t agent,
                               rocprofiler_device_counting_agent_cb_t set_config,
@@ -2761,15 +2766,47 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             }
             counter_names_per_agent.push_back(std::move(names));
 
+            // Build instance_id → qualified_name map from v1 counter info
+            auto instance_infos = std::vector<instance_info_t>{};
+            for(const auto& cid : counter_ids)
+            {
+                rocprofiler_counter_info_v1_t cinfo{};
+                const auto cinfo_status = rocprofiler_query_counter_info(
+                    cid, ROCPROFILER_COUNTER_INFO_VERSION_1, &cinfo);
+                if(cinfo_status != ROCPROFILER_STATUS_SUCCESS || cinfo.name == nullptr)
+                    continue;
+
+                const auto base_name = std::string{ cinfo.name };
+                for(uint64_t inst = 0; inst < cinfo.dimensions_instances_count; ++inst)
+                {
+                    const auto* dim_inst = cinfo.dimensions_instances[inst];
+                    auto        dims =
+                        std::vector<pmc::collectors::sdk_pmc::dimension_position>{};
+                    for(uint64_t dim_idx = 0; dim_idx < dim_inst->dimensions_count;
+                        ++dim_idx)
+                    {
+                        dims.push_back(
+                            { pmc::collectors::sdk_pmc::abbreviate_dimension_name(
+                                  dim_inst->dimensions[dim_idx]->dimension_name),
+                              dim_inst->dimensions[dim_idx]->index });
+                    }
+                    instance_infos.push_back(
+                        { dim_inst->instance_id,
+                          pmc::collectors::sdk_pmc::make_qualified_name(base_name,
+                                                                        dims) });
+                }
+            }
+            instance_infos_per_agent.push_back(std::move(instance_infos));
+
             ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
                 _data->sdk_pmc_ctx, null_buffer, _agent_id, set_profile, &profile_map));
         }
 
         if(!agent_ids.empty())
         {
-            pmc::register_sdk_pmc_source(_data->sdk_pmc_ctx.handle, agent_ids,
-                                         profile_configs, device_indices,
-                                         counter_names_per_agent);
+            pmc::register_sdk_pmc_source(
+                _data->sdk_pmc_ctx.handle, agent_ids, profile_configs, device_indices,
+                counter_names_per_agent, instance_infos_per_agent);
         }
     }
 

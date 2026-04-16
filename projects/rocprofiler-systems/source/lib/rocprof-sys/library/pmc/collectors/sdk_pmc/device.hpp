@@ -4,6 +4,7 @@
 #pragma once
 
 #include "library/pmc/collectors/sdk_pmc/types.hpp"
+#include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 #include "logger/debug.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -26,9 +27,9 @@ namespace rocprofsys::pmc::collectors::sdk_pmc
  * per-agent profile configuration. Polling is done via
  * rocprofiler_sample_device_counting_service().
  *
- * Counter names are provided at construction time (resolved during tool_init
- * from ROCPROFSYS_ROCM_EVENTS). On the first sample call, a mapping from
- * counter_id → index is built so subsequent samples skip name queries entirely.
+ * An instance_id → qualified_name map is built at construction from pre-resolved
+ * dimension info (provided by tool_init via v1 counter info). Sampling performs
+ * only a map lookup per record — no SDK queries in the hot path.
  *
  * @tparam Driver The rocprofiler-sdk driver type (real or mock for testing).
  */
@@ -36,23 +37,32 @@ template <typename Driver>
 class device
 {
 public:
+    using instance_info_vec =
+        std::vector<device_providers::rocprofiler_sdk::counter_instance_info>;
+
     device(std::shared_ptr<Driver> driver, rocprofiler_context_id_t context,
            rocprofiler_agent_id_t          agent_id,
            rocprofiler_counter_config_id_t profile_config, size_t logical_index,
-           std::vector<std::string> counter_names)
+           std::vector<std::string> counter_names, instance_info_vec instance_infos = {})
     : m_driver_api{ std::move(driver) }
     , m_context{ context }
     , m_agent_id{ agent_id }
     , m_profile_config{ profile_config }
     , m_index{ logical_index }
     , m_counter_names{ std::move(counter_names) }
+    , m_vendor_name("AMD")
+    , m_is_supported(true)
     {
-        m_device_name  = "GPU" + std::to_string(m_index);
-        m_product_name = "GPU " + std::to_string(m_index);
-        m_vendor_name  = "AMD";
+        m_device_name  = fmt::format("GPU {}", m_index);
+        m_product_name = fmt::format("GPU {}", m_index);
 
-        m_is_supported            = true;
         m_supported_metrics.value = 1;  // non-zero = has counters
+
+        // Build instance_id → qualified_name lookup from pre-resolved info
+        for(auto& info : instance_infos)
+        {
+            m_instance_map[info.instance_id] = std::move(info.qualified_name);
+        }
     }
 
     [[nodiscard]] bool is_supported() const noexcept { return m_is_supported; }
@@ -92,12 +102,28 @@ public:
     }
 
     /**
+     * @brief Get the list of qualified counter names for all dimension instances.
+     *
+     * Returns the values from the instance_id map, which are the fully qualified
+     * names like "SQC_ICACHE_HITS[WGP=0,SA=0,SE=0]".
+     */
+    [[nodiscard]] std::vector<std::string> get_qualified_names() const
+    {
+        std::vector<std::string> names;
+        names.reserve(m_instance_map.size());
+        for(const auto& [instance_id, counter_name] : m_instance_map)
+        {
+            names.push_back(counter_name);
+        }
+        return names;
+    }
+
+    /**
      * @brief Poll GPU hardware counters via device_counting_service.
      *
-     * Calls rocprofiler_sample_device_counting_service() and decodes the returned
-     * counter records into a metrics struct. On the first call, builds a mapping
-     * from counter_id → index into m_counter_names so subsequent calls skip
-     * name queries entirely.
+     * Calls rocprofiler_sample_device_counting_service() and looks up each
+     * returned record's instance_id in the pre-built map to get the qualified
+     * counter name. No SDK queries in the hot path.
      *
      * @param enabled Which counters to collect (currently unused — all configured
      *        counters are always sampled).
@@ -117,7 +143,7 @@ public:
         LOG_DEBUG("Sampling device {} (context={}, agent={}, profile={})", m_index,
                   m_context.handle, m_agent_id.handle, m_profile_config.handle);
 
-        auto status = m_driver_api->sample_device_counting_service(
+        const auto status = m_driver_api->sample_device_counting_service(
             m_context, {}, ROCPROFILER_COUNTER_FLAG_NONE, output_records, &rec_count);
 
         if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -129,54 +155,25 @@ public:
 
         LOG_DEBUG("Device {} returned {} counter records", m_index, rec_count);
 
-        const bool need_name_init = !m_counter_id_map_initialized;
-
         result.counters.reserve(rec_count);
 
         for(size_t i = 0; i < rec_count; ++i)
         {
-            rocprofiler_counter_id_t counter_id{};
-            auto                     query_status =
-                m_driver_api->query_record_counter_id(output_records[i].id, &counter_id);
-
-            if(query_status != ROCPROFILER_STATUS_SUCCESS)
+            auto map_iter = m_instance_map.find(output_records[i].id);
+            if(map_iter == m_instance_map.end())
             {
-                LOG_DEBUG("Device {} record {} — failed to query counter id", m_index, i);
+                LOG_DEBUG("Device {} record {} — unknown instance_id {}", m_index, i,
+                          output_records[i].id);
                 continue;
             }
 
-            // On first sample, resolve counter_id → name via SDK query
-            if(need_name_init && m_counter_id_to_name.count(counter_id.handle) == 0)
-            {
-                rocprofiler_counter_info_v0_t info{};
-                auto info_status = m_driver_api->query_counter_info(
-                    counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0,
-                    static_cast<void*>(&info));
-
-                if(info_status == ROCPROFILER_STATUS_SUCCESS && info.name != nullptr)
-                {
-                    m_counter_id_to_name[counter_id.handle] = info.name;
-                }
-                else
-                {
-                    m_counter_id_to_name[counter_id.handle] =
-                        "counter_" + std::to_string(counter_id.handle);
-                }
-            }
-
-            auto        name_it = m_counter_id_to_name.find(counter_id.handle);
-            const auto& name    = (name_it != m_counter_id_to_name.end())
-                                      ? name_it->second
-                                      : "counter_" + std::to_string(counter_id.handle);
-
-            LOG_DEBUG("Device {} counter: {} = {}", m_index, name,
+            LOG_DEBUG("Device {} counter: {} = {}", m_index, map_iter->second,
                       output_records[i].counter_value);
 
-            result.counters.push_back(counter_value{ counter_id.handle, name,
+            result.counters.push_back(counter_value{ output_records[i].id,
+                                                     map_iter->second,
                                                      output_records[i].counter_value });
         }
-
-        m_counter_id_map_initialized = true;
 
         return result;
     }
@@ -192,11 +189,10 @@ private:
     std::string                     m_product_name;
     std::string                     m_vendor_name;
     enabled_metrics                 m_supported_metrics;
-    bool                            m_is_supported               = false;
-    bool                            m_counter_id_map_initialized = false;
+    bool                            m_is_supported = false;
 
-    // counter_id.handle → counter name (built on first sample)
-    std::unordered_map<uint64_t, std::string> m_counter_id_to_name;
+    // instance_id → qualified counter name (built at construction)
+    std::unordered_map<uint64_t, std::string> m_instance_map;
 };
 
 }  // namespace rocprofsys::pmc::collectors::sdk_pmc

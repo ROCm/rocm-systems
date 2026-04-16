@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-add_library(pmc-sdk-pmc-collector-tests OBJECT test_device.cpp)
+add_library(pmc-sdk-pmc-collector-tests OBJECT test_device.cpp test_sample.cpp)
 
 target_link_libraries(
     pmc-sdk-pmc-collector-tests

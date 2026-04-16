@@ -100,22 +100,22 @@ struct cache_policy
      * @brief Store an SDK PMC sample to the trace cache.
      *
      * Writes one sdk_pmc_sample per device per tick with all counter
-     * values batched. No string allocation in the hot path.
+     * entries (qualified name + value) batched.
      */
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& /*enabled_metrics_cfg*/,
                              const enabled_metrics& /*supported_metrics*/,
                              const metrics& metric_values, uint64_t timestamp)
     {
-        std::vector<double> values;
-        values.reserve(metric_values.counters.size());
-        for(const auto& cv : metric_values.counters)
+        std::vector<sample_entry> entries;
+        entries.reserve(metric_values.counters.size());
+        for(const auto& counter : metric_values.counters)
         {
-            values.push_back(cv.value);
+            entries.push_back(sample_entry{ counter.name, counter.value });
         }
 
         trace_cache::get_buffer_storage().store(trace_cache::sdk_pmc_sample{
-            static_cast<uint32_t>(device_id), timestamp, std::move(values) });
+            static_cast<uint32_t>(device_id), timestamp, std::move(entries) });
     }
 };
 

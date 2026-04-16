@@ -18,14 +18,26 @@ namespace rocprofsys::pmc::device_providers::rocprofiler_sdk
 {
 
 /**
+ * @brief Pre-built mapping from SDK instance_id to qualified counter name.
+ *
+ * Built during tool_init from rocprofiler_counter_info_v1_t dimension instances.
+ */
+struct counter_instance_info
+{
+    uint64_t    instance_id = 0;  ///< rocprofiler_counter_instance_id_t value
+    std::string qualified_name;   ///< e.g. "SQC_ICACHE_HITS[WGP=0,SA=0,SE=0]"
+};
+
+/**
  * @brief Per-agent info for device_counting_service.
  */
 struct agent_info
 {
-    rocprofiler_agent_id_t          agent_id       = {};
-    rocprofiler_counter_config_id_t profile_config = {};
-    size_t                          device_index   = 0;
-    std::vector<std::string>        counter_names  = {};
+    rocprofiler_agent_id_t             agent_id       = {};
+    rocprofiler_counter_config_id_t    profile_config = {};
+    size_t                             device_index   = 0;
+    std::vector<std::string>           counter_names  = {};
+    std::vector<counter_instance_info> instance_infos = {};
 };
 
 /**
@@ -101,7 +113,7 @@ public:
         {
             devices.push_back(std::make_shared<Device>(
                 m_driver_api, m_context, info.agent_id, info.profile_config,
-                info.device_index, info.counter_names));
+                info.device_index, info.counter_names, info.instance_infos));
         }
 
         return devices;

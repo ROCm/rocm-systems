@@ -4,13 +4,14 @@
 #pragma once
 
 #include "core/state.hpp"
+#include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
+
 #include <atomic>
 #include <cstdint>
 #include <vector>
 
 namespace rocprofsys::pmc
 {
-
 std::atomic<State>&
 get_state();
 
@@ -54,6 +55,9 @@ register_sdk_pmc_source(
     uint64_t context_handle, const std::vector<uint64_t>& agent_ids,
     const std::vector<uint64_t>&                 profile_configs,
     const std::vector<size_t>&                   device_indices,
-    const std::vector<std::vector<std::string>>& counter_names_per_agent);
+    const std::vector<std::vector<std::string>>& counter_names_per_agent,
+    const std::vector<
+        std::vector<device_providers::rocprofiler_sdk::counter_instance_info>>&
+        instance_infos_per_agent);
 
 }  // namespace rocprofsys::pmc
