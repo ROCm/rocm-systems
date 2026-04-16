@@ -26,6 +26,7 @@
 
 #include <absl/log/check.h>
 #include <absl/log/log.h>
+#include <absl/log/vlog_is_on.h>
 
 #include <fmt/format.h>  // usually used in conjunction with logging
 #include <fmt/ranges.h>
@@ -68,13 +69,22 @@ namespace rocprofiler
 namespace common
 {
 /// CHECK_NOTNULL compatibility wrapper (abseil does not provide one).
-/// Returns the pointer value so it can be used as an expression:
+/// Returns the value so it can be used as an expression:
 ///   auto* p = CHECK_NOTNULL(some_ptr);
+/// Takes by const& to support move-only types like unique_ptr.
 template <typename T>
-T
-check_notnull_impl(const char* expr, T ptr)
+const T&
+check_notnull_impl(const char* expr, const T& ptr)
 {
-    CHECK_NE(ptr, nullptr) << "'" << expr << "' Must be non NULL";
+    CHECK(ptr != nullptr) << "'" << expr << "' Must be non NULL";
+    return ptr;
+}
+
+template <typename T>
+T&
+check_notnull_impl(const char* expr, T& ptr)
+{
+    CHECK(ptr != nullptr) << "'" << expr << "' Must be non NULL";
     return ptr;
 }
 
