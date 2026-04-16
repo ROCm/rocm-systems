@@ -6490,7 +6490,7 @@ amdsmi_status_t amdsmi_get_cpu_core_current_freq_limit(amdsmi_processor_handle p
 }
 
 amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle,
-                                            double* ppower) {
+                                            uint32_t* ppower) {
   amdsmi_status_t status;
   uint32_t avg_power;
   uint8_t sock_ind;
@@ -6498,6 +6498,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
   AMDSMI_CHECK_INIT();
 
   if (processor_handle == nullptr) return AMDSMI_STATUS_INVAL;
+  if (ppower == nullptr) return AMDSMI_STATUS_INVAL;
 
   amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
@@ -6508,13 +6509,13 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
   // Convert milliwatts to watts
-  *ppower = static_cast<double>(avg_power) / 1000.0;
+  *ppower = (avg_power + 500) / 1000;
 
   return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                double* pcap) {
+                                                uint32_t* pcap) {
   amdsmi_status_t status;
   uint32_t p_cap;
   uint8_t sock_ind;
@@ -6532,13 +6533,13 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
   // Convert milliwatts to watts
-  *pcap = static_cast<double>(p_cap) / 1000.0;
+  *pcap = (p_cap + 500) / 1000;
 
   return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle,
-                                                    double* pmax) {
+                                                    uint32_t* pmax) {
   amdsmi_status_t status;
   uint32_t p_max;
   uint8_t sock_ind;
@@ -6556,7 +6557,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle proc
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
   // Convert milliwatts to watts
-  *pmax = static_cast<double>(p_max) / 1000.0;
+  *pmax = (p_max + 500) / 1000;
 
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -6668,7 +6669,7 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
 
 amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
                                                    uint32_t* power_efficiency_mode,
-                                                   uint32_t* utilization, double* ppt_limit) {
+                                                   uint32_t* utilization, uint32_t* ppt_limit) {
   amdsmi_status_t status;
   uint8_t sock_ind;
   uint8_t mode_uint8;
@@ -6691,7 +6692,7 @@ amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
   *power_efficiency_mode = static_cast<uint32_t>(mode_uint8);
-  *ppt_limit = static_cast<double>(pptlimit_uint32) / 1000.0;
+  *ppt_limit = (pptlimit_uint32 + 500) / 1000;
 
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -7692,7 +7693,7 @@ amdsmi_status_t amdsmi_set_cpu_dimm_sb_reg(amdsmi_processor_handle processor_han
 }
 
 amdsmi_status_t amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_handle,
-                                              double* power) {
+                                              uint32_t* power) {
   amdsmi_status_t status;
   uint8_t core_ind;
   char proc_id[SIZE];
@@ -7710,7 +7711,7 @@ amdsmi_status_t amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_
   status = static_cast<amdsmi_status_t>(esmi_read_ccd_power(core_ind, &power_u32));
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
-  *power = static_cast<double>(power_u32) / 1000.0;
+  *power = (power_u32 + 500) / 1000;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -8062,7 +8063,7 @@ amdsmi_status_t amdsmi_set_cpu_sdps_limit(amdsmi_processor_handle processor_hand
 }
 
 amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_handle,
-                                          double* sdps_limit) {
+                                          uint32_t* sdps_limit) {
   amdsmi_status_t status;
   uint8_t sock_ind;
   char proc_id[SIZE];
@@ -8082,7 +8083,7 @@ amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_hand
   if (status != AMDSMI_STATUS_SUCCESS) return amdsmi_errno_to_esmi_status(status);
 
   // Convert milliwatts to watts
-  *sdps_limit = static_cast<double>(sdpslimit_u32) / 1000.0;
+  *sdps_limit = (sdpslimit_u32 + 500) / 1000;
 
   return AMDSMI_STATUS_SUCCESS;
 }

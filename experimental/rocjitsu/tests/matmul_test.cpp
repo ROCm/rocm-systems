@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "aql_queue.h"
+
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
@@ -12,6 +14,12 @@
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -29,8 +37,8 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string kSchemaPath = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
-const std::string kConfigPath = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
@@ -40,21 +48,7 @@ constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 
 // AMDGPU kernel descriptor (HSA code object v3, 64 bytes).
 
-struct KernelDescriptor {
-  uint32_t group_segment_fixed_size;
-  uint32_t private_segment_fixed_size;
-  uint32_t kernarg_size;
-  uint8_t reserved0[4];
-  int64_t kernel_code_entry_byte_offset;
-  uint8_t reserved1[20];
-  uint32_t compute_pgm_rsrc3;
-  uint32_t compute_pgm_rsrc1;
-  uint32_t compute_pgm_rsrc2;
-  uint16_t kernel_code_properties;
-  uint16_t kernarg_preload_spec;
-  uint8_t reserved2[4];
-};
-static_assert(sizeof(KernelDescriptor) == 64);
+using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 
 // CPU golden reference.
 
@@ -79,7 +73,7 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
     size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      auto inst = decoder->decode(&data[pc]);
+      std::unique_ptr<Instruction> inst(decoder->decode(&data[pc]));
       EXPECT_NE(inst, nullptr);
       ++pc;
       if (inst && inst->size() == 8)
@@ -91,10 +85,10 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
   return insts;
 }
 
-KernelDescriptor read_kernel_descriptor(const CodeObject &co) {
+KD read_kernel_descriptor(const CodeObject &co) {
   for (const auto *sec : co.rodata_sections())
-    if (sec->size() >= sizeof(KernelDescriptor)) {
-      KernelDescriptor kd;
+    if (sec->size() >= sizeof(KD)) {
+      KD kd;
       std::memcpy(&kd, sec->data(), sizeof(kd));
       return kd;
     }
@@ -103,7 +97,7 @@ KernelDescriptor read_kernel_descriptor(const CodeObject &co) {
 }
 
 // Memory layout.
-constexpr uint64_t CODE_ADDR = 0x1000;
+constexpr uint64_t KD_ADDR = 0x10000;
 constexpr uint64_t A_ADDR = 0x100000;
 constexpr uint64_t B_ADDR = 0x200000;
 constexpr uint64_t C_ADDR = 0x300000;
@@ -115,10 +109,10 @@ struct KernelExecFixture {
   std::unique_ptr<simdojo::SimulationEngine> engine;
   SoC *soc = nullptr;
   amdgpu::GpuMemory *gpu_mem = nullptr;
-  KernelDescriptor kd{};
+  uint64_t kernel_object = 0;
 
   void setup(const char *kernel_name, uint32_t num_threads = 1) {
-    auto loaded = config::load_config(kConfigPath, kSchemaPath);
+    auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
     soc = loaded.soc();
     gpu_mem = loaded.memory();
     loaded.engine_config.num_threads = num_threads;
@@ -136,11 +130,10 @@ struct KernelExecFixture {
     auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
     ASSERT_NE(co, nullptr);
 
-    kd = read_kernel_descriptor(*co);
-    ASSERT_NE(kd.kernel_code_entry_byte_offset, 0);
-
-    const auto *text = co->text_sections()[0];
-    mem()->load_image(reinterpret_cast<const uint8_t *>(text->data()), text->size(), CODE_ADDR);
+    // Load code object to GPU memory respecting ELF segment VA mapping.
+    co->load_to_memory(mem(), KD_ADDR);
+    kernel_object = KD_ADDR + co->kernel_descriptor_offset(kernel_name);
+    ASSERT_NE(kernel_object, KD_ADDR) << "Kernel descriptor symbol not found";
   }
 
   /// Partition so that each XCD's components stay in the same partition.
@@ -184,25 +177,19 @@ struct KernelExecFixture {
     mem()->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), KERNARG_ADDR);
   }
 
-  /// Enqueue workgroups across all XCDs.
+  /// Dispatch workgroups across all XCDs via AQL queues.
   /// @param total_wgs Total number of workgroups to dispatch.
   void dispatch_all_xcds(uint32_t total_wgs) {
     uint32_t num_xcds = soc->num_xcds();
     uint32_t wgs_per_xcd = total_wgs / num_xcds;
     ASSERT_EQ(wgs_per_xcd * num_xcds, total_wgs) << "WGs must divide evenly across XCDs";
 
-    amdgpu::DispatchPacket pkt;
-    pkt.kernel_entry_pc = CODE_ADDR;
-    pkt.wfs_per_workgroup = 1;
-    pkt.sgprs_per_wf = 104;
-    pkt.vgprs_per_wf = 256;
-    pkt.kernarg_addr = KERNARG_ADDR;
-    pkt.num_user_sgprs = (kd.compute_pgm_rsrc2 >> 1) & 0x1F; // bits[5:1] = USER_SGPR
-
     for (uint32_t xi = 0; xi < num_xcds; ++xi) {
-      pkt.workgroup_count = wgs_per_xcd;
-      pkt.workgroup_id_offset = xi * wgs_per_xcd;
-      cp(xi)->enqueue(pkt);
+      cp(xi)->set_workgroup_id_offset(xi * wgs_per_xcd);
+      uint64_t ring = 0xF0000000ULL + xi * 0x100000ULL;
+      test::AqlQueue queue(mem(), cp(xi), ring, 4096, ring + 0x10000, ring + 0x10008,
+                           ring + 0x10010);
+      queue.dispatch(kernel_object, wgs_per_xcd * 64, 64, KERNARG_ADDR);
     }
   }
 
@@ -398,7 +385,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
 
-  auto loaded = config::load_config(kConfigPath, kSchemaPath);
+  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -406,24 +393,29 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   loaded.wire_links(engine->topology());
   engine->build();
 
-  // Load a minimal program (just s_endpgm) at the code address.
-  memory->write32(CODE_ADDR, SOPP_S_ENDPGM);
+  // Write a kernel descriptor + s_endpgm to GPU memory.
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
-  // Dispatch 32 workgroups per XCD.
+  memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
+  memory->write32(KD_ADDR + sizeof(kernel_descriptor_t), SOPP_S_ENDPGM);
+
+  // Dispatch workgroups across all XCDs via AQL queues.
   uint32_t wgs_per_xcd = total_wgs / TOTAL_XCDS;
-  amdgpu::DispatchPacket pkt;
-  pkt.kernel_entry_pc = CODE_ADDR;
-  pkt.workgroup_count = wgs_per_xcd;
-  pkt.wfs_per_workgroup = 1;
-  pkt.sgprs_per_wf = 104;
-  pkt.vgprs_per_wf = 256;
-
   for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
-    pkt.workgroup_id_offset = xi * wgs_per_xcd;
-    soc->xcd(xi)->command_processor()->enqueue(pkt);
+    auto *cp = soc->xcd(xi)->command_processor();
+    cp->set_workgroup_id_offset(xi * wgs_per_xcd);
+    uint64_t ring = 0xF0000000ULL + xi * 0x100000ULL;
+    test::AqlQueue queue(memory, cp, ring, 4096, ring + 0x10000, ring + 0x10008, ring + 0x10010);
+    queue.dispatch(KD_ADDR, wgs_per_xcd * 64, 64);
   }
 
-  // Engine drives all CPs and CUs to completion.
   engine->run();
 
   // Verify all wavefronts halted.
@@ -444,7 +436,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
 
-  auto loaded = config::load_config(kConfigPath, kSchemaPath);
+  auto loaded = config::load_config(CONFIG_PATH, SCHEMA_PATH);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
@@ -468,19 +460,25 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
       });
   engine->build();
 
-  memory->write32(CODE_ADDR, SOPP_S_ENDPGM);
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                  ((104 / 8) - 1));
+  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+
+  memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
+  memory->write32(KD_ADDR + sizeof(kernel_descriptor_t), SOPP_S_ENDPGM);
 
   uint32_t wgs_per_xcd = total_wgs / TOTAL_XCDS;
-  amdgpu::DispatchPacket pkt;
-  pkt.kernel_entry_pc = CODE_ADDR;
-  pkt.workgroup_count = wgs_per_xcd;
-  pkt.wfs_per_workgroup = 1;
-  pkt.sgprs_per_wf = 104;
-  pkt.vgprs_per_wf = 256;
-
   for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
-    pkt.workgroup_id_offset = xi * wgs_per_xcd;
-    soc->xcd(xi)->command_processor()->enqueue(pkt);
+    auto *cp = soc->xcd(xi)->command_processor();
+    cp->set_workgroup_id_offset(xi * wgs_per_xcd);
+    uint64_t ring = 0xF0000000ULL + xi * 0x100000ULL;
+    test::AqlQueue queue(memory, cp, ring, 4096, ring + 0x10000, ring + 0x10008, ring + 0x10010);
+    queue.dispatch(KD_ADDR, wgs_per_xcd * 64, 64);
   }
 
   engine->run();

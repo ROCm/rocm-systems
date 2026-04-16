@@ -188,7 +188,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(socket_power) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(socket_power) << "\t|";
       } else {
         err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
@@ -203,7 +203,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(power_limit) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
         err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
@@ -218,7 +218,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << "] " << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(power_max) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(power_max) << "\t|";
       } else {
         err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";
@@ -238,7 +238,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
       if ((ret == AMDSMI_STATUS_SUCCESS) && (input_power > power_max)) {
         cout << "Input power is more than max power limit,"
                 " limiting to "
-             << static_cast<double>(power_max) / 1000 << "Watts\n";
+             << static_cast<double>(power_max) << "Watts\n";
         input_power = power_max;
       }
 
@@ -249,7 +249,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
 
       if (!ret) {
         cout << "CPU [" << index << "] power_limit set to " << fixed << setprecision(3)
-             << static_cast<double>(input_power) / 1000 << " Watts successfully\n";
+             << static_cast<double>(input_power) << " Watts successfully\n";
       }
 
       power_limit = 0;
@@ -261,7 +261,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char** argv) {
              << endl;
 
       if (!ret) {
-        cout << fixed << setprecision(3) << static_cast<double>(power_limit) / 1000 << "\t|";
+        cout << fixed << setprecision(3) << static_cast<double>(power_limit) << "\t|";
       } else {
         err_bits |= 1 << ret;
         cout << " NA (Err:" << ret << "     |";

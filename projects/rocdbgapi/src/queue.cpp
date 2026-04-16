@@ -34,14 +34,17 @@
 
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
+#include "hsa/hsa_ext_amd.h"
 
 #include <array>
 #include <cinttypes>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace amd::dbgapi
@@ -205,15 +208,47 @@ compute_queue_t::update_waves ()
     dbgapi_assert (*this == cwsr_record->queue ());
     process_t &process = cwsr_record->process ();
 
-    auto prefetch_begin
-      = cwsr_record->register_address (amdgpu_regnum_t::first_hwreg).value ();
-    auto prefetch_end
-      = cwsr_record->register_address (amdgpu_regnum_t::last_ttmp).value ()
-        + architecture ().register_size (amdgpu_regnum_t::last_ttmp);
+    constexpr auto cache_line_size = std::remove_reference_t<
+      decltype (cwsr_record->agent ().memory_cache ())>::cache_line_size;
 
-    dbgapi_assert (prefetch_end > prefetch_begin);
-    cwsr_record->agent ().memory_cache ().prefetch (
-      prefetch_begin, prefetch_end - prefetch_begin);
+    auto hwreg_begin = utils::align_down (
+      cwsr_record->register_address (amdgpu_regnum_t::first_hwreg).value (),
+      cache_line_size);
+    auto hwreg_end = utils::align_up (
+      hwreg_begin + cwsr_record->hwreg_count () * sizeof (uint32_t),
+      cache_line_size);
+
+    auto ttmp_begin = utils::align_down (
+      cwsr_record->register_address (amdgpu_regnum_t::first_ttmp).value (),
+      cache_line_size);
+    auto ttmp_end = utils::align_up (
+      cwsr_record->register_address (amdgpu_regnum_t::last_ttmp).value ()
+        + architecture ().register_size (amdgpu_regnum_t::last_ttmp),
+      cache_line_size);
+
+    dbgapi_assert (hwreg_begin < hwreg_end);
+    dbgapi_assert (ttmp_begin < ttmp_end);
+
+    /* Are the two blocks disjoint?  */
+    if (ttmp_end < hwreg_begin || ttmp_begin > hwreg_end)
+      {
+        const auto hwreg_blk_size = hwreg_end - hwreg_begin;
+        const auto ttmp_blk_size = ttmp_end - ttmp_begin;
+
+        cwsr_record->agent ().memory_cache ().prefetch (hwreg_begin,
+                                                        hwreg_blk_size);
+        cwsr_record->agent ().memory_cache ().prefetch (ttmp_begin,
+                                                        ttmp_blk_size);
+      }
+    /* Blocks overlap or are contiguous: we can fetch in one swoop.  */
+    else
+      {
+        const auto prefetch_begin = std::min (hwreg_begin, ttmp_begin);
+        const auto prefetch_end = std::max (hwreg_end, ttmp_end);
+
+        cwsr_record->agent ().memory_cache ().prefetch (
+          prefetch_begin, prefetch_end - prefetch_begin);
+      }
 
     wave_t *wave = nullptr;
 
@@ -558,7 +593,9 @@ private:
   class aql_dispatch_t : public dispatch_t
   {
   private:
-    hsa_kernel_dispatch_packet_t m_packet{};
+    std::variant<hsa_kernel_dispatch_packet_t,
+                 hsa_amd_ext_kernel_dispatch_packet_t>
+      m_packet;
     std::unique_ptr<const architecture_t::kernel_descriptor_t>
       m_kernel_descriptor{};
 
@@ -632,11 +669,44 @@ aql_queue_t::aql_dispatch_t::aql_dispatch_t (
     = std::get<host_address_t> (queue.address ())
       + (os_queue_packet_id * aql_packet_size) % queue.size ();
 
+  std::array<char, aql_packet_size> packet_bytes;
+
   /* Read the dispatch packet and kernel descriptor.  */
-  process ().read_host_memory (packet_address, &m_packet);
+  process ().read_host_memory (packet_address, packet_bytes.data (),
+                               aql_packet_size);
+  uint16_t packet_header;
+  std::memcpy (&packet_header, packet_bytes.data (), sizeof (packet_header));
+
+  const uint32_t packet_type = utils::bit_extract (
+    packet_header, HSA_PACKET_HEADER_TYPE,
+    (utils::narrow<int> (HSA_PACKET_HEADER_TYPE)
+     + utils::narrow<int> (HSA_PACKET_HEADER_WIDTH_TYPE)
+     - 1));
+
+  if (packet_type == HSA_PACKET_TYPE_KERNEL_DISPATCH)
+    {
+      m_packet.emplace<hsa_kernel_dispatch_packet_t> ();
+      std::memcpy (&std::get<hsa_kernel_dispatch_packet_t> (m_packet),
+                   packet_bytes.data (),
+                   sizeof (hsa_kernel_dispatch_packet_t));
+    }
+  else if (packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
+    {
+      m_packet.emplace<hsa_amd_ext_kernel_dispatch_packet_t> ();
+      std::memcpy (&std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet),
+                   packet_bytes.data (),
+                   sizeof (hsa_amd_ext_kernel_dispatch_packet_t));
+
+      if (std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
+          != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+        fatal_error ("Unsupported packet format");
+    }
+  else
+    fatal_error ("Unsupported AQL packet type %d", packet_type);
 
   m_kernel_descriptor = architecture ().make_kernel_descriptor (
-    process (), m_packet.kernel_object);
+    process (),
+    std::visit ([] (auto &&p) { return p.kernel_object; }, m_packet));
 }
 
 uint32_t
@@ -648,20 +718,38 @@ aql_queue_t::aql_dispatch_t::grid_dimensions () const
     = (utils::narrow<int> (HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS)
        + utils::narrow<int> (HSA_KERNEL_DISPATCH_PACKET_SETUP_WIDTH_DIMENSIONS)
        - 1);
-  return utils::bit_extract<uint32_t> (m_packet.setup, first, last);
+  return utils::bit_extract<uint32_t> (
+    std::visit ([] (auto &&p) -> uint32_t { return p.setup; }, m_packet),
+    first, last);
 }
 
 std::array<uint32_t, 3>
 aql_queue_t::aql_dispatch_t::grid_sizes () const
 {
-  return { m_packet.grid_size_x, m_packet.grid_size_y, m_packet.grid_size_z };
+  return std::visit (
+    [] (auto &&p) -> std::array<uint32_t, 3>
+    {
+      using T = std::decay_t<decltype (p)>;
+      if constexpr (std::is_same_v<hsa_kernel_dispatch_packet_t, T>)
+        return { p.grid_size_x, p.grid_size_y, p.grid_size_z };
+      else
+        return { static_cast<uint32_t> (p.cluster_count_x * p.cluster_size_x
+                                        * p.workgroup_size_x),
+                 static_cast<uint32_t> (p.cluster_count_y * p.cluster_size_y
+                                        * p.workgroup_size_y),
+                 static_cast<uint32_t> (p.cluster_count_z * p.cluster_size_z
+                                        * p.workgroup_size_z) };
+    },
+    m_packet);
 }
 
 std::array<uint16_t, 3>
 aql_queue_t::aql_dispatch_t::workgroup_sizes () const
 {
-  return { m_packet.workgroup_size_x, m_packet.workgroup_size_y,
-           m_packet.workgroup_size_z };
+  return std::visit (
+    [] (auto &&p) -> std::array<uint16_t, 3>
+    { return { p.workgroup_size_x, p.workgroup_size_y, p.workgroup_size_z }; },
+    m_packet);
 }
 
 void
@@ -691,12 +779,13 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_BARRIER:
-      utils::get_info (value_size, value,
-                       utils::bit_extract (m_packet.header,
-                                           HSA_PACKET_HEADER_BARRIER,
-                                           HSA_PACKET_HEADER_BARRIER)
-                         ? AMD_DBGAPI_DISPATCH_BARRIER_PRESENT
-                         : AMD_DBGAPI_DISPATCH_BARRIER_NONE);
+      utils::get_info (
+        value_size, value,
+        utils::bit_extract (
+          std::visit ([] (auto &&p) { return p.header; }, m_packet),
+          HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_BARRIER)
+          ? AMD_DBGAPI_DISPATCH_BARRIER_PRESENT
+          : AMD_DBGAPI_DISPATCH_BARRIER_NONE);
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_ACQUIRE_FENCE:
@@ -713,7 +802,8 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
       utils::get_info (
         value_size, value,
         static_cast<amd_dbgapi_dispatch_fence_scope_t> (utils::bit_extract (
-          m_packet.header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+          std::visit ([] (auto &&p) { return p.header; }, m_packet),
+          HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
           (utils::narrow<int> (HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE)
            + utils::narrow<int> (HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE)
            - 1))));
@@ -723,7 +813,8 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
       utils::get_info (
         value_size, value,
         static_cast<amd_dbgapi_dispatch_fence_scope_t> (utils::bit_extract (
-          m_packet.header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+          std::visit ([] (auto &&p) { return p.header; }, m_packet),
+          HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
           (utils::narrow<int> (HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
            + utils::narrow<int> (HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE)
            - 1))));
@@ -746,17 +837,21 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
     case AMD_DBGAPI_DISPATCH_INFO_PRIVATE_SEGMENT_SIZE:
       utils::get_info (
         value_size, value,
-        static_cast<amd_dbgapi_size_t> (m_packet.private_segment_size));
+        static_cast<amd_dbgapi_size_t> (std::visit (
+          [] (auto &&p) { return p.private_segment_size; }, m_packet)));
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_GROUP_SEGMENT_SIZE:
       utils::get_info (
         value_size, value,
-        static_cast<amd_dbgapi_size_t> (m_packet.group_segment_size));
+        static_cast<amd_dbgapi_size_t> (std::visit (
+          [] (auto &&p) { return p.group_segment_size; }, m_packet)));
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_KERNEL_ARGUMENT_SEGMENT_ADDRESS:
-      utils::get_info (value_size, value, m_packet.kernarg_address);
+      utils::get_info (
+        value_size, value,
+        std::visit ([] (auto &&p) { return p.kernarg_address; }, m_packet));
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_KERNEL_DESCRIPTOR_ADDRESS:
@@ -769,7 +864,9 @@ aql_queue_t::aql_dispatch_t::get_info (amd_dbgapi_dispatch_info_t query,
       return;
 
     case AMD_DBGAPI_DISPATCH_INFO_KERNEL_COMPLETION_ADDRESS:
-      utils::get_info (value_size, value, m_packet.completion_signal);
+      utils::get_info (
+        value_size, value,
+        std::visit ([] (auto &&p) { return p.completion_signal; }, m_packet));
       return;
     }
 
