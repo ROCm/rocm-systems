@@ -86,32 +86,25 @@ def _default_cdash_matrix_label() -> str:
     * Optional GPU segment from ``THEROCK_CDASH_GPU`` (default empty). When set, e.g.
       ``ROCm/rocm-systems-rhel-8.8-mi325-core``; when empty, no trailing hyphen.
     """
-    gpu = os.getenv("THEROCK_CDASH_GPU", "")
+    gpu = os.getenv("THEROCK_CDASH_GPU") or os.getenv("ARTIFACT_GROUP")
     os_part = _os_release_id_version()
-    base = f"ROCm/rocm-systems-{os_part}"
+    base = f"ROCm/TheRock/rocm-systems-{os_part}"
     if not gpu:
         return base
     return f"{base}-{gpu}"
 
 
 def _cdash_build_name() -> str:
-    """CDash build name: ``PR_<n>_<label> [<id>]`` (e.g. CI matrix labels).
-
-    * ``THEROCK_CDASH_BUILD_NAME`` — if set, returned verbatim (full override).
-    * PR number from ``GITHUB_REF`` (``refs/pull/N/merge``).
-    * Label from ``THEROCK_CDASH_LABEL``, else :func:`_default_cdash_matrix_label`.
-    * Bracket id from ``GITHUB_RUN_ID``, ``THEROCK_RUN_ID``, or a random 32-char hex id.
+    """CDash build name: ``<label>`` or ``<label> [RUN_ID: <id>]`` when set.
+    * Label from :func:`_default_cdash_matrix_label`.
+    * If ``ARTIFACT_RUN_ID`` is non-empty, append `` [RUN_ID: ...]``.
+    * If ``GITHUB_REF`` is a pull request, prefix the label with ``PR_<n>_``.
 
     Example::
 
-        PR_4946_ROCm/rocm-systems-rhel-8.8-mi325-core [9df51e03fa2d4071851eb4d2b8848612]
+        PR_4946_ROCm/TheRock/rocm-systems-rhel-8.8-mi325-core [RUN_ID: 24378824659]
 
-    Set ``THEROCK_CDASH_LABEL`` in CI to override the middle segment. Set
-    ``THEROCK_CDASH_GPU`` to append a trailing SKU; leave unset for no ``-<gpu>`` suffix.
     """
-    override = os.getenv("THEROCK_CDASH_BUILD_NAME")
-    if override:
-        return override
     ref = os.getenv("GITHUB_REF", "")
     m = re.match(r"refs/pull/(\d+)/", ref)
     prefix = f"PR_{m.group(1)}_" if m else ""
@@ -122,13 +115,13 @@ def _cdash_build_name() -> str:
             prefix = f"{safe}_" if safe else ""
         else:
             prefix = ""
-    label = os.getenv("THEROCK_CDASH_LABEL") or _default_cdash_matrix_label()
+    label = _default_cdash_matrix_label() or os.getenv("THEROCK_CDASH_LABEL")
     run_key = (
-        os.getenv("GITHUB_RUN_ID") or os.getenv("THEROCK_RUN_ID")
+        os.getenv("GITHUB_RUN_ID") or os.getenv("THEROCK_RUN_ID") or os.getenv("ARTIFACT_RUN_ID")
     )
     if not run_key:
         return f"{prefix}{label}"
-    return f"{prefix}{label} [ID: {run_key}]"
+    return f"{prefix}{label} [RUN_ID: {run_key}]"
 
 
 def _which_cmake() -> str:
