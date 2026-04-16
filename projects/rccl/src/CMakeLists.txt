@@ -94,11 +94,11 @@ set(SRC_FILES
   src/include/debug.h
   src/include/dev_runtime.h
   src/include/ipc_init.h
-  src/include/ipc_init_detail.cuh
+  src/include/ipc_init_detail.h
   src/include/dda_all_reduce_ipc.h
-  src/include/ipc_gpu_barrier.cuh
-  src/include/algorithms/CollCommon.cuh
-  src/include/algorithms/all_reduce/all_reduce_dda.cuh
+  src/include/ipc_gpu_barrier.h
+  src/include/algorithms/CollCommon.h
+  src/include/algorithms/all_reduce/all_reduce_dda.h
   src/include/device_buffer.h
   src/include/device.h
   src/include/enqueue.h

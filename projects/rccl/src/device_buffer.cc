@@ -37,10 +37,19 @@ DeviceBuffer::DeviceBuffer(DeviceBuffer&& other) noexcept
 }
 
 DeviceBuffer& DeviceBuffer::operator=(DeviceBuffer&& other) noexcept {
-  ptr_ = other.ptr_;
+  /*ptr_ = other.ptr_;
   size_ = other.size_;
   other.ptr_ = nullptr;
-  other.size_ = 0;
+  other.size_ = 0;*/
+  if (this != &other) {
+    if (ptr_) {
+      CUDACHECKIGNORE(cudaFree(ptr_));
+    }
+    ptr_ = other.ptr_;
+    size_ = other.size_;
+    other.ptr_ = nullptr;
+    other.size_ = 0;
+  }
   return *this;
 }
 

@@ -12,9 +12,6 @@
 
 struct ncclComm;
 
-/*ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm);
-ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm);*/
-
 bool ncclAllReduceDdaIpcEligible(
     ncclComm* comm,
     const void* sendbuff,

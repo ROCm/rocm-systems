@@ -67,9 +67,7 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(
   //ncclResult_t result = ncclSuccess;
   auto memHandler =
       std::make_unique<ncclIpcMemHandler>(bootstrap, selfRank, nRanks);
-  /*NCCLCHECKGOTO(
-      memHandler->addSelfDeviceMemPtr(selfMboxBuf->get()), result, fail);
-  NCCLCHECKGOTO(memHandler->exchangeMemPtrs(), result, fail);*/
+  
   ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfMboxBuf->get());
   if (result != ncclSuccess && result != ncclInProgress) {
     if (ncclDebugNoWarn == 0) {
@@ -91,9 +89,8 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(
       allMailboxes[i] = selfMbox;
     } else {
       void* peerPtr = nullptr;
-      /*NCCLCHECKGOTO(
-          memHandler->getPeerDeviceMemPtr(i, &peerPtr), result, fail);*/
       result = memHandler->getPeerDeviceMemPtr(i, &peerPtr);
+      
       if (result != ncclSuccess && result != ncclInProgress) {
         if (ncclDebugNoWarn == 0) {
           INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
@@ -111,8 +108,8 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(
   resources->selfMailboxBuf = std::move(selfMboxBuf);
   return {std::move(resources), barrier};
 
-fail:
-  return {nullptr, IpcGpuBarrier{}};
+/*fail:
+  return {nullptr, IpcGpuBarrier{}};*/
 }
 
 } // namespace meta::comms

@@ -47,12 +47,16 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
   }
 
   const int handleBytes = static_cast<int>(sizeof(cudaIpcMemHandle_t));
-  std::vector<char> handleBuf(static_cast<size_t>(nranks_) * sizeof(cudaIpcMemHandle_t));
+  /*std::vector<char> handleBuf(static_cast<size_t>(nranks_) * sizeof(cudaIpcMemHandle_t));
   auto* ipcHandles = reinterpret_cast<cudaIpcMemHandle_t*>(handleBuf.data());
 
   CUDACHECK(cudaIpcGetMemHandle(&ipcHandles[rank_], memPtrs_[static_cast<size_t>(rank_)]));
 
-  NCCLCHECK(bootstrapAllGather(bootstrap_, handleBuf.data(), handleBytes));
+  NCCLCHECK(bootstrapAllGather(bootstrap_, handleBuf.data(), handleBytes));*/
+
+  std::vector<cudaIpcMemHandle_t> ipcHandles(static_cast<size_t>(nranks_));
+  CUDACHECK(cudaIpcGetMemHandle(&ipcHandles[rank_], memPtrs_[static_cast<size_t>(rank_)]));
+  NCCLCHECK(bootstrapAllGather(bootstrap_, ipcHandles.data(), handleBytes));
 
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {

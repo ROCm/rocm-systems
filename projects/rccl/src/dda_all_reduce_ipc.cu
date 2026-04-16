@@ -101,10 +101,7 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   }
 
   const size_t sizeBytes = count * sizeof(T);
-  const size_t countPerThread = sizeof(uint4) / sizeof(T);
   const unsigned threads = 512;
-  const size_t denom = (size_t)threads * countPerThread;
-  //unsigned nblocks = (unsigned)((count + denom - 1) / denom);
   const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
   const bool treeOk =
       wantTree && (count % static_cast<size_t>(kDdaNranks) == 0);
@@ -118,24 +115,11 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
         kDdaNranks);
   }
 
-  unsigned nblocks;
-  if (treeOk) {
-    const size_t countPerRank = count / static_cast<size_t>(kDdaNranks);
-    nblocks = (unsigned)((countPerRank + denom - 1) / denom);
-  } else {
-    nblocks = (unsigned)((count + denom - 1) / denom);
-  }
-
-  if (nblocks < 1) {
-    nblocks = 1;
-  }
-
-  const int nBlocksMax = ddaMaxNBlocksForScratch(comm->ddaIpcScratchBytes);
-
+ 
+  const int nBlocksMax = ddaMaxNBlocksForScratch(); 
   auto gridBlock = getGridAndBlockDims(count, sizeof(T), nBlocksMax);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
-
 
   auto* barrierState =
       static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
@@ -143,9 +127,6 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
 
   void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
-
-  /*dim3 grid(nblocks);
-  dim3 block(threads);*/
 
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(
@@ -176,7 +157,6 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   }
 
   CUDACHECK(cudaGetLastError());
-  //CUDACHECK(cudaStreamSynchronize(stream));
 
   return ncclSuccess;
 }

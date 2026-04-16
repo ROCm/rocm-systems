@@ -15,7 +15,6 @@
 #include <cuda_runtime.h>
 
 using nccl_dda_ipc_detail::DdaIpcBarrierState;
-using nccl_dda_ipc_detail::ddaIpcScratchBytesFromEnv;
 using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_ipc_detail::kDdaNranks;
 
@@ -28,7 +27,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  size_t bytes = ddaIpcScratchBytesFromEnv();
+  size_t bytes = DDA_IPC_BUFFER_SIZE;
   if (bytes == 0) {
     return ncclSuccess;
   }
@@ -106,7 +105,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
-  const int nBlocksMax = ddaMaxNBlocksForScratch(bytes);
+  const int nBlocksMax = ddaMaxNBlocksForScratch();
   auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(
       kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
