@@ -57,13 +57,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(HSAuint32 NodeId,
 				    QueueResource);
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
 					     HSA_QUEUE_TYPE Type,
 					     HSAuint32 QueuePercentage,
 					     HSA_QUEUE_PRIORITY Priority,
 					     HSAuint32 SdmaEngineId,
 					     void *QueueAddress,
 					     HSAuint64 QueueSizeInBytes,
+					     HSAuint64 MetaDataPrefetchSizeInBytes,
 					     HsaEvent *Event,
 					     HsaQueueResource *QueueResource) {
   HSAKMT_STATUS result;
@@ -74,6 +75,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
   if (Priority < HSA_QUEUE_PRIORITY_MINIMUM ||
       Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
     return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  if (MetaDataPrefetchSizeInBytes) {
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
 
   wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   assert(device_);
@@ -121,6 +126,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
   }
 
   return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
+					     HSA_QUEUE_TYPE Type,
+					     HSAuint32 QueuePercentage,
+					     HSA_QUEUE_PRIORITY Priority,
+					     HSAuint32 SdmaEngineId,
+					     void *QueueAddress,
+					     HSAuint64 QueueSizeInBytes,
+					     HsaEvent *Event,
+					     HsaQueueResource *QueueResource) {
+  return hsaKmtCreateQueueV2(NodeId, Type, QueuePercentage, Priority,
+			     SdmaEngineId, QueueAddress, QueueSizeInBytes, 0,
+			     Event, QueueResource);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(

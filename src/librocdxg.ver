@@ -19,6 +19,7 @@ hsaKmtQueryEventState;
 hsaKmtWaitOnEvent;
 hsaKmtWaitOnMultipleEvents;
 hsaKmtCreateQueue;
+hsaKmtCreateQueueV2;
 hsaKmtCreateQueueExt;
 hsaKmtUpdateQueue;
 hsaKmtDestroyQueue;
