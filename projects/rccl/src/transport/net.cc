@@ -26,7 +26,6 @@
 #if defined(ENABLE_NPKIT)
 #include "npkit/npkit.h"
 #endif
-#include "msccl/msccl_lifecycle.h"
 #include <stdio.h>
 #include <glob.h>
 #include <dirent.h>
@@ -452,7 +451,7 @@ static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
 static ncclResult_t sendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo, struct ncclConnect* connectInfo, struct ncclConnector* send, int channelId, int connIndex) {
   struct setupReq req = { 0 };
 
-  send->conn.shared = req.shared = (graph || connIndex == 0  || mscclIsCaller()) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
+  send->conn.shared = req.shared = (graph || connIndex == 0) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
   req.channelId = channelId;
   req.connIndex = connIndex;
   req.curr_hdp_reg = 0;
@@ -507,7 +506,7 @@ NCCL_PARAM(GdrCopyFlushEnable, "GDRCOPY_FLUSH_ENABLE", 0);
 static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* myInfo, struct ncclPeerInfo* peerInfo, struct ncclConnect* connectInfo, struct ncclConnector* recv, int channelId, int connIndex) {
   struct setupReq req = { 0 };
 
-  recv->conn.shared = req.shared = (graph || connIndex == 0 || mscclIsCaller()) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
+  recv->conn.shared = req.shared = (graph || connIndex == 0) ? 0 : ncclParamNetSharedBuffers() != -2 ? ncclParamNetSharedBuffers() : 1;
   req.channelId = channelId;
   req.connIndex = connIndex;
   req.netDev = -1;
@@ -1045,6 +1044,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (proxyState->ncclNet == &rocmNetIb) {
     NCCLCHECK(rcclRocmNetP2pPolicy(req->handle, resources->isP2p));
+  } else if (proxyState->ncclNet == &netIbCast) {
+    NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
   }
 #endif
   

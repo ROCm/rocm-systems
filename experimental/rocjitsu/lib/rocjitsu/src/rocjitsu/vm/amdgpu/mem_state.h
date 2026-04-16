@@ -34,7 +34,8 @@ enum class AtomicOp : uint8_t {
   SWAP,     ///< Exchange.
   CMPSWAP,  ///< Compare-and-swap (data[0] = src, data[1] = cmp).
   ADD,      ///< Atomic add.
-  SUB,      ///< Atomic subtract.
+  SUB,      ///< Atomic subtract (mem - data).
+  RSUB,     ///< Atomic reverse subtract (data - mem).
   SMIN,     ///< Signed minimum.
   UMIN,     ///< Unsigned minimum.
   SMAX,     ///< Signed maximum.
@@ -56,6 +57,7 @@ struct ScalarMemState : DynamicInstState {
   uint32_t dst_reg_base = 0;
   uint32_t num_dwords = 0;
   bool is_load = true;
+  Mtype mtype = Mtype::RW;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
 };
@@ -75,6 +77,9 @@ struct VectorMemState : DynamicInstState {
   bool non_temporal = false;
   bool sign_extend = false;
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
+  bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  uint32_t lds_base = 0;               ///< M0 value for LDS-destination buffer loads.
+  uint64_t issue_pc = 0;               ///< PC at which the instruction was issued (debug).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
 };

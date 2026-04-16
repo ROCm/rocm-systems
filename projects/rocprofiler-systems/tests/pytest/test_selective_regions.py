@@ -6,7 +6,7 @@ Tests for selective region tracing and pause/resume integration.
 
 Validates that:
 - roctxProfilerPause/Resume correctly excludes kernels from traces
-- ROCPROFSYS_TRACE_REGION filters tracing to specific roctx regions
+- ROCPROFSYS_SELECTED_REGIONS filters tracing to specific roctx regions
 - Pause/resume interacts correctly with region filtering at various boundaries
 """
 
@@ -34,7 +34,7 @@ def no_marker_env() -> dict[str, str]:
     """Environment variables for tests without marker_api (ConditionB only).
 
     When marker_api is NOT in ROCM_DOMAINS, pause/resume is IGNORED.
-    Region filtering via ROCPROFSYS_TRACE_REGION still works.
+    Region filtering via ROCPROFSYS_SELECTED_REGIONS still works.
     """
     return {
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch",
@@ -112,7 +112,7 @@ class TestSelectiveRegion(RocprofsysTest):
     """
 
     def test_no_filter(self, mode, selective_region_env):
-        """No ROCPROFSYS_TRACE_REGION — all regions traced."""
+        """No ROCPROFSYS_SELECTED_REGIONS — all regions traced."""
         result = self.run_test(
             mode,
             "selective_region",
@@ -143,14 +143,14 @@ class TestSelectiveRegion(RocprofsysTest):
         )
 
     def test_region_1_filter(self, mode, selective_region_env):
-        """ROCPROFSYS_TRACE_REGION='Region1' — only Region1 content traced.
+        """ROCPROFSYS_SELECTED_REGIONS='Region1' — only Region1 content traced.
 
         Region1 spans: CodeBlock_B, CodeBlock_C (nested Region2), CodeBlock_D,
                         CodeBlock_F (second Region1 open)
         Outside Region1: CodeBlock_A (before), CodeBlock_E (Region3), CodeBlock_G (after)
         """
         env = selective_region_env.copy()
-        env["ROCPROFSYS_TRACE_REGION"] = "Region1"
+        env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
             "selective_region",
@@ -175,14 +175,14 @@ class TestSelectiveRegion(RocprofsysTest):
         )
 
     def test_region_2_and_3_filter(self, mode, selective_region_env):
-        """ROCPROFSYS_TRACE_REGION='Region2,Region3' — only Region2+3 content traced.
+        """ROCPROFSYS_SELECTED_REGIONS='Region2,Region3' — only Region2+3 content traced.
 
         Region2 spans: CodeBlock_C (nested inside Region1)
         Region3 spans: CodeBlock_E
         Outside: CodeBlock_A, B, D, F, G and Region1
         """
         env = selective_region_env.copy()
-        env["ROCPROFSYS_TRACE_REGION"] = "Region2,Region3"
+        env["ROCPROFSYS_SELECTED_REGIONS"] = "Region2,Region3"
         result = self.run_test(
             mode,
             "selective_region",
@@ -286,7 +286,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
     def test_filtered(self, mode, target, selective_region_env):
         """With Region1 filter: region filtering combined with pause/resume."""
         env = selective_region_env.copy()
-        env["ROCPROFSYS_TRACE_REGION"] = "Region1"
+        env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
             target,
@@ -326,7 +326,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
     def test_no_marker(self, mode, target, no_marker_env):
         """With Region1 filter but no marker_api: pause/resume ignored."""
         env = no_marker_env.copy()
-        env["ROCPROFSYS_TRACE_REGION"] = "Region1"
+        env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
             target,
@@ -367,7 +367,7 @@ class TestSelectiveRegionPause(RocprofsysTest):
 class TestSelectiveRegionNoMarker(RocprofsysTest):
     """Tests for region filtering with ConditionB only (no marker_api).
 
-    Region filtering works via ROCPROFSYS_TRACE_REGION even without marker_api.
+    Region filtering works via ROCPROFSYS_SELECTED_REGIONS even without marker_api.
     Pause/resume is IGNORED.
 
     Code flow:
@@ -379,9 +379,9 @@ class TestSelectiveRegionNoMarker(RocprofsysTest):
     """
 
     def test_region_1_filter(self, mode, no_marker_env):
-        """ROCPROFSYS_TRACE_REGION='Region1' without marker_api."""
+        """ROCPROFSYS_SELECTED_REGIONS='Region1' without marker_api."""
         env = no_marker_env.copy()
-        env["ROCPROFSYS_TRACE_REGION"] = "Region1"
+        env["ROCPROFSYS_SELECTED_REGIONS"] = "Region1"
         result = self.run_test(
             mode,
             "selective_region",

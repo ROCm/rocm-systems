@@ -16,14 +16,17 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/log.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/simulation.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <functional>
@@ -97,6 +100,15 @@ public:
 
   /// @brief Clear all halted wavefront slots and free their register allocations.
   void retire_halted_wfs();
+
+  /// @brief Check whether this CU can accept an entire workgroup.
+  ///
+  /// @details Queries the number of free wavefront slots and register file
+  /// blocks without modifying any state. The command processor calls this
+  /// before dispatching to guarantee all-or-nothing workgroup placement.
+  /// @param num_wfs Number of wavefronts in the workgroup.
+  /// @returns true if the CU has enough free slots and registers.
+  bool can_accept_workgroup(uint32_t num_wfs) const;
 
   /// @brief Execute work until the next scheduling boundary.
   ///
@@ -175,12 +187,22 @@ public:
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
   void flush_all() {
+    util::Logger::vm([&](auto &os) {
+      if (l1_vector_.store_count() > 0)
+        os << std::format("CU {}@{} L1 stores: total={} active={} l2_writes={}", this->name(),
+                          reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
+                          l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
+    });
+    l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
     l2_->flush_all();
   }
 
   /// @brief Flush only the per-CU L1 caches (invalidate, since L1 is write-through).
-  void flush_l1() { l1_vector_.flush_all(); }
+  void flush_l1() {
+    l1_scalar_.invalidate_all();
+    l1_vector_.flush_all();
+  }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
   ///
@@ -191,13 +213,48 @@ public:
   /// @brief Set (or replace) the L2 cache pointer.
   ///
   /// Used by the config loader for deferred initialization.
-  /// Also updates the L1 caches' backing store to the new L2.
+  /// Also updates the L1 caches' backing store and global memory pipeline.
   /// @param l2 New L2 cache (not owned).
   void set_l2(L2Cache *l2) {
     l2_ = l2;
     l1_scalar_.set_l2(l2);
     l1_vector_.set_l2(l2);
+    global_mem_pipeline_.set_l2(l2);
   }
+
+  // Memory issue interface for instruction execute() bodies.
+  //
+  // These provide the public interface through which instruction execute()
+  // methods issue memory operations. In FUNCTIONAL mode they perform
+  // the memory access synchronously through the appropriate cache level.
+
+  /// @brief Issue a scalar memory load through the L1 scalar cache.
+  ///
+  /// @param addr Dword-aligned scalar address (computed by smem_calculate_address).
+  /// @param dst_sgpr Physical SGPR index to write the first loaded dword.
+  /// @param dword_count Number of dwords to load (1, 2, 4, 8, or 16).
+  /// @param mtype Memory type (default RW — Phase D fills in correct value).
+  void issue_scalar_mem(uint64_t addr, uint32_t dst_sgpr, uint32_t dword_count,
+                        Mtype mtype = Mtype::RW);
+
+  /// @brief Issue a per-lane global/buffer memory load through the L1 vector cache.
+  ///
+  /// @param addrs Per-lane byte addresses (only active lanes are accessed).
+  /// @param lane_mask Bitmask of active lanes.
+  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
+  /// @param dword_count Dwords per lane (1, 2, 3, or 4).
+  /// @param mtype Memory type (default RW — Phase D fills in correct value).
+  void issue_global_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
+                        uint32_t dst_vgpr, uint32_t dword_count, Mtype mtype = Mtype::RW);
+
+  /// @brief Issue a per-lane local (LDS) memory load.
+  ///
+  /// @param addrs Per-lane byte addresses into the LDS.
+  /// @param lane_mask Bitmask of active lanes.
+  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
+  /// @param dword_count Dwords per lane (1 or 2).
+  void issue_local_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask, uint32_t dst_vgpr,
+                       uint32_t dword_count);
 
   /// @brief Return the ISA architecture.
   /// @returns Architecture enum value.
@@ -274,6 +331,21 @@ public:
   /// @returns Pointer to the requester port.
   simdojo::Port *req_port() { return req_; }
 
+  /// @brief Execute an instruction on a wavefront (ISA-specific dispatch).
+  ///
+  /// @warning NOT thread-safe. Must be called from the CU's event-loop
+  /// thread or from single-threaded test contexts only.
+  /// @param inst The decoded instruction.
+  /// @param wf The wavefront executing the instruction.
+  virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
+
+  /// @brief Reset all wavefront slots to halted state.
+  ///
+  /// Frees all register allocations and resets every slot.  Used by the
+  /// instruction execution test harness between instructions.
+  /// @warning NOT thread-safe.  Must not be called while step() is running.
+  void reset_all_wf();
+
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
                   uint32_t wf_size);
@@ -287,10 +359,8 @@ protected:
   /// @param base Base index returned by allocate_vgprs().
   virtual void free_vgprs(uint32_t base) = 0;
 
-  /// @brief Execute an instruction on a wavefront (ISA-specific dispatch).
-  /// @param inst The decoded instruction.
-  /// @param wf The wavefront executing the instruction.
-  virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
+  /// @brief Count the number of free VGPR allocation blocks.
+  virtual uint32_t free_vgpr_blocks() const = 0;
 
   /// @brief Tick all memory pipelines (called at the start of step).
   void tick_pipelines();
@@ -298,7 +368,7 @@ protected:
   /// @brief Route a memory instruction into the appropriate pipeline.
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.
-  void route_memory_inst(std::unique_ptr<Instruction> inst, Wavefront &wf);
+  void route_memory_inst(Instruction *inst, Wavefront &wf);
 
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
@@ -369,7 +439,6 @@ public:
         for (uint32_t i = 0; i < quantum && step(); ++i) {
         }
       }
-      retire_halted_wfs();
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
@@ -380,8 +449,22 @@ public:
     return true;
   }
 
-  /// @brief Schedule an engine event that calls advance().
+  /// @brief Run wavefronts on this CU.
+  ///
+  /// In unbounded functional mode (quantum == 0), advance directly — the CU
+  /// will drain all wavefronts before returning. This avoids scheduling an
+  /// engine event and waiting for the LBTS to advance, which can deadlock
+  /// when the engine is in await_primaries mode (KFD driver).
+  ///
+  /// In bounded mode (quantum > 0), schedule a work event to yield between
+  /// quanta, ensuring fair interleaving across CUs.
   void activate() override {
+    if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
+      if (this->config_.functional_quantum == 0) {
+        advance();
+        return;
+      }
+    }
     this->schedule_event(&work_event_, this->engine()->global_time() + 1);
   }
 
@@ -454,10 +537,12 @@ protected:
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
 
+  uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
+
   /// @brief Execute one instruction on the given wavefront.
-  void execute_instruction(Instruction *inst, Wavefront &wf) override {
-    static_cast<IsaInstruction<Isa> *>(inst)->execute(wf);
-  }
+  ///
+  /// @brief Execute one instruction on the given wavefront via direct dispatch.
+  void execute_instruction(Instruction *inst, Wavefront &wf) override { inst->execute(*inst, &wf); }
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};

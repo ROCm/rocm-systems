@@ -374,7 +374,9 @@ def format_analysis_output(
         commands = rec.get("commands", [])
         estimated_impact = rec.get("estimated_impact", "")
 
-        lines.append(f"[{priority}] {category}")
+        confidence = rec.get("confidence")
+        conf_str = f"  (Confidence: {int(confidence * 100)}%)" if confidence is not None else ""
+        lines.append(f"[{priority}] {category}{conf_str}")
         lines.append("\u2500" * width)
         lines.append(f"  Issue: {issue}")
         lines.append("")

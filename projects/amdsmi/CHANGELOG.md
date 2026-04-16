@@ -66,6 +66,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - CLI help text and memory partition change warnings no longer reference `amd-smi reset -r` for driver reloading.
   - Users are now directed to use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload the driver after partition changes.
 
+- **Changed power APIs to have consistent output parameter types**.  
+  - Modified 6 cpu power API's to have consistent output power types. All set and get API's have uint32_t output values.
+  - Modified get and set API's that had double output types to have uint32_t output types.
+    - amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle, uint32_t* ppower);
+    - amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle, uint32_t* pcap);
+    - amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle, uint32_t* pmax);
+    - amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
+                                         uint32_t* power_efficiency_mode,
+                                         uint32_t* utilization, uint32_t* ppt_limit);
+    - amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_handle, uint32_t* power);
+    - amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_handle, uint32_t* sdps_limit);
+
 ## amd_smi_lib for ROCm 7.12.0
 
 ### Added

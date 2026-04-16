@@ -138,7 +138,7 @@ def load_reference_guide() -> str:
     Raises:
         ReferenceGuideNotFoundError: If guide file not found.
     """
-    return get_reference_guide_path().read_text()
+    return get_reference_guide_path().read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +414,7 @@ class LLMAnalyzer:
         if not self.reference_guide_path.exists():
             raise ReferenceGuideNotFoundError([str(self.reference_guide_path)])
 
-        return self.reference_guide_path.read_text()
+        return self.reference_guide_path.read_text(encoding="utf-8")
 
     def _sanitize_data(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1082,13 +1082,20 @@ Follow the reference guide strictly for analysis methodology and output format."
         verify_ssl = verify_ssl_env not in ("0", "false", "no")
         http_client = None
         if not verify_ssl:
+            import warnings
+
+            warnings.warn(
+                "[LLMAnalyzer] SSL certificate verification is DISABLED via "
+                "ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL — LLM traffic is exposed "
+                "to MITM. Only use this for trusted private endpoints with "
+                "self-signed certs.",
+                stacklevel=2,
+            )
             try:
                 import httpx as _httpx
 
                 http_client = _httpx.Client(verify=False)
             except ImportError:
-                import warnings
-
                 warnings.warn(
                     "ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is not installed. "
                     "SSL verification will remain enabled. Run: pip install httpx",

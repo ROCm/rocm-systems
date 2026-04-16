@@ -31,6 +31,7 @@
 #include "KFDBaseComponentTest.hpp"
 
 #define mmCOMPUTE_PGM_RSRC3                                                     0x2e2d
+#define mmCOMPUTE_TMPRING_SIZE_GFX1250                                          0x2e16
 
 Dispatch::Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset)
     :m_IsaBuf(isaBuf), m_IndirectBuf(PACKETTYPE_PM4, PAGE_SIZE / sizeof(unsigned int), isaBuf.Node()),
@@ -248,7 +249,10 @@ void Dispatch::BuildIb() {
 
     m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_RESOURCE_LIMITS, COMPUTE_RESOURCE_LIMITS,
                                                   ARRAY_SIZE(COMPUTE_RESOURCE_LIMITS)));
-    m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_TMPRING_SIZE, COMPUTE_TMPRING_SIZE,
+    m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(m_FamilyId >= FAMILY_GFX125X ?
+                                                  mmCOMPUTE_TMPRING_SIZE_GFX1250 :
+                                                  mmCOMPUTE_TMPRING_SIZE,
+                                                  COMPUTE_TMPRING_SIZE,
                                                   ARRAY_SIZE(COMPUTE_TMPRING_SIZE)));
     m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_RESTART_X, COMPUTE_RESTART_VALUES,
                                                   ARRAY_SIZE(COMPUTE_RESTART_VALUES)));

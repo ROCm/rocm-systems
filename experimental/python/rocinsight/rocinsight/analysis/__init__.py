@@ -33,6 +33,7 @@ from .core import (
     identify_hotspots,
     analyze_memory_copies,
     analyze_hardware_counters,
+    detect_warmup_issues,
 )
 
 from .att import (
@@ -68,6 +69,7 @@ __all__ = [
     "identify_hotspots",
     "analyze_memory_copies",
     "analyze_hardware_counters",
+    "detect_warmup_issues",
     # att.py
     "_ATT_STALL_CATEGORY_MAP",
     "_ATT_MIN_HITCOUNT",
