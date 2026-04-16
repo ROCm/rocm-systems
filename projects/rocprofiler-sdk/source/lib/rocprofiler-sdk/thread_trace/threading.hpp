@@ -98,6 +98,7 @@ enum worker_flag_status_t
 void
 producer_loop(triple_buffer_producer_data_t parameters);
 
+/// Important: Only one consumer is allowed per instance of "parameters"
 void
 consumer_loop(triple_buffer_consumer_data_t parameters);
 
