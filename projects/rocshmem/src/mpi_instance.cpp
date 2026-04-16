@@ -27,7 +27,6 @@
 #include "rocshmem/rocshmem.hpp"
 #include "mpi_instance.hpp"
 #include "util.hpp"
-#include "log.hpp"
 
 #if !defined(HAVE_EXTERNAL_MPI)
 // Open MPI specific symbols
@@ -45,7 +44,7 @@ int MPIInstance::mpilib_dl_init() {
 
   mpilib_handle_ = dlopen("libmpi.so", RTLD_LAZY);
   if (!mpilib_handle_) {
-    LOG_TRACE("Could not open libmpi.so");
+    printf("Could not open libmpi.so. Returning\n");
     return ROCSHMEM_ERROR;
   }
 

@@ -22,7 +22,6 @@
  * THE SOFTWARE.
  *****************************************************************************/
 
-#include "log.hpp"
 #include "topology.hpp"
 #include "ibv_wrapper.hpp"
 #include "numa_wrapper.hpp"
@@ -57,23 +56,23 @@ namespace rocshmem
 
     long const retCode = numa.move_pages(0, numPages, pages.data(), NULL, status.data(), 0);
     if (retCode) {
-      LOG_ERROR("Unable to collect page table information for allocated memory. "
-                "Ensure NUMA library is installed properly");
+      fprintf(stderr, "Unable to collect page table information for allocated memory. "
+              "Ensure NUMA library is installed properly\n");
       return -1;
     }
 
     size_t mistakeCount = 0;
     for (size_t i = 0; i < numPages; i++) {
       if (status[i] < 0) {
-        LOG_ERROR("Unexpected page status (%d) for page %zu", status[i], i);
+        fprintf(stderr, "Unexpected page status (%d) for page %zu\n", status[i], i);
         return -1;
       }
       if (status[i] != targetId) mistakeCount++;
     }
     if (mistakeCount > 0) {
-      LOG_ERROR("%zu out of %zu pages for memory allocation were not on NUMA node %d\n"
-                "  This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad\n",
-                mistakeCount, numPages, targetId);
+      fprintf(stderr, "%zu out of %zu pages for memory allocation were not on NUMA node %d.\n"
+              " This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad\n",
+              mistakeCount, numPages, targetId);
       return -1;
     }
     return ROCSHMEM_SUCCESS;
@@ -83,7 +82,7 @@ namespace rocshmem
   static int AllocateMemory(MemDevice memDevice, size_t numBytes, void** memPtr)
   {
     if (numBytes == 0) {
-      LOG_ERROR("Unable to allocate 0 bytes");
+      fprintf(stderr, "Unable to allocate 0 bytes");
       return -1;
     }
     *memPtr = nullptr;
@@ -119,7 +118,7 @@ namespace rocshmem
       // Reset to original GPU
       CHECK_HIP(hipSetDevice(prev_dev));
     } else {
-      LOG_ERROR("Unsupported memory type (%d)", memType);
+      printf("Unsupported memory type (%d)", memType);
       return -1;
     }
     return ROCSHMEM_SUCCESS;
@@ -130,7 +129,7 @@ namespace rocshmem
   {
     // Avoid deallocating nullptr
     if (memPtr == nullptr) {
-      LOG_ERROR("Attempted to free null pointer for %lu bytes", bytes);
+      fprintf(stderr, "Attempted to free null pointer for %lu bytes", bytes);
       return -1;
     }
 
@@ -146,7 +145,7 @@ namespace rocshmem
         break;
       }
     default:
-      LOG_ERROR("Attempting to deallocate unrecognized memory type (%d)", memType);
+      fprintf(stderr, "Attempting to deallocate unrecognized memory type (%d)", memType);
       return -1;
     }
     return ROCSHMEM_SUCCESS;
@@ -196,20 +195,20 @@ namespace rocshmem
     switch (exeDevice.exeType) {
     case EXE_CPU:
       if (exeIndex < 0 || exeIndex >= numCpus) {
-        LOG_ERROR("CPU index must be between 0 and %d inclusively", numCpus - 1);
+        fprintf(stderr, "CPU index must be between 0 and %d inclusively", numCpus - 1);
         return -1;
       }
       agent = cpuAgents[exeDevice.exeIndex];
       break;
     case EXE_GPU:
       if (exeIndex < 0 || exeIndex >= numGpus) {
-        LOG_ERROR("GPU index must be between 0 and %d inclusively", numGpus - 1);
+        fprintf(stderr, "GPU index must be between 0 and %d inclusively", numGpus - 1);
         return -1;
       }
       agent = gpuAgents[exeIndex];
       break;
     default:
-      LOG_ERROR("Attempting to get HSA agent of unknown or unsupported executor type (%d)",
+      fprintf(stderr, "Attempting to get HSA agent of unknown or unsupported executor type (%d)",
              exeDevice.exeType);
       return -1;
     }
@@ -222,7 +221,7 @@ namespace rocshmem
     if (IsCpuMemType(memDevice.memType)) return GetHsaAgent({EXE_CPU, memDevice.memIndex}, agent);
     if (IsGpuMemType(memDevice.memType)) return GetHsaAgent({EXE_GPU, memDevice.memIndex}, agent);
 
-    LOG_ERROR("Unable to get HSA agent for memDevice (%d,%d)",
+    fprintf(stderr, "Unable to get HSA agent for memDevice (%d,%d)",
            memDevice.memType, memDevice.memIndex);
     return -1;
   }
@@ -275,7 +274,7 @@ namespace rocshmem
 
     int fd = open(roceTypePath, O_RDONLY);
     if (fd == -1) {
-      LOG_ERROR("Failed while opening RoCE file path (%s)", roceTypePath);
+      fprintf(stderr, "Failed while opening RoCE file path (%s)", roceTypePath);
       return -1;
     }
 
@@ -283,7 +282,7 @@ namespace rocshmem
     close(fd);
 
     if (ret == -1) {
-      LOG_ERROR("Failed while reading RoCE version");
+      fprintf(stderr, "Failed while reading RoCE version");
       return -1;
     }
 
@@ -346,7 +345,7 @@ namespace rocshmem
 
     if (highestPriority == GidPriority::UNKNOWN) {
       gidInfo.first = -1;
-      LOG_ERROR("Failed to auto-detect a valid GID index. Try setting it manually through IB_GID_INDEX");
+      fprintf(stderr, "Failed to auto-detect a valid GID index. Try setting it manually through IB_GID_INDEX");
       return -1;
     }
     gidInfo.first = gidIndex;
@@ -434,7 +433,7 @@ namespace rocshmem
           ibvDeviceList.push_back(ibvDevice);
         }
       } else {
-        LOG_WARN("No visible InfiniBand devices found.");
+        fprintf(stderr, "[Warning] No visible InfiniBand devices found.\n");
       }
       ibv.free_device_list(deviceList);
       isInitialized = true;
@@ -473,7 +472,7 @@ namespace rocshmem
     iss >> std::hex >> domain >> delimiter >> bus >> delimiter >> device >> delimiter >> function;
     if (iss.fail()) {
 #ifdef VERBS_DEBUG
-      LOG_ERROR("Invalid PCIe address format: %s", pcieAddress.c_str());
+      printf("Invalid PCIe address format: %s\n", pcieAddress.c_str());
 #endif
       return -1;
     }
@@ -567,7 +566,7 @@ namespace rocshmem
     std::string canonicalPath = std::filesystem::canonical(devicePath).string();
 
     if (!std::filesystem::exists(devicePath)) {
-      LOG_ERROR("Device path %s does not exist", devicePath.c_str());
+      fprintf(stderr, "Device path %s does not exist", devicePath.c_str());
       return -1;
     }
 
@@ -873,7 +872,7 @@ namespace rocshmem
         hipError_t err = hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), i);
         if (err != hipSuccess) {
 #ifdef VERBS_DEBUG
-          LOG_WARN("Failed to get PCI Bus ID for HIP device %d: %s", i, hipGetErrorString(err));
+          printf("Failed to get PCI Bus ID for HIP device %d: %s\n", i, hipGetErrorString(err));
 #endif
           closestNicId[i] = -1;
           continue;
@@ -893,7 +892,7 @@ namespace rocshmem
         // to determine the closest NIC to GPU if the PCIe tree approach fails
         if (closestIdx < 0) {
 #ifdef VERBS_DEBUG
-          LOG_WARN("Falling back to PCIe bus ID distance to determine proximity");
+          printf("[WARN] Falling back to PCIe bus ID distance to determine proximity\n");
 #endif
 
           int minDistance = std::numeric_limits<int>::max();
@@ -914,7 +913,7 @@ namespace rocshmem
     }
 
     int closestIdx = closestNicId[gpuIndex];
-    LOG_TRACE("GPU Device id: %d closest NIC id : %d name: %s", gpuIndex, closestIdx,
+    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestIdx,
            (-1 != closestIdx)? ibvDeviceList[closestIdx].name.c_str(): "none-found");
     if (dev_name != nullptr && closestIdx != -1) {
       *dev_name = strdup(ibvDeviceList[closestIdx].name.c_str());

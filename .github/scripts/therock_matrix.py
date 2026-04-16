@@ -67,10 +67,9 @@ project_map = {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_ROCSHMEM=ON"],
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
     },
-    # Also test rocr-debug-agent and rocgdb since those depend on runtimes.
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
-        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk",
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],

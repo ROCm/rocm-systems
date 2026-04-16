@@ -17,54 +17,6 @@
  * @ingroup AtomicsTest
  */
 
-// Helper function to run unsafeAtomicAdd tests (single kernel)
-template <typename TestType>
-static void runUnsafeAtomicAddTest() {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(warp_size,
-                                                                          sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(warp_size,
-                                                                          cache_line_size);
-    }
-  }
-}
-
-// Helper function to run unsafeAtomicAdd tests (multi kernel)
-template <typename TestType>
-static void runUnsafeAtomicAddMultiKernelTest() {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(2, warp_size,
-                                                                            sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(2, warp_size,
-                                                                            cache_line_size);
-    }
-  }
-}
-
 /**
  * Test Description
  * ------------------------
@@ -90,9 +42,26 @@ static void runUnsafeAtomicAddMultiKernelTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_unsafeAtomicAdd_Positive) {
-  SECTION("float") { runUnsafeAtomicAddTest<float>(); }
-  SECTION("double") { runUnsafeAtomicAddTest<double>(); }
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_Positive, float, double) {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(warp_size,
+                                                                          sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(warp_size,
+                                                                          cache_line_size);
+    }
+  }
 }
 
 /**
@@ -119,9 +88,26 @@ HIP_TEST_CASE(Unit_unsafeAtomicAdd_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_unsafeAtomicAdd_Positive_Multi_Kernel) {
-  SECTION("float") { runUnsafeAtomicAddMultiKernelTest<float>(); }
-  SECTION("double") { runUnsafeAtomicAddMultiKernelTest<double>(); }
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_Positive_Multi_Kernel, float, double) {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(2, warp_size,
+                                                                            sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kUnsafeAdd>(2, warp_size,
+                                                                            cache_line_size);
+    }
+  }
 }
 
 template <typename Type,
@@ -133,9 +119,8 @@ __global__ void unsafe_add_kernel(Type* ptr, Type val) {
   (void)unsafeAtomicAdd(ptr, val);
 }
 
-// Helper function to run unsafe_atomic_add_half_and_bfloat tests
-template <typename TestType>
-static void runUnsafeAtomicAddHalfAndBfloatTest() {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafe_atomic_add_half_and_bfloat, __half2, __hip_bfloat162, __half,
+                   __hip_bfloat16) {
   auto kernel = unsafe_add_kernel<TestType>;
   TestType val;
   if constexpr (std::is_same<TestType, __half2>::value) {
@@ -175,13 +160,6 @@ static void runUnsafeAtomicAddHalfAndBfloatTest() {
   REQUIRE(hout.x == 32.0f);
   REQUIRE(hout.y == 64.0f);
   HIP_CHECK(hipFree(out));
-}
-
-TEST_CASE(Unit_unsafe_atomic_add_half_and_bfloat) {
-  SECTION("__half2") { runUnsafeAtomicAddHalfAndBfloatTest<__half2>(); }
-  SECTION("__hip_bfloat162") { runUnsafeAtomicAddHalfAndBfloatTest<__hip_bfloat162>(); }
-  SECTION("__half") { runUnsafeAtomicAddHalfAndBfloatTest<__half>(); }
-  SECTION("__hip_bfloat16") { runUnsafeAtomicAddHalfAndBfloatTest<__hip_bfloat16>(); }
 }
 
 /**

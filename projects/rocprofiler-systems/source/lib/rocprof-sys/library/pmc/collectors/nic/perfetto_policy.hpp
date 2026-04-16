@@ -111,11 +111,11 @@ struct perfetto_policy
                                device_index);
         };
 
-        auto& device_tracks = perfetto_policy::tracks[device_index];
+        auto& tracks = perfetto_policy::tracks[device_index];
 
         if(enabled_metric_config.bits.rx_rdma_ucast_bytes)
         {
-            device_tracks[RX_RDMA_UCAST_BYTES_VALUE] = {
+            tracks[RX_RDMA_UCAST_BYTES_VALUE] = {
                 "RX RDMA Bytes", "bytes",
                 counter_track::emplace(device_index, addendum("RX RDMA Bytes"), "bytes")
             };
@@ -123,7 +123,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.tx_rdma_ucast_bytes)
         {
-            device_tracks[TX_RDMA_UCAST_BYTES_VALUE] = {
+            tracks[TX_RDMA_UCAST_BYTES_VALUE] = {
                 "TX RDMA Bytes", "bytes",
                 counter_track::emplace(device_index, addendum("TX RDMA Bytes"), "bytes")
             };
@@ -131,7 +131,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.rx_rdma_ucast_pkts)
         {
-            device_tracks[RX_RDMA_UCAST_PKTS_VALUE] = {
+            tracks[RX_RDMA_UCAST_PKTS_VALUE] = {
                 "RX RDMA Pkts", "packets",
                 counter_track::emplace(device_index, addendum("RX RDMA Pkts"), "packets")
             };
@@ -139,7 +139,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.tx_rdma_ucast_pkts)
         {
-            device_tracks[TX_RDMA_UCAST_PKTS_VALUE] = {
+            tracks[TX_RDMA_UCAST_PKTS_VALUE] = {
                 "TX RDMA Pkts", "packets",
                 counter_track::emplace(device_index, addendum("TX RDMA Pkts"), "packets")
             };
@@ -147,7 +147,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.rx_rdma_cnp_pkts)
         {
-            device_tracks[RX_RDMA_CNP_PKTS_VALUE] = {
+            tracks[RX_RDMA_CNP_PKTS_VALUE] = {
                 "RX CNP Pkts", "packets",
                 counter_track::emplace(device_index, addendum("RX CNP Pkts"), "packets")
             };
@@ -155,7 +155,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.tx_rdma_cnp_pkts)
         {
-            device_tracks[TX_RDMA_CNP_PKTS_VALUE] = {
+            tracks[TX_RDMA_CNP_PKTS_VALUE] = {
                 "TX CNP Pkts", "packets",
                 counter_track::emplace(device_index, addendum("TX CNP Pkts"), "packets")
             };
@@ -222,9 +222,10 @@ struct perfetto_policy
             return;
         }
 
-        ::rocprofsys::pmc::collectors::nic::enabled_metrics effective_metrics{};
-        effective_metrics.value =
-            static_cast<uint32_t>(enabled_metrics.value & supported_metrics.value);
+        ::rocprofsys::pmc::collectors::nic::enabled_metrics effective_metrics = {
+            .value =
+                static_cast<uint32_t>(enabled_metrics.value & supported_metrics.value)
+        };
 
         if(effective_metrics.value == 0)
         {
@@ -237,7 +238,7 @@ struct perfetto_policy
             return;
         }
 
-        auto& device_tracks = tracks_it->second;
+        auto& tracks = tracks_it->second;
 
         for(const auto& sample : samples)
         {
@@ -252,8 +253,8 @@ struct perfetto_policy
             // RX RDMA unicast bytes
             if(effective_metrics.bits.rx_rdma_ucast_bytes)
             {
-                auto it = device_tracks.find(RX_RDMA_UCAST_BYTES_VALUE);
-                if(it != device_tracks.end())
+                auto it = tracks.find(RX_RDMA_UCAST_BYTES_VALUE);
+                if(it != tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_rx_ucast_bytes",
@@ -265,8 +266,8 @@ struct perfetto_policy
             // TX RDMA unicast bytes
             if(effective_metrics.bits.tx_rdma_ucast_bytes)
             {
-                auto it = device_tracks.find(TX_RDMA_UCAST_BYTES_VALUE);
-                if(it != device_tracks.end())
+                auto it = tracks.find(TX_RDMA_UCAST_BYTES_VALUE);
+                if(it != tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_tx_ucast_bytes",
@@ -278,8 +279,8 @@ struct perfetto_policy
             // RX RDMA unicast packets
             if(effective_metrics.bits.rx_rdma_ucast_pkts)
             {
-                auto it = device_tracks.find(RX_RDMA_UCAST_PKTS_VALUE);
-                if(it != device_tracks.end())
+                auto it = tracks.find(RX_RDMA_UCAST_PKTS_VALUE);
+                if(it != tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_rx_ucast_pkts",
@@ -291,8 +292,8 @@ struct perfetto_policy
             // TX RDMA unicast packets
             if(effective_metrics.bits.tx_rdma_ucast_pkts)
             {
-                auto it = device_tracks.find(TX_RDMA_UCAST_PKTS_VALUE);
-                if(it != device_tracks.end())
+                auto it = tracks.find(TX_RDMA_UCAST_PKTS_VALUE);
+                if(it != tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_tx_ucast_pkts",
@@ -304,8 +305,8 @@ struct perfetto_policy
             // RX RDMA CNP packets
             if(effective_metrics.bits.rx_rdma_cnp_pkts)
             {
-                auto it = device_tracks.find(RX_RDMA_CNP_PKTS_VALUE);
-                if(it != device_tracks.end())
+                auto it = tracks.find(RX_RDMA_CNP_PKTS_VALUE);
+                if(it != tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_rx_cnp_pkts",
@@ -317,8 +318,8 @@ struct perfetto_policy
             // TX RDMA CNP packets
             if(effective_metrics.bits.tx_rdma_cnp_pkts)
             {
-                auto it = device_tracks.find(TX_RDMA_CNP_PKTS_VALUE);
-                if(it != device_tracks.end())
+                auto it = tracks.find(TX_RDMA_CNP_PKTS_VALUE);
+                if(it != tracks.end())
                 {
                     TRACE_COUNTER(
                         "nic_tx_cnp_pkts",

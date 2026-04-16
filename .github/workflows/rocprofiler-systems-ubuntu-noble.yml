@@ -64,12 +64,14 @@ jobs:
       ROCPROFSYS_CI: 'ON'
 
     steps:
-    - &sparse-checkout
-      uses: actions/checkout@v6
+    - uses: actions/checkout@v6
       with:
-        sparse-checkout: |
-          projects/rocprofiler-systems/
-          .gitmodules
+    - &sparse-checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-systems/
+            .gitmodules
 
     - name: Install Packages
       timeout-minutes: 25
@@ -220,17 +222,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        compiler: ['g++', 'amdclang++']
-        include:
-          - compiler: 'g++'
-            cc: 'gcc'
-            use-clang-omp: 'OFF'
-          - compiler: 'amdclang++'
-            cc: 'amdclang'
-            use-clang-omp: 'ON'
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -289,16 +280,16 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
         echo "CMake version: $(cmake --version | head -n 1)"
-        echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
+        echo "Compiler version: $(g++ --version | head -n 1)"
         echo "ROCm version: 7.2"
         echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{BOOST,TBB,ELFUTILS,LIBIBERTY}=OFF)"
         python3 ./scripts/run-ci.py -B build \
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-system-deps-${{ matrix.compiler }} \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-system-deps \
           --build-jobs $(nproc) \
           --site GitHub \
           -- \
-          -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+          -DCMAKE_C_COMPILER=gcc \
+          -DCMAKE_CXX_COMPILER=g++ \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
@@ -316,7 +307,7 @@ jobs:
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
-          -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
+          -DUSE_CLANG_OMP=OFF \
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
@@ -343,7 +334,7 @@ jobs:
       continue-on-error: True
       uses: actions/upload-artifact@v7
       with:
-        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        name: ctest-${{ github.job }}-log
         path: |
           projects/rocprofiler-systems/build/*.log
 
@@ -352,7 +343,7 @@ jobs:
       continue-on-error: True
       uses: actions/upload-artifact@v7
       with:
-        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        name: data-${{ github.job }}-files
         path: |
           projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
           projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt

@@ -162,10 +162,7 @@ struct nic_traits
                              entry.device->get_product_name().c_str(),
                              entry.device->get_vendor_name().c_str(),
                              "AI NIC",
-                             "AI NIC",
-                             0,
-                             0,
-                             {} };
+                             "AI NIC" };
 
             get_agent_manager_instance().insert_agent(cur_agent);
             nic_index++;

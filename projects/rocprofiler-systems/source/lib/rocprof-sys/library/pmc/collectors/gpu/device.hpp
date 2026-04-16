@@ -388,8 +388,7 @@ private:
         return fmt::format(
             "Current power: {}, Average power: {}, Memory usage: {}, Hotspot temp: {}, "
             "Edge temp: {}, GFX activity: {}, UMC activity: {}, MM activity: {}, "
-            "VCN activity: {}, JPEG activity: {}, VCN busy: {}, JPEG busy: {}, "
-            "XGMI: {}, PCIe: {}, SDMA: {}",
+            "VCN activity: {}, JPEG activity: {}, XGMI: {}, PCIe: {}, SDMA: {}",
             bool_string(metrics.bits.current_socket_power),
             bool_string(metrics.bits.average_socket_power),
             bool_string(metrics.bits.memory_usage),
@@ -398,8 +397,7 @@ private:
             bool_string(metrics.bits.gfx_activity),
             bool_string(metrics.bits.umc_activity), bool_string(metrics.bits.mm_activity),
             bool_string(metrics.bits.vcn_activity),
-            bool_string(metrics.bits.jpeg_activity), bool_string(metrics.bits.vcn_busy),
-            bool_string(metrics.bits.jpeg_busy), bool_string(metrics.bits.xgmi),
+            bool_string(metrics.bits.jpeg_activity), bool_string(metrics.bits.xgmi),
             bool_string(metrics.bits.pcie), bool_string(metrics.bits.sdma_usage));
     }
 

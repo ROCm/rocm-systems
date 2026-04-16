@@ -23,7 +23,6 @@
  *****************************************************************************/
 
 #include "gda/backend_gda.hpp"
-#include "log.hpp"
 #include "util.hpp"
 
 namespace rocshmem {
@@ -137,7 +136,7 @@ void* GDABackend::ionic_dv_dlopen() {
     // Try hard-coded PATH
     dv_handle = dlopen("/usr/local/lib/libionic.so", RTLD_LAZY);
     if (!dv_handle) {
-      LOG_TRACE("Could not open libionic.so. Returning");
+      DPRINTF("Could not open libionic.so. Returning\n");
     }
   }
   return dv_handle;
