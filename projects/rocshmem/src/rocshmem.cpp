@@ -1076,13 +1076,13 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
 }
 
 __host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_quiet_on_stream\n");
+  LOG_API("rocshmem_quiet_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->quiet_on_stream(stream);
 }
 
 __host__ void rocshmem_sync_all_on_stream(hipStream_t stream) {
-  DPRINTF("Host function: rocshmem_sync_all_on_stream\n");
+  LOG_API("rocshmem_sync_all_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all_on_stream(stream);
 }

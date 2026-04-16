@@ -130,13 +130,13 @@ __host__ void ROHostContext::barrier_all_on_stream(hipStream_t stream) {
 }
 
 __host__ void ROHostContext::quiet_on_stream(hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_quiet_on_stream\n");
+  LOG_TRACE("ro_net_host_quiet_on_stream");
 
   host_interface->quiet_on_stream(stream);
 }
 
 __host__ void ROHostContext::sync_all_on_stream(hipStream_t stream) {
-  DPRINTF("Function: ro_net_host_sync_all_on_stream\n");
+  LOG_TRACE("ro_net_host_sync_all_on_stream");
 
   host_interface->sync_all_on_stream(stream);
 }

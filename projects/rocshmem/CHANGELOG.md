@@ -3,6 +3,7 @@
 ### Added
 * Added new APIs:
    * `rocshmem_quiet_on_stream`
+   * `rocshmem_sync_all_on_stream`
    * `rocshmem_TYPENAME_alltoall_wg`
    * `rocshmem_TYPENAME_alltoallv_wg`
    * `rocshmem_team_my_pe`
