@@ -403,7 +403,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         }
       }
     }
-  }  
+  }
 
 exit:
   return ret;
