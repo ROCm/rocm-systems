@@ -8,9 +8,18 @@ find_program(CYTHON_EXECUTABLE cython REQUIRED)
 
 # ---- hipFile library & headers --------------------------------------------
 
-# hipfile.h location (default: sibling include/ directory)
-set(HIPFILE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-    CACHE PATH "Path to directory containing hipfile.h")
+# hipfile.h location (prefer sibling include/ from source, fall back to installed)
+find_path(HIPFILE_INCLUDE_DIR hipfile.h
+    HINTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+        "/opt/rocm/include"
+    PATH "Path to directory containing hipfile.h"
+)
+if(NOT HIPFILE_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "Could not find hipfile.h. Set -DHIPFILE_INCLUDE_DIR=<path> or "
+        "install hipfile to /opt/rocm.")
+endif()
 
 # libhipfile.so location
 find_library(HIPFILE_LIBRARY hipfile

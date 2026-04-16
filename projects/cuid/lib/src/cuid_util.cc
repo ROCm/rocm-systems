@@ -532,8 +532,8 @@ void CuidUtilities::remove_UUIDv8_bits(amdcuid_id_t *id,
   out_raw_bits[5] = id->bytes[5];
 
   // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-  out_raw_bits[6] = ((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xFC) >> 2);
-  out_raw_bits[7] = ((id->bytes[7] & 0x03) << 6) | ((id->bytes[8] & 0xFC) >> 2);
+  out_raw_bits[6] = ((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xF0) >> 4);
+  out_raw_bits[7] = ((id->bytes[7] & 0x0F) << 4) | ((id->bytes[8] & 0x3C) >> 2);
 
   // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
   out_raw_bits[8] = ((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2);

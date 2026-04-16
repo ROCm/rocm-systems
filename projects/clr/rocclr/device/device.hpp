@@ -660,6 +660,7 @@ struct Info : public amd::EmbeddedObject {
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
+  bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 };
 
 //! Device settings

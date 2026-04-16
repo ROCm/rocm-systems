@@ -4661,7 +4661,7 @@ class AMDSMICommands:
                 # Only show util and ppt_limit for modes 4 and 5
                 if mode in [4, 5]:
                     static_dict["pwr_eff_mode"]["util"] = f"{util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit:.3f} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit} Watts"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -5078,7 +5078,7 @@ class AMDSMICommands:
             static_dict["ccd_power"] = {}
             try:
                 power = amdsmi_interface.amdsmi_get_cpu_core_ccd_power(args.core)
-                static_dict["ccd_power"]["value"] = f"{power:.3f} Watts"
+                static_dict["ccd_power"]["value"] = f"{power} Watts"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ccd_power"]["value"] = "N/A"
                 logging.debug(
@@ -7851,7 +7851,7 @@ class AMDSMICommands:
                 if mode in [4, 5]:
                     ppt_limit_watts = updated_ppt_limit / 1000.0  # Convert milliwatts to watts
                     static_dict["pwr_eff_mode"]["util"] = f"{updated_util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts:.3f} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts} Watts"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -9939,10 +9939,7 @@ class AMDSMICommands:
                 self.logger.clear_multiple_devices_output()
                 return
             if args.power_cap:
-                final_output = {
-                    "ppt0": "N/A",
-                    "ppt1": "N/A",
-                }
+                final_output = {"ppt0": "N/A", "ppt1": "N/A"}
                 power_limit_types = {}
                 for power_type in amdsmi_interface.AmdSmiPowerCapType:
                     # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase

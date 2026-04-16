@@ -475,6 +475,7 @@ HIP_TEST_CASE(Unit_hipDrvMemcpy3D_HosttoDevice) {
  */
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative) {
+  CHECK_IMAGE_SUPPORT
   DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.NegativeTests();
 }
