@@ -159,7 +159,7 @@ ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1 \
 After sourcing the script, the `rocshmem-deadlock-analyze` command is available:
 
 ```
-(rocgdb) rocshmem-deadlock-analyze [--color|--no-color] [--cull[=pat,...]] [output_file]
+(rocgdb) rocshmem-deadlock-analyze [--color|--no-color] [--cull[=pat,...]] [--check-lanes] [output_file]
 ```
 
 | Option | Description |
@@ -168,6 +168,7 @@ After sourcing the script, the `rocshmem-deadlock-analyze` command is available:
 | `--no-color` | Disable color codes, even on a TTY |
 | `--cull` | Cull groups stuck in GPU barriers / gridsync using the built-in default pattern list |
 | `--cull=p1,p2,...` | Cull groups whose backtrace contains any of the comma-separated substrings |
+| `--check-lanes` | Enable lane-level parameter mismatch detection for `_wg` and `_wave` collective calls (slow; see below) |
 | `output_file` | Write report to this file instead of stdout |
 
 #### Cull option
@@ -253,17 +254,59 @@ stack.  Template parameters and source file locations are kept in the key, so
 separate groups.
 
 **`<<< rocSHMEM API entry`** — Marks the outermost rocSHMEM public API function
-in the backtrace: the call the application made that led to the deadlock.  This
-frame is highlighted in bold yellow when color is enabled.
+in the backtrace: the call the application made that led to the deadlock.
 
 **`[rocSHMEM] Stuck in:`** — Names the matched API function for easy grepping.
-Printed in bold red when color is enabled.
 
 **`[HINT]`** — A short diagnosis of the likely deadlock cause based on the
-innermost recognized frame.  Printed in bold magenta when color is enabled.
+innermost recognized frame.
 
-The innermost deadlock frame (the actual spinning loop) is printed in bold
-regardless of color mode.
+The innermost deadlock frame (the actual spinning loop) is printed in bold cyan.
+
+**`=== Collective API Usage Issues ===`** — Appears after the per-group section
+when incorrect `_wg` or `_wave` API usage is detected from the backtraces.
+Three kinds of violations are reported:
+
+| Issue | Description |
+|---|---|
+| `[BAD] … non-collective _wg call` | Wavefronts in the same workgroup are at different `_wg` API calls, or some are not in any `_wg` call. All wavefronts in a WG must call the same `_wg` primitive together. |
+| `[BAD] … parameter mismatch in rocshmem_*_wg` | All wavefronts in a WG are at the same `_wg` call but with different argument values (e.g., different `pe` or `nelems`). |
+
+`_wave` primitives are collective only within a single wavefront (all 64 lanes
+must call with matching parameters). Different wavefronts — even in the same WG —
+may independently call any `_wave` function with different parameters; that is valid.
+Lane-level divergence within a wavefront is not visible from wavefront-level
+backtraces and requires `--check-lanes` to detect.
+
+#### Lane-level parameter mismatch (`--check-lanes`)
+
+When `--check-lanes` is added to the `rocshmem-deadlock-analyze` command, the
+script iterates over the active lanes of every wavefront that is inside a `_wg`
+or `_wave` collective call.  It switches rocgdb to each active lane, collects
+the per-lane backtrace, and extracts the argument values for the collective
+API frame.
+
+If any two active lanes in the same wavefront disagree on a parameter, a
+`LANE_PARAM_MISMATCH` issue is reported:
+
+```
+=== Collective API Usage Issues ===
+[BAD] WG (0,0,0) WF 0 — lane parameter mismatch in rocshmem_putmem_wave (_wave contract)
+  Differing parameter(s): pe
+    Lane 0 [0,0,0]: pe=0
+    Lane 1 [1,0,0]: pe=1
+    Lane 2 [2,0,0]: pe=0
+    ...
+```
+
+This check covers both `_wave` (lanes diverging within one wavefront) and `_wg`
+(lanes in a wavefront that should present unified parameters to the WG-wide
+collective).
+
+> **Performance note:** `--check-lanes` issues up to 64 additional `bt` calls per
+> wavefront in a collective call.  On a busy kernel with many wavefronts this can
+> be slow (several minutes).  Use it only when wavefront-level analysis has
+> already identified a collective call of interest.
 
 ### Recognized Deadlock Patterns and Hints
 
@@ -397,6 +440,9 @@ Without debug symbols only the outermost non-inlined frame is visible.  The
 - **Release builds**: Without debug symbols, internal frames (`wait_until`,
   `mlx5_poll_cq_until`, etc.) are invisible and no `[HINT]` is generated.
   The API entry frame is still detected when it is non-inlined.
+
+- **Lane-level analysis performance**: `--check-lanes` issues up to 64 `bt` calls
+  per wavefront in a collective call.  On large kernels this can take several minutes.
 
 - **Single GPU per process**: The script handles one GPU device per MPI rank.
   Multi-GPU-per-rank configurations are untested.

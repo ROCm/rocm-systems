@@ -159,6 +159,68 @@ _ARGS_RE   = re.compile(r'\(.*?\)')
 # This covers all ~1000 public device API functions without enumerating them.
 _API_FRAME_RE = re.compile(r'\b(rocshmem_[A-Za-z0-9_]+)\s*\(')
 
+# Matches only _wg and _wave collective API calls.
+_WG_WAVE_API_RE = re.compile(r'\b(rocshmem_[A-Za-z0-9_]+_(wg|wave))\s*\(')
+
+# Matches named parameters in a backtrace argument list: "name=value"
+_NAMED_PARAM_RE = re.compile(r'\b(\w+)=([^,)]+)')
+
+# Parses active lane entries from "info lanes" output.
+#
+# rocgdb 7 format (one lane per line):
+#   "  * 0   A   AMDGPU Lane 2:1:1:1/0 (0,0,0)[0,0,0]"
+#   "    1   A   AMDGPU Lane 2:1:1:1/0 (0,0,0)[1,0,0]"
+#   "    2   I   AMDGPU Lane 2:1:1:1/0 (0,0,0)[2,0,0]"   # inactive
+# Groups: (lane_id, wi_x, wi_y, wi_z)  — only rows with state 'A'.
+_LANE_INFO_RE = re.compile(
+    r'^\s*\*?\s*(\d+)\s+A\s+AMDGPU\s+Lane\s+\S+/\d+\s+\(\d+,\d+,\d+\)\[(\d+),(\d+),(\d+)\]',
+    re.MULTILINE
+)
+
+
+def _extract_raw_args(frame):
+    """
+    Extract the raw argument string from a single backtrace frame line.
+
+    Given a line like::
+
+        #3  rocshmem_putmem_wg (ctx=0x…, dest=0x…, nelems=64, pe=1) at file.hpp:42
+
+    returns ``'ctx=0x…, dest=0x…, nelems=64, pe=1'``.
+    """
+    paren = frame.find('(')
+    if paren == -1:
+        return ''
+    at_pos = frame.rfind(' at ')
+    sub = frame[paren + 1: at_pos if at_pos != -1 else len(frame)]
+    end = sub.rfind(')')
+    return sub[:end].strip() if end != -1 else sub.strip()
+
+
+def _parse_named_args(args_str):
+    """
+    Return a dict of ``{name: value}`` from a ``'a=1, b=2'``-style argument
+    string.  Hex addresses are normalized to ``'<addr>'`` so that per-wavefront
+    pointer values do not produce false mismatches.
+    """
+    result = {}
+    for m in _NAMED_PARAM_RE.finditer(args_str):
+        name = m.group(1)
+        val  = _ADDR_RE.sub('<addr>', m.group(2).strip())
+        result[name] = val
+    return result
+
+
+def _differing_params(arg_dicts):
+    """
+    Given a list of ``{name: value}`` dicts (one per wavefront), return the
+    sorted list of parameter names whose values are not identical across all
+    dicts.
+    """
+    all_keys = sorted(set().union(*arg_dicts))
+    return [k for k in all_keys
+            if len({d.get(k, '<missing>') for d in arg_dicts}) > 1]
+
 # Default set of backtrace substrings used to cull non-rocSHMEM blocking groups.
 # These are GPU synchronization primitives that are not rocSHMEM deadlocks:
 #   - HIP workgroup barriers (__syncthreads and variants)
@@ -289,7 +351,7 @@ class DeadlockAnalyzer:
     """
 
     def __init__(self, inferiors=None, output_file=None, color=None,
-                 cull_patterns=None):
+                 cull_patterns=None, lane_check=False):
         """
         Parameters
         ----------
@@ -311,6 +373,12 @@ class DeadlockAnalyzer:
             ``None``  — culling disabled (default).
             ``[]``    — cull using ``_DEFAULT_CULL_PATTERNS``.
             ``[...]`` — cull using the supplied list.
+        lane_check : bool
+            When True, iterate over the active lanes of each wavefront that is
+            inside a ``_wg`` or ``_wave`` collective call, collect per-lane
+            argument values, and report any lanes whose arguments differ.
+            This is slow (up to 64 ``bt`` calls per wavefront) so it is
+            disabled by default.  Enable with ``--check-lanes``.
         """
         self.inferiors = inferiors
         self.out = output_file if output_file is not None else sys.stdout
@@ -323,6 +391,7 @@ class DeadlockAnalyzer:
             self.cull_patterns = _DEFAULT_CULL_PATTERNS
         else:
             self.cull_patterns = list(cull_patterns)
+        self.lane_check = lane_check
 
     # ------------------------------------------------------------------
     # Thread collection
@@ -568,6 +637,280 @@ class DeadlockAnalyzer:
                 return hint
         return None
 
+    def _detect_wg_wave_api(self, frames):
+        """
+        Like detect_rocshmem_api_frame but restricted to ``_wg`` and ``_wave``
+        collective API functions.  Returns ``(api_name, raw_frame)`` for the
+        outermost matching frame, or ``(None, None)`` if none is found.
+        """
+        for frame in reversed(frames):
+            if 'rocshmem::' in frame:
+                continue
+            m = _WG_WAVE_API_RE.search(frame)
+            if m:
+                return m.group(1), frame
+        return None, None
+
+    def analyze_collective_usage(self, entries_with_bt):
+        """
+        Scan all per-wavefront backtraces for incorrect ``_wg`` / ``_wave``
+        collective API usage and return a list of issue dicts.
+
+        Detectable violations
+        ---------------------
+        **Non-collective _wg call**
+            Not all wavefronts in a workgroup are at the same ``_wg``
+            primitive.  The API contract requires every wavefront in the WG to
+            call the same function together.
+
+        **_wg parameter mismatch**
+            All wavefronts in a WG are in the same ``_wg`` call but with
+            different argument values (after stripping pointer addresses).
+
+        Not detectable
+        --------------
+        ``_wave`` primitives are collective only within a single wavefront
+        (all 64 lanes must call with matching parameters).  Different
+        wavefronts — even in the same WG — may independently call any
+        ``_wave`` function with different parameters; that is valid.
+        Lane-level divergence within a wavefront is not visible from
+        wavefront-level backtraces and therefore cannot be checked here.
+
+        Each returned dict has at minimum:
+          ``type``  — ``'NON_COLLECTIVE_WG'`` or ``'PARAM_MISMATCH_WG'``
+          ``pid``   — process ID
+          ``wg``    — workgroup coordinates tuple
+        """
+        issues = []
+
+        # Collect (inf.pid, wg) → list of per-wf info dicts
+        wg_map = {}
+        for (inf, thread, wg, wf, frames) in entries_with_bt:
+            api_name, raw_frame = self._detect_wg_wave_api(frames)
+            key = (inf.pid, wg)
+            if key not in wg_map:
+                wg_map[key] = []
+            wg_map[key].append({
+                'wf': wf,
+                'api': api_name,         # e.g. 'rocshmem_putmem_wg' or None
+                'frame': raw_frame,      # raw backtrace line for the API frame
+                'frames': frames,        # full raw backtrace
+            })
+
+        for (pid, wg), wf_list in sorted(wg_map.items()):
+            if len(wf_list) < 2:
+                continue  # need at least two wavefronts to compare
+
+            wg_entries = [e for e in wf_list if e['api'] and e['api'].endswith('_wg')]
+            non_wg     = [e for e in wf_list if not (e['api'] and e['api'].endswith('_wg'))]
+
+            # ---- _wg non-collective check --------------------------------
+            if wg_entries and non_wg:
+                # Some wavefronts are inside a _wg collective; others are not.
+                issues.append({
+                    'type': 'NON_COLLECTIVE_WG',
+                    'pid': pid,
+                    'wg': wg,
+                    'in_collective':     [(e['wf'], e['api']) for e in wg_entries],
+                    'not_in_collective': [(e['wf'], e['api']) for e in non_wg],
+                })
+            elif wg_entries:
+                wg_api_names = {e['api'] for e in wg_entries}
+                if len(wg_api_names) > 1:
+                    # Wavefronts in the same WG are in *different* _wg calls.
+                    issues.append({
+                        'type': 'NON_COLLECTIVE_WG',
+                        'pid': pid,
+                        'wg': wg,
+                        'in_collective':     [(e['wf'], e['api']) for e in wg_entries],
+                        'not_in_collective': [],
+                    })
+                else:
+                    # All in the same _wg call — check parameters.
+                    api_name = next(iter(wg_api_names))
+                    arg_dicts = [_parse_named_args(_extract_raw_args(e['frame']))
+                                 for e in wg_entries if e['frame']]
+                    if len(arg_dicts) >= 2:
+                        diff = _differing_params(arg_dicts)
+                        if diff:
+                            issues.append({
+                                'type': 'PARAM_MISMATCH_WG',
+                                'pid': pid,
+                                'wg': wg,
+                                'api': api_name,
+                                'differing': diff,
+                                'per_wf': [
+                                    (e['wf'], _parse_named_args(
+                                        _extract_raw_args(e['frame'])))
+                                    for e in wg_entries if e['frame']
+                                ],
+                            })
+
+        return issues
+
+    def collect_lane_args(self, thread, frames):
+        """
+        Switch to *thread* and iterate over its active lanes, collecting the
+        per-lane argument values for the ``_wg``/``_wave`` collective API call
+        visible in *frames*.
+
+        Returns a list of ``(lane_id, work_item_xyz, args_dict)`` tuples — one
+        entry per active lane.  ``args_dict`` is empty when rocgdb cannot parse
+        arguments for that lane (e.g. optimised-out values).
+
+        The caller is responsible for restoring the current thread/lane context
+        if needed; this method leaves the thread/lane state in an indeterminate
+        position after iteration.
+        """
+        api_name, _ = self._detect_wg_wave_api(frames)
+        if not api_name:
+            return []
+
+        try:
+            thread.switch()
+            lane_info = gdb.execute('info lanes', to_string=True)
+        except gdb.error:
+            return []
+
+        active_lanes = _LANE_INFO_RE.findall(lane_info)
+        if not active_lanes:
+            return []
+
+        results = []
+        for lane_id_str, wi_x, wi_y, wi_z in active_lanes:
+            lane_id = int(lane_id_str)
+            work_item = (int(wi_x), int(wi_y), int(wi_z))
+            try:
+                gdb.execute(f'lane {lane_id}', to_string=True)
+                raw_bt = gdb.execute('bt', to_string=True)
+                lane_frames = [l.strip() for l in raw_bt.splitlines()
+                               if l.strip().startswith('#')]
+                _, raw_frame = self._detect_wg_wave_api(lane_frames)
+                args = _parse_named_args(_extract_raw_args(raw_frame)) if raw_frame else {}
+            except gdb.error:
+                args = {}
+            results.append((lane_id, work_item, args))
+
+        return results
+
+    def analyze_lane_usage(self, entries_with_bt):
+        """
+        For each wavefront that is inside a ``_wg`` or ``_wave`` collective
+        call, iterate over its active lanes and compare their per-lane argument
+        values.  Any wavefront where at least two active lanes disagree on a
+        parameter is reported as a ``'LANE_PARAM_MISMATCH'`` issue.
+
+        This is the lane-level complement of ``analyze_collective_usage``:
+        - ``_wg`` lane check — all lanes within a wavefront that is in a
+          ``_wg`` call should agree on parameters (the wavefront participates
+          as a unit; lanes should not diverge).
+        - ``_wave`` lane check — the ``_wave`` contract requires ALL active
+          lanes within a single wavefront to call the function with matching
+          parameters; divergence here is a programming error.
+
+        Returns a list of issue dicts, each with keys:
+          ``type``      — ``'LANE_PARAM_MISMATCH'``
+          ``pid``       — process ID
+          ``wg``        — workgroup coordinates tuple
+          ``wf``        — wavefront index within the WG
+          ``api``       — collective API function name
+          ``scope``     — ``'wg'`` or ``'wave'``
+          ``differing`` — sorted list of parameter names that differ
+          ``per_lane``  — list of ``(lane_id, work_item_xyz, args_dict)``
+        """
+        issues = []
+        for (inf, thread, wg, wf, frames) in entries_with_bt:
+            api_name, _ = self._detect_wg_wave_api(frames)
+            if not api_name:
+                continue
+
+            lane_data = self.collect_lane_args(thread, frames)
+            if len(lane_data) < 2:
+                continue
+
+            arg_dicts = [args for (_, _, args) in lane_data if args]
+            if len(arg_dicts) < 2:
+                continue
+
+            diff = _differing_params(arg_dicts)
+            if diff:
+                scope = 'wg' if api_name.endswith('_wg') else 'wave'
+                issues.append({
+                    'type': 'LANE_PARAM_MISMATCH',
+                    'pid': inf.pid,
+                    'wg': wg,
+                    'wf': wf,
+                    'api': api_name,
+                    'scope': scope,
+                    'differing': diff,
+                    'per_lane': lane_data,
+                })
+        return issues
+
+    def _format_collective_issues(self, issues):
+        """
+        Render the list of collective-usage issues returned by
+        ``analyze_collective_usage`` as a multi-line string.
+        """
+        c = self.c
+        lines = []
+        lines.append(f'{c.HEADER}=== Collective API Usage Issues ==={c.RESET}')
+
+        for issue in issues:
+            wg = issue['wg']
+            wg_str = f'({wg[0]},{wg[1]},{wg[2]})'
+            itype = issue['type']
+
+            if itype == 'NON_COLLECTIVE_WG':
+                in_col  = issue['in_collective']
+                not_col = issue['not_in_collective']
+                lines.append(
+                    f'{c.STUCK}[BAD] WG {wg_str} — non-collective _wg call{c.RESET}')
+                if in_col:
+                    wf_list = ', '.join(f'WF {wf} ({api})' for wf, api in sorted(in_col))
+                    lines.append(f'  In collective : {wf_list}')
+                if not_col:
+                    others = []
+                    for wf, api in sorted(not_col):
+                        others.append(f'WF {wf} ({api if api else "not in _wg call"})')
+                    lines.append(f'  Not in collective: {", ".join(others)}')
+
+            elif itype == 'PARAM_MISMATCH_WG':
+                lines.append(
+                    f'{c.STUCK}[BAD] WG {wg_str} — parameter mismatch in '
+                    f'{issue["api"]}{c.RESET}')
+                lines.append(
+                    f'  Differing parameter(s): '
+                    f'{c.HINT}{", ".join(issue["differing"])}{c.RESET}')
+                for wf, args in sorted(issue['per_wf']):
+                    param_str = ', '.join(
+                        f'{k}={v}' for k, v in sorted(args.items())
+                        if k in issue['differing']
+                    )
+                    lines.append(f'    WF {wf}: {param_str}')
+
+            elif itype == 'LANE_PARAM_MISMATCH':
+                scope = issue['scope']
+                wf = issue['wf']
+                lines.append(
+                    f'{c.STUCK}[BAD] WG {wg_str} WF {wf} — lane parameter mismatch '
+                    f'in {issue["api"]} (_{scope} contract){c.RESET}')
+                lines.append(
+                    f'  Differing parameter(s): '
+                    f'{c.HINT}{", ".join(issue["differing"])}{c.RESET}')
+                for lane_id, work_item, args in issue['per_lane']:
+                    if not args:
+                        continue
+                    wi_str = f'[{work_item[0]},{work_item[1]},{work_item[2]}]'
+                    param_str = ', '.join(
+                        f'{k}={v}' for k, v in sorted(args.items())
+                        if k in issue['differing']
+                    )
+                    lines.append(f'    Lane {lane_id} {wi_str}: {param_str}')
+
+        lines.append('')
+        return '\n'.join(lines)
+
     # ------------------------------------------------------------------
     # Formatting helpers
     # ------------------------------------------------------------------
@@ -689,6 +1032,18 @@ class DeadlockAnalyzer:
 
             print('', file=out)
 
+        # --- Collective API usage issues ---
+        collective_issues = self.analyze_collective_usage(entries_with_bt)
+
+        # --- Lane-level analysis (optional, slow) ---
+        lane_issues = []
+        if self.lane_check:
+            lane_issues = self.analyze_lane_usage(entries_with_bt)
+
+        all_issues = collective_issues + lane_issues
+        if all_issues:
+            print(self._format_collective_issues(all_issues), file=out)
+
         # --- Summary ---
         print(f'{c.HEADER}=== Summary ==={c.RESET}', file=out)
         stuck_str = f'{rocshmem_wf_count} wavefront(s) inside rocSHMEM'
@@ -699,6 +1054,10 @@ class DeadlockAnalyzer:
             other_str = f'{c.SUMMARY_OK}{other_str}{c.RESET}'
         print(f'  {stuck_str}', file=out)
         print(f'  {other_str}', file=out)
+        if all_issues:
+            n_bad = len(all_issues)
+            bad_str = f'{c.SUMMARY_BAD}{n_bad} collective API issue(s) detected{c.RESET}'
+            print(f'  {bad_str}', file=out)
 
 
 # ---------------------------------------------------------------------------
@@ -708,7 +1067,8 @@ class DeadlockAnalyzer:
 class RocshmemDeadlockCommand(gdb.Command):
     """Analyze rocSHMEM deadlocks in the current inferior(s).
 
-    Usage: rocshmem-deadlock-analyze [--color|--no-color] [--cull[=pat,...]] [output_file]
+    Usage: rocshmem-deadlock-analyze [--color|--no-color] [--cull[=pat,...]]
+                                     [--check-lanes] [output_file]
 
     --color           Force colored output even when writing to a file.
     --no-color        Disable colored output even on a TTY.
@@ -717,6 +1077,11 @@ class RocshmemDeadlockCommand(gdb.Command):
                       s_barrier, OCKL grid/gws sync, cooperative_groups, ...).
     --cull=p1,p2,...  Cull groups whose backtrace contains any of the
                       comma-separated substrings p1, p2, ...
+    --check-lanes     Enable lane-level parameter mismatch detection for _wg
+                      and _wave collective calls.  For each wavefront in such
+                      a call, rocgdb switches to every active lane and compares
+                      per-lane argument values (up to 64 bt calls per wavefront;
+                      slow but thorough).
 
     When output_file is given the full report is written there;
     otherwise it is printed to stdout.  Color is auto-detected from the
@@ -732,6 +1097,7 @@ class RocshmemDeadlockCommand(gdb.Command):
         output_file = None
         color = None       # auto-detect
         cull_patterns = None  # culling disabled by default
+        lane_check = False
 
         remaining = []
         for a in args:
@@ -743,6 +1109,8 @@ class RocshmemDeadlockCommand(gdb.Command):
                 cull_patterns = []  # use _DEFAULT_CULL_PATTERNS
             elif a.startswith('--cull='):
                 cull_patterns = [p for p in a[len('--cull='):].split(',') if p]
+            elif a == '--check-lanes':
+                lane_check = True
             else:
                 remaining.append(a)
 
@@ -754,7 +1122,8 @@ class RocshmemDeadlockCommand(gdb.Command):
                 return
         try:
             DeadlockAnalyzer(output_file=output_file, color=color,
-                             cull_patterns=cull_patterns).report()
+                             cull_patterns=cull_patterns,
+                             lane_check=lane_check).report()
         finally:
             if output_file is not None:
                 output_file.close()
