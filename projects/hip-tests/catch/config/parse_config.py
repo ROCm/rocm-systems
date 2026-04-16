@@ -7,6 +7,25 @@ import argparse
 from common import iter_group_configs, load_definitions, parse_size_string
 
 
+def level_indices_for_catch_tags(level_raw, default=2):
+    """
+    Build descending level indices for Catch2 [level_K] tags (highest first).
+
+    Scalar N (YAML default 2): emit tags for every level 0..N so a filter like
+    [level_0] still selects tests that are authored as "level 2" only, while
+    [level_N] continues to match those tests.
+
+    Explicit list (e.g. [0, 2]): emit only those levels — use for tests that
+    optionally implement a short path at level 0 without claiming [level_1].
+    """
+    if isinstance(level_raw, list):
+        return sorted({int(x) for x in level_raw}, reverse=True)
+    max_level = int(level_raw) if level_raw is not None else default
+    if max_level < 0:
+        max_level = default
+    return list(range(max_level, -1, -1))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Parse YAML test configs and generate a C/C++ header with "
@@ -42,7 +61,7 @@ def parse_args():
 
 
 def create_test_definition(group, case_name, case_config, platform, os_name, arch):
-    level = case_config.get("level", 2)
+    level_raw = case_config.get("level", 2)
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
 
@@ -50,7 +69,8 @@ def create_test_definition(group, case_name, case_config, platform, os_name, arc
 
     for tag in tags:
         tags_str += f"[{tag}]"
-    tags_str += f"[level_{level}]"
+    for lev in level_indices_for_catch_tags(level_raw):
+        tags_str += f"[level_{lev}]"
     tags_str += f"[{group}]"
 
     if f"{platform}_{os_name}" in disabled or arch in disabled:
