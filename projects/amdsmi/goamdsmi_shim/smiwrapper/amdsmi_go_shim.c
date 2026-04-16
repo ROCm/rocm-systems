@@ -472,7 +472,7 @@ uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index) {
            socket_index, socket_power_watts);
   }
 
-  return readSuccess ? (uint32_t)(socket_power_watts * 1000) : GOAMDSMI_UINT32_MAX;
+  return readSuccess ? socket_power_watts * 1000 : GOAMDSMI_UINT32_MAX;
 }
 
 uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index) {
@@ -487,7 +487,7 @@ uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index) {
            readSuccess ? "Success" : "Failed", socket_index, socket_power_cap_watts);
   }
 
-  return readSuccess ? (uint32_t)(socket_power_cap_watts * 1000) : GOAMDSMI_UINT32_MAX;
+  return readSuccess ? socket_power_cap_watts * 1000 : GOAMDSMI_UINT32_MAX;
 }
 
 uint32_t goamdsmi_cpu_core_boostlimit_get(uint32_t thread_index) {

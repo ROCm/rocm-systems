@@ -3681,9 +3681,9 @@ amdsmi_status_t amdsmi_get_supported_power_cap(amdsmi_processor_handle processor
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]      processor_handle Cpu socket which to query
+ *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[in,out]    ppower - Input buffer to return socket power
+ *  @param[out]  ppower - Input buffer to return socket power
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3697,9 +3697,9 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]      processor_handle Cpu socket which to query
+ *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[in,out]    pcap - Input buffer to return power cap.
+ *  @param[out]  pcap - Input buffer to return power cap.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3713,9 +3713,9 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]      processor_handle Cpu socket which to query
+ *  @param[in]   processor_handle Cpu socket which to query
  *
- *  @param[in,out]    pmax - Input buffer to return maximum power limit value
+ *  @param[out]  pmax - Input buffer to return maximum power limit value
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -3808,7 +3808,7 @@ amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]  processor_handle Cpu core which to query
+ *  @param[in]   processor_handle Cpu core which to query
  *  @param[out]  power - Input buffer to store power consumption in watts
  *
  *   @return ::amdsmi_status_t
@@ -7798,7 +7798,7 @@ amdsmi_status_t amdsmi_set_cpu_sdps_limit(amdsmi_processor_handle processor_hand
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]  processor_handle Processor handle for which to query the limit
+ *  @param[in]   processor_handle Processor handle for which to query the limit
  *  @param[out]  sdps_limit - Input buffer to receive the current SDPS limit value in watts
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
