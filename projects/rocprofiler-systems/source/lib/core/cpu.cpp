@@ -183,9 +183,6 @@ query_cpu_agents()
                                 cpu.model_name,
                                 cpu.model_name,
                                 cpu.vendor_id,
-                                "",
-                                0,
-                                0,
                                 "" };
         _agent_manager.insert_agent(cur_agent);
     }

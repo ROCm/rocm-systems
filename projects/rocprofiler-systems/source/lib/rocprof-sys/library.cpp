@@ -392,8 +392,7 @@ rocprofsys_preinit_cache()
     config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()), 0,
-          0 });
+        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()) });
 }
 
 void

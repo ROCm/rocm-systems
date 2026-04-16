@@ -435,7 +435,7 @@ how the profiler manages its internals.
    * - ``ROCPROFSYS_OUTPUT_PREFIX``
      - Per-run output prefix (e.g., test name). Set by the test harness
        or user for each run.
-   * - ``ROCPROFSYS_SELECTED_REGIONS``
+   * - ``ROCPROFSYS_TRACE_REGION``
      - Region filter for selective tracing. Depends on the specific
        application being profiled.
 

@@ -32,14 +32,14 @@
 #include "envvar.hpp"
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
-#include "log.hpp"
 
 namespace rocshmem {
 
 #define NET_CHECK(cmd)                                       \
   {                                                          \
     if (cmd != MPI_SUCCESS) {                                \
-      LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");   \
+      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
+      abort() ;                                              \
     }                                                        \
   }
 
@@ -73,8 +73,9 @@ IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
    * All the PEs must be with in a node for IPC conduit
    */
   if(num_pes != ipcImpl.shm_size) {
-    LOG_ERROR_EXIT("IPC Backend selected but some PEs are non-local. This is not a supported configuration. "
-                   "The GDA and RO backends mix off-node and IPC on-node communication as needed.");
+    fprintf(stderr, "rocSHMEM: IPC Backend selected but some PEs are non-local. This is not a supported configuration.\n"
+                    "  The GDA and RO backends mix off-node -and- IPC on-node communication as needed.\n");
+    exit(1);
   }
 
   /* Initialize the host interface */
@@ -246,7 +247,8 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   if (num_pes == backend_bootstr->getNranks() ) {
     backend_bootstr->allGather(tmp_buffer, num_bytes);
   } else {
-    LOG_ERROR_ABORT("create_new_team: non-mpi version only supports parent_teams that contain all processes");
+    printf("IPCBackend::create_new_team: non-mpi version only supports parent_teams that contain all processes. Aborting.\n");
+    abort();
   }
 
   for (size_t i = 0; i < num_bytes; i++) {
@@ -282,7 +284,8 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
   int common_index = get_ls_non_zero_bit(team_reduced_bitmask_, max_num_teams);
   if (common_index < 0) {
     /* No team available */
-    LOG_ERROR_ABORT("Could not create team, all bits in use");
+    printf("Could not create team, all bits in use. Aborting.\n");
+    abort();
   }
 
   /* Mark the team as taken (by unsetting the bit in the pool bitmask) */

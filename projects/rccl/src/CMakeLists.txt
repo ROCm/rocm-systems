@@ -266,7 +266,6 @@ set(SRC_FILES
   src/plugin/tuner/tuner_v3.cc
   src/plugin/tuner/tuner_v4.cc
   src/plugin/tuner/tuner_v5.cc
-  src/plugin/tuner/csv_tuner.cc
   src/ras/client.cc
   src/ras/client_support.cc
   src/ras/collectives.cc

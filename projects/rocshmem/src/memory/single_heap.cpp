@@ -25,7 +25,7 @@
 #include "single_heap.hpp"
 
 #include <sstream>
-#include "log.hpp"
+#include "util.hpp"
 
 #include "dlmalloc.hpp"
 #include "default_allocator.hpp"
@@ -50,7 +50,8 @@ SingleHeap::SingleHeap() {
   }
 #endif
   else {
-    LOG_ERROR_ABORT("Unknown allocator type");
+    printf("Unknown allocator type\n");
+    abort();
   }
   assert(heap_mem_ != nullptr);
 
@@ -67,7 +68,8 @@ SingleHeap::SingleHeap() {
   }
 #endif
   else {
-    LOG_ERROR_ABORT("Unknown allocator type");
+    printf("Unknown allocator type\n");
+    abort();
   }
 }
 

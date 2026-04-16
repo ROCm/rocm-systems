@@ -22,7 +22,6 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "log.hpp"
 #include "util.hpp"
 #include "gda/backend_gda.hpp"
 #include "gda/mlx5/mlx5dv_core.hpp"
@@ -34,7 +33,7 @@ void* GDABackend::mlx5_dv_dlopen() {
   void* dv_handle{nullptr};
   dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
   if (!dv_handle) {
-    LOG_TRACE("Could not open libmlx5.so. Returning");
+    DPRINTF("Could not open libmlx5.so. Returning\n");
   }
   return dv_handle;
 }

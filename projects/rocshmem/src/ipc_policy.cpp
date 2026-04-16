@@ -30,7 +30,6 @@
 #include "context_incl.hpp"
 #include "envvar.hpp"
 #include "util.hpp"
-#include "log.hpp"
 
 namespace rocshmem {
 
@@ -112,8 +111,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
   if (envvar::ro::disable_ipc || envvar::disable_ipc) {
     if (0 == my_pe) {
-      LOG_WARN("ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated."
-               "Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.");
+      printf("ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated.\n"
+             "  Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.\n");
     }
   }
   auto disable_ipc = envvar::disable_mixed_ipc || envvar::ro::disable_ipc || envvar::disable_ipc;
@@ -196,8 +195,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
   if (envvar::ro::disable_ipc || envvar::disable_ipc) {
     if (0 == my_pe) {
-      LOG_WARN("ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated."
-               "Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.");
+      printf("ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated.\n"
+             "  Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.\n");
     }
   }
   auto disable_ipc = envvar::disable_mixed_ipc || envvar::ro::disable_ipc || envvar::disable_ipc;

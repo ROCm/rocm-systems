@@ -23,7 +23,6 @@
  *****************************************************************************/
 
 #include "gda/backend_gda.hpp"
-#include "log.hpp"
 #include "util.hpp"
 #include <unistd.h> // getpagesize()
 
@@ -64,8 +63,9 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->bnxt_sq.depth      = bnxt_qps[conn_num].mem_info.sq_slots;
 
   if ((gpu_qp->bnxt_sq.depth % BNXT_RE_STATIC_WQE_BB) != 0) {
-    LOG_WARN("SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
-             "There may be runtime errors.");
+    fprintf(stderr,
+            "[WARNING] SQ depth not divisible by BNXT_RE_STATIC_WQE_BB. "
+            "There may be runtime errors.\n");
   }
 
   gpu_qp->bnxt_sq.id          = ib_qp->qp_num;
@@ -306,7 +306,7 @@ void* GDABackend::bnxt_dv_dlopen() {
     // Try hard-coded PATH
     dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
     if (!dv_handle) {
-      LOG_TRACE("Could not open libbnxt_re.so. Returning");
+      DPRINTF("Could not open libbnxt_re.so. Returning\n");
     }
   }
   return dv_handle;

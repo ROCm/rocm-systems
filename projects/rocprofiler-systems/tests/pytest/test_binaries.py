@@ -44,7 +44,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_PERFETTO_FILL_POLICY": "tracing.fill_policy",
     "ROCPROFSYS_PERFETTO_BACKEND": "tracing.backend",
     "ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS": "tracing.flush_period_ms",
-    "ROCPROFSYS_SELECTED_REGIONS": "tracing.region",
+    "ROCPROFSYS_TRACE_REGION": "tracing.region",
     # --- Profiling ---
     "ROCPROFSYS_PROFILE": "profiling.enabled",
     "ROCPROFSYS_FLAT_PROFILE": "profiling.flat_profile",
@@ -197,7 +197,6 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
         test_args = [
             "--simulate",
-            "--dump-info",
             "--print-format",
             "json",
             "txt",

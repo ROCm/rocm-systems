@@ -29,11 +29,9 @@
 #include <cassert>
 
 #include "backend_gda.hpp"
-#include "debug_gda.hpp"
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
 #include "gda_team.hpp"
-#include "log.hpp"
 #include "mpi_instance.hpp"
 #include "util.hpp"
 #include "topology.hpp"
@@ -42,7 +40,8 @@ namespace rocshmem {
 
 #define NET_CHECK(cmd) {                                     \
     if (cmd != MPI_SUCCESS) {                                \
-      LOG_ERROR_EXIT("Unrecoverable error: MPI Failure");    \
+      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
+      abort();                                               \
     }                                                        \
   }
 
@@ -345,8 +344,8 @@ void GDABackend::create_new_team([[maybe_unused]] Team *parent_team,
   int common_index = get_ls_non_zero_bit(team_reduced_bitmask_, max_num_teams);
   if (common_index < 0) {
     /* No team available */
-    LOG_ERROR_EXIT("Could not create team, out of resources: all bits in use.\n"
-                   "  Please adjust ROCSHMEM_MAX_NUM_TEAMS\n");
+    printf("Could not create team, all bits in use. Aborting.\n");
+    abort();
   }
 
   /* Mark the team as taken (by unsetting the bit in the pool bitmask) */
@@ -577,7 +576,7 @@ GDAProvider GDABackend::requested_provider() {
   std::string envstr = envvar::gda::provider;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
-    LOG_INFO("Found environment variable ROCSHMEM_GDA_PROVIDER, value is %s", envstr.c_str());
+    DPRINTF("Found environment variable ROCSHMEM_GDA_PROVIDER, value is %s\n", envstr.c_str());
     if (envstr.find("bnxt") != std::string::npos) {
       return GDAProvider::BNXT;
     }
@@ -621,7 +620,7 @@ bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
   }
 
   if (device_attr.vendor_id != expected_vendor_id) {
-    LOG_TRACE("Skipping device %s with vendor_id=0x%04x (not %s)",
+    DPRINTF("Skipping device %s with vendor_id=0x%04x (not %s)\n",
             device_name, device_attr.vendor_id, vendor_name);
     return false;
   }
@@ -641,12 +640,12 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
 
   device_list = ibv.get_device_list(&num_devices);
   if (!device_list || num_devices == 0) {
-    LOG_WARN("No RDMA NIC devices found");
+    DPRINTF("No RDMA NIC devices found\n");
     return false;
   }
 
   for (int i = 0; i < num_devices && !has_active; i++) {
-    LOG_TRACE("ibv.open device[%d] of %d", i, num_devices);
+    DPRINTF("ibv.open device[%d] of %d\n", i, num_devices);
     struct ibv_context *context = ibv.open_device(device_list[i]);
     if (!context) {
       continue;
@@ -665,7 +664,7 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
         struct ibv_port_attr port_attr;
         if (ibv.query_port(context, port, &port_attr) == 0) {
           if (port_attr.state == IBV_PORT_ACTIVE) {
-            LOG_TRACE("Found at least one device with an active RDMA NIC (port=%d device=%s vendor_id=0x%04x, state=%d, phys_state=%d)",
+            DPRINTF("Found active RDMA NIC port %d on device %s (vendor_id=0x%04x, state=%d, phys_state=%d)\n",
                     port, ibv.get_device_name(device_list[i]),
                     device_attr.vendor_id, port_attr.state, port_attr.phys_state);
             has_active = true;
@@ -681,7 +680,7 @@ bool GDABackend::has_active_ib_interface(GDAProvider provider) {
   ibv.free_device_list(device_list);
 
   if (!has_active) {
-    LOG_WARN("No active InfiniBand ports found on any device");
+    DPRINTF("No active InfiniBand ports found on any device\n");
   }
 
   return has_active;
@@ -705,7 +704,7 @@ int GDABackend::backend_can_run() {
       auto ret = has_active_ib_interface(GDAProvider::BNXT);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
-      LOG_TRACE("BNXT DV library found but no active InfiniBand interface available");
+      DPRINTF("BNXT DV library found but no active InfiniBand interface available\n");
     }
   }
 #endif //defined(GDA_BNXT)
@@ -718,7 +717,7 @@ int GDABackend::backend_can_run() {
       auto ret = has_active_ib_interface(GDAProvider::IONIC);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
-      LOG_TRACE("IONIC DV library found but no active InfiniBand interface available");
+      DPRINTF("IONIC DV library found but no active InfiniBand interface available\n");
     }
   }
 #endif //defined(GDA_IONIC)
@@ -731,7 +730,7 @@ int GDABackend::backend_can_run() {
       auto ret = has_active_ib_interface(GDAProvider::MLX5);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
-      LOG_TRACE("MLX5 DV library found but no active InfiniBand interface available");
+      DPRINTF("MLX5 DV library found but no active InfiniBand interface available\n");
     }
   }
 #endif //defined(GDA_MLX5)
@@ -848,7 +847,7 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::BNXT;
     } else {
-      LOG_TRACE("Initializing rocSHMEM BNXT GDA support failed");
+      DPRINTF("Initializing rocSHMEM BNXT GDA support failed\n");
     }
   }
 #endif // defined(GDA_BNXT)
@@ -861,7 +860,7 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::IONIC;
     } else {
-      LOG_TRACE("Initializing rocSHMEM IONIC GDA support failed");
+      DPRINTF("Initializing rocSHMEM IONIC GDA support failed\n");
     }
   }
 #endif // defined(GDA_IONIC)
@@ -874,13 +873,14 @@ void GDABackend::open_dv_libs() {
     if (ret == ROCSHMEM_SUCCESS) {
       gda_provider = GDAProvider::MLX5;
     } else {
-      LOG_TRACE("Initializing rocSHMEM MLX5 GDA support failed");
+      DPRINTF("Initializing rocSHMEM MLX5 GDA support failed\n");
     }
   }
 #endif // defined(GDA_MLX5)
 
   if (gda_provider == GDAProvider::UNSET) {
-    LOG_ERROR_EXIT("gda:open_dv_libs: no DV library could dlopen for IONIC, BNXT, or MLX5 GDA support");
+    printf("rocshmem::gda:open_dv_libs: no DV library could dlopen for IONIC, BNXT, or MLX5 GDA support\n");
+    exit(1);
   }
 }
 
@@ -1015,10 +1015,11 @@ void GDABackend::open_ib_device() {
   }
 
   if (nullptr == device) {
-    LOG_ERROR_EXIT(
-      "Failed to select a NIC when initializing GDA backend.\n"
+    fprintf(stderr,
+      "rocshmem error: failed to select a NIC when initializing GDA backend.\n"
       "  ROCSHMEM_HCA_LIST or ROCSHMEM_USE_IB_HCA may have excluded all available NICs.\n"
-      "  Please review HCA_LIST or NIC configuration.\n");
+      "  Please adjust HCA_LIST or NIC configuration.\n");
+    exit(1);
   }
 
   if (gda_provider == GDAProvider::MLX5) {
@@ -1074,34 +1075,25 @@ void GDABackend::validate_ib_device() {
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
     if (device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
-      LOG_ERROR_EXIT("%s GDAProvider::BNXT requested but an invalid device is selected", debug_str.c_str());
+      fprintf(stderr, "%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
+      exit(1);
     }
 
     if (supported_bnxt_part_ids.find(device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
-      LOG_ERROR_EXIT("%s Unsupported Broadcom Part: %x", debug_str.c_str(), device_attr.vendor_part_id);
+      fprintf(stderr, "%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
+      exit(1);
     }
 
     if (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0) {
-      LOG_ERROR("%s Unsupported firmware version: %s", debug_str.c_str(), device_attr.fw_ver);
+      fprintf(stderr, "%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
+
       if (envvar::gda::override_nic_firmware_check == false) {
-        exit(EXIT_FAILURE);
+        exit(1);
       }
 
-      LOG_WARN("BNXT NIC Firmware check is disabled");
+      fprintf(stderr, "[WARNING] BNXT NIC Firmware check is disabled\n");
     }
   }
-
-  for (int port = 1; port <= device_attr.phys_port_cnt; ++port) {
-    struct ibv_port_attr port_attr;
-    if (ibv.query_port(context, port, &port_attr) == 0) {
-      if (port_attr.state == IBV_PORT_ACTIVE) {
-        LOG_INFO("Using NIC %s: it has an active RDMA NIC port %d (vendor_id=0x%04x, state=%d, phys_state=%d)",
-                  nicname, port, device_attr.vendor_id, port_attr.state, port_attr.phys_state);
-        return;
-      }
-    }
-  }
-  LOG_ERROR_EXIT("Could not validate that selected RDMA NIC %s has an active port", debug_str.c_str());
 }
 
 void GDABackend::modify_qps_reset_to_init() {
@@ -1399,11 +1391,9 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   switch (gda_provider) {
   case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
-    dump_ibv_qp(qps[conn_num], conn_num);
     break;
   case GDAProvider::BNXT:
     bnxt_initialize_gpu_qp(gpu_qp, conn_num);
-    dump_ibv_qp(qps[conn_num], conn_num);
     break;
   case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
@@ -1459,7 +1449,7 @@ void GDABackend::select_gid_index() {
 
   gid_tbl_entries = ibv.query_gid_table(context, gid_entries, gid_tbl_len, 0);
   if (gid_tbl_entries < 0) {
-    LOG_WARN("ibv_query_gid_table failed: GIDs not available");
+    fprintf(stderr, "[Warning] ibv_query_gid_table failed. No available GIDs\n");
     free(gid_entries);
     return;
   }
@@ -1513,7 +1503,7 @@ int GDABackend::ibv_mtu_to_int(enum ibv_mtu mtu) {
     case IBV_MTU_2048: return 2048;
     case IBV_MTU_4096: return 4096;
     default: {
-      LOG_WARN("Invalid ibv_mtu %d", mtu);
+      fprintf(stderr, "[ERROR] Invalid ibv_mtu\n");
       return 0;
     }
   }

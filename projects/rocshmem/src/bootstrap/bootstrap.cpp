@@ -31,7 +31,6 @@
 #include <vector>
 
 #include "bootstrap.hpp"
-#include "log.hpp"
 #include "utils.hpp"
 #include "util.hpp"
 #include "socket.hpp"
@@ -77,10 +76,11 @@ struct ExtInfo {
    }
 
    if (rank_pos == -1) {
-     ERROR("groupAllGather: called with process that is not in list of ranks");
+     printf("Bootstrap::groupAllGather: called with process that is not in list of ranks. Aborting\n");
+     abort();
    }
 
-   LOG_TRACE("groupAllGather: rank %d nranks %d size %d", rank, nRanks, size);
+   DPRINTF("groupAllGather: rank %d nranks %d size %d\n", rank, nRanks, size);
 
    int sendto = (rank_pos + 1 + nRanks) % nRanks;
    int recvfrom = (rank_pos - 1 + nRanks) % nRanks;
@@ -94,7 +94,7 @@ struct ExtInfo {
      this->recv(tmprecv, size, ranks[recvfrom], i);
    }
 
-   //LOG_TRACE("groupAllGather: rank %d nranks %d size %d - DONE", rank, nRanks, size);
+   DPRINTF("groupAllGather: rank %d nranks %d size %d - DONE\n", rank, nRanks, size);
  }
 
  void Bootstrap::groupAlltoall(void* allData, int size, const std::vector<int>& ranks) {
@@ -112,10 +112,11 @@ struct ExtInfo {
    }
 
    if (rank_pos == -1) {
-     ERROR("groupAlltoall: called with process that is not in list of ranks");
+     printf("Bootstrap::groupAlltoall: called with process that is not in list of ranks. Aborting\n");
+     abort();
    }
 
-   LOG_TRACE("groupAlltoall: rank %d nranks %d size %d", rank, num_pes, size);
+   DPRINTF("groupAlltoall: rank %d nranks %d size %d\n", rank, num_pes, size);
 
    // Since this is an in-place algorithm, allocate temporary receive buffer
    char *recv_buf = new char[size * num_pes];
@@ -139,7 +140,7 @@ struct ExtInfo {
      std::memcpy(&data[step*size], &recv_buf[step*size], size);
    }
 
-   //LOG_TRACE("groupAlltoall: rank %d nranks %d size %d DONE ", rank, num_pes, size);
+   DPRINTF("groupAlltoall: rank %d nranks %d size %d DONE \n", rank, num_pes, size);
    delete[] recv_buf;
  }
 
@@ -267,7 +268,7 @@ void TcpBootstrap::Impl::initialize(const rocshmem_uniqueid_t& uniqueId, int64_t
 
   char line[MAX_IF_NAME_SIZE + 1];
   SocketToString(&uniqueId_.addr, line);
-  LOG_INFO("rank %d nranks %d - connecting to %s", rank_, nRanks_, line);
+  DPRINTF("rank %d nranks %d - connecting to %s\n", rank_, nRanks_, line);
   establishConnections(timeoutSec);
 }
 
@@ -378,28 +379,28 @@ void TcpBootstrap::Impl::bootstrapRoot() {
   std::memset(rankAddresses.data(), 0, sizeof(SocketAddress) * nRanks_);
   std::memset(rankAddressesRoot.data(), 0, sizeof(SocketAddress) * nRanks_);
 
-  LOG_TRACE("BEGIN bootstrapRoot");
+  DPRINTF("BEGIN bootstrapRoot\n");
   /* Receive addresses from all ranks */
   do {
     int rank;
     getRemoteAddresses(listenSockRoot_.get(), rankAddresses, rankAddressesRoot, rank);
     ++numCollected;
-    LOG_INFO("Received connect from rank %d total %d/%d", rank, numCollected, nRanks_);
+    DPRINTF("Received connect from rank %d total %d/%d\n", rank, numCollected, nRanks_);
   } while (numCollected < nRanks_ && (!abortFlag_ || *abortFlag_ == 0));
 
   if (abortFlag_ && *abortFlag_) {
-    LOG_TRACE("ABORTED");
+    DPRINTF("ABORTED\n");
     return;
   }
 
-  LOG_TRACE("COLLECTED ALL %d HANDLES", nRanks_);
+  DPRINTF("COLLECTED ALL %d HANDLES\n", nRanks_);
 
   // Send the connect handle for the next rank in the AllGather ring
   for (int peer = 0; peer < nRanks_; ++peer) {
     sendHandleToPeer(peer, rankAddresses, rankAddressesRoot);
   }
 
-  LOG_TRACE("DONE bootstrapRoot");
+  DPRINTF("DONE bootstrapRoot\n");
 }
 
 void TcpBootstrap::Impl::netInit(std::string ipPortPair, std::string interface,
@@ -434,7 +435,7 @@ void TcpBootstrap::Impl::netInit(std::string ipPortPair, std::string interface,
   char line[SOCKET_NAME_MAXLEN + MAX_IF_NAME_SIZE + 2];
   std::sprintf(line, " %s:", netIfName);
   SocketToString(&netIfAddr, line + strlen(line));
-  LOG_INFO("TcpBootstrap : Using%s", line);
+  DPRINTF("TcpBootstrap : Using%s", line);
 }
 
 #define TIMEOUT(__exp)                                                      \
@@ -455,7 +456,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
   SocketAddress nextAddr;
   ExtInfo info;
 
-  LOG_TRACE("establishConnections: rank %d nranks %d", rank_, nRanks_);
+  DPRINTF("establishConnections: rank %d nranks %d\n", rank_, nRanks_);
 
   auto getLeftTime = [&]() {
     if (connectionTimeoutUs < 0) {
@@ -490,7 +491,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
       timespec tv;
       tv.tv_sec = rank / 1000;
       tv.tv_nsec = 1000000 * (rank % 1000);
-      LOG_TRACE("rank %d delaying connection to root by %ld sec %ld nsec", rank,
+      DPRINTF("rank %d delaying connection to root by %ld sec %ld nsec\n", rank,
             tv.tv_sec, tv.tv_nsec);
       (void)nanosleep(&tv, NULL);
     };
@@ -528,7 +529,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
   peerCommAddresses_[rank_] = listenSock_->getAddr();
   allGather(peerCommAddresses_.data(), sizeof(SocketAddress));
 
-  LOG_TRACE("rank %d nranks %d - DONE", rank_, nRanks_);
+  DPRINTF("rank %d nranks %d - DONE\n", rank_, nRanks_);
 }
 
 int TcpBootstrap::Impl::getNranksPerNode() {
@@ -560,7 +561,7 @@ void TcpBootstrap::Impl::allGather(void* allData, int size) {
   int rank = rank_;
   int nRanks = nRanks_;
 
-  LOG_TRACE("allGather: rank %d nranks %d size %d", rank, nRanks, size);
+  DPRINTF("allGather: rank %d nranks %d size %d\n", rank, nRanks, size);
 
   /* Simple ring based AllGather
    * At each step i receive data from (rank-i-1) from left
@@ -576,7 +577,7 @@ void TcpBootstrap::Impl::allGather(void* allData, int size) {
     netRecv(ringRecvSocket_.get(), data + rSlice * size, size);
   }
 
-  //LOG_TRACE("allGather: rank %d nranks %d size %d - DONE", rank, nRanks, size);
+  DPRINTF("allGather: rank %d nranks %d size %d - DONE\n", rank, nRanks, size);
 }
 
 std::shared_ptr<Socket> TcpBootstrap::Impl::getPeerSendSocket(int peer, int tag) {

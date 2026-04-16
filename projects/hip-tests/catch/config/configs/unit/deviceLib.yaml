@@ -462,10 +462,22 @@ deviceLib:
   Unit_ocp_fp4_from_double_full_range_device:
     <<: *level_2
     tags: [types]
-  Unit_AtomicAdd_Coherent:
+  Unit_AtomicAdd_CoherentwithUnsafeflag:
     <<: *level_2
     tags: [atomics]
-  Unit_AtomicAdd_NonCoherent:
+  Unit_AtomicAdd_Coherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_Coherentwithnounsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_NonCoherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_NonCoherentwithnounsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_NonCoherentwithUnsafeflag:
     <<: *level_2
     tags: [atomics]
   Unit_BuiltinAtomics_fmaxCoherentGlobalMem:
@@ -510,10 +522,22 @@ deviceLib:
   Unit_unsafeAtomicAdd_NonCoherentRTC:
     <<: *level_2
     tags: [atomics]
-  Unit_unsafeAtomicAdd_Coherent:
+  Unit_unsafeAtomicAdd_CoherentwithUnsafeflag:
     <<: *level_2
     tags: [atomics]
-  Unit_unsafeAtomicAdd_NonCoherent:
+  Unit_unsafeAtomicAdd_Coherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_CoherentwithnoUnsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentwithunsafeatomicsflag:
     <<: *level_2
     tags: [atomics]
   Unit_fp8_fnuz_compare_host_device:
