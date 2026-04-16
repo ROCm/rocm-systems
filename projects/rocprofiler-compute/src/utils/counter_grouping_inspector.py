@@ -307,19 +307,22 @@ def detect_counters(
 
 
 def _group_present_counters(
-    counters: list[str],
+    all_counters: set[str],
     same_bucket_groups: list[set[str]] | None,
 ) -> list[list[str]]:
-    """Return policy groups that have at least two counters present."""
+    """Return policy groups that have at least two counters present in the full set.
+
+    Uses the FULL counter set (not remaining) to allow shared counters
+    to appear in multiple metric groups.
+    """
     if not same_bucket_groups:
         return []
 
-    present = set(counters)
     grouped: list[list[str]] = []
     seen_groups: set[tuple[str, ...]] = set()
 
     for group in same_bucket_groups:
-        members = sorted(counter for counter in group if counter in present)
+        members = sorted(counter for counter in group if counter in all_counters)
         if len(members) < 2:
             continue
 
@@ -338,25 +341,37 @@ def _allocate_same_bucket_groups(
     perfmon_config: dict[str, int],
     same_bucket_groups: list[set[str]] | None,
     start_file_count: int,
+    all_counters: set[str],
 ) -> tuple[list[CounterFile], list[str], int]:
-    """Allocate policy-prioritized counter groups before general first-fit placement."""
+    """Allocate policy-prioritized counter groups before general first-fit placement.
+
+    For each metric group in the policy, ALL counters are forced into the same
+    bucket. This guarantees single-pass collection for policy metrics, even if
+    it means exceeding hardware limits for that bucket.
+
+    Counters that are shared between metrics will appear in MULTIPLE buckets
+    to ensure each metric gets all its counters in a single pass.
+    """
     grouped_buckets: list[CounterFile] = []
     remaining = list(work)
     file_count = start_file_count
 
-    for members in _group_present_counters(remaining, same_bucket_groups):
+    # Use FULL counter set to determine group membership (allow shared counters)
+    for members in _group_present_counters(all_counters, same_bucket_groups):
         bucket = CounterFile(str(file_count), perfmon_config)
         added_members: list[str] = []
 
+        # Force ALL counters from the metric into this bucket
         for counter in members:
-            if counter in remaining and bucket.add(counter):
-                added_members.append(counter)
+            bucket.add(counter)  # Ignore return value - force add
+            added_members.append(counter)
+            # Remove from remaining if still present (may already be gone)
+            if counter in remaining:
+                remaining.remove(counter)
 
         if len(added_members) >= 2:
             file_count += 1
             grouped_buckets.append(bucket)
-            for counter in added_members:
-                remaining.remove(counter)
 
     return grouped_buckets, remaining, file_count
 
@@ -408,6 +423,7 @@ def allocate_buckets(
         perfmon_config,
         same_bucket_groups,
         file_count,
+        counters,  # Pass full counter set for group membership check
     )
     output_files.extend(grouped_files)
 
@@ -525,15 +541,21 @@ def print_bucket_plan(output_files: list[CounterFile], arch: str) -> None:
     print(output, end="")
 
 
-def _counter_to_bucket_map(
+def _counter_to_buckets_map(
     output_files: list[CounterFile],
-) -> dict[str, str]:
-    """Map each PMC counter string to its perfmon bucket label."""
-    result: dict[str, str] = {}
+) -> dict[str, set[str]]:
+    """Map each PMC counter string to ALL perfmon bucket labels it appears in.
+
+    Since counters can be duplicated across buckets for single-pass collection,
+    we need to track all buckets each counter appears in.
+    """
+    result: dict[str, set[str]] = {}
     for counter_file in output_files:
         label = counter_file.file_name_txt.replace(".txt", "")
         for ctr in flat_counters_in_perfmon_file(counter_file):
-            result[ctr] = label
+            if ctr not in result:
+                result[ctr] = set()
+            result[ctr].add(label)
     return result
 
 
@@ -542,11 +564,16 @@ def generate_multi_bucket_metrics(
     config_dir: Path,
     arch: str,
 ) -> str:
-    """Generate metrics that span multiple buckets as a string."""
+    """Generate metrics that span multiple buckets as a string.
+
+    A metric is considered "single bucket" if ALL its counters appear together
+    in at least ONE bucket. This accounts for counter duplication across buckets
+    for single-pass collection guarantees.
+    """
     from io import StringIO
 
     buf = StringIO()
-    counter_to_bucket = _counter_to_bucket_map(output_files)
+    counter_to_buckets = _counter_to_buckets_map(output_files)
 
     multi_rows: list[tuple[str, str, int, str, int, str]] = []
     single_rows: list[tuple[str, str, int, str, str]] = []
@@ -557,30 +584,47 @@ def generate_multi_bucket_metrics(
     ):
         total_metrics += 1
         hw = parse_counters(metric_yaml)
-        buckets: set[str] = set()
+
+        # Get all buckets that contain each counter
+        counter_bucket_sets: list[set[str]] = []
         for c in hw:
-            b = counter_to_bucket.get(c)
-            if b is not None:
-                buckets.add(b)
+            bs = counter_to_buckets.get(c)
+            if bs is not None:
+                counter_bucket_sets.append(bs)
+
+        if not counter_bucket_sets:
+            # No counters in any bucket - skip
+            continue
+
+        # Find buckets that contain ALL of this metric's counters
+        # (intersection of all counter bucket sets)
+        common_buckets = counter_bucket_sets[0].copy()
+        for bs in counter_bucket_sets[1:]:
+            common_buckets &= bs
 
         panel_s = str(panel_id) if panel_id is not None else "-"
-        n_b = len(buckets)
-        if n_b > 1:
-            multi_rows.append((
-                file_id,
-                panel_s,
-                metric_idx,
-                metric_name,
-                n_b,
-                ", ".join(sorted(buckets)),
-            ))
-        elif n_b == 1:
+
+        if common_buckets:
+            # All counters are together in at least one bucket - single bucket metric
             single_rows.append((
                 file_id,
                 panel_s,
                 metric_idx,
                 metric_name,
-                next(iter(buckets)),
+                min(sorted(common_buckets)),  # Report first common bucket
+            ))
+        else:
+            # Counters span multiple buckets with no single bucket containing all
+            all_buckets: set[str] = set()
+            for bs in counter_bucket_sets:
+                all_buckets |= bs
+            multi_rows.append((
+                file_id,
+                panel_s,
+                metric_idx,
+                metric_name,
+                len(all_buckets),
+                ", ".join(sorted(all_buckets)),
             ))
 
     multi_pct = (100.0 * len(multi_rows) / total_metrics) if total_metrics else 0.0
