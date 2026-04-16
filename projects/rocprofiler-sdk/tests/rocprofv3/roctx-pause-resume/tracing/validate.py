@@ -36,22 +36,49 @@ EXPECTED_PC_SAMPLING_KERNELS = 4
 EXPECTED_DISPATCH_COUNT = EXPECTED_TARGET_KERNELS + EXPECTED_PC_SAMPLING_KERNELS
 
 
+def get_tool_data(json_data) -> dict:
+    """Extract rocprofiler-sdk-tool data with a clear error on missing keys."""
+    assert "rocprofiler-sdk-tool" in json_data, (
+        f"Missing 'rocprofiler-sdk-tool' in JSON output. "
+        f"Available keys: {list(json_data.keys())}"
+    )
+    return json_data["rocprofiler-sdk-tool"]
+
+
+def get_kernel_name(data: dict, kernel_id: int) -> str:
+    """Resolve kernel_id to formatted name with a clear error on missing symbols."""
+    assert "kernel_symbols" in data, (
+        f"Missing 'kernel_symbols' in tool data. Available keys: {list(data.keys())}"
+    )
+    assert kernel_id in data["kernel_symbols"], (
+        f"kernel_id {kernel_id} not found in kernel_symbols. "
+        f"Available IDs: {list(data['kernel_symbols'].keys())}"
+    )
+    return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+
+
+def get_kernel_dispatches(data: dict) -> list:
+    """Extract kernel dispatch records with clear errors on missing keys."""
+    assert "buffer_records" in data, (
+        f"Missing 'buffer_records' in tool data. Available keys: {list(data.keys())}"
+    )
+    assert "kernel_dispatch" in data["buffer_records"], (
+        f"Missing 'kernel_dispatch' in buffer_records. "
+        f"Available keys: {list(data['buffer_records'].keys())}"
+    )
+    return data["buffer_records"]["kernel_dispatch"]
+
+
 def test_kernel_data(json_data):
-    def get_kernel_name(kernel_id: int) -> str:
-        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
-
-    data = json_data["rocprofiler-sdk-tool"]
-    buffer_records = data["buffer_records"]
-
-    kernel_dispatch_data = buffer_records["kernel_dispatch"]
+    data = get_tool_data(json_data)
+    kernel_dispatch_data = get_kernel_dispatches(data)
     assert len(kernel_dispatch_data) > 0
 
-    # check buffering data
     for dispatch in kernel_dispatch_data:
         dispatch_info = dispatch["dispatch_info"]
         assert dispatch_info["kernel_id"] > 0
 
-        kernel_name = get_kernel_name(dispatch_info["kernel_id"])
+        kernel_name = get_kernel_name(data, dispatch_info["kernel_id"])
         assert (
             target_kernel_regex.search(kernel_name) is not None
         ), f"kernel '{kernel_name}' does not match regular expression '{target_kernel_regex.pattern}'"
@@ -59,15 +86,11 @@ def test_kernel_data(json_data):
 
 def test_paused_kernels_excluded(json_data):
     """Verify that kernels launched while profiling is paused do not appear in the trace."""
-
-    def get_kernel_name(kernel_id: int) -> str:
-        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
-
-    data = json_data["rocprofiler-sdk-tool"]
-    kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
+    data = get_tool_data(json_data)
+    kernel_dispatch_data = get_kernel_dispatches(data)
 
     for dispatch in kernel_dispatch_data:
-        kernel_name = get_kernel_name(dispatch["dispatch_info"]["kernel_id"])
+        kernel_name = get_kernel_name(data, dispatch["dispatch_info"]["kernel_id"])
         assert paused_kernel_regex.search(kernel_name) is None, (
             f"kernel '{kernel_name}' should NOT appear in trace — "
             f"it was launched while profiling was paused"
@@ -76,8 +99,8 @@ def test_paused_kernels_excluded(json_data):
 
 def test_expected_dispatch_count(json_data):
     """Verify the expected number of kernel dispatches were recorded."""
-    data = json_data["rocprofiler-sdk-tool"]
-    kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
+    data = get_tool_data(json_data)
+    kernel_dispatch_data = get_kernel_dispatches(data)
 
     assert len(kernel_dispatch_data) == EXPECTED_DISPATCH_COUNT, (
         f"Expected {EXPECTED_DISPATCH_COUNT} kernel dispatches "
@@ -88,8 +111,8 @@ def test_expected_dispatch_count(json_data):
 
 def test_dispatch_timestamps_ordered(json_data):
     """Verify that kernel dispatch end timestamps are non-decreasing."""
-    data = json_data["rocprofiler-sdk-tool"]
-    kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
+    data = get_tool_data(json_data)
+    kernel_dispatch_data = get_kernel_dispatches(data)
 
     end_timestamps = []
     for dispatch in kernel_dispatch_data:
@@ -105,10 +128,14 @@ def test_dispatch_timestamps_ordered(json_data):
 
 
 def test_counter_collection_data(json_data):
-    def get_kernel_name(kernel_id: int) -> str:
-        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
-
-    data = json_data["rocprofiler-sdk-tool"]
+    data = get_tool_data(json_data)
+    assert "callback_records" in data, (
+        f"Missing 'callback_records' in tool data. Available keys: {list(data.keys())}"
+    )
+    assert "counter_collection" in data["callback_records"], (
+        f"Missing 'counter_collection' in callback_records. "
+        f"Available keys: {list(data['callback_records'].keys())}"
+    )
     counter_collection_data = data["callback_records"]["counter_collection"]
     assert len(counter_collection_data) > 0
 
@@ -119,7 +146,7 @@ def test_counter_collection_data(json_data):
         assert dispatch_data["agent_id"]["handle"] > 0
         assert dispatch_data["queue_id"]["handle"] > 0
 
-        kernel_name = get_kernel_name(dispatch_data["kernel_id"])
+        kernel_name = get_kernel_name(data, dispatch_data["kernel_id"])
         assert (
             target_kernel_regex.search(kernel_name) is not None
         ), f"kernel '{kernel_name}' does not match regular expression '{target_kernel_regex.pattern}'"

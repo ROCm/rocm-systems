@@ -34,11 +34,8 @@ THE SOFTWARE.
         if(error_ != hipSuccess)                                                                   \
         {                                                                                          \
             auto _hip_api_print_lk = auto_lock_t{print_lock};                                      \
-            fprintf(stderr,                                                                        \
-                    "%s:%d :: HIP error : %s\n",                                                   \
-                    __FILE__,                                                                      \
-                    __LINE__,                                                                      \
-                    hipGetErrorString(error_));                                                    \
+            std::cerr << __FILE__ << ":" << __LINE__ << " :: HIP error : "                         \
+                      << hipGetErrorString(error_) << "\n";                                        \
             throw std::runtime_error("hip_api_call");                                              \
         }                                                                                          \
     }

@@ -25,12 +25,11 @@
 // hip header file
 #include <hip/hip_runtime.h>
 
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #define WIDTH 1024
 
@@ -48,13 +47,10 @@ check(T result, char const* const func, const char* const file, int const line)
 {
     if(result)
     {
-        fprintf(stderr,
-                "Hip error at %s:%d code=%d(%s) \"%s\" \n",
-                file,
-                line,
-                static_cast<unsigned int>(result),
-                hipGetErrorName(result),
-                func);
+        std::cerr << "Hip error at " << file << ":" << line
+                  << " code=" << static_cast<unsigned int>(result)
+                  << "(" << hipGetErrorName(result) << ")"
+                  << " \"" << func << "\"\n";
         exit(EXIT_FAILURE);
     }
 }
@@ -157,18 +153,12 @@ main(int argc, char** argv)
     // Set up matrices
     float* gpuMatrix          = nullptr;
     float* gpuTransposeMatrix = nullptr;
-    float* Matrix             = nullptr;
 
-    Matrix = (float*) malloc(NUM * sizeof(float));
-    if(!Matrix)
-    {
-        std::cerr << "roctx-pause-resume: malloc failed for Matrix\n";
-        return EXIT_FAILURE;
-    }
+    auto Matrix = std::vector<float>(NUM);
     // initialize the input data
     for(auto i = 0; i < NUM; i++)
     {
-        Matrix[i] = (float) i * 10.0f;
+        Matrix[i] = static_cast<float>(i) * 10.0f;
     }
 
     // allocate the memory on the device side
@@ -176,7 +166,7 @@ main(int argc, char** argv)
     checkHipErrors(hipMalloc((void**) &gpuTransposeMatrix, NUM * sizeof(float)));
 
     // Memory transfer from host to device
-    checkHipErrors(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
+    checkHipErrors(hipMemcpy(gpuMatrix, Matrix.data(), NUM * sizeof(float), hipMemcpyHostToDevice));
     checkHipErrors(
         hipMemcpy(gpuTransposeMatrix, gpuMatrix, NUM * sizeof(float), hipMemcpyDeviceToDevice));
 
@@ -248,7 +238,4 @@ main(int argc, char** argv)
 
     // destroy the stream
     checkHipErrors(hipStreamDestroy(stream));
-
-    // free the resources on host side
-    free(Matrix);
 }
