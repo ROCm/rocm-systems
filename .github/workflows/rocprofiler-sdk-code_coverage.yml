@@ -1,8 +1,7 @@
 name: rocprofiler-sdk Code Coverage
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 on:
   workflow_dispatch:
@@ -70,6 +69,9 @@ env:
 jobs:
   code-coverage:
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    permissions:
+      contents: write
+      pull-requests: write
     strategy:
       # fail-fast: false
       matrix:
