@@ -335,6 +335,25 @@ def get_hardcoded_args(device: str) -> Dict[str, Any]:
             ],
             {},
         ),
+        # Bitwise left shift on CUDA is not implemented for float; schema-only
+        # ``Tensor`` args would use ``randn``.
+        "__ilshift__": lambda: (
+            [
+                torch.randint(0, 8, (4, 4), device=device, dtype=torch.int64),
+                torch.randint(0, 4, (4, 4), device=device, dtype=torch.int64),
+            ],
+            {},
+        ),
+        # ``padding`` must list six ints (last three dims, left/right each); schema
+        # ``List[int]`` defaults to ``[1, 1]``.
+        "reflection_pad3d_backward": lambda: (
+            [
+                torch.randn(2, 3, 8, 8, 8, device=device),
+                torch.randn(2, 3, 6, 6, 6, device=device),
+                [1, 1, 1, 1, 1, 1],
+            ],
+            {},
+        ),
         "one_hot": lambda: (
             [torch.randint(0, 5, (4,), device=device)],
             {},
@@ -561,6 +580,88 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
 
 # -- Workload script generation --
 
+# Ruff E501 uses 88 columns; workload ``def`` bodies are indented by 4 spaces.
+_WORKLOAD_EMIT_BODY_CONTENT_MAX = 84
+
+
+def _workload_emit_tensor_randn_setup(
+    vname: str,
+    shape: Tuple[Any, ...],
+) -> List[str]:
+    """Emit ``torch.randn`` assignment, splitting lines when needed."""
+    single = f"{vname} = torch.randn({shape}, device=device)"
+    if len(single) <= _WORKLOAD_EMIT_BODY_CONTENT_MAX:
+        return [single]
+    return [
+        f"{vname} = torch.randn(",
+        f"    {shape},",
+        "    device=device,",
+        ")",
+    ]
+
+
+def _workload_emit_tensor_randint_setup(
+    vname: str,
+    shape: Tuple[Any, ...],
+    low: int,
+    high: int,
+) -> List[str]:
+    """Emit ``torch.randint`` assignment, splitting lines when needed."""
+    single = f"{vname} = torch.randint({low}, {high}, {shape}, device=device)"
+    if len(single) <= _WORKLOAD_EMIT_BODY_CONTENT_MAX:
+        return [single]
+    return [
+        f"{vname} = torch.randint(",
+        f"    {low},",
+        f"    {high},",
+        f"    {shape},",
+        "    device=device,",
+        ")",
+    ]
+
+
+def _workload_emit_tensor_list_randn_setup(
+    vname: str,
+    shape: Tuple[Any, ...],
+    count: int,
+) -> List[str]:
+    """Emit a list comprehension of ``torch.randn`` tensors, wrapping if needed."""
+    single = f"{vname} = [torch.randn({shape}, device=device) for _ in range({count})]"
+    if len(single) <= _WORKLOAD_EMIT_BODY_CONTENT_MAX:
+        return [single]
+    return [
+        f"{vname} = [",
+        f"    torch.randn({shape}, device=device)",
+        f"    for _ in range({count})",
+        "]",
+    ]
+
+
+def _workload_emit_multiline_call(
+    call_expr: str,
+    arg_expression_strings: List[str],
+) -> List[str]:
+    """Emit ``call_expr(...)`` on one line or split across lines for Ruff E501."""
+    parts = list(arg_expression_strings)
+    if not parts:
+        single = f"{call_expr}()"
+        if len(single) <= _WORKLOAD_EMIT_BODY_CONTENT_MAX:
+            return [single]
+        return [
+            f"{call_expr}(",
+            ")",
+        ]
+    one_line = f"{call_expr}(" + ", ".join(parts) + ")"
+    if len(one_line) <= _WORKLOAD_EMIT_BODY_CONTENT_MAX:
+        return [one_line]
+    out_lines = [f"{call_expr}("]
+    for index, part in enumerate(parts):
+        last = index == len(parts) - 1
+        suffix = "" if last else ","
+        out_lines.append(f"    {part}{suffix}")
+    out_lines.append(")")
+    return out_lines
+
 
 def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
     """Build emitted-source lines that define ``vname`` plus an expression to pass.
@@ -579,10 +680,10 @@ def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
         shape = tuple(argument_value.shape)
         if argument_value.dtype == torch.long:
             return (
-                [f"{vname} = torch.randint(0, 4, {shape}, device=device)"],
+                _workload_emit_tensor_randint_setup(vname, shape, 0, 4),
                 vname,
             )
-        return ([f"{vname} = torch.randn({shape}, device=device)"], vname)
+        return (_workload_emit_tensor_randn_setup(vname, shape), vname)
     if (
         isinstance(argument_value, list)
         and argument_value
@@ -590,10 +691,11 @@ def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
     ):
         shape = tuple(argument_value[0].shape)
         return (
-            [
-                f"{vname} = [torch.randn({shape}, device=device) "
-                f"for _ in range({len(argument_value)})]"
-            ],
+            _workload_emit_tensor_list_randn_setup(
+                vname,
+                shape,
+                len(argument_value),
+            ),
             vname,
         )
     if argument_value is None:
@@ -633,9 +735,13 @@ def emit_structural_preamble(
             [
                 "import torch.nn as nn",
                 f"_m_{safe_var} = nn.Linear(4, 4).cuda()",
-                f"_opt_{safe_var} = torch.optim.SGD("
-                f"_m_{safe_var}.parameters(), lr=0.01)",
-                f"_m_{safe_var}(torch.randn(2, 4, device=device)).sum().backward()",
+                f"_opt_{safe_var} = torch.optim.SGD(",
+                f"    _m_{safe_var}.parameters(),",
+                "    lr=0.01,",
+                ")",
+                f"_m_{safe_var}(",
+                "    torch.randn(2, 4, device=device),",
+                ").sum().backward()",
             ],
             f"_opt_{safe_var}.step",
             "",
@@ -644,9 +750,10 @@ def emit_structural_preamble(
     if op_name == "torch.Tensor.backward":
         return (
             [
-                f"_loss_{safe_var} = torch.nn.Linear(4, 4)"
-                f".cuda()(torch.randn("
-                f"2, 4, device=device)).sum()"
+                f"_lin_{safe_var} = torch.nn.Linear(4, 4).cuda()",
+                f"_loss_{safe_var} = _lin_{safe_var}(",
+                "    torch.randn(2, 4, device=device),",
+                ").sum()",
             ],
             f"_loss_{safe_var}.backward",
             "",
@@ -692,9 +799,7 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
             op_setup.extend(stmts)
             arg_strs.append(expr)
 
-        kwarg_strs = [
-            f"{keyword}={repr(value)}" for keyword, value in kwargs.items()
-        ]
+        kwarg_strs = [f"{keyword}={repr(value)}" for keyword, value in kwargs.items()]
         call_args = ", ".join(arg_strs + kwarg_strs)
 
         if op.name.startswith("torch.ops."):
@@ -708,12 +813,19 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
         else:
             call_expr = op.name
 
-        call_line = f"{call_expr}({call_args})"
+        if op.category == "structural" and not call_args.strip():
+            call_segments: List[str] = []
+        elif op.category == "structural":
+            call_segments = [call_args]
+        else:
+            call_segments = arg_strs + kwarg_strs
+        call_body_lines = _workload_emit_multiline_call(call_expr, call_segments)
         fn_name = f"_run_{safe_var}"
         lines.append(f"def {fn_name}():")
         for setup_line in op_setup:
             lines.append(f"    {setup_line}")
-        lines.append(f"    {call_line}")
+        for call_body_line in call_body_lines:
+            lines.append(f"    {call_body_line}")
         lines.append("")
 
         op_name_literals.append(repr(op.name))
