@@ -1330,6 +1330,134 @@ struct_amdsmi_link_metrics_t._fields_ = [
 ]
 
 amdsmi_link_metrics_t = struct_amdsmi_link_metrics_t
+
+# ── Fabric (UALoE) telemetry structs ──────────────────────────────────────
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX             = 7
+AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE    = 32
+AMDSMI_FABRIC_MAX_LOCAL_GPUS                     = 8
+AMDSMI_MAX_UUID_ELEMENTS                         = 16
+
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE           = 0
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH          = 1
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO          = 2
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC             = 3
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT         = 4
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE   = 5
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT = 6
+
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_UALOE           = (1 << AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE)
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_SWITCH          = (1 << AMDSMI_FABRIC_TELEMETRY_CATEGORY_SWITCH)
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_CRYPTO          = (1 << AMDSMI_FABRIC_TELEMETRY_CATEGORY_CRYPTO)
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_PFC             = (1 << AMDSMI_FABRIC_TELEMETRY_CATEGORY_PFC)
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_NETPORT         = (1 << AMDSMI_FABRIC_TELEMETRY_CATEGORY_NETPORT)
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE   = (1 << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_UALOE)
+AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT = (1 << AMDSMI_FABRIC_TELEMETRY_CATEGORY_DERIVED_NETPORT)
+
+class struct_amdsmi_fabric_telemetry_item_t(Structure):
+    pass
+
+struct_amdsmi_fabric_telemetry_item_t._pack_ = 1
+struct_amdsmi_fabric_telemetry_item_t._fields_ = [
+    ('id',    ctypes.c_uint64),
+    ('value', ctypes.c_uint64),
+]
+amdsmi_fabric_telemetry_item_t = struct_amdsmi_fabric_telemetry_item_t
+
+class struct_amdsmi_fabric_label_t(Structure):
+    pass
+
+struct_amdsmi_fabric_label_t._pack_ = 1
+struct_amdsmi_fabric_label_t._fields_ = [
+    ('text', ctypes.c_char * 32),
+]
+amdsmi_fabric_label_t = struct_amdsmi_fabric_label_t
+
+class struct_amdsmi_fabric_telemetry_instance_t(Structure):
+    pass
+
+struct_amdsmi_fabric_telemetry_instance_t._pack_ = 1
+struct_amdsmi_fabric_telemetry_instance_t._fields_ = [
+    ('name',        struct_amdsmi_fabric_label_t),
+    ('logical_idx', ctypes.c_uint32),
+    ('item_count',  ctypes.c_uint32),
+    ('items',       ctypes.POINTER(struct_amdsmi_fabric_telemetry_item_t)),
+]
+amdsmi_fabric_telemetry_instance_t = struct_amdsmi_fabric_telemetry_instance_t
+
+class struct_amdsmi_fabric_telemetry_dataset_t(Structure):
+    pass
+
+struct_amdsmi_fabric_telemetry_dataset_t._pack_ = 1
+struct_amdsmi_fabric_telemetry_dataset_t._fields_ = [
+    ('category',         ctypes.c_uint32),   # amdsmi_fabric_telemetry_category_t
+    ('PADDING_0',        ctypes.c_ubyte * 4),
+    ('generation_count', ctypes.c_uint64),
+    ('timestamp',        ctypes.c_int64 * 2),  # struct timespec: tv_sec + tv_nsec
+    ('instance_count',   ctypes.c_uint32),
+    ('PADDING_1',        ctypes.c_ubyte * 4),
+    ('instances',        ctypes.POINTER(struct_amdsmi_fabric_telemetry_instance_t)),
+]
+amdsmi_fabric_telemetry_dataset_t = struct_amdsmi_fabric_telemetry_dataset_t
+
+class struct_amdsmi_fabric_telemetry_t(Structure):
+    pass
+
+struct_amdsmi_fabric_telemetry_t._pack_ = 1
+struct_amdsmi_fabric_telemetry_t._fields_ = [
+    ('datasets', ctypes.POINTER(struct_amdsmi_fabric_telemetry_dataset_t) * AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX),
+]
+amdsmi_fabric_telemetry_t = struct_amdsmi_fabric_telemetry_t
+
+# ── Fabric device info structs ─────────────────────────────────────────────
+class struct_amdsmi_fabric_info_v1_t(Structure):
+    pass
+
+struct_amdsmi_fabric_info_v1_t._pack_ = 1
+struct_amdsmi_fabric_info_v1_t._fields_ = [
+    ('accelerator_id',           ctypes.c_uint32),
+    ('fabric_type',              ctypes.c_uint32),   # amdsmi_fabric_type_t
+    ('bandwidth',                ctypes.c_uint32),
+    ('latency',                  ctypes.c_uint32),
+    ('ppod_id',                  ctypes.c_uint8 * AMDSMI_MAX_UUID_ELEMENTS),
+    ('ppod_size',                ctypes.c_uint32),
+    ('vpod_id',                  ctypes.c_uint32),
+    ('vpod_size',                ctypes.c_uint32),
+    ('vpod_active_accelerators', ctypes.c_uint32 * AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE),
+    ('local_accelerators',       ctypes.c_uint32 * AMDSMI_FABRIC_MAX_LOCAL_GPUS),
+    ('addr_mode',                ctypes.c_uint32),   # amdsmi_fabric_npa_address_mode_t
+    ('accel_state',              ctypes.c_uint32),   # amdsmi_fabric_accelerator_vpod_state_t
+]
+amdsmi_fabric_info_v1_t = struct_amdsmi_fabric_info_v1_t
+
+class union_amdsmi_fabric_info_ver_inner(Union):
+    pass
+
+union_amdsmi_fabric_info_ver_inner._pack_ = 1
+union_amdsmi_fabric_info_ver_inner._fields_ = [
+    ('v1', struct_amdsmi_fabric_info_v1_t),
+]
+
+class struct_amdsmi_fabric_info_ver_t(Structure):
+    pass
+
+struct_amdsmi_fabric_info_ver_t._pack_ = 1
+struct_amdsmi_fabric_info_ver_t._fields_ = [
+    ('version',        ctypes.c_uint32),
+    ('fabric_version', union_amdsmi_fabric_info_ver_inner),
+]
+amdsmi_fabric_info_ver_t = struct_amdsmi_fabric_info_ver_t
+
+class struct_amdsmi_fabric_info_t(Structure):
+    pass
+
+struct_amdsmi_fabric_info_t._pack_ = 1
+struct_amdsmi_fabric_info_t._fields_ = [
+    ('bdf',         amdsmi_bdf_t),
+    ('fabric_info', struct_amdsmi_fabric_info_ver_t),
+    ('reserved',    ctypes.c_uint32 * 15),
+]
+amdsmi_fabric_info_t = struct_amdsmi_fabric_info_t
+
 class struct_amdsmi_vram_info_t(Structure):
     pass
 
@@ -4865,6 +4993,13 @@ __all__ = \
     'struct_amdsmi_gpu_xcp_metrics_t',
     'struct_amdsmi_hsmp_driver_version_t',
     'struct_amdsmi_hsmp_metrics_table_t', 'struct_amdsmi_kfd_info_t',
+    'struct_amdsmi_fabric_info_t', 'struct_amdsmi_fabric_info_v1_t',
+    'struct_amdsmi_fabric_info_ver_t', 'amdsmi_fabric_info_t',
+    'struct_amdsmi_fabric_telemetry_t', 'amdsmi_fabric_telemetry_t',
+    'struct_amdsmi_fabric_telemetry_dataset_t', 'amdsmi_fabric_telemetry_dataset_t',
+    'struct_amdsmi_fabric_telemetry_instance_t', 'amdsmi_fabric_telemetry_instance_t',
+    'struct_amdsmi_fabric_telemetry_item_t', 'amdsmi_fabric_telemetry_item_t',
+    'struct_amdsmi_fabric_label_t', 'amdsmi_fabric_label_t',
     'struct_amdsmi_link_id_bw_type_t', 'struct_amdsmi_link_metrics_t',
     'struct_amdsmi_memory_partition_config_t',
     'struct_amdsmi_name_value_t', 'struct_amdsmi_nic_asic_info_t',

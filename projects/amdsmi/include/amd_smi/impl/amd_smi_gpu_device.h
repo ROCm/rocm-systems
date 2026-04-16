@@ -23,13 +23,93 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
-#include <map>
-
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 
+extern "C" {
+#include "ualoe_lib/ualoe_lib.h"
+}
+
+#include <map>
+#include <string>
+#include <string_view>
+#include <vector>
+#include <type_traits>
+
+// decouple the dependency to ualoe_lib.h by using a typedef for the handle
+typedef int ualoe_handle_t;
+
 namespace amd::smi {
+
+/*
+ * UALoE Link Information
+ * -----------------------------------------------------------------------------------------------
+ *  - link_type: ualink or ualoe
+ *  - accel_id: size is architecture dependent, 0-255 on MI4xx
+ *  - bandwidth: station bandwidth share, units TBD
+ *  - latency: latency depends on switch presence/type, unit TBD
+ *  - ppod_id: physical pod id: 64-bit hexadecimal 0x...
+ *  - ppod_size: physical pod size
+ *  - vpod_id: virtual pod id, size architecture dependent, decimal
+ *  - vpod_size: virtual pod size
+ *  - vpod_active_accels: list of active accelerator ids
+ *  - local_accels: list of local accelerator ids
+ *  - addr_mode: source aliasing or source identification
+ *  - accel_state: this accelerator state: unconfigured, configured, ready, active, error
+ */
+
+ constexpr auto kUALOE_BASE_PATH = std::string_view("/sys/class/drm/");
+ constexpr auto kUALOE_LINK_TYPE = std::string_view("/ualink/link_type");
+ constexpr auto kUALOE_ACCEL_ID = std::string_view("/ualink/accel_id");
+ constexpr auto kUALOE_BANDWIDTH = std::string_view("/ualink/bandwidth");
+ constexpr auto kUALOE_LATENCY = std::string_view("/ualink/latency");
+ constexpr auto kUALOE_PPOD_ID = std::string_view("/ualink/ppod_id");
+ constexpr auto kUALOE_PPOD_SIZE = std::string_view("/ualink/ppod_size");
+ constexpr auto kUALOE_VPOD_ID = std::string_view("/ualink/vpod_id");
+ constexpr auto kUALOE_VPOD_SIZE = std::string_view("/ualink/vpod_size");
+ constexpr auto kUALOE_VPOD_ACTIVE_ACCELS = std::string_view("/ualink/vpod_active_accels");
+ constexpr auto kUALOE_LOCAL_ACCELS = std::string_view("/ualink/local_accels");
+ constexpr auto kUALOE_ADDR_MODE = std::string_view("/ualink/addr_mode");
+ constexpr auto kUALOE_ACCEL_STATE = std::string_view("/ualink/accel_state");
+ constexpr auto kUALOE_BDF_OFFSET = std::uint16_t(0x001);   // TODO: Example offset - TBD
+
+ enum class UALoeLinkInfo_t : std::uint16_t
+ {
+     LINK_TYPE = 0,
+     ACCEL_ID,
+     BANDWIDTH,
+     LATENCY,
+     PPOD_ID,
+     PPOD_SIZE,
+     VPOD_ID,
+     VPOD_SIZE,
+     VPOD_ACTIVE_ACCELS,
+     LOCAL_ACCELS,
+     ADDR_MODE,
+     ACCEL_STATE,
+     ALL_LINK_INFO
+ };
+
+ using UALoeLinkInfoMap_t = std::map<UALoeLinkInfo_t, std::string_view>;
+ inline const auto UALoeLinkInfoMap = UALoeLinkInfoMap_t
+ {
+     {UALoeLinkInfo_t::LINK_TYPE, kUALOE_LINK_TYPE},
+     {UALoeLinkInfo_t::ACCEL_ID, kUALOE_ACCEL_ID},
+     {UALoeLinkInfo_t::BANDWIDTH, kUALOE_BANDWIDTH},
+     {UALoeLinkInfo_t::LATENCY, kUALOE_LATENCY},
+     {UALoeLinkInfo_t::PPOD_ID, kUALOE_PPOD_ID},
+     {UALoeLinkInfo_t::PPOD_SIZE, kUALOE_PPOD_SIZE},
+     {UALoeLinkInfo_t::VPOD_ID, kUALOE_VPOD_ID},
+     {UALoeLinkInfo_t::VPOD_SIZE, kUALOE_VPOD_SIZE},
+     {UALoeLinkInfo_t::VPOD_ACTIVE_ACCELS, kUALOE_VPOD_ACTIVE_ACCELS},
+     {UALoeLinkInfo_t::LOCAL_ACCELS, kUALOE_LOCAL_ACCELS},
+     {UALoeLinkInfo_t::ADDR_MODE, kUALOE_ADDR_MODE},
+     {UALoeLinkInfo_t::ACCEL_STATE, kUALOE_ACCEL_STATE},
+ };
+ using UALoeLinkInfoType_t = std::underlying_type_t<UALoeLinkInfo_t>;
+ using UALoeLinkInfoLine_t = std::string;
+ using UALoeLinkInfoLines_t = std::vector<UALoeLinkInfoLine_t>;
 
 // PID, amdsmi_proc_info_t
 using GPUComputeProcessList_t = std::map<amdsmi_process_handle_t, amdsmi_proc_info_t>;
@@ -47,13 +127,29 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
         gpu_id_(gpu_id),
         path_(path),
         bdf_(bdf),
-        drm_(drm) {}
+        drm_(drm) {
+        if (auto ualoe_status = ualoe_open(bdf_to_string().c_str(), &ualoe_handle_); ualoe_status != 0) {
+            ualoe_handle_ = (-1);
+        }
+  }
 
   AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
       : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
     if (check_if_drm_is_supported()) this->get_drm_data();
+
+    if (!bdf_to_string().empty()) {
+        if (auto ualoe_status = ualoe_open(bdf_to_string().c_str(), &ualoe_handle_); ualoe_status != 0) {
+            ualoe_handle_ = (-1);
+        }
+    }
   }
-  ~AMDSmiGPUDevice() {}
+
+  ~AMDSmiGPUDevice() {
+    if (ualoe_handle_ != -1) {
+        ualoe_close(ualoe_handle_);
+        ualoe_handle_ = -1;
+    }
+  }
 
   amdsmi_status_t get_drm_data();
   pthread_mutex_t* get_mutex();
@@ -62,18 +158,30 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   uint32_t get_drm_render_minor();  // -e feature + we can get card_id for our internal functions
   uint64_t get_kfd_gpu_id();        // Used to decode vram usage for KFD processes
   std::string& get_gpu_path();
+  const std::string& get_gpu_path() const;
   amdsmi_bdf_t get_bdf();
   bool check_if_drm_is_supported() { return drm_.check_if_drm_is_supported(); }
   uint32_t get_vendor_id();
   const GPUComputeProcessList_t& amdgpu_get_compute_process_list(
       ComputeProcessListType_t list_type = ComputeProcessListType_t::kAllProcessesOnDevice);
-
   amdsmi_status_t amdgpu_query_cpu_affinity(std::string& cpu_affinity) const;
 
   // New methods for -e feature
   std::string bdf_to_string() const;  // -e feature
   std::vector<uint64_t> get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const;
   std::vector<uint64_t> get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const;
+
+  // Get the UALoE handle
+  ualoe_handle_t get_ualoe_handle() const {
+    return ualoe_handle_;
+  }
+
+  /** UALoE fabric sysfs:
+   *    - partial reads; see amdsmi_get_gpu_fabric_info() for status info
+   */
+  auto get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_info,
+                                  UALoeLinkInfo_t link_info_type = UALoeLinkInfo_t::ALL_LINK_INFO) const -> amdsmi_status_t;
+
 
  private:
   uint32_t gpu_id_;
@@ -85,8 +193,11 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   uint32_t drm_render_minor_;
   uint64_t kfd_gpu_id_;  // Used to decode vram usage for KFD processes
   GPUComputeProcessList_t compute_process_list_;
+  std::string gpu_uuid_;  // Device UUID for UALoE identification
   int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                         ComputeProcessListType_t list_type);
+  // UALoE
+  ualoe_handle_t ualoe_handle_ = (-1);
 };
 
 }  // namespace amd::smi

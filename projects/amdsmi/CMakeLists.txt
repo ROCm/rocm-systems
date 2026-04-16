@@ -109,10 +109,10 @@ endif()
 
 include(GNUInstallDirs)
 
-option(BUILD_TESTS "Build test suite" OFF)
+option(BUILD_TESTS "Build test suite" ON)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
-option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_EXAMPLES "Build examples" ON)
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Enable position independent code for all targets")
@@ -175,8 +175,28 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+
+# Netlink libraries for network interface functionality (required)
+# TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
+find_package(PkgConfig REQUIRED)
+
+# Try to use CMake config files first (bundled sysdeps provide these)
+find_package(libnl CONFIG QUIET)
+find_package(libmnl CONFIG QUIET)
+
+if(libnl_FOUND AND libmnl_FOUND)
+    message(STATUS "Using bundled netlink libraries via CMake config")
+    set(USING_BUNDLED_NETLINK TRUE)
+else()
+    message(STATUS "Using system netlink libraries via pkg-config")
+    pkg_check_modules(LIBNL3 REQUIRED IMPORTED_TARGET libnl-3.0)
+    pkg_check_modules(LIBNLGENL3 REQUIRED IMPORTED_TARGET libnl-genl-3.0)
+    pkg_check_modules(LIBMNL REQUIRED IMPORTED_TARGET libmnl)
+    set(USING_BUNDLED_NETLINK FALSE)
+endif()
 
 # Configuration
 function(get_imported_target_info target out_soname out_include_dirs)
@@ -228,6 +248,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow")
 # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
+
 
 set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")

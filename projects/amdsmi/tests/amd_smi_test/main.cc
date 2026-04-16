@@ -60,6 +60,7 @@
 #include "functional/volt_freq_curv_read.h"
 #include "functional/volt_read.h"
 #include "functional/xgmi_read_write.h"
+#include "functional/fabric_read.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "test_base.h"
 #include "test_common.h"
@@ -327,6 +328,12 @@ TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
   TestMemoryReadWrite tst;
   RunGenericTest(&tst);
 }
+
+TEST(amdsmitstReadOnly, TestFabricRead) {
+  TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
 /*
 TEST(amdsmitstReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
