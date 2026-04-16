@@ -1855,7 +1855,17 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         B.CreateCondBr(vccV, targetBB, fallthroughBB);
         handled = true; break;
       }
-      // All other SOPP instructions (waitcnt, nop, barriers, etc.) are no-ops
+      // s_barrier / s_barrier_wait / s_barrier_signal — emit barrier for gfx942
+      // GFX12+ splits s_barrier into signal+wait; both may be SOPP format.
+      if (di.mnemonic == "s_barrier" || di.mnemonic == "s_barrier_wait") {
+        Function *barrierFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::amdgcn_s_barrier);
+        B.CreateCall(barrierFn, {});
+        handled = true; break;
+      }
+      if (di.mnemonic == "s_barrier_signal") {
+        handled = true; break;
+      }
+      // All other SOPP instructions (waitcnt, nop, etc.) are no-ops
       handled = true;
       break;
     }
@@ -2150,8 +2160,14 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       if (sop == SemOp::S_SET_VGPR_MSB) {
         handled = true; break;
       }
-      // s_barrier_signal / s_barrier_wait may be classified as SOP1 by LLVM
-      if (di.mnemonic == "s_barrier_signal" || di.mnemonic == "s_barrier_wait") {
+      // s_barrier_signal → no-op (the wait emits the actual barrier)
+      if (di.mnemonic == "s_barrier_signal") {
+        handled = true; break;
+      }
+      // s_barrier_wait → emit a full s_barrier for gfx942 synchronization
+      if (di.mnemonic == "s_barrier_wait") {
+        Function *barrierFn = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::amdgcn_s_barrier);
+        B.CreateCall(barrierFn, {});
         handled = true; break;
       }
       break;
