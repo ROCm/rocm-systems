@@ -113,6 +113,35 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+
+  // s_atomic_swap: atomic exchange on memory through SGPR pair base pointer.
+  // HW only returns the old value when GLC=1; we always write it back,
+  // which is conservative (harmless when GLC=0 since the dest is dead).
+  if (sop == SemOp::S_ATOMIC_SWAP) {
+    ParsedReg dataDst = op.dst();
+    ParsedReg base = op.srcReg(0);
+    Value *data = ctx.regs.readReg32(ctx.B, dataDst);
+
+    Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);
+    Value *ptr = ctx.B.CreateIntToPtr(baseAddr, ctx.ptrGlobalTy);
+
+    unsigned offIdx = op.srcIdx(1);
+    if (di.isImm(offIdx)) {
+      int64_t off = op.srcImm(1);
+      if (off != 0)
+        ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
+    } else {
+      Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
+      ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
+    }
+
+    Value *old = ctx.B.CreateAtomicRMW(AtomicRMWInst::Xchg, ptr, data,
+                                       MaybeAlign(), AtomicOrdering::Monotonic);
+    ctx.regs.storeSGPR32(ctx.B, dataDst.baseIdx, old);
+    hr.handled = true;
+    return hr;
+  }
+
   return hr;
 }
 

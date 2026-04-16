@@ -1,5 +1,6 @@
 #include "handlers.hpp"
 #include "raiser.hpp"
+#include "wmma_lowering.hpp"
 
 #include "semop.hpp"
 #include "llvm/ADT/SmallVector.h"
@@ -105,6 +106,149 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
     Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateFAdd(a, b, "add_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_SUB_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
+    Value *res = ctx.B.CreateBitCast(ctx.B.CreateFSub(a, b, "sub_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_MAX_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
+    Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maxnum, {ctx.f16Ty});
+    Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {a, b}, "max_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  // v_pk_fmac_f16: packed <2xf16> fused multiply-accumulate into dst
+  if (sop == SemOp::V_PK_FMAC_F16) {
+    auto *v2f16 = FixedVectorType::get(ctx.f16Ty, 2);
+    Value *s0 = ctx.B.CreateBitCast(op.src(0), v2f16);
+    Value *s1 = ctx.B.CreateBitCast(op.src(1), v2f16);
+    Value *acc = ctx.B.CreateBitCast(ctx.regs.readReg32(ctx.B, op.dst()), v2f16);
+    Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {v2f16});
+    Value *res = ctx.B.CreateCall(fma, {s0, s1, acc}, "pk_fmac");
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  // v_mac_f16 / v_fmac_f16: dst = src0 * src1 + dst (f16)
+  if (sop == SemOp::V_MAC_F16 || sop == SemOp::V_FMAC_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *s0 = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Value *s1 = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
+    Value *acc = ctx.B.CreateBitCast(ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, op.dst()), i16Ty), ctx.f16Ty);
+    Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f16Ty});
+    Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, acc}, "mac_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_SUBREV_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
+    Value *res = ctx.B.CreateBitCast(ctx.B.CreateFSub(b, a, "subrev_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_FLOOR_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *s = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::floor, {ctx.f16Ty});
+    Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {s}, "floor_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_CVT_F16_U16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *s = ctx.B.CreateTrunc(op.src(0), i16Ty);
+    Value *res = ctx.B.CreateUIToFP(s, ctx.f16Ty, "cvt_f16_u16");
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(ctx.B.CreateBitCast(res, i16Ty), ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_CVT_U16_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *s = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Value *res = ctx.B.CreateFPToUI(s, i16Ty, "cvt_u16_f16");
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_LDEXP_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *s0 = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Value *s1 = ctx.B.CreateTrunc(op.src(1), i16Ty);
+    Function *ldexpFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::ldexp, {ctx.f16Ty, i16Ty});
+    Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(ldexpFn, {s0, s1}, "ldexp_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_MIN_F16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
+    Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
+    Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f16Ty});
+    Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {a, b}, "min_f16"), i16Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_MAX_U16 || sop == SemOp::V_MIN_U16 ||
+      sop == SemOp::V_MAX_I16 || sop == SemOp::V_MIN_I16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *a = ctx.B.CreateTrunc(op.src(0), i16Ty);
+    Value *b = ctx.B.CreateTrunc(op.src(1), i16Ty);
+    Value *cmp;
+    if (sop == SemOp::V_MAX_U16)      cmp = ctx.B.CreateICmpUGT(a, b);
+    else if (sop == SemOp::V_MIN_U16) cmp = ctx.B.CreateICmpULT(a, b);
+    else if (sop == SemOp::V_MAX_I16) cmp = ctx.B.CreateICmpSGT(a, b);
+    else                               cmp = ctx.B.CreateICmpSLT(a, b);
+    Value *res = ctx.B.CreateSelect(cmp, a, b, "i16sel");
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_ASHRREV_I16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    // HW uses src0[3:0]; mask to avoid UB from shift >= bitwidth.
+    Value *shamt = ctx.B.CreateAnd(ctx.B.CreateTrunc(op.src(0), i16Ty),
+                                   ConstantInt::get(i16Ty, 0xF));
+    Value *base = ctx.B.CreateTrunc(op.src(1), i16Ty);
+    Value *res = ctx.B.CreateAShr(base, shamt, "vashr16");
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_LSHRREV_B16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *shamt = ctx.B.CreateAnd(ctx.B.CreateTrunc(op.src(0), i16Ty),
+                                   ConstantInt::get(i16Ty, 0xF));
+    Value *base = ctx.B.CreateTrunc(op.src(1), i16Ty);
+    Value *res = ctx.B.CreateLShr(base, shamt, "vlshr16");
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_LSHLREV_B16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *shamt = ctx.B.CreateAnd(ctx.B.CreateTrunc(op.src(0), i16Ty),
+                                   ConstantInt::get(i16Ty, 0xF));
+    Value *base = ctx.B.CreateTrunc(op.src(1), i16Ty);
+    Value *res = ctx.B.CreateShl(base, shamt, "vlshl16");
     ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
@@ -249,6 +393,50 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // Vector sub with carry-out (GFX9: v_sub_u32; GFX10+: v_sub_co_u32)
+  if (sop == SemOp::V_SUB_CO_U32) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    Value *res = ctx.B.CreateSub(s0, s1, "vsub_co");
+    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    ctx.regs.storeVCC(ctx.B, ctx.B.CreateICmpULT(s0, s1));
+    hr.handled = true;
+    return hr;
+  }
+  // Vector reversed sub with carry-out (GFX9: v_subrev_u32; GFX10+: v_subrev_co_u32)
+  if (sop == SemOp::V_SUBREV_CO_U32) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    Value *res = ctx.B.CreateSub(s1, s0, "vsubrev_co");
+    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    ctx.regs.storeVCC(ctx.B, ctx.B.CreateICmpULT(s1, s0));
+    hr.handled = true;
+    return hr;
+  }
+  // Vector sub with borrow-in/borrow-out (GFX9: v_subb_u32; GFX10+: v_sub_co_ci_u32)
+  if (sop == SemOp::V_SUB_CO_CI_U32) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    Value *bin = ctx.B.CreateZExt(ctx.regs.loadVCC(ctx.B), ctx.i32Ty);
+    Value *diff1 = ctx.B.CreateSub(s0, s1);
+    Value *diff2 = ctx.B.CreateSub(diff1, bin, "vsub_ci");
+    Value *b1 = ctx.B.CreateICmpULT(s0, s1);
+    Value *b2 = ctx.B.CreateICmpULT(diff1, bin);
+    ctx.regs.writeReg32(ctx.B, op.dst(), diff2);
+    ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(b1, b2));
+    hr.handled = true;
+    return hr;
+  }
+  // Vector reversed sub with borrow-in/borrow-out (v_subbrev_co_u32)
+  if (sop == SemOp::V_SUBREV_CO_CI_U32) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    Value *bin = ctx.B.CreateZExt(ctx.regs.loadVCC(ctx.B), ctx.i32Ty);
+    Value *diff1 = ctx.B.CreateSub(s1, s0);
+    Value *diff2 = ctx.B.CreateSub(diff1, bin, "vsubrev_ci");
+    Value *b1 = ctx.B.CreateICmpULT(s1, s0);
+    Value *b2 = ctx.B.CreateICmpULT(diff1, bin);
+    ctx.regs.writeReg32(ctx.B, op.dst(), diff2);
+    ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(b1, b2));
+    hr.handled = true;
+    return hr;
+  }
   // Vector add with carry-in/carry-out (GFX12: v_add_co_ci_u32)
   if (sop == SemOp::V_ADD_CO_CI_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
@@ -310,6 +498,11 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  if (sop == SemOp::V_XNOR_B32) {
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateNot(ctx.B.CreateXor(op.src(0), op.src(1)), "vxnor"));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_MAX_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpUGT(s0, s1), s0, s1, "vmax"));
@@ -359,6 +552,67 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *b = ctx.B.CreateShl(op.src(1), 8);
     b = ctx.B.CreateAShr(b, 8);
     ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateMul(a, b, "mul24i"));
+    hr.handled = true;
+    return hr;
+  }
+  // v_dot8c_i32_i4: dst += sum of 8 signed 4-bit lane products
+  if (sop == SemOp::V_DOT8C_I32_I4) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    Value *acc = ctx.regs.readReg32(ctx.B, op.dst());
+    for (int i = 0; i < 8; i++) {
+      Value *shift = ConstantInt::get(ctx.i32Ty, i * 4);
+      Value *a = ctx.B.CreateAnd(ctx.B.CreateLShr(s0, shift), ConstantInt::get(ctx.i32Ty, 0xF));
+      Value *b = ctx.B.CreateAnd(ctx.B.CreateLShr(s1, shift), ConstantInt::get(ctx.i32Ty, 0xF));
+      // Sign-extend 4-bit: shift left 28, arithmetic shift right 28
+      a = ctx.B.CreateAShr(ctx.B.CreateShl(a, 28), 28);
+      b = ctx.B.CreateAShr(ctx.B.CreateShl(b, 28), 28);
+      acc = ctx.B.CreateAdd(acc, ctx.B.CreateMul(a, b));
+    }
+    ctx.regs.writeReg32(ctx.B, op.dst(), acc);
+    hr.handled = true;
+    return hr;
+  }
+  // v_dot4c_i32_i8: dst += sum of 4 signed 8-bit lane products
+  if (sop == SemOp::V_DOT4C_I32_I8) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    Type *i8Ty = Type::getInt8Ty(ctx.C);
+    Value *acc = ctx.regs.readReg32(ctx.B, op.dst());
+    for (int i = 0; i < 4; i++) {
+      Value *shift = ConstantInt::get(ctx.i32Ty, i * 8);
+      Value *a = ctx.B.CreateSExt(ctx.B.CreateTrunc(ctx.B.CreateLShr(s0, shift), i8Ty), ctx.i32Ty);
+      Value *b = ctx.B.CreateSExt(ctx.B.CreateTrunc(ctx.B.CreateLShr(s1, shift), i8Ty), ctx.i32Ty);
+      acc = ctx.B.CreateAdd(acc, ctx.B.CreateMul(a, b));
+    }
+    ctx.regs.writeReg32(ctx.B, op.dst(), acc);
+    hr.handled = true;
+    return hr;
+  }
+  // v_dot2c_i32_i16: dst += src0.lo16 * src1.lo16 + src0.hi16 * src1.hi16
+  if (sop == SemOp::V_DOT2C_I32_I16) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *a_lo = ctx.B.CreateSExt(ctx.B.CreateTrunc(s0, i16Ty), ctx.i32Ty);
+    Value *a_hi = ctx.B.CreateSExt(ctx.B.CreateTrunc(ctx.B.CreateLShr(s0, 16), i16Ty), ctx.i32Ty);
+    Value *b_lo = ctx.B.CreateSExt(ctx.B.CreateTrunc(s1, i16Ty), ctx.i32Ty);
+    Value *b_hi = ctx.B.CreateSExt(ctx.B.CreateTrunc(ctx.B.CreateLShr(s1, 16), i16Ty), ctx.i32Ty);
+    Value *dot = ctx.B.CreateAdd(ctx.B.CreateMul(a_lo, b_lo), ctx.B.CreateMul(a_hi, b_hi));
+    Value *acc = ctx.regs.readReg32(ctx.B, op.dst());
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAdd(acc, dot, "dot2c"));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_MUL_HI_U32_U24) {
+    Value *a = ctx.B.CreateZExt(ctx.B.CreateAnd(op.src(0), ConstantInt::get(ctx.i32Ty, 0xFFFFFF)), ctx.i64Ty);
+    Value *b = ctx.B.CreateZExt(ctx.B.CreateAnd(op.src(1), ConstantInt::get(ctx.i32Ty, 0xFFFFFF)), ctx.i64Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateTrunc(ctx.B.CreateLShr(ctx.B.CreateMul(a, b), 32), ctx.i32Ty, "mulhi24"));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_MUL_HI_I32_I24) {
+    Value *a = ctx.B.CreateAShr(ctx.B.CreateShl(op.src(0), 8), 8);
+    Value *b = ctx.B.CreateAShr(ctx.B.CreateShl(op.src(1), 8), 8);
+    Value *a64 = ctx.B.CreateSExt(a, ctx.i64Ty), *b64 = ctx.B.CreateSExt(b, ctx.i64Ty);
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateTrunc(ctx.B.CreateAShr(ctx.B.CreateMul(a64, b64), 32), ctx.i32Ty, "mulhi24i"));
     hr.handled = true;
     return hr;
   }
@@ -429,10 +683,17 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  if (sop == SemOp::V_FMA_F64) {
-    Value *s0 = op.src64(0), *s1 = op.src64(1), *s2 = op.src64(2);
+  if (sop == SemOp::V_FMA_F64 || sop == SemOp::V_FMAC_F64) {
     auto *f64Ty = Type::getDoubleTy(ctx.C);
-    s0 = ctx.B.CreateBitCast(s0, f64Ty); s1 = ctx.B.CreateBitCast(s1, f64Ty); s2 = ctx.B.CreateBitCast(s2, f64Ty);
+    Value *s0, *s1, *s2;
+    if (sop == SemOp::V_FMA_F64) {
+      s0 = op.src64(0); s1 = op.src64(1); s2 = op.src64(2);
+    } else {
+      s0 = op.src64(0); s1 = op.src64(1);
+      s2 = ctx.B.CreateBitCast(ctx.regs.readReg64(ctx.B, op.dst()), f64Ty);
+    }
+    s0 = ctx.B.CreateBitCast(s0, f64Ty); s1 = ctx.B.CreateBitCast(s1, f64Ty);
+    if (s2->getType() != f64Ty) s2 = ctx.B.CreateBitCast(s2, f64Ty);
     Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {f64Ty});
     ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, s2}, "vfma_f64"), ctx.i64Ty));
     hr.handled = true;
@@ -544,6 +805,30 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (dv->getType() != ctx.f32Ty) dv = ctx.B.CreateBitCast(dv, ctx.f32Ty);
     Function *fmuladd = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fmuladd, {ctx.f32Ty});
     ctx.regs.writeReg32(ctx.B, dstReg, ctx.B.CreateBitCast(ctx.B.CreateCall(fmuladd, {s0, s1, dv}, "fmac"), ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  // v_fmamk_f32 dst, src0, K, src2: dst = src0 * K + src2
+  // Operand order from MC disassembler: srcF(0)=src0, srcF(1)=K (literal),
+  // srcF(2)=src2. Same ordering applies to v_fmaak_f32 below.
+  if (sop == SemOp::V_FMAMK_F32) {
+    Value *s0 = op.srcF(0), *k = op.srcF(1), *s2 = op.srcF(2);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (k->getType() != ctx.f32Ty) k = ctx.B.CreateBitCast(k, ctx.f32Ty);
+    if (s2->getType() != ctx.f32Ty) s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
+    Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f32Ty});
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, k, s2}, "fmamk"), ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  // v_fmaak_f32 dst, src0, src1, K: dst = src0 * src1 + K
+  if (sop == SemOp::V_FMAAK_F32) {
+    Value *s0 = op.srcF(0), *s1 = op.srcF(1), *k = op.srcF(2);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    if (k->getType() != ctx.f32Ty) k = ctx.B.CreateBitCast(k, ctx.f32Ty);
+    Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f32Ty});
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, k}, "fmaak"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -1075,9 +1360,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   }
 
   // ---- WMMA (gfx1250 RDNA4, VOP3P encoding) ----
-  // v_wmma_f32_16x16x32_f16: A and ctx.B are v16f16, C/D are v8f32
-  // Intrinsic signature: (i1 A_mod, v16f16 A, i1 B_mod, v16f16 ctx.B,
-  //                       i16 C_mod, v8f32 C, i1 a_reuse, i1 b_reuse) → v8f32
+  // v_wmma_f32_16x16x32_f16: A and B are v16f16, C/D are v8f32
   if (sop == SemOp::V_WMMA_F32_16x16x32_F16) {
     Type *v16f16Ty = FixedVectorType::get(Type::getHalfTy(ctx.C), 16);
     Type *v8f32Ty = FixedVectorType::get(ctx.f32Ty, 8);
@@ -1090,14 +1373,21 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *b = ctx.regs.readRegVec(ctx.B, srcB, v16f16Ty);
     Value *c = ctx.regs.readRegVec(ctx.B, srcC, v8f32Ty);
 
-    Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
-        &ctx.M, Intrinsic::amdgcn_wmma_f32_16x16x32_f16, {v8f32Ty, v16f16Ty});
-    Value *result_val = ctx.B.CreateCall(wmmaFn, {
-        ctx.B.getFalse(), a,
-        ctx.B.getFalse(), b,
-        ConstantInt::get(Type::getInt16Ty(ctx.C), 0), c,
-        ctx.B.getFalse(), ctx.B.getFalse()
-    }, "wmma");
+    Value *result_val;
+    if (ctx.targetIsa.hasWMMA) {
+      Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::amdgcn_wmma_f32_16x16x32_f16,
+          {v8f32Ty, v16f16Ty});
+      result_val = ctx.B.CreateCall(wmmaFn, {
+          ctx.B.getFalse(), a,
+          ctx.B.getFalse(), b,
+          ConstantInt::get(Type::getInt16Ty(ctx.C), 0), c,
+          ctx.B.getFalse(), ctx.B.getFalse()
+      }, "wmma");
+    } else {
+      result_val = emitWMMAtoMFMA(ctx, a, b, c);
+    }
+
     ctx.regs.writeRegVec(ctx.B, dest, result_val);
     hr.handled = true;
     return hr;

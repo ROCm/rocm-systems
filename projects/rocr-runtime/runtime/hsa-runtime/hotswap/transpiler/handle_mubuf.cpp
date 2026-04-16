@@ -35,6 +35,7 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     case SemOp::BUFFER_LOAD_SBYTE:    return {true, false, 1, 8, true, true};
     case SemOp::BUFFER_LOAD_USHORT:   return {true, false, 1, 16, true, false};
     case SemOp::BUFFER_LOAD_SSHORT:   return {true, false, 1, 16, true, true};
+    case SemOp::BUFFER_LOAD_SHORT_D16:     return {true, false, 1, 16, true, false};
     case SemOp::BUFFER_LOAD_SHORT_D16_HI: return {true, false, 1, 16, true, false};
     case SemOp::BUFFER_STORE_DWORD:   return {false, true, 1, 32, false, false};
     case SemOp::BUFFER_STORE_DWORDX2: return {false, true, 2, 64, false, false};
@@ -226,6 +227,88 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
       hr.handled = true;
     return hr;
     }
+  }
+
+  // ---- Buffer load to LDS (buffer_load_dword lds, ...) ----
+  // Data goes directly to LDS at M0 + vaddr, not to a VGPR.
+  // Model as: tmp = raw_buffer_load; ds_write(LDS[M0], tmp)
+  if (sop == SemOp::BUFFER_LOAD_DWORD_LDS ||
+      sop == SemOp::BUFFER_LOAD_DWORDX2_LDS ||
+      sop == SemOp::BUFFER_LOAD_DWORDX4_LDS) {
+    int dwords = (sop == SemOp::BUFFER_LOAD_DWORDX4_LDS) ? 4
+               : (sop == SemOp::BUFFER_LOAD_DWORDX2_LDS) ? 2 : 1;
+
+    ParsedReg srsrcReg{}, vaddrReg{};
+    bool haveSrsrc = false, haveVaddr = false, haveSoff = false;
+    ParsedReg soffReg{};
+    int64_t immOff = 0;
+
+    for (unsigned k = 0; k < op.nSrcs(); k++) {
+      unsigned idx = op.srcIdx(k);
+      if (di.isReg(idx)) {
+        ParsedReg pr = op.srcReg(k);
+        if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSrsrc) {
+          srsrcReg = pr; haveSrsrc = true;
+        } else if (pr.kind == ParsedReg::VGPR && !haveVaddr) {
+          vaddrReg = pr; haveVaddr = true;
+        } else if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSoff) {
+          soffReg = pr; haveSoff = true;
+        }
+      } else if (di.isImm(idx)) {
+        int64_t v = di.getImm(idx);
+        if (v != 0 && immOff == 0)
+          immOff = v;
+      }
+    }
+
+    if (!haveSrsrc) {
+      llvm::errs() << "transpiler: MUBUF_LDS: no SRSRC for " << mn << "\n";
+      result.failMnemonic = di.mnemonic;
+      result.failFormat = "MUBUF";
+      hr.handled = false;
+      return hr;
+    }
+
+    // Build SRD <4 x i32>
+    Value *dw0 = ctx.regs.readReg32(ctx.B, srsrcReg);
+    ParsedReg s1 = srsrcReg; s1.baseIdx = srsrcReg.baseIdx + 1;
+    ParsedReg s2 = srsrcReg; s2.baseIdx = srsrcReg.baseIdx + 2;
+    Value *dw1 = ctx.regs.readReg32(ctx.B, s1);
+    Value *dw2 = ctx.regs.readReg32(ctx.B, s2);
+    Function *readfirstlane = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_readfirstlane, {ctx.i32Ty});
+    Value *cleanDw1 = ctx.B.CreateAnd(dw1, ConstantInt::get(ctx.i32Ty, 0xFFFF));
+    Value *srd = UndefValue::get(FixedVectorType::get(ctx.i32Ty, 4));
+    srd = ctx.B.CreateInsertElement(srd, ctx.B.CreateCall(readfirstlane, {dw0}), (uint64_t)0);
+    srd = ctx.B.CreateInsertElement(srd, ctx.B.CreateCall(readfirstlane, {cleanDw1}), (uint64_t)1);
+    srd = ctx.B.CreateInsertElement(srd, ctx.B.CreateCall(readfirstlane, {dw2}), (uint64_t)2);
+    srd = ctx.B.CreateInsertElement(srd, ConstantInt::get(ctx.i32Ty, 0), (uint64_t)3);
+
+    Value *voffset = ConstantInt::get(ctx.i32Ty, 0);
+    if (haveVaddr)
+      voffset = ctx.B.CreateAdd(voffset, ctx.regs.readReg32(ctx.B, vaddrReg));
+    if (immOff != 0)
+      voffset = ctx.B.CreateAdd(voffset, ConstantInt::get(ctx.i32Ty, (int32_t)immOff));
+    Value *soffset = haveSoff ? ctx.regs.readReg32(ctx.B, soffReg)
+                              : ConstantInt::get(ctx.i32Ty, 0);
+    Value *auxFlags = ConstantInt::get(ctx.i32Ty, 0);
+
+    // Load from buffer into temp value(s)
+    Type *ldTy = (dwords == 1) ? (Type *)ctx.i32Ty
+                               : (Type *)FixedVectorType::get(ctx.i32Ty, dwords);
+    Function *bufLd = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_raw_buffer_load, {ldTy});
+    Value *loaded = ctx.B.CreateCall(bufLd, {srd, voffset, soffset, auxFlags}, "lds_buf_ld");
+
+    // Store to LDS at address from M0
+    ParsedReg m0Reg; m0Reg.kind = ParsedReg::M0; m0Reg.baseIdx = 0;
+    Value *ldsAddr = ctx.regs.readReg32(ctx.B, m0Reg);
+    auto *ldsPtrTy = PointerType::get(ctx.C, 3);
+    Value *ldsPtr = ctx.B.CreateIntToPtr(ldsAddr, ldsPtrTy);
+    ctx.B.CreateStore(loaded, ldsPtr);
+
+    hr.handled = true;
+    return hr;
   }
 
   // ---- Buffer atomics ----

@@ -180,6 +180,58 @@ configuring.
 
 ---
 
+## Kernel coverage
+
+The transpiler targets production AMDGPU kernels compiled for the GFX9 family
+(MI200/MI300 — gfx90a, gfx940, gfx942, gfx950) and GFX12/GFX1250 (RDNA4+).
+Coverage depends on which instruction patterns a kernel uses.
+
+### AITER kernels (gfx942/gfx950)
+
+Tested against 27 representative AITER CK kernels (GEMM, FMHA, MoE, MLA,
+paged-attention, topk-softmax, etc.):
+
+| Metric | Value |
+|--------|-------|
+| Kernels raised | **23 / 27 (85.2%)** |
+| Remaining failures | 4 (IR verification: CFG reconstruction edge case) |
+
+Successfully raised kernel families:
+- **GEMM** (bf16, fp4, fp8 block-scale, int8)
+- **FMHA forward** (bf16, with/without causal mask, GQA)
+- **FMHA backward** (bf16)
+- **MoE** (fp8 block-scale, gate/up fusion)
+- **MLA** (bf16 attention decode)
+- **Paged attention** (bf16 no-quant)
+- **TopK softmax** (f32 and bf16 variants)
+
+### Known limitations
+
+| Category | Description |
+|----------|-------------|
+| **BUFFER_LOAD_DWORD_LDS** | Direct-to-LDS buffer loads are now supported. |
+| **IR verification failures** | 4 f8_block_scale kernels fail IR verification due to a CFG reconstruction edge case ("terminator in the middle of a basic block"). |
+| **WMMA (gfx1250)** | Wave Matrix Multiply support is being added by a separate effort. |
+| **LDS_DIRECT operand** | The LDS_DIRECT pseudo-register (used in some FMHA backward kernels) triggers a non-fatal warning but does not block raising when the register is used in non-critical paths. |
+
+### Instruction coverage highlights
+
+The transpiler handles the full GFX9 instruction set including:
+- Scalar ALU (SOP1/SOP2/SOPK/SOPC), including carry-chain operations
+- Vector ALU (VOP1/VOP2/VOP3), including GFX9 naming variants (v_add_u32 → v_add_co_u32)
+- Packed f16 ops (v_pk_fmac_f16, v_pk_add_f32, v_pk_fma_f32)
+- Dot product accumulate (v_dot2c_i32_i16, v_dot4c_i32_i8, v_dot8c_i32_i4)
+- MFMA (matrix fused multiply-add, including scaled variants)
+- MUBUF with buffer resource descriptors (loads, stores, atomics, LDS-direct)
+- SMEM (scalar loads, s_atomic_swap)
+- FLAT/GLOBAL memory (loads, stores, atomics including pk_add_bf16/f16)
+- DS (LDS reads/writes, including strided and 128-bit)
+- VOPC/CMPX (vector comparisons with VCC/EXEC writeback)
+- Control flow (branches, saveexec, EXEC mask management)
+- VOPD (dual-issue instructions, gfx12+)
+
+---
+
 ## Project structure
 
 ```

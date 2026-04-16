@@ -146,6 +146,7 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
       {"V_ADD_F32", SemOp::V_ADD_F32}, {"V_SUB_F32", SemOp::V_SUB_F32},
       {"V_SUBREV_F32", SemOp::V_SUBREV_F32}, {"V_MUL_F32", SemOp::V_MUL_F32},
       {"V_FMAC_F32", SemOp::V_FMAC_F32}, {"V_FMA_F32", SemOp::V_FMA_F32},
+      {"V_FMAMK_F32", SemOp::V_FMAMK_F32}, {"V_FMAAK_F32", SemOp::V_FMAAK_F32},
       {"V_MAX_F32", SemOp::V_MAX_F32}, {"V_MIN_F32", SemOp::V_MIN_F32},
       {"V_MAX_NUM_F32", SemOp::V_MAX_NUM_F32}, {"V_MIN_NUM_F32", SemOp::V_MIN_NUM_F32},
       {"V_DIV_FIXUP_F32", SemOp::V_DIV_FIXUP_F32},
@@ -153,15 +154,24 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
       {"V_DIV_SCALE_F32", SemOp::V_DIV_SCALE_F32},
       {"V_ADD_NC_U32", SemOp::V_ADD_NC_U32}, {"V_SUB_NC_U32", SemOp::V_SUB_NC_U32},
       {"V_SUBREV_NC_U32", SemOp::V_SUBREV_NC_U32},
-      {"V_ADD_CO_U32", SemOp::V_ADD_CO_U32}, {"V_ADD_CO_CI_U32", SemOp::V_ADD_CO_CI_U32},
+      {"V_ADD_CO_U32", SemOp::V_ADD_CO_U32}, {"V_ADD_U32", SemOp::V_ADD_CO_U32},
+      {"V_ADD_CO_CI_U32", SemOp::V_ADD_CO_CI_U32},
       {"V_ADDC_CO_U32", SemOp::V_ADD_CO_CI_U32}, {"V_ADDC_U32", SemOp::V_ADD_CO_CI_U32},
-      {"V_AND_B32", SemOp::V_AND_B32}, {"V_OR_B32", SemOp::V_OR_B32}, {"V_XOR_B32", SemOp::V_XOR_B32},
+      {"V_SUB_CO_U32", SemOp::V_SUB_CO_U32}, {"V_SUB_U32", SemOp::V_SUB_CO_U32},
+      {"V_SUBREV_CO_U32", SemOp::V_SUBREV_CO_U32}, {"V_SUBREV_U32", SemOp::V_SUBREV_CO_U32},
+      {"V_SUB_CO_CI_U32", SemOp::V_SUB_CO_CI_U32},
+      {"V_SUBB_CO_U32", SemOp::V_SUB_CO_CI_U32}, {"V_SUBB_U32", SemOp::V_SUB_CO_CI_U32},
+      {"V_SUBBREV_CO_U32", SemOp::V_SUBREV_CO_CI_U32}, {"V_SUBBREV_U32", SemOp::V_SUBREV_CO_CI_U32},
+      {"V_AND_B32", SemOp::V_AND_B32}, {"V_OR_B32", SemOp::V_OR_B32},
+      {"V_XOR_B32", SemOp::V_XOR_B32}, {"V_XNOR_B32", SemOp::V_XNOR_B32},
       {"V_LSHLREV_B32", SemOp::V_LSHLREV_B32}, {"V_LSHRREV_B32", SemOp::V_LSHRREV_B32},
       {"V_ASHRREV_I32", SemOp::V_ASHRREV_I32},
       {"V_CNDMASK_B32", SemOp::V_CNDMASK_B32},
       {"V_MUL_LO_U32", SemOp::V_MUL_LO_U32}, {"V_MUL_HI_U32", SemOp::V_MUL_HI_U32},
       {"V_MUL_HI_I32", SemOp::V_MUL_HI_I32},
       {"V_MUL_I32_I24", SemOp::V_MUL_I32_I24}, {"V_MUL_U32_U24", SemOp::V_MUL_U32_U24},
+      {"V_MUL_HI_U32_U24", SemOp::V_MUL_HI_U32_U24},
+      {"V_MUL_HI_I32_I24", SemOp::V_MUL_HI_I32_I24},
       {"V_MAD_U32_U24", SemOp::V_MAD_U32_U24}, {"V_MAD_U32", SemOp::V_MAD_U32},
       {"V_ADD3_U32", SemOp::V_ADD3_U32}, {"V_LSHL_ADD_U32", SemOp::V_LSHL_ADD_U32},
       {"V_LSHL_OR_B32", SemOp::V_LSHL_OR_B32},
@@ -175,6 +185,20 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
       {"V_BITOP3_B32", SemOp::V_BITOP3_B32}, {"V_BITOP3_B16", SemOp::V_BITOP3_B16},
       {"V_FMA_MIX_F32", SemOp::V_FMA_MIX_F32},
       {"V_ADD_F16", SemOp::V_ADD_F16}, {"V_MUL_F16", SemOp::V_MUL_F16},
+      {"V_SUB_F16", SemOp::V_SUB_F16}, {"V_SUBREV_F16", SemOp::V_SUBREV_F16},
+      {"V_MAC_F16", SemOp::V_MAC_F16}, {"V_FMAC_F16", SemOp::V_FMAC_F16},
+      {"V_FLOOR_F16", SemOp::V_FLOOR_F16},
+      {"V_CVT_F16_U16", SemOp::V_CVT_F16_U16}, {"V_CVT_U16_F16", SemOp::V_CVT_U16_F16},
+      {"V_MAX_F16", SemOp::V_MAX_F16}, {"V_MIN_F16", SemOp::V_MIN_F16},
+      {"V_LDEXP_F16", SemOp::V_LDEXP_F16},
+      {"V_DOT2C_I32_I16", SemOp::V_DOT2C_I32_I16},
+      {"V_DOT4C_I32_I8", SemOp::V_DOT4C_I32_I8},
+      {"V_DOT8C_I32_I4", SemOp::V_DOT8C_I32_I4},
+      {"V_PK_FMAC_F16", SemOp::V_PK_FMAC_F16},
+      {"V_MAX_U16", SemOp::V_MAX_U16}, {"V_MIN_U16", SemOp::V_MIN_U16},
+      {"V_MAX_I16", SemOp::V_MAX_I16}, {"V_MIN_I16", SemOp::V_MIN_I16},
+      {"V_ASHRREV_I16", SemOp::V_ASHRREV_I16},
+      {"V_LSHRREV_B16", SemOp::V_LSHRREV_B16}, {"V_LSHLREV_B16", SemOp::V_LSHLREV_B16},
       {"V_PACK_B32_F16", SemOp::V_PACK_B32_F16},
       {"V_CVT_PK_BF16_F32", SemOp::V_CVT_PK_BF16_F32},
       {"V_CVT_PK_BF8_F32", SemOp::V_CVT_PK_BF8_F32},
@@ -182,7 +206,7 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
 
       // FP64
       {"V_ADD_F64", SemOp::V_ADD_F64}, {"V_MUL_F64", SemOp::V_MUL_F64},
-      {"V_FMA_F64", SemOp::V_FMA_F64},
+      {"V_FMA_F64", SemOp::V_FMA_F64}, {"V_FMAC_F64", SemOp::V_FMAC_F64},
 
       {"V_MAX_U32", SemOp::V_MAX_U32}, {"V_MIN_U32", SemOp::V_MIN_U32},
       {"V_MAX_I32", SemOp::V_MAX_I32}, {"V_MIN_I32", SemOp::V_MIN_I32},
@@ -338,6 +362,9 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
       {"GLOBAL_ATOMIC_PK_ADD_BF16", SemOp::GLOBAL_ATOMIC_PK_ADD_BF16},
       {"GLOBAL_ATOMIC_PK_ADD_F16", SemOp::GLOBAL_ATOMIC_PK_ADD_F16},
 
+      // SMEM atomics
+      {"S_ATOMIC_SWAP", SemOp::S_ATOMIC_SWAP},
+
       // DS
       {"DS_LOAD_TR16_B128", SemOp::DS_LOAD_TR16_B128},
       {"DS_READ_B32", SemOp::DS_READ_B32}, {"DS_READ_B64", SemOp::DS_READ_B64},
@@ -350,6 +377,11 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
       {"DS_WRITE2_B32", SemOp::DS_WRITE2_B32}, {"DS_WRITE2_B64", SemOp::DS_WRITE2_B64},
       {"DS_WRITE_B16", SemOp::DS_WRITE_B16}, {"DS_WRITE_B8", SemOp::DS_WRITE_B8},
       {"DS_BPERMUTE_B32", SemOp::DS_BPERMUTE_B32},
+
+      // MUBUF (LDS-direct variants — must appear before _LDS is stripped)
+      {"BUFFER_LOAD_DWORD_LDS", SemOp::BUFFER_LOAD_DWORD_LDS},
+      {"BUFFER_LOAD_DWORDX2_LDS", SemOp::BUFFER_LOAD_DWORDX2_LDS},
+      {"BUFFER_LOAD_DWORDX4_LDS", SemOp::BUFFER_LOAD_DWORDX4_LDS},
 
       // MUBUF
       {"BUFFER_LOAD_DWORD", SemOp::BUFFER_LOAD_DWORD},
@@ -365,6 +397,7 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
       {"BUFFER_LOAD_SBYTE", SemOp::BUFFER_LOAD_SBYTE},
       {"BUFFER_LOAD_USHORT", SemOp::BUFFER_LOAD_USHORT},
       {"BUFFER_LOAD_SSHORT", SemOp::BUFFER_LOAD_SSHORT},
+      {"BUFFER_LOAD_SHORT_D16", SemOp::BUFFER_LOAD_SHORT_D16},
       {"BUFFER_LOAD_SHORT_D16_HI", SemOp::BUFFER_LOAD_SHORT_D16_HI},
       {"BUFFER_STORE_DWORD", SemOp::BUFFER_STORE_DWORD},
       {"BUFFER_STORE_B32", SemOp::BUFFER_STORE_DWORD},
@@ -426,20 +459,31 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
 StringRef OpcodeMap::stripMCIISuffix(StringRef name) {
     // Iteratively strip suffixes until no more match, since they can nest:
     // e.g. V_BITOP3_B16_gfx1250_e64_dpp → _dpp → _e64 → _gfx1250 → V_BITOP3_B16
+    // NOTE: _LDS is deliberately absent — it changes instruction semantics
+    // (buffer load to LDS vs. to VGPR) and has its own SemOp entries.
     bool changed = true;
     while (changed) {
       changed = false;
       for (StringRef suf : {"_dpp8", "_dpp16", "_dpp", "_sdwa",
                             "_e32", "_e64",
-                            "_gfx1250", "_gfx12", "_gfx11", "_gfx10", "_gfx9",
-                            "_gfx1170", "_gfx8", "_vi", "_si", "_ci",
-                            "_SADDR", "_IMM",
+                            "_vi", "_si", "_ci",
+                            "_SADDR", "_SGPR", "_IMM",
                             "_VBUFFER_OFFSET", "_VBUFFER_OFFEN",
                             "_VBUFFER_IDXEN", "_VBUFFER_BOTHEN",
+                            "_OFFSET", "_OFFEN", "_IDXEN", "_BOTHEN",
                             "_w32", "_w64", "_twoaddr", "_threeaddr",
                             "_fake16", "_t16"}) {
         if (name.ends_with(suf)) {
           name = name.drop_back(suf.size());
+          changed = true;
+        }
+      }
+      // Strip _gfxNNN / _gfxNNNN suffixes (e.g. _gfx9, _gfx90a, _gfx942,
+      // _gfx1250) — match any suffix starting with "_gfx".
+      {
+        auto pos = name.rfind("_gfx");
+        if (pos != StringRef::npos && pos > 0) {
+          name = name.substr(0, pos);
           changed = true;
         }
       }
