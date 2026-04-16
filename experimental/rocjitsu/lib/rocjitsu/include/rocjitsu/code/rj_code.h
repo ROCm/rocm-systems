@@ -29,12 +29,22 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_CDNA3 = 2,
   /// @brief Compute Data Network Architecture 4 (CDNA4).
   ROCJITSU_CODE_ARCH_CDNA4 = 3,
+  /// @brief Radeon DNA Architecture 1 (RDNA1, GFX10.1).
+  ROCJITSU_CODE_ARCH_RDNA1 = 4,
+  /// @brief Radeon DNA Architecture 2 (RDNA2, GFX10.3).
+  ROCJITSU_CODE_ARCH_RDNA2 = 5,
+  /// @brief Radeon DNA Architecture 3 (RDNA3, GFX11).
+  ROCJITSU_CODE_ARCH_RDNA3 = 6,
+  /// @brief Radeon DNA Architecture 3.5 (RDNA3.5, GFX11.5).
+  ROCJITSU_CODE_ARCH_RDNA3_5 = 7,
+  /// @brief Radeon DNA Architecture 4 (RDNA4, GFX12).
+  ROCJITSU_CODE_ARCH_RDNA4 = 8,
   /// @brief RISC-V 32-bit integer base ISA.
-  ROCJITSU_CODE_ARCH_RV32I = 4,
+  ROCJITSU_CODE_ARCH_RV32I = 9,
   /// @brief RISC-V 64-bit integer base ISA.
-  ROCJITSU_CODE_ARCH_RV64I = 5,
+  ROCJITSU_CODE_ARCH_RV64I = 10,
   /// @brief Total number of supported architectures.
-  ROCJITSU_CODE_ARCH_NUM_ARCHS = 6,
+  ROCJITSU_CODE_ARCH_NUM_ARCHS = 11,
   /// @brief Sentinel value representing an invalid architecture.
   ROCJITSU_CODE_ARCH_INVALID = ROCJITSU_CODE_ARCH_NUM_ARCHS
 } rj_code_arch_t;

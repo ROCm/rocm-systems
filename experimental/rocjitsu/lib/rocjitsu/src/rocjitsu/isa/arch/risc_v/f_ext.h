@@ -18,7 +18,7 @@ namespace detail {
 class FlwInst : public IType {
 public:
   explicit FlwInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -31,7 +31,7 @@ private:
 class FswInst : public SType {
 public:
   explicit FswInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs2_op;
@@ -44,7 +44,7 @@ private:
 class FaddSInst : public RType {
 public:
   explicit FaddSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -55,7 +55,7 @@ private:
 class FsubSInst : public RType {
 public:
   explicit FsubSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -66,7 +66,7 @@ private:
 class FmulSInst : public RType {
 public:
   explicit FmulSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -77,7 +77,7 @@ private:
 class FdivSInst : public RType {
 public:
   explicit FdivSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -88,7 +88,7 @@ private:
 class FsgnjSInst : public RType {
 public:
   explicit FsgnjSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -99,7 +99,7 @@ private:
 class FsgnjnSInst : public RType {
 public:
   explicit FsgnjnSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -110,7 +110,7 @@ private:
 class FsgnjxSInst : public RType {
 public:
   explicit FsgnjxSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -121,7 +121,7 @@ private:
 class FminSInst : public RType {
 public:
   explicit FminSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -132,7 +132,7 @@ private:
 class FmaxSInst : public RType {
 public:
   explicit FmaxSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -145,7 +145,7 @@ private:
 class FsqrtSInst : public RType {
 public:
   explicit FsqrtSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -157,7 +157,7 @@ private:
 class FcvtWSInst : public RType {
 public:
   explicit FcvtWSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -167,7 +167,7 @@ private:
 class FcvtWuSInst : public RType {
 public:
   explicit FcvtWuSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -177,7 +177,7 @@ private:
 class FcvtLSInst : public RType {
 public:
   explicit FcvtLSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -187,7 +187,7 @@ private:
 class FcvtLuSInst : public RType {
 public:
   explicit FcvtLuSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -199,7 +199,7 @@ private:
 class FcvtSWInst : public RType {
 public:
   explicit FcvtSWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -209,7 +209,7 @@ private:
 class FcvtSWuInst : public RType {
 public:
   explicit FcvtSWuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -219,7 +219,7 @@ private:
 class FcvtSLInst : public RType {
 public:
   explicit FcvtSLInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -229,7 +229,7 @@ private:
 class FcvtSLuInst : public RType {
 public:
   explicit FcvtSLuInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -241,7 +241,7 @@ private:
 class FmvXWInst : public RType {
 public:
   explicit FmvXWInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -251,7 +251,7 @@ private:
 class FclassSInst : public RType {
 public:
   explicit FclassSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -263,7 +263,7 @@ private:
 class FmvWXInst : public RType {
 public:
   explicit FmvWXInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -275,7 +275,7 @@ private:
 class FeqSInst : public RType {
 public:
   explicit FeqSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -286,7 +286,7 @@ private:
 class FltSInst : public RType {
 public:
   explicit FltSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -297,7 +297,7 @@ private:
 class FleSInst : public RType {
 public:
   explicit FleSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -310,7 +310,7 @@ private:
 class FmaddSInst : public R4Type {
 public:
   explicit FmaddSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -322,7 +322,7 @@ private:
 class FmsubSInst : public R4Type {
 public:
   explicit FmsubSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -334,7 +334,7 @@ private:
 class FnmsubSInst : public R4Type {
 public:
   explicit FnmsubSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
@@ -346,7 +346,7 @@ private:
 class FnmaddSInst : public R4Type {
 public:
   explicit FnmaddSInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rd;
