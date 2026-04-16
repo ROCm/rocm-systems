@@ -8,6 +8,7 @@
 #include <cxxabi.h>
 #include <regex>
 #include <sstream>
+#include "gsl_assert.h"
 
 using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
@@ -15,10 +16,7 @@ using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_sym
 SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     : m_sdk_wrapper(sdk_wrapper)
 {
-    if (!m_sdk_wrapper)
-    {
-        throw std::invalid_argument("SdkWrapper pointer cannot be null");
-    }
+    Expects(m_sdk_wrapper)
 }
 
 void SdkCallbacksImpl::dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,

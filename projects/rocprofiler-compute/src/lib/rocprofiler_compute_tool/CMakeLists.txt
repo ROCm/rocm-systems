@@ -16,6 +16,6 @@ add_library(${target} SHARED
  "counters_writer.h")
 
 target_include_directories(${target} PUBLIC .)
-target_link_libraries(${target} PUBLIC rocprofiler-sdk::rocprofiler-sdk)
+target_link_libraries(${target} PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert)
 
 add_subdirectory(test)
