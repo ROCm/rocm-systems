@@ -159,6 +159,24 @@ _ARGS_RE   = re.compile(r'\(.*?\)')
 # This covers all ~1000 public device API functions without enumerating them.
 _API_FRAME_RE = re.compile(r'\b(rocshmem_[A-Za-z0-9_]+)\s*\(')
 
+# Default set of backtrace substrings used to cull non-rocSHMEM blocking groups.
+# These are GPU synchronization primitives that are not rocSHMEM deadlocks:
+#   - HIP workgroup barriers (__syncthreads and variants)
+#   - AMDGCN scalar barrier intrinsic and workgroup barrier wrapper
+#   - Named sync intrinsic
+#   - OCKL grid / multi-grid / global-workspace-sync barriers
+#   - Cooperative-groups sync (grid_group, thread_block, multi_grid_group)
+_DEFAULT_CULL_PATTERNS = [
+    '__syncthreads',            # HIP workgroup barrier (and _count/_and/_or)
+    '__builtin_amdgcn_s_barrier',  # direct AMDGCN s_barrier intrinsic
+    '__work_group_barrier',     # workgroup barrier with memory-fence flags
+    '__named_sync',             # named barrier intrinsic
+    '__ockl_grid_sync',         # OCKL grid-level sync
+    '__ockl_gws_barrier',       # OCKL global-workspace barrier
+    '__ockl_multi_grid_sync',   # OCKL multi-grid sync
+    'cooperative_groups',       # HIP cooperative-groups (grid/thread_block/multi_grid)
+]
+
 # Hint rules: ordered most-specific first. First match wins.
 # Each entry: (substring_to_find_in_frame_text, hint_message)
 _HINT_RULES = [
@@ -270,7 +288,8 @@ class DeadlockAnalyzer:
     deadlocks in rocSHMEM applications.
     """
 
-    def __init__(self, inferiors=None, output_file=None, color=None):
+    def __init__(self, inferiors=None, output_file=None, color=None,
+                 cull_patterns=None):
         """
         Parameters
         ----------
@@ -282,12 +301,28 @@ class DeadlockAnalyzer:
             True/False to force color on/off; None to auto-detect from the
             ``ROCSHMEM_DEADLOCK_COLOR`` environment variable and whether the
             output file is a TTY.
+        cull_patterns : list[str] or None
+            Substrings used to filter out backtrace groups that are stuck in
+            non-rocSHMEM GPU synchronization primitives (e.g. __syncthreads,
+            AMDGCN barriers, cooperative-groups grid sync).  Any group whose
+            representative frame list contains at least one of these substrings
+            is silently dropped from the report.
+
+            ``None``  — culling disabled (default).
+            ``[]``    — cull using ``_DEFAULT_CULL_PATTERNS``.
+            ``[...]`` — cull using the supplied list.
         """
         self.inferiors = inferiors
         self.out = output_file if output_file is not None else sys.stdout
         if color is None:
             color = _color_enabled_default(self.out)
         self.c = Colors(enabled=color)
+        if cull_patterns is None:
+            self.cull_patterns = None
+        elif len(cull_patterns) == 0:
+            self.cull_patterns = _DEFAULT_CULL_PATTERNS
+        else:
+            self.cull_patterns = list(cull_patterns)
 
     # ------------------------------------------------------------------
     # Thread collection
@@ -460,6 +495,43 @@ class DeadlockAnalyzer:
             groups[key]['entries'].append((inf, thread, wg, wf))
         return groups
 
+    def cull_groups(self, groups):
+        """
+        Remove groups whose representative backtrace matches any pattern in
+        ``self.cull_patterns``.  Returns ``(kept, n_culled, n_wf_culled)``
+        where *kept* is the filtered dict, *n_culled* is the number of groups
+        removed, and *n_wf_culled* is the total wavefront count removed.
+
+        If ``self.cull_patterns`` is None, returns the dict unchanged.
+        """
+        if not self.cull_patterns:
+            return groups, 0, 0
+
+        kept = {}
+        n_culled = 0
+        n_wf_culled = 0
+        for key, group_data in groups.items():
+            frames = group_data['frames']
+            frame_text = '\n'.join(frames)
+
+            # Never cull a group that is inside rocSHMEM: a __syncthreads (or
+            # any other barrier) found there is called internally by rocSHMEM
+            # itself (e.g. rocshmem_putmem_wg) and must be reported.
+            in_rocshmem = (
+                'rocshmem::' in frame_text or
+                self.detect_rocshmem_api_frame(frames) is not None
+            )
+            if in_rocshmem:
+                kept[key] = group_data
+                continue
+
+            if any(pat in frame_text for pat in self.cull_patterns):
+                n_culled += 1
+                n_wf_culled += len(group_data['entries'])
+            else:
+                kept[key] = group_data
+        return kept, n_culled, n_wf_culled
+
     # ------------------------------------------------------------------
     # Pattern detection
     # ------------------------------------------------------------------
@@ -546,6 +618,9 @@ class DeadlockAnalyzer:
         # Coalesce identical backtraces
         groups = self.coalesce_backtraces(entries_with_bt)
 
+        # Optionally cull groups stuck in non-rocSHMEM GPU barriers / gridsync
+        groups, n_culled, n_wf_culled = self.cull_groups(groups)
+
         # --- Header ---
         c = self.c
         pid_set = sorted({inf.pid for (inf, thread, wg, wf, _) in entries_with_bt})
@@ -553,6 +628,9 @@ class DeadlockAnalyzer:
         print(f"Process(es): {', '.join(str(p) for p in pid_set)}", file=out)
         print(f'Total GPU wavefronts analyzed: {len(gpu_threads)}', file=out)
         print(f'Unique backtrace groups: {len(groups)}', file=out)
+        if n_culled:
+            print(f'  (+ {n_culled} group(s) / {n_wf_culled} wavefront(s) culled'
+                  f' — GPU barrier / gridsync)', file=out)
         print('', file=out)
 
         # --- Per-group detail ---
@@ -630,10 +708,15 @@ class DeadlockAnalyzer:
 class RocshmemDeadlockCommand(gdb.Command):
     """Analyze rocSHMEM deadlocks in the current inferior(s).
 
-    Usage: rocshmem-deadlock-analyze [--color|--no-color] [output_file]
+    Usage: rocshmem-deadlock-analyze [--color|--no-color] [--cull[=pat,...]] [output_file]
 
-    --color      Force colored output even when writing to a file.
-    --no-color   Disable colored output even on a TTY.
+    --color           Force colored output even when writing to a file.
+    --no-color        Disable colored output even on a TTY.
+    --cull            Cull groups stuck in GPU barriers / gridsync using the
+                      built-in default pattern list (__syncthreads, AMDGCN
+                      s_barrier, OCKL grid/gws sync, cooperative_groups, ...).
+    --cull=p1,p2,...  Cull groups whose backtrace contains any of the
+                      comma-separated substrings p1, p2, ...
 
     When output_file is given the full report is written there;
     otherwise it is printed to stdout.  Color is auto-detected from the
@@ -647,7 +730,8 @@ class RocshmemDeadlockCommand(gdb.Command):
     def invoke(self, arg, from_tty):
         args = gdb.string_to_argv(arg)
         output_file = None
-        color = None  # auto-detect
+        color = None       # auto-detect
+        cull_patterns = None  # culling disabled by default
 
         remaining = []
         for a in args:
@@ -655,6 +739,10 @@ class RocshmemDeadlockCommand(gdb.Command):
                 color = True
             elif a == '--no-color':
                 color = False
+            elif a == '--cull':
+                cull_patterns = []  # use _DEFAULT_CULL_PATTERNS
+            elif a.startswith('--cull='):
+                cull_patterns = [p for p in a[len('--cull='):].split(',') if p]
             else:
                 remaining.append(a)
 
@@ -665,7 +753,8 @@ class RocshmemDeadlockCommand(gdb.Command):
                 print(f'rocshmem-deadlock-analyze: cannot open {remaining[0]!r}: {e}')
                 return
         try:
-            DeadlockAnalyzer(output_file=output_file, color=color).report()
+            DeadlockAnalyzer(output_file=output_file, color=color,
+                             cull_patterns=cull_patterns).report()
         finally:
             if output_file is not None:
                 output_file.close()

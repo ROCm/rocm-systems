@@ -159,14 +159,41 @@ ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1 \
 After sourcing the script, the `rocshmem-deadlock-analyze` command is available:
 
 ```
-(rocgdb) rocshmem-deadlock-analyze [--color|--no-color] [output_file]
+(rocgdb) rocshmem-deadlock-analyze [--color|--no-color] [--cull[=pat,...]] [output_file]
 ```
 
 | Option | Description |
 |---|---|
 | `--color` | Force ANSI color codes on, even when writing to a file |
 | `--no-color` | Disable color codes, even on a TTY |
+| `--cull` | Cull groups stuck in GPU barriers / gridsync using the built-in default pattern list |
+| `--cull=p1,p2,...` | Cull groups whose backtrace contains any of the comma-separated substrings |
 | `output_file` | Write report to this file instead of stdout |
+
+#### Cull option
+
+When `--cull` is given without a pattern list, the following substrings are used to remove groups
+that are simply waiting at a non-rocSHMEM GPU synchronization primitive (and are therefore not
+rocSHMEM deadlocks):
+
+| Pattern | Covers |
+|---|---|
+| `__syncthreads` | HIP workgroup barrier and reduction variants (`_count`, `_and`, `_or`) |
+| `__builtin_amdgcn_s_barrier` | Direct AMDGCN scalar barrier intrinsic |
+| `__work_group_barrier` | Workgroup barrier with memory-fence flags |
+| `__named_sync` | Named barrier intrinsic |
+| `__ockl_grid_sync` | OCKL grid-level synchronization |
+| `__ockl_gws_barrier` | OCKL global-workspace barrier |
+| `__ockl_multi_grid_sync` | OCKL multi-grid synchronization |
+| `cooperative_groups` | HIP cooperative groups (`grid_group`, `thread_block`, `multi_grid_group`) |
+
+Culled groups are not shown in the report; the header prints a count of how many
+groups and wavefronts were removed:
+
+```
+Unique backtrace groups: 1
+  (+ 3 group(s) / 192 wavefront(s) culled — GPU barrier / gridsync)
+```
 
 ### Environment Variables
 
