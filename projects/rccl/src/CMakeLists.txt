@@ -423,6 +423,28 @@ foreach(file ${GENERATED_FILES})
   list(APPEND HIP_SOURCES ${file})
 endforeach()
 
+# Specialized kernels are only used by the device linker pipeline;
+# always exclude them from the normal HIP compilation to avoid
+# duplicate symbols with the aggregate per-collective .cpp files.
+list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/specialized/")
+
+# Device Linker: filter out device sources that are built by the pipeline
+#==================================================================================================
+if(ENABLE_DEVICE_LINKER)
+  # Remove per-collective .cpp files from gensrc/ (replaced by specialized pipeline)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/[^/]*\\.cpp$")
+  # Add back host-only generated files
+  list(APPEND HIP_SOURCES "${GEN_DIR}/host_table.cpp")
+  if(EXISTS "${GEN_DIR}/device_table.cpp")
+    list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")
+  endif()
+  # Remove files compiled separately by the device pipeline
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp, common.cu, onerank.cu, collectives.cc)")
+endif()
+
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
 # Create initial empty file at configure time
@@ -717,7 +739,12 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+if(ENABLE_DEVICE_LINKER)
+  target_compile_definitions(rccl PRIVATE RCCL_DEVICE_LINKER)
+  target_compile_options(rccl PRIVATE --offload-host-only)
+else()
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -828,6 +855,16 @@ if(RCCL_ROCPROFILER_REGISTER)
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
 
+# Device Linker: include pipeline and wire up dependencies
+# (placed after all target_compile_definitions so DeviceLinker.cmake
+#  can read the rccl target's definitions directly)
+#==================================================================================================
+if(ENABLE_DEVICE_LINKER)
+  include(${PROJECT_SOURCE_DIR}/cmake/DeviceLinker.cmake)
+  add_dependencies(rccl device_linker_build)
+  target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
+endif()
+
 ## Set RCCL linked libraries
 if (HAVE_BFD)
   target_link_libraries(rccl PRIVATE bfd)
@@ -838,10 +875,30 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+if(NOT ENABLE_DEVICE_LINKER)
+  target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
-target_link_libraries(rccl PRIVATE   hip::device)
+if(ENABLE_DEVICE_LINKER)
+  # Device code is compiled separately by the DeviceLinker pipeline.
+  # Link hip::host for the runtime library but add -x hip manually so HIP
+  # builtins (warpSize, etc.) are available. Crucially, do NOT propagate
+  # --offload-arch from hip::device — that would make the compiler try to
+  # compile device code in host-only .cc files.
+  target_link_libraries(rccl PRIVATE hip::host)
+  target_compile_options(rccl PRIVATE -x hip)
+  # api_trace.c exists only to include api_trace.h under strict C rules; global
+  # -x hip makes Clang treat it as C++ and hits #error there. Per-file -x c is
+  # appended after target flags so this unit is compiled as C (same driver).
+  set_source_files_properties(
+    "${HIPIFY_DIR}/src/misc/api_trace.c"
+    PROPERTIES
+      COMPILE_OPTIONS "-x;c"
+  )
+else()
+  target_link_libraries(rccl PRIVATE hip::device)
+endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
@@ -891,34 +948,17 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)
-  ## ---- ASAN device-link acceleration ----------------------------------------
-  ## With -fgpu-rdc, the offload linker merges device bitcode from all object
-  ## files and performs full LTO (optimization + codegen) for each GPU target.
-  ## For ASAN/debug builds this is the dominant bottleneck for a
-  ## single GPU arch.
-  ##
-  ## The device LLD has three independent knobs that the amdclang++ driver
-  ## populates with defaults (--lto-partitions=8, -plugin-opt=O1, --lto-CGO1).
-  ## We override all three via -Xoffload-linker (last-wins semantics):
-  ## (lto-partitions didn't help since librccl has only one kernel)
-  ##
-  ## --lto-O0:  Skip all LTO optimization passes (inlining, SROA, InstCombine,
-  ##   LICM, loop opts, etc.) on the merged device bitcode.  The bitcode is
-  ##   still linked and backend codegen still runs, but the expensive mid-level
-  ##   optimization pipeline is completely bypassed.  For ASAN builds, optimized
-  ##   device code is counterproductive — it can hide bugs by reordering memory
-  ##   accesses or eliminating loads/stores.
-  ##
-  ## --lto-CGO0:  Set the backend CodeGen optimization level to 0.  This is
-  ##   separate from --lto-O0 — even at LTO O0 the backend (ISel, RegAlloc,
-  ##   scheduling) still runs at whatever CGO level the driver injected (O1 by
-  ##   default).  CGO0 disables machine-level optimizations, further reducing
-  ##   link time while preserving correct ASAN instrumentation.
-  ## --------------------------------------------------------------------------
-  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
-  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
+  if(NOT ENABLE_DEVICE_LINKER)
+    ## ---- ASAN device-link acceleration ----------------------------------------
+    ## With -fgpu-rdc, the offload linker merges device bitcode from all object
+    ## files and performs full LTO (optimization + codegen) for each GPU target.
+    ## --lto-O0 + --lto-CGO0: skip LTO optimization and backend optimization.
+    ## --------------------------------------------------------------------------
+    target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+    target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
+  endif()
 endif()
-if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast")
+if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast" AND NOT ENABLE_DEVICE_LINKER)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
 endif()
@@ -931,7 +971,7 @@ if(NOT BUILD_SHARED_LIBS)
 else()
   message(STATUS "Building shared RCCL library")
 endif()
-if (HAVE_KERNARG_PRELOAD)
+if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
 endif()
 
