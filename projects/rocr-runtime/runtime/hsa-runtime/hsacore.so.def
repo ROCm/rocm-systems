@@ -269,6 +269,7 @@ global:
 	hsa_ext_image_destroy_v2;
 	hsa_amd_counted_queue_acquire;
 	hsa_amd_counted_queue_release;
+	rocr_salmon_patch_elf;
 local:
     *;
 };

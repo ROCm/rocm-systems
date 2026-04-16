@@ -623,14 +623,38 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  // v_writelane_b32: scalar→vector lane write, in scalar model just a move
+  // v_writelane_b32 vDST, sSRC, lane: write scalar value to a specific lane
+  // of a VGPR. Used for "register parking" — storing multiple scalar values
+  // in different lanes of one VGPR to free up SGPRs.
+  // Emulated with a private-memory array indexed by lane number.
   if (sop == SemOp::V_WRITELANE_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    ParsedReg dst = op.dst();
+    Value *val = op.src(0);
+    Value *lane = op.src(1);
+    auto *arr = ctx.getOrCreateLaneParking(dst.baseIdx);
+    Value *gep = ctx.B.CreateInBoundsGEP(
+        arr->getAllocatedType(), arr,
+        {ConstantInt::get(ctx.i32Ty, 0), lane}, "wrlane_gep");
+    ctx.B.CreateStore(val, gep);
     hr.handled = true;
     return hr;
   }
+  // v_readlane_b32 sDST, vSRC, lane: read a specific lane from a VGPR
+  // into a scalar register. Reverse of writelane parking.
   if (sop == SemOp::V_READLANE_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    ParsedReg srcReg = op.srcReg(0);
+    Value *lane = op.src(1);
+    auto it = ctx.laneParking.find(srcReg.baseIdx);
+    if (it != ctx.laneParking.end()) {
+      auto *arr = it->second;
+      Value *gep = ctx.B.CreateInBoundsGEP(
+          arr->getAllocatedType(), arr,
+          {ConstantInt::get(ctx.i32Ty, 0), lane}, "rdlane_gep");
+      Value *val = ctx.B.CreateLoad(ctx.i32Ty, gep, "rdlane_val");
+      ctx.regs.writeReg32(ctx.B, op.dst(), val);
+    } else {
+      ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    }
     hr.handled = true;
     return hr;
   }
@@ -1369,6 +1393,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
     ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
 
+    llvm::errs() << "transpiler: WMMA dest.baseIdx=" << dest.baseIdx
+                 << " srcA.baseIdx=" << srcA.baseIdx
+                 << " srcB.baseIdx=" << srcB.baseIdx
+                 << " srcC.baseIdx=" << srcC.baseIdx
+                 << " vgprMSBs=0x" << llvm::format_hex(ctx.vgprMSBs, 4)
+                 << " adj[0]=" << ctx.currentVGPRAdjust[0]
+                 << " at 0x" << llvm::format_hex(di.offset, 1) << "\n";
+
     Value *a = ctx.regs.readRegVec(ctx.B, srcA, v16f16Ty);
     Value *b = ctx.regs.readRegVec(ctx.B, srcB, v16f16Ty);
     Value *c = ctx.regs.readRegVec(ctx.B, srcC, v8f32Ty);
@@ -1455,7 +1487,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *src1 = op.src(1);
     Value *cond = nullptr;
     if (op.nSrcs() >= 3 && di.isReg(op.srcIdx(2))) {
-      ParsedReg condReg = ctx.parseReg(di.getReg(op.srcIdx(2)));
+      ParsedReg condReg = ctx.parseReg(di.getReg(op.srcIdx(2)), op.srcIdx(2));
       if (condReg.kind == ParsedReg::SGPR) {
         Value *condVal = ctx.isa.isWave32() ? (Value *)ctx.regs.loadSGPR32(ctx.B, condReg.baseIdx)
                                         : (Value *)ctx.regs.loadSGPR64(ctx.B, condReg.baseIdx);

@@ -46,6 +46,7 @@ add_library(hotswap-transpiler STATIC
   handle_mubuf.cpp
   handle_mfma.cpp
   handle_vopd.cpp
+  wmma_lowering.cpp
   pipeline.cpp
   code_object_utils.cpp
 )
@@ -188,6 +189,21 @@ if(hip_FOUND)
     LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
   )
   target_link_libraries(gfx1250_gpu_test
+    PRIVATE
+      -Wl,--exclude-libs,ALL
+      hotswap-transpiler
+      hip::host
+  )
+
+  # Integration test: runPipelineAllKernels + GPU execution
+  add_executable(integration_test
+    tests/integration_test.cpp
+  )
+  target_compile_definitions(integration_test PRIVATE
+    GFX1250_TEST_DATA_DIR="${GFX1250_TEST_DATA}"
+    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+  )
+  target_link_libraries(integration_test
     PRIVATE
       -Wl,--exclude-libs,ALL
       hotswap-transpiler

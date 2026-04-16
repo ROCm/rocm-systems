@@ -235,6 +235,7 @@ set ( SRCS core/driver/driver.cpp
 
 ## Optional: HotSwap load-time ISA rewriting
 option(ROCR_ENABLE_HOTSWAP "Enable ROCm HotSwap load-time ISA rewriting" OFF)
+option(ROCR_ENABLE_IR_RAISER "Enable LLVM IR raiser path (raise binary → LLVM IR → lower)" OFF)
 if(ROCR_ENABLE_HOTSWAP)
   find_package(LLVM REQUIRED CONFIG)
   message(STATUS "HotSwap: Found LLVM ${LLVM_PACKAGE_VERSION}")
@@ -251,6 +252,52 @@ if(ROCR_ENABLE_HOTSWAP)
     ${CMAKE_CURRENT_SOURCE_DIR}/hotswap)
   target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${HOTSWAP_LLVM_LIBS})
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE ROCR_HOTSWAP_ENABLED=1)
+
+  if(ROCR_ENABLE_IR_RAISER)
+    message(STATUS "HotSwap IR Raiser: enabled")
+    llvm_map_components_to_libnames(IR_RAISER_LLVM_LIBS
+      Core IRReader Target AsmParser AsmPrinter SelectionDAG GlobalISel
+      CodeGen CodeGenTypes MIRParser ScalarOpts TransformUtils Analysis
+      InstCombine AggressiveInstCombine Instrumentation Vectorize Passes
+      ProfileData ipo ObjCARCOpts Linker BitReader BitWriter BitstreamReader
+      BinaryFormat Object Remarks Demangle TextAPI FrontendOffloading
+      FrontendOpenMP DebugInfoDWARF DebugInfoCodeView CFGuard Symbolize
+      DebugInfoMSF DebugInfoPDB)
+    list(APPEND SRCS
+      hotswap/transpiler/raiser.cpp
+      hotswap/transpiler/raise_context.cpp
+      hotswap/transpiler/mc_state.cpp
+      hotswap/transpiler/opcode_map.cpp
+      hotswap/transpiler/canonicalize.cpp
+      hotswap/transpiler/handle_sopp.cpp
+      hotswap/transpiler/handle_smem.cpp
+      hotswap/transpiler/handle_sopc.cpp
+      hotswap/transpiler/handle_sop1.cpp
+      hotswap/transpiler/handle_sopk.cpp
+      hotswap/transpiler/handle_sop2.cpp
+      hotswap/transpiler/handle_valu.cpp
+      hotswap/transpiler/handle_flat.cpp
+      hotswap/transpiler/handle_ds.cpp
+      hotswap/transpiler/handle_mubuf.cpp
+      hotswap/transpiler/handle_mfma.cpp
+      hotswap/transpiler/handle_vopd.cpp
+      hotswap/transpiler/wmma_lowering.cpp
+      hotswap/transpiler/pipeline.cpp
+      hotswap/transpiler/code_object_utils.cpp)
+    target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/hotswap/transpiler)
+    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${IR_RAISER_LLVM_LIBS})
+    # LLVM_TOOLS_BINARY_DIR is set by find_package(LLVM) for build trees;
+    # for install trees it may be empty, so fall back to <prefix>/bin.
+    if(LLVM_TOOLS_BINARY_DIR)
+      set(_IR_RAISER_TOOLS_DIR "${LLVM_TOOLS_BINARY_DIR}")
+    else()
+      set(_IR_RAISER_TOOLS_DIR "${LLVM_INSTALL_PREFIX}/bin")
+    endif()
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE
+      ROCR_HOTSWAP_IR_RAISER=1
+      LLVM_TOOLS_DIR="${_IR_RAISER_TOOLS_DIR}")
+  endif()
 endif()
 
 if(UNIX)

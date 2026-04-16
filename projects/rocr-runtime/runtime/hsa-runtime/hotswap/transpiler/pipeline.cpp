@@ -112,101 +112,129 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
   return runPipeline(codeObjectData, targetISA, targetISA, kernelName);
 }
 
-PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
-                           const std::string &sourceISA,
-                           const std::string &targetISA,
-                           const std::string &kernelName) {
-  PipelineResult result;
-
-  // Step 1: Extract .text section
-  auto text = extractTextSection(codeObjectData);
-  if (!text.valid) {
-    llvm::errs() << "transpiler: Failed to extract .text section\n";
-    return result;
-  }
-  LLVM_DEBUG(llvm::dbgs() << "transpiler: .text section: " << text.bytes.size()
-                          << " bytes\n");
-
-  // Step 1b: Extract kernel metadata
+// Raise one kernel to IR, compile to a relocatable .o via llc + llvm-mc.
+// On success, writes the .o to objPath and returns true.
+static bool raiseAndCompileKernel(const TextSection &text,
+                                  const std::vector<uint8_t> &codeObjectData,
+                                  const std::string &kernelName,
+                                  const std::string &sourceISA,
+                                  const std::string &targetISA,
+                                  const TempDir &tmpDir,
+                                  const std::string &objPath,
+                                  PipelineResult &result) {
   auto meta = extractKernelMeta(codeObjectData, kernelName);
   if (meta.args.empty()) {
     llvm::errs() << "transpiler: WARNING: No metadata found for '" << kernelName
                  << "', using empty metadata\n";
   }
 
-  // Step 1c: Find kernel symbol offset in .text section
   uint64_t kernelOffset = findKernelSymbolOffset(codeObjectData, kernelName);
   LLVM_DEBUG(if (kernelOffset > 0)
     llvm::dbgs() << "transpiler: Kernel '" << kernelName
                  << "' at .text offset 0x" << llvm::utohexstr(kernelOffset)
                  << "\n");
 
-  // Step 2: Raise to LLVM IR (using source ISA for disassembly)
-  auto raised = raiseToIR(text.bytes, sourceISA, kernelName, meta, kernelOffset);
+  auto raised = raiseToIR(text.bytes, sourceISA, kernelName, meta, kernelOffset,
+                           targetISA);
   if (!raised.success) {
-    llvm::errs() << "transpiler: Raising to LLVM IR failed\n";
-    return result;
+    llvm::errs() << "transpiler: Raising '" << kernelName << "' to LLVM IR failed";
+    if (!raised.failMnemonic.empty()) {
+      llvm::errs() << " (unsupported: " << raised.failMnemonic << ")";
+      result.failMnemonic = raised.failMnemonic;
+    }
+    llvm::errs() << "\n";
+    return false;
   }
-  result.irText = raised.irText;
-  result.liftedCount = raised.liftedCount;
-  result.totalCount = raised.totalCount;
+  result.liftedCount += raised.liftedCount;
+  result.totalCount += raised.totalCount;
+  if (!result.irText.empty())
+    result.irText += "\n";
+  result.irText += raised.irText;
 
-  LLVM_DEBUG(llvm::dbgs() << "transpiler: Raised " << raised.liftedCount << "/"
-                           << raised.totalCount << " instructions to LLVM IR\n");
-  LLVM_DEBUG(llvm::dbgs() << "--- Raised LLVM IR ---\n" << raised.irText << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "transpiler: Raised '" << kernelName << "' "
+                           << raised.liftedCount << "/"
+                           << raised.totalCount << " instructions\n");
 
-  // Step 3: Create temp directory and write IR to file
-  TempDir tmpDir;
-  if (!tmpDir.valid) {
-    llvm::errs() << "transpiler: Failed to create temp directory\n";
-    return result;
-  }
+  // TODO: kernel names are used directly as filenames here.  Names containing
+  // slashes, NUL bytes, or other path-unsafe characters would break this.
+  // In practice AMDGPU kernel names are valid C identifiers, but a robust
+  // implementation should sanitise or hash the name.
+  std::string irPath  = tmpDir.filePath(kernelName + ".ll");
+  std::string asmPath = tmpDir.filePath(kernelName + ".s");
 
-  std::string irPath   = tmpDir.filePath("kernel.ll");
-  std::string asmPath  = tmpDir.filePath("kernel.s");
-  std::string objPath  = tmpDir.filePath("kernel.o");
-  std::string hsacoPath = tmpDir.filePath("kernel.hsaco");
+  if (!writeFile(irPath, raised.irText))
+    return false;
 
-  if (!writeFile(irPath, raised.irText)) {
-    llvm::errs() << "transpiler: Failed to write IR file\n";
-    return result;
-  }
-  LLVM_DEBUG(writeFile("/tmp/transpiler_debug_" + kernelName + ".ll", raised.irText));
-
-  // Step 4: llc — compile LLVM IR to assembly
   std::string llcBin = std::string(LLVM_TOOLS_DIR) + "/llc";
   if (runTool(llcBin, {llcBin, "-march=amdgcn",
                        "-mcpu=" + targetISA,
                        "-filetype=asm", "-o", asmPath, irPath}) != 0) {
-    llvm::errs() << "transpiler: llc failed\n";
-    return result;
+    llvm::errs() << "transpiler: llc failed for '" << kernelName << "'\n";
+    return false;
   }
 
-  // Read the generated assembly for inspection
   {
     auto asmData = readFile(asmPath);
-    result.asmText.assign(asmData.begin(), asmData.end());
-    LLVM_DEBUG(llvm::dbgs() << "--- llc output assembly ---\n" << result.asmText << "\n");
-    LLVM_DEBUG(writeFile("/tmp/transpiler_debug_" + kernelName + ".s", result.asmText));
+    if (!result.asmText.empty())
+      result.asmText += "\n";
+    result.asmText.append(asmData.begin(), asmData.end());
   }
 
-  // Step 5: llvm-mc — assemble to object file
   std::string mcBin = std::string(LLVM_TOOLS_DIR) + "/llvm-mc";
   if (runTool(mcBin, {mcBin, "-triple=amdgcn-amd-amdhsa",
                       "-mcpu=" + targetISA,
                       "-filetype=obj", "-o", objPath, asmPath}) != 0) {
-    llvm::errs() << "transpiler: llvm-mc failed\n";
-    return result;
+    llvm::errs() << "transpiler: llvm-mc failed for '" << kernelName << "'\n";
+    return false;
   }
 
-  // Step 6: ld.lld — link to HSACO
+  return true;
+}
+
+// Link one or more relocatable .o files into a shared HSACO.
+static bool linkObjects(llvm::ArrayRef<std::string> objPaths,
+                        const std::string &hsacoPath) {
   std::string lldBin = std::string(LLVM_TOOLS_DIR) + "/ld.lld";
-  if (runTool(lldBin, {lldBin, "-shared", "-o", hsacoPath, objPath}) != 0) {
+  llvm::SmallVector<llvm::StringRef, 16> args;
+  args.push_back(lldBin);
+  args.push_back("-shared");
+  args.push_back("-o");
+  args.push_back(hsacoPath);
+  for (auto &o : objPaths)
+    args.push_back(o);
+  if (runTool(lldBin, args) != 0) {
     llvm::errs() << "transpiler: ld.lld failed\n";
+    return false;
+  }
+  return true;
+}
+
+PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
+                           const std::string &sourceISA,
+                           const std::string &targetISA,
+                           const std::string &kernelName) {
+  PipelineResult result;
+
+  auto text = extractTextSection(codeObjectData);
+  if (!text.valid) {
+    llvm::errs() << "transpiler: Failed to extract .text section\n";
     return result;
   }
 
-  // Step 7: Read the generated HSACO
+  TempDir tmpDir;
+  if (!tmpDir.valid)
+    return result;
+
+  std::string objPath   = tmpDir.filePath("kernel.o");
+  std::string hsacoPath = tmpDir.filePath("kernel.hsaco");
+
+  if (!raiseAndCompileKernel(text, codeObjectData, kernelName,
+                             sourceISA, targetISA, tmpDir, objPath, result))
+    return result;
+
+  if (!linkObjects({objPath}, hsacoPath))
+    return result;
+
   result.hsaco = readFile(hsacoPath);
   if (result.hsaco.empty()) {
     llvm::errs() << "transpiler: Failed to read HSACO\n";
@@ -215,7 +243,66 @@ PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
 
   LLVM_DEBUG(llvm::dbgs() << "transpiler: HSACO generated: " << result.hsaco.size()
                           << " bytes\n");
+  result.success = true;
+  return result;
+}
 
+PipelineResult runPipelineAllKernels(const std::vector<uint8_t> &codeObjectData,
+                                     const std::string &sourceISA,
+                                     const std::string &targetISA) {
+  PipelineResult result;
+
+  auto kernelNames = listKernelNames(codeObjectData);
+  if (kernelNames.empty()) {
+    llvm::errs() << "transpiler: No kernels found in code object\n";
+    return result;
+  }
+
+  LLVM_DEBUG(llvm::dbgs() << "transpiler: Raising " << kernelNames.size()
+                          << " kernel(s) [" << sourceISA << " -> " << targetISA
+                          << "]\n");
+
+  auto text = extractTextSection(codeObjectData);
+  if (!text.valid) {
+    llvm::errs() << "transpiler: Failed to extract .text section\n";
+    return result;
+  }
+
+  TempDir tmpDir;
+  if (!tmpDir.valid)
+    return result;
+
+  std::vector<std::string> objPaths;
+  for (size_t i = 0; i < kernelNames.size(); ++i) {
+    const auto &kName = kernelNames[i];
+    std::string objPath = tmpDir.filePath("k" + std::to_string(i) + ".o");
+
+    LLVM_DEBUG(llvm::dbgs() << "transpiler:   [" << (i + 1) << "/"
+                            << kernelNames.size() << "] " << kName << " ... ");
+
+    if (!raiseAndCompileKernel(text, codeObjectData, kName,
+                               sourceISA, targetISA, tmpDir, objPath, result)) {
+      LLVM_DEBUG(llvm::dbgs() << "FAILED\n");
+      result.success = false;
+      return result;
+    }
+    LLVM_DEBUG(llvm::dbgs() << "OK\n");
+    objPaths.push_back(std::move(objPath));
+  }
+
+  std::string hsacoPath = tmpDir.filePath("merged.hsaco");
+  if (!linkObjects(objPaths, hsacoPath))
+    return result;
+
+  result.hsaco = readFile(hsacoPath);
+  if (result.hsaco.empty()) {
+    llvm::errs() << "transpiler: Failed to read merged HSACO\n";
+    return result;
+  }
+
+  LLVM_DEBUG(llvm::dbgs() << "transpiler: Merged HSACO: " << result.hsaco.size()
+                          << " bytes, " << kernelNames.size()
+                          << " kernel(s)\n");
   result.success = true;
   return result;
 }

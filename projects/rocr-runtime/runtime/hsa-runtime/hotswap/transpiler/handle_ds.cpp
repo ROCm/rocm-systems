@@ -9,6 +9,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstring>
 #include <map>
@@ -46,9 +47,28 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     default: return {-1, 0, false};
     }
   };
-  // ds_load_tr16_b128: LDS transpose load — reads 128 bits with transpose
-  // Semantically equivalent to a 4-dword LDS read for the purposes of
-  // binary translation.
+  // ds_load_tr16_b128: LDS transpose load for Wave32 with 16-bit elements.
+  //
+  // Hardware behaviour (gfx1250, Wave32):
+  //   Each lane provides a base address via VGPR + immediate offset.  The
+  //   hardware reads 128 bits (8 × i16) from each lane's LDS address, then
+  //   transposes the data across lanes within groups of 8.
+  //
+  //   Per the CDNA4 ISA doc §11.4 (gfx950 DS_READ_B64_TR_B16):
+  //   "Read N bits of data per lane from data share. Interpret the data as
+  //    a matrix with 16 bit elements and transpose the matrix."
+  //   "Each lane (one VGPR) holds 4 consecutive M or N values."
+  //
+  //   The transpose converts M-contiguous LDS data into the WMMA/MFMA
+  //   register layout where each thread holds K-contiguous elements.
+  //
+  // Software emulation (for gfx942 which lacks transpose loads):
+  //   1. Contiguous 128-bit load (4 × i32) from each lane's address.
+  //   2. 8×8 cross-lane transpose via ds_bpermute within groups of 8 lanes:
+  //        result[lane][elem] = raw[group_base + elem][lane_in_group]
+  //      This exchanges rows and columns so that each lane, which started
+  //      with 8 values from consecutive M positions for one K column, now
+  //      holds 8 values from different K columns for its M position.
   if (sop == SemOp::DS_LOAD_TR16_B128) {
     Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");
     for (unsigned k = 1; k < op.nSrcs(); k++) {
@@ -59,14 +79,92 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
         break;
       }
     }
-    Value *ptr = ctx.B.CreateIntToPtr(addr, PointerType::get(ctx.C, 3));
-    Type *v4i32Ty = FixedVectorType::get(ctx.i32Ty, 4);
-    Value *loaded = ctx.B.CreateLoad(v4i32Ty, ptr, "ds_tr16");
-    ParsedReg dest = op.dst();
-    for (unsigned i = 0; i < 4; i++) {
-      Value *elem = ctx.B.CreateExtractElement(loaded, i);
-      ctx.regs.storeVGPR32(ctx.B, dest.baseIdx + i, elem);
+
+    Type *ptrLdsTy = PointerType::get(ctx.C, 3);
+    auto *v4i32Ty = FixedVectorType::get(ctx.i32Ty, 4);
+
+    Value *ptr = ctx.B.CreateIntToPtr(addr, ptrLdsTy, "tr_ptr");
+    Value *loaded = ctx.B.CreateLoad(v4i32Ty, ptr, "tr_load");
+
+    // Optimized transpose via LDS re-reads.
+    // Instead of 32 bpermute+select per transpose (which causes register
+    // pressure and spills), bpermute only the base address from each source
+    // lane, then do direct i16 LDS loads for the transposed elements.
+    // This is 8 bpermute + 8 LDS loads = 16 ops vs 32 bpermute + selects.
+
+    // Compute the 32-bit LDS base address (before the 128-bit load).
+    Value *addr32 = op.src(0);
+    for (unsigned k = 1; k < op.nSrcs(); k++) {
+      if (di.isImm(op.srcIdx(k))) {
+        int64_t imm = di.getImm(op.srcIdx(k));
+        if (imm != 0)
+          addr32 = ctx.B.CreateAdd(addr32,
+                       ConstantInt::get(ctx.i32Ty, imm), "ds_off32");
+        break;
+      }
     }
+
+    Function *mbcntLo = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_mbcnt_lo);
+    Function *mbcntHi = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_mbcnt_hi);
+    Value *allOnes = ConstantInt::getSigned(ctx.i32Ty, -1);
+    Value *zero32 = ConstantInt::get(ctx.i32Ty, 0);
+    Value *lo = ctx.B.CreateCall(mbcntLo, {allOnes, zero32}, "lane_lo");
+    Value *laneId = ctx.B.CreateCall(mbcntHi, {allOnes, lo}, "lane_id");
+
+    // L_in_group = lane_id % 8
+    Value *lInGroup = ctx.B.CreateAnd(laneId, ctx.B.getInt32(7), "l_in_grp");
+    // group_base = (lane_id / 8) * 8
+    Value *groupBase = ctx.B.CreateAnd(laneId,
+        ctx.B.CreateNot(ctx.B.getInt32(7)), "grp_base");
+    // Byte offset for element L_in_group (each i16 = 2 bytes)
+    Value *elemOff = ctx.B.CreateShl(lInGroup, ctx.B.getInt32(1), "elem_off");
+
+    Function *bperm = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
+
+    auto *i16Ty = Type::getInt16Ty(ctx.C);
+
+    Value *outDw[4];
+    for (unsigned j = 0; j < 4; j++) {
+      Value *srcLo = ctx.B.CreateAdd(groupBase, ctx.B.getInt32(2 * j));
+      Value *srcHi = ctx.B.CreateAdd(groupBase, ctx.B.getInt32(2 * j + 1));
+
+      // Get source lane's LDS base address via ds_bpermute.
+      Value *baseLo = ctx.B.CreateCall(bperm,
+          {ctx.B.CreateShl(srcLo, ctx.B.getInt32(2)), addr32}, "bp_base_lo");
+      Value *baseHi = ctx.B.CreateCall(bperm,
+          {ctx.B.CreateShl(srcHi, ctx.B.getInt32(2)), addr32}, "bp_base_hi");
+
+      // LDS address for element L_in_group in source lane's contiguous data.
+      Value *ldAddrLo = ctx.B.CreateAdd(baseLo, elemOff, "ld_addr_lo");
+      Value *ldAddrHi = ctx.B.CreateAdd(baseHi, elemOff, "ld_addr_hi");
+
+      // Load i16 from LDS (address space 3).
+      Value *ptrLo = ctx.B.CreateIntToPtr(
+          ctx.B.CreateZExt(ldAddrLo, ctx.i64Ty), ptrLdsTy, "tr_p_lo");
+      Value *ptrHi = ctx.B.CreateIntToPtr(
+          ctx.B.CreateZExt(ldAddrHi, ctx.i64Ty), ptrLdsTy, "tr_p_hi");
+      Value *valLo = ctx.B.CreateLoad(i16Ty, ptrLo, "tr_lo");
+      Value *valHi = ctx.B.CreateLoad(i16Ty, ptrHi, "tr_hi");
+
+      // Pack two i16 into one i32: (hi << 16) | lo
+      Value *lo32 = ctx.B.CreateZExt(valLo, ctx.i32Ty);
+      Value *hi32 = ctx.B.CreateZExt(valHi, ctx.i32Ty);
+      outDw[j] = ctx.B.CreateOr(
+          ctx.B.CreateShl(hi32, ctx.B.getInt32(16)), lo32, "tr_out");
+    }
+
+    ParsedReg dest = op.dst();
+    llvm::errs() << "transpiler: DS_LOAD_TR16_B128 dest.baseIdx=" << dest.baseIdx
+                 << " dest.kind=" << (int)dest.kind
+                 << " vgprMSBs=0x" << llvm::format_hex(ctx.vgprMSBs, 4)
+                 << " adj[0]=" << ctx.currentVGPRAdjust[0]
+                 << " at 0x" << llvm::format_hex(di.offset, 1) << "\n";
+    for (unsigned j = 0; j < 4; j++)
+      ctx.regs.storeVGPR32(ctx.B, dest.baseIdx + j, outDw[j]);
+
     hr.handled = true;
     return hr;
   }

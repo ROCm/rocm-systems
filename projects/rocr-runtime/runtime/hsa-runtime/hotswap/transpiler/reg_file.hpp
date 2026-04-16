@@ -14,10 +14,10 @@ namespace transpiler {
 
 struct AllocaRegFile {
   static constexpr int MAX_SGPR = 106;
-  static constexpr int MAX_VGPR = 256;
+  static constexpr int MAX_VGPR = 512;
   llvm::AllocaInst *sgpr[106] = {};
-  llvm::AllocaInst *vgpr[256] = {};
-  llvm::AllocaInst *agpr[256] = {};
+  llvm::AllocaInst *vgpr[512] = {};
+  llvm::AllocaInst *agpr[512] = {};
   llvm::AllocaInst *vcc = nullptr;
   llvm::AllocaInst *scc = nullptr;
   llvm::AllocaInst *exec = nullptr;

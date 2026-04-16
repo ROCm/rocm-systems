@@ -128,13 +128,29 @@ static bool testMatmul(const char *hsacoFile, int M, int N, int K, const char *l
   if (!result.success) { fprintf(stderr, "Pipeline failed\n"); return false; }
   printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
          result.liftedCount, result.totalCount, result.hsaco.size());
+  {
+    std::string dumpPath = std::string("/tmp/transpiled_matmul_") + label + ".hsaco";
+    FILE *f = fopen(dumpPath.c_str(), "wb");
+    if (f) { fwrite(result.hsaco.data(), 1, result.hsaco.size(), f); fclose(f); }
+    std::string irDump = std::string("/tmp/transpiled_matmul_") + label + ".ll";
+    FILE *fi = fopen(irDump.c_str(), "w");
+    if (fi) { fwrite(result.irText.data(), 1, result.irText.size(), fi); fclose(fi); }
+  }
 
   std::vector<__half> hA(M * K), hB(K * N);
   std::vector<float> hC(M * N, 0.0f);
+  // Use all-ones for A and identity-like pattern for B to diagnose WMMA lowering
+  const bool diagMode = (getenv("MATMUL_DIAG") != nullptr);
   std::mt19937 rng(123);
   std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
-  for (int i = 0; i < M * K; i++) hA[i] = __float2half(dist(rng));
-  for (int i = 0; i < K * N; i++) hB[i] = __float2half(dist(rng));
+  if (diagMode) {
+    printf("  ** DIAGNOSTIC MODE: A=all-ones, B=all-ones **\n");
+    for (int i = 0; i < M * K; i++) hA[i] = __float2half(1.0f);
+    for (int i = 0; i < K * N; i++) hB[i] = __float2half(1.0f);
+  } else {
+    for (int i = 0; i < M * K; i++) hA[i] = __float2half(dist(rng));
+    for (int i = 0; i < K * N; i++) hB[i] = __float2half(dist(rng));
+  }
 
   __half *dA, *dB; float *dC;
   HIP_CHECK(hipMalloc(&dA, M * K * sizeof(__half)));
@@ -142,7 +158,9 @@ static bool testMatmul(const char *hsacoFile, int M, int N, int K, const char *l
   HIP_CHECK(hipMalloc(&dC, M * N * sizeof(float)));
   HIP_CHECK(hipMemcpy(dA, hA.data(), M * K * sizeof(__half), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dB, hB.data(), K * N * sizeof(__half), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(dC, 0, M * N * sizeof(float)));
+  // Initialize C to a sentinel value (42.0f) to detect if kernel writes at all
+  std::vector<float> sentinel(M * N, 42.0f);
+  HIP_CHECK(hipMemcpy(dC, sentinel.data(), M * N * sizeof(float), hipMemcpyHostToDevice));
 
   hipModule_t mod;
   HIP_CHECK(hipModuleLoadData(&mod, result.hsaco.data()));
@@ -160,18 +178,34 @@ static bool testMatmul(const char *hsacoFile, int M, int N, int K, const char *l
                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz, HIP_LAUNCH_PARAM_END};
 
   auto meta = transpiler::extractKernelMeta(data, "matmul_kernel");
+  printf("  meta: kernargSz=%d maxFlatWgSz=%d groupSegFixedSz=%d\n",
+         meta.kernargSegmentSize, meta.maxFlatWorkgroupSize,
+         meta.groupSegmentFixedSize);
+  printf("  args (%zu):\n", meta.args.size());
+  for (size_t i = 0; i < meta.args.size(); i++)
+    printf("    [%zu] name='%s' offset=%d size=%d kind='%s'\n",
+           i, meta.args[i].name.c_str(), meta.args[i].offset,
+           meta.args[i].size, meta.args[i].valueKind.c_str());
+  printf("  sizeof(args struct)=%zu\n", argSz);
   int wgSize = meta.maxFlatWorkgroupSize > 0 ? meta.maxFlatWorkgroupSize : 256;
-  // Grid: num_pid_m * num_pid_n (each tile is BLOCK_M x BLOCK_N)
-  // For the small kernel: BLOCK_M=BLOCK_N=64; large: BLOCK_M=BLOCK_N=128
-  // We determine tile size from file name
   int blockM = (std::string(hsacoFile).find("large") != std::string::npos) ? 128 : 64;
   int blockN = blockM;
   int numPidM = (M + blockM - 1) / blockM;
   int numPidN = (N + blockN - 1) / blockN;
   int gridX = numPidM * numPidN;
+  // The original gfx1250 kernel declares group_segment_fixed_size=0 because
+  // Triton passes LDS size dynamically at launch.  The transpiled kernel may
+  // add static LDS (for emulated transpose loads), so we must subtract that
+  // from the total LDS budget to avoid exceeding the hardware max (65536).
+  int ldsRequired = (blockM >= 128) ? 65536 : 32768;
+  auto transpMeta = transpiler::extractKernelMeta(result.hsaco, "matmul_kernel");
+  int dynamicLds = std::max(0, ldsRequired - transpMeta.groupSegmentFixedSize);
+  printf("  launch: grid=(%d,1,1) wg=(%d,1,1) sharedMem=%d (static=%d + dynamic=%d)\n",
+         gridX, wgSize, meta.groupSegmentFixedSize + dynamicLds,
+         meta.groupSegmentFixedSize, dynamicLds);
 
   HIP_CHECK(hipModuleLaunchKernel(func, gridX, 1, 1, wgSize, 1, 1,
-                                   meta.groupSegmentFixedSize, nullptr, nullptr, config));
+                                   dynamicLds, nullptr, nullptr, config));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(hC.data(), dC, M * N * sizeof(float), hipMemcpyDeviceToHost));
 
@@ -184,6 +218,24 @@ static bool testMatmul(const char *hsacoFile, int M, int N, int K, const char *l
         sum += __half2float(hA[i * K + kk]) * __half2float(hB[kk * N + j]);
       ref[i * N + j] = sum;
     }
+
+  // Diagnostic: first 16 outputs vs refs
+  printf("  First 16 got: ");
+  for (int i = 0; i < std::min(16, M*N); i++) printf("%.4f ", hC[i]);
+  printf("\n  First 16 ref: ");
+  for (int i = 0; i < std::min(16, M*N); i++) printf("%.4f ", ref[i]);
+  printf("\n");
+
+  // Check row-by-row pattern: show first element of each row
+  printf("  Row starts (got|ref): ");
+  for (int r = 0; r < std::min(8, M); r++)
+    printf("[%d]%.3f|%.3f ", r, hC[r*N], ref[r*N]);
+  printf("\n");
+
+  int zeroCount = 0;
+  for (int i = 0; i < M * N; i++)
+    if (hC[i] == 0.0f) zeroCount++;
+  printf("  Zero elements: %d / %d\n", zeroCount, M*N);
 
   int errors = 0;
   float maxErr = 0;
@@ -334,6 +386,10 @@ int main() {
   else              { fail++; printf("  >> FAIL\n\n"); }
 
   if (testMatmul("matmul_f16_gfx1250.hsaco", 128, 128, 64, "64x64 tile"))
+    { pass++; printf("  >> PASS\n\n"); }
+  else { fail++; printf("  >> FAIL\n\n"); }
+
+  if (testMatmul("matmul_f16_large_gfx1250.hsaco", 128, 128, 128, "128x128 tile 1-tile"))
     { pass++; printf("  >> PASS\n\n"); }
   else { fail++; printf("  >> FAIL\n\n"); }
 

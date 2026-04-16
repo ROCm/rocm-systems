@@ -24,7 +24,8 @@ struct RaiseContext {
   llvm::IRBuilder<> &B;
   AllocaRegFile &regs;
   const MCState &mc;
-  const ISAProfile &isa;
+  const ISAProfile &isa;       // source ISA (for disassembly / instruction semantics)
+  ISAProfile targetIsa;        // compilation target ISA (for code generation decisions)
   KernargLayout &kernargs;
   llvm::Function *kernel;
 
@@ -38,9 +39,27 @@ struct RaiseContext {
 
   std::map<uint64_t, llvm::BasicBlock *> &offsetToBB;
 
+  // Per-lane storage for v_writelane/v_readlane "register parking" pattern.
+  // Key: VGPR index. Value: alloca of [64 x i32] in private memory.
+  std::map<unsigned, llvm::AllocaInst *> laneParking;
+  llvm::AllocaInst *getOrCreateLaneParking(unsigned vgprIdx);
+
+  // gfx1250 s_set_vgpr_msb state: 8-bit encoding provides 2-bit MSB values
+  // for each operand slot. Format: src0[1:0], src1[3:2], src2[5:4], dst[7:6].
+  // Each 2-bit field adds (value * 256) to the corresponding VGPR index.
+  uint8_t vgprMSBs = 0;
+
+  // Per-instruction VGPR index adjustment, indexed by MCInst operand index.
+  // Computed from vgprMSBs before each instruction dispatch.
+  static constexpr unsigned kMaxOps = 16;
+  unsigned currentVGPRAdjust[kMaxOps] = {};
+
+  // Compute currentVGPRAdjust for the given instruction based on vgprMSBs.
+  void computeVGPRAdjust(const DecodedInst &di);
+
   llvm::BasicBlock *lookupBB(uint64_t addr);
 
-  ParsedReg parseReg(unsigned reg) const;
+  ParsedReg parseReg(unsigned reg, int mciOpIdx = -1) const;
 
   // Operand reading — mirrors the lambdas in the original raiseToIR.
   llvm::Value *readOp32(const DecodedInst &di, unsigned opIdx);
@@ -92,7 +111,7 @@ struct OpResolver {
   llvm::Value *srcExecWidth(unsigned i) { return ctx.readOpExecWidth(di, srcIdx(i)); }
   int64_t srcImm(unsigned i) { return di.getImm(srcIdx(i)); }
 
-  ParsedReg dst(unsigned i = 0) { return ctx.parseReg(di.getReg(i)); }
+  ParsedReg dst(unsigned i = 0) { return ctx.parseReg(di.getReg(i), i); }
   bool isSrcReg(unsigned i) { return di.isReg(srcIdx(i)); }
 
   ParsedReg srcReg(unsigned i) {
@@ -102,7 +121,7 @@ struct OpResolver {
       pr.kind = ParsedReg::OTHER;
       return pr;
     }
-    return ctx.parseReg(di.getReg(idx));
+    return ctx.parseReg(di.getReg(idx), idx);
   }
 };
 

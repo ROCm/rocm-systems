@@ -188,10 +188,7 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  if (sop == SemOp::S_SET_VGPR_MSB) {
-    hr.handled = true;
-    return hr;
-  }
+  // S_SET_VGPR_MSB is SOPP format — handled in handleSOPP, not here.
   // s_barrier_signal → no-op (the wait emits the actual barrier)
   if (di.mnemonic == "s_barrier_signal") {
     hr.handled = true;

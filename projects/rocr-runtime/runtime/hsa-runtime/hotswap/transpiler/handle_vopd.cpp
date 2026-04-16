@@ -79,13 +79,20 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       return -1;
     };
 
-    // dst
+    // s_set_vgpr_msb offset for a given slot (0=src0, 1=src1, 2=src2, 3=dst)
+    auto msbOffset = [&](unsigned slot) -> int {
+      return ((ctx.vgprMSBs >> (slot * 2)) & 0x3) * 256;
+    };
+
+    // dst — apply DST MSB (slot 3)
     int dstIdx = parseVRegIdx(operands[0]);
     if (dstIdx < 0) return false;
+    dstIdx += msbOffset(3);
 
     // Generic VOPD operand reader: VGPR, SGPR, or literal immediate.
     // Handles source modifiers: -v0 (fneg), |v0| (fabs), -|v0| (fneg+fabs)
-    auto readVOPDSrc = [&](StringRef name) -> Value * {
+    // srcSlot: MSB slot for this source (0=src0, 1=src1, 2=src2)
+    auto readVOPDSrc = [&](StringRef name, unsigned srcSlot = 0) -> Value * {
       bool neg = false, absmod = false;
       if (name.starts_with("-")) { neg = true; name = name.drop_front(1); }
       if (name.starts_with("|") && name.ends_with("|")) {
@@ -93,7 +100,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       }
       Value *v = nullptr;
       int vidx = parseVRegIdx(name);
-      if (vidx >= 0) { v = ctx.regs.loadVGPR32(ctx.B, vidx); }
+      if (vidx >= 0) { v = ctx.regs.loadVGPR32(ctx.B, vidx + msbOffset(srcSlot)); }
       else if (name.starts_with("s")) {
         int sidx = -1;
         if (!name.drop_front(1).getAsInteger(10, sidx))
@@ -124,8 +131,8 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
 
     if (vopMn == "v_cndmask_b32") {
       if (operands.size() < 3) return false;
-      Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s0 = readVOPDSrc(operands[1], 0);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       Value *cond = ctx.regs.loadVCC(ctx.B);
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateSelect(cond, s1, s0, "vopd_cndmask"));
@@ -135,7 +142,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_add_f32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFAdd(s0, s1, "vopd_fadd"), ctx.i32Ty));
@@ -145,7 +152,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_mul_f32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFMul(s0, s1, "vopd_fmul"), ctx.i32Ty));
@@ -155,7 +162,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_sub_f32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFSub(s0, s1, "vopd_fsub"), ctx.i32Ty));
@@ -165,7 +172,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_fmac_f32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       Value *dv = ctx.B.CreateBitCast(ctx.regs.loadVGPR32(ctx.B, dstIdx), ctx.f32Ty);
@@ -177,7 +184,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_add_nc_u32" || vopMn == "v_add_u32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateAdd(s0, s1, "vopd_add"));
       return true;
@@ -186,7 +193,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_sub_nc_u32" || vopMn == "v_subrev_nc_u32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       if (vopMn == "v_subrev_nc_u32") std::swap(s0, s1);
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateSub(s0, s1, "vopd_sub"));
@@ -196,7 +203,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_lshlrev_b32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateShl(s1, s0, "vopd_shl"));
       return true;
@@ -205,7 +212,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_and_b32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateAnd(s0, s1, "vopd_and"));
       return true;
@@ -214,7 +221,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_lshrrev_b32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateLShr(s1, s0, "vopd_lshr"));
       return true;
@@ -223,8 +230,8 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_fma_f32") {
       if (operands.size() < 4) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
-      Value *s2 = readVOPDSrc(operands[3]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      Value *s2 = readVOPDSrc(operands[3], 2);
       if (!s0 || !s1 || !s2) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
@@ -236,7 +243,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_max_num_f32" || vopMn == "v_max_f32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       Function *maxFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maxnum, {ctx.f32Ty});
@@ -247,7 +254,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_min_num_f32" || vopMn == "v_min_f32") {
       if (operands.size() < 3) return false;
       Value *s0 = readVOPDSrc(operands[1]);
-      Value *s1 = readVOPDSrc(operands[2]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f32Ty});
@@ -260,7 +267,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
     if (vopMn == "v_bitop2_b32" || vopMn == "v_bitop3_b32") {
       if (operands.size() < 3) return false;
       Value *a = readVOPDSrc(operands[1]);
-      Value *b = readVOPDSrc(operands[2]);
+      Value *b = readVOPDSrc(operands[2], 1);
       if (!a || !b) return false;
       uint32_t lut = 0;
       for (unsigned k = 3; k < operands.size(); k++) {

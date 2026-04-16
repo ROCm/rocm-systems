@@ -93,6 +93,12 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
       {"S_XOR_SAVEEXEC_B32", SemOp::S_XOR_SAVEEXEC_B32},
       {"S_ANDN2_SAVEEXEC_B32", SemOp::S_ANDN2_SAVEEXEC_B32},
       {"S_ORN2_SAVEEXEC_B32", SemOp::S_ORN2_SAVEEXEC_B32},
+      // GFX9 B64 aliases — handler uses EXEC-width-aware ops, same semantics
+      {"S_AND_SAVEEXEC_B64", SemOp::S_AND_SAVEEXEC_B32},
+      {"S_OR_SAVEEXEC_B64", SemOp::S_OR_SAVEEXEC_B32},
+      {"S_XOR_SAVEEXEC_B64", SemOp::S_XOR_SAVEEXEC_B32},
+      {"S_ANDN2_SAVEEXEC_B64", SemOp::S_ANDN2_SAVEEXEC_B32},
+      {"S_ORN2_SAVEEXEC_B64", SemOp::S_ORN2_SAVEEXEC_B32},
       {"S_GETPC_B64", SemOp::S_GETPC_B64},
       {"S_ABS_I32", SemOp::S_ABS_I32},
       {"S_SET_VGPR_MSB", SemOp::S_SET_VGPR_MSB},

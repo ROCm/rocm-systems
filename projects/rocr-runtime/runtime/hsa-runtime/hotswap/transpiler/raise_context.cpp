@@ -1,13 +1,29 @@
 #include "raise_context.hpp"
 
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <cstring>
+
 using namespace llvm;
 
 namespace transpiler {
+
+AllocaInst *RaiseContext::getOrCreateLaneParking(unsigned vgprIdx) {
+  auto it = laneParking.find(vgprIdx);
+  if (it != laneParking.end())
+    return it->second;
+  IRBuilder<>::InsertPointGuard guard(B);
+  B.SetInsertPoint(&kernel->getEntryBlock(), kernel->getEntryBlock().begin());
+  auto *arrTy = ArrayType::get(i32Ty, 64);
+  auto *alloca = B.CreateAlloca(arrTy, nullptr, "lane_park_v" + Twine(vgprIdx));
+  alloca->setAlignment(Align(4));
+  laneParking[vgprIdx] = alloca;
+  return alloca;
+}
 
 BasicBlock *RaiseContext::lookupBB(uint64_t addr) {
   auto it = offsetToBB.find(addr);
@@ -21,7 +37,35 @@ BasicBlock *RaiseContext::lookupBB(uint64_t addr) {
   return bb;
 }
 
-ParsedReg RaiseContext::parseReg(unsigned reg) const {
+void RaiseContext::computeVGPRAdjust(const DecodedInst &di) {
+  std::memset(currentVGPRAdjust, 0, sizeof(currentVGPRAdjust));
+  if (vgprMSBs == 0)
+    return;
+  llvm::errs() << "transpiler: computeVGPRAdjust: vgprMSBs=0x"
+               << llvm::format_hex(vgprMSBs, 4)
+               << " numDefs=" << di.numDefs
+               << " numSrcs=" << di.numSrcs
+               << " mnemonic=" << di.mnemonic
+               << " at 0x" << llvm::format_hex(di.offset, 1) << "\n";
+
+  unsigned dstMsb = ((unsigned)(vgprMSBs >> 6) & 0x3u) * 256u;
+  unsigned srcMsb[3] = {
+      ((unsigned)(vgprMSBs >> 0) & 0x3u) * 256u,
+      ((unsigned)(vgprMSBs >> 2) & 0x3u) * 256u,
+      ((unsigned)(vgprMSBs >> 4) & 0x3u) * 256u,
+  };
+
+  for (unsigned i = 0; i < di.numDefs && i < kMaxOps; i++)
+    currentVGPRAdjust[i] = dstMsb;
+
+  for (unsigned i = 0; i < di.numSrcs && i < 3; i++) {
+    unsigned opIdx = di.srcMap[i];
+    if (opIdx < kMaxOps)
+      currentVGPRAdjust[opIdx] = srcMsb[i];
+  }
+}
+
+ParsedReg RaiseContext::parseReg(unsigned reg, int mciOpIdx) const {
   ParsedReg pr;
   if (reg == 0) {
     pr.kind = ParsedReg::NOREG;
@@ -33,6 +77,8 @@ ParsedReg RaiseContext::parseReg(unsigned reg) const {
     pr.kind = ParsedReg::AGPR;
     name.substr(4).split('_').first.getAsInteger(10, pr.baseIdx);
     pr.width = name.count("AGPR");
+    if (mciOpIdx >= 0 && (unsigned)mciOpIdx < kMaxOps)
+      pr.baseIdx += currentVGPRAdjust[mciOpIdx];
     return pr;
   }
   if (name.starts_with("SGPR")) {
@@ -45,6 +91,8 @@ ParsedReg RaiseContext::parseReg(unsigned reg) const {
     pr.kind = ParsedReg::VGPR;
     name.substr(4).split('_').first.getAsInteger(10, pr.baseIdx);
     pr.width = name.count("VGPR");
+    if (mciOpIdx >= 0 && (unsigned)mciOpIdx < kMaxOps)
+      pr.baseIdx += currentVGPRAdjust[mciOpIdx];
     return pr;
   }
   if (name.starts_with("VCC")) {
@@ -91,7 +139,7 @@ ParsedReg RaiseContext::parseReg(unsigned reg) const {
 
 Value *RaiseContext::readOp32(const DecodedInst &di, unsigned opIdx) {
   if (di.isReg(opIdx)) {
-    ParsedReg pr = parseReg(di.getReg(opIdx));
+    ParsedReg pr = parseReg(di.getReg(opIdx), opIdx);
     if (pr.kind == ParsedReg::VCC) {
       Value *v = regs.loadVCC(B);
       return B.CreateSExt(v, i32Ty);
@@ -133,7 +181,7 @@ Value *RaiseContext::readOp32(const DecodedInst &di, unsigned opIdx) {
 
 Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
   if (di.isReg(opIdx)) {
-    ParsedReg pr = parseReg(di.getReg(opIdx));
+    ParsedReg pr = parseReg(di.getReg(opIdx), opIdx);
     if (pr.kind == ParsedReg::VCC)
       return B.CreateSExt(regs.loadVCC(B), i64Ty);
     if (pr.kind == ParsedReg::EXEC) {
@@ -165,7 +213,7 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
 
 Value *RaiseContext::readOpExecWidth(const DecodedInst &di, unsigned opIdx) {
   if (di.isReg(opIdx)) {
-    ParsedReg pr = parseReg(di.getReg(opIdx));
+    ParsedReg pr = parseReg(di.getReg(opIdx), opIdx);
     if (pr.kind == ParsedReg::VCC)
       return B.CreateSExt(regs.loadVCC(B), regs.execTy);
     if (pr.kind == ParsedReg::EXEC)

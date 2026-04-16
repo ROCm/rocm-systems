@@ -47,15 +47,15 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   // s_add_i32 / s_add_u32 (both SemOp::S_ADD_U32)
-  if (sop == SemOp::S_ADD_U32) {
-    Value *src0 = op.src(0), *src1 = op.src(1);
-    Value *res = ctx.B.CreateAdd(src0, src1, "add");
-    ctx.regs.writeReg32(ctx.B, op.dst(), res);
-    auto *ov = ctx.B.CreateIntrinsic(Intrinsic::uadd_with_overflow, {ctx.i32Ty},
+  if (sop == SemOp::S_ADD_U32) {                                                // Match by canonical semantic opcode, not raw mnemonic string
+    Value *src0 = op.src(0), *src1 = op.src(1);                                 // Read source operands — resolves SGPR, VGPR, or immediate to LLVM Value*
+    Value *res = ctx.B.CreateAdd(src0, src1, "add");                             // Emit LLVM IR: %add = add i32 %src0, %src1
+    ctx.regs.writeReg32(ctx.B, op.dst(), res);                                   // Store result into destination register's alloca (later promoted to SSA)
+    auto *ov = ctx.B.CreateIntrinsic(Intrinsic::uadd_with_overflow, {ctx.i32Ty}, // Compute carry-out using LLVM's uadd.with.overflow intrinsic
                                      {src0, src1});
-    ctx.regs.storeSCC(ctx.B, ctx.B.CreateExtractValue(ov, 1));
-    hr.sccHandled = true;
-    hr.handled = true;
+    ctx.regs.storeSCC(ctx.B, ctx.B.CreateExtractValue(ov, 1));                   // Extract the overflow bit and write it to SCC (Scalar Condition Code)
+    hr.sccHandled = true;                                                        // Tell the dispatch loop: "I wrote SCC myself, don't auto-compute it"
+    hr.handled = true;                                                           // Tell the dispatch loop: "This instruction was successfully raised"
     return hr;
   }
   // s_sub_i32 / s_sub_u32 (both SemOp::S_SUB_U32)

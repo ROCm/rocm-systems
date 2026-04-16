@@ -1753,3 +1753,13 @@ int rocr_hotswap_retarget(void* elf_data, size_t elf_size,
       elf_data, elf_size, std::string(source_isa), std::string(target_isa));
   return result.rules_matched;
 }
+
+// Patch ELF e_flags and NT_AMDGPU_ISA note to match target_isa.
+// MSGPACK metadata (NT_AMDGPU_METADATA) is deliberately left untouched so the
+// HSA runtime can still detect the original ISA and trigger Salmon.
+extern "C" __attribute__((visibility("default")))
+int rocr_salmon_patch_elf(void* elf_data, size_t elf_size,
+                          const char* target_isa) {
+  return rocr::hotswap::PatchElfIsa(elf_data, elf_size,
+                                    std::string(target_isa)) ? 0 : -1;
+}

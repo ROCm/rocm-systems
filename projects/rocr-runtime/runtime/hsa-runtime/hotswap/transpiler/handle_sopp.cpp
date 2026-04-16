@@ -84,6 +84,16 @@ HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  if (sop == SemOp::S_SET_VGPR_MSB) {
+    int64_t imm = di.getImm(0);
+    ctx.vgprMSBs = static_cast<uint8_t>(imm & 0xFF);
+    llvm::errs() << "transpiler: s_set_vgpr_msb 0x"
+                 << llvm::format_hex(imm, 4)
+                 << " → vgprMSBs=0x" << llvm::format_hex(ctx.vgprMSBs, 4)
+                 << " at offset 0x" << llvm::format_hex(di.offset, 1) << "\n";
+    hr.handled = true;
+    return hr;
+  }
   // All other SOPP instructions (waitcnt, nop, etc.) are no-ops
   hr.handled = true;
   return hr;

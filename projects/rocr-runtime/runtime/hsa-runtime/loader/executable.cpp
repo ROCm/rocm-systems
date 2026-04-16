@@ -70,6 +70,9 @@
 #ifdef ROCR_HOTSWAP_ENABLED
 #include "hotswap/hotswap.hpp"
 #include "hotswap/transpiler.hpp"
+#ifdef ROCR_HOTSWAP_IR_RAISER
+#include "hotswap/transpiler/pipeline.hpp"
+#endif
 #endif
 
 using namespace rocr::amd::hsa;
@@ -1440,8 +1443,64 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
         // Use original ISA from .note for cross-family detection
         // (e_flags may have been patched by HIP to match the target)
         std::string sourceIsa = hotswapOriginalIsa.empty() ? codeIsa : hotswapOriginalIsa;
+
+#ifdef ROCR_HOTSWAP_IR_RAISER
+        // ── Salmon (LLVM IR raiser) ──────────────────────────────────
+        // When active, Salmon handles ALL ISA mismatches by raising
+        // the binary to LLVM IR and re-lowering to the target ISA.
+        // This replaces both the legacy cross-family transpiler and
+        // the same-family retarget path.  Failures are hard errors.
+        static const char* s_use_salmon = std::getenv("HSA_HOTSWAP_IR_RAISER");
+        if (s_use_salmon && s_use_salmon[0] == '1') {
+          auto extractGfx = [](const std::string &isa) -> std::string {
+            size_t pos = isa.rfind("gfx");
+            if (pos == std::string::npos) return "";
+            size_t end = pos + 3;
+            while (end < isa.size() && ((isa[end] >= '0' && isa[end] <= '9') ||
+                   (isa[end] >= 'a' && isa[end] <= 'z'))) ++end;
+            return isa.substr(pos, end - pos);
+          };
+          std::string srcGfx = extractGfx(sourceIsa);
+          std::string tgtGfx = extractGfx(agentIsaName);
+
+          if (srcGfx.empty() || tgtGfx.empty()) {
+            std::cerr << "salmon: cannot extract gfx target from ISA strings ("
+                      << sourceIsa << " / " << agentIsaName << ")\n";
+            return HSA_STATUS_ERROR;
+          }
+
+          const uint8_t* elfBytes = reinterpret_cast<const uint8_t*>(elfData);
+          auto irResult = transpiler::runPipelineAllKernels(
+              {elfBytes, elfBytes + elfSize}, srcGfx, tgtGfx);
+
+          if (!irResult.success || irResult.hsaco.empty()) {
+            std::cerr << "salmon: FAILED (" << srcGfx << " -> " << tgtGfx
+                      << ", " << elfSize << " bytes, "
+                      << irResult.liftedCount << "/" << irResult.totalCount
+                      << " instructions raised)\n";
+            if (!irResult.failMnemonic.empty())
+              std::cerr << "salmon: unsupported instruction: "
+                        << irResult.failMnemonic << "\n";
+            return HSA_STATUS_ERROR;
+          }
+
+          static std::vector<std::vector<uint8_t>> s_salmonBuffers;
+          s_salmonBuffers.push_back(std::move(irResult.hsaco));
+          elfData = const_cast<void*>(
+              static_cast<const void*>(s_salmonBuffers.back().data()));
+          elfSize = s_salmonBuffers.back().size();
+          code = std::make_unique<code::AmdHsaCode>();
+          if (!code->InitAsBuffer(elfData, elfSize)) {
+            std::cerr << "salmon: failed to re-init code object\n";
+            return HSA_STATUS_ERROR;
+          }
+          std::cerr << "salmon: OK (" << srcGfx << " -> " << tgtGfx << ", "
+                    << irResult.liftedCount << "/" << irResult.totalCount
+                    << " instructions, " << elfSize << " bytes)\n";
+        } else
+#endif // ROCR_HOTSWAP_IR_RAISER
         if (rocr::hotswap::NeedsTranspile(sourceIsa, agentIsaName)) {
-          // Cross-family transpile (e.g., gfx1250 → gfx950)
+          // Legacy cross-family transpile (e.g., gfx1250 → gfx950)
           // TranspileCodeObject may reallocate the buffer if .text grows
           void* transpileData = elfData;
           size_t transpileSize = elfSize;
@@ -1451,8 +1510,6 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
           if (rt.status == HSA_STATUS_SUCCESS && rt.rules_matched > 0) {
             if (transpileData != elfData) {
-              // Buffer was reallocated — re-initialize the code object
-              // with the new transpiled buffer so LoadSegments uses it.
               elfData = transpileData;
               elfSize = transpileSize;
               code = std::make_unique<code::AmdHsaCode>();

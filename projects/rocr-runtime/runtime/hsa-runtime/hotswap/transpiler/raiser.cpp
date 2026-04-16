@@ -54,17 +54,21 @@ namespace transpiler {
 // ============================================================================
 
 RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
-                      const std::string &targetISA,
+                      const std::string &sourceISA,
                       const std::string &kernelName,
                       const KernelMeta &meta,
-                      uint64_t kernelOffset) {
+                      uint64_t kernelOffset,
+                      const std::string &compilationTargetISA) {
   RaiseResult result;
 
   MCState mc;
-  if (!initMCState(mc, targetISA))
+  if (!initMCState(mc, sourceISA))
     return result;
 
-  ISAProfile isa = ISAProfile::fromTarget(StringRef(targetISA));
+  ISAProfile isa = ISAProfile::fromTarget(StringRef(sourceISA));
+  ISAProfile targetIsa = compilationTargetISA.empty()
+      ? isa
+      : ISAProfile::fromTarget(StringRef(compilationTargetISA));
 
   // Build opcode → SemOp map from MCInstrInfo
   OpcodeMap opcMap;
@@ -189,7 +193,9 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
   TargetOptions opts;
   std::unique_ptr<TargetMachine> tm(mc.target->createTargetMachine(
-      Triple("amdgcn-amd-amdhsa"), targetISA, "", opts, Reloc::PIC_));
+      Triple("amdgcn-amd-amdhsa"),
+      compilationTargetISA.empty() ? sourceISA : compilationTargetISA,
+      "", opts, Reloc::PIC_));
   if (!tm) {
     errs() << "transpiler: Failed to create TargetMachine\n";
     return result;
@@ -234,7 +240,16 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   Function *F =
       Function::Create(funcTy, GlobalValue::ExternalLinkage, kernelName, &M);
   F->setCallingConv(CallingConv::AMDGPU_KERNEL);
-  F->addFnAttr("amdgpu-flat-work-group-size", "1,1024");
+  {
+    int maxWg = meta.maxFlatWorkgroupSize > 0 ? meta.maxFlatWorkgroupSize : 1024;
+    int waveSz = targetIsa.isWave32() ? 32 : 64;
+    int minWaves = (maxWg + waveSz - 1) / waveSz;
+    F->addFnAttr("amdgpu-flat-work-group-size",
+                  std::to_string(maxWg) + "," + std::to_string(maxWg));
+    if (minWaves > 1)
+      F->addFnAttr("amdgpu-waves-per-eu",
+                    std::to_string(minWaves) + "," + std::to_string(minWaves));
+  }
 
   for (int i = 0; i < paramIdx; i++)
     F->getArg(i)->setName("arg" + std::to_string(i));
@@ -288,7 +303,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // ==== Phase 5: Raise each instruction ====
 
   auto *f16Ty = Type::getHalfTy(C);
-  RaiseContext ctx{C, M, B, regs, mc, isa, kernargs, F,
+  RaiseContext ctx{C, M, B, regs, mc, isa, targetIsa, kernargs, F,
                    i1Ty, i8Ty, i32Ty, i64Ty, f32Ty, f16Ty,
                    ptrGlobalTy, offsetToBB};
 
@@ -306,6 +321,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       B.SetInsertPoint(currentBB);
     }
 
+    ctx.computeVGPRAdjust(di);
     OpResolver op{ctx, di};
 
     HandlerResult hr;
