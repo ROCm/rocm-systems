@@ -3,39 +3,39 @@
   "num_threads": 1,
   "exec_mode": "functional",
   "vm": {
-    "arch": "cdna4",
+    "arch": "cdna3",
     "gpu": {
       "device": {
-        "gpu_id": 38144,
-        "gfx_target_version": 90500,
+        "gpu_id": 50148,
+        "gfx_target_version": 90402,
         "vendor_id": 4098,
-        "device_id": 5892,
-        "family_id": 160,
-        "unique_id": 5929628898254127105,
-        "marketing_name": "AMD Instinct MI350X",
+        "device_id": 29856,
+        "family_id": 146,
+        "unique_id": 0,
+        "marketing_name": "AMD Instinct MI300X",
         "drm_render_minor": 128,
-        "simd_count": 256,
+        "simd_count": 16,
         "max_waves_per_simd": 8,
-        "num_shader_engines": 4,
-        "num_shader_arrays_per_engine": 2,
+        "num_shader_engines": 1,
+        "num_shader_arrays_per_engine": 1,
         "num_cu_per_sh": 4,
         "simd_per_cu": 4,
         "wave_front_size": 64,
         "max_slots_scratch_cu": 32,
-        "local_mem_size": 309237645312,
-        "lds_size_kb": 160,
+        "local_mem_size": 206158430208,
+        "lds_size_kb": 64,
         "mem_width": 8192,
-        "mem_clk_max": 1600,
+        "mem_clk_max": 1300,
         "l1_size_kb": 32,
         "l1_line_size": 128,
         "l1_assoc": 4,
         "l2_size_kb": 4096,
         "l2_line_size": 128,
         "l2_assoc": 16,
-        "num_sdma_engines": 5,
-        "num_sdma_xgmi_engines": 12,
+        "num_sdma_engines": 4,
+        "num_sdma_xgmi_engines": 6,
         "num_cp_queues": 128,
-        "max_engine_clk_fcompute": 2700
+        "max_engine_clk_fcompute": 2100
       }
     }
   },
@@ -50,14 +50,14 @@
             { "name": "l2", "type": "l2_cache" },
             { "name": "cp", "type": "command_processor" },
             {
-              "name": "se[0:7]", "type": "shader_engine",
+              "name": "se[0:1]", "type": "shader_engine",
               "children": [{
                 "name": "cu[0:4]", "type": "compute_unit",
                 "config": [
                   { "key": "num_wf_slots", "value": "32" },
                   { "key": "sgprs_per_wf", "value": "104" },
                   { "key": "vgprs_per_wf", "value": "512" },
-                  { "key": "lds_size_kb", "value": "160" }
+                  { "key": "lds_size_kb", "value": "64" }
                 ]
               }]
             }

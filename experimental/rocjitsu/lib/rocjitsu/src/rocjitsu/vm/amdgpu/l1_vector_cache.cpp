@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "util/log.h"
 
+#include <bit>
 #include <cassert>
 
 namespace rocjitsu {
@@ -92,7 +93,7 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
   // Iterate only over lanes that are active according to lane_mask.
   uint64_t remaining = lane_mask;
   while (remaining) {
-    uint32_t lane = __builtin_ctzll(remaining);
+    uint32_t lane = std::countr_zero(remaining);
     remaining &= remaining - 1; // clear lowest set bit
     uint64_t base = addrs[lane];
     for (uint32_t e = 0; e < num_elems; ++e) {
@@ -105,7 +106,7 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal) {
   uint32_t stride = num_elems * elem_size;
-  uint32_t active_lanes = __builtin_popcountll(lane_mask);
+  uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
   if (active_lanes > 0)
     ++store_active_count_;
@@ -113,7 +114,7 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
   // Iterate only over lanes that are active according to lane_mask.
   uint64_t remaining = lane_mask;
   while (remaining) {
-    uint32_t lane = __builtin_ctzll(remaining);
+    uint32_t lane = std::countr_zero(remaining);
     remaining &= remaining - 1; // clear lowest set bit
     uint64_t base = addrs[lane];
     for (uint32_t e = 0; e < num_elems; ++e) {

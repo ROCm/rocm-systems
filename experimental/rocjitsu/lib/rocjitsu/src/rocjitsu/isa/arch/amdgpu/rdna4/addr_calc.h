@@ -20,12 +20,12 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
-#include <array>
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
+struct VectorMemState;
 } // namespace amdgpu
 
 namespace rdna4 {
@@ -33,19 +33,19 @@ namespace rdna4 {
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
-                              std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
+                              amdgpu::VectorMemState &d);
 
 void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront &wf,
-                              std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
+                              amdgpu::VectorMemState &d);
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
-                              std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
+                              amdgpu::VectorMemState &d);
 
 void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront &wf,
-                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
+                               amdgpu::VectorMemState &d);
 
 void ds_calculate_addresses(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
-                            std::array<uint64_t, 64> &addrs, uint64_t &lane_mask);
+                            amdgpu::VectorMemState &d);
 
 /// @brief Derive Mtype from sc0/sc1 encoding bits (GFX12 coherency model stub).
 inline amdgpu::Mtype mtype_from_bits(bool sc0, bool sc1) {

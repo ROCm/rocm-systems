@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cassert>
@@ -13,8 +15,6 @@ namespace rocjitsu {
 namespace rdna3_5 {
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
-  // GFX11 SMEM: sbase is an aligned SGPR pair, offset is a 21-bit signed immediate,
-  // soffset is an SGPR index (0x7F = no SGPR offset).
   auto &cu = wf.cu();
   uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
   uint64_t base = (static_cast<uint64_t>(cu.read_sgpr(sbase + 1)) << 32) | cu.read_sgpr(sbase);
@@ -25,12 +25,12 @@ uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
-                              std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  // GFX11 FLAT: 13-bit signed offset, optional SGPR base via saddr.
+                              amdgpu::VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  lane_mask = exec;
-  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 19) >> 19);
+  d.lane_mask = exec;
+  d.exec_mask = exec;
+  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 20) >> 20);
   uint64_t saddr_val = 0;
   if (inst.saddr != 0x7F) {
     uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
@@ -47,23 +47,23 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
       vaddr =
           (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
     }
-    addrs[lane] = saddr_val + vaddr + offset;
+    d.per_lane_addr[lane] = saddr_val + vaddr + offset;
   }
 }
 
 void mubuf_calculate_addresses(const MubufMachineInst &inst, amdgpu::Wavefront &wf,
-                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  amdgpu::addr_calc::mubuf_calculate_addresses(inst, wf, addrs, lane_mask);
+                               amdgpu::VectorMemState &d) {
+  amdgpu::addr_calc::mubuf_calculate_addresses(inst, wf, d);
 }
 
 void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &wf,
-                               std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  amdgpu::addr_calc::mtbuf_calculate_addresses(inst, wf, addrs, lane_mask);
+                               amdgpu::VectorMemState &d) {
+  amdgpu::addr_calc::mtbuf_calculate_addresses(inst, wf, d);
 }
 
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,
-                            std::array<uint64_t, 64> &addrs, uint64_t &lane_mask) {
-  amdgpu::addr_calc::ds_calculate_addresses(inst, wf, addrs, lane_mask);
+                            amdgpu::VectorMemState &d) {
+  amdgpu::addr_calc::ds_calculate_addresses(inst, wf, d);
 }
 
 } // namespace rdna3_5

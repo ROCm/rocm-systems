@@ -1133,9 +1133,13 @@ class CodeGenerator:
 
         if cls == 'ds_read':
             return self._gen_ds_read(dst_ops, src_ops, sem)
+        if cls == 'ds_read2':
+            return self._gen_ds_read2(dst_ops, src_ops, sem)
 
         if cls == 'ds_write':
             return self._gen_ds_write(dst_ops, src_ops, sem)
+        if cls == 'ds_write2':
+            return self._gen_ds_write2(dst_ops, src_ops, sem)
 
         if cls == 'dcache_inv':
             return '  wf.cu().l1_scalar().invalidate_all();'
@@ -3843,7 +3847,15 @@ class CodeGenerator:
         L = []
         L.append(f'  auto &cu = wf.cu();')
         L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
-        L.append(f'  uint32_t dst = mfma::dst_base(vb, {d}.encoding_value_);')
+        # acc_cd field exists in CDNA2/3/4 VOP3P_MFMA encoding (controls
+        # AccVGPR bank selection). CDNA1 and RDNA lack this field — default
+        # to 1 (always use AccVGPR bank, the CDNA1 behavior).
+        arch = self.isa_spec.arch_name.lower()
+        has_acc_cd = arch in ('cdna2', 'cdna3', 'cdna4')
+        if has_acc_cd:
+            L.append(f'  uint32_t dst = mfma::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);')
+        else:
+            L.append(f'  uint32_t dst = mfma::dst_base(vb, {d}.encoding_value_, 1);')
         L.append(f'  uint32_t const_acc;')
         L.append(f'  uint32_t s2 = mfma::resolve_acc(vb, dst,')
         L.append(f'      {s2}.encoding_value_, const_acc,'
@@ -3865,10 +3877,18 @@ class CodeGenerator:
             # register layout, not by separate exec functions).
             ea = _EXTRACT_A.get(input_type, 'mfma::extract_f32')
             eb = _EXTRACT_B.get(input_type, 'mfma::extract_f32')
+            # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
+            # A-matrix broadcast and B-matrix lane permutation. RDNA does
+            # not have MFMA (only WMMA), so these fields don't exist.
+            has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             L.append(f'  mfma::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
             L.append(f'                 mfma::src_base(vb, {s0}.encoding_value_),')
             L.append(f'                 mfma::src_base(vb, {s1}.encoding_value_),')
-            L.append(f'                 s2, {ea}, {eb}, const_acc);')
+            if has_blgp:
+                L.append(f'                 s2, {ea}, {eb}, const_acc,')
+                L.append(f'                 inst_.cbsz, inst_.abid, inst_.blgp);')
+            else:
+                L.append(f'                 s2, {ea}, {eb}, const_acc);')
 
             # VOP3PX2 (MFMA_SCALE): apply scale factors from the X2
             # extension dwords to the accumulator after the MFMA.
@@ -4033,8 +4053,12 @@ class CodeGenerator:
                                   else 'amdgpu::WaitCounterType::VMCNT'),
             'ds_read': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
                        else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_read2': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                        else 'amdgpu::WaitCounterType::LGKMCNT',
             'ds_write': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
                         else 'amdgpu::WaitCounterType::LGKMCNT',
+            'ds_write2': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
+                         else 'amdgpu::WaitCounterType::LGKMCNT',
             'ds_atomic': 'amdgpu::WaitCounterType::DSCNT' if is_gfx11_plus
                          else 'amdgpu::WaitCounterType::LGKMCNT',
         }
@@ -4066,7 +4090,7 @@ class CodeGenerator:
             L.append('  d->sign_extend = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
-        L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append('  flat_calculate_addresses(inst_, wf, *d);')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -4083,7 +4107,7 @@ class CodeGenerator:
         L.append('  d->is_load = false;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
-        L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         stride = esz * ne
@@ -4151,7 +4175,7 @@ class CodeGenerator:
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         data_field = self.isa_spec.profile.flat_store_src_field
-        L.append('  flat_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append('  flat_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         stride = data_dwords * 4
@@ -4187,7 +4211,7 @@ class CodeGenerator:
         L.append(f'  d->atomic_op = {op_enum};')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
-        L.append('  mubuf_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append('  mubuf_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         stride = data_dwords * 4
@@ -4221,7 +4245,7 @@ class CodeGenerator:
         # DS atomics always return the old value (like GLC=1).
         L.append('  d->is_load = true;')
         L.append(f'  d->atomic_op = {op_enum};')
-        L.append('  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append('  ds_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         stride = data_dwords * 4
@@ -4262,7 +4286,7 @@ class CodeGenerator:
             L.append('    d->lds_base = wf.m0();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
-            L.append(f'    {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
+            L.append(f'    {addr_fn}(inst_, wf, *d);')
             L.append('    set_data(std::move(d));')
             L.append('    return;')
             L.append('  }')
@@ -4276,7 +4300,7 @@ class CodeGenerator:
             L.append('  d->sign_extend = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
-        L.append(f'  {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append(f'  {addr_fn}(inst_, wf, *d);')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -4292,7 +4316,7 @@ class CodeGenerator:
         L.append('  d->is_load = false;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
-        L.append(f'  {addr_fn}(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append(f'  {addr_fn}(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         stride = esz * ne
@@ -4325,7 +4349,7 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
-        L.append('  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append('  ds_calculate_addresses(inst_, wf, *d);')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -4338,7 +4362,7 @@ class CodeGenerator:
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = false;')
-        L.append('  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);')
+        L.append('  ds_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         stride = esz * ne
@@ -4367,6 +4391,88 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _gen_ds_read2(self, dst: list[str], src: list[str],
+                      sem: InstructionSemantics) -> str:
+        """Generate ds_read2 execute body: two independent LDS loads.
+
+        DS_READ2_B32:  vdst[31:0]  = LDS[addr + offset0*4]
+                       vdst[63:32] = LDS[addr + offset1*4]
+        DS_READ2ST64:  same but offsets scaled by 256 instead of 4.
+        B64 variants:  read 8 bytes per access (two dwords each).
+
+        Uses VectorMemState ds2 fields to package both accesses into a
+        single pipeline request.
+        """
+        L = []
+        esz = sem.elem_size  # 4 for B32, 8 for B64
+        dwords_per_access = esz // 4  # 1 for B32, 2 for B64
+        stride_scale = '256U' if sem.operation == 'st64' else '4U'
+        acc = self._acc_vgpr_expr
+        L.append('  auto &cu = wf.cu();')
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
+        L.append(f'  d->elem_size = {esz};')
+        L.append('  d->num_elems = 1;')
+        L.append('  d->is_load = true;')
+        L.append('  d->exec_mask = exec;')
+        L.append('  d->lane_mask = exec;')
+        L.append('  d->ds2_active = true;')
+        L.append(f'  d->ds2_dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst + {dwords_per_access};')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append('    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);')
+        L.append(f'    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale};')
+        L.append(f'    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * {stride_scale};')
+        L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_ds_write2(self, dst: list[str], src: list[str],
+                       sem: InstructionSemantics) -> str:
+        """Generate ds_write2 execute body: two independent LDS stores.
+
+        DS_WRITE2_B32:  LDS[addr + offset0*4] = data0
+                        LDS[addr + offset1*4] = data1
+        DS_WRITE2ST64:  same but offsets scaled by 256 instead of 4.
+        B64 variants:   write 8 bytes per access (two dwords each).
+
+        Uses VectorMemState ds2 fields to package both accesses into a
+        single pipeline request.
+        """
+        L = []
+        esz = sem.elem_size  # 4 for B32, 8 for B64
+        dwords_per_access = esz // 4
+        stride_scale = '256U' if sem.operation == 'st64' else '4U'
+        acc = self._acc_vgpr_expr
+        L.append('  auto &cu = wf.cu();')
+        L.append('  uint64_t exec = wf.exec();')
+        L.append('  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);')
+        L.append(f'  d->elem_size = {esz};')
+        L.append('  d->num_elems = 1;')
+        L.append('  d->is_load = false;')
+        L.append('  d->exec_mask = exec;')
+        L.append('  d->lane_mask = exec;')
+        L.append('  d->ds2_active = true;')
+        L.append(f'  d->store_data.resize(wf.wf_size() * {esz});')
+        L.append(f'  d->ds2_store_data.resize(wf.wf_size() * {esz});')
+        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        L.append('    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);')
+        L.append(f'    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale};')
+        L.append(f'    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * {stride_scale};')
+        # Pack data0 into store_data
+        for i in range(dwords_per_access):
+            L.append(f'    uint32_t v0_{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0 + {i}, lane);')
+            L.append(f'    std::memcpy(&d->store_data[lane * {esz} + {i * 4}], &v0_{i}, 4);')
+        # Pack data1 into ds2_store_data
+        for i in range(dwords_per_access):
+            L.append(f'    uint32_t v1_{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data1 + {i}, lane);')
+            L.append(f'    std::memcpy(&d->ds2_store_data[lane * {esz} + {i * 4}], &v1_{i}, 4);')
+        L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
     def _enc_has_semantics(self, enc: InstEncoding) -> bool:
         """Check if any instruction in this encoding has semantics."""
         if not self.semantics:
@@ -4385,7 +4491,7 @@ class CodeGenerator:
         'flat_load', 'flat_store', 'flat_atomic',
         'buffer_load', 'buffer_store', 'buffer_atomic',
         'tbuffer_load', 'tbuffer_store',
-        'ds_read', 'ds_write', 'ds_atomic',
+        'ds_read', 'ds_read2', 'ds_write', 'ds_write2', 'ds_atomic',
         'global_load', 'global_store',
         'dcache_inv', 'dcache_wb',
         'image_load', 'image_store', 'image_atomic', 'image_sample',
@@ -4578,7 +4684,7 @@ class CodeGenerator:
                         'flat_load', 'flat_store', 'flat_atomic',
                         'buffer_load', 'buffer_store', 'buffer_atomic',
                         'tbuffer_load', 'tbuffer_store',
-                        'ds_read', 'ds_write', 'ds_atomic',
+                        'ds_read', 'ds_read2', 'ds_write', 'ds_write2', 'ds_atomic',
                     })
                     ctor_body_parts = list(opnd_body)
                     ctor_body_parts.append(f'num_src_ = {src_idx};')
@@ -5311,10 +5417,15 @@ class CodeGenerator:
                 '  }'
             )
         if 'OPR_SRC_ACCVGPR' in _opr:
+            # AccVGPR source: maps to the AccVGPR bank at +256 offset.
+            # v_accvgpr_read src0=256 (acc0) → physical index 256.
+            # OpSel range 768+ also maps to +256 offset.
             _vgpr_index_lines.append(
                 '  if (opr_type == OperandType::OPR_SRC_ACCVGPR) {\n'
                 f'    if (ev >= OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN)\n'
                 f'      return {_ACC_OFFSET} + static_cast<uint32_t>(ev - OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN);\n'
+                f'    if (ev >= 256)\n'
+                f'      return {_ACC_OFFSET} + static_cast<uint32_t>(ev - 256);\n'
                 f'    return {_ACC_OFFSET} + static_cast<uint32_t>(ev);\n'
                 '  }'
             )

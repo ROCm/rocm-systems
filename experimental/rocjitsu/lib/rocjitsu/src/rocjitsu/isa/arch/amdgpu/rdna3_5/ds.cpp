@@ -41,7 +41,7 @@ void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -72,7 +72,7 @@ void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -103,7 +103,7 @@ void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -134,7 +134,7 @@ void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -165,7 +165,7 @@ void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -196,7 +196,7 @@ void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -227,7 +227,7 @@ void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -258,7 +258,7 @@ void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -289,7 +289,7 @@ void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -320,7 +320,7 @@ void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -351,7 +351,7 @@ void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -382,7 +382,7 @@ void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -425,7 +425,7 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -453,19 +453,27 @@ DsStore2addrB32Ds::DsStore2addrB32Ds(const MachineInst *inst)
 }
 
 void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 4);
+  d->ds2_store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U;
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
   }
   set_data(std::move(d));
 }
@@ -485,19 +493,27 @@ DsStore2addrStride64B32Ds::DsStore2addrStride64B32Ds(const MachineInst *inst)
 }
 
 void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 4);
+  d->ds2_store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U;
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 4 + 0], &v0_0, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 4 + 0], &v1_0, 4);
   }
   set_data(std::move(d));
 }
@@ -523,7 +539,7 @@ void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -559,7 +575,7 @@ void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -592,7 +608,7 @@ void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -623,7 +639,7 @@ void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -662,7 +678,7 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -750,7 +766,7 @@ void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 1);
@@ -779,7 +795,7 @@ void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 2);
@@ -813,7 +829,7 @@ void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -847,7 +863,7 @@ void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -881,7 +897,7 @@ void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -915,7 +931,7 @@ void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -949,7 +965,7 @@ void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -983,7 +999,7 @@ void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1017,7 +1033,7 @@ void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1051,7 +1067,7 @@ void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1085,7 +1101,7 @@ void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1119,7 +1135,7 @@ void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1152,7 +1168,7 @@ void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1186,7 +1202,7 @@ void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1237,7 +1253,7 @@ void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1273,7 +1289,7 @@ void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1309,7 +1325,7 @@ void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1345,7 +1361,7 @@ void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1383,7 +1399,7 @@ void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1419,7 +1435,7 @@ void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1453,7 +1469,7 @@ void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -1515,7 +1531,7 @@ void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1532,12 +1548,24 @@ DsLoad2addrB32Ds::DsLoad2addrB32Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U;
+  }
   set_data(std::move(d));
 }
 
@@ -1554,12 +1582,24 @@ DsLoad2addrStride64B32Ds::DsLoad2addrStride64B32Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 1;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U;
+  }
   set_data(std::move(d));
 }
 
@@ -1581,7 +1621,7 @@ void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1602,7 +1642,7 @@ void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1624,7 +1664,7 @@ void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1645,7 +1685,7 @@ void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -1700,7 +1740,7 @@ void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1733,7 +1773,7 @@ void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1766,7 +1806,7 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1799,7 +1839,7 @@ void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1832,7 +1872,7 @@ void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1865,7 +1905,7 @@ void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1898,7 +1938,7 @@ void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1931,7 +1971,7 @@ void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1964,7 +2004,7 @@ void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -1997,7 +2037,7 @@ void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2030,7 +2070,7 @@ void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2063,7 +2103,7 @@ void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2108,7 +2148,7 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2138,21 +2178,31 @@ DsStore2addrB64Ds::DsStore2addrB64Ds(const MachineInst *inst)
 }
 
 void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 8);
+  d->ds2_store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
-    std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U;
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
+    uint32_t v0_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &v0_1, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &v1_0, 4);
+    uint32_t v1_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 1, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
   }
   set_data(std::move(d));
 }
@@ -2172,21 +2222,31 @@ DsStore2addrStride64B64Ds::DsStore2addrStride64B64Ds(const MachineInst *inst)
 }
 
 void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
   d->store_data.resize(wf.wf_size() * 8);
+  d->ds2_store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lo0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
-    std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U;
+    uint32_t v0_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 0, lane);
+    std::memcpy(&d->store_data[lane * 8 + 0], &v0_0, 4);
+    uint32_t v0_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data0 + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &v0_1, 4);
+    uint32_t v1_0 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 0, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 0], &v1_0, 4);
+    uint32_t v1_1 = cu.read_vgpr(wf.vgpr_alloc().base + 0u + inst_.data1 + 1, lane);
+    std::memcpy(&d->ds2_store_data[lane * 8 + 4], &v1_1, 4);
   }
   set_data(std::move(d));
 }
@@ -2212,7 +2272,7 @@ void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -2252,7 +2312,7 @@ void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -2289,7 +2349,7 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2322,7 +2382,7 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2358,7 +2418,7 @@ void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::ADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2394,7 +2454,7 @@ void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2430,7 +2490,7 @@ void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2466,7 +2526,7 @@ void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::INC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2502,7 +2562,7 @@ void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::DEC;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2538,7 +2598,7 @@ void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2574,7 +2634,7 @@ void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2610,7 +2670,7 @@ void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2646,7 +2706,7 @@ void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2682,7 +2742,7 @@ void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::AND;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2717,7 +2777,7 @@ void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::OR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2753,7 +2813,7 @@ void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::XOR;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2806,7 +2866,7 @@ void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2844,7 +2904,7 @@ void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2882,7 +2942,7 @@ void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -2920,7 +2980,7 @@ void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -2962,7 +3022,7 @@ void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -3002,7 +3062,7 @@ void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -3038,7 +3098,7 @@ void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 8);
@@ -3070,7 +3130,7 @@ void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3087,12 +3147,24 @@ DsLoad2addrB64Ds::DsLoad2addrB64Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 4U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 4U;
+  }
   set_data(std::move(d));
 }
 
@@ -3109,12 +3181,24 @@ DsLoad2addrStride64B64Ds::DsLoad2addrStride64B64Ds(const MachineInst *inst)
 }
 
 void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  d->exec_mask = exec;
+  d->lane_mask = exec;
+  d->ds2_active = true;
+  d->ds2_dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst + 2;
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t base = cu.read_vgpr(wf.vgpr_alloc().base + inst_.addr, lane);
+    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * 256U;
+    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * 256U;
+  }
   set_data(std::move(d));
 }
 
@@ -3139,7 +3223,7 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::FADD;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -3199,7 +3283,7 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -3235,7 +3319,7 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 1);
@@ -3265,7 +3349,7 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 2);
@@ -3296,7 +3380,7 @@ void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3318,7 +3402,7 @@ void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 1;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3341,7 +3425,7 @@ void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3364,7 +3448,7 @@ void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = true;
   d->sign_extend = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3386,7 +3470,7 @@ void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3408,7 +3492,7 @@ void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 2;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3445,7 +3529,7 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 4);
@@ -3474,7 +3558,7 @@ void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 1;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3528,7 +3612,7 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 12);
@@ -3562,7 +3646,7 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = false;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   d->store_data.resize(wf.wf_size() * 16);
@@ -3598,7 +3682,7 @@ void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 
@@ -3619,7 +3703,7 @@ void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
-  ds_calculate_addresses(inst_, wf, d->per_lane_addr, d->lane_mask);
+  ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
 

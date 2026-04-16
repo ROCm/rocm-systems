@@ -1349,10 +1349,21 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     (was ``DS_CMPST``), which are handled by the atomic fallthrough.
     """
     upper = name.upper()
-    is_write = ('_WRITE_' in upper or '_WRITE2' in upper
-                or 'DS_STORE_' in upper or 'DS_STORE_2ADDR' in upper)
-    is_read = ('_READ_' in upper or '_READ2' in upper
-               or 'DS_LOAD_' in upper or 'DS_LOAD_2ADDR' in upper)
+    is_write2 = '_WRITE2' in upper or 'DS_STORE_2ADDR' in upper
+    is_read2 = '_READ2' in upper or 'DS_LOAD_2ADDR' in upper
+    is_write = ('_WRITE_' in upper or 'DS_STORE_' in upper) and not is_write2
+    is_read = ('_READ_' in upper or 'DS_LOAD_' in upper) and not is_read2
+    is_st64 = 'ST64' in upper or 'STRIDE64' in upper
+    if is_write2:
+        esz = 8 if 'B64' in upper else 4
+        return InstructionSemantics(name, 'ds_write2', elem_size=esz,
+                                    num_elems=1,
+                                    operation='st64' if is_st64 else None)
+    if is_read2:
+        esz = 8 if 'B64' in upper else 4
+        return InstructionSemantics(name, 'ds_read2', elem_size=esz,
+                                    num_elems=1,
+                                    operation='st64' if is_st64 else None)
     if is_write:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):

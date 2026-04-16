@@ -43,6 +43,25 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
       for (uint32_t b = 0; b < per_lane_bytes; ++b)
         lds.write8(lds_addr + b, d.response_data[data_offset + b]);
     }
+    // Per-lane LDS-dst buffer load trace.
+    util::Logger::vm([&](auto &os) {
+      static thread_local uint64_t lds_dst_trace = 0;
+      if (++lds_dst_trace > 80)
+        return;
+      os << std::format("BUF->LDS: lds_base={:#x} plb={}", d.lds_base, per_lane_bytes);
+      uint64_t rm = d.lane_mask;
+      int cnt = 0;
+      while (rm && cnt < 4) {
+        uint32_t ln = std::countr_zero(rm);
+        rm &= rm - 1;
+        uint32_t v = 0;
+        if (per_lane_bytes >= 4)
+          std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
+        os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln],
+                          d.lds_base + ln * per_lane_bytes, v);
+        ++cnt;
+      }
+    });
     return;
   }
 
@@ -50,8 +69,29 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
   // [lane * (num_elems * elem_size) + elem * elem_size].
   bool is_atomic = (d.atomic_op != AtomicOp::NONE);
   uint32_t stride = is_atomic ? d.elem_size : d.num_elems * d.elem_size;
-  uint32_t vgpr_count = is_atomic ? (d.elem_size / 4) : d.num_elems;
+  // Number of destination VGPRs: total bytes / 4, rounded up.
+  // For sub-dword elements (u8, u16), at least 1 VGPR is used.
+  // For 8-byte elements (b64), 2 VGPRs per element.
+  uint32_t total_bytes = d.num_elems * d.elem_size;
+  uint32_t vgpr_count = is_atomic ? (d.elem_size / 4) : std::max(1u, total_bytes / 4);
 
+  // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
+  // buffer loads return 0. exec_mask is the original EXEC at issue time;
+  // lane_mask has OOB lanes removed. The difference gives exec-active OOB lanes.
+  uint64_t exec = d.exec_mask;
+  uint64_t oob_mask = exec & ~d.lane_mask; // exec-active but OOB
+  if (oob_mask) {
+    static uint64_t oob_count = 0;
+    if (++oob_count <= 10)
+      util::Logger::vm("OOB zeroing: exec=", std::hex, d.exec_mask, " lane=", d.lane_mask,
+                       " oob=", oob_mask, std::dec, " dst=", d.dst_reg_base, " vgprs=", vgpr_count);
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      if (!(oob_mask & (1ULL << lane)))
+        continue;
+      for (uint32_t i = 0; i < vgpr_count; ++i)
+        cu.write_vgpr(d.dst_reg_base + i, lane, 0);
+    }
+  }
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
@@ -66,6 +106,24 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
       cu.write_vgpr(d.dst_reg_base + i, lane, val);
     }
   }
+  // Per-lane VGPR writeback trace: log first 4 active lanes with addresses
+  // and loaded values so we can verify the buffer_load -> VGPR data path.
+  util::Logger::vm([&](auto &os) {
+    static thread_local uint64_t vcomp_trace = 0;
+    if (++vcomp_trace > 80)
+      return;
+    os << std::format("VMEM complete: dst_v={} esz={} nelm={} stride={}", d.dst_reg_base,
+                      d.elem_size, d.num_elems, stride);
+    uint64_t rm = d.lane_mask;
+    int cnt = 0;
+    while (rm && cnt < 4) {
+      uint32_t ln = std::countr_zero(rm);
+      rm &= rm - 1;
+      uint32_t v0 = cu.read_vgpr(d.dst_reg_base, ln);
+      os << std::format(" L{}:@{:#x}={:#x}", ln, d.per_lane_addr[ln], v0);
+      ++cnt;
+    }
+  });
 }
 
 } // namespace
@@ -280,7 +338,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
 
 } // namespace
 
-void GlobalMemPipeline::initiate_access(Instruction &inst, [[maybe_unused]] Wavefront &wf) {
+void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
 
   if (d.atomic_op != AtomicOp::NONE) {
@@ -293,38 +351,36 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, [[maybe_unused]] Wave
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
               d.mtype, d.non_temporal);
   } else {
-    // Trace: dump per-lane values for stores to tensor address range.
+    // Trace: dump per-lane addresses, hex data, and float values for stores.
     util::Logger::vm([&](auto &os) {
-      if (d.lane_mask == 0)
+      static thread_local uint64_t store_trace = 0;
+      ++store_trace;
+      // Only log GEMM kernel stores (skip blit kernel noise)
+      if (d.elem_size == 4 && d.num_elems == 2 && d.lane_mask != 0 && store_trace > 40) {
+      } // log it below
+      else if (store_trace > 200)
         return;
-      uint64_t rm = d.lane_mask;
-      bool hits_tensor = false;
-      while (rm) {
-        uint32_t ln = __builtin_ctzll(rm);
-        rm &= rm - 1;
-        if (d.per_lane_addr[ln] >= 0x4d00c00000ULL && d.per_lane_addr[ln] < 0x4d00c00100ULL) {
-          hits_tensor = true;
-          break;
-        }
-      }
-      if (!hits_tensor)
-        return;
+      else if (d.elem_size != 4 || d.num_elems != 2)
+        return; // skip non-dwordx2 stores to reduce noise
+      os << std::format("VMEM store: wf={} wg={} esz={} nelm={} pc={:#x} exec={:#x}", wf.wf_id(),
+                        wf.wg_id(), d.elem_size, d.num_elems, d.issue_pc, d.lane_mask);
       uint32_t stride = d.num_elems * d.elem_size;
-      rm = d.lane_mask;
+      uint64_t rm = d.lane_mask;
       int cnt = 0;
-      while (rm && cnt < 6) {
-        uint32_t ln = __builtin_ctzll(rm);
+      while (rm && cnt < 4) {
+        uint32_t ln = std::countr_zero(rm);
         rm &= rm - 1;
-        uint64_t a = d.per_lane_addr[ln];
-        if (a < 0x4d00c00000ULL || a >= 0x4d00c00100ULL)
-          continue;
-        uint32_t v = 0;
-        if (stride > 0 && d.store_data.size() >= ln * stride + 4)
-          std::memcpy(&v, &d.store_data[ln * stride], 4);
-        if (cnt > 0)
-          os << '\n' << std::format("[rj log VM] ");
-        os << std::format("SLANE L{} @+{:#x} ={:#x} ipc={:#x} exec={:#x} wf={} wg={}", ln,
-                          a - 0x4d00c00000ULL, v, d.issue_pc, d.lane_mask, wf.wf_id(), wf.wg_id());
+        uint64_t addr = d.per_lane_addr[ln];
+        // Extract up to num_elems dwords of store data for this lane.
+        os << std::format("\n[rj log VM]   L{}:@{:#x} =", ln, addr);
+        for (uint32_t e = 0; e < d.num_elems; ++e) {
+          uint32_t v = 0;
+          uint32_t off = ln * stride + e * d.elem_size;
+          if (d.elem_size >= 4 && d.store_data.size() >= off + 4)
+            std::memcpy(&v, &d.store_data[off], 4);
+          float fv = std::bit_cast<float>(v);
+          os << std::format(" [{:#x}|{:.6g}]", v, fv);
+        }
         ++cnt;
       }
     });
@@ -349,14 +405,113 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
     lds_->vector_load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
                       d.response_data.data());
+    if (d.ds2_active) {
+      d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
+      lds_->vector_load(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                        d.ds2_response_data.data());
+    }
+    // Per-lane LDS load trace: log addresses and loaded values for first 4 lanes.
+    util::Logger::vm([&](auto &os) {
+      static thread_local uint64_t ds_ld_trace = 0;
+      if (++ds_ld_trace > 80)
+        return;
+      os << std::format("DS load: esz={} nelm={} ds2={}", d.elem_size, d.num_elems, d.ds2_active);
+      uint32_t stride = d.num_elems * d.elem_size;
+      uint64_t rm = d.lane_mask;
+      int cnt = 0;
+      while (rm && cnt < 4) {
+        uint32_t ln = std::countr_zero(rm);
+        rm &= rm - 1;
+        uint32_t v = 0;
+        if (stride >= 4)
+          std::memcpy(&v, &d.response_data[ln * stride], 4);
+        os << std::format(" L{}:lds[{:#x}]={:#x}", ln, static_cast<uint32_t>(d.per_lane_addr[ln]),
+                          v);
+        if (d.ds2_active) {
+          uint32_t v2 = 0;
+          if (stride >= 4)
+            std::memcpy(&v2, &d.ds2_response_data[ln * stride], 4);
+          os << std::format(",lds2[{:#x}]={:#x}", static_cast<uint32_t>(d.ds2_per_lane_addr[ln]),
+                            v2);
+        }
+        ++cnt;
+      }
+    });
   } else {
+    // Per-lane LDS store trace: log addresses and values for first 4 lanes.
+    util::Logger::vm([&](auto &os) {
+      static thread_local uint64_t ds_st_trace = 0;
+      if (++ds_st_trace > 80)
+        return;
+      os << std::format("DS store: esz={} nelm={} ds2={}", d.elem_size, d.num_elems, d.ds2_active);
+      uint32_t stride = d.num_elems * d.elem_size;
+      uint64_t rm = d.lane_mask;
+      int cnt = 0;
+      while (rm && cnt < 4) {
+        uint32_t ln = std::countr_zero(rm);
+        rm &= rm - 1;
+        uint32_t v = 0;
+        if (stride >= 4 && d.store_data.size() >= ln * stride + 4)
+          std::memcpy(&v, &d.store_data[ln * stride], 4);
+        os << std::format(" L{}:lds[{:#x}]<={:#x}", ln, static_cast<uint32_t>(d.per_lane_addr[ln]),
+                          v);
+        if (d.ds2_active) {
+          uint32_t v2 = 0;
+          if (stride >= 4 && d.ds2_store_data.size() >= ln * stride + 4)
+            std::memcpy(&v2, &d.ds2_store_data[ln * stride], 4);
+          os << std::format(",lds2[{:#x}]<={:#x}", static_cast<uint32_t>(d.ds2_per_lane_addr[ln]),
+                            v2);
+        }
+        ++cnt;
+      }
+    });
     lds_->vector_store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
                        d.store_data.data());
+    if (d.ds2_active) {
+      lds_->vector_store(d.ds2_per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems,
+                         d.ds2_store_data.data());
+    }
   }
 }
 
 void LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
-  vector_complete(*inst.data_as<VectorMemState>(), wf.cu());
+  auto &d = *inst.data_as<VectorMemState>();
+  vector_complete(d, wf.cu());
+
+  // DS dual-access (ds_read2/ds_write2): write the second access results.
+  if (d.ds2_active && d.is_load) {
+    auto &cu = wf.cu();
+    uint32_t vgpr_count = d.elem_size / 4;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      if (!(d.lane_mask & (1ULL << lane)))
+        continue;
+      for (uint32_t i = 0; i < vgpr_count; ++i) {
+        uint32_t val = 0;
+        uint32_t data_offset = lane * d.elem_size + i * 4;
+        std::memcpy(&val, &d.ds2_response_data[data_offset], std::min(d.elem_size, 4u));
+        cu.write_vgpr(d.ds2_dst_reg_base + i, lane, val);
+      }
+    }
+    // Per-lane DS read2 complete trace: show first 4 lanes with both accesses.
+    util::Logger::vm([&](auto &os) {
+      static thread_local uint64_t ds2_comp_trace = 0;
+      if (++ds2_comp_trace > 80)
+        return;
+      os << std::format("DS read2 complete: dst1_v={} dst2_v={}", d.dst_reg_base,
+                        d.ds2_dst_reg_base);
+      uint64_t rm = d.lane_mask;
+      int cnt = 0;
+      while (rm && cnt < 4) {
+        uint32_t ln = std::countr_zero(rm);
+        rm &= rm - 1;
+        uint32_t v1 = cu.read_vgpr(d.dst_reg_base, ln);
+        uint32_t v2 = cu.read_vgpr(d.ds2_dst_reg_base, ln);
+        os << std::format(" L{}:v{}={:#x},v{}={:#x}", ln, d.dst_reg_base, v1, d.ds2_dst_reg_base,
+                          v2);
+        ++cnt;
+      }
+    });
+  }
 }
 
 } // namespace amdgpu

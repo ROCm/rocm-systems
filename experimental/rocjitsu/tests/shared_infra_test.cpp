@@ -341,13 +341,12 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   inst.offset = 0x10; // 12-bit immediate offset
   inst.pad_12 = 0;
 
-  std::array<uint64_t, 64> addrs{};
-  uint64_t lane_mask = 0;
-  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, addrs, lane_mask);
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, d);
 
-  EXPECT_EQ(lane_mask, 1ULL);
+  EXPECT_EQ(d.lane_mask, 1ULL);
   // scratch_base (0x1_0000_0000) + VGPR (0x100) + offset (0x10) = 0x1_0000_0110
-  EXPECT_EQ(addrs[0], SCRATCH_BASE + 0x100 + 0x10);
+  EXPECT_EQ(d.per_lane_addr[0], SCRATCH_BASE + 0x100 + 0x10);
 }
 
 TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
@@ -382,11 +381,10 @@ TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {
   inst.offset = 0;
   inst.pad_12 = 0;
 
-  std::array<uint64_t, 64> addrs{};
-  uint64_t lane_mask = 0;
-  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, addrs, lane_mask);
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, d);
 
-  EXPECT_EQ(addrs[0], 0x1'0000'2000ULL); // No scratch_base added.
+  EXPECT_EQ(d.per_lane_addr[0], 0x1'0000'2000ULL); // No scratch_base added.
 }
 
 } // namespace

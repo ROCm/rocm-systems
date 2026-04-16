@@ -57,11 +57,17 @@ struct OutputLoc {
 /// the second half of the 512-register block: acc0 = vgpr_base + 256.
 constexpr uint32_t ACC_VGPR_OFFSET = 256;
 
-/// Resolve VGPR base for an MFMA destination operand (OPR_VGPR_OR_ACCVGPR).
-/// Encoding: 0-255 = ArchVGPR, 512-767 = AccVGPR (acc0-acc255).
-inline uint32_t dst_base(uint32_t vb, int ev) {
+/// Resolve VGPR base for an MFMA destination operand.
+/// The acc_cd bit in the MFMA encoding determines whether the destination
+/// is in the arch VGPR bank (acc_cd=0, gfx950 unified model) or the
+/// AccVGPR bank (acc_cd=1, gfx942 separate bank model).
+/// Encoding 0-255 = v[0-255] or acc[0-255] depending on acc_cd.
+/// Encoding 512-767 = acc[0-255] via OpSel (always AccVGPR bank).
+inline uint32_t dst_base(uint32_t vb, int ev, uint32_t acc_cd = 1) {
   if (ev >= 512)
     return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 512);
+  if (acc_cd)
+    return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev);
   return vb + static_cast<uint32_t>(ev);
 }
 
@@ -100,6 +106,17 @@ inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &co
     }
     if (src2_ev >= 256 && src2_ev <= 511) {
       const_acc = ACC_FROM_VGPR;
+      // When MFMA writes to AccVGPR bank (acc_cd=1, dst >= vb+256),
+      // the accumulator source at encoding 256-511 also refers to
+      // AccVGPRs to maintain consistency. This matches gfx942 behavior
+      // where v_accvgpr_write initializes the AccVGPR bank.
+      if (dst >= vb + ACC_VGPR_OFFSET) {
+        util::Logger::vm([&](auto &os) {
+          os << std::format("MFMA resolve_acc: acc_cd path, dst={} vb={} src2_ev={} → acc_base={}",
+                            dst, vb, src2_ev, vb + ACC_VGPR_OFFSET + (src2_ev - 256));
+        });
+        return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(src2_ev - 256);
+      }
       return vb + static_cast<uint32_t>(src2_ev - 256);
     }
     const_acc = get_const();
@@ -165,6 +182,56 @@ inline OutputLoc output_loc_64(uint32_t M, uint32_t N, uint32_t i, uint32_t j, u
 }
 
 // ---------------------------------------------------------------------------
+// Lane permutation for cbsz/abid (A broadcast) and blgp (B permutation)
+// ---------------------------------------------------------------------------
+
+/// @brief Permute the A-matrix lane based on cbsz and abid fields.
+///
+/// @details When cbsz > 0, a block of S = 64/(1<<cbsz) lanes is broadcast to
+/// all other blocks. abid selects which block is the broadcast source.
+/// cbsz=0 means no broadcast (identity).
+inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid) {
+  if (cbsz == 0)
+    return lane;
+  uint32_t S = 64 >> cbsz;
+  return (lane % S) + S * abid;
+}
+
+/// @brief Permute the B-matrix lane based on the blgp field.
+///
+/// @details Per AMD ISA Table 29:
+///   0: identity (l_b)
+///   1: broadcast first 32 lanes  (l_b % 32)
+///   2: broadcast second 32 lanes (l_b % 32 + 32)
+///   3: rotate 16 lanes left      ((l_b + 16) % 64)
+///   4: broadcast first 16 lanes  (l_b % 16)
+///   5: broadcast second 16 lanes (l_b % 16 + 16)
+///   6: broadcast third 16 lanes  (l_b % 16 + 32)
+///   7: broadcast fourth 16 lanes (l_b % 16 + 48)
+inline uint32_t permute_b_lane(uint32_t lane, uint32_t blgp) {
+  switch (blgp) {
+  case 0:
+    return lane;
+  case 1:
+    return lane % 32;
+  case 2:
+    return lane % 32 + 32;
+  case 3:
+    return (lane + 16) % 64;
+  case 4:
+    return lane % 16;
+  case 5:
+    return lane % 16 + 16;
+  case 6:
+    return lane % 16 + 32;
+  case 7:
+    return lane % 16 + 48;
+  default:
+    return lane;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Element extraction functions
 // ---------------------------------------------------------------------------
 
@@ -211,10 +278,15 @@ inline double extract_f64(amdgpu::ComputeUnitCore &cu, uint32_t base, const Inpu
 ///
 /// All inputs are read before any outputs are written to avoid WAR hazards
 /// when destination registers overlap source registers.
+///
+/// @param cbsz  A-matrix broadcast block size (0 = no broadcast).
+/// @param abid  A-matrix broadcast source block ID.
+/// @param blgp  B-matrix lane group permutation pattern.
 template <typename ExtractA, typename ExtractB>
 void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
               uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea,
-              ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR) {
+              ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
+              uint32_t blgp = 0) {
   struct Result {
     uint32_t reg;
     uint32_t lane;
@@ -225,14 +297,41 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
   for (uint32_t b = 0; b < B; ++b) {
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, col, row, b);
+        // AMD convention: i=row (register dimension), j=col (lane dimension).
+        auto out = output_loc_32(M, N, row, col, b);
         float acc = (const_acc != ACC_FROM_VGPR)
                         ? std::bit_cast<float>(const_acc)
                         : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        // Debug: log initial acc for output (0,0)
+        if (row == 0 && col == 0 && b == 0) {
+          static uint32_t mfma_trace_count = 0;
+          if (++mfma_trace_count <= 5)
+            util::Logger::vm([&](auto &os) {
+              os << std::format("MFMA exec_f32: s2={} reg={} lane={} acc_init={} (raw={:#x})", s2,
+                                out.reg, out.lane, acc, cu.read_vgpr(s2 + out.reg, out.lane));
+            });
+        }
         for (uint32_t k = 0; k < K; ++k) {
           auto al = input_loc(M, K, B, row, k, b, in_bits);
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+          // Apply cbsz/abid lane permutation to A input.
+          if (cbsz != 0)
+            al.lane = permute_a_lane(al.lane, cbsz, abid);
+          // Apply blgp lane permutation to B input.
+          if (blgp != 0)
+            bl.lane = permute_b_lane(bl.lane, blgp);
+          float a_val = ea(cu, s0, al);
+          float b_val = eb(cu, s1, bl);
+          if (row == 0 && col <= 1 && b == 0) {
+            static uint32_t dbg_count = 0;
+            if (++dbg_count <= 40)
+              util::Logger::vm([&](auto &os) {
+                os << std::format("MFMA D[{},{}] K[{}]: A(v{},L{})={} B(v{},L{})={} blgp={}", row,
+                                  col, k, al.vgpr_offset, al.lane, a_val, bl.vgpr_offset, bl.lane,
+                                  b_val, blgp);
+              });
+          }
+          acc += a_val * b_val;
         }
         results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
@@ -256,7 +355,8 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
   for (uint32_t b = 0; b < B; ++b) {
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, col, row, b);
+        // AMD convention: i=row (register dimension), j=col (lane dimension).
+        auto out = output_loc_32(M, N, row, col, b);
         int32_t acc = (const_acc != ACC_FROM_VGPR)
                           ? static_cast<int32_t>(const_acc)
                           : static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane));
