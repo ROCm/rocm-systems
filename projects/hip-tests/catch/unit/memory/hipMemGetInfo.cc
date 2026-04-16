@@ -20,3 +20,24 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_FreeLessThanTotal) {
 
   HIP_CHECK(hipFree(A_mem));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that free memory never exceeds total memory.
+ *  - This is a universal sanity check that catches memory reporting bugs.
+ *  - Prevents regression where free=25.85 GiB > total=15.35 GiB occurred.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemGetInfo.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipMemGetInfo_ConsistencyCheck) {
+  size_t free, total;
+  HIP_CHECK(hipMemGetInfo(&free, &total));
+
+  // Free memory must never exceed total memory
+  REQUIRE(free <= total);
+}

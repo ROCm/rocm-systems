@@ -1241,12 +1241,21 @@ bool Device::populateOCLDeviceConstants() {
     }
 
     // For APU systems the SVM aperture can exceed actual physical RAM.
-    const size_t phys_mem = amd::Os::getPhysicalMemSize();
-    const uint apu_mem_percent =
-        ((phys_mem / Mi) > 1536 && IS_WINDOWS) ? 75 : 50;
-    const uint64_t apu_mem_limit = phys_mem * apu_mem_percent / 100;
-    info_.globalMemSize_ = std::min(info_.globalMemSize_,
-                                    static_cast<uint64_t>(apu_mem_limit));
+    // Only apply to integrated/APU devices — dGPUs report real VRAM.
+    // Only cap if reported VRAM exceeds physical RAM (unrealistic SVM aperture).
+    const bool is_apu = hsa_flag_isset64(memory_properties, HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU);
+    if (is_apu) {
+      const size_t phys_mem = amd::Os::getPhysicalMemSize();
+
+      // Only cap if VRAM > physical RAM (indicates SVM aperture, not real allocation)
+      if (info_.globalMemSize_ > phys_mem) {
+        const uint apu_mem_percent =
+            ((phys_mem / Mi) > 1536 && IS_WINDOWS) ? 75 : 50;
+        const uint64_t apu_mem_limit = phys_mem * apu_mem_percent / 100;
+        info_.globalMemSize_ = std::min(info_.globalMemSize_,
+                                        static_cast<uint64_t>(apu_mem_limit));
+      }
+    }
 
     gpuvm_segment_max_alloc_ =
         uint64_t(info_.globalMemSize_ * std::min(GPU_SINGLE_ALLOC_PERCENT, 100u) / 100u);

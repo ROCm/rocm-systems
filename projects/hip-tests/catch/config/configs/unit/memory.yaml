@@ -1761,6 +1761,9 @@ memory:
   Unit_hipMemGetInfo_FreeLessThanTotal:
     <<: *level_2
     tags: [query]
+  Unit_hipMemGetInfo_ConsistencyCheck:
+    <<: *level_2
+    tags: [query]
   Unit_hipFreeImplicitSyncDev:
     <<: *level_2
     # Note: TDR
