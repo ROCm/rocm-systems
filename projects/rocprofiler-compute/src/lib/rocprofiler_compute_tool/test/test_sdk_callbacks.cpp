@@ -112,6 +112,8 @@ TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfiguredForColle
 
 TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_ReturnsNoConfig)
 {
+    // FIXME: This test currently disabled because current implementation of dispatch_callback
+    // tries to create counters config even if there are no counters available for it.
     m_tool_data->requested_counters = convert_counters_per_pmc_to_str({m_counters_pmc0, m_counters_pmc1});
 
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
