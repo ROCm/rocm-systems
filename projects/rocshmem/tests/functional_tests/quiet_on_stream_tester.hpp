@@ -54,16 +54,13 @@ class QuietOnStreamTester : public Tester {
  private:
   int my_pe;
   int n_pes;
-  int num_streams = 1;
-  bool use_default_stream = false;
+  int num_streams{1};
+  bool use_default_stream{false};
   std::vector<hipStream_t> streams;
-  std::vector<hipEvent_t> start_events_timed;
-  std::vector<hipEvent_t> stop_events_timed;
 
-  // Buffers for testing RMA operations before quiet
-  char *source_buf;
-  char *dest_buf;
-  size_t buf_size;  // Size in bytes
+  // Simple test buffers
+  int *source_buf{nullptr};
+  int *dest_buf{nullptr};
 };
 
 #include "quiet_on_stream_tester.cpp"
