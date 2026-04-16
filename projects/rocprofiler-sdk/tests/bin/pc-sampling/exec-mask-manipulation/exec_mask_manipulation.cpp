@@ -25,8 +25,8 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
 
-#define ITER_NUM   16 * 1024
-#define BLOCK_SIZE 1024
+#define PC_SAMPLING_ITERS (16 * 1024)
+#define NUM_BLOCKS        1024
 
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \
@@ -58,7 +58,7 @@ kernel1(const int c)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < ITER_NUM; i++)
+    for(int i = 0; i < PC_SAMPLING_ITERS; i++)
     {
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
         asm volatile("v_mov_b32 %0 %1\n" : "=v"(a) : "s"(c));
@@ -168,7 +168,7 @@ kernel2(const int c)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < ITER_NUM; i++)
+    for(int i = 0; i < PC_SAMPLING_ITERS; i++)
     {
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
         asm volatile("s_mov_b32 %0 %1\n" : "=s"(a) : "s"(c));
@@ -281,7 +281,7 @@ kernel3(const float c)
     float  d        = threadIdx.x;
     float  e        = 0;
     int    tid_even = threadIdx.x % 2;
-    for(int j = 0; j < ITER_NUM; j++)
+    for(int j = 0; j < PC_SAMPLING_ITERS; j++)
     {
         if(tid_even == 0)
         {
@@ -501,7 +501,7 @@ run_kernel()
     HIP_API_CALL(hipDeviceGetAttribute(&wave_size, hipDeviceAttributeWarpSize, 0));
 
     // Get device properties to retrieve GFXIP version
-    uint32_t num_blocks = BLOCK_SIZE;
+    uint32_t num_blocks = NUM_BLOCKS;
 
     for(int i = 1; i <= wave_size; i++)
     {
