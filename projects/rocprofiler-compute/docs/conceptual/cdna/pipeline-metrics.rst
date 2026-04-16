@@ -116,8 +116,8 @@ Overall instruction mix
 -----------------------
 
 This panel shows the total number of each type of instruction issued to
-the :doc:`various compute pipelines </conceptual/pipeline-descriptions>` on the
-:doc:`CU </conceptual/compute-unit>`. These are:
+the :doc:`various compute pipelines <pipeline-descriptions>` on the
+:doc:`CU <compute-unit>`. These are:
 
 .. tab-set::
 
@@ -200,7 +200,7 @@ instructions.
 .. _matrix-instruction-mix:
 
 Matrix instruction mix
---------------------
+----------------------
 
 .. warning::
 

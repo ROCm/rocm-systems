@@ -41,7 +41,7 @@ operations issued by a wavefront. The vL1D cache consists of several components:
 Together, this complex is known as the vL1D, or Texture Cache per Pipe
 (TCP). A simplified diagram of the vL1D is presented below:
 
-.. figure:: ../data/performance-model/l1perf_model.png
+.. figure:: ../../data/performance-model/l1perf_model.png
    :align: center
    :alt: Performance model of the vL1D Cache on AMD Instinct
    :width: 800
@@ -224,7 +224,7 @@ The address processor counts these instruction types as follows:
    * Global/Generic: global and flat memory operations, that are used for global
      and generic memory access.
 
-   * Spill/Stack: buffer instructions which are used on the MI50, MI100, and
+   * Spill/Stack: buffer instructions which are used on the MI100, and
      :ref:`MI2XX <mixxx-note>` accelerators for register spills / stack memory.
 
    These concepts are described in more detail in the :ref:`memory-spaces`,
