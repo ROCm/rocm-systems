@@ -55,7 +55,11 @@
 
 namespace rocshmem {
 
-constexpr char VERSION[] = "3.3.0";
+#define ROCSHMEM_MAJOR_VERSION 1
+#define ROCSHMEM_MINOR_VERSION 4
+#define ROCSHMEM_MAX_NAME_LEN  64
+
+constexpr char VERSION[] = ROCSHMEM_VERSION;
 
 /******************************************************************************
  **************************** HOST INTERFACE **********************************
