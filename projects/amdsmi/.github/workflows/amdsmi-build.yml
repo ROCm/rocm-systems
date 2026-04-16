@@ -20,7 +20,7 @@ jobs:
     name: Build
     runs-on:
       - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+      - mi450-golden-u24
     continue-on-error: true
     strategy:
       max-parallel: 10
