@@ -26,6 +26,7 @@ def gpu_connect_env() -> dict[str, str]:
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api",
         "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,xgmi,pcie",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
+        "ROCPROFSYS_SAMPLING_GPUS": "all",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "500",
         "ROCPROFSYS_CPU_FREQ_ENABLED": "OFF",
