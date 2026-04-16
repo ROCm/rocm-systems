@@ -13,7 +13,7 @@ pre-built LLVM with AMDGPU support.
 | **LLVM** (with AMDGPU backend) | **Yes** | 18+ (tested with 23.0.0git) | Must include `llc`, `llvm-mc`, `ld.lld` |
 | **CMake** | **Yes** | 3.20+ | |
 | **Ninja** | Recommended | any | `apt install ninja-build` |
-| **C++17 compiler** | **Yes** | GCC 11+ or Clang 15+ | |
+| **C++17 compiler** | **Yes** | Clang 15+ | |
 | **HIP + ROCm** | Optional | ROCm 6.x / 7.x | Only for GPU execution tests |
 | **AMD GPU** | Optional | MI300X (gfx942) recommended | Only for GPU execution tests |
 
@@ -47,7 +47,7 @@ mkdir build && cd build
 
 cmake .. -G Ninja \
   -DLLVM_INSTALL_DIR=$HOME/shared-llvm \
-  -DCMAKE_CXX_COMPILER=g++
+  -DCMAKE_CXX_COMPILER=clang++
 
 ninja batch_raise_test
 ```
@@ -157,7 +157,7 @@ cmake .. -G Ninja \
   -DCMAKE_PREFIX_PATH="/opt/rocm;$HOME/shared-llvm" \
   -DLLVM_INSTALL_DIR=$HOME/shared-llvm \
   -Dhip_DIR=/opt/rocm/lib/cmake/hip \
-  -DCMAKE_CXX_COMPILER=g++
+  -DCMAKE_CXX_COMPILER=clang++
 
 ninja
 ```
