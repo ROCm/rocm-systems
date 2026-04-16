@@ -3965,9 +3965,7 @@ rsmi_status_t rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t* power, float*
      << " | Device #: " << dv_ind
      << " | Read SYSFS file: " << dev->get_sys_file_path_by_type(amd::smi::kDevGpuMetrics, true)
      << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevGpuMetrics)
-     << " | Data: " << *power
-     << " | Timestamp: " << *timestamp
-     << " | Counter Resolution: "
+     << " | Data: " << *power << " | Timestamp: " << *timestamp << " | Counter Resolution: "
      << (counter_resolution ? std::to_string(*counter_resolution) : "N/A")
      << " | Returning: " << amd::smi::getRSMIStatusString(ret, false) << " |";
   LOG_INFO(ss);
