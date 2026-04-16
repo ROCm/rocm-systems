@@ -774,11 +774,16 @@ def load_grouping_policy(
 ) -> list[set[str]]:
     """Load same-bucket priority groups from profiling_counter_grouping_policy.yaml.
 
-    Reads the policy file and extracts counters for metrics listed in
-    same_bucket_priority_metric_ids for the given architecture.
+    Reads the policy file and extracts counters for each INDIVIDUAL metric
+    in the blocks/panels listed in same_bucket_priority_metric_ids.
+
+    When a block ID like "2" or panel ID like "2.1" is specified, this function
+    iterates over each individual metric in that block/panel and creates a
+    separate group for each metric's counters.
 
     Returns:
-        List of counter sets where counters in each set should be co-located.
+        List of counter sets where each set contains counters for ONE metric
+        that should be co-located in the same bucket (single pass).
     """
     policy_file = config_dir / "profiling_counter_grouping_policy.yaml"
     if not policy_file.is_file():
@@ -806,29 +811,60 @@ def load_grouping_policy(
     if not isinstance(priority_ids, dict) or not priority_ids:
         return []
 
-    # Collect all counters from priority metrics into one group
-    all_priority_counters: set[str] = set()
-    config_files = {f.name.split("_")[0]: f for f in (config_dir / arch).glob("*.yaml")}
+    # For each policy entry, iterate over individual metrics and create groups
+    metric_groups: list[set[str]] = []
 
     for metric_id in priority_ids:
-        texts: list[str] = []
-        panel_alias_dict = get_panel_alias()
-        append_analysis_yaml_for_filter_token(
-            metric_id,
-            config_files,
-            config_dir / arch,
-            texts,
-            panel_alias_dict,
-        )
-        if texts:
-            counters = parse_counters("\n".join(texts))
-            all_priority_counters.update(counters)
+        # Check if this is a full metric ID (x.x.x) or a block/panel ID (x or x.x)
+        parts = metric_id.split(".")
+        if len(parts) == 3:
+            # Full metric ID - just get counters for this one metric
+            for (
+                file_id,
+                panel_id,
+                metric_idx,
+                _metric_name,
+                metric_yaml,
+            ) in iter_yaml_metrics(config_dir, arch):
+                # Convert file_id to block number
+                block_num = str(int(file_id) // 100)
+                full_id = (
+                    f"{block_num}.{panel_id % 100 if panel_id else 0}.{metric_idx}"
+                )
+                if full_id == metric_id:
+                    counters = parse_counters(metric_yaml)
+                    if len(counters) >= 2:
+                        metric_groups.append(counters)
+                    break
+        else:
+            # Block or panel ID - iterate over all metrics in that scope
+            target_block = parts[0] if parts else None
+            target_panel = int(parts[1]) if len(parts) > 1 else None
 
-    if not all_priority_counters:
-        return []
+            for (
+                file_id,
+                panel_id,
+                metric_idx,
+                _metric_name,
+                metric_yaml,
+            ) in iter_yaml_metrics(config_dir, arch):
+                # Convert file_id (like "0200") to block number (like "2")
+                block_num = str(int(file_id) // 100)
 
-    # Return as a single group (all priority metrics go in same bucket)
-    return [all_priority_counters]
+                # Check if this metric matches the policy scope
+                if target_block and block_num != target_block:
+                    continue
+                if target_panel is not None:
+                    panel_table_id = panel_id % 100 if panel_id else 0
+                    if panel_table_id != target_panel:
+                        continue
+
+                # Extract counters for this individual metric
+                counters = parse_counters(metric_yaml)
+                if len(counters) >= 2:
+                    metric_groups.append(counters)
+
+    return metric_groups
 
 
 def main() -> None:
@@ -912,6 +948,7 @@ Examples:
         print("No counters found!", file=sys.stderr)
         sys.exit(1)
 
+    # Load grouping policy from profiling_counter_grouping_policy.yaml
     same_bucket_groups = load_grouping_policy(config_dir, arch)
 
     if args.verbose:
