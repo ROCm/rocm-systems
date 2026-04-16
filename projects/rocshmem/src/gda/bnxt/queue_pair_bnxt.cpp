@@ -23,7 +23,7 @@
  *****************************************************************************/
 
 #include "gda/queue_pair.hpp"
-#include "util.hpp"
+#include "log.hpp"
 
 namespace rocshmem {
 
@@ -131,39 +131,45 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
   __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-__device__ void QueuePair::bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe) {
-  struct bnxt_re_bcqe *hdr;
-  uint32_t flg_val;
-  uint8_t status;
-
-  const char bnxt_re_wc_error_strings[12][14] = {
-    "OK",
-    "BAD_RESP",
-    "LOC_LEN",
-    "LOC_QP_OP",
-    "PROT",
-    "MEM_OP",
-    "REM_INVAL",
-    "REM_ACC",
-    "REM_OP",
-    "RNR_NAK_XCED",
-    "TRNSP_XCED",
-    "WR_FLUSH",
-  };
-
-  hdr = (struct bnxt_re_bcqe*) ((char*)cqe + sizeof(struct bnxt_re_req_cqe));
-
-  flg_val = hdr->flg_st_typ_ph;
-
-  __threadfence();
-
-  // Is the CQE valid?
-  status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT)
-         & BNXT_RE_BCQE_STATUS_MASK;
-
-  if (status != BNXT_RE_REQ_ST_OK) {
-    printf("CQ Error %s (%x)\n", bnxt_re_wc_error_strings[status], status);
-    abort();
+[[maybe_unused]] __attribute__((noinline))
+__device__ void QueuePair::bnxt_print_cqe_error(uint8_t status) {
+  switch (status) {
+  case BNXT_RE_REQ_ST_BAD_RESP:
+    LOGD_ERROR_ABORT("CQ error BAD_RESP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_LOC_LEN:
+    LOGD_ERROR_ABORT("CQ error LOC_LEN (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_LOC_QP_OP:
+    LOGD_ERROR_ABORT("CQ error LOC_QP_OP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_PROT:
+    LOGD_ERROR_ABORT("CQ error PROT (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_MEM_OP:
+    LOGD_ERROR_ABORT("CQ error MEM_OP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_REM_INVAL:
+    LOGD_ERROR_ABORT("CQ error REM_INVAL (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_REM_ACC:
+    LOGD_ERROR_ABORT("CQ error REM_ACC (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_REM_OP:
+    LOGD_ERROR_ABORT("CQ error REM_OP (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_RNR_NAK_XCED:
+    LOGD_ERROR_ABORT("CQ error RNR_NAK_XCED (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_TRNSP_XCED:
+    LOGD_ERROR_ABORT("CQ error TRNSP_XCED (%x)", status);
+    break;
+  case BNXT_RE_REQ_ST_WR_FLUSH:
+    LOGD_ERROR_ABORT("CQ error WR_FLUSH (%x)", status);
+    break;
+  default:
+    LOGD_ERROR_ABORT("CQ error unknown status (%x)", status);
+    break;
   }
 }
 
@@ -180,8 +186,16 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
   do {
     cqe = (struct bnxt_re_req_cqe *) bnxt_cq.buf;
 
-#ifdef DEBUG
-    bnxt_check_cqe_error(cqe);
+#ifdef BUILD_DEBUG_DEVICE
+    {
+      uint32_t flg_val = __hip_atomic_load(
+          static_cast<uint32_t*>(__builtin_assume_aligned(
+              (char*)cqe + sizeof(struct bnxt_re_req_cqe) + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph), 4)),
+          __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
+      if (status != BNXT_RE_REQ_ST_OK)
+        bnxt_print_cqe_error(status);
+    }
 #endif
 
     /* Update the SQ head

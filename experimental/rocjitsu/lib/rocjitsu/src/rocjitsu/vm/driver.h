@@ -2,53 +2,53 @@
 // SPDX-License-Identifier: MIT
 
 /// @file driver.h
-/// @brief Hardware driver interface for a VirtualMachine.
+/// @brief Abstract kernel-mode driver interface.
+///
+/// @details Defines the syscall-level interface between the host runtime
+/// (e.g., ROCR's user-mode driver API) and the simulated GPU. The Linux implementation
+/// emulates the AMD KFD ioctl interface. Platform-specific interposer libraries
+/// route open/close/ioctl/mmap calls to a concrete Driver implementation.
 
 #ifndef ROCJITSU_VM_DRIVER_H_
 #define ROCJITSU_VM_DRIVER_H_
 
-#include "rocjitsu/vm/amdgpu/command_processor.h"
-
+#include <cstddef>
 #include <cstdint>
+
+#ifdef __linux__
+#include <sys/types.h>
+#else
+using off_t = int64_t;
+#endif
 
 namespace rocjitsu {
 
-class VirtualMachine;
-
-/// @brief Hardware driver interface for a VirtualMachine.
-///
-/// Models the kernel-mode driver interface presented to a user-mode driver
-/// (e.g. rocr). Owned as a value member of VirtualMachine - the driver is
-/// part of the hardware being modeled.
-///
-/// The driver is a thin bridge between the host (app) thread and the
-/// event-driven simulation. It translates API calls into simulation events
-/// via schedule_event_async().
+/// @brief Abstract kernel-mode driver interface for simulated GPU access.
 class Driver {
 public:
-  /// @brief Construct a driver for the given VM.
-  /// @param vm The virtual machine that owns this driver.
-  explicit Driver(VirtualMachine &vm);
-  ~Driver() = default;
+  virtual ~Driver() = default;
 
-  Driver(const Driver &) = delete;
-  Driver &operator=(const Driver &) = delete;
+  /// @brief Open the device.
+  /// @returns File descriptor (or fake fd for simulation).
+  virtual int open() = 0;
 
-  /// @brief Submit a dispatch packet to an XCD's command processor.
-  ///
-  /// Thread-safe. Injects a doorbell event into the simulation via
-  /// schedule_event_async().
-  /// @param packet The dispatch parameters.
-  /// @param xcd_idx Which XCD to submit to (default: 0).
-  void submit(amdgpu::DispatchPacket packet, uint32_t xcd_idx = 0);
+  /// @brief Close the device.
+  /// @returns 0 on success, negative errno on failure.
+  virtual int close() = 0;
 
-  /// @brief Request the simulation to stop.
-  ///
-  /// Thread-safe. Signals the engine to exit at the next epoch boundary.
-  void close();
+  /// @brief Handle an ioctl request.
+  /// @param request The ioctl command number.
+  /// @param arg Pointer to the ioctl argument struct.
+  /// @returns 0 on success, negative errno on failure.
+  virtual int ioctl(unsigned long request, void *arg) = 0;
 
-private:
-  VirtualMachine &vm_;
+  /// @brief Map device memory into the host address space.
+  /// @returns Mapped address, or MAP_FAILED on failure.
+  virtual void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) = 0;
+
+  /// @brief Unmap previously mapped device memory.
+  /// @returns 0 on success, negative errno on failure.
+  virtual int munmap(void *addr, size_t length) = 0;
 };
 
 } // namespace rocjitsu

@@ -31,6 +31,7 @@ option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
 option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
+option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -83,9 +84,6 @@ endif()
 if(ENABLE_YAML_TAGS)
     add_definitions(-DENABLE_YAML_TAGS)
 endif()
-
-# flag to generate standalone exe per src file.
-message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
 
 if(NOT WIN32)
   set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")

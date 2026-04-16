@@ -455,6 +455,19 @@ PROFILING WORKFLOW:
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
+    parser
+        .add_argument({ "--selected-regions" },
+                      "Comma-separated list of roctx region names. When set, only "
+                      "activity inside matching roctx regions is traced (matched against "
+                      "roctxRangeStartA message)")
+        .count(1)
+        .dtype("string")
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, env::SELECTED_REGIONS, p.get<std::string>("selected-regions"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
+
     parser.start_group("TRACING OPTIONS", "Specific options controlling tracing (i.e. "
                                           "deterministic measurements of every event)");
     parser
