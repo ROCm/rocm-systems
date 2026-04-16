@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_ipc.hpp"
+#include "log.hpp"
 #include "context_ipc_device.hpp"
 #include "context_ipc_tmpl_device.hpp"
 
@@ -45,16 +46,6 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
   ctx_id_ = ctx_id;
 
   orders_.store = detail::atomic::rocshmem_memory_order::memory_order_seq_cst;
-}
-
-__device__ void IPCContext::threadfence_system() {
-  __threadfence_system();
-}
-
-__device__ void IPCContext::ctx_create() {
-}
-
-__device__ void IPCContext::ctx_destroy(){
 }
 
 __device__ void IPCContext::putmem(void *dest, const void *source, size_t nelems,
@@ -233,7 +224,7 @@ __device__ void IPCContext::putmem_signal(void *dest, const void *source, size_t
     amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
     break;
   default:
-    DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+    LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
     break;
   }
 }
@@ -253,7 +244,7 @@ __device__ void IPCContext::putmem_signal_wg(void *dest, const void *source, siz
       amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
   }
@@ -274,7 +265,7 @@ __device__ void IPCContext::putmem_signal_wave(void *dest, const void *source, s
       amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
   }

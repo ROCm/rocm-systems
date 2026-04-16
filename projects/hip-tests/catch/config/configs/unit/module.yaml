@@ -32,7 +32,7 @@ module:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [launch, multigpu]
+    tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
     <<: *level_2
     tags: [launch]
@@ -91,7 +91,7 @@ module:
     tags: [resource]
   Unit_hipGetProcAddress_ModuleApisCooperativeKernels:
     <<: *level_2
-    tags: [multigpu, resource]
+    tags: [resource]
   Unit_hipGetProcAddress_ModuleApisOccupancy:
     <<: *level_2
     tags: [resource]
@@ -132,7 +132,7 @@ module:
     tags: [launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Functional:
     <<: *level_2
-    tags: [launch, multigpu]
+    tags: [launch]
   Unit_hipModuleLoadData_Positive_Basic:
     <<: *level_2
     # Below tests tests fail in PSDB
@@ -186,10 +186,10 @@ module:
     tags: [function]
   Unit_hipModuleGetGlobal_Functional:
     <<: *level_2
-    tags: [function, multigpu]
+    tags: [function]
   Unit_hipModuleLoad_MultProcess_MultGPU:
     <<: *level_2
-    tags: [load, multigpu]
+    tags: [load]
   Unit_hip_linker_spirv_input:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
@@ -208,12 +208,12 @@ module:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-    tags: [launch, multigpu]
+    tags: [launch]
   Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-    tags: [launch, multigpu]
+    tags: [launch]
   Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_2
     tags: [multigpu]
@@ -293,7 +293,7 @@ module:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [launch, multigpu]
+    tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_2
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23

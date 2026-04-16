@@ -76,7 +76,7 @@ cooperativeGrps:
     tags: [cooperative, groups]
   Unit_hipCGMultiGridGroupType_Basic:
     <<: *level_2
-    tags: [cooperative, groups, multigpu]
+    tags: [cooperative, groups]
   Unit_hipCGMultiGridGroupType_Barrier:
     <<: *level_2
     tags: [cooperative, groups, multigpu]
@@ -105,19 +105,19 @@ cooperativeGrps:
     tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
-    tags: [cooperative, launch, multigpu]
+    tags: [cooperative, launch]
   Unit_Multi_Grid_Group_Getters_Positive_Basic:
     <<: *level_2
-    tags: [cooperative, groups, multigpu]
+    tags: [cooperative, groups]
   Unit_Multi_Grid_Group_Getters_Positive_Base_Type:
     <<: *level_2
-    tags: [cooperative, groups, multigpu]
+    tags: [cooperative, groups]
   Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions:
     <<: *level_2
-    tags: [cooperative, groups, multigpu]
+    tags: [cooperative, groups]
   Unit_Multi_Grid_Group_Positive_Sync:
     <<: *level_2
-    tags: [cooperative, groups, multigpu]
+    tags: [cooperative, groups]
   Unit_coalesced_groups_shfl_down:
     <<: *level_2
     # Below tests hang in Jenkins PSDB

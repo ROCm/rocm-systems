@@ -1507,6 +1507,13 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_signal_t        completion_signal;
     } hsa_amd_svm_discard_batch_async;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    struct
+    {
+        hsa_signal_t signal;
+        uint32_t*    event_id;
+    } hsa_amd_signal_get_event_id;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

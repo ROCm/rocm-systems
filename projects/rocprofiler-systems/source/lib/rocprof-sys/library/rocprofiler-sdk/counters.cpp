@@ -47,7 +47,8 @@ metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::GPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, name.c_str(),
           name.c_str(), metric_description.c_str(), LONG_DESCRIPTION, COMPONENT,
-          "Unit Count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          "Unit Count", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+          "{}" });
 }
 }  // namespace
 namespace

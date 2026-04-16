@@ -427,6 +427,7 @@ to_string (amd_dbgapi_instruction_kind_t instruction_kind)
       CASE (INSTRUCTION_KIND_BARRIER);
       CASE (INSTRUCTION_KIND_SLEEP);
       CASE (INSTRUCTION_KIND_SPECIAL);
+      CASE (INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR);
     }
   return to_string (make_hex (instruction_kind));
 }
@@ -547,6 +548,7 @@ to_string (detail::query_ref<amd_dbgapi_instruction_kind_t> ref)
           information)))));
     case AMD_DBGAPI_INSTRUCTION_KIND_INDIRECT_BRANCH_REGISTER_PAIR:
     case AMD_DBGAPI_INSTRUCTION_KIND_INDIRECT_BRANCH_CONDITIONAL_REGISTER_PAIR:
+    case AMD_DBGAPI_INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR:
       return to_string (make_ref (
         make_ref (
           static_cast<const amd_dbgapi_register_id_t *const *> (information)),

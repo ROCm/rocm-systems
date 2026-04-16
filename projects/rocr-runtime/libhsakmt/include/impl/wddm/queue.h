@@ -202,8 +202,8 @@ public:
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
-  void *ring;         //!< AQL queue, allocated in ROCR and points to the AQL packets
-  uint64_t ring_size; //!< AQL queue size in packets
+  void *ring; //!< AQL queue, allocated in ROCR and points to the AQL packets
+  uint64_t ring_size;
 
   // ib_start_addr is the current ib start address
   uint64_t ib_start_addr;
@@ -229,7 +229,7 @@ private:
     return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
   }
   void HandleError(hsa_status_t status);
-  bool UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave32);
+  bool UpdateScratch(uint32_t private_segment_size, bool wave32);
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
 
@@ -257,7 +257,7 @@ private:
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
 
-  uint64_t max_scratch_waves_;
+  uint64_t scratch_waves_;
   uint64_t dispatch_waves_;
   uint64_t scratch_size_per_wave_;
   uint64_t scratch_size_;

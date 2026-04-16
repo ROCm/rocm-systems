@@ -9,13 +9,13 @@ namespace rocjitsu {
 namespace risc_v {
 namespace detail {
 
-RType::RType(const std::string &mnemonic, uint32_t raw)
-    : IsaInstruction<Isa>(mnemonic), inst_(std::bit_cast<RTypeMachineInst>(raw)) {
+RType::RType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(std::bit_cast<RTypeMachineInst>(raw)) {
   size_ = 4;
 }
 
-IType::IType(const std::string &mnemonic, uint32_t raw)
-    : IsaInstruction<Isa>(mnemonic), inst_(std::bit_cast<ITypeMachineInst>(raw)) {
+IType::IType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(std::bit_cast<ITypeMachineInst>(raw)) {
   size_ = 4;
 }
 
@@ -24,8 +24,8 @@ int32_t IType::imm() const {
   return static_cast<int32_t>(inst_.imm11_0 << 20) >> 20;
 }
 
-SType::SType(const std::string &mnemonic, uint32_t raw)
-    : IsaInstruction<Isa>(mnemonic), inst_(std::bit_cast<STypeMachineInst>(raw)) {
+SType::SType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(std::bit_cast<STypeMachineInst>(raw)) {
   size_ = 4;
 }
 
@@ -35,8 +35,8 @@ int32_t SType::imm() const {
   return static_cast<int32_t>(raw << 20) >> 20;
 }
 
-BType::BType(const std::string &mnemonic, uint32_t raw)
-    : IsaInstruction<Isa>(mnemonic), inst_(std::bit_cast<BTypeMachineInst>(raw)) {
+BType::BType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(std::bit_cast<BTypeMachineInst>(raw)) {
   size_ = 4;
 }
 
@@ -47,8 +47,8 @@ int32_t BType::imm() const {
   return static_cast<int32_t>(raw << 19) >> 19;
 }
 
-UType::UType(const std::string &mnemonic, uint32_t raw)
-    : IsaInstruction<Isa>(mnemonic), inst_(std::bit_cast<UTypeMachineInst>(raw)) {
+UType::UType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(std::bit_cast<UTypeMachineInst>(raw)) {
   size_ = 4;
 }
 
@@ -57,8 +57,8 @@ int32_t UType::imm() const {
   return static_cast<int32_t>(inst_.imm31_12 << 12);
 }
 
-JType::JType(const std::string &mnemonic, uint32_t raw)
-    : IsaInstruction<Isa>(mnemonic), inst_(std::bit_cast<JTypeMachineInst>(raw)) {
+JType::JType(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(std::bit_cast<JTypeMachineInst>(raw)) {
   size_ = 4;
 }
 
@@ -69,8 +69,8 @@ int32_t JType::imm() const {
   return static_cast<int32_t>(raw << 11) >> 11;
 }
 
-R4Type::R4Type(const std::string &mnemonic, uint32_t raw)
-    : IsaInstruction<Isa>(mnemonic), inst_(std::bit_cast<R4TypeMachineInst>(raw)) {
+R4Type::R4Type(std::string_view mnemonic, uint32_t raw, ExecuteFn exec_fn)
+    : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(std::bit_cast<R4TypeMachineInst>(raw)) {
   size_ = 4;
 }
 

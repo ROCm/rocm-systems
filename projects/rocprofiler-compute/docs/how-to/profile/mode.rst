@@ -713,7 +713,7 @@ Roofline options (profile)
 
 .. note::
 
-  For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
+  For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/cdna/cdna-performance-model`
 
 
 Roofline only

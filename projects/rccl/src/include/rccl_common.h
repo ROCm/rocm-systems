@@ -61,8 +61,6 @@ typedef enum {
 
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
-  RCCL_MSCCL,
-  RCCL_MSCCLPP,
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif

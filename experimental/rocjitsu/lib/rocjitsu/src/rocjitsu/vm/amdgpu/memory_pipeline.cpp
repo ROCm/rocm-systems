@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <bit>
@@ -29,6 +30,22 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
   if (!d.is_load)
     return;
 
+  // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
+  // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
+  if (d.lds_dst) {
+    auto &lds = cu.lds();
+    uint32_t per_lane_bytes = d.num_elems * d.elem_size;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+      if (!(d.lane_mask & (1ULL << lane)))
+        continue;
+      uint32_t lds_addr = d.lds_base + lane * per_lane_bytes;
+      uint32_t data_offset = lane * per_lane_bytes;
+      for (uint32_t b = 0; b < per_lane_bytes; ++b)
+        lds.write8(lds_addr + b, d.response_data[data_offset + b]);
+    }
+    return;
+  }
+
   // Atomics: response layout is [lane * elem_size], regular loads are
   // [lane * (num_elems * elem_size) + elem * elem_size].
   bool is_atomic = (d.atomic_op != AtomicOp::NONE);
@@ -41,7 +58,10 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
       uint32_t val = 0;
       uint32_t data_offset = lane * stride + i * 4;
-      uint32_t copy_size = std::min(d.elem_size - i * 4, 4u);
+      // For atomics (8-byte element split across 2 VGPRs): copy 4 then 4.
+      // For regular loads (one element per VGPR): always copy elem_size bytes.
+      uint32_t copy_size =
+          is_atomic ? std::min(d.elem_size - i * 4, 4u) : std::min(d.elem_size, 4u);
       std::memcpy(&val, &d.response_data[data_offset], copy_size);
       cu.write_vgpr(d.dst_reg_base + i, lane, val);
     }
@@ -64,8 +84,22 @@ void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
   if (!d.is_load)
     return;
   auto &cu = wf.cu();
-  for (uint32_t i = 0; i < d.num_dwords; ++i)
+  for (uint32_t i = 0; i < d.num_dwords; ++i) {
     cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
+  }
+  // Trace: log SMEM load values for debugging.
+  util::Logger::vm([&](auto &os) {
+    if (wf.wg_id() == 0) {
+      static thread_local uint32_t slw_count = 0;
+      if (++slw_count <= 100) {
+        os << std::format("SMEM complete: addr={:#x} dst_s={} ndw={} data=[{:#x}", d.addr,
+                          d.dst_reg_base, d.num_dwords, d.response_data[0]);
+        for (uint32_t i = 1; i < d.num_dwords && i < 4; ++i)
+          os << std::format(",{:#x}", d.response_data[i]);
+        os << std::format("] wg={}", wf.wg_id());
+      }
+    }
+  });
 }
 
 namespace {
@@ -82,6 +116,8 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return old_val + src_val;
   case AtomicOp::SUB:
     return old_val - src_val;
+  case AtomicOp::RSUB:
+    return src_val - old_val;
   case AtomicOp::SMIN:
     return static_cast<T>(std::min(static_cast<S>(old_val), static_cast<S>(src_val)));
   case AtomicOp::UMIN:
@@ -244,7 +280,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
 
 } // namespace
 
-void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
+void GlobalMemPipeline::initiate_access(Instruction &inst, [[maybe_unused]] Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
 
   if (d.atomic_op != AtomicOp::NONE) {
@@ -257,6 +293,41 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront & /*wf*/) {
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
               d.mtype, d.non_temporal);
   } else {
+    // Trace: dump per-lane values for stores to tensor address range.
+    util::Logger::vm([&](auto &os) {
+      if (d.lane_mask == 0)
+        return;
+      uint64_t rm = d.lane_mask;
+      bool hits_tensor = false;
+      while (rm) {
+        uint32_t ln = __builtin_ctzll(rm);
+        rm &= rm - 1;
+        if (d.per_lane_addr[ln] >= 0x4d00c00000ULL && d.per_lane_addr[ln] < 0x4d00c00100ULL) {
+          hits_tensor = true;
+          break;
+        }
+      }
+      if (!hits_tensor)
+        return;
+      uint32_t stride = d.num_elems * d.elem_size;
+      rm = d.lane_mask;
+      int cnt = 0;
+      while (rm && cnt < 6) {
+        uint32_t ln = __builtin_ctzll(rm);
+        rm &= rm - 1;
+        uint64_t a = d.per_lane_addr[ln];
+        if (a < 0x4d00c00000ULL || a >= 0x4d00c00100ULL)
+          continue;
+        uint32_t v = 0;
+        if (stride > 0 && d.store_data.size() >= ln * stride + 4)
+          std::memcpy(&v, &d.store_data[ln * stride], 4);
+        if (cnt > 0)
+          os << '\n' << std::format("[rj log VM] ");
+        os << std::format("SLANE L{} @+{:#x} ={:#x} ipc={:#x} exec={:#x} wf={} wg={}", ln,
+                          a - 0x4d00c00000ULL, v, d.issue_pc, d.lane_mask, wf.wf_id(), wf.wg_id());
+        ++cnt;
+      }
+    });
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
                d.mtype, d.non_temporal);
   }

@@ -336,7 +336,7 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
-                           core::Queue** queue) override;
+                           bool metadata_queue, core::Queue** queue) override;
 
   // @brief Decrement GWS ref count.
   void GWSRelease();
@@ -466,8 +466,13 @@ class GpuAgent : public GpuAgentInt {
     }
   }
 
-  const size_t MAX_SCRATCH_APERTURE_PER_XCC = (1ULL << 32);
-  size_t MaxScratchDevice() const { return properties_.NumXcc * MAX_SCRATCH_APERTURE_PER_XCC; }
+  const size_t MAX_SCRATCH_APERTURE_PER_XCC = (1ULL << 32); // 4GB
+  const size_t MAX_SCRATCH_APERTURE_PER_XCC_GFX12 = (2ULL << 32); // 8GB
+  __forceinline size_t MaxScratchDevice() const {
+    return properties_.NumXcc *
+          (isa_->GetMajorVersion() >= 12 ? MAX_SCRATCH_APERTURE_PER_XCC_GFX12 :
+                                            MAX_SCRATCH_APERTURE_PER_XCC);
+  }
 
   void ReserveScratch();
 
@@ -479,12 +484,27 @@ class GpuAgent : public GpuAgentInt {
     const uint32_t GFX94X_MIN_CP_FW_VERSION_REQUIRED = 177;
     const uint32_t GFX95X_MIN_CP_FW_VERSION_REQUIRED = 24;
 
-    return (core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
-	    supported_isas()[0]->GetMajorVersion() == 9 &&
-	    ((supported_isas()[0]->GetMinorVersion() == 4 &&
-	      properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED) ||
-	     (supported_isas()[0]->GetMinorVersion() == 5 &&
-	      properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED)));
+    if (!core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim())
+      return false;
+
+    switch (supported_isas()[0]->GetMajorVersion()) {
+      case 9:
+        switch (supported_isas()[0]->GetMinorVersion()) {
+          case 4:
+            return (properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+          case 5:
+            return (properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED);
+          default:
+            break;
+        }
+        break;
+      case 12:
+        return (supported_isas()[0]->GetMinorVersion() >= 5);
+      default:
+        break;
+    }
+
+    return false;
   };
 
   hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) override;
@@ -536,14 +556,14 @@ class GpuAgent : public GpuAgentInt {
   const uint32_t maxAqlSize_ = 0x20000;  // 8MB max
 
   // @brief Create an internal queue allowing tools to be notified.
-  core::Queue* CreateInterceptibleQueue(const uint32_t size = 0) {
-    return CreateInterceptibleQueue(core::Queue::DefaultErrorHandler, nullptr, size);
+  core::Queue* CreateInterceptibleQueue(bool metadata_prefetch, const uint32_t size = 0) {
+    return CreateInterceptibleQueue(core::Queue::DefaultErrorHandler, nullptr, metadata_prefetch, size);
   }
 
   // @brief Create an internal queue, with a custom error handler, allowing tools to be
   // notified.
   core::Queue* CreateInterceptibleQueue(void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
-                                        void* data, const uint32_t size);
+                                        void* data, bool metadata_prefetch, const uint32_t size);
 
   // @brief Create SDMA blit object.
   //
@@ -797,6 +817,8 @@ class GpuAgent : public GpuAgentInt {
 
   void GetInfoMemoryProperties(uint8_t value[8]) const;
 
+  void GetAqlInfoProperties(uint8_t value[8]) const;
+
   // @brief Alternative aperture base address. Only on KV.
   uintptr_t ape1_base_;
 
@@ -899,8 +921,6 @@ class GpuAgent : public GpuAgentInt {
   amdgpu_device_handle ldrm_dev_;
   HsaAMDGPUDeviceHandle libthunk_dev_;
 
-  DISALLOW_COPY_AND_ASSIGN(GpuAgent);
-
   // Check if SDMA engine by ID is free
   bool DmaEngineIsFree(uint32_t engine_id);
 
@@ -924,6 +944,17 @@ class GpuAgent : public GpuAgentInt {
   bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.
   bool large_bar_enabled_;
+
+  bool extended_aql_dispatch_supported_;
+
+  /* Workgroup Cluster Parameters */
+  bool workgroup_clusters_supported_;
+  hsa_amd_dim3_t kern_cluster_max_dim_;
+  hsa_amd_dim3_t cluster_max_dim_;
+
+  size_t max_wave_scratch_;
+
+  DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };
 
 }  // namespace amd

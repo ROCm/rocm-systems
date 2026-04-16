@@ -16,25 +16,25 @@ namespace detail {
 class SretInst : public RType {
 public:
   explicit SretInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 };
 
 class MretInst : public RType {
 public:
   explicit MretInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 };
 
 class WfiInst : public RType {
 public:
   explicit WfiInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 };
 
 class SfenceVmaInst : public RType {
 public:
   explicit SfenceVmaInst(uint32_t raw);
-  void execute(HartState &ctx) override;
+  void execute_impl(HartState &ctx);
 
 private:
   Operand rs1;

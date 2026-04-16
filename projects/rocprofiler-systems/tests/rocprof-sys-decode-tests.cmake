@@ -28,12 +28,12 @@
 
 set(_video_decode_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api"
-    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,vcn_busy,mem_usage"
+    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none"
 )
 set(_jpeg_decode_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocjpeg_api"
-    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,jpeg_activity,jpeg_busy,mem_usage"
+    "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,jpeg_activity,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none"
 )
 

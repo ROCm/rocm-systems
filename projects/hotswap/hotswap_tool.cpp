@@ -145,7 +145,7 @@ bool compute_program_header_offset(const Elf64_Ehdr *ehdr, size_t size,
                    static_cast<size_t>(ehdr->e_phentsize),
                    &hdr_index_offset) ||
       !checked_add(ehdr->e_phoff, hdr_index_offset, hdr_offset) ||
-      sizeof(Elf64_Phdr) > size - *hdr_offset) {
+      *hdr_offset > size || sizeof(Elf64_Phdr) > size - *hdr_offset) {
     return false;
   }
   return true;
@@ -455,9 +455,15 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     if (status == HSA_STATUS_SUCCESS) {
       return status;
     }
+    fprintf(stderr,
+            "hotswap: rewrite failed (status=%d), falling back to "
+            "original code object\n",
+            static_cast<int>(status));
     return load_original_reader(executable, agent, code_object_reader, options,
                                 loaded_code_object, reader_from_file);
   } catch (const std::bad_alloc &) {
+    fprintf(stderr, "hotswap: OOM during rewrite, falling back to "
+                    "original code object\n");
     return load_original_reader(executable, agent, code_object_reader, options,
                                 loaded_code_object, reader_from_file);
   }
