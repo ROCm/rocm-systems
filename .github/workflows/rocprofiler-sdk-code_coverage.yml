@@ -423,7 +423,7 @@ jobs:
     - id: generatereport
       name: Generate Code Coverage Comment
       if: github.event_name == 'pull_request'
-      timeout-minutes: 5
+      timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       shell: bash
       run: |
@@ -468,7 +468,7 @@ jobs:
 
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
-      timeout-minutes: 5
+      timeout-minutes: 10
       uses: actions/github-script@v6
       env:
         COMMENT_BODY: |
