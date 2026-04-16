@@ -5,24 +5,35 @@
 #include "fmt/format.h"
 #include "rocprofiler_compute_tool.h"
 
-TEST_F(TestSdkCallbacks, ProvidedCountersAvaiableWithMultiplexingDisabled_ReturnsFirstPmcForCollection)
+using namespace rocprofiler_compute_tool;
+
+TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_ReturnsFirstPmcForCollection)
 {
-    m_tool_data->iteration_multiplexing_mode = rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED;
-    const auto config_index_0 = dispatch_kernel(1, m_counters_pmc0, m_counters_pmc1);
-    const auto config_index_1 = dispatch_kernel(1, m_counters_pmc0, m_counters_pmc1);
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
+    const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
-    EXPECT_LT(config_index_0, created_config_info.size());
-    EXPECT_LT(config_index_1, created_config_info.size());
     EXPECT_EQ(created_config_info[config_index_0].counter_names, m_counters_pmc0);
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedCountersAvaiableWithKernelMultiplexing_ReturnsEachPmcForCollection)
+TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_ReturnsFirstPmcForCollection)
 {
-    m_tool_data->iteration_multiplexing_mode = rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL;
-    const auto config_index_0 = dispatch_kernel(1, m_counters_pmc0, m_counters_pmc1);
-    const auto config_index_1 = dispatch_kernel(1, m_counters_pmc0, m_counters_pmc1);
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
+    const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
+
+    const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
+    EXPECT_EQ(created_config_info[config_index_0].counter_names, m_counters_pmc0);
+    EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedSameKernelWithKernelMultiplexing_ReturnsEachPmcForCollection)
+{
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
+    const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
     EXPECT_LT(config_index_0, created_config_info.size());
@@ -31,9 +42,67 @@ TEST_F(TestSdkCallbacks, ProvidedCountersAvaiableWithKernelMultiplexing_ReturnsE
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
+TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithKernelMultiplexing_ReturnsFirstPmcForCollection)
+{
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
+    const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_2 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_3 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
+
+    const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
+    EXPECT_EQ(created_config_info[config_index_0].counter_names, m_counters_pmc0);
+    EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
+    EXPECT_EQ(created_config_info[config_index_2].counter_names, m_counters_pmc1);
+    EXPECT_EQ(created_config_info[config_index_3].counter_names, m_counters_pmc1);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_ReturnsEachPmcForCollection)
+{
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::LAUNCH;
+    constexpr kernel_dispatch_info_t info    = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
+
+    const auto config_index_0 = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_1 = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+
+    const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
+    EXPECT_EQ(created_config_info[config_index_0].counter_names, m_counters_pmc0);
+    EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_ReturnsSamePmcForCollection)
+{
+    m_tool_data->iteration_multiplexing_mode   = iteration_multiplexing_mode_t::LAUNCH;
+    kernel_dispatch_info_t info                = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
+    const auto&            created_config_info = m_sdk_wrapper->get_create_counter_config_info();
+
+    auto config_index = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+    EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
+
+    info.kernel_id++;
+    config_index = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+    EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
+
+    info.queue_id++;
+    config_index = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+    EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
+
+    info.workgroup_size.x++;
+    config_index = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+    EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
+
+    info.grid_size.x++;
+    config_index = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+    EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
+
+    info.LDS_memory_size++;
+    config_index = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
+    EXPECT_EQ(created_config_info[config_index].counter_names, m_counters_pmc0);
+}
+
 TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfiguredForCollection)
 {
-    dispatch_kernel(1, m_counters_pmc0, m_counters_pmc1);
+    dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
     EXPECT_EQ(created_config_info.size(), 2);
@@ -41,41 +110,44 @@ TEST_F(TestSdkCallbacks, ProvidedRequestedCountersAvaiable_AllConfiguredForColle
     EXPECT_EQ(created_config_info[1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedKernelIdsWithDisabledMultiplexing_ReturnsResultForThemOnly)
+TEST_P(TestSdkCallbacksMultiplexing, DISABLED_ProvidedCountersNotAvailable_ReturnsNoConfig)
 {
-    m_tool_data->iteration_multiplexing_mode = rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED;
-    m_tool_data->target_kernel_ids.insert(2);
+    m_tool_data->requested_counters = convert_counters_per_pmc_to_str({m_counters_pmc0, m_counters_pmc1});
 
-    dispatch_kernel(1, m_counters_pmc0);
-    dispatch_kernel(2, m_counters_pmc1);
+    rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
+    dispatch_data.dispatch_info.kernel_id                      = 1;
+    dispatch_data.dispatch_info.agent_id.handle                = 0xff;
+    rocprofiler_counter_config_id_t config{m_invalid_config_id};
+    m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
 
-    const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
-    EXPECT_EQ(created_config_info.size(), 1);
-    EXPECT_EQ(created_config_info[0].counter_names, m_counters_pmc1);
+    EXPECT_EQ(config.handle, m_invalid_config_id);
+    
 }
 
-TEST_F(TestSdkCallbacks, ProvidedKernelDispatchRangesWithDisabledMultiplexing_ReturnsResultForThemOnly)
+TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_ReturnsResultForThemOnly)
 {
-    m_tool_data->iteration_multiplexing_mode = rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED;
-    m_tool_data->kernel_filter_ranges.emplace_back(2, 2);
+    m_tool_data->target_kernel_ids.insert(2);
 
-    const auto config_index_0 = dispatch_kernel(11, m_counters_pmc0);
-    const auto config_index_1 = dispatch_kernel(11, m_counters_pmc1);
+    m_tool_data->iteration_multiplexing_mode = m_multiplexing_mode;
+    const auto config_index_0                = dispatch_kernel_with_id(1, m_counters_pmc0);
+    const auto config_index_1                = dispatch_kernel_with_id(2, m_counters_pmc1);
 
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
-    EXPECT_EQ(created_config_info.size(), 1);
     EXPECT_EQ(config_index_0, m_invalid_config_id);
-    EXPECT_EQ(config_index_1, 0);
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedMultiplexingDisabled_ReturnsFirstPmcConfig)
+TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_ReturnsResultForThemOnly)
 {
-    const auto selected_config = dispatch_kernel(1, m_counters_pmc0, m_counters_pmc1);
+    m_tool_data->kernel_filter_ranges.emplace_back(2, 2);
+
+    m_tool_data->iteration_multiplexing_mode = m_multiplexing_mode;
+    const auto config_index_0                = dispatch_kernel_with_id(1, m_counters_pmc0);
+    const auto config_index_1                = dispatch_kernel_with_id(1, m_counters_pmc1);
 
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
-    EXPECT_GE(created_config_info.size(), selected_config);
-    EXPECT_EQ(created_config_info[selected_config].counter_names, m_counters_pmc0);
+    EXPECT_EQ(config_index_0, m_invalid_config_id);
+    EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -83,24 +155,37 @@ TEST_F(TestSdkCallbacks, ProvidedMultiplexingDisabled_ReturnsFirstPmcConfig)
 void TestSdkCallbacks::SetUp()
 {
     m_sdk_wrapper = std::make_shared<MockSdkWrapper>();
-    rocprofiler_compute_tool::test_knobs::set_sdk_wrapper(m_sdk_wrapper);
-    m_sdk_callbacks = std::make_shared<rocprofiler_compute_tool::SdkCallbacksImpl>(m_sdk_wrapper);
-    m_tool_data     = std::make_unique<rocprofiler_compute_tool::tool_data_t>();
+    test_knobs::set_sdk_wrapper(m_sdk_wrapper);
+    m_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(m_sdk_wrapper);
+    m_tool_data     = std::make_unique<tool_data_t>();
 }
 
-uint64_t TestSdkCallbacks::dispatch_kernel(uint64_t                        kernel_id,
-                                           const std::vector<std::string>& counters_pmc0,
-                                           const std::vector<std::string>& counters_pmc1)
+uint64_t TestSdkCallbacks::dispatch_kernel_with_dispatch_info(const kernel_dispatch_info_t& dispatch_info,
+                                                              const std::vector<std::string>& counters_pmc0,
+                                                              const std::vector<std::string>& counters_pmc1)
 {
     m_tool_data->requested_counters = convert_counters_per_pmc_to_str({counters_pmc0, counters_pmc1});
     m_sdk_wrapper->set_available_counters(concat_counters(counters_pmc0, counters_pmc1));
 
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
-    dispatch_data.dispatch_info.kernel_id                      = kernel_id;
+    dispatch_data.dispatch_info.kernel_id                      = dispatch_info.kernel_id;
+    dispatch_data.dispatch_info.queue_id.handle                = dispatch_info.queue_id;
+    dispatch_data.dispatch_info.workgroup_size                 = dispatch_info.workgroup_size;
+    dispatch_data.dispatch_info.grid_size                      = dispatch_info.grid_size;
+    dispatch_data.dispatch_info.group_segment_size             = dispatch_info.LDS_memory_size;
     dispatch_data.dispatch_info.agent_id.handle                = 0xff;
     rocprofiler_counter_config_id_t config{m_invalid_config_id};
     m_sdk_callbacks->dispatch_callback(dispatch_data, &config, &m_tool_data);
     return config.handle;
+}
+
+uint64_t TestSdkCallbacks::dispatch_kernel_with_id(uint64_t                        kernel_id,
+                                                   const std::vector<std::string>& counters_pmc0,
+                                                   const std::vector<std::string>& counters_pmc1)
+{
+    kernel_dispatch_info_t dispatch_info = {};
+    dispatch_info.kernel_id              = kernel_id;
+    return dispatch_kernel_with_dispatch_info(dispatch_info, counters_pmc0, counters_pmc1);
 }
 
 std::string TestSdkCallbacks::convert_counters_per_pmc_to_str(
@@ -144,4 +229,12 @@ std::vector<std::string> TestSdkCallbacks::concat_counters(const std::vector<std
     auto result = v0;
     result.insert(result.end(), v1.begin(), v1.end());
     return result;
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// TestSdkCallbacksMultiplexing
+void TestSdkCallbacksMultiplexing::SetUp()
+{
+    TestSdkCallbacks::SetUp();
+    m_multiplexing_mode = GetParam();
 }

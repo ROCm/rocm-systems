@@ -7,10 +7,13 @@ class TestSdkCallbacks : public ::testing::Test
 {
 protected:
     void SetUp() override;
+    uint64_t dispatch_kernel_with_dispatch_info(const rocprofiler_compute_tool::kernel_dispatch_info_t& dispatch_info,
+                                                const std::vector<std::string>& counters_pmc0,
+                                                const std::vector<std::string>& counters_pmc1);
 
-    uint64_t dispatch_kernel(uint64_t                        kernel_id,
-                             const std::vector<std::string>& counters_pmc0,
-                             const std::vector<std::string>& counters_pmc1 = {});
+    uint64_t dispatch_kernel_with_id(uint64_t                        kernel_id,
+                                     const std::vector<std::string>& counters_pmc0,
+                                     const std::vector<std::string>& counters_pmc1 = {});
 
     static std::string convert_counters_per_pmc_to_str(const std::vector<std::vector<std::string>>& counters_per_pmc);
     static std::string convert_counters_to_str(const std::vector<std::string>& counters);
@@ -25,3 +28,21 @@ protected:
     const std::vector<std::string> m_counters_pmc1     = {"counter2"};
     const uint64_t                 m_invalid_config_id = ~0u;
 };
+
+class TestSdkCallbacksMultiplexing
+    : public TestSdkCallbacks
+    , public ::testing::WithParamInterface<rocprofiler_compute_tool::iteration_multiplexing_mode_t>
+{
+protected:
+    void SetUp() override;
+
+    rocprofiler_compute_tool::iteration_multiplexing_mode_t m_multiplexing_mode =
+        rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED;
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    Multiplexing_,
+    TestSdkCallbacksMultiplexing,
+    ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
+                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
+                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
