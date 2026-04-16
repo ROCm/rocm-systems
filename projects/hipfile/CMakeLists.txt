@@ -241,6 +241,32 @@ else()
     message(NOTICE "find_package did NOT find hip")
 endif()
 
+# Find libmount (required for AMD builds)
+if(AIS_BUILD_AMD_DETAIL)
+    find_path(LIBMOUNT_INCLUDE_DIR
+        NAMES libmount/libmount.h
+        DOC "Path to libmount include directory"
+    )
+    find_library(LIBMOUNT_LIBRARY
+        NAMES mount
+        DOC "Path to libmount library"
+    )
+    if(NOT LIBMOUNT_INCLUDE_DIR)
+        message(FATAL_ERROR
+            "libmount headers not found (libmount/libmount.h). "
+            "Please install: libmount-dev (Debian/Ubuntu) or util-linux-devel (RHEL/Rocky/SUSE)."
+        )
+    endif()
+    if(NOT LIBMOUNT_LIBRARY)
+        message(FATAL_ERROR
+            "libmount library not found. "
+            "Please install: libmount-dev (Debian/Ubuntu) or util-linux-devel (RHEL/Rocky/SUSE)."
+        )
+    endif()
+    message(STATUS "libmount include dir: ${LIBMOUNT_INCLUDE_DIR}")
+    message(STATUS "libmount library:     ${LIBMOUNT_LIBRARY}")
+endif()
+
 # Find the cuFile library and headers on NVIDIA
 if(AIS_BUILD_NVIDIA_DETAIL)
     find_package(CUDAToolkit REQUIRED)
