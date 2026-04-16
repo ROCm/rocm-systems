@@ -147,12 +147,6 @@ jobs:
           apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
 
-      - name: Setup environment variables
-        shell: bash
-        run: |
-          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
-          echo "PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH" >> "$GITHUB_ENV"
-
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
@@ -164,6 +158,8 @@ jobs:
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
+          ccache-key: ccache-docs-ubuntu-22.04-gfx94X
+          ccache-variant: ccache
 
       - name: Configure, Build, Install, and Package
         timeout-minutes: 60

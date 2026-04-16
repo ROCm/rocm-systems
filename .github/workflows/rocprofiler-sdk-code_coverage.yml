@@ -201,13 +201,6 @@ jobs:
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
-    - name: Setup ccache
-      uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
-      with:
-        key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
-        max-size: 2G
-        save: true
-
     - name: Build ROCProfiler SDK Dependencies
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
@@ -221,34 +214,8 @@ jobs:
         enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
         enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
         install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-
-    - name: Remove old ROCProfiler SDK artifacts
-      shell: bash
-      run: |
-        rm -rf \
-          ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
-          ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
-
-    - name: Setup environment variables
-      shell: bash
-      run: |
-        echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-        echo "PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
-
-    - name: List Files
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: |
-        echo "PATH: ${PATH}"
-        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
-        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat ${{ env.ROCM_PATH }}/.info/version
-        ls -la
+        ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+        ccache-variant: ccache
 
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30

@@ -45,6 +45,27 @@ inputs:
     description: 'Number of parallel build jobs'
     required: false
     default: '16'
+  # ccache inputs
+  enable-ccache:
+    description: 'Enable ccache/sccache setup'
+    required: false
+    default: 'true'
+  ccache-key:
+    description: 'Cache key for ccache'
+    required: false
+    default: 'ccache-default'
+  ccache-variant:
+    description: 'Compiler cache variant (ccache or sccache). Use sccache for RHEL/SLES.'
+    required: false
+    default: 'ccache'
+  ccache-max-size:
+    description: 'Maximum size for ccache'
+    required: false
+    default: '2G'
+  ccache-save:
+    description: 'Whether to save the ccache after the job'
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -59,6 +80,34 @@ runs:
         mkdir -p "${{ inputs.rocm-path }}"
         tar -xf "rocm-${{ inputs.gpu-target }}.tar.gz" -C "${{ inputs.rocm-path }}"
         echo "ROCm installed to: ${{ inputs.rocm-path }}"
+
+    - name: Setup environment variables
+      shell: bash
+      run: |
+        echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
+
+    - name: Setup ccache
+      if: ${{ inputs.enable-ccache == 'true' }}
+      uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
+      with:
+        key: ${{ inputs.ccache-key }}
+        max-size: ${{ inputs.ccache-max-size }}
+        save: ${{ inputs.ccache-save }}
+        variant: ${{ inputs.ccache-variant }}
+
+    - name: Display ccache info
+      shell: bash
+      run: |
+        echo "Checking compiler cache configuration..."
+        if [ -x "${{ inputs.compiler-launcher }}" ]; then
+          echo "Compiler launcher: ${{ inputs.compiler-launcher }}"
+          ${{ inputs.compiler-launcher }} --version || true
+          ${{ inputs.compiler-launcher }} -p || ${{ inputs.compiler-launcher }} --show-stats || true
+        else
+          echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
+        fi
 
     - name: Build and Install ROCR-Runtime
       if: ${{ inputs.enable-rocr-build == 'true' }}
@@ -179,3 +228,30 @@ runs:
         cmake --build build-rocjpeg --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocjpeg --target install
         echo "✅ ROCJPEG Installation complete!"
+
+    - name: Remove old ROCProfiler SDK artifacts
+      shell: bash
+      run: |
+        echo "Removing old ROCProfiler SDK artifacts..."
+        rm -rf \
+          ${{ inputs.rocm-path }}/lib/*rocprofiler-sdk* \
+          ${{ inputs.rocm-path }}/lib/cmake/*rocprofiler-sdk* \
+          ${{ inputs.rocm-path }}/share/*rocprofiler-sdk* \
+          ${{ inputs.rocm-path }}/libexec/*rocprofiler-sdk* \
+          ${{ inputs.rocm-path }}*/lib/python*/site-packages/roctx \
+          ${{ inputs.rocm-path }}*/lib/python*/site-packages/rocpd
+        echo "✅ Old ROCProfiler SDK artifacts removed!"
+
+    - name: List Files
+      shell: bash
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1) 2>/dev/null || echo 'not found')"; $1 --version 2>&1 | head -n 1 || true; }
+        for i in python3 git cmake ctest gcc g++ gcov clang clang++; do which-realpath $i; done
+        echo ""
+        echo "ROCm version:"
+        cat ${{ inputs.rocm-path }}/.info/version 2>/dev/null || echo "Version file not found"
+        echo ""
+        echo "ROCm directory contents:"
+        ls -la ${{ inputs.rocm-path }}/ 2>/dev/null || echo "ROCm directory not found"

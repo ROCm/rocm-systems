@@ -182,19 +182,6 @@ jobs:
           python3 -m pip install -U --user -r requirements.txt
           python3 -m pip install -U --user cmake==3.24.0
 
-      - name: Setup environment variables
-        shell: bash
-        run: |
-          echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
-          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
-
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
-        with:
-          key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
-          max-size: 2G
-          save: true
-
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
@@ -208,28 +195,8 @@ jobs:
           enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
           enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-
-      - name: Remove old ROCProfiler SDK artifacts
-        shell: bash
-        run: |
-          rm -rf \
-            ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
-            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
-
-      - name: List Files
-        shell: bash
-        working-directory: projects/rocprofiler-sdk
-        run: |
-          echo "PATH: ${PATH}"
-          echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
-          which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-          for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-          cat ${{ env.ROCM_PATH }}/.info/version
-          ls -la
+          ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-variant: ccache
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -421,27 +388,11 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
 
-        # on RHEL 8.8, this fixes an issue with finding libdrm_amdgpu in /usr instead of /opt/amdgpu
-      - name: Setup environment variables
-        shell: bash
-        run: |
-          echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib64:${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
-
       - name: Install Curl for RHEL 8.8
         if: ${{ matrix.system.os == 'rhel-8.8' }}
         run: |
           dnf install -y curl
           ln -s /usr/local/bin/curl /usr/bin/curl
-
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
-        with:
-          key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
-          max-size: 2G
-          save: true
-          variant: sccache
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
@@ -454,17 +405,8 @@ jobs:
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-
-      - name: Remove old ROCProfiler SDK artifacts
-        shell: bash
-        run: |
-          rm -rf \
-            ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
-            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
-            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
+          ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-variant: sccache
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -472,18 +414,6 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run:
             echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-      - name: List Files
-        shell: bash
-        working-directory: projects/rocprofiler-sdk
-        run: |
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
-          echo "PATH: ${PATH}"
-          echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
-          which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-          for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-          cat ${{ env.ROCM_PATH }}/.info/version
-          ls -la
 
       - name: Configure, Build, and Test
         timeout-minutes: 45
@@ -603,33 +533,11 @@ jobs:
         python3 -m pip install -U --user -r requirements.txt
         python3 -m pip install -U --user cmake==3.24.0
 
-    - name: Setup environment variables
-      shell: bash
-      run: |
-        echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
-        echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
-
-    - name: List Files
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: |
-        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat ${{ env.ROCM_PATH }}/.info/version
-        ls -la
-
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-    - name: Setup ccache
-      uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
-      with:
-        key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
-        max-size: 2G
-        save: true
 
     - name: Build ROCProfiler SDK Dependencies
       uses: ./.github/actions/rocprofiler-sdk-util
@@ -642,17 +550,8 @@ jobs:
         enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
-
-    - name: Remove old ROCProfiler SDK artifacts
-      shell: bash
-      run: |
-        rm -rf \
-          ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
-          ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
-          ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
+        ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
+        ccache-variant: ccache
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
