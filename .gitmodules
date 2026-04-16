@@ -60,51 +60,6 @@
 [submodule "projects/rocprofiler-sdk/external/gotcha"]
 	path = projects/rocprofiler-sdk/external/gotcha
 	url = https://github.com/ROCm/GOTCHA
-[submodule "projects/rocprofiler-systems/external/timemory"]
-	path = projects/rocprofiler-systems/external/timemory
-	url = https://github.com/ROCm/timemory.git
-	branch = rocprofiler-systems
-[submodule "projects/rocprofiler-systems/external/perfetto"]
-	path = projects/rocprofiler-systems/external/perfetto
-	url = https://github.com/google/perfetto.git
-[submodule "projects/rocprofiler-systems/external/elfio"]
-	path = projects/rocprofiler-systems/external/elfio
-	url = https://github.com/jrmadsen/ELFIO.git
-[submodule "projects/rocprofiler-systems/external/dyninst"]
-	path = projects/rocprofiler-systems/external/dyninst
-	url = https://github.com/ROCm/dyninst.git
-	branch = dyninst_13
-[submodule "projects/rocprofiler-systems/external/PTL"]
-	path = projects/rocprofiler-systems/external/PTL
-	url = https://github.com/jrmadsen/PTL.git
-[submodule "projects/rocprofiler-systems/external/kokkos"]
-	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
-	url = https://github.com/kokkos/kokkos.git
-[submodule "projects/rocprofiler-systems/external/papi"]
-	path = projects/rocprofiler-systems/external/papi
-	url = https://github.com/icl-utk-edu/papi.git
-[submodule "projects/rocprofiler-systems/external/pybind11"]
-	path = projects/rocprofiler-systems/external/pybind11
-	url = https://github.com/jrmadsen/pybind11.git
-[submodule "projects/rocprofiler-systems/external/sqlite"]
-	path = projects/rocprofiler-systems/external/sqlite
-	url = https://github.com/sqlite/sqlite.git
-[submodule "projects/rocprofiler-systems/examples/openmp/external/ompvv"]
-	path = projects/rocprofiler-systems/examples/openmp/external/ompvv
-	url = https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git
-[submodule "projects/rocprofiler-systems/external/googletest"]
-	path = projects/rocprofiler-systems/external/googletest
-	url = https://github.com/google/googletest.git
-[submodule "projects/rocprofiler-systems/external/filesystem"]
-	path = projects/rocprofiler-systems/external/filesystem
-	url = https://github.com/gulrak/filesystem.git
-[submodule "projects/rocprofiler-systems/external/spdlog"]
-	path = projects/rocprofiler-systems/external/spdlog
-	url = https://github.com/gabime/spdlog.git
-	tag = v1.16.0
-[submodule "projects/rocprofiler-systems/external/json"]
-	path = projects/rocprofiler-systems/external/json
-	url = https://github.com/nlohmann/json.git
 [submodule "projects/rccl/ext-src/rocSHMEM"]
 	path = projects/rccl/ext-src/rocSHMEM
 	url = https://github.com/ROCm/rocSHMEM.git

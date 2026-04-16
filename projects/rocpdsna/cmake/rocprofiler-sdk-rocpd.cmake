@@ -124,16 +124,56 @@ find_package(rocprofiler-sdk-rocpd QUIET)
 
 if(rocprofiler-sdk-rocpd_FOUND)
     set(ROCPD_HAS_SQL_H FALSE)
+    #    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
+    #        set(_INCLUDE_PATH
+    #            "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd"
+    #        )
+    #        message(STATUS "${_INCLUDE_PATH}/sql.h")
+    #        if(EXISTS "${_INCLUDE_PATH}/sql.h")
 
-    if(rocprofiler-sdk-rocpd_INCLUDE_DIR)
-        set(_INCLUDE_PATH
-            "${rocprofiler-sdk-rocpd_INCLUDE_DIR}/rocprofiler-sdk-rocpd"
-        )
-        message(STATUS "${_INCLUDE_PATH}/sql.h")
-        if(EXISTS "${_INCLUDE_PATH}/sql.h")
+    # Temporary check will remove after new rocprofiler-sdk-rocpd is released.
+    # rocprofiler-sdk-rocpd_INCLUDE_DIR may be a list (source + build include dirs).
+    # Search each entry for sql.h and detect API features.
+    set(ROCPD_SQL_HAS_SCHEMA_VERSION 0)
+    foreach(_ROCPD_INC_DIR ${rocprofiler-sdk-rocpd_INCLUDE_DIR})
+        set(_ROCPD_SQL_H "${_ROCPD_INC_DIR}/rocprofiler-sdk-rocpd/sql.h")
+        if(EXISTS "${_ROCPD_SQL_H}")
             set(ROCPD_HAS_SQL_H TRUE)
+
+            # Distinguish old vs new API by checking two markers in sql.h:
+            #   1. ROCPD_SQL_SCHEMA_ROCPD_METADATA enum value (old SDK has MARKER_VIEWS instead)
+            #   2. rocpd_version_triplet_t param in rocpd_sql_load_schema signature
+            # The old SDK (rocm-7.2.2) has neither; the new SDK has both.
+            file(READ "${_ROCPD_SQL_H}" _ROCPD_SQL_H_CONTENTS)
+            string(
+                FIND "${_ROCPD_SQL_H_CONTENTS}"
+                "ROCPD_SQL_SCHEMA_ROCPD_METADATA"
+                _ROCPD_METADATA_POS
+            )
+            string(
+                FIND "${_ROCPD_SQL_H_CONTENTS}"
+                "rocpd_version_triplet_t"
+                _ROCPD_VERSION_PARAM_POS
+            )
+            if(
+                NOT _ROCPD_METADATA_POS EQUAL -1
+                AND NOT _ROCPD_VERSION_PARAM_POS EQUAL -1
+            )
+                set(ROCPD_SQL_HAS_SCHEMA_VERSION 1)
+                message(
+                    STATUS
+                    "[rocpdsna] Detected new rocpd API (ROCPD_SQL_SCHEMA_ROCPD_METADATA + rocpd_version_triplet_t in ${_ROCPD_SQL_H})"
+                )
+            else()
+                message(
+                    STATUS
+                    "[rocpdsna] Detected old rocpd API (${_ROCPD_SQL_H})"
+                )
+            endif()
+
+            break()
         endif()
-    endif()
+    endforeach()
 
     if(ROCPD_HAS_SQL_H)
         set(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD

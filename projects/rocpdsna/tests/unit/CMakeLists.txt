@@ -85,15 +85,19 @@ gtest_discover_tests(
     PROPERTIES LABELS "unit"
 )
 
-# Pass USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD to tests
+# Pass USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD and API variant to tests
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
     target_compile_definitions(
         rocpdsna_unit_tests
-        PRIVATE USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1
+        PRIVATE
+            USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1
+            ROCPD_SQL_HAS_SCHEMA_VERSION=${ROCPD_SQL_HAS_SCHEMA_VERSION}
     )
 else()
     target_compile_definitions(
         rocpdsna_unit_tests
-        PRIVATE USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0
+        PRIVATE
+            USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0
+            ROCPD_SQL_HAS_SCHEMA_VERSION=0
     )
 endif()

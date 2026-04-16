@@ -162,18 +162,23 @@ public:
 
     void maybe_insert_sample(const writer_types::trace_environment_t& trace_env,
                              uint64_t                                 timestamp,
-                             std::optional<primary_key_t>             event_pk)
+                             std::optional<primary_key_t>             event_pk,
+                             std::string_view sample_extdata = writer_types::empty_json,
+                             std::string_view track_extdata  = writer_types::empty_json)
     {
         if(trace_env.track_name.has_value() && event_pk.has_value())
         {
-            const writer_types::track_info_t  track_info = { trace_env.track_name.value(),
-                                                             "{}",
-                                                             trace_env.node_id.value(),
-                                                             trace_env.process_id.value(),
-                                                             trace_env.thread_id.value() };
-            const writer_types::sample_data_t sample_data = { timestamp,
-                                                              track_info,
-                                                              "{}" };
+            writer_types::track_info_t track_info;
+            track_info.name       = trace_env.track_name.value();
+            track_info.extdata    = track_extdata;
+            track_info.node_id    = trace_env.node_id.value();
+            track_info.process_id = trace_env.process_id.value();
+            track_info.thread_id  = trace_env.thread_id.value();
+
+            writer_types::sample_data_t sample_data;
+            sample_data.timestamp = timestamp;
+            sample_data.track     = track_info;
+            sample_data.extdata   = sample_extdata;
             insert_sample(sample_data, event_pk.value());
         }
     }

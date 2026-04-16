@@ -13,6 +13,10 @@
 #include <utility>
 #include <vector>
 
+#if !defined(ROCPD_SQL_HAS_SCHEMA_VERSION)
+#    define ROCPD_SQL_HAS_SCHEMA_VERSION 0
+#endif
+
 #if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
     USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
 #    include <rocprofiler-sdk-rocpd/sql.h>
@@ -73,15 +77,26 @@ create_directory_for_database_file(const std::string& db_file)
 #if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
     USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
 void
-load_schema_cb(rocpd_sql_engine_t                        engine,
-               rocpd_sql_schema_kind_t                   schema_kind,
-               rocpd_sql_options_t                       options,
-               rocpd_version_triplet_t                   schema_version,
+load_schema_cb(rocpd_sql_engine_t      engine,
+               rocpd_sql_schema_kind_t schema_kind,
+               rocpd_sql_options_t     options,
+#    if ROCPD_SQL_HAS_SCHEMA_VERSION
+               rocpd_version_triplet_t schema_version,
+#    endif
                const rocpd_sql_schema_jinja_variables_t* jinja_vars,
                const char*                               filename,
                const char*                               schema_content,
                void*                                     user_data)
 {
+    (void) engine;
+    (void) schema_kind;
+    (void) options;
+#    if ROCPD_SQL_HAS_SCHEMA_VERSION
+    (void) schema_version;
+#    endif
+    (void) jinja_vars;
+    (void) filename;
+
     if(user_data == nullptr || schema_content == nullptr)
     {
         LOG_ERROR("Invalid user data or schema content pointer");
@@ -110,20 +125,31 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind,
                                                    uuid.c_str(),
                                                    uuid.c_str() };
 
-    // Convert version to SDK's rocpd_version_triplet_t
-    rocpd_version_triplet_t schema_version = { version.major,
-                                               version.minor,
-                                               version.patch };
+#    if ROCPD_SQL_HAS_SCHEMA_VERSION
+    rocpd_version_triplet_t sdk_schema_version = { version.major,
+                                                   version.minor,
+                                                   version.patch };
 
     auto status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
                                         schema_kind,
                                         ROCPD_SQL_OPTIONS_NONE,
-                                        schema_version,
+                                        sdk_schema_version,
                                         &info,
                                         load_schema_cb,
                                         nullptr,
                                         0,
                                         &query);
+#    else
+    auto status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
+                                        schema_kind,
+                                        ROCPD_SQL_OPTIONS_NONE,
+                                        &info,
+                                        load_schema_cb,
+                                        nullptr,
+                                        0,
+                                        &query);
+#    endif
+
     if(status != ROCPD_STATUS_SUCCESS)
     {
         LOG_ERROR("Unable to load rocpd schema (error code: {})",
@@ -295,13 +321,19 @@ sqlite_backend::initialize_schema(rocpdsna::version_t version)
              version.minor,
              version.patch);
 
-    const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
+    std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
         ROCPD_SQL_SCHEMA_ROCPD_TABLES,
         ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_METADATA
     };
+
+#if ROCPD_SQL_HAS_SCHEMA_VERSION
+    schema_kinds.push_back(ROCPD_SQL_SCHEMA_ROCPD_METADATA);
+#else
+    // Old SDK has MARKER_VIEWS instead of METADATA
+    schema_kinds.push_back(ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS);
+#endif
 
     for(const auto& schema_kind : schema_kinds)
     {

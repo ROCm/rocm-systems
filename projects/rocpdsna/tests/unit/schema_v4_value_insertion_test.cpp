@@ -171,7 +171,7 @@ protected:
                  .name              = "TestThread",
                  .start             = 1100000,
                  .end               = 8900000,
-                 .extdata           = "{}",
+                 .extdata           = R"({"priority":"high","affinity":3})",
                  .node_id           = node_id,
                  .process_id        = process_id };
     }
@@ -190,7 +190,7 @@ protected:
                  .vendor_name    = "AMD",
                  .product_name   = "Radeon RX 7900 XTX",
                  .user_name      = "gpu0",
-                 .extdata        = "{}",
+                 .extdata        = R"({"pci_bus":"0000:03:00.0","mem_gb":24})",
                  .node_id        = node_id,
                  .process_id     = process_id };
     }
@@ -201,7 +201,7 @@ protected:
     {
         return { .queue_id   = queue_id,
                  .name       = "TestQueue",
-                 .extdata    = "{}",
+                 .extdata    = R"({"capacity":128,"type":"compute"})",
                  .node_id    = node_id,
                  .process_id = process_id };
     }
@@ -212,7 +212,7 @@ protected:
     {
         return { .stream_id  = stream_id,
                  .name       = "TestStream",
-                 .extdata    = "{}",
+                 .extdata    = R"({"flags":"default","priority":0})",
                  .node_id    = node_id,
                  .process_id = process_id };
     }
@@ -238,7 +238,7 @@ protected:
                  .expression       = "",
                  .is_constant      = 0,
                  .is_derived       = 0,
-                 .extdata          = "{}",
+                 .extdata          = R"({"shader_engine":0,"cu_mask":"0xff"})",
                  .node_id          = node_id,
                  .process_id       = process_id,
                  .qualifier        = "ACCUM" };
@@ -256,7 +256,7 @@ protected:
                  .load_size    = 0x100000,
                  .load_delta   = 0,
                  .storage_type = "FILE",
-                 .extdata      = "{}",
+                 .extdata      = R"({"isa":"gfx1100","format":"elf"})",
                  .node_id      = node_id,
                  .process_id   = process_id,
                  .agent_id     = agent_id };
@@ -279,7 +279,7 @@ protected:
                  .sgpr_count                = 32,
                  .arch_vgpr_count           = 64,
                  .accum_vgpr_count          = 0,
-                 .extdata                   = "{}",
+                 .extdata                   = R"({"lds_size":256,"waves_per_eu":4})",
                  .node_id                   = node_id,
                  .process_id                = process_id,
                  .code_obj_id               = code_object_id };
@@ -289,7 +289,7 @@ protected:
         size_t /*id*/    = 1,
         const char* name = "HIP_API")
     {
-        return { .name = name, .extdata = "{}" };
+        return { .name = name, .extdata = R"({"domain":"hip","level":1})" };
     }
 
     rocpdsna::writer_types::address_range_info_t
@@ -299,7 +299,7 @@ protected:
                  .address_base = 0x7f0000000000,
                  .address_low  = 0x7f0000001000,
                  .address_high = 0x7f0000002000,
-                 .extdata      = "{}",
+                 .extdata      = R"({"segment":"text","permissions":"rx"})",
                  .node_id      = node_id,
                  .process_id   = process_id };
     }
@@ -315,7 +315,7 @@ protected:
                  .line_number  = 42,
                  .lines        = R"(["  float a = x + y;", "  return a;"])",
                  .instructions = R"(["abcd", "efgh"])",
-                 .extdata      = "{}",
+                 .extdata      = R"({"compiler":"hipcc","opt_level":3})",
                  .node_id      = node_id,
                  .process_id   = process_id,
                  .address_id   = address_id };
@@ -330,7 +330,7 @@ protected:
                  .function   = "vector_add",
                  .file       = "temp.hpp",
                  .line       = 42,
-                 .extdata    = "{}",
+                 .extdata    = R"({"inlined":false,"hotspot":true})",
                  .node_id    = node_id,
                  .process_id = process_id,
                  .address_id = address_id };
@@ -343,7 +343,7 @@ protected:
         std::optional<std::string_view> name       = "TestTrack")
     {
         return { .name       = name,
-                 .extdata    = "{}",
+                 .extdata    = R"({"source":"profiler","kind":"gpu"})",
                  .node_id    = node_id,
                  .process_id = process_id,
                  .thread_id  = thread_id };
@@ -355,17 +355,18 @@ protected:
         size_t      end   = 2000000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .start_timestamp = start,
                  .end_timestamp   = end,
                  .name            = name,
-                 .extdata         = "{}",
+                 .extdata         = R"({"scope":"global","async":false})",
                  .args            = {} };
     }
 
@@ -377,13 +378,14 @@ protected:
         size_t end         = 3000000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .dispatch_id          = dispatch_id,
                  .start_timestamp      = start,
                  .end_timestamp        = end,
@@ -398,7 +400,7 @@ protected:
                  .grid_size_y          = 1,
                  .grid_size_z          = 1,
                  .name                 = "vector_add",
-                 .extdata              = "{}" };
+                 .extdata              = R"({"queue_idx":0,"signal_handle":42})" };
     }
 
     rocpdsna::writer_types::memory_copy_data_t create_memory_copy_data(
@@ -406,13 +408,14 @@ protected:
         size_t end   = 3500000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .start_timestamp = start,
                  .end_timestamp   = end,
                  .dst_agent_id    = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 },
@@ -422,7 +425,7 @@ protected:
                  .size            = 1024 * 1024,
                  .name            = "hipMemcpy",
                  .region_name     = "default_region",
-                 .extdata         = "{}" };
+                 .extdata         = R"({"direction":"HtoD","pinned":true})" };
     }
 
     rocpdsna::writer_types::memory_alloc_data_t create_memory_alloc_data(
@@ -430,20 +433,21 @@ protected:
         size_t end   = 600000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .type            = "ALLOC",
                  .level           = "REAL",
                  .start_timestamp = start,
                  .end_timestamp   = end,
                  .address         = 0x7f0000100000,
                  .size            = 1024 * 1024,
-                 .extdata         = "{}" };
+                 .extdata         = R"({"pool":"default","managed":false})" };
     }
 
     // ========================================================================
@@ -517,14 +521,14 @@ TEST_F(SchemaV4ValueInsertionTest, info_process_values_and_fk_correct)
     m_writer->register_process_info(process);
     flush_and_wait();
 
-    auto result = query_database(
-        m_db_path,
-        "SELECT p.pid, p.ppid, p.name, p.command, p.init, p.fini, n.machine_id "
-        "FROM rocpd_info_process_" +
-            m_uuid +
-            " p "
-            "JOIN rocpd_info_node_" +
-            m_uuid + " n ON p.nid = n.id");
+    auto result = query_database(m_db_path,
+                                 "SELECT p.pid, p.ppid, p.name, p.command, p.init, "
+                                 "p.fini, n.machine_id, p.extdata "
+                                 "FROM rocpd_info_process_" +
+                                     m_uuid +
+                                     " p "
+                                     "JOIN rocpd_info_node_" +
+                                     m_uuid + " n ON p.nid = n.id");
 
     ASSERT_EQ(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "1000");            // pid
@@ -534,6 +538,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_process_values_and_fk_correct)
     EXPECT_EQ(result.rows[0][4], "1000000");         // init
     EXPECT_EQ(result.rows[0][5], "9000000");         // fini
     EXPECT_EQ(result.rows[0][6], "test-machine-1");  // FK to node verified
+    EXPECT_EQ(result.rows[0][7], R"({"custom":"data"})");
 }
 
 // ============================================================================
@@ -553,7 +558,8 @@ TEST_F(SchemaV4ValueInsertionTest, info_thread_values_and_fks_correct)
 
     auto result =
         query_database(m_db_path,
-                       "SELECT t.tid, t.name, t.start, t.end, p.pid, n.machine_id "
+                       "SELECT t.tid, t.name, t.start, t.end, p.pid, n.machine_id, "
+                       "t.extdata "
                        "FROM rocpd_info_thread_" +
                            m_uuid +
                            " t "
@@ -570,6 +576,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_thread_values_and_fks_correct)
     EXPECT_EQ(result.rows[0][3], "8900000");         // end
     EXPECT_EQ(result.rows[0][4], "1000");            // FK process pid
     EXPECT_EQ(result.rows[0][5], "test-machine-1");  // FK node
+    EXPECT_EQ(result.rows[0][6], R"({"priority":"high","affinity":3})");
 }
 
 // ============================================================================
@@ -590,7 +597,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_agent_values_and_fks_correct)
     auto result = query_database(
         m_db_path,
         "SELECT a.type, a.type_index, a.name, a.model_name, a.vendor_name, "
-        "a.product_name, p.pid "
+        "a.product_name, p.pid, a.extdata "
         "FROM rocpd_info_agent_" +
             m_uuid +
             " a "
@@ -605,6 +612,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_agent_values_and_fks_correct)
     EXPECT_EQ(result.rows[0][4], "AMD");                 // vendor_name
     EXPECT_EQ(result.rows[0][5], "Radeon RX 7900 XTX");  // product_name
     EXPECT_EQ(result.rows[0][6], "1000");                // FK process pid
+    EXPECT_EQ(result.rows[0][7], R"({"pci_bus":"0000:03:00.0","mem_gb":24})");
 }
 
 // ============================================================================
@@ -622,15 +630,17 @@ TEST_F(SchemaV4ValueInsertionTest, info_queue_values_and_fks_correct)
     m_writer->register_queue_info(queue);
     flush_and_wait();
 
-    auto result = query_database(m_db_path,
-                                 "SELECT q.name, p.pid FROM rocpd_info_queue_" + m_uuid +
-                                     " q "
-                                     "JOIN rocpd_info_process_" +
-                                     m_uuid + " p ON q.pid = p.id");
+    auto result =
+        query_database(m_db_path,
+                       "SELECT q.name, p.pid, q.extdata FROM rocpd_info_queue_" + m_uuid +
+                           " q "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid + " p ON q.pid = p.id");
 
     ASSERT_EQ(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "TestQueue");
     EXPECT_EQ(result.rows[0][1], "1000");
+    EXPECT_EQ(result.rows[0][2], R"({"capacity":128,"type":"compute"})");
 }
 
 // ============================================================================
@@ -648,15 +658,17 @@ TEST_F(SchemaV4ValueInsertionTest, info_stream_values_and_fks_correct)
     m_writer->register_stream_info(stream);
     flush_and_wait();
 
-    auto result = query_database(m_db_path,
-                                 "SELECT s.name, p.pid FROM rocpd_info_stream_" + m_uuid +
-                                     " s "
-                                     "JOIN rocpd_info_process_" +
-                                     m_uuid + " p ON s.pid = p.id");
+    auto result = query_database(
+        m_db_path,
+        "SELECT s.name, p.pid, s.extdata FROM rocpd_info_stream_" + m_uuid +
+            " s "
+            "JOIN rocpd_info_process_" +
+            m_uuid + " p ON s.pid = p.id");
 
     ASSERT_EQ(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "TestStream");
     EXPECT_EQ(result.rows[0][1], "1000");
+    EXPECT_EQ(result.rows[0][2], R"({"flags":"default","priority":0})");
 }
 
 // ============================================================================
@@ -681,7 +693,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_pmc_values_with_qualifier_and_fks)
     auto result = query_database(
         m_db_path,
         "SELECT pm.name, pm.symbol, pm.qualifier, pm.description, pm.units, "
-        "pm.value_type, pm.block, a.type "
+        "pm.value_type, pm.block, a.type, pm.extdata "
         "FROM rocpd_info_pmc_" +
             m_uuid +
             " pm "
@@ -697,6 +709,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_pmc_values_with_qualifier_and_fks)
     EXPECT_EQ(result.rows[0][5], "ACCUM");            // value_type
     EXPECT_EQ(result.rows[0][6], "SQ");               // block
     EXPECT_EQ(result.rows[0][7], "GPU");              // FK agent type
+    EXPECT_EQ(result.rows[0][8], R"({"shader_engine":0,"cu_mask":"0xff"})");
 }
 
 // ============================================================================
@@ -719,7 +732,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_code_object_values_and_fks_correct)
 
     auto result = query_database(
         m_db_path,
-        "SELECT co.uri, co.load_base, co.load_size, co.storage_type, a.type "
+        "SELECT co.uri, co.load_base, co.load_size, co.storage_type, a.type, co.extdata "
         "FROM rocpd_info_code_object_" +
             m_uuid +
             " co "
@@ -730,6 +743,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_code_object_values_and_fks_correct)
     EXPECT_EQ(result.rows[0][0], "www.amd.com");
     EXPECT_EQ(result.rows[0][3], "FILE");
     EXPECT_EQ(result.rows[0][4], "GPU");
+    EXPECT_EQ(result.rows[0][5], R"({"isa":"gfx1100","format":"elf"})");
 }
 
 // ============================================================================
@@ -756,7 +770,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_kernel_symbol_values_and_fks_correct)
     auto result = query_database(
         m_db_path,
         "SELECT ks.kernel_name, ks.display_name, ks.sgpr_count, ks.arch_vgpr_count, "
-        "co.uri, n.hostname, p.pid FROM rocpd_info_kernel_symbol_" +
+        "co.uri, n.hostname, p.pid, ks.extdata FROM rocpd_info_kernel_symbol_" +
             m_uuid +
             " ks "
             "JOIN rocpd_info_code_object_" +
@@ -776,6 +790,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_kernel_symbol_values_and_fks_correct)
     EXPECT_EQ(result.rows[0][4], "www.amd.com");  // FK code_object uri
     EXPECT_EQ(result.rows[0][5], "test-host");    // FK node hostname
     EXPECT_EQ(result.rows[0][6], "1000");         // FK process pid
+    EXPECT_EQ(result.rows[0][7], R"({"lds_size":256,"waves_per_eu":4})");
 }
 
 // ============================================================================
@@ -792,7 +807,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_category_values_inserted)
 
     ASSERT_EQ(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "HIP_API");
-    EXPECT_EQ(result.rows[0][1], "{}");
+    EXPECT_EQ(result.rows[0][1], R"({"domain":"hip","level":1})");
 }
 
 // ============================================================================
@@ -812,7 +827,8 @@ TEST_F(SchemaV4ValueInsertionTest, info_address_range_values_and_fks)
 
     auto result = query_database(
         m_db_path,
-        "SELECT ar.address_base, ar.address_low, ar.address_high, p.pid, n.hostname "
+        "SELECT ar.address_base, ar.address_low, ar.address_high, p.pid, n.hostname, "
+        "ar.extdata "
         "FROM rocpd_info_address_range_" +
             m_uuid +
             " ar "
@@ -826,6 +842,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_address_range_values_and_fks)
     // Verify addresses are correctly stored
     EXPECT_EQ(result.rows[0][3], "1000");       // FK process pid
     EXPECT_EQ(result.rows[0][4], "test-host");  // FK node hostname
+    EXPECT_EQ(result.rows[0][5], R"({"segment":"text","permissions":"rx"})");
 }
 
 // ============================================================================
@@ -846,22 +863,24 @@ TEST_F(SchemaV4ValueInsertionTest, info_source_code_values_and_fks)
     m_writer->register_source_code_info(source);
     flush_and_wait();
 
-    auto result = query_database(m_db_path,
-                                 "SELECT sc.file, sc.line_number, p.pid, n.hostname "
-                                 "FROM rocpd_info_source_code_" +
-                                     m_uuid +
-                                     " sc "
-                                     "JOIN rocpd_info_process_" +
-                                     m_uuid +
-                                     " p ON sc.pid = p.id "
-                                     "JOIN rocpd_info_node_" +
-                                     m_uuid + " n ON sc.nid = n.id");
+    auto result =
+        query_database(m_db_path,
+                       "SELECT sc.file, sc.line_number, p.pid, n.hostname, sc.extdata "
+                       "FROM rocpd_info_source_code_" +
+                           m_uuid +
+                           " sc "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid +
+                           " p ON sc.pid = p.id "
+                           "JOIN rocpd_info_node_" +
+                           m_uuid + " n ON sc.nid = n.id");
 
     ASSERT_EQ(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "temp.hpp");
     EXPECT_EQ(result.rows[0][1], "42");
     EXPECT_EQ(result.rows[0][2], "1000");       // FK process pid
     EXPECT_EQ(result.rows[0][3], "test-host");  // FK node hostname
+    EXPECT_EQ(result.rows[0][4], R"({"compiler":"hipcc","opt_level":3})");
 }
 
 // ============================================================================
@@ -884,7 +903,8 @@ TEST_F(SchemaV4ValueInsertionTest, info_pc_values_and_fks)
 
     auto result =
         query_database(m_db_path,
-                       "SELECT pc.function, pc.file, pc.line, p.pid, n.hostname "
+                       "SELECT pc.function, pc.file, pc.line, p.pid, n.hostname, "
+                       "pc.extdata "
                        "FROM rocpd_info_pc_" +
                            m_uuid +
                            " pc "
@@ -900,6 +920,7 @@ TEST_F(SchemaV4ValueInsertionTest, info_pc_values_and_fks)
     EXPECT_EQ(result.rows[0][2], "42");
     EXPECT_EQ(result.rows[0][3], "1000");       // FK process pid
     EXPECT_EQ(result.rows[0][4], "test-host");  // FK node hostname
+    EXPECT_EQ(result.rows[0][5], R"({"inlined":false,"hotspot":true})");
 }
 
 // ============================================================================
@@ -1764,20 +1785,24 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_basic_region_insert)
     m_writer->register_thread_info(thread);
 
     // Create region data with event
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 42,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 42,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "test_api_call",
-                                                  .extdata         = "{}",
-                                                  .args            = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "test_api_call",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = {}
+    };
 
     // Register track for sample creation
     auto track = create_track_info(1, 1000, 100, "test_track");
@@ -1797,11 +1822,12 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_basic_region_insert)
 
     // Verify rocpd_event table has data
     auto result = query_database(
-        m_db_path, "SELECT stack_id, correlation_id FROM rocpd_event_" + m_uuid);
+        m_db_path, "SELECT stack_id, correlation_id, extdata FROM rocpd_event_" + m_uuid);
 
     ASSERT_GE(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "1");   // stack_id
     EXPECT_EQ(result.rows[0][1], "42");  // correlation_id
+    EXPECT_EQ(result.rows[0][2], R"({"origin":"api","depth":0})");
 }
 
 // ============================================================================
@@ -1823,20 +1849,24 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_category_fk_populated)
     m_writer->register_category_info(category);
 
     // Create region with category in event
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 100,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "HIP_RUNTIME",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 100,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "HIP_RUNTIME",
+        .extdata         = R"({"origin":"runtime","depth":1})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "hipMalloc",
-                                                  .extdata         = "{}",
-                                                  .args            = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "hipMalloc",
+        .extdata         = R"({"scope":"device","async":false})",
+        .args            = {}
+    };
 
     // Register track for sample creation
     auto track = create_track_info(1, 1000, 100, "test_track");
@@ -1887,26 +1917,32 @@ TEST_F(SchemaV4ValueInsertionTest, arg_table_populated_via_region)
                                              .type     = "void*",
                                              .name     = "dst",
                                              .value    = "0x7f0000001000",
-                                             .extdata  = "{}" };
+                                             .extdata  = R"({"semantic":"output"})" };
 
-    rocpdsna::writer_types::arg_data_t arg2{
-        .position = 1, .type = "size_t", .name = "size", .value = "1024", .extdata = "{}"
+    rocpdsna::writer_types::arg_data_t arg2{ .position = 1,
+                                             .type     = "size_t",
+                                             .name     = "size",
+                                             .value    = "1024",
+                                             .extdata  = R"({"semantic":"size"})" };
+
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 200,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
     };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 200,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
-
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "hipMemcpy",
-                                                  .extdata         = "{}",
-                                                  .args            = { arg1, arg2 } };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "hipMemcpy",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = { arg1, arg2 }
+    };
 
     // Register track for sample creation
     auto track = create_track_info(1, 1000, 100, "test_track");
@@ -1925,20 +1961,23 @@ TEST_F(SchemaV4ValueInsertionTest, arg_table_populated_via_region)
     flush_and_wait();
 
     // Verify rocpd_arg table has data
-    auto result = query_database(m_db_path,
-                                 "SELECT position, type, name, value FROM rocpd_arg_" +
-                                     m_uuid + " ORDER BY position");
+    auto result =
+        query_database(m_db_path,
+                       "SELECT position, type, name, value, extdata FROM rocpd_arg_" +
+                           m_uuid + " ORDER BY position");
 
     ASSERT_GE(result.rows.size(), 2);
     EXPECT_EQ(result.rows[0][0], "0");               // position
     EXPECT_EQ(result.rows[0][1], "void*");           // type
     EXPECT_EQ(result.rows[0][2], "dst");             // name
     EXPECT_EQ(result.rows[0][3], "0x7f0000001000");  // value
+    EXPECT_EQ(result.rows[0][4], R"({"semantic":"output"})");
 
     EXPECT_EQ(result.rows[1][0], "1");       // position
     EXPECT_EQ(result.rows[1][1], "size_t");  // type
     EXPECT_EQ(result.rows[1][2], "size");    // name
     EXPECT_EQ(result.rows[1][3], "1024");    // value
+    EXPECT_EQ(result.rows[1][4], R"({"semantic":"size"})");
 }
 
 // ============================================================================
@@ -1955,24 +1994,30 @@ TEST_F(SchemaV4ValueInsertionTest, arg_table_event_fk_verified)
     auto thread = create_thread_info(1, 1000, 100);
     m_writer->register_thread_info(thread);
 
-    rocpdsna::writer_types::arg_data_t arg{
-        .position = 0, .type = "int", .name = "device", .value = "0", .extdata = "{}"
+    rocpdsna::writer_types::arg_data_t arg{ .position = 0,
+                                            .type     = "int",
+                                            .name     = "device",
+                                            .value    = "0",
+                                            .extdata  = R"({"semantic":"device_id"})" };
+
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 99,
+        .parent_stack_id = 0,
+        .correlation_id  = 888,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
     };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 99,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 888,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
-
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "hipSetDevice",
-                                                  .extdata         = "{}",
-                                                  .args            = { arg } };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "hipSetDevice",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = { arg }
+    };
 
     // Register track for sample creation
     auto track = create_track_info(1, 1000, 100, "test_track");
@@ -2023,20 +2068,24 @@ TEST_F(SchemaV4ValueInsertionTest, sample_table_populated_via_region)
     m_writer->register_track_info(track);
 
     // Create region WITH event (sample is created when track_name and event both present)
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 555,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 555,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "myKernel",
-                                                  .extdata         = "{}",
-                                                  .args            = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "myKernel",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = {}
+    };
 
     rocpdsna::writer_types::trace_environment_t trace_env{
         .node_id    = 1,
@@ -2073,24 +2122,28 @@ TEST_F(SchemaV4ValueInsertionTest, pmc_event_table_populated)
 
     // Create PMC event data
     rocpdsna::writer_types::pmc_event_data_t pmc_event{
-        .event   = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                         .parent_stack_id = 0,
-                                                         .correlation_id  = 1,
-                                                         .call_stack      = {},
-                                                         .line_info_list  = {},
-                                                         .event_category  = "GENERAL",
-                                                         .extdata         = "{}" },
+        .event =
+            rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                  .parent_stack_id = 0,
+                                                  .correlation_id  = 1,
+                                                  .call_stack      = {},
+                                                  .line_info_list  = {},
+                                                  .event_category  = "GENERAL",
+                                                  .extdata =
+                                                      R"({"origin":"pmc","depth":0})" },
         .value   = 0.75,
-        .extdata = "{}",
+        .extdata = R"({"unit":"percentage","normalized":true})",
         .sample =
             rocpdsna::writer_types::sample_data_t{
                 .timestamp = 1500000,
-                .track     = rocpdsna::writer_types::track_info_t{ .name       = "TestTrack",
-                                                                   .extdata    = "{}",
-                                                                   .node_id    = 1,
-                                                                   .process_id = 1000,
-                                                                   .thread_id  = 100 },
-                .extdata   = "{}" }
+                .track =
+                    rocpdsna::writer_types::track_info_t{
+                        .name       = "TestTrack",
+                        .extdata    = R"({"source":"profiler","kind":"gpu"})",
+                        .node_id    = 1,
+                        .process_id = 1000,
+                        .thread_id  = 100 },
+                .extdata = R"({"interval_ms":10})" }
     };
 
     rocpdsna::writer_types::pmc_info_unique_id_t pmc_id{
@@ -2132,45 +2185,53 @@ TEST_F(SchemaV4ValueInsertionTest, pmc_event_multiple_counters)
 
     // Insert two PMC events
     rocpdsna::writer_types::pmc_event_data_t pmc_event1{
-        .event   = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                         .parent_stack_id = 0,
-                                                         .correlation_id  = 1,
-                                                         .call_stack      = {},
-                                                         .line_info_list  = {},
-                                                         .event_category  = "GENERAL",
-                                                         .extdata         = "{}" },
+        .event =
+            rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                  .parent_stack_id = 0,
+                                                  .correlation_id  = 1,
+                                                  .call_stack      = {},
+                                                  .line_info_list  = {},
+                                                  .event_category  = "GENERAL",
+                                                  .extdata =
+                                                      R"({"origin":"pmc","depth":0})" },
         .value   = 100.0,
-        .extdata = "{}",
+        .extdata = R"({"unit":"count","normalized":false})",
         .sample =
             rocpdsna::writer_types::sample_data_t{
                 .timestamp = 2000000,
-                .track     = rocpdsna::writer_types::track_info_t{ .name       = "TestTrack",
-                                                                   .extdata    = "{}",
-                                                                   .node_id    = 1,
-                                                                   .process_id = 1000,
-                                                                   .thread_id  = 100 },
-                .extdata   = "{}" }
+                .track =
+                    rocpdsna::writer_types::track_info_t{
+                        .name       = "TestTrack",
+                        .extdata    = R"({"source":"profiler","kind":"gpu"})",
+                        .node_id    = 1,
+                        .process_id = 1000,
+                        .thread_id  = 100 },
+                .extdata = R"({"interval_ms":10})" }
     };
 
     rocpdsna::writer_types::pmc_event_data_t pmc_event2{
-        .event   = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                         .parent_stack_id = 0,
-                                                         .correlation_id  = 1,
-                                                         .call_stack      = {},
-                                                         .line_info_list  = {},
-                                                         .event_category  = "GENERAL",
-                                                         .extdata         = "{}" },
+        .event =
+            rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                  .parent_stack_id = 0,
+                                                  .correlation_id  = 1,
+                                                  .call_stack      = {},
+                                                  .line_info_list  = {},
+                                                  .event_category  = "GENERAL",
+                                                  .extdata =
+                                                      R"({"origin":"pmc","depth":0})" },
         .value   = 200.0,
-        .extdata = "{}",
+        .extdata = R"({"unit":"count","normalized":false})",
         .sample =
             rocpdsna::writer_types::sample_data_t{
                 .timestamp = 2000000,
-                .track     = rocpdsna::writer_types::track_info_t{ .name       = "TestTrack",
-                                                                   .extdata    = "{}",
-                                                                   .node_id    = 1,
-                                                                   .process_id = 1000,
-                                                                   .thread_id  = 100 },
-                .extdata   = "{}" }
+                .track =
+                    rocpdsna::writer_types::track_info_t{
+                        .name       = "TestTrack",
+                        .extdata    = R"({"source":"profiler","kind":"gpu"})",
+                        .node_id    = 1,
+                        .process_id = 1000,
+                        .thread_id  = 100 },
+                .extdata = R"({"interval_ms":10})" }
     };
 
     m_writer->insert_pmc_event_data(
@@ -2235,24 +2296,30 @@ TEST_F(SchemaV4ValueInsertionTest, missing_tables_end_to_end)
     m_writer->register_stream_info(stream);
 
     // Insert region with event and args
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 12345,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "TEST_CATEGORY",
-                                                     .extdata         = "{}" };
-
-    rocpdsna::writer_types::arg_data_t arg{
-        .position = 0, .type = "int", .name = "param", .value = "42", .extdata = "{}"
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 12345,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "TEST_CATEGORY",
+        .extdata         = R"({"origin":"api","depth":0})"
     };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "test_function",
-                                                  .extdata         = "{}",
-                                                  .args            = { arg } };
+    rocpdsna::writer_types::arg_data_t arg{ .position = 0,
+                                            .type     = "int",
+                                            .name     = "param",
+                                            .value    = "42",
+                                            .extdata  = R"({"semantic":"config"})" };
+
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "test_function",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = { arg }
+    };
 
     // Register track for sample creation
     auto track = create_track_info(1, 1000, 100, "test_track");
@@ -2271,24 +2338,28 @@ TEST_F(SchemaV4ValueInsertionTest, missing_tables_end_to_end)
 
     // Insert PMC event
     rocpdsna::writer_types::pmc_event_data_t pmc_event{
-        .event   = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                         .parent_stack_id = 0,
-                                                         .correlation_id  = 1,
-                                                         .call_stack      = {},
-                                                         .line_info_list  = {},
-                                                         .event_category  = "GENERAL",
-                                                         .extdata         = "{}" },
+        .event =
+            rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                  .parent_stack_id = 0,
+                                                  .correlation_id  = 1,
+                                                  .call_stack      = {},
+                                                  .line_info_list  = {},
+                                                  .event_category  = "GENERAL",
+                                                  .extdata =
+                                                      R"({"origin":"pmc","depth":0})" },
         .value   = 0.5,
-        .extdata = "{}",
+        .extdata = R"({"unit":"ratio","normalized":true})",
         .sample =
             rocpdsna::writer_types::sample_data_t{
                 .timestamp = 1500000,
-                .track     = rocpdsna::writer_types::track_info_t{ .name       = "test_track",
-                                                                   .extdata    = "{}",
-                                                                   .node_id    = 1,
-                                                                   .process_id = 1000,
-                                                                   .thread_id  = 100 },
-                .extdata   = "{}" }
+                .track =
+                    rocpdsna::writer_types::track_info_t{
+                        .name       = "test_track",
+                        .extdata    = R"({"source":"profiler","kind":"gpu"})",
+                        .node_id    = 1,
+                        .process_id = 1000,
+                        .thread_id  = 100 },
+                .extdata = R"({"interval_ms":10})" }
     };
     m_writer->insert_pmc_event_data(
         pmc_event,
@@ -2963,20 +3034,24 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_with_parent_stack_id)
     auto track = create_track_info(1, 1000, 100, "TestTrack");
     m_writer->register_track_info(track);
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 2,
-                                                     .parent_stack_id = 1,
-                                                     .correlation_id  = 100,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 2,
+        .parent_stack_id = 1,
+        .correlation_id  = 100,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":1})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1500000,
-                                                  .end_timestamp   = 1800000,
-                                                  .name            = "nested_call",
-                                                  .extdata         = "{}",
-                                                  .args            = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1500000,
+        .end_timestamp   = 1800000,
+        .name            = "nested_call",
+        .extdata         = R"({"scope":"nested","async":false})",
+        .args            = {}
+    };
 
     rocpdsna::writer_types::trace_environment_t trace_env{
         .node_id    = 1,
@@ -3010,46 +3085,52 @@ TEST_F(SchemaV4ValueInsertionTest, arg_table_multiple_types)
     auto track = create_track_info(1, 1000, 100, "TestTrack");
     m_writer->register_track_info(track);
 
-    std::vector<rocpdsna::writer_types::arg_data_t> args = { { .position = 0,
-                                                               .type     = "hipStream_t",
-                                                               .name     = "stream",
-                                                               .value    = "0x12345678",
-                                                               .extdata  = "{}" },
-                                                             { .position = 1,
-                                                               .type     = "unsigned int",
-                                                               .name     = "flags",
-                                                               .value    = "0",
-                                                               .extdata  = "{}" },
-                                                             { .position = 2,
-                                                               .type  = "hipDeviceptr_t",
-                                                               .name  = "devPtr",
-                                                               .value = "0x7f0000000000",
-                                                               .extdata = "{}" },
-                                                             { .position = 3,
-                                                               .type     = "float",
-                                                               .name     = "value",
-                                                               .value    = "3.14159",
-                                                               .extdata  = "{}" },
-                                                             { .position = 4,
-                                                               .type     = "const char*",
-                                                               .name     = "name",
-                                                               .value    = "kernel_name",
-                                                               .extdata  = "{}" } };
+    std::vector<rocpdsna::writer_types::arg_data_t> args = {
+        { .position = 0,
+          .type     = "hipStream_t",
+          .name     = "stream",
+          .value    = "0x12345678",
+          .extdata  = R"({"semantic":"stream"})" },
+        { .position = 1,
+          .type     = "unsigned int",
+          .name     = "flags",
+          .value    = "0",
+          .extdata  = R"({"semantic":"flags"})" },
+        { .position = 2,
+          .type     = "hipDeviceptr_t",
+          .name     = "devPtr",
+          .value    = "0x7f0000000000",
+          .extdata  = R"({"semantic":"pointer"})" },
+        { .position = 3,
+          .type     = "float",
+          .name     = "value",
+          .value    = "3.14159",
+          .extdata  = R"({"semantic":"scalar"})" },
+        { .position = 4,
+          .type     = "const char*",
+          .name     = "name",
+          .value    = "kernel_name",
+          .extdata  = R"({"semantic":"label"})" }
+    };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 1,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 1,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "hipLaunchKernelGGL",
-                                                  .extdata         = "{}",
-                                                  .args            = args };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "hipLaunchKernelGGL",
+        .extdata         = R"({"scope":"global","async":true})",
+        .args            = args
+    };
 
     rocpdsna::writer_types::trace_environment_t trace_env{
         .node_id    = 1,
@@ -3109,30 +3190,34 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_via_kernel_dispatch)
         .track_name = "TestTrack"
     };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 500,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 600,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 500,
+        .parent_stack_id = 0,
+        .correlation_id  = 600,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"dispatch","depth":0})"
+    };
 
-    rocpdsna::writer_types::kernel_dispatch_data_t dispatch{ .event       = event_data,
-                                                             .dispatch_id = 1,
-                                                             .start_timestamp  = 2000000,
-                                                             .end_timestamp    = 3000000,
-                                                             .kernel_symbol_id = 1,
-                                                             .code_object_id   = 1,
-                                                             .private_segment_size = 0,
-                                                             .group_segment_size   = 256,
-                                                             .workgroup_size_x     = 64,
-                                                             .workgroup_size_y     = 1,
-                                                             .workgroup_size_z     = 1,
-                                                             .grid_size_x          = 1024,
-                                                             .grid_size_y          = 1,
-                                                             .grid_size_z          = 1,
-                                                             .name    = "test_kernel",
-                                                             .extdata = "{}" };
+    rocpdsna::writer_types::kernel_dispatch_data_t dispatch{
+        .event                = event_data,
+        .dispatch_id          = 1,
+        .start_timestamp      = 2000000,
+        .end_timestamp        = 3000000,
+        .kernel_symbol_id     = 1,
+        .code_object_id       = 1,
+        .private_segment_size = 0,
+        .group_segment_size   = 256,
+        .workgroup_size_x     = 64,
+        .workgroup_size_y     = 1,
+        .workgroup_size_z     = 1,
+        .grid_size_x          = 1024,
+        .grid_size_y          = 1,
+        .grid_size_z          = 1,
+        .name                 = "test_kernel",
+        .extdata              = R"({"queue_idx":0,"signal_handle":42})"
+    };
 
     m_writer->insert_kernel_dispatch_data(dispatch, env);
     flush_and_wait();
@@ -3177,13 +3262,15 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_via_memory_copy)
         .track_name = "TestTrack"
     };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 700,
-                                                     .parent_stack_id = 699,
-                                                     .correlation_id  = 800,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 700,
+        .parent_stack_id = 699,
+        .correlation_id  = 800,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"memcpy","depth":0})"
+    };
 
     rocpdsna::writer_types::memory_copy_data_t copy{
         .event           = event_data,
@@ -3196,7 +3283,7 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_via_memory_copy)
         .size            = 1024 * 1024,
         .name            = "hipMemcpy",
         .region_name     = "default_region",
-        .extdata         = "{}"
+        .extdata         = R"({"direction":"HtoD","pinned":true})"
     };
 
     m_writer->insert_memory_copy_data(copy, env);
@@ -3247,14 +3334,16 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_via_memory_alloc)
         .extdata         = R"({"alloc_type":"hipMalloc"})"
     };
 
-    rocpdsna::writer_types::memory_alloc_data_t alloc{ .event           = event_data,
-                                                       .type            = "ALLOC",
-                                                       .level           = "REAL",
-                                                       .start_timestamp = 500000,
-                                                       .end_timestamp   = 600000,
-                                                       .address         = 0x7f0000100000,
-                                                       .size            = 1024 * 1024,
-                                                       .extdata         = "{}" };
+    rocpdsna::writer_types::memory_alloc_data_t alloc{
+        .event           = event_data,
+        .type            = "ALLOC",
+        .level           = "REAL",
+        .start_timestamp = 500000,
+        .end_timestamp   = 600000,
+        .address         = 0x7f0000100000,
+        .size            = 1024 * 1024,
+        .extdata         = R"({"pool":"default","managed":false})"
+    };
 
     m_writer->insert_memory_alloc_data(alloc, env);
     flush_and_wait();
@@ -3265,6 +3354,7 @@ TEST_F(SchemaV4ValueInsertionTest, event_table_via_memory_alloc)
     ASSERT_GE(result.rows.size(), 1);
     EXPECT_EQ(result.rows[0][0], "900");
     EXPECT_EQ(result.rows[0][1], "1000");
+    EXPECT_EQ(result.rows[0][2], R"({"alloc_type":"hipMalloc"})");
 }
 
 // ============================================================================
@@ -3296,22 +3386,22 @@ TEST_F(SchemaV4ValueInsertionTest, events_multiple_categories)
 
     for(int i = 0; i < 3; ++i)
     {
-        rocpdsna::writer_types::event_data_t event_data{ .stack_id =
-                                                             static_cast<size_t>(i + 1),
-                                                         .parent_stack_id = 0,
-                                                         .correlation_id =
-                                                             static_cast<size_t>(i * 100),
-                                                         .call_stack     = {},
-                                                         .line_info_list = {},
-                                                         .event_category = categories[i],
-                                                         .extdata        = "{}" };
+        rocpdsna::writer_types::event_data_t event_data{
+            .stack_id        = static_cast<size_t>(i + 1),
+            .parent_stack_id = 0,
+            .correlation_id  = static_cast<size_t>(i * 100),
+            .call_stack      = {},
+            .line_info_list  = {},
+            .event_category  = categories[i],
+            .extdata         = R"({"origin":"api","depth":0})"
+        };
 
         rocpdsna::writer_types::region_data_t region{
             .event           = event_data,
             .start_timestamp = static_cast<size_t>(1000000 + i * 100000),
             .end_timestamp   = static_cast<size_t>(1050000 + i * 100000),
             .name            = names[i],
-            .extdata         = "{}",
+            .extdata         = R"({"scope":"global","async":false})",
             .args            = {}
         };
 
@@ -3353,28 +3443,33 @@ TEST_F(SchemaV4ValueInsertionTest, pmc_event_with_event_data)
         1, 1000, "EVENT_PMC", rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 });
     m_writer->register_pmc_info(pmc);
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 123,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 456,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 123,
+        .parent_stack_id = 0,
+        .correlation_id  = 456,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"pmc","depth":0})"
+    };
 
     // sample.track must be a valid track_info_t matching registered track
-    rocpdsna::writer_types::track_info_t sample_track{ .name       = "PMCEventTrack",
-                                                       .extdata    = "{}",
-                                                       .node_id    = 1,
-                                                       .process_id = 1000,
-                                                       .thread_id  = 100 };
+    rocpdsna::writer_types::track_info_t sample_track{
+        .name       = "PMCEventTrack",
+        .extdata    = R"({"source":"profiler","kind":"gpu"})",
+        .node_id    = 1,
+        .process_id = 1000,
+        .thread_id  = 100
+    };
 
     rocpdsna::writer_types::pmc_event_data_t pmc_event{
         .event   = event_data,
         .value   = 98765.43,
-        .extdata = "{}",
-        .sample  = rocpdsna::writer_types::sample_data_t{ .timestamp = 8888888,
-                                                          .track     = sample_track,
-                                                          .extdata   = "{}" }
+        .extdata = R"({"unit":"cycles","normalized":false})",
+        .sample =
+            rocpdsna::writer_types::sample_data_t{ .timestamp = 8888888,
+                                                   .track     = sample_track,
+                                                   .extdata   = R"({"interval_ms":5})" }
     };
 
     m_writer->insert_pmc_event_data(
@@ -3415,27 +3510,32 @@ TEST_F(SchemaV4ValueInsertionTest, sample_table_with_timestamp_track)
     m_writer->register_track_info(track);
 
     // Sample is only created when event has value - must provide event
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 777,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 888,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 777,
+        .parent_stack_id = 0,
+        .correlation_id  = 888,
+        .call_stack      = {},
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"pmc","depth":0})"
+    };
 
-    rocpdsna::writer_types::track_info_t sample_track{ .name       = "SampleTrack",
-                                                       .extdata    = "{}",
-                                                       .node_id    = 1,
-                                                       .process_id = 1000,
-                                                       .thread_id  = 100 };
+    rocpdsna::writer_types::track_info_t sample_track{
+        .name       = "SampleTrack",
+        .extdata    = R"({"source":"profiler","kind":"gpu"})",
+        .node_id    = 1,
+        .process_id = 1000,
+        .thread_id  = 100
+    };
 
     rocpdsna::writer_types::pmc_event_data_t pmc_event{
         .event   = event_data,  // Must have event to trigger sample creation
         .value   = 999.0,
-        .extdata = "{}",
-        .sample  = rocpdsna::writer_types::sample_data_t{ .timestamp = 7777777,
-                                                          .track     = sample_track,
-                                                          .extdata   = "{}" }
+        .extdata = R"({"unit":"count","normalized":false})",
+        .sample =
+            rocpdsna::writer_types::sample_data_t{ .timestamp = 7777777,
+                                                   .track     = sample_track,
+                                                   .extdata   = R"({"interval_ms":10})" }
     };
 
     m_writer->insert_pmc_event_data(
@@ -3503,20 +3603,24 @@ TEST_F(SchemaV4ValueInsertionTest, call_stack_table_populated_via_region)
 
     rocpdsna::shared_types::call_stack_t call_stack = { frame1, frame2, frame3 };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 100,
-                                                     .call_stack      = call_stack,
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 100,
+        .call_stack      = call_stack,
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name    = "test_with_call_stack",
-                                                  .extdata = "{}",
-                                                  .args    = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "test_with_call_stack",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = {}
+    };
 
     rocpdsna::writer_types::trace_environment_t trace_env{
         .node_id    = 1,
@@ -3538,8 +3642,11 @@ TEST_F(SchemaV4ValueInsertionTest, call_stack_table_populated_via_region)
 
     ASSERT_EQ(result.rows.size(), 3);
     EXPECT_EQ(result.rows[0][0], "0");  // depth 0 (top of stack)
+    EXPECT_EQ(result.rows[0][1], R"({"function":"main"})");
     EXPECT_EQ(result.rows[1][0], "1");  // depth 1
+    EXPECT_EQ(result.rows[1][1], R"({"function":"foo"})");
     EXPECT_EQ(result.rows[2][0], "2");  // depth 2
+    EXPECT_EQ(result.rows[2][1], R"({"function":"bar"})");
 }
 
 // ============================================================================
@@ -3561,20 +3668,24 @@ TEST_F(SchemaV4ValueInsertionTest, call_stack_event_fk_verified)
 
     rocpdsna::shared_types::call_stack_t call_stack = { frame };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 999,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 888,
-                                                     .call_stack      = call_stack,
-                                                     .line_info_list  = {},
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 999,
+        .parent_stack_id = 0,
+        .correlation_id  = 888,
+        .call_stack      = call_stack,
+        .line_info_list  = {},
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "test_call_stack_fk",
-                                                  .extdata         = "{}",
-                                                  .args            = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "test_call_stack_fk",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = {}
+    };
 
     rocpdsna::writer_types::trace_environment_t trace_env{
         .node_id    = 1,
@@ -3646,20 +3757,24 @@ TEST_F(SchemaV4ValueInsertionTest, line_info_table_populated_via_region)
     rocpdsna::shared_types::source_context_list_t line_info_list = { line_entry1,
                                                                      line_entry2 };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 1,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 200,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = line_info_list,
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 1,
+        .parent_stack_id = 0,
+        .correlation_id  = 200,
+        .call_stack      = {},
+        .line_info_list  = line_info_list,
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name    = "test_with_line_info",
-                                                  .extdata = "{}",
-                                                  .args    = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "test_with_line_info",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = {}
+    };
 
     rocpdsna::writer_types::trace_environment_t trace_env{
         .node_id    = 1,
@@ -3706,20 +3821,24 @@ TEST_F(SchemaV4ValueInsertionTest, line_info_event_fk_verified)
 
     rocpdsna::shared_types::source_context_list_t line_info_list = { line_entry };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 777,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 666,
-                                                     .call_stack      = {},
-                                                     .line_info_list  = line_info_list,
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 777,
+        .parent_stack_id = 0,
+        .correlation_id  = 666,
+        .call_stack      = {},
+        .line_info_list  = line_info_list,
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
-    rocpdsna::writer_types::region_data_t region{ .event           = event_data,
-                                                  .start_timestamp = 1000000,
-                                                  .end_timestamp   = 2000000,
-                                                  .name            = "test_line_info_fk",
-                                                  .extdata         = "{}",
-                                                  .args            = {} };
+    rocpdsna::writer_types::region_data_t region{
+        .event           = event_data,
+        .start_timestamp = 1000000,
+        .end_timestamp   = 2000000,
+        .name            = "test_line_info_fk",
+        .extdata         = R"({"scope":"global","async":false})",
+        .args            = {}
+    };
 
     rocpdsna::writer_types::trace_environment_t trace_env{
         .node_id    = 1,
@@ -3828,20 +3947,22 @@ TEST_F(SchemaV4ValueInsertionTest, call_stack_and_line_info_together)
                                                                      line_entry2,
                                                                      line_entry3 };
 
-    rocpdsna::writer_types::event_data_t event_data{ .stack_id        = 123,
-                                                     .parent_stack_id = 0,
-                                                     .correlation_id  = 456,
-                                                     .call_stack      = call_stack,
-                                                     .line_info_list  = line_info_list,
-                                                     .event_category  = "GENERAL",
-                                                     .extdata         = "{}" };
+    rocpdsna::writer_types::event_data_t event_data{
+        .stack_id        = 123,
+        .parent_stack_id = 0,
+        .correlation_id  = 456,
+        .call_stack      = call_stack,
+        .line_info_list  = line_info_list,
+        .event_category  = "GENERAL",
+        .extdata         = R"({"origin":"api","depth":0})"
+    };
 
     rocpdsna::writer_types::region_data_t region{
         .event           = event_data,
         .start_timestamp = 1000000,
         .end_timestamp   = 2000000,
         .name            = "test_both_call_stack_and_line_info",
-        .extdata         = "{}",
+        .extdata         = R"({"scope":"global","async":false})",
         .args            = {}
     };
 
@@ -3904,7 +4025,7 @@ TEST_F(SchemaV4ValueInsertionTest, track_values_and_all_fks_verified)
 
     rocpdsna::writer_types::track_info_t track{
         .name       = "GPUTrack",
-        .extdata    = "{}",
+        .extdata    = R"({"source":"profiler","kind":"gpu"})",
         .node_id    = 1,
         .process_id = 1000,
         .thread_id  = 100,
@@ -3947,6 +4068,7 @@ TEST_F(SchemaV4ValueInsertionTest, track_values_and_all_fks_verified)
     EXPECT_EQ(result.rows[0][4], "TestQueue");   // queue name
     EXPECT_EQ(result.rows[0][5], "TestStream");  // stream name
     EXPECT_EQ(result.rows[0][6], "GPUTrack");    // track name via string table
+    EXPECT_EQ(result.rows[0][7], R"({"source":"profiler","kind":"gpu"})");
 }
 
 // ============================================================================

@@ -167,7 +167,7 @@ protected:
                  .name              = "TestThread",
                  .start             = 1100000,
                  .end               = 8900000,
-                 .extdata           = "{}",
+                 .extdata           = R"({"priority":"high","affinity":3})",
                  .node_id           = node_id,
                  .process_id        = process_id };
     }
@@ -186,7 +186,7 @@ protected:
                  .vendor_name    = "AMD",
                  .product_name   = "Radeon RX 7900 XTX",
                  .user_name      = "gpu0",
-                 .extdata        = "{}",
+                 .extdata        = R"({"pci_bus":"0000:03:00.0","mem_gb":24})",
                  .node_id        = node_id,
                  .process_id     = process_id };
     }
@@ -197,7 +197,7 @@ protected:
     {
         return { .queue_id   = queue_id,
                  .name       = "TestQueue",
-                 .extdata    = "{}",
+                 .extdata    = R"({"capacity":128,"type":"compute"})",
                  .node_id    = node_id,
                  .process_id = process_id };
     }
@@ -208,7 +208,7 @@ protected:
     {
         return { .stream_id  = stream_id,
                  .name       = "TestStream",
-                 .extdata    = "{}",
+                 .extdata    = R"({"flags":"default","priority":0})",
                  .node_id    = node_id,
                  .process_id = process_id };
     }
@@ -234,7 +234,7 @@ protected:
                  .expression       = "",
                  .is_constant      = 0,
                  .is_derived       = 0,
-                 .extdata          = "{}",
+                 .extdata          = R"({"shader_engine":0,"cu_mask":"0xff"})",
                  .node_id          = node_id,
                  .process_id       = process_id,
                  .qualifier        = "ACCUM" };
@@ -252,7 +252,7 @@ protected:
                  .load_size    = 0x100000,
                  .load_delta   = 0,
                  .storage_type = "FILE",
-                 .extdata      = "{}",
+                 .extdata      = R"({"isa":"gfx1100","format":"elf"})",
                  .node_id      = node_id,
                  .process_id   = process_id,
                  .agent_id     = agent_id };
@@ -275,7 +275,7 @@ protected:
                  .sgpr_count                = 32,
                  .arch_vgpr_count           = 64,
                  .accum_vgpr_count          = 0,
-                 .extdata                   = "{}",
+                 .extdata                   = R"({"lds_size":256,"waves_per_eu":4})",
                  .node_id                   = node_id,
                  .process_id                = process_id,
                  .code_obj_id               = code_object_id };
@@ -288,7 +288,7 @@ protected:
         std::optional<std::string_view> name       = "TestTrack")
     {
         return { .name       = name,
-                 .extdata    = "{}",
+                 .extdata    = R"({"source":"profiler","kind":"gpu"})",
                  .node_id    = node_id,
                  .process_id = process_id,
                  .thread_id  = thread_id };
@@ -300,17 +300,18 @@ protected:
         size_t      end   = 2000000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .start_timestamp = start,
                  .end_timestamp   = end,
                  .name            = name,
-                 .extdata         = "{}",
+                 .extdata         = R"({"scope":"global","async":false})",
                  .args            = {} };
     }
 
@@ -322,13 +323,14 @@ protected:
         size_t end         = 3000000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .dispatch_id          = dispatch_id,
                  .start_timestamp      = start,
                  .end_timestamp        = end,
@@ -343,7 +345,7 @@ protected:
                  .grid_size_y          = 1,
                  .grid_size_z          = 1,
                  .name                 = "vector_add",
-                 .extdata              = "{}" };
+                 .extdata              = R"({"queue_idx":0,"signal_handle":42})" };
     }
 
     rocpdsna::writer_types::memory_copy_data_t create_memory_copy_data(
@@ -351,13 +353,14 @@ protected:
         size_t end   = 3500000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .start_timestamp = start,
                  .end_timestamp   = end,
                  .dst_agent_id    = rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 },
@@ -367,7 +370,7 @@ protected:
                  .size            = 1024 * 1024,
                  .name            = "hipMemcpy",
                  .region_name     = "default_region",
-                 .extdata         = "{}" };
+                 .extdata         = R"({"direction":"HtoD","pinned":true})" };
     }
 
     rocpdsna::writer_types::memory_alloc_data_t create_memory_alloc_data(
@@ -375,20 +378,21 @@ protected:
         size_t end   = 600000)
     {
         return { .event =
-                     rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                           .parent_stack_id = 0,
-                                                           .correlation_id  = 1,
-                                                           .call_stack      = {},
-                                                           .line_info_list  = {},
-                                                           .event_category  = "GENERAL",
-                                                           .extdata         = "{}" },
+                     rocpdsna::writer_types::event_data_t{
+                         .stack_id        = 1,
+                         .parent_stack_id = 0,
+                         .correlation_id  = 1,
+                         .call_stack      = {},
+                         .line_info_list  = {},
+                         .event_category  = "GENERAL",
+                         .extdata         = R"({"origin":"api","depth":0})" },
                  .type            = "ALLOC",
                  .level           = "REAL",
                  .start_timestamp = start,
                  .end_timestamp   = end,
                  .address         = 0x7f0000100000,
                  .size            = 1024 * 1024,
-                 .extdata         = "{}" };
+                 .extdata         = R"({"pool":"default","managed":false})" };
     }
 
     rocpdsna::writer_types::trace_environment_t create_trace_env()
@@ -518,7 +522,8 @@ TEST_F(SchemaV3ValueInsertionTest, info_process_values_and_fk)
 
     auto result =
         query_database(m_db_path,
-                       "SELECT p.pid, p.ppid, p.command, p.init, p.fini, n.machine_id "
+                       "SELECT p.pid, p.ppid, p.command, p.init, p.fini, n.machine_id, "
+                       "p.extdata "
                        "FROM rocpd_info_process_" +
                            m_uuid +
                            " p "
@@ -532,6 +537,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_process_values_and_fk)
     EXPECT_EQ(result.rows[0][3], "1000000");
     EXPECT_EQ(result.rows[0][4], "9000000");
     EXPECT_EQ(result.rows[0][5], "test-machine-1");
+    EXPECT_EQ(result.rows[0][6], R"({"custom":"data"})");
 }
 
 // ============================================================================
@@ -546,7 +552,8 @@ TEST_F(SchemaV3ValueInsertionTest, info_thread_values_and_fks)
 
     auto result =
         query_database(m_db_path,
-                       "SELECT t.tid, t.name, t.start, t.end, p.pid, n.machine_id "
+                       "SELECT t.tid, t.name, t.start, t.end, p.pid, n.machine_id, "
+                       "t.extdata "
                        "FROM rocpd_info_thread_" +
                            m_uuid +
                            " t "
@@ -563,6 +570,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_thread_values_and_fks)
     EXPECT_EQ(result.rows[0][3], "8900000");
     EXPECT_EQ(result.rows[0][4], "1000");
     EXPECT_EQ(result.rows[0][5], "test-machine-1");
+    EXPECT_EQ(result.rows[0][6], R"({"priority":"high","affinity":3})");
 }
 
 // ============================================================================
@@ -578,7 +586,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_agent_values_and_fks)
     auto result = query_database(
         m_db_path,
         "SELECT a.type, a.type_index, a.name, a.model_name, a.vendor_name, "
-        "a.product_name, a.user_name, p.pid "
+        "a.product_name, a.user_name, p.pid, a.extdata "
         "FROM rocpd_info_agent_" +
             m_uuid +
             " a "
@@ -594,6 +602,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_agent_values_and_fks)
     EXPECT_EQ(result.rows[0][5], "Radeon RX 7900 XTX");
     EXPECT_EQ(result.rows[0][6], "gpu0");
     EXPECT_EQ(result.rows[0][7], "1000");
+    EXPECT_EQ(result.rows[0][8], R"({"pci_bus":"0000:03:00.0","mem_gb":24})");
 }
 
 // ============================================================================
@@ -606,15 +615,17 @@ TEST_F(SchemaV3ValueInsertionTest, info_queue_values_and_fks)
     m_writer->register_queue_info(create_queue_info(1, 1000, 1));
     flush_and_wait();
 
-    auto result = query_database(m_db_path,
-                                 "SELECT q.name, p.pid FROM rocpd_info_queue_" + m_uuid +
-                                     " q "
-                                     "JOIN rocpd_info_process_" +
-                                     m_uuid + " p ON q.pid = p.id");
+    auto result =
+        query_database(m_db_path,
+                       "SELECT q.name, p.pid, q.extdata FROM rocpd_info_queue_" + m_uuid +
+                           " q "
+                           "JOIN rocpd_info_process_" +
+                           m_uuid + " p ON q.pid = p.id");
 
     ASSERT_EQ(result.rows.size(), 1u);
     EXPECT_EQ(result.rows[0][0], "TestQueue");
     EXPECT_EQ(result.rows[0][1], "1000");
+    EXPECT_EQ(result.rows[0][2], R"({"capacity":128,"type":"compute"})");
 }
 
 // ============================================================================
@@ -627,15 +638,17 @@ TEST_F(SchemaV3ValueInsertionTest, info_stream_values_and_fks)
     m_writer->register_stream_info(create_stream_info(1, 1000, 1));
     flush_and_wait();
 
-    auto result = query_database(m_db_path,
-                                 "SELECT s.name, p.pid FROM rocpd_info_stream_" + m_uuid +
-                                     " s "
-                                     "JOIN rocpd_info_process_" +
-                                     m_uuid + " p ON s.pid = p.id");
+    auto result = query_database(
+        m_db_path,
+        "SELECT s.name, p.pid, s.extdata FROM rocpd_info_stream_" + m_uuid +
+            " s "
+            "JOIN rocpd_info_process_" +
+            m_uuid + " p ON s.pid = p.id");
 
     ASSERT_EQ(result.rows.size(), 1u);
     EXPECT_EQ(result.rows[0][0], "TestStream");
     EXPECT_EQ(result.rows[0][1], "1000");
+    EXPECT_EQ(result.rows[0][2], R"({"flags":"default","priority":0})");
 }
 
 // ============================================================================
@@ -652,7 +665,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_pmc_values_and_fks)
 
     auto result = query_database(m_db_path,
                                  "SELECT pm.name, pm.symbol, pm.description, pm.units, "
-                                 "pm.value_type, pm.block, a.type "
+                                 "pm.value_type, pm.block, a.type, pm.extdata "
                                  "FROM rocpd_info_pmc_" +
                                      m_uuid +
                                      " pm "
@@ -667,6 +680,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_pmc_values_and_fks)
     EXPECT_EQ(result.rows[0][4], "ACCUM");
     EXPECT_EQ(result.rows[0][5], "SQ");
     EXPECT_EQ(result.rows[0][6], "GPU");
+    EXPECT_EQ(result.rows[0][7], R"({"shader_engine":0,"cu_mask":"0xff"})");
 }
 
 // ============================================================================
@@ -682,7 +696,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_code_object_values_and_fks)
     flush_and_wait();
 
     auto result = query_database(m_db_path,
-                                 "SELECT co.uri, co.storage_type, a.type "
+                                 "SELECT co.uri, co.storage_type, a.type, co.extdata "
                                  "FROM rocpd_info_code_object_" +
                                      m_uuid +
                                      " co "
@@ -693,6 +707,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_code_object_values_and_fks)
     EXPECT_EQ(result.rows[0][0], "www.amd.com");
     EXPECT_EQ(result.rows[0][1], "FILE");
     EXPECT_EQ(result.rows[0][2], "GPU");
+    EXPECT_EQ(result.rows[0][3], R"({"isa":"gfx1100","format":"elf"})");
 }
 
 // ============================================================================
@@ -711,7 +726,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_kernel_symbol_values_and_fks)
     auto result = query_database(
         m_db_path,
         "SELECT ks.kernel_name, ks.display_name, ks.sgpr_count, ks.arch_vgpr_count, "
-        "co.uri, n.hostname, p.pid "
+        "co.uri, n.hostname, p.pid, ks.extdata "
         "FROM rocpd_info_kernel_symbol_" +
             m_uuid +
             " ks "
@@ -732,6 +747,7 @@ TEST_F(SchemaV3ValueInsertionTest, info_kernel_symbol_values_and_fks)
     EXPECT_EQ(result.rows[0][4], "www.amd.com");
     EXPECT_EQ(result.rows[0][5], "test-host");
     EXPECT_EQ(result.rows[0][6], "1000");
+    EXPECT_EQ(result.rows[0][7], R"({"lds_size":256,"waves_per_eu":4})");
 }
 
 // ============================================================================
@@ -746,7 +762,7 @@ TEST_F(SchemaV3ValueInsertionTest, track_values_and_fks)
     flush_and_wait();
 
     auto result = query_database(m_db_path,
-                                 "SELECT tr.nid, s.string, n.machine_id "
+                                 "SELECT tr.nid, s.string, n.machine_id, tr.extdata "
                                  "FROM rocpd_track_" +
                                      m_uuid +
                                      " tr "
@@ -759,6 +775,7 @@ TEST_F(SchemaV3ValueInsertionTest, track_values_and_fks)
     ASSERT_GE(result.rows.size(), 1u);
     EXPECT_EQ(result.rows[0][1], "MyTrack");
     EXPECT_EQ(result.rows[0][2], "test-machine-1");
+    EXPECT_EQ(result.rows[0][3], R"({"source":"profiler","kind":"gpu"})");
 }
 
 // ============================================================================
@@ -773,11 +790,12 @@ TEST_F(SchemaV3ValueInsertionTest, event_table_via_region)
     flush_and_wait();
 
     auto result = query_database(
-        m_db_path, "SELECT stack_id, correlation_id FROM rocpd_event_" + m_uuid);
+        m_db_path, "SELECT stack_id, correlation_id, extdata FROM rocpd_event_" + m_uuid);
 
     ASSERT_GE(result.rows.size(), 1u);
     EXPECT_EQ(result.rows[0][0], "1");
     EXPECT_EQ(result.rows[0][1], "1");
+    EXPECT_EQ(result.rows[0][2], R"({"origin":"api","depth":0})");
 }
 
 // ============================================================================
@@ -788,17 +806,19 @@ TEST_F(SchemaV3ValueInsertionTest, arg_table_populated_via_region)
     register_base_entities();
 
     rocpdsna::writer_types::region_data_t region{
-        .event           = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                                 .parent_stack_id = 0,
-                                                                 .correlation_id  = 42,
-                                                                 .call_stack      = {},
-                                                                 .line_info_list  = {},
-                                                                 .event_category  = "GENERAL",
-                                                                 .extdata         = "{}" },
+        .event =
+            rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                  .parent_stack_id = 0,
+                                                  .correlation_id  = 42,
+                                                  .call_stack      = {},
+                                                  .line_info_list  = {},
+                                                  .event_category  = "GENERAL",
+                                                  .extdata =
+                                                      R"({"origin":"api","depth":0})" },
         .start_timestamp = 1000000,
         .end_timestamp   = 2000000,
         .name            = "hipMalloc",
-        .extdata         = "{}",
+        .extdata         = R"({"scope":"device","async":false})",
         .args = { { .position = 0, .type = "void**", .name = "ptr", .value = "0x7f00" },
                   { .position = 1, .type = "size_t", .name = "size", .value = "1024" } }
     };
@@ -833,22 +853,26 @@ TEST_F(SchemaV3ValueInsertionTest, pmc_event_table_populated)
         1, 1000, "SQ_WAVES", rocpdsna::writer_types::agent_unique_id_t{ "GPU", 0 }));
 
     rocpdsna::writer_types::pmc_event_data_t pmc_event{
-        .event   = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                         .parent_stack_id = 0,
-                                                         .correlation_id  = 1,
-                                                         .call_stack      = {},
-                                                         .line_info_list  = {},
-                                                         .event_category  = "GENERAL",
-                                                         .extdata         = "{}" },
+        .event =
+            rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                  .parent_stack_id = 0,
+                                                  .correlation_id  = 1,
+                                                  .call_stack      = {},
+                                                  .line_info_list  = {},
+                                                  .event_category  = "GENERAL",
+                                                  .extdata =
+                                                      R"({"origin":"pmc","depth":0})" },
         .value   = 42.5,
-        .extdata = "{}",
+        .extdata = R"({"unit":"count","normalized":false})",
         .sample  = { .timestamp = 5000000,
-                     .track   = rocpdsna::writer_types::track_info_t{ .name    = "TestTrack",
-                                                                      .extdata = "{}",
-                                                                      .node_id = 1,
-                                                                      .process_id = 1000,
-                                                                      .thread_id  = 100 },
-                     .extdata = "{}" }
+                     .track =
+                         rocpdsna::writer_types::track_info_t{
+                             .name       = "TestTrack",
+                             .extdata    = R"({"source":"profiler","kind":"gpu"})",
+                             .node_id    = 1,
+                             .process_id = 1000,
+                             .thread_id  = 100 },
+                     .extdata = R"({"interval_ms":10})" }
     };
 
     rocpdsna::writer_types::pmc_info_unique_id_t pmc_uid{
@@ -860,7 +884,7 @@ TEST_F(SchemaV3ValueInsertionTest, pmc_event_table_populated)
     flush_and_wait();
 
     auto result = query_database(m_db_path,
-                                 "SELECT pe.value, pm.name "
+                                 "SELECT pe.value, pm.name, pe.extdata "
                                  "FROM rocpd_pmc_event_" +
                                      m_uuid +
                                      " pe "
@@ -870,6 +894,7 @@ TEST_F(SchemaV3ValueInsertionTest, pmc_event_table_populated)
     ASSERT_GE(result.rows.size(), 1u);
     EXPECT_EQ(result.rows[0][0], "42.5");
     EXPECT_EQ(result.rows[0][1], "SQ_WAVES");
+    EXPECT_EQ(result.rows[0][2], R"({"unit":"count","normalized":false})");
 }
 
 // ============================================================================
@@ -1309,22 +1334,26 @@ TEST_F(SchemaV3ValueInsertionTest, end_to_end_all_tables)
     m_writer->insert_memory_alloc_data(alloc, env);
 
     rocpdsna::writer_types::pmc_event_data_t pmc_event{
-        .event   = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
-                                                         .parent_stack_id = 0,
-                                                         .correlation_id  = 1,
-                                                         .call_stack      = {},
-                                                         .line_info_list  = {},
-                                                         .event_category  = "GENERAL",
-                                                         .extdata         = "{}" },
+        .event =
+            rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
+                                                  .parent_stack_id = 0,
+                                                  .correlation_id  = 1,
+                                                  .call_stack      = {},
+                                                  .line_info_list  = {},
+                                                  .event_category  = "GENERAL",
+                                                  .extdata =
+                                                      R"({"origin":"pmc","depth":0})" },
         .value   = 100.0,
-        .extdata = "{}",
+        .extdata = R"({"unit":"count","normalized":false})",
         .sample  = { .timestamp = 5000000,
-                     .track   = rocpdsna::writer_types::track_info_t{ .name    = "TestTrack",
-                                                                      .extdata = "{}",
-                                                                      .node_id = 1,
-                                                                      .process_id = 1000,
-                                                                      .thread_id  = 100 },
-                     .extdata = "{}" }
+                     .track =
+                         rocpdsna::writer_types::track_info_t{
+                             .name       = "TestTrack",
+                             .extdata    = R"({"source":"profiler","kind":"gpu"})",
+                             .node_id    = 1,
+                             .process_id = 1000,
+                             .thread_id  = 100 },
+                     .extdata = R"({"interval_ms":10})" }
     };
 
     m_writer->insert_pmc_event_data(

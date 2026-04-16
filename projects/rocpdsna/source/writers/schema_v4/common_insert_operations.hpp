@@ -301,24 +301,27 @@ public:
 
     void maybe_insert_sample(const writer_types::trace_environment_t& trace_env,
                              uint64_t                                 timestamp,
-                             std::optional<primary_key_t>             event_pk)
+                             std::optional<primary_key_t>             event_pk,
+                             std::string_view sample_extdata = writer_types::empty_json,
+                             std::string_view track_extdata  = writer_types::empty_json)
     {
         if(trace_env.track_name.has_value() && event_pk.has_value())
         {
-            const writer_types::track_info_t track_info = {
-                .name       = trace_env.track_name,
-                .extdata    = "{}",
-                .node_id    = trace_env.node_id.value(),
-                .process_id = trace_env.process_id,
-                .thread_id  = trace_env.thread_id,
-                .ppid       = trace_env.ppid,
-                .agent_id   = trace_env.agent_id,
-                .queue_id   = trace_env.queue_id,
-                .stream_id  = trace_env.stream_id
-            };
-            const writer_types::sample_data_t sample_data = { .timestamp = timestamp,
-                                                              .track     = track_info,
-                                                              .extdata   = "{}" };
+            writer_types::track_info_t track_info;
+            track_info.name       = trace_env.track_name;
+            track_info.extdata    = track_extdata;
+            track_info.node_id    = trace_env.node_id.value();
+            track_info.process_id = trace_env.process_id;
+            track_info.thread_id  = trace_env.thread_id;
+            track_info.ppid       = trace_env.ppid;
+            track_info.agent_id   = trace_env.agent_id;
+            track_info.queue_id   = trace_env.queue_id;
+            track_info.stream_id  = trace_env.stream_id;
+
+            writer_types::sample_data_t sample_data;
+            sample_data.timestamp = timestamp;
+            sample_data.track     = track_info;
+            sample_data.extdata   = sample_extdata;
             insert_sample(sample_data, event_pk.value());
         }
     }
@@ -330,14 +333,16 @@ public:
      * This method resolves or creates the appropriate track, auto-registering
      * if the track doesn't exist.
      */
-    primary_key_t resolve_track_id(const writer_types::trace_environment_t& trace_env)
+    primary_key_t resolve_track_id(
+        const writer_types::trace_environment_t& trace_env,
+        std::string_view                         track_extdata = writer_types::empty_json)
     {
         auto& track_info_utility = m_ctx->registry->track_info();
 
         // Build a track_info from trace_environment
         writer_types::track_info_t track_info;
         track_info.name    = trace_env.track_name;
-        track_info.extdata = "{}";
+        track_info.extdata = track_extdata;
         track_info.node_id = trace_env.node_id.value();
         if(trace_env.process_id.has_value())
         {
@@ -413,7 +418,7 @@ public:
                                             queue_fk,
                                             stream_fk,
                                             name_fk,
-                                            std::string_view("{}"));
+                                            track_extdata);
 
             track_info_utility.emplace_entity(track_info, track_pk);
             LOG_TRACE("Auto-registered track: nid={}, pid={}, tid={}",
