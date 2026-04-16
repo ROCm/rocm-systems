@@ -296,7 +296,7 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ void mlx5_quiet(ActiveWFInfo &wf_info);
+  __device__ void mlx5_quiet();
   __device__ void mlx5_quiet_single();
 #endif
 #if defined(GDA_BNXT)
@@ -317,7 +317,7 @@ class QueuePair {
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ void bnxt_quiet(ActiveWFInfo &wf_info);
+  __device__ void bnxt_quiet();
   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
@@ -359,7 +359,7 @@ class QueuePair {
   struct bnxt_device_sq bnxt_sq;
 
   __device__ void bnxt_poll_cq_until(uint32_t requested_available_slots);
-  __device__ void bnxt_check_cqe_error(struct bnxt_re_req_cqe *cqe);
+  [[maybe_unused]] __device__ __attribute__((noinline)) void bnxt_print_cqe_error(uint8_t status);
 
   /* GDAProvider::BNXT END */
 
@@ -369,7 +369,7 @@ class QueuePair {
   gda_mlx5_device_sq mlx5_sq;
 
   __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
-  __device__ void mlx5_check_cqe_error(const mlx5_cqe64* cqe);
+  [[maybe_unused]] __device__ __attribute__((noinline)) void mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode);
 
   /* GDAProvider::MLX5 END */
 

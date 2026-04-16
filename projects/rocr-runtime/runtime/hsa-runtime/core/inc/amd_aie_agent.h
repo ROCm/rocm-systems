@@ -80,6 +80,7 @@ public:
  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                           core::HsaEventCallback event_callback, void* data,
                           uint32_t private_segment_size, uint32_t group_segment_size,
+                          bool metadata_queue,
                           core::Queue** queue) override;
 
  /// @brief Override from core::Agent.

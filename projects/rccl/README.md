@@ -42,9 +42,6 @@ RCCL build & installation helper script
        --debug                 Build debug library
        --enable_backtrace      Build with custom backtrace support
        --disable-colltrace     Build without collective trace
-       --enable-msccl-kernel   Build with MSCCL kernels
-       --enable-mscclpp        Build with MSCCL++ support
-       --enable-mscclpp-clip   Build MSCCL++ with clip wrapper on bfloat16 and half addition routines
        --disable-roctx         Build without ROCTX logging
     -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
     -h|--help                  Prints this help message
@@ -81,7 +78,7 @@ $ cd build
 $ cmake ..
 $ make -j 16      # Or some other suitable number of parallel jobs
 ```
-If you have already cloned, you can check out the remaining git submodules manually (for example MSCCL++ and nlohmann/json under `ext-src/`). rocSHMEM is **not** a submodule; to build RCCL with rocSHMEM from CMake, set `ROCSHMEM_INSTALL_DIR` or `ROCSHMEM_SOURCE_DIR` as described under [rocSHMEM support](#rocshmem-support) below.
+If you have already cloned, you can check out the remaining git submodules manually. rocSHMEM is **not** a submodule; to build RCCL with rocSHMEM from CMake, set `ROCSHMEM_INSTALL_DIR` or `ROCSHMEM_SOURCE_DIR` as described under [rocSHMEM support](#rocshmem-support) below.
 ```shell
 $ git submodule update --init --recursive --depth=1
 ```

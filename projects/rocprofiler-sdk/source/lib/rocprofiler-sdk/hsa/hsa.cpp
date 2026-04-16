@@ -709,6 +709,9 @@ check_hsa_timing_functions()
 std::string_view
 get_hsa_status_string(hsa_status_t _status)
 {
+    if(!hsa::get_core_table() || !hsa::get_core_table()->hsa_status_string_fn)
+        return std::string_view{"(hsa_status_string function not available)"};
+
     const char* _status_msg = nullptr;
     return (hsa::get_core_table()->hsa_status_string_fn(_status, &_status_msg) ==
                 HSA_STATUS_SUCCESS &&

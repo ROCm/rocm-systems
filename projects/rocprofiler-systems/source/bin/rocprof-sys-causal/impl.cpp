@@ -1,28 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "rocprof-sys-causal.hpp"
 
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "core/mproc.hpp"
@@ -57,21 +39,13 @@ namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
+namespace env      = rocprofsys::env_vars;
 using namespace ::timemory::join;
 using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
 using ::tim::get_env;
 using ::tim::log::monochrome;
 using ::tim::log::stream;
-
-namespace std
-{
-std::string
-to_string(bool _v)
-{
-    return (_v) ? "true" : "false";
-}
-}  // namespace std
 
 namespace
 {
@@ -119,11 +93,8 @@ forward_signal(int sig)
 int
 get_verbose()
 {
-    verbose     = get_env("ROCPROFSYS_CAUSAL_VERBOSE",
-                          get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
-    auto _debug = get_env("ROCPROFSYS_CAUSAL_DEBUG",
-                          get_env<bool>("ROCPROFSYS_DEBUG", false, false));
-    if(_debug) verbose += 8;
+    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
+    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
     return verbose;
 }
 
@@ -158,14 +129,10 @@ diagnose_status(pid_t _pid, int _status)
     return ::rocprofsys::mproc::diagnose_status(_pid, _status, get_verbose());
 }
 
-void
-print_command(const std::vector<char*>& _argv, std::string_view _prefix)
+const std::unordered_set<std::string_view>&
+get_updated_envs()
 {
-    if(verbose >= 1)
-        stream(std::cout, color::info())
-            << _prefix << "Executing '" << join(array_config{ " " }, _argv) << "'...\n";
-
-    std::cerr << color::end() << std::flush;
+    return updated_envs;
 }
 
 std::vector<char*>
@@ -247,53 +214,6 @@ prepare_environment_for_run(std::vector<char*>& _env)
         update_env(_env, "ROCPROFSYS_SCRIPT_DIR", path::get_internal_script_path());
         update_env(_env, "ROCPROFSYS_ROOT", path::get_rocprofsys_root());
     }
-}
-
-void
-print_updated_environment(std::vector<char*> _env, std::string_view _prefix)
-{
-    if(get_verbose() < 0) return;
-
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    std::vector<std::string_view> _updates = {};
-    std::vector<std::string_view> _general = {};
-
-    for(auto* itr : _env)
-    {
-        if(itr == nullptr) continue;
-
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
-
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
-    }
-
-    if(_general.size() + _updates.size() == 0 || verbose < 0) return;
-
-    std::cerr << std::endl;
-
-    for(auto& itr : _general)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-    for(auto& itr : _updates)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-
-    std::cerr << color::end() << std::flush;
 }
 
 template <typename Tp>

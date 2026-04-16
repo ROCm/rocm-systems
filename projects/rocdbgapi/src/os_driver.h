@@ -34,6 +34,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace amd::dbgapi
 {
@@ -65,6 +66,8 @@ enum elf_amdgpu_machine_t : uint32_t
   EF_AMDGPU_MACH_AMDGCN_GFX1153 = 0x058,
   EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x048,
   EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x04e,
+  EF_AMDGPU_MACH_AMDGCN_GFX1250 = 0x049,
+  EF_AMDGPU_MACH_AMDGCN_GFX1251 = 0x05a,
   EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC = 0x051,
   EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC = 0x052,
   EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC = 0x053,
@@ -407,12 +410,15 @@ struct os_queue_snapshot_entry_t
   os_agent_id_t gpu_id;
   os_queue_type_t queue_type{ os_queue_type_t::unknown };
   os_exception_mask_t exception_status;
-  host_address_t ring_base_address;
+  std::variant<host_address_t, agent_address_t> ring_base_address;
   amd_dbgapi_size_t ring_size;
-  host_address_t write_pointer_address;
-  host_address_t read_pointer_address;
+  std::optional<std::variant<host_address_t, agent_address_t>>
+    write_pointer_address;
+  std::optional<std::variant<host_address_t, agent_address_t>>
+    read_pointer_address;
   agent_address_t ctx_save_restore_address;
   amd_dbgapi_size_t ctx_save_restore_area_size;
+  std::optional<uint32_t> compute_tmpring_size;
 };
 
 enum class os_wave_launch_mode_t : uint32_t

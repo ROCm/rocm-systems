@@ -29,6 +29,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // stripped from imported dlmalloc.c:
 //   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG;
 #include "dlmalloc.hpp"
+#include "log.hpp"
 #include <cstdio>
 
 // Suppress GNU null pointer arithmetic warnings for dlmalloc's intentional
@@ -47,14 +48,12 @@ namespace rocshmem {
 #define NO_MALLOC_STATS 1
 
 #define USAGE_ERROR_ACTION(m, p) do {                                   \
-  fprintf(stderr, "Symmetric heap usage error detected, "               \
-                  "possibly at %p\n", p);                               \
-  ABORT;                                                                \
+  LOG_ERROR_ABORT("Symmetric heap usage error detected, "               \
+                  "possibly at %p", p);                                 \
 } while (0)
 
 #define CORRUPTION_ERROR_ACTION(m) do {                                 \
-  fprintf(stderr, "Symmetric heap data structure corruption found");    \
-  ABORT;                                                                \
+  LOG_ERROR_ABORT("Symmetric heap data structure corruption found");    \
 } while (0)
 
 #define DLMALLOC_EXPORT static
@@ -970,7 +969,7 @@ DLMALLOC_EXPORT int mspace_mallopt(int, int);
 #ifndef LACKS_ERRNO_H
 #include <errno.h>       /* for MALLOC_FAILURE_ACTION */
 #endif /* LACKS_ERRNO_H */
-#ifdef DEBUG
+#ifdef BUILD_DEBUG_TRACE_HOST
 #if ABORT_ON_ASSERT_FAILURE
 #undef assert
 #define assert(x) if(!(x)) ABORT
@@ -1166,7 +1165,7 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
     #define CALL_MREMAP(addr, osz, nsz, mv)     MFAIL
 #endif /* HAVE_MMAP && HAVE_MREMAP */
 
-/* mstate bit set if continguous morecore disabled or failed */
+/* mstate bit set if contiguous morecore disabled or failed */
 #define USE_NONCONTIGUOUS_BIT (4U)
 
 /* segment bit set in create_mspace_with_base */
@@ -3852,10 +3851,10 @@ History:
         Wolfram Gloger (Gloger@lrz.uni-muenchen.de).
       * Use last_remainder in more cases.
       * Pack bins using idea from  colin@nyx10.cs.du.edu
-      * Use ordered bins instead of best-fit threshhold
+      * Use ordered bins instead of best-fit threshold
       * Eliminate block-local decls to simplify tracing and debugging.
       * Support another case of realloc via move into top
-      * Fix error occuring when initial sbrk_base not word-aligned.
+      * Fix error occurring when initial sbrk_base not word-aligned.
       * Rely on page size for units instead of SBRK_UNIT to
         avoid surprises about sbrk alignment conventions.
       * Add mallinfo, mallopt. Thanks to Raymond Nijssen

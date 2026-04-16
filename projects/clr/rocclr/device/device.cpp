@@ -614,8 +614,7 @@ Device::BlitProgram::~BlitProgram() {
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
                                  const std::string& extraOptions) {
-  std::vector<amd::Device*> devices;
-  devices.push_back(device);
+  std::vector<amd::Device*> devices{device};
   int32_t retval = CL_SUCCESS;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
