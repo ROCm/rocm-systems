@@ -249,14 +249,21 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       Function::Create(funcTy, GlobalValue::ExternalLinkage, kernelName, &M);
   F->setCallingConv(CallingConv::AMDGPU_KERNEL);
   {
+    // Pin the workgroup size to exactly what the source kernel declared, so
+    // the backend lays out LDS / workitem IDs the same way the original
+    // gfx1250 binary did.
     int maxWg = meta.maxFlatWorkgroupSize > 0 ? meta.maxFlatWorkgroupSize : 1024;
-    int waveSz = targetIsa.isWave32() ? 32 : 64;
-    int minWaves = (maxWg + waveSz - 1) / waveSz;
     F->addFnAttr("amdgpu-flat-work-group-size",
                   std::to_string(maxWg) + "," + std::to_string(maxWg));
-    if (minWaves > 1)
-      F->addFnAttr("amdgpu-waves-per-eu",
-                    std::to_string(minWaves) + "," + std::to_string(minWaves));
+
+    // Deliberately do NOT set "amdgpu-waves-per-eu".  Pinning occupancy
+    // constrains register allocation and caused spurious VGPR spills for
+    // wide kernels (e.g. the Triton 128x128 matmul on gfx942), which then
+    // triggered memory faults because our raised IR is register-pressure
+    // heavy compared to a from-source compile.  Letting the backend choose
+    // occupancy freely keeps register pressure safe.
+    // TODO(gfx1250→gfx942): revisit once the raiser emits tighter IR; we may
+    // want to propagate the source kernel's waves-per-eu for parity.
   }
 
   for (int i = 0; i < paramIdx; i++)
