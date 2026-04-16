@@ -24,7 +24,8 @@
 
 #include "lib/common/defines.hpp"
 
-#include <glog/logging.h>
+#include <absl/log/check.h>
+#include <absl/log/log.h>
 
 #include <fmt/format.h>  // usually used in conjunction with logging
 #include <fmt/ranges.h>
@@ -66,13 +67,21 @@ namespace rocprofiler
 {
 namespace common
 {
+/// CHECK_NOTNULL compatibility wrapper (abseil does not provide one).
+/// Returns the pointer value so it can be used as an expression:
+///   auto* p = CHECK_NOTNULL(some_ptr);
+template <typename T>
+T
+check_notnull_impl(const char* expr, T ptr)
+{
+    CHECK_NE(ptr, nullptr) << "'" << expr << "' Must be non NULL";
+    return ptr;
+}
+
 struct logging_config
 {
     bool        install_failure_handler = false;
-    bool        logtostderr             = true;
-    bool        alsologtostderr         = false;
-    bool        logdir_gitignore        = false;  // add .gitignore to logdir
-    int32_t     loglevel                = google::WARNING;
+    int32_t     loglevel                = 1;  // WARNING
     int32_t     vlog_level              = ROCP_LOG_LEVEL_WARNING;
     std::string vlog_modules            = {};
     std::string name                    = {};
@@ -86,3 +95,6 @@ void
 update_logging(const logging_config& cfg);
 }  // namespace common
 }  // namespace rocprofiler
+
+#define CHECK_NOTNULL(val)                                                                         \
+    ::rocprofiler::common::check_notnull_impl(#val, (val))

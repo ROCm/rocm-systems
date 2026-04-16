@@ -34,7 +34,6 @@
 #    include <rocprofiler-sdk/pc_sampling.h>
 #    include <rocprofiler-sdk/cxx/operators.hpp>
 
-#    include <glog/logging.h>
 #    include <hsa/hsa.h>
 #    include <hsa/hsa_api_trace.h>
 #    include <hsa/hsa_ven_amd_loader.h>
