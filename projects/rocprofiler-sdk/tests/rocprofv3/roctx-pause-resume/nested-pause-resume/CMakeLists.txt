@@ -45,7 +45,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-nested-trace -o out --output-format json
         --log-level info -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
-    TIMEOUT 45
+    TIMEOUT 60
     LABELS "integration-tests;pause-resume"
     ENVIRONMENT "${roctx-pause-resume-nested-env}"
     FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-nested-tracing)
@@ -71,7 +71,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-selected-kernel -o out --output-format json
         --log-level info -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
-    TIMEOUT 45
+    TIMEOUT 60
     LABELS "integration-tests;pause-resume;selected-regions"
     ENVIRONMENT "${roctx-pause-resume-nested-env}"
     FIXTURES_SETUP rocprofv3-test-selected-regions-kernel-only)

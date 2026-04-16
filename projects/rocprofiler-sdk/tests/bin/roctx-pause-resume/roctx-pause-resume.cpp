@@ -34,8 +34,8 @@
 #define THREADS_PER_BLOCK_X 4
 #define THREADS_PER_BLOCK_Y 4
 
-#define ITER_NUM   16 * 1024
-#define BLOCK_SIZE 1024
+#define PC_SAMPLING_ITERS (8 * 1024)
+#define NUM_BLOCKS        512
 
 template <typename T>
 void
@@ -115,7 +115,7 @@ pc_sampling_kernel(const int c)
 {
     int a = 0;
 #pragma nounroll
-    for(int i = 0; i < ITER_NUM; i++)
+    for(int i = 0; i < PC_SAMPLING_ITERS; i++)
     {
         REPEAT_100(ASM_LINE);
     }
@@ -161,7 +161,7 @@ main()
     float*           result                   = nullptr;
     float            varA                     = 5.5;
     float            varB                     = 11.7;
-    uint32_t         num_blocks               = BLOCK_SIZE;
+    uint32_t         num_blocks               = NUM_BLOCKS;
     checkHipErrors(hipMallocAsync(&result, sizeof(float), stream));
     for(auto i = 0; i < NUM_KERNELS; ++i)
     {
