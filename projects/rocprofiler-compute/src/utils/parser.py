@@ -525,32 +525,21 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
     Convert user defined equation string to eval executable string.
     For example,
         input:
-            AVG(100  * SQ_ACTIVE_INST_SCA / ( GRBM_GUI_ACTIVE * $numCU ))
+            100 * SUM(SQ_ACTIVE_INST_SCA) / SUM(GRBM_GUI_ACTIVE * $numCU)
         output:
-            to_avg(
-                100 * raw_pmc_df["pmc_perf"]["SQ_ACTIVE_INST_SCA"] /
-                (
-                    raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] *
-                    numCU
-                )
+            100 * to_sum(
+                raw_pmc_df["pmc_perf"]["SQ_ACTIVE_INST_SCA"]
+            ) / to_sum(
+                raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] *
+                numCU
             )
         input:
-            AVG(
-                (
-                    TCC_EA_RDREQ_LEVEL_31 / TCC_EA_RDREQ_31
-                )
-                if (TCC_EA_RDREQ_31 != 0)
-                else (0)
-            )
+            SUM(TCC_EA_RDREQ_LEVEL_31) / SUM(TCC_EA_RDREQ_31)
         output:
-            to_avg(
-                (
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] /
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
-                ).where(
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] != 0,
-                    0
-                )
+            to_sum(
+                raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"]
+            ) / to_sum(
+                raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
             )
         We can not handle the below for now:
         input:
