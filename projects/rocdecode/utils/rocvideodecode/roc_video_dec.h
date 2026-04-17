@@ -36,10 +36,30 @@ THE SOFTWARE.
 #include <unordered_map>
 #include <chrono>
 #include <thread>
+#include <ctime>
+#include <time.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 #include <hip/hip_runtime.h>
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
-#include "logger.h"
+
+#define ROCVIDEODEC_TOSTR(X) std::to_string(X)
+#define ROCVIDEODEC_STR(X) std::string(X)
+
+// Simple logging macros - format matches src/commons.h:
+//   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y] func(): message
+#define RocVideoDecCriticalLog(msg) \
+    do { \
+        struct timespec _ts_; \
+        clock_gettime(CLOCK_MONOTONIC, &_ts_); \
+        uint64_t _us_ = static_cast<uint64_t>(_ts_.tv_sec) * 1000000ULL + _ts_.tv_nsec / 1000ULL; \
+        const char *_f_ = strrchr(__FILE__, '/'); \
+        std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
+                  << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
+                  << getpid() << " tid:" << syscall(SYS_gettid) << "] " \
+                  << __func__ << "(): " << (msg) << std::endl; \
+    } while (0)
 
 /*!
  * \file
@@ -149,7 +169,7 @@ private:
 #define CHECK_ZERO(str, value)              \
     do {                                   \
         if (value == 0) {                  \
-            CriticalLog(g_rocdec_logger, ROCDEC_STR(str) + " is 0.");    \
+            RocVideoDecCriticalLog(ROCVIDEODEC_STR(str) + " is 0.");    \
         }                                  \
     } while (0)
 
