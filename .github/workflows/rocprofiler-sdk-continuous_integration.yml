@@ -119,13 +119,14 @@ jobs:
           tar -xf "rocm-${{ matrix.system.gpu-target }}.tar.gz" -C "${{ env.ROCM_PATH }}"
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v5
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/aqlprofile
             projects/rocprofiler-register
+            projects/rocprof-trace-decoder
             projects/rocr-runtime
             projects/clr
             projects/hip
@@ -313,6 +314,26 @@ jobs:
           cmake --build build-aqlprofile --target install
           echo "✅ AQLProfile Installation complete!"
 
+      - &build_and_install_rocprof_trace_decoder
+        name: Build and Install rocprof-trace-decoder
+        shell: bash
+        working-directory: projects/rocprof-trace-decoder
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          echo "Install rocprof-trace-decoder..."
+          rm -f ${{ env.ROCM_PATH }}/lib/librocprof-trace-decoder*
+          cmake -B build-rocprof-trace-decoder \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
+            .
+          cmake --build build-rocprof-trace-decoder --target all --parallel 16
+          cmake --build build-rocprof-trace-decoder --target install
+          echo "✅ rocprof-trace-decoder Installation complete!"
+
       - name: List Files
         shell: bash
         working-directory: projects/rocprofiler-sdk
@@ -462,13 +483,14 @@ jobs:
       OS_TYPE: ${{ matrix.system.os }}
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v5
         with:
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/aqlprofile
             projects/rocprofiler-register
+            projects/rocprof-trace-decoder
             projects/rocr-runtime
             projects/clr
             projects/hip
@@ -627,6 +649,26 @@ jobs:
           cmake --build build-aqlprofile --target install
           echo "✅ AQLProfile Installation complete!"
 
+      - name: Build and Install rocprof-trace-decoder
+        shell: bash
+        working-directory: projects/rocprof-trace-decoder
+        run: |
+          echo "Install rocprof-trace-decoder..."
+          rm -f ${{ env.ROCM_PATH }}/lib/librocprof-trace-decoder*
+          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          cmake -B build-rocprof-trace-decoder \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/local/bin/sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/local/bin/sccache \
+            .
+          cmake --build build-rocprof-trace-decoder --target all --parallel 16
+          cmake --build build-rocprof-trace-decoder --target install
+          echo "✅ rocprof-trace-decoder Installation complete!"
+
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
         shell: bash
@@ -710,13 +752,14 @@ jobs:
     steps:
     - *install_latest_nightly_rocm
 
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
       uses: actions/checkout@v5
       with:
         sparse-checkout: |
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
+          projects/rocprof-trace-decoder
           projects/rocr-runtime
           projects/clr
           projects/hip
@@ -869,6 +912,8 @@ jobs:
         cmake --build build-aqlprofile --target all --parallel 16
         cmake --build build-aqlprofile --target install
         echo "✅ Installation complete!"
+
+    - *build_and_install_rocprof_trace_decoder
 
     - name: Configure, Build, and Test
       timeout-minutes: 45

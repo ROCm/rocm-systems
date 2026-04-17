@@ -239,11 +239,24 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
 
   // AIE agent's dev heap is advertised as HSA_HEAPTYPE_DEVICE_SVM, but
   // is limited to the actual pool size.
-  if (ag_type == HSA_DEVICE_TYPE_AIE && pool_i.alloc_rec_granule == 0) {
+  // Also use pool size when ROCRTST_LIMIT_POOL_SIZE is set to cap the search range.
+  if ((ag_type == HSA_DEVICE_TYPE_AIE && pool_i.alloc_rec_granule == 0) ||
+      rocrtst::pool_size_limit) {
     pool_sz = pool_i.size / gran_sz;
   }
 
+  // Skip if ROCRTST_LIMIT_POOL_SIZE is set below one allocation granule.
+  if (rocrtst::pool_size_limit && pool_sz == 0) {
+    if (verbosity() > 0) {
+      std::cout << "  Skipping: ROCRTST_LIMIT_POOL_SIZE < allocation granule" << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
   // Neg. test: Try to allocate more than the pool size
+  // Skip when ROCRTST_LIMIT_POOL_SIZE is set, since the artificial limit only affects
+  // the test's view of the pool, not the runtime's actual pool size.
 #ifdef ROCRTST_ASAN
   // Under ASAN, hsa_amd_memory_pool_allocate is intercepted by the ASAN runtime.
   // Requesting (max_size + granule) from ASANs heap allocator triggers
@@ -252,8 +265,14 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
     std::cout << "  Skipping over-max negative alloc under ASAN (abort risk)" << std::endl;
   }
 #else
-  err = TestAllocate(pool, pool_sz*gran_sz + gran_sz);
-  EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ALLOCATION, err);
+  if (rocrtst::pool_size_limit) {
+    if (verbosity() > 0) {
+      std::cout << "  Skipping over-max negative alloc under pool size limit (false positive)" << std::endl;
+    }
+  } else {
+    err = TestAllocate(pool, pool_sz*gran_sz + gran_sz);
+    EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ALLOCATION, err);
+  }
 #endif
 
   const bool is_system_ram = (ag_type == HSA_DEVICE_TYPE_CPU) || (ag_type == HSA_DEVICE_TYPE_AIE);
