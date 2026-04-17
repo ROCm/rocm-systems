@@ -1470,7 +1470,6 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->latency = 0; // Not set
   props->port = ibDev->portNum + ibDev->realPort;
   props->maxComms = ibDev->maxQp;
-
   if (rcclCtsOffloadEnabled) {
       props->maxRecvs = 1; 
   } else {
