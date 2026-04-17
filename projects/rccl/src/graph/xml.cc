@@ -860,8 +860,8 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
             NCCLCHECK(xmlSetAttrInt(nvlNode, "accelerator_id", fabInfo.acceleratorId));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "bandwidth", fabInfo.bandwidth));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "latency", fabInfo.latency));
-            NCCLCHECK(xmlSetAttrLong(nvlNode, "uuidHigh", uuidHigh));
-            NCCLCHECK(xmlSetAttrLong(nvlNode, "uuidLow", uuidLow));
+            NCCLCHECK(xmlSetAttrUint64(nvlNode, "uuidHigh", uuidHigh));
+            NCCLCHECK(xmlSetAttrUint64(nvlNode, "uuidLow", uuidLow));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "ppod_size", fabInfo.ppodSize));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_id", fabInfo.cliqueId));
             NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_size", fabInfo.vpodSize));
