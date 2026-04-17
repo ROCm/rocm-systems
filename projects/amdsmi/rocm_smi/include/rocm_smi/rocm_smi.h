@@ -1216,10 +1216,9 @@ typedef struct metrics_table_header_t metrics_table_header_t;
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
- #define RSMI_APU_MAX_CORES  16   //!< v2_4 = 8, v3_0 = 16
- #define RSMI_APU_MAX_L3     2    //!< v2_4
- #define RSMI_APU_MAX_IPU    8    //!< v3_0, average_ipu_activity[]
-
+#define RSMI_APU_MAX_CORES 16  //!< v2_4 = 8, v3_0 = 16
+#define RSMI_APU_MAX_L3 2      //!< v2_4
+#define RSMI_APU_MAX_IPU 8     //!< v3_0, average_ipu_activity[]
 
 /**
  * @brief The following structures hold the gpu statistics for a device.
@@ -1251,7 +1250,6 @@ struct amdgpu_xcp_metrics_t {
   uint64_t gfx_below_host_limit_total_acc[RSMI_MAX_NUM_XCC];
 };
 
-
 /**
  * @brief APU metrics auxiliary data.
  *
@@ -1265,111 +1263,111 @@ struct amdgpu_xcp_metrics_t {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-    /**
-     * @brief Temperature (instant)
-     */
-    uint16_t temperature_gfx;                            //!< v2_4, v3_0
-    uint16_t temperature_soc;                            //!< v2_4, v3_0
-    uint16_t temperature_core[RSMI_APU_MAX_CORES];      //!< v2_4[8], v3_0[16]
-    uint16_t temperature_l3[RSMI_APU_MAX_L3];           //!< v2_4
-    uint16_t temperature_skin;                          //!< v3_0
+  /**
+   * @brief Temperature (instant)
+   */
+  uint16_t temperature_gfx;                       //!< v2_4, v3_0
+  uint16_t temperature_soc;                       //!< v2_4, v3_0
+  uint16_t temperature_core[RSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
+  uint16_t temperature_l3[RSMI_APU_MAX_L3];       //!< v2_4
+  uint16_t temperature_skin;                      //!< v3_0
 
-    /**
-     * @brief Utilization
-     */
-    uint16_t average_gfx_activity;                        //!< v2_4, v3_0
-    uint16_t average_mm_activity;                         //!< v2_4
-    uint16_t average_vcn_activity;                        //!< v3_0
-    uint16_t average_ipu_activity[RSMI_APU_MAX_IPU];      //!< v3_0
-    uint16_t average_core_c0_activity[RSMI_APU_MAX_CORES];  //!< v3_0
-    uint16_t average_dram_reads;                          //!< v3_0 [MB/s]
-    uint16_t average_dram_writes;                         //!< v3_0
-    uint16_t average_ipu_reads;                           //!< v3_0
-    uint16_t average_ipu_writes;                          //!< v3_0
+  /**
+   * @brief Utilization
+   */
+  uint16_t average_gfx_activity;                          //!< v2_4, v3_0
+  uint16_t average_mm_activity;                           //!< v2_4
+  uint16_t average_vcn_activity;                          //!< v3_0
+  uint16_t average_ipu_activity[RSMI_APU_MAX_IPU];        //!< v3_0
+  uint16_t average_core_c0_activity[RSMI_APU_MAX_CORES];  //!< v3_0
+  uint16_t average_dram_reads;                            //!< v3_0 [MB/s]
+  uint16_t average_dram_writes;                           //!< v3_0
+  uint16_t average_ipu_reads;                             //!< v3_0
+  uint16_t average_ipu_writes;                            //!< v3_0
 
-    /**
-     * @brief Power [mW]
-     */
-    uint32_t average_socket_power;                         //!< v2_4[uint16_t], v3_0[uint32_t]
-    uint16_t average_cpu_power;                            //!< v2_4
-    uint16_t average_soc_power;                            //!< v2_4
-    uint32_t average_gfx_power;                            //!< v2_4[uint16_t], v3_0[uint32_t]
-    uint16_t average_core_power[RSMI_APU_MAX_CORES];       //!< v2_4[8], v3_0[16]
-    uint16_t average_ipu_power;                            //!< v3_0
-    uint32_t average_apu_power;                            //!< v3_0
-    uint32_t average_dgpu_power;                           //!< v3_0
-    uint32_t average_all_core_power;                       //!< v3_0
-    uint16_t average_sys_power;                            //!< v3_0
-    uint16_t stapm_power_limit;                            //!< v3_0
-    uint16_t current_stapm_power_limit;                    //!< v3_0
+  /**
+   * @brief Power [mW]
+   */
+  uint32_t average_socket_power;                    //!< v2_4[uint16_t], v3_0[uint32_t]
+  uint16_t average_cpu_power;                       //!< v2_4
+  uint16_t average_soc_power;                       //!< v2_4
+  uint32_t average_gfx_power;                       //!< v2_4[uint16_t], v3_0[uint32_t]
+  uint16_t average_core_power[RSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
+  uint16_t average_ipu_power;                       //!< v3_0
+  uint32_t average_apu_power;                       //!< v3_0
+  uint32_t average_dgpu_power;                      //!< v3_0
+  uint32_t average_all_core_power;                  //!< v3_0
+  uint16_t average_sys_power;                       //!< v3_0
+  uint16_t stapm_power_limit;                       //!< v3_0
+  uint16_t current_stapm_power_limit;               //!< v3_0
 
-    /**
-     * @brief Average clocks [MHz]
-     */
-    uint16_t average_gfxclk_frequency;                  //!< v2_4, v3_0
-    uint16_t average_socclk_frequency;                  //!< v2_4, v3_0
-    uint16_t average_uclk_frequency;                    //!< v2_4, v3_0
-    uint16_t average_fclk_frequency;                    //!< v2_4, v3_0
-    uint16_t average_vclk_frequency;                    //!< v2_4, v3_0
-    uint16_t average_dclk_frequency;                    //!< v2_4
-    uint16_t average_vpeclk_frequency;                  //!< v3_0
-    uint16_t average_ipuclk_frequency;                  //!< v3_0
-    uint16_t average_mpipu_frequency;                   //!< v3_0
+  /**
+   * @brief Average clocks [MHz]
+   */
+  uint16_t average_gfxclk_frequency;  //!< v2_4, v3_0
+  uint16_t average_socclk_frequency;  //!< v2_4, v3_0
+  uint16_t average_uclk_frequency;    //!< v2_4, v3_0
+  uint16_t average_fclk_frequency;    //!< v2_4, v3_0
+  uint16_t average_vclk_frequency;    //!< v2_4, v3_0
+  uint16_t average_dclk_frequency;    //!< v2_4
+  uint16_t average_vpeclk_frequency;  //!< v3_0
+  uint16_t average_ipuclk_frequency;  //!< v3_0
+  uint16_t average_mpipu_frequency;   //!< v3_0
 
-    /**
-     * @brief Current clocks [MHz]
-     */
-    uint16_t current_gfxclk;                            //!< v2_4
-    uint16_t current_socclk;                            //!< v2_4
-    uint16_t current_uclk;                              //!< v2_4
-    uint16_t current_fclk;                              //!< v2_4
-    uint16_t current_vclk;                              //!< v2_4
-    uint16_t current_dclk;                              //!< v2_4
-    uint16_t current_coreclk[RSMI_APU_MAX_CORES];       //!< v2_4[8], v3_0[16]
-    uint16_t current_l3clk[RSMI_APU_MAX_L3];            //!< v2_4
-    uint16_t current_core_maxfreq;                      //!< v3_0
-    uint16_t current_gfx_maxfreq;                       //!< v3_0
+  /**
+   * @brief Current clocks [MHz]
+   */
+  uint16_t current_gfxclk;                       //!< v2_4
+  uint16_t current_socclk;                       //!< v2_4
+  uint16_t current_uclk;                         //!< v2_4
+  uint16_t current_fclk;                         //!< v2_4
+  uint16_t current_vclk;                         //!< v2_4
+  uint16_t current_dclk;                         //!< v2_4
+  uint16_t current_coreclk[RSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
+  uint16_t current_l3clk[RSMI_APU_MAX_L3];       //!< v2_4
+  uint16_t current_core_maxfreq;                 //!< v3_0
+  uint16_t current_gfx_maxfreq;                  //!< v3_0
 
-    /**
-     * @brief Throttle
-     */
-    uint32_t throttle_status;                           //!< v2_4
-    uint64_t indep_throttle_status;                     //!< v2_4
-    uint32_t throttle_residency_prochot;                //!< v3_0
-    uint32_t throttle_residency_spl;                    //!< v3_0
-    uint32_t throttle_residency_fppt;                   //!< v3_0
-    uint32_t throttle_residency_sppt;                   //!< v3_0
-    uint32_t throttle_residency_thm_core;               //!< v3_0
-    uint32_t throttle_residency_thm_gfx;                //!< v3_0
-    uint32_t throttle_residency_thm_soc;                //!< v3_0
+  /**
+   * @brief Throttle
+   */
+  uint32_t throttle_status;              //!< v2_4
+  uint64_t indep_throttle_status;        //!< v2_4
+  uint32_t throttle_residency_prochot;   //!< v3_0
+  uint32_t throttle_residency_spl;       //!< v3_0
+  uint32_t throttle_residency_fppt;      //!< v3_0
+  uint32_t throttle_residency_sppt;      //!< v3_0
+  uint32_t throttle_residency_thm_core;  //!< v3_0
+  uint32_t throttle_residency_thm_gfx;   //!< v3_0
+  uint32_t throttle_residency_thm_soc;   //!< v3_0
 
-    /**
-     * @brief Fan
-     */
-    uint16_t fan_pwm;                                  //!< v2_4
+  /**
+   * @brief Fan
+   */
+  uint16_t fan_pwm;  //!< v2_4
 
-    /**
-     * @brief Average temperature
-     */
-    uint16_t average_temperature_gfx;                           //!< v2_4
-    uint16_t average_temperature_soc;                           //!< v2_4
-    uint16_t average_temperature_core[RSMI_APU_MAX_CORES];      //!< v2_4
-    uint16_t average_temperature_l3[RSMI_APU_MAX_L3];           //!< v2_4
+  /**
+   * @brief Average temperature
+   */
+  uint16_t average_temperature_gfx;                       //!< v2_4
+  uint16_t average_temperature_soc;                       //!< v2_4
+  uint16_t average_temperature_core[RSMI_APU_MAX_CORES];  //!< v2_4
+  uint16_t average_temperature_l3[RSMI_APU_MAX_L3];       //!< v2_4
 
-    /**
-     * @brief Voltage [mV] / Current [mA]
-     */
-    uint16_t average_cpu_voltage;                     //!< v2_4
-    uint16_t average_soc_voltage;                     //!< v2_4
-    uint16_t average_gfx_voltage;                     //!< v2_4
-    uint16_t average_cpu_current;                     //!< v2_4
-    uint16_t average_soc_current;                     //!< v2_4
-    uint16_t average_gfx_current;                     //!< v2_4
+  /**
+   * @brief Voltage [mV] / Current [mA]
+   */
+  uint16_t average_cpu_voltage;  //!< v2_4
+  uint16_t average_soc_voltage;  //!< v2_4
+  uint16_t average_gfx_voltage;  //!< v2_4
+  uint16_t average_cpu_current;  //!< v2_4
+  uint16_t average_soc_current;  //!< v2_4
+  uint16_t average_gfx_current;  //!< v2_4
 
-    /**
-     * @brief Other (v3_0)
-     */
-    uint32_t time_filter_alphavalue;                  //!< v3_0; alpha filter time constant [us]
+  /**
+   * @brief Other (v3_0)
+   */
+  uint32_t time_filter_alphavalue;  //!< v3_0; alpha filter time constant [us]
 
 } rsmi_apu_metrics_t;
 

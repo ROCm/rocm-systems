@@ -30,10 +30,10 @@
 #include <map>
 #include <string>
 
-#include "libdrm/amdgpu_drm.h"
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "libdrm/amdgpu_drm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 namespace {
@@ -58,12 +58,10 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
   }
 
   const auto& apu = *smu.apu_metrics;
-  const bool is_v24 =
-      smu.common_header.format_revision == kApuMetricsV24FormatRevision &&
-      smu.common_header.content_revision == kApuMetricsV24ContentRevision;
-  const bool is_v30 =
-      smu.common_header.format_revision == kApuMetricsV30FormatRevision &&
-      smu.common_header.content_revision == kApuMetricsV30ContentRevision;
+  const bool is_v24 = smu.common_header.format_revision == kApuMetricsV24FormatRevision &&
+                      smu.common_header.content_revision == kApuMetricsV24ContentRevision;
+  const bool is_v30 = smu.common_header.format_revision == kApuMetricsV30FormatRevision &&
+                      smu.common_header.content_revision == kApuMetricsV30ContentRevision;
 
   const size_t core_count = is_v24 ? kApuMetricsV24CoreCount : AMDSMI_APU_MAX_CORES;
   const size_t l3_count = is_v24 ? AMDSMI_APU_MAX_L3 : 0;
@@ -112,8 +110,8 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
     std::cout << "average_all_core_power = " << std::dec << apu.average_all_core_power << "\n";
     std::cout << "average_sys_power = " << std::dec << apu.average_sys_power << "\n";
     std::cout << "stapm_power_limit = " << std::dec << apu.stapm_power_limit << "\n";
-    std::cout << "current_stapm_power_limit = " << std::dec
-              << apu.current_stapm_power_limit << "\n";
+    std::cout << "current_stapm_power_limit = " << std::dec << apu.current_stapm_power_limit
+              << "\n";
   }
 
   std::cout << "\n";
@@ -127,10 +125,8 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
     std::cout << "average_dclk_frequency = " << std::dec << apu.average_dclk_frequency << "\n";
   }
   if (is_v30) {
-    std::cout << "average_vpeclk_frequency = " << std::dec << apu.average_vpeclk_frequency
-              << "\n";
-    std::cout << "average_ipuclk_frequency = " << std::dec << apu.average_ipuclk_frequency
-              << "\n";
+    std::cout << "average_vpeclk_frequency = " << std::dec << apu.average_vpeclk_frequency << "\n";
+    std::cout << "average_ipuclk_frequency = " << std::dec << apu.average_ipuclk_frequency << "\n";
     std::cout << "average_mpipu_frequency = " << std::dec << apu.average_mpipu_frequency << "\n";
   }
 
@@ -160,19 +156,17 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
     std::cout << "indep_throttle_status = " << std::dec << apu.indep_throttle_status << "\n";
   }
   if (is_v30) {
-    std::cout << "throttle_residency_prochot = " << std::dec
-              << apu.throttle_residency_prochot << "\n";
+    std::cout << "throttle_residency_prochot = " << std::dec << apu.throttle_residency_prochot
+              << "\n";
     std::cout << "throttle_residency_spl = " << std::dec << apu.throttle_residency_spl << "\n";
-    std::cout << "throttle_residency_fppt = " << std::dec << apu.throttle_residency_fppt
+    std::cout << "throttle_residency_fppt = " << std::dec << apu.throttle_residency_fppt << "\n";
+    std::cout << "throttle_residency_sppt = " << std::dec << apu.throttle_residency_sppt << "\n";
+    std::cout << "throttle_residency_thm_core = " << std::dec << apu.throttle_residency_thm_core
               << "\n";
-    std::cout << "throttle_residency_sppt = " << std::dec << apu.throttle_residency_sppt
+    std::cout << "throttle_residency_thm_gfx = " << std::dec << apu.throttle_residency_thm_gfx
               << "\n";
-    std::cout << "throttle_residency_thm_core = " << std::dec
-              << apu.throttle_residency_thm_core << "\n";
-    std::cout << "throttle_residency_thm_gfx = " << std::dec
-              << apu.throttle_residency_thm_gfx << "\n";
-    std::cout << "throttle_residency_thm_soc = " << std::dec
-              << apu.throttle_residency_thm_soc << "\n";
+    std::cout << "throttle_residency_thm_soc = " << std::dec << apu.throttle_residency_thm_soc
+              << "\n";
   }
 
   if (is_v24) {
@@ -271,7 +265,8 @@ void TestGpuMetricsRead::Run(void) {
       amdsmi_asic_info_t asic_info = {};
       err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
       ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-      if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0) {  //Query h/w info: Flag that this is integrated (a.h.a. fusion) GPU
+      if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) !=
+          0) {  // Query h/w info: Flag that this is integrated (a.h.a. fusion) GPU
         ASSERT_NE(smu.apu_metrics, nullptr);
       }
       IF_VERB(STANDARD) {

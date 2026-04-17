@@ -3943,8 +3943,8 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
 
   *pgpu_metrics = amdsmi_gpu_metrics_t{};
   rsmi_gpu_metrics_t rsmi_metrics{};
-  auto status = rsmi_wrapper(rsmi_dev_gpu_partition_metrics_info_get, processor_handle, 0,
-                             &rsmi_metrics);
+  auto status =
+      rsmi_wrapper(rsmi_dev_gpu_partition_metrics_info_get, processor_handle, 0, &rsmi_metrics);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }

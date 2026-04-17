@@ -3009,8 +3009,8 @@ class AMDSMICommands:
         if is_apu:
             format_rev = gpu_metric.get("common_header.format_revision", "N/A")
             content_rev = gpu_metric.get("common_header.content_revision", "N/A")
-            is_apu_v24 = (format_rev == 2 and content_rev == 4)
-            is_apu_v30 = (format_rev == 3 and content_rev == 0)
+            is_apu_v24 = format_rev == 2 and content_rev == 4
+            is_apu_v30 = format_rev == 3 and content_rev == 0
             apu_core_count = 8 if is_apu_v24 else 16
             apu_l3_count = 2 if is_apu_v24 else 0
         else:
@@ -3143,17 +3143,27 @@ class AMDSMICommands:
                             engine_usage["mm_activity"] = apu.get("average_mm_activity", "N/A")
                         elif is_apu_v30:
                             engine_usage["vcn_activity"] = apu.get("average_vcn_activity", "N/A")
-                            engine_usage["ipu_activity"] = apu.get("average_ipu_activity", ["N/A"] * 8)
-                            engine_usage["core_c0_activity"] = apu.get("average_core_c0_activity", ["N/A"] * apu_core_count)[:apu_core_count]
-                            if apu.get("average_dram_reads") != "N/A" or apu.get("average_dram_writes") != "N/A":
+                            engine_usage["ipu_activity"] = apu.get(
+                                "average_ipu_activity", ["N/A"] * 8
+                            )
+                            engine_usage["core_c0_activity"] = apu.get(
+                                "average_core_c0_activity", ["N/A"] * apu_core_count
+                            )[:apu_core_count]
+                            if (
+                                apu.get("average_dram_reads") != "N/A"
+                                or apu.get("average_dram_writes") != "N/A"
+                            ):
                                 engine_usage["dram_bandwidth"] = {
                                     "reads_mb_s": apu.get("average_dram_reads", "N/A"),
-                                    "writes_mb_s": apu.get("average_dram_writes", "N/A")
+                                    "writes_mb_s": apu.get("average_dram_writes", "N/A"),
                                 }
-                            if apu.get("average_ipu_reads") != "N/A" or apu.get("average_ipu_writes") != "N/A":
+                            if (
+                                apu.get("average_ipu_reads") != "N/A"
+                                or apu.get("average_ipu_writes") != "N/A"
+                            ):
                                 engine_usage["ipu_bandwidth"] = {
                                     "reads_mb_s": apu.get("average_ipu_reads", "N/A"),
-                                    "writes_mb_s": apu.get("average_ipu_writes", "N/A")
+                                    "writes_mb_s": apu.get("average_ipu_writes", "N/A"),
                                 }
                     else:
                         # Discrete GPU usage metrics
@@ -3178,16 +3188,16 @@ class AMDSMICommands:
 
                             new_xcp_dict = {}
                             for current_xcp in range(num_partition):
-                                new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.jpeg_busy"][
-                                    current_xcp
-                                ]
+                                new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
+                                    "xcp_stats.jpeg_busy"
+                                ][current_xcp]
                             engine_usage["jpeg_busy"] = new_xcp_dict
 
                             new_xcp_dict = {}
                             for current_xcp in range(num_partition):
-                                new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric["xcp_stats.vcn_busy"][
-                                    current_xcp
-                                ]
+                                new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
+                                    "xcp_stats.vcn_busy"
+                                ][current_xcp]
                             engine_usage["vcn_busy"] = new_xcp_dict
 
                     logging.debug(f"After updates to engine_usage dictionary = {engine_usage}")
@@ -3249,7 +3259,10 @@ class AMDSMICommands:
                             self.logger, apu["average_gfx_power"] / 1000.0, power_unit
                         )
                     if apu.get("average_core_power") != "N/A":
-                        core_power_list = [p / 1000.0 if p != "N/A" else "N/A" for p in apu["average_core_power"][:apu_core_count]]
+                        core_power_list = [
+                            p / 1000.0 if p != "N/A" else "N/A"
+                            for p in apu["average_core_power"][:apu_core_count]
+                        ]
                         power_dict["core_power"] = core_power_list
 
                     # v2.4-specific fields
@@ -3752,10 +3765,16 @@ class AMDSMICommands:
                     if apu.get("temperature_soc") != "N/A":
                         temperatures["soc"] = apu["temperature_soc"] / 100.0
                     if apu.get("temperature_core") != "N/A":
-                        temp_core = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_core"][:apu_core_count]]
+                        temp_core = [
+                            t / 100.0 if t != "N/A" else "N/A"
+                            for t in apu["temperature_core"][:apu_core_count]
+                        ]
                         temperatures["core"] = temp_core
                     if is_apu_v24 and apu.get("temperature_l3") != "N/A":
-                        temp_l3 = [t / 100.0 if t != "N/A" else "N/A" for t in apu["temperature_l3"][:apu_l3_count]]
+                        temp_l3 = [
+                            t / 100.0 if t != "N/A" else "N/A"
+                            for t in apu["temperature_l3"][:apu_l3_count]
+                        ]
                         temperatures["l3"] = temp_l3
                     if is_apu_v30 and apu.get("temperature_skin") != "N/A":
                         temperatures["skin"] = apu["temperature_skin"] / 100.0
@@ -12596,7 +12615,10 @@ class AMDSMICommands:
                     current_power = gpu_metrics["current_socket_power"]
                 elif gpu_metrics["average_socket_power"] != "N/A":
                     current_power = gpu_metrics["average_socket_power"]
-                elif "apu_metrics" in gpu_metrics and gpu_metrics["apu_metrics"].get("average_socket_power") != "N/A":
+                elif (
+                    "apu_metrics" in gpu_metrics
+                    and gpu_metrics["apu_metrics"].get("average_socket_power") != "N/A"
+                ):
                     # APU metrics power is in mW, convert to W
                     current_power = gpu_metrics["apu_metrics"]["average_socket_power"] / 1000.0
                 else:
@@ -12607,7 +12629,10 @@ class AMDSMICommands:
                     temperature = gpu_metrics["temperature_hotspot"]
                 elif gpu_metrics["temperature_edge"] != "N/A":
                     temperature = gpu_metrics["temperature_edge"]
-                elif "apu_metrics" in gpu_metrics and gpu_metrics["apu_metrics"].get("temperature_gfx") != "N/A":
+                elif (
+                    "apu_metrics" in gpu_metrics
+                    and gpu_metrics["apu_metrics"].get("temperature_gfx") != "N/A"
+                ):
                     # APU temperature is in centi-Celsius, convert to Celsius
                     temperature = gpu_metrics["apu_metrics"]["temperature_gfx"] / 100.0
                 else:

@@ -5896,48 +5896,118 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
         apu = gpu_metrics.apu_metrics.contents
         gpu_metrics_output["apu_metrics"] = {
             # Temperature (centi-Celsius, divide by 100 for actual Celsius)
-            "temperature_gfx": _validate_if_max_uint(apu.temperature_gfx, MaxUIntegerTypes.UINT16_T),
-            "temperature_soc": _validate_if_max_uint(apu.temperature_soc, MaxUIntegerTypes.UINT16_T),
-            "temperature_core": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.temperature_core],
-            "temperature_l3": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.temperature_l3],
-            "temperature_skin": _validate_if_max_uint(apu.temperature_skin, MaxUIntegerTypes.UINT16_T),
-
+            "temperature_gfx": _validate_if_max_uint(
+                apu.temperature_gfx, MaxUIntegerTypes.UINT16_T
+            ),
+            "temperature_soc": _validate_if_max_uint(
+                apu.temperature_soc, MaxUIntegerTypes.UINT16_T
+            ),
+            "temperature_core": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.temperature_core
+            ],
+            "temperature_l3": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.temperature_l3
+            ],
+            "temperature_skin": _validate_if_max_uint(
+                apu.temperature_skin, MaxUIntegerTypes.UINT16_T
+            ),
             # Utilization
-            "average_gfx_activity": _validate_if_max_uint(apu.average_gfx_activity, MaxUIntegerTypes.UINT16_T),
-            "average_mm_activity": _validate_if_max_uint(apu.average_mm_activity, MaxUIntegerTypes.UINT16_T),
-            "average_vcn_activity": _validate_if_max_uint(apu.average_vcn_activity, MaxUIntegerTypes.UINT16_T),
-            "average_ipu_activity": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_ipu_activity],
-            "average_core_c0_activity": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_core_c0_activity],
-            "average_dram_reads": _validate_if_max_uint(apu.average_dram_reads, MaxUIntegerTypes.UINT16_T),
-            "average_dram_writes": _validate_if_max_uint(apu.average_dram_writes, MaxUIntegerTypes.UINT16_T),
-            "average_ipu_reads": _validate_if_max_uint(apu.average_ipu_reads, MaxUIntegerTypes.UINT16_T),
-            "average_ipu_writes": _validate_if_max_uint(apu.average_ipu_writes, MaxUIntegerTypes.UINT16_T),
-
+            "average_gfx_activity": _validate_if_max_uint(
+                apu.average_gfx_activity, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_mm_activity": _validate_if_max_uint(
+                apu.average_mm_activity, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_vcn_activity": _validate_if_max_uint(
+                apu.average_vcn_activity, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipu_activity": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_ipu_activity
+            ],
+            "average_core_c0_activity": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_core_c0_activity
+            ],
+            "average_dram_reads": _validate_if_max_uint(
+                apu.average_dram_reads, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_dram_writes": _validate_if_max_uint(
+                apu.average_dram_writes, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipu_reads": _validate_if_max_uint(
+                apu.average_ipu_reads, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipu_writes": _validate_if_max_uint(
+                apu.average_ipu_writes, MaxUIntegerTypes.UINT16_T
+            ),
             # Power (mW)
-            "average_socket_power": _validate_if_max_uint(apu.average_socket_power, MaxUIntegerTypes.UINT32_T),
-            "average_cpu_power": _validate_if_max_uint(apu.average_cpu_power, MaxUIntegerTypes.UINT16_T),
-            "average_soc_power": _validate_if_max_uint(apu.average_soc_power, MaxUIntegerTypes.UINT16_T),
-            "average_gfx_power": _validate_if_max_uint(apu.average_gfx_power, MaxUIntegerTypes.UINT32_T),
-            "average_core_power": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_core_power],
-            "average_ipu_power": _validate_if_max_uint(apu.average_ipu_power, MaxUIntegerTypes.UINT16_T),
-            "average_apu_power": _validate_if_max_uint(apu.average_apu_power, MaxUIntegerTypes.UINT32_T),
-            "average_dgpu_power": _validate_if_max_uint(apu.average_dgpu_power, MaxUIntegerTypes.UINT32_T),
-            "average_all_core_power": _validate_if_max_uint(apu.average_all_core_power, MaxUIntegerTypes.UINT32_T),
-            "average_sys_power": _validate_if_max_uint(apu.average_sys_power, MaxUIntegerTypes.UINT16_T),
-            "stapm_power_limit": _validate_if_max_uint(apu.stapm_power_limit, MaxUIntegerTypes.UINT16_T),
-            "current_stapm_power_limit": _validate_if_max_uint(apu.current_stapm_power_limit, MaxUIntegerTypes.UINT16_T),
-
+            "average_socket_power": _validate_if_max_uint(
+                apu.average_socket_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_cpu_power": _validate_if_max_uint(
+                apu.average_cpu_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_soc_power": _validate_if_max_uint(
+                apu.average_soc_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_gfx_power": _validate_if_max_uint(
+                apu.average_gfx_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_core_power": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_core_power
+            ],
+            "average_ipu_power": _validate_if_max_uint(
+                apu.average_ipu_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_apu_power": _validate_if_max_uint(
+                apu.average_apu_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_dgpu_power": _validate_if_max_uint(
+                apu.average_dgpu_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_all_core_power": _validate_if_max_uint(
+                apu.average_all_core_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_sys_power": _validate_if_max_uint(
+                apu.average_sys_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "stapm_power_limit": _validate_if_max_uint(
+                apu.stapm_power_limit, MaxUIntegerTypes.UINT16_T
+            ),
+            "current_stapm_power_limit": _validate_if_max_uint(
+                apu.current_stapm_power_limit, MaxUIntegerTypes.UINT16_T
+            ),
             # Average clocks (MHz)
-            "average_gfxclk_frequency": _validate_if_max_uint(apu.average_gfxclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_socclk_frequency": _validate_if_max_uint(apu.average_socclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_uclk_frequency": _validate_if_max_uint(apu.average_uclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_fclk_frequency": _validate_if_max_uint(apu.average_fclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_vclk_frequency": _validate_if_max_uint(apu.average_vclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_dclk_frequency": _validate_if_max_uint(apu.average_dclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_vpeclk_frequency": _validate_if_max_uint(apu.average_vpeclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_ipuclk_frequency": _validate_if_max_uint(apu.average_ipuclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_mpipu_frequency": _validate_if_max_uint(apu.average_mpipu_frequency, MaxUIntegerTypes.UINT16_T),
-
+            "average_gfxclk_frequency": _validate_if_max_uint(
+                apu.average_gfxclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_socclk_frequency": _validate_if_max_uint(
+                apu.average_socclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_uclk_frequency": _validate_if_max_uint(
+                apu.average_uclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_fclk_frequency": _validate_if_max_uint(
+                apu.average_fclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_vclk_frequency": _validate_if_max_uint(
+                apu.average_vclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_dclk_frequency": _validate_if_max_uint(
+                apu.average_dclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_vpeclk_frequency": _validate_if_max_uint(
+                apu.average_vpeclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipuclk_frequency": _validate_if_max_uint(
+                apu.average_ipuclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_mpipu_frequency": _validate_if_max_uint(
+                apu.average_mpipu_frequency, MaxUIntegerTypes.UINT16_T
+            ),
             # Current clocks (MHz)
             "current_gfxclk": _validate_if_max_uint(apu.current_gfxclk, MaxUIntegerTypes.UINT16_T),
             "current_socclk": _validate_if_max_uint(apu.current_socclk, MaxUIntegerTypes.UINT16_T),
@@ -5945,35 +6015,83 @@ def amdsmi_get_gpu_metrics_info(processor_handle: processor_handle_t) -> Dict[st
             "current_fclk": _validate_if_max_uint(apu.current_fclk, MaxUIntegerTypes.UINT16_T),
             "current_vclk": _validate_if_max_uint(apu.current_vclk, MaxUIntegerTypes.UINT16_T),
             "current_dclk": _validate_if_max_uint(apu.current_dclk, MaxUIntegerTypes.UINT16_T),
-            "current_coreclk": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_coreclk],
-            "current_l3clk": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_l3clk],
-            "current_core_maxfreq": _validate_if_max_uint(apu.current_core_maxfreq, MaxUIntegerTypes.UINT16_T),
-            "current_gfx_maxfreq": _validate_if_max_uint(apu.current_gfx_maxfreq, MaxUIntegerTypes.UINT16_T),
-
+            "current_coreclk": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_coreclk
+            ],
+            "current_l3clk": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_l3clk
+            ],
+            "current_core_maxfreq": _validate_if_max_uint(
+                apu.current_core_maxfreq, MaxUIntegerTypes.UINT16_T
+            ),
+            "current_gfx_maxfreq": _validate_if_max_uint(
+                apu.current_gfx_maxfreq, MaxUIntegerTypes.UINT16_T
+            ),
             # Throttle
-            "throttle_status": _validate_if_max_uint(apu.throttle_status, MaxUIntegerTypes.UINT32_T),
-            "indep_throttle_status": _validate_if_max_uint(apu.indep_throttle_status, MaxUIntegerTypes.UINT64_T),
-            "throttle_residency_prochot": _validate_if_max_uint(apu.throttle_residency_prochot, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_spl": _validate_if_max_uint(apu.throttle_residency_spl, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_fppt": _validate_if_max_uint(apu.throttle_residency_fppt, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_sppt": _validate_if_max_uint(apu.throttle_residency_sppt, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_thm_core": _validate_if_max_uint(apu.throttle_residency_thm_core, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_thm_gfx": _validate_if_max_uint(apu.throttle_residency_thm_gfx, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_thm_soc": _validate_if_max_uint(apu.throttle_residency_thm_soc, MaxUIntegerTypes.UINT32_T),
-
+            "throttle_status": _validate_if_max_uint(
+                apu.throttle_status, MaxUIntegerTypes.UINT32_T
+            ),
+            "indep_throttle_status": _validate_if_max_uint(
+                apu.indep_throttle_status, MaxUIntegerTypes.UINT64_T
+            ),
+            "throttle_residency_prochot": _validate_if_max_uint(
+                apu.throttle_residency_prochot, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_spl": _validate_if_max_uint(
+                apu.throttle_residency_spl, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_fppt": _validate_if_max_uint(
+                apu.throttle_residency_fppt, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_sppt": _validate_if_max_uint(
+                apu.throttle_residency_sppt, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_thm_core": _validate_if_max_uint(
+                apu.throttle_residency_thm_core, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_thm_gfx": _validate_if_max_uint(
+                apu.throttle_residency_thm_gfx, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_thm_soc": _validate_if_max_uint(
+                apu.throttle_residency_thm_soc, MaxUIntegerTypes.UINT32_T
+            ),
             # Fan / Voltage / Current
             "fan_pwm": _validate_if_max_uint(apu.fan_pwm, MaxUIntegerTypes.UINT16_T),
-            "average_temperature_gfx": _validate_if_max_uint(apu.average_temperature_gfx, MaxUIntegerTypes.UINT16_T),
-            "average_temperature_soc": _validate_if_max_uint(apu.average_temperature_soc, MaxUIntegerTypes.UINT16_T),
-            "average_temperature_core": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_temperature_core],
-            "average_temperature_l3": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_temperature_l3],
-            "average_cpu_voltage": _validate_if_max_uint(apu.average_cpu_voltage, MaxUIntegerTypes.UINT16_T),
-            "average_soc_voltage": _validate_if_max_uint(apu.average_soc_voltage, MaxUIntegerTypes.UINT16_T),
-            "average_gfx_voltage": _validate_if_max_uint(apu.average_gfx_voltage, MaxUIntegerTypes.UINT16_T),
-            "average_cpu_current": _validate_if_max_uint(apu.average_cpu_current, MaxUIntegerTypes.UINT16_T),
-            "average_soc_current": _validate_if_max_uint(apu.average_soc_current, MaxUIntegerTypes.UINT16_T),
-            "average_gfx_current": _validate_if_max_uint(apu.average_gfx_current, MaxUIntegerTypes.UINT16_T),
-            "time_filter_alphavalue": _validate_if_max_uint(apu.time_filter_alphavalue, MaxUIntegerTypes.UINT32_T),
+            "average_temperature_gfx": _validate_if_max_uint(
+                apu.average_temperature_gfx, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_temperature_soc": _validate_if_max_uint(
+                apu.average_temperature_soc, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_temperature_core": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_temperature_core
+            ],
+            "average_temperature_l3": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_temperature_l3
+            ],
+            "average_cpu_voltage": _validate_if_max_uint(
+                apu.average_cpu_voltage, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_soc_voltage": _validate_if_max_uint(
+                apu.average_soc_voltage, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_gfx_voltage": _validate_if_max_uint(
+                apu.average_gfx_voltage, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_cpu_current": _validate_if_max_uint(
+                apu.average_cpu_current, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_soc_current": _validate_if_max_uint(
+                apu.average_soc_current, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_gfx_current": _validate_if_max_uint(
+                apu.average_gfx_current, MaxUIntegerTypes.UINT16_T
+            ),
+            "time_filter_alphavalue": _validate_if_max_uint(
+                apu.time_filter_alphavalue, MaxUIntegerTypes.UINT32_T
+            ),
         }
 
     return gpu_metrics_output
@@ -6286,44 +6404,118 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
         apu = gpu_metrics.apu_metrics.contents
         gpu_metrics_output["apu_metrics"] = {
             # Temperature (centi-Celsius, divide by 100 for actual Celsius)
-            "temperature_gfx": _validate_if_max_uint(apu.temperature_gfx, MaxUIntegerTypes.UINT16_T),
-            "temperature_soc": _validate_if_max_uint(apu.temperature_soc, MaxUIntegerTypes.UINT16_T),
-            "temperature_core": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.temperature_core],
-            "temperature_l3": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.temperature_l3],
-            "temperature_skin": _validate_if_max_uint(apu.temperature_skin, MaxUIntegerTypes.UINT16_T),
+            "temperature_gfx": _validate_if_max_uint(
+                apu.temperature_gfx, MaxUIntegerTypes.UINT16_T
+            ),
+            "temperature_soc": _validate_if_max_uint(
+                apu.temperature_soc, MaxUIntegerTypes.UINT16_T
+            ),
+            "temperature_core": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.temperature_core
+            ],
+            "temperature_l3": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.temperature_l3
+            ],
+            "temperature_skin": _validate_if_max_uint(
+                apu.temperature_skin, MaxUIntegerTypes.UINT16_T
+            ),
             # Utilization
-            "average_gfx_activity": _validate_if_max_uint(apu.average_gfx_activity, MaxUIntegerTypes.UINT16_T),
-            "average_mm_activity": _validate_if_max_uint(apu.average_mm_activity, MaxUIntegerTypes.UINT16_T),
-            "average_vcn_activity": _validate_if_max_uint(apu.average_vcn_activity, MaxUIntegerTypes.UINT16_T),
-            "average_ipu_activity": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_ipu_activity],
-            "average_core_c0_activity": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_core_c0_activity],
-            "average_dram_reads": _validate_if_max_uint(apu.average_dram_reads, MaxUIntegerTypes.UINT16_T),
-            "average_dram_writes": _validate_if_max_uint(apu.average_dram_writes, MaxUIntegerTypes.UINT16_T),
-            "average_ipu_reads": _validate_if_max_uint(apu.average_ipu_reads, MaxUIntegerTypes.UINT16_T),
-            "average_ipu_writes": _validate_if_max_uint(apu.average_ipu_writes, MaxUIntegerTypes.UINT16_T),
+            "average_gfx_activity": _validate_if_max_uint(
+                apu.average_gfx_activity, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_mm_activity": _validate_if_max_uint(
+                apu.average_mm_activity, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_vcn_activity": _validate_if_max_uint(
+                apu.average_vcn_activity, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipu_activity": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_ipu_activity
+            ],
+            "average_core_c0_activity": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_core_c0_activity
+            ],
+            "average_dram_reads": _validate_if_max_uint(
+                apu.average_dram_reads, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_dram_writes": _validate_if_max_uint(
+                apu.average_dram_writes, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipu_reads": _validate_if_max_uint(
+                apu.average_ipu_reads, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipu_writes": _validate_if_max_uint(
+                apu.average_ipu_writes, MaxUIntegerTypes.UINT16_T
+            ),
             # Power (mW)
-            "average_socket_power": _validate_if_max_uint(apu.average_socket_power, MaxUIntegerTypes.UINT32_T),
-            "average_cpu_power": _validate_if_max_uint(apu.average_cpu_power, MaxUIntegerTypes.UINT16_T),
-            "average_soc_power": _validate_if_max_uint(apu.average_soc_power, MaxUIntegerTypes.UINT16_T),
-            "average_gfx_power": _validate_if_max_uint(apu.average_gfx_power, MaxUIntegerTypes.UINT32_T),
-            "average_core_power": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_core_power],
-            "average_ipu_power": _validate_if_max_uint(apu.average_ipu_power, MaxUIntegerTypes.UINT16_T),
-            "average_apu_power": _validate_if_max_uint(apu.average_apu_power, MaxUIntegerTypes.UINT32_T),
-            "average_dgpu_power": _validate_if_max_uint(apu.average_dgpu_power, MaxUIntegerTypes.UINT32_T),
-            "average_all_core_power": _validate_if_max_uint(apu.average_all_core_power, MaxUIntegerTypes.UINT32_T),
-            "average_sys_power": _validate_if_max_uint(apu.average_sys_power, MaxUIntegerTypes.UINT16_T),
-            "stapm_power_limit": _validate_if_max_uint(apu.stapm_power_limit, MaxUIntegerTypes.UINT16_T),
-            "current_stapm_power_limit": _validate_if_max_uint(apu.current_stapm_power_limit, MaxUIntegerTypes.UINT16_T),
+            "average_socket_power": _validate_if_max_uint(
+                apu.average_socket_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_cpu_power": _validate_if_max_uint(
+                apu.average_cpu_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_soc_power": _validate_if_max_uint(
+                apu.average_soc_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_gfx_power": _validate_if_max_uint(
+                apu.average_gfx_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_core_power": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_core_power
+            ],
+            "average_ipu_power": _validate_if_max_uint(
+                apu.average_ipu_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_apu_power": _validate_if_max_uint(
+                apu.average_apu_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_dgpu_power": _validate_if_max_uint(
+                apu.average_dgpu_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_all_core_power": _validate_if_max_uint(
+                apu.average_all_core_power, MaxUIntegerTypes.UINT32_T
+            ),
+            "average_sys_power": _validate_if_max_uint(
+                apu.average_sys_power, MaxUIntegerTypes.UINT16_T
+            ),
+            "stapm_power_limit": _validate_if_max_uint(
+                apu.stapm_power_limit, MaxUIntegerTypes.UINT16_T
+            ),
+            "current_stapm_power_limit": _validate_if_max_uint(
+                apu.current_stapm_power_limit, MaxUIntegerTypes.UINT16_T
+            ),
             # Average clocks (MHz)
-            "average_gfxclk_frequency": _validate_if_max_uint(apu.average_gfxclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_socclk_frequency": _validate_if_max_uint(apu.average_socclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_uclk_frequency": _validate_if_max_uint(apu.average_uclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_fclk_frequency": _validate_if_max_uint(apu.average_fclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_vclk_frequency": _validate_if_max_uint(apu.average_vclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_dclk_frequency": _validate_if_max_uint(apu.average_dclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_vpeclk_frequency": _validate_if_max_uint(apu.average_vpeclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_ipuclk_frequency": _validate_if_max_uint(apu.average_ipuclk_frequency, MaxUIntegerTypes.UINT16_T),
-            "average_mpipu_frequency": _validate_if_max_uint(apu.average_mpipu_frequency, MaxUIntegerTypes.UINT16_T),
+            "average_gfxclk_frequency": _validate_if_max_uint(
+                apu.average_gfxclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_socclk_frequency": _validate_if_max_uint(
+                apu.average_socclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_uclk_frequency": _validate_if_max_uint(
+                apu.average_uclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_fclk_frequency": _validate_if_max_uint(
+                apu.average_fclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_vclk_frequency": _validate_if_max_uint(
+                apu.average_vclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_dclk_frequency": _validate_if_max_uint(
+                apu.average_dclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_vpeclk_frequency": _validate_if_max_uint(
+                apu.average_vpeclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_ipuclk_frequency": _validate_if_max_uint(
+                apu.average_ipuclk_frequency, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_mpipu_frequency": _validate_if_max_uint(
+                apu.average_mpipu_frequency, MaxUIntegerTypes.UINT16_T
+            ),
             # Current clocks (MHz)
             "current_gfxclk": _validate_if_max_uint(apu.current_gfxclk, MaxUIntegerTypes.UINT16_T),
             "current_socclk": _validate_if_max_uint(apu.current_socclk, MaxUIntegerTypes.UINT16_T),
@@ -6331,33 +6523,83 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
             "current_fclk": _validate_if_max_uint(apu.current_fclk, MaxUIntegerTypes.UINT16_T),
             "current_vclk": _validate_if_max_uint(apu.current_vclk, MaxUIntegerTypes.UINT16_T),
             "current_dclk": _validate_if_max_uint(apu.current_dclk, MaxUIntegerTypes.UINT16_T),
-            "current_coreclk": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_coreclk],
-            "current_l3clk": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_l3clk],
-            "current_core_maxfreq": _validate_if_max_uint(apu.current_core_maxfreq, MaxUIntegerTypes.UINT16_T),
-            "current_gfx_maxfreq": _validate_if_max_uint(apu.current_gfx_maxfreq, MaxUIntegerTypes.UINT16_T),
+            "current_coreclk": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_coreclk
+            ],
+            "current_l3clk": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.current_l3clk
+            ],
+            "current_core_maxfreq": _validate_if_max_uint(
+                apu.current_core_maxfreq, MaxUIntegerTypes.UINT16_T
+            ),
+            "current_gfx_maxfreq": _validate_if_max_uint(
+                apu.current_gfx_maxfreq, MaxUIntegerTypes.UINT16_T
+            ),
             # Throttle
-            "throttle_status": _validate_if_max_uint(apu.throttle_status, MaxUIntegerTypes.UINT32_T),
-            "indep_throttle_status": _validate_if_max_uint(apu.indep_throttle_status, MaxUIntegerTypes.UINT64_T),
-            "throttle_residency_prochot": _validate_if_max_uint(apu.throttle_residency_prochot, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_spl": _validate_if_max_uint(apu.throttle_residency_spl, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_fppt": _validate_if_max_uint(apu.throttle_residency_fppt, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_sppt": _validate_if_max_uint(apu.throttle_residency_sppt, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_thm_core": _validate_if_max_uint(apu.throttle_residency_thm_core, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_thm_gfx": _validate_if_max_uint(apu.throttle_residency_thm_gfx, MaxUIntegerTypes.UINT32_T),
-            "throttle_residency_thm_soc": _validate_if_max_uint(apu.throttle_residency_thm_soc, MaxUIntegerTypes.UINT32_T),
+            "throttle_status": _validate_if_max_uint(
+                apu.throttle_status, MaxUIntegerTypes.UINT32_T
+            ),
+            "indep_throttle_status": _validate_if_max_uint(
+                apu.indep_throttle_status, MaxUIntegerTypes.UINT64_T
+            ),
+            "throttle_residency_prochot": _validate_if_max_uint(
+                apu.throttle_residency_prochot, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_spl": _validate_if_max_uint(
+                apu.throttle_residency_spl, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_fppt": _validate_if_max_uint(
+                apu.throttle_residency_fppt, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_sppt": _validate_if_max_uint(
+                apu.throttle_residency_sppt, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_thm_core": _validate_if_max_uint(
+                apu.throttle_residency_thm_core, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_thm_gfx": _validate_if_max_uint(
+                apu.throttle_residency_thm_gfx, MaxUIntegerTypes.UINT32_T
+            ),
+            "throttle_residency_thm_soc": _validate_if_max_uint(
+                apu.throttle_residency_thm_soc, MaxUIntegerTypes.UINT32_T
+            ),
             # Fan / Voltage / Current
             "fan_pwm": _validate_if_max_uint(apu.fan_pwm, MaxUIntegerTypes.UINT16_T),
-            "average_temperature_gfx": _validate_if_max_uint(apu.average_temperature_gfx, MaxUIntegerTypes.UINT16_T),
-            "average_temperature_soc": _validate_if_max_uint(apu.average_temperature_soc, MaxUIntegerTypes.UINT16_T),
-            "average_temperature_core": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_temperature_core],
-            "average_temperature_l3": [_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T) for val in apu.average_temperature_l3],
-            "average_cpu_voltage": _validate_if_max_uint(apu.average_cpu_voltage, MaxUIntegerTypes.UINT16_T),
-            "average_soc_voltage": _validate_if_max_uint(apu.average_soc_voltage, MaxUIntegerTypes.UINT16_T),
-            "average_gfx_voltage": _validate_if_max_uint(apu.average_gfx_voltage, MaxUIntegerTypes.UINT16_T),
-            "average_cpu_current": _validate_if_max_uint(apu.average_cpu_current, MaxUIntegerTypes.UINT16_T),
-            "average_soc_current": _validate_if_max_uint(apu.average_soc_current, MaxUIntegerTypes.UINT16_T),
-            "average_gfx_current": _validate_if_max_uint(apu.average_gfx_current, MaxUIntegerTypes.UINT16_T),
-            "time_filter_alphavalue": _validate_if_max_uint(apu.time_filter_alphavalue, MaxUIntegerTypes.UINT32_T),
+            "average_temperature_gfx": _validate_if_max_uint(
+                apu.average_temperature_gfx, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_temperature_soc": _validate_if_max_uint(
+                apu.average_temperature_soc, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_temperature_core": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_temperature_core
+            ],
+            "average_temperature_l3": [
+                _validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T)
+                for val in apu.average_temperature_l3
+            ],
+            "average_cpu_voltage": _validate_if_max_uint(
+                apu.average_cpu_voltage, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_soc_voltage": _validate_if_max_uint(
+                apu.average_soc_voltage, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_gfx_voltage": _validate_if_max_uint(
+                apu.average_gfx_voltage, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_cpu_current": _validate_if_max_uint(
+                apu.average_cpu_current, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_soc_current": _validate_if_max_uint(
+                apu.average_soc_current, MaxUIntegerTypes.UINT16_T
+            ),
+            "average_gfx_current": _validate_if_max_uint(
+                apu.average_gfx_current, MaxUIntegerTypes.UINT16_T
+            ),
+            "time_filter_alphavalue": _validate_if_max_uint(
+                apu.time_filter_alphavalue, MaxUIntegerTypes.UINT32_T
+            ),
         }
 
     return gpu_metrics_output
