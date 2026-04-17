@@ -51,6 +51,22 @@ create, edit, comment on, label, assign, close, or reopen issues,
 project items, or PRs, and do not touch any other GitHub state unless
 explicitly told to and with additional confirmation.
 
+### Draft issues vs. repo issues
+
+A "draft issue" is a **project-board draft** on Project Salmon — no
+repo number, no permalink, board-only. A repo issue (anything via
+`gh issue create`, `POST /repos/.../issues`, or `createIssue`) is
+live, indexed, permalinked, and cannot be downgraded — only deleted.
+A `[Draft]` title prefix changes nothing.
+
+- "Draft issue" / "file a draft" → create a project draft item
+  (`gh project item-create` / `addProjectV2DraftIssue`). Never hit
+  the repo-issues surface.
+- Convert to a repo issue only on an explicit instruction ("file
+  it", "publish it", "open an actual issue"). "Looks good" is not
+  enough.
+- If unsure, ask before touching the GitHub API.
+
 ## Architecture in one page
 
 ```

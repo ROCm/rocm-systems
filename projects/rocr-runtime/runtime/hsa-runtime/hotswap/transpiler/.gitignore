@@ -6,7 +6,7 @@ __pycache__/
 
 tests/salmon_hip_test
 tests/salmon_integration_test
-tools/compare_transpilers
+tools/smoke_test_compare_transpilers
 tools/compare_correctness/compare_correctness
 tools/compare_correctness/libsalmon_intercept.so
 tools/compare_correctness/kernels/build/

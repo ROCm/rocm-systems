@@ -23,7 +23,7 @@ HIPCC          ?= hipcc
 CXX            ?= g++
 BUNDLER        := $(ROCM)/lib/llvm/bin/clang-offload-bundler
 
-# Where the compare_transpilers tool's copy of salmon_intercept.cpp lives.
+# Where the smoke_test_compare_transpilers tool's copy of salmon_intercept.cpp lives.
 INTERCEPT_SRC  := ../../tests/salmon_intercept.cpp
 
 KERNELS        := vecadd block_sum_shfl lane_swap

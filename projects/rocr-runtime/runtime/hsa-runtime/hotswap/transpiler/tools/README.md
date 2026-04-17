@@ -11,7 +11,7 @@ Everything here is built separately from the main CMake project.
 
 | tool                                     | question it answers                                                                 |
 |------------------------------------------|-------------------------------------------------------------------------------------|
-| [`compare_transpilers`](#compare_transpilers)        | Does the code object *load* under legacy vs Salmon?                                 |
+| [`smoke_test_compare_transpilers`](#smoke_test_compare_transpilers) | Does the code object *load* under legacy vs Salmon?                                 |
 | [`compare_correctness/`](compare_correctness/README.md) | Does the translated kernel produce the *correct numerical output* under each engine? |
 
 "Does it load" is a weak signal. A code object can load cleanly and
@@ -21,7 +21,7 @@ and not kernel semantics. `compare_correctness` closes that gap by
 dispatching each translated kernel end-to-end and comparing the produced
 output buffers against a CPU reference.
 
-## `compare_transpilers` — load-level smoke test
+## `smoke_test_compare_transpilers` — load-level smoke test
 
 > **Scope.** This is a **load-level** smoke test.  A `PASS` here means
 > ROCR accepted the code object (`hsa_executable_load_agent_code_object`
@@ -72,8 +72,8 @@ Plain `g++` invocation is equivalent:
 ```bash
 g++ -std=c++17 -O2 \
   -I"$ROCR_BUILD/rocr/include" \
-  compare_transpilers.cpp \
-  -o compare_transpilers \
+  smoke_test_compare_transpilers.cpp \
+  -o smoke_test_compare_transpilers \
   -L"$ROCR_BUILD/rocr/lib" -Wl,-rpath,"$ROCR_BUILD/rocr/lib" \
   -lhsa-runtime64
 ```
@@ -83,19 +83,19 @@ g++ -std=c++17 -O2 \
 ```bash
 # Single kernel
 HSA_HOTSWAP_RULES=/dev/null \
-  ./compare_transpilers path/to/kernel.co
+  ./smoke_test_compare_transpilers path/to/kernel.co
 
 # Whole directory
 HSA_HOTSWAP_RULES=/dev/null \
-  ./compare_transpilers /opt/rocm-7.2.1/lib/rocblas/library --recursive
+  ./smoke_test_compare_transpilers /opt/rocm-7.2.1/lib/rocblas/library --recursive
 
 # Explicit target ISA (forwarded as HSA_HOTSWAP_ISA_OVERRIDE to both modes)
 HSA_HOTSWAP_RULES=/dev/null \
-  ./compare_transpilers ../kernels/aiter_gfx950 --isa=gfx942
+  ./smoke_test_compare_transpilers ../kernels/aiter_gfx950 --isa=gfx942
 
 # Machine-readable output
 HSA_HOTSWAP_RULES=/dev/null \
-  ./compare_transpilers ./corpus --json > compare.json
+  ./smoke_test_compare_transpilers ./corpus --json > compare.json
 ```
 
 `HSA_HOTSWAP_RULES` is required: without it, ROCR's hotswap hook does not
@@ -140,10 +140,10 @@ Human format (default):
    dispatched — a miscompilation is invisible to this tool.
    For numerical correctness, use tools/compare_correctness/.
 
-=== compare_transpilers (load-level smoke test) ===
+=== smoke_test_compare_transpilers (load-level smoke test) ===
   target ISA   : gfx942
   inputs       : 27
-  executable   : /home/…/compare_transpilers
+  executable   : /home/…/smoke_test_compare_transpilers
   strategy     : per-file fork+exec isolation, both modes
 
   [1/27] aiter_gfx950/gemm_bf16_a.co  legacy=FAIL  salmon=PASS

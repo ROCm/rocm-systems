@@ -1,13 +1,13 @@
 # `compare_correctness`
 
 Head-to-head **numerical** comparison of the two hotswap transpilation
-paths.  Where its sibling `tools/compare_transpilers` only asks "does the
+paths.  Where its sibling `tools/smoke_test_compare_transpilers` only asks "does the
 code object load?", this tool asks the sharper question: "does the
 translated kernel compute the right answer?".
 
 ## Why this tool exists
 
-`compare_transpilers` answers "does the code object load under each
+`smoke_test_compare_transpilers` answers "does the code object load under each
 engine?".  That is necessary but weak: a code object can load cleanly
 and still produce wrong numerical results, because the loader only
 validates structural invariants (ELF format, ISA tags, kernel

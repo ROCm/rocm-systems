@@ -167,8 +167,9 @@ link against (or load through) the live `libhsa-runtime64.so` rather
 than the transpiler library. They are built separately from
 `transpiler_tests`.
 
-- **`tools/compare_transpilers`** (`tools/compare_transpilers.cpp`,
-  `tools/Makefile`) — **load-level smoke test**: does the code object
+- **`tools/smoke_test_compare_transpilers`**
+  (`tools/smoke_test_compare_transpilers.cpp`, `tools/Makefile`) —
+  **load-level smoke test**: does the code object
   load + freeze under the legacy byte-level transpiler and under
   Salmon?  Accepts a single `.co`/`.hsaco` file or a directory and
   reports per-file agreement between the two engines.  The kernel is
@@ -184,7 +185,7 @@ than the transpiler library. They are built separately from
   recipe) are compiled to both gfx942 and gfx1250, dispatched in
   isolated child processes under `native` / `legacy` / `salmon`, and
   their outputs are compared to a CPU reference.  Complements
-  `compare_transpilers`: load success does not imply correct numerical
+  `smoke_test_compare_transpilers`: load success does not imply correct numerical
   output, and this tool measures the latter.  See
   `tools/compare_correctness/README.md`.
 - **`salmon_hip_test`** (`tests/salmon_hip_test.cpp`) + **`libsalmon_intercept.so`**
