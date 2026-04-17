@@ -737,6 +737,15 @@ static bool bothAreMAI(const MCInstrDesc &src, const MCInstrDesc &tgt) {
   return (src.TSFlags & kMAI) && (tgt.TSFlags & kMAI);
 }
 
+// `_nosdst_` collapse: starting with GFX11, VOPC CMPX instructions no longer
+// write a scalar destination register (EXEC receives the mask directly) and
+// LLVM represents this as a `_nosdst_` variant. The non-`_nosdst_` target
+// form keeps the scalar dst (for older subtargets). Both forms share
+// dispatch-relevant TSFlags; the raiser's CMPX handler only writes EXEC and
+// ignores the optional sdst, so collapsing the variant onto the base is
+// safe. The source has one fewer def when the base includes sdst (e64
+// forms) and the same number of defs otherwise (e32, where both lack sdst).
+
 // Bits we require to be identical between source and target for an alias
 // collapse to be considered semantically safe. Deliberately excludes encoding
 // variation flags like `VOP3_OPSEL` (set on `_t16_` op-sel encodings but not
@@ -766,6 +775,17 @@ static bool sameSemanticShape(const MCInstrDesc &src,
   return (src.TSFlags & kSemanticShapeMask) ==
              (tgt.TSFlags & kSemanticShapeMask) &&
          src.getNumDefs() == tgt.getNumDefs();
+}
+
+// `_nosdst_` collapse: same dispatch identity as the base, and the source
+// never has more defs than the target (the scalar dst is either dropped
+// entirely or added back on the target's e64 form).
+static bool nosdstDropsScalarDef(const MCInstrDesc &src,
+                                 const MCInstrDesc &tgt) {
+  return (src.TSFlags & kSemanticShapeMask) ==
+             (tgt.TSFlags & kSemanticShapeMask) &&
+         tgt.getNumDefs() >= src.getNumDefs() &&
+         tgt.getNumDefs() - src.getNumDefs() <= 1;
 }
 
 // Build an alias map that collapses "parallel" pseudos LLVM generates for the
@@ -814,6 +834,10 @@ buildPseudoAliasMap(const MCInstrInfo &MCII) {
       // arity are preserved, but tolerate encoding-bit drift.
       {"_t16_", false, sameSemanticShape},
       {"_fake16_", false, sameSemanticShape},
+      // GFX11+ VOPC CMPX family drops the scalar destination register; the
+      // raiser's CMPX handler only touches EXEC so the `_nosdst_` form
+      // collapses cleanly onto the base pseudo of the same encoding width.
+      {"_nosdst_", false, nosdstDropsScalarDef},
       // MFMA register-class modifiers.  `_vgprcd_` marks a VGPR destination
       // variant; `_mac_` marks a multiply-accumulate (tied dst/src2) variant.
       // Both keep the same TableGen intrinsic and semantic shape, so they

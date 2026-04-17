@@ -65,8 +65,19 @@ ParsedReg RaiseContext::parseReg(unsigned reg, int mciOpIdx) const {
     return pr;
   }
   if (name.starts_with("SGPR")) {
+    // `SGPR_NULL` / `SGPR_NULL_HI` are the sink registers GFX11+ uses for
+    // carry-discard destinations (e.g. `v_mad_co_u64_u32 ..., null, ...`).
+    // They are not regular SGPR files and have no backing slot; treat them
+    // as NOREG so handlers skip the write.
+    if (name.starts_with("SGPR_NULL")) {
+      pr.kind = ParsedReg::NOREG;
+      return pr;
+    }
     pr.kind = ParsedReg::SGPR;
-    name.substr(4).split('_').first.getAsInteger(10, pr.baseIdx);
+    if (name.substr(4).split('_').first.getAsInteger(10, pr.baseIdx))
+      llvm::report_fatal_error(llvm::Twine("transpiler: unparseable SGPR "
+                                           "register name '") +
+                               name + "'");
     pr.width = name.count("SGPR");
     return pr;
   }
