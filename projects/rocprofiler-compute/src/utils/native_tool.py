@@ -10,32 +10,16 @@ from utils.utils_common import capture_subprocess_output
 
 class NativeTool:
     def __init__(self) -> None:
-        pass
+        self.build_dir_name = "_build"
+        self.native_collector_name = "librocprofiler-compute-tool.so"
 
     def get_collector_library_path(
-        self, rocprof_compute_script_path: Path, rocprofiler_sdk_tool_path: Path
+        self, compute_script_path: Path, rocprofiler_sdk_tool_path: Path
     ) -> Path:
-        native_tool_path = None
-        native_tool_base_path = (
-            rocprof_compute_script_path.parents[1]
-            if len(rocprof_compute_script_path.parents) >= 2
-            else Path()
+        native_tool_path = self.__find_existing_collector(
+            compute_script_path, rocprofiler_sdk_tool_path
         )
-        native_tool_glob_pattern = (
-            "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
-        )
-        try:
-            native_tool_path = str(
-                next(native_tool_base_path.glob(native_tool_glob_pattern))
-            )
-        except Exception as e:
-            console_debug(
-                f"Could not find pre-built native tool: {e}.\n"
-                f"Search path: {native_tool_base_path}\n"
-                f"Glob pattern: {native_tool_glob_pattern}\n"
-                "Building native tool now."
-            )
-        if not (native_tool_path and Path(native_tool_path).is_file()):
+        if not native_tool_path:
             # Build native counter collection tool if not exists
             native_tool_path = str(
                 Path(tempfile.mkdtemp(prefix="rocprofiler-compute-tool-", dir="/tmp"))
@@ -67,11 +51,48 @@ class NativeTool:
             if not success:
                 console_error(
                     "Failed to use native counter collection tool.\n"
-                    "Could not find pre-built .so file at: "
-                    f"{native_tool_base_path / native_tool_glob_pattern}\n"
                     "Could not find source .cpp files in folder: "
                     f"{native_tool_cpp_path}\n"
                     "Please ensure the native tool library is installed "
                     "or source files are present."
                 )
         return Path(native_tool_path)
+
+    def __find_existing_collector(
+        self, compute_script_path: Path, rocprofiler_sdk_tool_path: Path
+    ) -> Path | None:
+        collector_path = self.__find_installed_collector(rocprofiler_sdk_tool_path)
+        if not collector_path:
+            collector_path = self.__find_built_collector(compute_script_path)
+        return collector_path
+
+    def __find_installed_collector(
+        self, rocprofiler_sdk_tool_path: Path
+    ) -> Path | None:
+        rocm_root_path = self.__get_installed_rocm_root_path(rocprofiler_sdk_tool_path)
+        pattern = f"lib*/rocprofiler-compute/{self.native_collector_name}"
+        console_debug(f"Searching {rocm_root_path} by {pattern} for native collector")
+        return self.__find_file_by_glob_pattern(rocm_root_path, pattern)
+
+    def __get_installed_rocm_root_path(self, rocprofiler_sdk_tool_path: Path) -> Path:
+        assert rocprofiler_sdk_tool_path.stem == "rocprofv3"
+        native_tool_base_path = (
+            rocprofiler_sdk_tool_path.parents[1]
+            if len(rocprofiler_sdk_tool_path.parents) > 1
+            else Path()
+        )
+        return native_tool_base_path
+
+    def __find_built_collector(self, compute_script_path: Path) -> Path | None:
+        source_root = self.__get_source_root(compute_script_path)
+        pattern = f"lib/{self.build_dir_name}/bin/{self.native_collector_name}"
+        console_debug(f"Searching {source_root} by {pattern} for native collector")
+        return self.__find_file_by_glob_pattern(source_root, pattern)
+
+    def __get_source_root(self, compute_script_path: Path) -> Path:
+        assert compute_script_path.stem == "rocprof-compute"
+        return compute_script_path.parent
+
+    def __find_file_by_glob_pattern(self, base_path: Path, pattern: str) -> Path | None:
+        match = next(base_path.glob(pattern), None)
+        return Path(match) if match is not None else None
