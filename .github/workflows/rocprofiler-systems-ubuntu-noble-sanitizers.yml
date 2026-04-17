@@ -44,7 +44,6 @@ concurrency:
 env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
-  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
   SANITIZER_EXIT_CODE: 1
 
 jobs:
@@ -56,7 +55,6 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ["g++"]
-        build-type: ["RelWithDebInfo"]
         build-dyninst: ["ON"]
         sanitizer-type: ["address", "undefined"]
     env:
@@ -66,7 +64,6 @@ jobs:
       # Disable OpenMPI's binary patcher — it conflicts with ASAN's
       # mprotect interceptor, causing SIGSEGV in all MPI/UCX tests.
       OMPI_MCA_patcher: ""
-      ROCPROFSYS_CI: "ON"
 
     steps:
       - name: Install git
@@ -115,8 +112,6 @@ jobs:
         working-directory: projects/rocprofiler-systems/
         run: |
           SUPP_DIR=${PWD}/scripts
-          LOG_DIR=${PWD}/build/sanitizer-logs
-          mkdir -p "${LOG_DIR}"
           SANITIZER_TYPE="${{ matrix.sanitizer-type }}"
           if [ "${SANITIZER_TYPE}" = "address" ]; then
               ASAN_LIB=$(${{ matrix.compiler }} -print-file-name=libasan.so)
@@ -125,9 +120,9 @@ jobs:
               ls -la "${ASAN_LIB}"
               echo "ASAN_LIBRARY=${ASAN_LIB}" >> $GITHUB_ENV
               echo "SANITIZER_CMAKE_FLAGS=-DASAN_LIBRARY=${ASAN_LIB}" >> $GITHUB_ENV
-              echo "ASAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-asan.supp:detect_leaks=1:new_delete_type_mismatch=0:detect_odr_violation=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/asan:log_exe_name=1" >> $GITHUB_ENV
+              echo "ASAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-asan.supp:detect_leaks=1:new_delete_type_mismatch=0:detect_odr_violation=0:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
               echo "LSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-lsan.supp:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
-              echo "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/ubsan:log_exe_name=1" >> $GITHUB_ENV
+              echo "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
           elif [ "${SANITIZER_TYPE}" = "thread" ]; then
               TSAN_LIB=$(${{ matrix.compiler }} -print-file-name=libtsan.so)
               TSAN_LIB=$(realpath "${TSAN_LIB}")
@@ -135,7 +130,7 @@ jobs:
               ls -la "${TSAN_LIB}"
               echo "TSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
               echo "SANITIZER_CMAKE_FLAGS=-DTSAN_LIBRARY=${TSAN_LIB}" >> $GITHUB_ENV
-              echo "TSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-thread.supp:second_deadlock_stack=1:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/tsan:log_exe_name=1" >> $GITHUB_ENV
+              echo "TSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-thread.supp:second_deadlock_stack=1:print_suppressions=1:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
 
               # Known TSan issue: logger fork tests (pthread_atfork + fork from
               # multi-threaded process) cause the test binary to hang during
@@ -144,7 +139,7 @@ jobs:
               echo "GTEST_FILTER=-logger_test*" >> $GITHUB_ENV
           elif [ "${SANITIZER_TYPE}" = "undefined" ]; then
               echo "SANITIZER_CMAKE_FLAGS=" >> $GITHUB_ENV
-              echo "UBSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-ubsan.supp:print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}:log_path=${LOG_DIR}/ubsan:log_exe_name=1" >> $GITHUB_ENV
+              echo "UBSAN_OPTIONS=suppressions=${SUPP_DIR}/rocprof-sys-ubsan.supp:print_stacktrace=1:halt_on_error=0:exitcode=${SANITIZER_EXIT_CODE}" >> $GITHUB_ENV
           fi
 
       - name: Configure, Build and Test
@@ -158,7 +153,7 @@ jobs:
           git config --global --add safe.directory ${PWD}
           echo "CMake version: $(cmake --version | head -n 1)"
           echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
-          echo "ROCm version: ${{ matrix.rocm-version }}"
+          echo "Build type: RelWithDebInfo"
           echo "Sanitizer type: ${{ matrix.sanitizer-type }}"
           echo "Sanitizer CMake flags: ${SANITIZER_CMAKE_FLAGS}"
           TAG="-${{ matrix.sanitizer-type }}-sanitizer"
@@ -170,7 +165,7 @@ jobs:
             -- \
             -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_TESTING=ON \
             -DROCPROFSYS_USE_PYTHON=OFF \
@@ -214,16 +209,6 @@ jobs:
           du build/rocprof-sys-tests-output -d 1 -h
           df -h
           rm -fr /tmp/* build/rocprof-sys-tests-output/*
-
-      - name: Sanitizer Report Artifacts
-        if: always()
-        continue-on-error: True
-        uses: actions/upload-artifact@v7
-        with:
-          name: sanitizer-${{ matrix.sanitizer-type }}-${{ github.job }}-${{ strategy.job-index }}-reports
-          path: |
-            projects/rocprofiler-systems/build/sanitizer-logs/
-          if-no-files-found: ignore
 
       - name: CTest Artifacts
         if: failure()
