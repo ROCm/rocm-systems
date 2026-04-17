@@ -497,6 +497,8 @@
 #  define AMD_DBGAPI_EXPORT_DECORATOR __declspec(dllexport)
 # elif defined(__GNUC__)
 #  define AMD_DBGAPI_EXPORT_DECORATOR __attribute__ ((visibility ("default")))
+# else
+#  define AMD_DBGAPI_EXPORT_DECORATOR
 # endif
 #endif /* !defined (AMD_DBGAPI_EXPORT_DECORATOR) */
 
