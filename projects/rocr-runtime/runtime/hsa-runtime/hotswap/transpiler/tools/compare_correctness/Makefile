@@ -26,7 +26,8 @@ BUNDLER        := $(ROCM)/lib/llvm/bin/clang-offload-bundler
 # Where the smoke_test_compare_transpilers tool's copy of salmon_intercept.cpp lives.
 INTERCEPT_SRC  := ../../tests/salmon_intercept.cpp
 
-KERNELS        := vecadd block_sum_shfl lane_swap
+KERNELS        := vecadd block_sum_shfl lane_swap \
+                  cvt_pkrtz cvt_pk_f16 bfm_b32 swap_b32 mov_b64 cvt_f32_bf16
 ISAS           := gfx942 gfx1250
 KERNEL_BUILD   := kernels/build
 

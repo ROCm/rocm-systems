@@ -475,6 +475,514 @@ Recipe makeLaneSwapRecipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helpers for the cvt_* recipes.  Both live here rather than in the kernels
+// because they define the CPU reference, not any device-side behaviour.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// f32 -> f16 with round-toward-zero, matching v_cvt_pkrtz_f16_f32
+// semantics: NaN -> qNaN with sign preserved; +/-Inf -> +/-Inf; overflow
+// (|v| >= 65520) saturates to the largest finite f16 in that direction;
+// normals truncate their 13 low mantissa bits; subnormals truncate the
+// bits that shift past the denormal exponent.
+uint16_t f32_to_f16_rtz(float v) {
+  uint32_t u;
+  std::memcpy(&u, &v, sizeof(u));
+  uint32_t sign = (u >> 31) & 1;
+  uint32_t exp  = (u >> 23) & 0xffu;
+  uint32_t mant = u & 0x7fffffu;
+  if (exp == 0xff) {
+    if (mant) return static_cast<uint16_t>((sign << 15) | 0x7e00);
+    return static_cast<uint16_t>((sign << 15) | 0x7c00);
+  }
+  if (exp == 0) {
+    return static_cast<uint16_t>(sign << 15);
+  }
+  int32_t e = static_cast<int32_t>(exp) - 127 + 15;
+  if (e >= 31) {
+    return static_cast<uint16_t>((sign << 15) | 0x7bff);
+  }
+  if (e <= 0) {
+    if (e < -10) return static_cast<uint16_t>(sign << 15);
+    uint32_t m = mant | 0x800000u;
+    uint32_t shift = static_cast<uint32_t>(14 - e);
+    return static_cast<uint16_t>((sign << 15) | (m >> shift));
+  }
+  return static_cast<uint16_t>((sign << 15) |
+                               (static_cast<uint32_t>(e) << 10) |
+                               (mant >> 13));
+}
+
+// Exact CPU comparator over N u32s.  Used by the integer-output recipes
+// (cvt_pkrtz, cvt_pk_f16, bfm_b32, swap_b32) where a single bit of
+// difference is a bug, not numerical noise.
+std::tuple<int, double, int, double, double>
+compareU32Exact(const std::vector<uint8_t> &gold,
+                const std::vector<uint8_t> &actual, int n) {
+  const uint32_t *g = reinterpret_cast<const uint32_t *>(gold.data());
+  const uint32_t *a = reinterpret_cast<const uint32_t *>(actual.data());
+  int mismatches = 0, firstIdx = -1;
+  double firstG = 0.0, firstA = 0.0;
+  for (int i = 0; i < n; ++i) {
+    if (g[i] != a[i]) {
+      if (mismatches++ == 0) {
+        firstIdx = i;
+        firstG = static_cast<double>(g[i]);
+        firstA = static_cast<double>(a[i]);
+      }
+    }
+  }
+  // maxAbsErr is not meaningful for bit-exact compare; return 0 when
+  // all match, 1 otherwise so the existing grid shows a signal.
+  double maxAbs = (mismatches == 0) ? 0.0 : 1.0;
+  return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: cvt_pkrtz — V_CVT_PKRTZ_F16_F32 handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeCvtPkrtzRecipe() {
+  Recipe r;
+  r.name = "cvt_pkrtz";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(2 * N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    std::mt19937 rng(0xBEEF + N);
+    std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
+    for (int i = 0; i < 2 * N; ++i) f[i] = dist(rng);
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const float *a = reinterpret_cast<const float *>(input.data());
+    const float *b = a + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *o = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i < N; ++i) {
+      uint32_t lo = f32_to_f16_rtz(a[i]);
+      uint32_t hi = f32_to_f16_rtz(b[i]);
+      o[i] = lo | (hi << 16);
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "cvt_pkrtz"));
+    float *dA, *dB;
+    uint32_t *dC;
+    size_t inBytes = N * sizeof(float);
+    size_t outBytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dA, inBytes));
+    HIP_ASSERT(hipMalloc(&dB, inBytes));
+    HIP_ASSERT(hipMalloc(&dC, outBytes));
+    HIP_ASSERT(hipMemset(dC, 0xA5, outBytes));
+    HIP_ASSERT(hipMemcpy(dA, input.data(),           inBytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dB, input.data() + inBytes, inBytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const float *a; const float *b; uint32_t *c; int n; }
+        args = {dA, dB, dC, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(outBytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dC, outBytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dA)); HIP_ASSERT(hipFree(dB)); HIP_ASSERT(hipFree(dC));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: cvt_pk_f16 — V_CVT_PK_F16_F32 handler
+// Same interface as cvt_pkrtz but round-to-nearest-even (default f16
+// cast on CPU).  gfx942 native lowers this without the packed opcode
+// but produces the same f16 bit pattern per lane, so the comparison
+// works across all three engines.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeCvtPkF16Recipe() {
+  Recipe r;
+  r.name = "cvt_pk_f16";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(2 * N * sizeof(float));
+    auto *f = reinterpret_cast<float *>(buf.data());
+    std::mt19937 rng(0xCAFE + N);
+    std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
+    for (int i = 0; i < 2 * N; ++i) f[i] = dist(rng);
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const float *a = reinterpret_cast<const float *>(input.data());
+    const float *b = a + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *o = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i < N; ++i) {
+      _Float16 lo = static_cast<_Float16>(a[i]);
+      _Float16 hi = static_cast<_Float16>(b[i]);
+      uint16_t blo, bhi;
+      std::memcpy(&blo, &lo, sizeof(blo));
+      std::memcpy(&bhi, &hi, sizeof(bhi));
+      o[i] = static_cast<uint32_t>(blo) |
+             (static_cast<uint32_t>(bhi) << 16);
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "cvt_pk_f16"));
+    float *dA, *dB;
+    uint32_t *dC;
+    size_t inBytes = N * sizeof(float);
+    size_t outBytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dA, inBytes));
+    HIP_ASSERT(hipMalloc(&dB, inBytes));
+    HIP_ASSERT(hipMalloc(&dC, outBytes));
+    HIP_ASSERT(hipMemset(dC, 0xA5, outBytes));
+    HIP_ASSERT(hipMemcpy(dA, input.data(),           inBytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dB, input.data() + inBytes, inBytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const float *a; const float *b; uint32_t *c; int n; }
+        args = {dA, dB, dC, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(outBytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dC, outBytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dA)); HIP_ASSERT(hipFree(dB)); HIP_ASSERT(hipFree(dC));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: bfm_b32 — V_BFM_B32 handler
+// Inputs: width[N], offset[N].  Only the low 5 bits of each are used,
+// matching the hardware.  Output: ((1<<w)-1) << off per lane.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeBfmB32Recipe() {
+  Recipe r;
+  r.name = "bfm_b32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(2 * N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    std::mt19937 rng(0xF00D + N);
+    // Sweep all five-bit widths and offsets — the whole interesting
+    // space is 0..31 for each, so uniformly cover it.
+    for (int i = 0; i < N; ++i) u[i]     = rng();
+    for (int i = 0; i < N; ++i) u[N + i] = rng();
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint32_t *w = reinterpret_cast<const uint32_t *>(input.data());
+    const uint32_t *o = w + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *c = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i < N; ++i) {
+      uint32_t wi = w[i] & 31u;
+      uint32_t oi = o[i] & 31u;
+      uint32_t mask = (wi == 0) ? 0u : ((1u << wi) - 1u);
+      c[i] = mask << oi;
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "bfm_b32"));
+    uint32_t *dW, *dO, *dC;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dW, bytes));
+    HIP_ASSERT(hipMalloc(&dO, bytes));
+    HIP_ASSERT(hipMalloc(&dC, bytes));
+    HIP_ASSERT(hipMemset(dC, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dW, input.data(),         bytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dO, input.data() + bytes, bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint32_t *w; const uint32_t *o; uint32_t *c; int n; }
+        args = {dW, dO, dC, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dC, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dW)); HIP_ASSERT(hipFree(dO)); HIP_ASSERT(hipFree(dC));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: swap_b32 — V_SWAP_B32 handler
+// Pairwise exchange of adjacent elements.  N must be even; the
+// validate hook rejects odd N rather than producing garbage for the
+// trailing lane.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeSwapB32Recipe() {
+  Recipe r;
+  r.name = "swap_b32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.validate = [](int N, int) -> std::optional<std::string> {
+    if (N % 2 != 0)
+      return std::string("swap_b32 consumes input in pairs; N must be even");
+    return std::nullopt;
+  };
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    for (int i = 0; i < N; ++i) u[i] = 0xA55A0000u + static_cast<uint32_t>(i);
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint32_t *in = reinterpret_cast<const uint32_t *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *o = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i + 1 < N; i += 2) {
+      o[i]     = in[i + 1];
+      o[i + 1] = in[i];
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "swap_b32"));
+    uint32_t *dIn, *dOut;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dIn, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint32_t *in; uint32_t *out; int n; }
+        args = {dIn, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    // The kernel's tid selects pair index (N/2 pairs).
+    int pairs = N / 2;
+    int grd = (pairs + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: mov_b64 — V_MOV_B64 handler
+// 64-bit copy; gfx942 uses a natural move, gfx1250 uses v_mov_b64 via
+// inline asm so the raiser sees the opcode.  Expected output equals
+// input byte-for-byte.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeMovB64Recipe() {
+  Recipe r;
+  r.name = "mov_b64";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint64_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(uint64_t));
+    auto *u = reinterpret_cast<uint64_t *>(buf.data());
+    std::mt19937_64 rng(0xDEAD5E7 + N);
+    for (int i = 0; i < N; ++i) u[i] = rng();
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int, int) {
+    return input;  // identity
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "mov_b64"));
+    uint64_t *dIn, *dOut;
+    size_t bytes = N * sizeof(uint64_t);
+    HIP_ASSERT(hipMalloc(&dIn, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint64_t *a; uint64_t *c; int n; }
+        args = {dIn, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    const uint64_t *g = reinterpret_cast<const uint64_t *>(gold.data());
+    const uint64_t *a = reinterpret_cast<const uint64_t *>(actual.data());
+    int mismatches = 0, firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    for (int i = 0; i < n; ++i) {
+      if (g[i] != a[i]) {
+        if (mismatches++ == 0) {
+          firstIdx = i;
+          firstG = static_cast<double>(g[i]);
+          firstA = static_cast<double>(a[i]);
+        }
+      }
+    }
+    double maxAbs = (mismatches == 0) ? 0.0 : 1.0;
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: cvt_f32_bf16 — V_CVT_F32_BF16 handler
+// bf16 -> f32 is an exact upcast (low 16 bits of the f32 are zero and
+// high 16 bits are the bf16 bit pattern), so the CPU reference and
+// both compile paths agree bit-for-bit.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeCvtF32Bf16Recipe() {
+  Recipe r;
+  r.name = "cvt_f32_bf16";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(float);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(N * sizeof(uint16_t));
+    auto *u = reinterpret_cast<uint16_t *>(buf.data());
+    std::mt19937 rng(0xB16B16 + N);
+    // Cover the whole representable bf16 space, including NaN/Inf.
+    std::uniform_int_distribution<uint32_t> dist(0, 0xffffu);
+    for (int i = 0; i < N; ++i) u[i] = static_cast<uint16_t>(dist(rng));
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint16_t *in = reinterpret_cast<const uint16_t *>(input.data());
+    std::vector<uint8_t> out(N * sizeof(float));
+    auto *o = reinterpret_cast<float *>(out.data());
+    for (int i = 0; i < N; ++i) {
+      uint32_t bits = static_cast<uint32_t>(in[i]) << 16;
+      std::memcpy(&o[i], &bits, sizeof(float));
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "cvt_f32_bf16"));
+    uint16_t *dIn;
+    float *dOut;
+    size_t inBytes = N * sizeof(uint16_t);
+    size_t outBytes = N * sizeof(float);
+    HIP_ASSERT(hipMalloc(&dIn, inBytes));
+    HIP_ASSERT(hipMalloc(&dOut, outBytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, outBytes));
+    HIP_ASSERT(hipMemcpy(dIn, input.data(), inBytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint16_t *a; float *c; int n; }
+        args = {dIn, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(outBytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, outBytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIn)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    // Bit-exact on u32 reinterpretation of floats.  Necessary because
+    // NaN inputs produce NaNs whose bit pattern must be preserved, and
+    // naive float subtraction would treat any NaN as mismatch noise.
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recipe registry
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -483,6 +991,12 @@ const std::vector<Recipe> &allRecipes() {
       makeVecaddRecipe(),
       makeBlockSumRecipe(),
       makeLaneSwapRecipe(),
+      makeCvtPkrtzRecipe(),
+      makeCvtPkF16Recipe(),
+      makeBfmB32Recipe(),
+      makeSwapB32Recipe(),
+      makeMovB64Recipe(),
+      makeCvtF32Bf16Recipe(),
   };
   return v;
 }

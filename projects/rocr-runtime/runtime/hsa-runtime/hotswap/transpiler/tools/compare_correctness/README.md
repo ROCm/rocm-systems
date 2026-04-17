@@ -156,6 +156,31 @@ you're comparing kernels that compute different quantities.
 | `vecadd`          | Baseline: pure VALU, no cross-lane ops.  Any failure here is structural, not intrinsic-related. |
 | `block_sum_shfl`  | Two-phase block-sum reduction using `__shfl_xor` within each warp and cross-warp via shared memory.  One float per block. |
 | `lane_swap`       | 1:1 output:  `out[tid] = in[tid ^ 1]`.  Crisp probe for whether cross-lane reads arrive from the expected partner. |
+| `cvt_pkrtz`       | `V_CVT_PKRTZ_F16_F32` handler.  Packs two f32 into v2f16 with round-toward-zero (`__builtin_amdgcn_cvt_pkrtz`). |
+| `cvt_pk_f16`      | `V_CVT_PK_F16_F32` handler.  Packs two f32 into v2f16 with round-to-nearest-even.  gfx942 native lowers without the packed opcode; the f16 bit pattern per lane matches, so the cross-engine compare is still meaningful. |
+| `bfm_b32`         | `V_BFM_B32` handler.  Bit-field mask `((1<<w)-1)<<off`, forced via inline asm because hipcc lowers the same source to `v_lshlrev_b32` + `v_not_b32` on gfx1250. |
+| `swap_b32`        | `V_SWAP_B32` handler.  Pairwise element exchange, forced via inline asm — this is one of the few VALU ops that writes both of its operands, so it's specifically worth stressing. |
+| `mov_b64`         | `V_MOV_B64` handler (gfx11+).  Forced via inline asm under `#ifdef __gfx1250__`; gfx942 native uses a plain 64-bit copy because the opcode didn't exist yet.  Identity output. |
+| `cvt_f32_bf16`    | `V_CVT_F32_BF16` handler (gfx950+).  Forced via inline asm under `#ifdef __gfx1250__`; gfx942 native uses the bit-level upcast `bf16 -> (u32 << 16) reinterpreted as f32`.  Both paths are bit-exact. |
+
+## Handlers this harness does NOT cover
+
+Three categories of handler cannot be exercised with today's
+`gfx1250 -> gfx942` routing and are out of scope for this tool:
+
+1. **gfx950-only instructions** — `v_cvt_scalef32_pk_fp4_f32` (scaled
+   fp4 packing), `ds_read_b64_tr_b8` (LDS transpose load).  The
+   gfx1250 assembler does not accept them (neither via inline asm nor
+   spontaneous emission), so they cannot be placed in the source
+   code object.
+2. **gfx11+-only instructions with no gfx942 analogue** — covered
+   above by `#ifdef __gfx1250__` gating, at the cost of only
+   exercising the Salmon path (legacy translator has nothing gfx11
+   to chew on either).
+3. **Wave64-specific raiser paths** — the `EXEC_LO`/`EXEC_HI` partial
+   write fix is only triggered when the source ISA is wave64, and
+   gfx1250 is wave32.  Probing this requires either a gfx950/gfx942
+   source ISA (a sibling harness change) or gfx950 hardware.
 
 ## Kernel provenance
 
