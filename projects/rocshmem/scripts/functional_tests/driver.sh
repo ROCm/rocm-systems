@@ -127,6 +127,7 @@ declare -A TEST_NUMBERS=(
   ["flood_fadd"]="91"
   ["flood_waitadd"]="92"
   ["device_bitcode"]="93"
+  ["library_info"]="94"
   ["quiet_on_stream"]="96"
   ["sync_all_on_stream"]="97"
 )
@@ -517,6 +518,7 @@ TestOther() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "init"             2       1            1
+  ExecTest  "library_info"     2       1            1
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
