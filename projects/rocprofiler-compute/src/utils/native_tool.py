@@ -24,15 +24,13 @@ class NativeTool:
 
     def get_collector_library_path(
         self, compute_script_path: Path, rocprofiler_sdk_tool_path: Path
-    ) -> Path:
+    ) -> Path | None:
         native_tool_path = self.__find_existing_collector(
             compute_script_path, rocprofiler_sdk_tool_path
         )
         if not native_tool_path:
-            native_tool_path = self.__build_collector(
-                compute_script_path, rocprofiler_sdk_tool_path
-            )
-        return Path(native_tool_path)
+            native_tool_path = self.__build_collector(compute_script_path)
+        return native_tool_path
 
     def __find_existing_collector(
         self, compute_script_path: Path, rocprofiler_sdk_tool_path: Path
@@ -73,18 +71,34 @@ class NativeTool:
         match = next(base_path.glob(pattern), None)
         return Path(match) if match is not None else None
 
-    def __build_collector(
-        self, native_tool_path: Path, rocprofiler_sdk_tool_path: Path
-    ) -> Path:
-        # Build native counter collection tool if not exists
-        build_command = ""
+    def __build_collector(self, compute_script_path: Path) -> Path | None:
+        self._generate_cmake_project(compute_script_path.parent)
+        self._build_cmake_project(compute_script_path.parent)
+        return self.__find_built_collector(compute_script_path)
+
+    def _generate_cmake_project(self, src_path: Path) -> bool:
+        build_command = (
+            "cmake "
+            + f"-S {src_path}/{self.sources_dir_name} "
+            + f"-B {src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
+        )
         console_debug(f"Building native tool using command: {build_command}")
-        success, output = capture_subprocess_output(shlex.split(build_command))
+        return self.__execute_command(build_command)
+
+    def _build_cmake_project(self, src_path: Path) -> bool:
+        generate_command = (
+            "cmake --build "
+            + f"{src_path}/{self.sources_dir_name}/{self.sources_build_subdir_name}"
+        )
+        console_debug(
+            f"Generating native tool project using command: {generate_command}"
+        )
+        return self.__execute_command(generate_command)
+
+    def __execute_command(self, command: str) -> bool:
+        success, output = capture_subprocess_output(shlex.split(command))
         console_debug(f"Build output: {output}")
         if not success:
-            console_error(
-                "Failed to use native counter collection tool.\n"
-                "Please ensure the native tool library is installed "
-                "or source files are present."
-            )
-        return native_tool_path
+            console_error("Failed to execute command: {command}")
+            return False
+        return True
