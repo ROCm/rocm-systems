@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -36,8 +36,18 @@
 #include "palStringView.h"
 #include "palSpan.h"
 
+namespace Util
+{
+namespace MetroHash
+{
+struct Hash;
+}
+}
+
 namespace Pal
 {
+
+using Hash128 = Util::MetroHash::Hash;
 
 struct GpuMemSubAllocInfo;
 
@@ -77,16 +87,30 @@ enum class ShaderSubType : uint32
     Count
 };
 
+/// Callback object to get ELF contents from the client's cache for an empty member in an archive pipeline.
+/// The client creates an object of its own subclass of this and provides it to CreatePipeline/CreateShaderLibrary.
+class GetContentsCallback
+{
+public:
+    /// Callback function.
+    /// @param hash         128-bit hash for ELF, base64-decoded from archive member name
+    /// @param (out) pBlob  The returned ELF blob; must remain valid until CreatePipeline/CreateShaderLibrary returns.
+    /// @returns            Success or error code
+    virtual Result Get(const Hash128& hash, Util::Span<const void>* pBlob) = 0;
+};
+
 /// Specifies properties for creation of a compute @ref IShaderLibrary object.  Input structure to
 /// IDevice::CreateShaderLibrary().
 struct ShaderLibraryCreateInfo
 {
-    LibraryCreateFlags  flags;      ///< Library creation flags
+    LibraryCreateFlags   flags;          ///< Library creation flags
 
-    const void*  pCodeObject;       ///< Pointer to code-object ELF binary implementing the Pipeline ABI interface.
-                                    ///  The code-object ELF contains pre-compiled shaders, register values, and
-                                    ///  additional metadata.
-    size_t       codeObjectSize;    ///< Size of code object in bytes.
+    const void*          pCodeObject;    ///< Pointer to code-object ELF binary implementing the Pipeline ABI interface.
+                                         ///  The code-object ELF contains pre-compiled shaders, register values, and
+                                         ///  additional metadata.
+    size_t               codeObjectSize; ///< Size of code object in bytes.
+    GetContentsCallback* pGetContents;   ///< Callback to get ELF contents; can be nullptr if client never provides an
+                                         ///  archive with empty members.
 };
 
 /// Reports properties of a compiled library.
@@ -176,6 +200,18 @@ public:
     virtual Result GetCodeObject(
         uint32*  pSize,
         void*    pBuffer) const = 0;
+
+    /// Recursively counts or collects the code objects contained in this shader library.
+    ///
+    /// @param [in, out] pCount     Represents the number of code objects contained in this library and its children.
+    ///
+    /// @param [out] pCodeObjects   If non-null, writes code object spans. If null, writes code object count to pCount.
+    ///
+    /// @returns Success if the library binaries were fetched successfully.
+    ///          +ErrorUnavailable if a library binary was not fetched successfully.
+    virtual Result GetCodeObjects(
+        uint32*                             pCount,
+        Util::Span<Util::Span<const void>>* pCodeObjects) const = 0;
 
     /// Returns the value of the associated arbitrary client data pointer.
     /// Can be used to associate arbitrary data with a particular PAL object.

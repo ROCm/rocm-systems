@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2016-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -153,7 +153,6 @@ struct GpuMemoryData
 
 #if PAL_DEVELOPER_BUILD
 /// PWS acquire point for barrier logger
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 901
 enum AcquirePoint : uint8
 {
     AcquirePointPfp,
@@ -166,20 +165,6 @@ enum AcquirePoint : uint8
 
     AcquirePointCount
 };
-#else
-enum class AcquirePoint : uint8
-{
-    Pfp = 0,
-    Me,
-    PreShader,
-    PreDepth,
-    PrePs,
-    PreColor,
-    Eop, // Invalid, for internal optimization purpose.
-
-    Count
-};
-#endif
 #endif
 
 /// Information pertaining to the cache flush/invalidations and stalls performed during barrier execution.
@@ -324,57 +309,13 @@ enum class BarrierType : uint32
 struct BarrierData
 {
     ICmdBuffer*       pCmdBuffer;    ///< The command buffer that is executing the barrier.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 902
     ImgBarrier        transition;    ///< The particular image barrier with layout transition blt that is currently
                                      ///  executing, only used during a CallbackType::ImageBarrier.
-#else
-    BarrierTransition transition;    ///< The particular transition with layout transition blt that is currently
-                                     ///  executing, only used during a CallbackType::ImageBarrier.
-#endif
     bool              hasTransition; ///< Whether or not the transition structure is populated.
     BarrierOperations operations;    ///< Detailed cache and pipeline operations performed during this barrier execution
     uint32            reason;        ///< Reason that the barrier was invoked. Only filled at BarrierBegin.
     BarrierType       type;          ///< What style of barrier this is. Only filled at BarrierBegin.
 };
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 888
-/// Enumeration describing the different types of tile mode dimensions
-enum class Gfx6ImageTileModeDimension : uint32
-{
-    Linear = 0, ///< Linear tile mode.
-    Dim1d,      ///< 1D tile mode.
-    Dim2d,      ///< 2D tile mode.
-    Dim3d,      ///< 3D tile mode.
-};
-
-/// Tile mode information
-struct Gfx6ImageTileMode
-{
-    Gfx6ImageTileModeDimension dimension;   ///< Dimensionality of tile mode.
-
-    union
-    {
-        struct
-        {
-            uint32 prt       : 1;   ///< Image is a PRT.
-            uint32 thin      : 1;   ///< Thin tiled.
-            uint32 thick     : 1;   ///< Thick tiled.
-            uint32 reserved  : 29;  ///< Reserved for future use.
-        };
-        uint32 u32All;              ///< Flags packed as 32-bit uint.
-    } properties;                   ///< Bitfield of properties
-};
-
-/// Enumeration describing the different tile types
-enum class Gfx6ImageTileType : uint32
-{
-    Displayable = 0,    ///< Displayable tiling.
-    NonDisplayable,     ///< Non-displayable tiling.
-    DepthSampleOrder,   ///< Same as non-displayable plus depth-sample-order.
-    Rotated,            ///< Rotated displayable tiling.
-    Thick,              ///< Thick micro-tiling.
-};
-#endif
 
 /// Meta-data-related properties
 struct ImageMetaDataInfo
@@ -414,21 +355,6 @@ struct ImageMetaDataInfo
 /// Information for allocation of a PAL Image - AddrLib surface info.
 struct ImageDataAddrMgrSurfInfo
 {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 888
-    union
-    {
-        struct
-        {
-            Gfx6ImageTileMode mode; ///< Tile mode.
-            Gfx6ImageTileType type; ///< Micro tiling type.
-        } gfx6;
-        struct
-        {
-            uint32 swizzle;         ///< Swizzle mode.
-        } gfx9;
-    } tiling;
-#endif
-
     ImageMetaDataInfo flags;    ///< Metadata info.
     uint32            swizzle;  ///< HW-specific swizzle mode.
     uint64            size;     ///< Surface size, in bytes.
