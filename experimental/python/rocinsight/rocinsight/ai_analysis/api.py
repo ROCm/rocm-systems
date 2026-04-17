@@ -43,6 +43,7 @@ from ..analysis import (
     detect_warmup_issues,
     analyze_kernel_resources,
     analyze_api_overhead,
+    analyze_roctx_regions,
     generate_recommendations,
     _detect_already_collected,
 )
@@ -285,9 +286,12 @@ class AnalysisResult:
                 hardware_counters=raw["hardware_counters"],
                 database_path=raw["database_path"],
                 output_format="json",
-                interval_timeline=raw.get("interval_timeline"),  # NEW
-                kernel_categories=raw.get("kernel_categories"),  # NEW
-                short_kernels=raw.get("short_kernels"),  # NEW
+                interval_timeline=raw.get("interval_timeline"),
+                kernel_categories=raw.get("kernel_categories"),
+                short_kernels=raw.get("short_kernels"),
+                kernel_resources=raw.get("kernel_resources"),
+                api_overhead=raw.get("api_overhead"),
+                roctx_regions=raw.get("roctx_regions"),
             )
         raise RuntimeError(
             "Raw analysis data not available. "
@@ -319,9 +323,12 @@ class AnalysisResult:
             hardware_counters=raw["hardware_counters"],
             database_path=raw["database_path"],
             output_format="webview",
-            interval_timeline=raw.get("interval_timeline"),  # NEW
-            kernel_categories=raw.get("kernel_categories"),  # NEW
-            short_kernels=raw.get("short_kernels"),  # NEW
+            interval_timeline=raw.get("interval_timeline"),
+            kernel_categories=raw.get("kernel_categories"),
+            short_kernels=raw.get("short_kernels"),
+            kernel_resources=raw.get("kernel_resources"),
+            api_overhead=raw.get("api_overhead"),
+            roctx_regions=raw.get("roctx_regions"),
         )
 
     def to_text(self) -> str:
@@ -591,6 +598,7 @@ def analyze_database(
         warmup_issues = detect_warmup_issues(connection, hotspots)
         kernel_resources = analyze_kernel_resources(connection, hotspots)
         api_overhead_data = analyze_api_overhead(connection)
+        roctx_regions = analyze_roctx_regions(connection)
 
         # TraceLens-derived analysis
         interval_timeline = compute_interval_timeline(connection)
@@ -619,6 +627,7 @@ def analyze_database(
             att_analysis=att_analysis if att_dir else None,
             warmup_issues=warmup_issues,
             api_overhead=api_overhead_data,
+            roctx_regions=roctx_regions,
         )
 
         if verbose:
@@ -652,6 +661,8 @@ def analyze_database(
     result._raw["kernel_resources"] = kernel_resources
     result._raw["api_overhead"] = api_overhead_data
     result._raw["warmup_issues"] = warmup_issues
+    result._raw["roctx_regions"] = roctx_regions
+    result.roctx_regions = roctx_regions
     if att_dir and att_analysis.get("has_att_data"):
         result._raw["att_trace"] = att_analysis
         result._raw["att_analysis"] = att_analysis

@@ -580,3 +580,231 @@ def analyze_api_overhead(connection: RocpdImportData) -> Dict[str, Any]:
     except Exception:
         # Graceful fallback if regions view doesn't exist in older DBs
         return {"api_calls": [], "launch_overhead_ns": 0, "total_api_ns": 0, "has_api_data": False}
+
+
+def analyze_roctx_regions(connection: RocpdImportData) -> Optional[Dict[str, Any]]:
+    """
+    Discover roctx marker regions and correlate with kernel/memcpy activity.
+
+    Queries the ``regions`` view for entries with category
+    ``MARKER_CORE_RANGE_API`` (user roctx markers), then correlates kernel
+    dispatches and memory copy operations by timestamp overlap.
+
+    **Conservation-correct attribution model:**
+
+    Every nanosecond of GPU work is accounted for exactly once — either
+    inside a marker region or in the unranged bucket. For per-region
+    ownership, the overlapping portion of each event goes to the innermost
+    (shortest-duration) marker. The non-overlapping portion goes to the
+    unranged bucket. Wall-time coverage uses the UNION of marker intervals
+    (not sum of durations) to correctly handle nested and overlapping ranges
+    per the ROC-TX library spec (``roctxRangePush``/``Pop`` nesting and
+    ``roctxRangeStart``/``Stop`` cross-thread overlaps).
+
+    Returns ``None`` if no user roctx markers are found in the trace
+    (graceful no-op — callers check ``if roctx_regions:``).
+
+    When markers are found, returns a dict with:
+
+    - ``regions``: per-marker breakdown (wall time, kernel/memcpy counts and %)
+    - ``unranged``: activity that falls outside any marker
+    - ``unranged_pct_of_total``: fraction of total runtime that is unranged
+    """
+    # Step 1: Find user roctx markers
+    marker_query = """
+    SELECT name, start, end, duration
+    FROM regions
+    WHERE category = 'MARKER_CORE_RANGE_API'
+    ORDER BY start ASC
+    """
+    try:
+        rows = execute_statement(connection, marker_query).fetchall()
+    except Exception:
+        return None  # regions view may not exist in older DBs
+
+    if not rows:
+        return None  # No markers — no-op
+
+    markers = []
+    for row in rows:
+        markers.append({
+            "name": row[0],
+            "start": row[1],
+            "end": row[2],
+            "duration": row[3] or (row[2] - row[1]),
+        })
+
+    # Step 2: Get all kernels and memcpy with timestamps
+    kernel_query = "SELECT name, start, end, duration FROM kernels ORDER BY start"
+    memcpy_query = "SELECT name, start, end, duration FROM memory_copies ORDER BY start"
+
+    try:
+        all_kernels = execute_statement(connection, kernel_query).fetchall()
+    except Exception:
+        all_kernels = []
+    try:
+        all_memcpy = execute_statement(connection, memcpy_query).fetchall()
+    except Exception:
+        all_memcpy = []
+
+    # Step 3: Conservation-correct interval accounting.
+    #
+    # Key principles:
+    #   1. Every nanosecond of an event is accounted for exactly once —
+    #      either inside a marker region or in the unranged bucket.
+    #   2. For per-region ownership, each event is assigned to the
+    #      innermost (shortest) marker that overlaps it. Only the
+    #      overlapping portion counts toward that region.
+    #   3. The non-overlapping portion of a partially-overlapping event
+    #      goes to the unranged bucket (not lost).
+    #   4. Wall-time coverage uses the UNION of marker intervals (not
+    #      sum of durations) to correctly handle nested/overlapping ranges.
+    #
+    # This ensures: sum(region_kernel_time) + unranged_kernel_time == total_kernel_time
+    all_marker_ranges = [(m["start"], m["end"], m["duration"]) for m in markers]
+
+    def _best_marker_idx(event_start: int, event_end: int) -> int:
+        """Return index of the marker with greatest overlap, preferring shorter (innermost) on ties."""
+        best_idx = -1
+        best_overlap = 0
+        best_duration = float("inf")
+        for i, (ms, me, mdur) in enumerate(all_marker_ranges):
+            ov = max(0, min(event_end, me) - max(event_start, ms))
+            if ov > best_overlap or (ov == best_overlap and ov > 0 and mdur < best_duration):
+                best_overlap = ov
+                best_idx = i
+                best_duration = mdur
+        return best_idx
+
+    def _compute_union_coverage(intervals):
+        """Compute total wall-time covered by the union of intervals."""
+        if not intervals:
+            return 0
+        sorted_iv = sorted(intervals, key=lambda x: x[0])
+        merged = [sorted_iv[0]]
+        for s, e in sorted_iv[1:]:
+            if s <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+            else:
+                merged.append((s, e))
+        return sum(e - s for s, e in merged)
+
+    # Pre-compute child coverage for each marker to get exclusive wall time.
+    # A child is any other marker fully contained within this one.
+    marker_exclusive_wall: List[int] = []
+    for mi, m in enumerate(markers):
+        ms, me = m["start"], m["end"]
+        # Collect intervals of child markers nested inside this one
+        child_intervals = []
+        for mj, m2 in enumerate(markers):
+            if mj == mi:
+                continue
+            m2s, m2e = m2["start"], m2["end"]
+            # m2 is a child if it's fully inside m (or overlaps and is shorter)
+            if m2s >= ms and m2e <= me and (m2e - m2s) < (me - ms):
+                child_intervals.append((m2s, m2e))
+        child_coverage = _compute_union_coverage(child_intervals)
+        marker_exclusive_wall.append(max(0, m["duration"] - child_coverage))
+
+    # Per-region accounting: for each event, split time into covered and uncovered
+    region_data: List[Dict[str, Any]] = []
+    total_ranged_kernel_ns = 0
+    total_ranged_memcpy_ns = 0
+
+    for mi, m in enumerate(markers):
+        ms, me = m["start"], m["end"]
+        m_kernels = [k for k in all_kernels if _best_marker_idx(k[1], k[2]) == mi]
+        m_memcpy = [mc for mc in all_memcpy if _best_marker_idx(mc[1], mc[2]) == mi]
+
+        kernel_time = 0
+        for k in m_kernels:
+            kernel_time += max(0, min(k[2], me) - max(k[1], ms))
+        memcpy_time = 0
+        for mc in m_memcpy:
+            memcpy_time += max(0, min(mc[2], me) - max(mc[1], ms))
+
+        total_ranged_kernel_ns += kernel_time
+        total_ranged_memcpy_ns += memcpy_time
+
+        # Use exclusive wall time (total minus nested children) as the
+        # denominator for percentages. This ensures that when child ranges
+        # own the kernel work inside them, the parent's percentages reflect
+        # only the parent's exclusive time slice.
+        exclusive_wall = marker_exclusive_wall[mi]
+        total_wall = m["duration"]
+        overhead_time = max(0, exclusive_wall - kernel_time - memcpy_time)
+
+        region_data.append({
+            "name": m["name"],
+            "wall_time_ns": total_wall,
+            "exclusive_wall_time_ns": exclusive_wall,
+            "kernel_count": len(m_kernels),
+            "kernel_time_ns": kernel_time,
+            "memcpy_count": len(m_memcpy),
+            "memcpy_time_ns": memcpy_time,
+            "overhead_time_ns": overhead_time,
+            "kernel_pct": (kernel_time / exclusive_wall * 100) if exclusive_wall > 0 else 0,
+            "memcpy_pct": (memcpy_time / exclusive_wall * 100) if exclusive_wall > 0 else 0,
+            "overhead_pct": (overhead_time / exclusive_wall * 100) if exclusive_wall > 0 else 0,
+        })
+
+    # Step 4: Conservation-correct unranged bucket.
+    #
+    # Unranged kernel/memcpy time = total event time minus what was attributed
+    # to regions. This correctly accounts for partial overlaps: the uncovered
+    # portion of a partially-overlapping event lands here automatically.
+    total_kernel_time = sum(k[3] for k in all_kernels)
+    total_memcpy_time = sum(mc[3] for mc in all_memcpy)
+
+    unranged_kernel_time = total_kernel_time - total_ranged_kernel_ns
+    unranged_memcpy_time = total_memcpy_time - total_ranged_memcpy_ns
+
+    # Count events that have ANY unranged portion
+    unranged_kernel_count = sum(
+        1 for k in all_kernels
+        if _best_marker_idx(k[1], k[2]) < 0  # fully unranged
+        or (k[3] > max(0, min(k[2], all_marker_ranges[_best_marker_idx(k[1], k[2])][1])
+                        - max(k[1], all_marker_ranges[_best_marker_idx(k[1], k[2])][0])))  # partially unranged
+    )
+    unranged_memcpy_count = sum(
+        1 for mc in all_memcpy
+        if _best_marker_idx(mc[1], mc[2]) < 0
+        or (mc[3] > max(0, min(mc[2], all_marker_ranges[_best_marker_idx(mc[1], mc[2])][1])
+                         - max(mc[1], all_marker_ranges[_best_marker_idx(mc[1], mc[2])][0])))
+    )
+
+    # Total runtime from event span
+    total_runtime = 0
+    if all_kernels or all_memcpy:
+        all_starts = [k[1] for k in all_kernels] + [mc[1] for mc in all_memcpy]
+        all_ends = [k[2] for k in all_kernels] + [mc[2] for mc in all_memcpy]
+        if all_starts:
+            total_runtime = max(all_ends) - min(all_starts)
+
+    # Use UNION of marker intervals (not sum) to handle nesting/overlap
+    marker_union_coverage = _compute_union_coverage(
+        [(m["start"], m["end"]) for m in markers]
+    )
+    unranged_wall = max(0, total_runtime - marker_union_coverage)
+    unranged_overhead = max(0, unranged_wall - unranged_kernel_time - unranged_memcpy_time)
+
+    unranged_pct = (unranged_wall / total_runtime * 100) if total_runtime > 0 else 0
+
+    return {
+        "has_markers": True,
+        "marker_count": len(markers),
+        "regions": region_data,
+        "unranged": {
+            "wall_time_ns": unranged_wall,
+            "kernel_count": unranged_kernel_count,
+            "kernel_time_ns": unranged_kernel_time,
+            "memcpy_count": unranged_memcpy_count,
+            "memcpy_time_ns": unranged_memcpy_time,
+            "overhead_time_ns": unranged_overhead,
+            "kernel_pct": (unranged_kernel_time / unranged_wall * 100) if unranged_wall > 0 else 0,
+            "memcpy_pct": (unranged_memcpy_time / unranged_wall * 100) if unranged_wall > 0 else 0,
+            "overhead_pct": (unranged_overhead / unranged_wall * 100) if unranged_wall > 0 else 0,
+        },
+        "unranged_pct_of_total": unranged_pct,
+        "total_runtime_ns": total_runtime,
+    }
