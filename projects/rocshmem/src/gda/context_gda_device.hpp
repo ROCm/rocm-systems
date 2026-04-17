@@ -360,7 +360,8 @@ class GDAContext : public Context {
    * op is a Callable returning T with arguments (T prior_value, T new_value).
    */
   template <typename T, typename Op>
-  __device__ T internal_amo_fetch_op(void *dst, T value, int pe, Op op);
+  __device__ T internal_amo_fetch_op(void *dst, T value, int pe, uint32_t qp_index,
+                                     [[maybe_unused]] const ActiveWFInfo& wf_info, Op&& op);
 
   /**
    * @brief Get the Queue Pair index to use for a given PE
