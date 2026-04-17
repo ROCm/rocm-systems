@@ -58,6 +58,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added compute partition memory allocation mode API**.
+  - New `amd-smi static --partition` output includes `COMPUTE_PARTITION_MEM_ALLOC_MODE` field.
+  - New `amd-smi set --compute-partition-mem-alloc-mode [CAPPING|ALL]` to control memory allocation mode (requires sudo).
+  - New APIs: `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, `amdsmi_set_gpu_compute_partition_mem_alloc_mode()`.
+  - New enum: `amdsmi_compute_partition_mem_alloc_mode_t` (`AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL`).
+  - Reads/writes sysfs: `/sys/class/drm/cardN/device/compute_partition_mem_alloc_mode`.
 - **Added `--sort-by-pid` flag and `amdsmi_get_gpu_process_list_by_pid()` API**.
   - New C API `amdsmi_get_gpu_process_list_by_pid()` aggregates process info across all GPUs and returns results keyed by PID, with per-GPU breakdowns for memory, engine usage, and occupancy.
   - New structs: `amdsmi_proc_gpu_entry_t`, `amdsmi_proc_info_by_pid_t`.

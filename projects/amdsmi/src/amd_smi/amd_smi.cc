@@ -3020,6 +3020,25 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(
   return ret_resp;
 }
 
+amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode) {
+  AMDSMI_CHECK_INIT();
+  std::ostringstream ss;
+  auto status = rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_get, processor_handle, 0,
+                             reinterpret_cast<rsmi_compute_partition_mem_alloc_mode_t*>(mode));
+  ss << __PRETTY_FUNCTION__ << " | rsmi_dev_compute_partition_mem_alloc_mode_get() returned: "
+     << smi_amdgpu_get_status_string(status, false);
+  LOG_INFO(ss);
+  return status;
+}
+
+amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode) {
+  AMDSMI_CHECK_INIT();
+  return rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_set, processor_handle, 0,
+                      static_cast<rsmi_compute_partition_mem_alloc_mode_t>(mode));
+}
+
 // Memory Partition functions
 amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                                 char* memory_partition, uint32_t len) {

@@ -662,6 +662,13 @@ class TestAmdSmiPython(unittest.TestCase):
         )
         return
 
+    def test_get_gpu_compute_partition_mem_alloc_mode(self):
+        self.common.print_func_name("")
+        self.common.Test_API_Per_GPU(
+            amdsmi_get_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode
+        )
+        return
+
     def test_get_gpu_compute_process_gpus(self):
         self.common.print_func_name("")
 

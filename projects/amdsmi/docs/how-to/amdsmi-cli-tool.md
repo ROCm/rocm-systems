@@ -607,6 +607,9 @@ Set Arguments:
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
   -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
+  --compute-partition-mem-alloc-mode MODE     Set compute partition memory allocation mode (requires sudo):
+                                                CAPPING - each XCP is capped to an even share of partition memory
+                                                ALL     - each XCP may use the full partition memory
   -o, --power-cap WATTS                       Set power capacity limit:
                                                 min cap: 0 W, max cap: 550 W
   -p, --soc-pstate POLICY_ID                  Set the GPU soc pstate policy using policy id, an integer. Valid id's include:
@@ -1114,6 +1117,7 @@ GPU: 0
         ACCELERATOR_PARTITION: SPX
         MEMORY_PARTITION: NPS1
         PARTITION_ID: 0
+        COMPUTE_PARTITION_MEM_ALLOC_MODE: CAPPING
     SOC_PSTATE: N/A
     XGMI_PLPD: N/A
     PROCESS_ISOLATION: Disabled
