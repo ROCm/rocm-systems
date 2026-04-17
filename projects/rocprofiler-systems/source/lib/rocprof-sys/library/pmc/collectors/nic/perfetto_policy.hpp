@@ -416,7 +416,8 @@ struct perfetto_policy
                     TRACE_COUNTER("nic_req_rx_impl_nak_seq_err",
                                   counter_track::at(device_index, it->second.track_index),
                                   ts,
-                                  static_cast<double>(sample.metric_values.req_rx_impl_nak_seq_err));
+                                  static_cast<double>(
+                                      sample.metric_values.req_rx_impl_nak_seq_err));
                 }
             }
         }

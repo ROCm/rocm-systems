@@ -67,8 +67,9 @@ struct metrics
     uint64_t rx_rdma_cnp_pkts    = 0;  // Received CNP (congestion notification) packets
     uint64_t tx_rdma_cnp_pkts    = 0;  // Transmitted CNP packets
     uint64_t tx_rdma_ack_timeout = 0;  // Local ACK timeout errors
-    uint64_t resp_tx_pkt_seq_err = 0;  // Responder has detected a packet sequence error and issued a NAK
-    uint64_t req_rx_pkt_seq_err  = 0;  // Requester has detected a sequence error via a NAK
+    uint64_t resp_tx_pkt_seq_err =
+        0;  // Responder has detected a packet sequence error and issued a NAK
+    uint64_t req_rx_pkt_seq_err = 0;  // Requester has detected a sequence error via a NAK
     uint64_t req_rx_impl_nak_seq_err =
         0;  // Requester has received an ACK with PSN larger than expected
 };
