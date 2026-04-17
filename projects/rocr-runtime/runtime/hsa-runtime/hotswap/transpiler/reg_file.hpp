@@ -235,18 +235,50 @@ struct AllocaRegFile {
   // category of bug that would be hard to catch without a round-trip
   // reference. Keep it in mind when adding new handlers.
   llvm::Value *readVCCAsWaveMask(llvm::IRBuilder<> &B, llvm::Type *resultTy) {
+    return ballotI1ToWidth(B, loadVCC(B), resultTy, "vcc_ballot");
+  }
+
+  // Collect a per-lane `i1` predicate into a wave-level bit-mask of width
+  // `resultTy`. Same invariants as `readVCCAsWaveMask`: the ballot MUST
+  // match the target wave width (waveMaskTy) because that is what the
+  // AMDGPU backend has selection patterns for, and the call must be
+  // emitted in "outer" / full-EXEC control flow so inactive lanes don't
+  // silently contribute 0.
+  //
+  // Cross-wave projection. When the source ISA wave width differs from
+  // the target's (gfx1250 wave32 → gfx942 wave64), `resultTy` is the
+  // source-authored destination width (i32 for a wave32 V_CMP[X] EXEC
+  // write) while the ballot runs at target width (i64). Truncating the
+  // target ballot to source width is the modulo-replication projection
+  // of `emitLaneActiveBit`'s inverse: it keeps bits 0..sourceBits-1 of
+  // the target wave, which under modulo-replication semantics are the
+  // canonical "source wave's lanes" of the target wave. The upper half
+  // of the ballot is redundant under modulo-replication (same predicate
+  // computed twice) and is discarded here. For kernels that violate the
+  // modulo-replication precondition — target lane K and K+sourceBits
+  // computing different predicates — the truncation silently picks the
+  // lower half's answer; the cross-wave gate in `raiser.cpp` is what
+  // warns on that class of kernel.
+  //
+  // Callers that need per-lane i1 pass-through (e.g. writing a mask back
+  // to VCC) should consume the pred directly — this helper's contract is
+  // "give me a wave-level iN mask of width resultTy".
+  llvm::Value *ballotI1ToWidth(llvm::IRBuilder<> &B, llvm::Value *pred,
+                               llvm::Type *resultTy,
+                               const llvm::Twine &name = "ballot") {
+    assert(pred->getType() == B.getInt1Ty() &&
+           "ballotI1ToWidth requires an i1 predicate");
     llvm::Module *M = B.GetInsertBlock()->getModule();
-    llvm::Value *vccI1 = loadVCC(B);
     llvm::Function *ballot = llvm::Intrinsic::getOrInsertDeclaration(
         M, llvm::Intrinsic::amdgcn_ballot, {waveMaskTy});
-    llvm::Value *waveMask = B.CreateCall(ballot, {vccI1}, "vcc_ballot");
+    llvm::Value *waveMask = B.CreateCall(ballot, {pred}, name);
     unsigned wantedBits = resultTy->getPrimitiveSizeInBits();
     unsigned waveBits = waveMaskTy->getPrimitiveSizeInBits();
     if (wantedBits == waveBits)
       return waveMask;
     if (wantedBits > waveBits)
-      return B.CreateZExt(waveMask, resultTy, "vcc_ballot_ext");
-    return B.CreateTrunc(waveMask, resultTy, "vcc_ballot_trunc");
+      return B.CreateZExt(waveMask, resultTy, name + "_ext");
+    return B.CreateTrunc(waveMask, resultTy, name + "_trunc");
   }
 
   // Project a wave-level bit-mask back onto the current lane's VCC bit.

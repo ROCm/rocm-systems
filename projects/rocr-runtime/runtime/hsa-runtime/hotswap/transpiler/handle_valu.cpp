@@ -1408,7 +1408,21 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
 
     if (sop == SemOp::V_CMPX) {
       // Compare-and-exec: result ANDs into EXEC.
-      Value *mask = ctx.B.CreateSExt(cmp, ctx.regs.execTy);
+      //
+      // The mask MUST be materialised as a wave-level ballot, not a
+      // per-lane `sext i1`. `sext` on a divergent `cmp` produces a
+      // divergent SSA value: each target lane writes its own private
+      // all-ones-or-zero into the EXEC slot, and every subsequent read
+      // (notably `emitLaneActiveBit`'s `lshr %exec, %lane_mod`) sees a
+      // per-lane "EXEC" instead of the single wave-level mask the SPE
+      // model requires. The backend then lowers the SPE diamond as a
+      // divergent branch on a per-lane value, narrowing hardware EXEC
+      // based on the wrong bit entirely — which surfaces as stores going
+      // missing on half the wave in cross-wave lifts (gfx1250 wave32 →
+      // gfx942 wave64). Routing through `ballotI1ToWidth` matches the
+      // VCC read path (`readVCCAsWaveMask`) and keeps EXEC wave-uniform.
+      Value *mask = ctx.regs.ballotI1ToWidth(ctx.B, cmp, ctx.regs.execTy,
+                                             "cmpx_ballot");
       Value *curExec = ctx.regs.loadExec(ctx.B);
       ctx.regs.storeExec(ctx.B, ctx.B.CreateAnd(curExec, mask, "cmpx_exec"));
     } else {
@@ -1417,7 +1431,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       if (di.numDefs >= 1) {
         ParsedReg d = op.dst();
         if (d.kind == ParsedReg::SGPR) {
-          Value *mask = ctx.B.CreateSExt(cmp, ctx.regs.execTy);
+          // Same ballot discipline as V_CMPX: the SGPR-pair destination
+          // carries a wave-level mask, not a per-lane predicate. `sext`
+          // here would make every downstream consumer that reads the
+          // SGPR pair as a wave mask (`s_and_b64`, `s_mov_b64 exec, …`,
+          // `v_cndmask_b32`'s mask input via `readVCCAsWaveMask`) see
+          // divergent SSA and silently miscompile.
+          Value *mask = ctx.regs.ballotI1ToWidth(
+              ctx.B, cmp, ctx.regs.execTy, "vcmp_ballot");
           ctx.writeRegExecWidth(d, mask);
         } else {
           ctx.regs.storeVCC(ctx.B, cmp);
