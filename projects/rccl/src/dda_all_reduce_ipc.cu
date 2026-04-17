@@ -200,8 +200,7 @@ bool ncclAllReduceDdaIpcEligible(
   if (need > comm->ddaIpcScratchBytes) {
     return false;
   }
-  if (((uintptr_t)sendbuff % 16) || ((uintptr_t)recvbuff % 16) ||
-      ((count *  ncclTypeSize(datatype)) % 16)) {
+  if ((count *  ncclTypeSize(datatype)) % 16) {
     // 16 byte alignment as we do 16-byte loads in DDA kernel
     return false;
   }

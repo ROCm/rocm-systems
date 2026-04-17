@@ -27,6 +27,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
+#include "ipc_init_detail.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -519,7 +520,7 @@ struct ncclComm {
   void* ddaIpcScratch;
   size_t ddaIpcScratchBytes;
   void* ddaIpcPeerPtrsDev;
-  void* ddaIpcBarrierState; /* opaque DDA IpcGpuBarrier (see ncclDdaIpcCommInit) */
+  nccl_dda_ipc_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* see ncclDdaIpcCommInit */
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
