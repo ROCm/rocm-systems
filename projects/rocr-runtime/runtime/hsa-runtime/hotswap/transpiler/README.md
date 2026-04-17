@@ -388,7 +388,6 @@ transpiler/
 ├── parsed_reg.hpp              # Register classification helpers
 ├── mc_state.hpp/.cpp           # LLVM MC layer encapsulation
 ├── opcode_map.hpp/.cpp         # MC opcode → SemOp mapping
-├── canonicalize.hpp/.cpp       # Mnemonic normalization across ISAs
 ├── raise_context.hpp/.cpp      # Shared raiser state (RaiseContext)
 ├── reg_file.hpp                # SSA register file (AllocaRegFile)
 ├── kernarg_layout.hpp          # Kernel argument metadata

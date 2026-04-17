@@ -8,7 +8,6 @@
 
 #include "mc_state.hpp"
 #include "opcode_map.hpp"
-#include "canonicalize.hpp"
 #include "reg_file.hpp"
 #include "kernarg_layout.hpp"
 #include "raise_context.hpp"
@@ -105,8 +104,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         mc.printer->printInst(&inst, 0, "", *mc.subtargetInfo, os);
         di.fullText = StringRef(s).ltrim().str();
       }
-      std::string stripped = stripEncoding(StringRef(di.rawMnemonic)).str();
-      di.mnemonic = canonicalizeMnemonic(StringRef(stripped));
+      di.mnemonic = stripEncoding(StringRef(di.rawMnemonic)).str();
       di.inst = inst;
       di.semOp = opcMap.lookup(inst.getOpcode());
       di.numDefs = desc.getNumDefs();
@@ -165,7 +163,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           blockStarts.insert(off + instSize);
       }
 
-      bool isEnd = (di.mnemonic == "s_endpgm");
+      bool isEnd = (di.semOp == SemOp::S_ENDPGM);
       insts.push_back(std::move(di));
       if (isEnd) {
         // s_endpgm may appear mid-binary (early-return path); if there are

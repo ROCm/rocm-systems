@@ -6,14 +6,31 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- Paths to LLVM ------------------------------------------------------------
-set(LLVM_INSTALL_DIR "$ENV{HOME}/shared-llvm" CACHE PATH "LLVM install prefix")
-
-# --- Find LLVM ----------------------------------------------------------------
-list(APPEND CMAKE_PREFIX_PATH "${LLVM_INSTALL_DIR}")
+# We require an LLVM *build tree* (not an install tree) because the raiser uses
+# AMDGPU target-private headers (SIDefines.h, SIInstrInfo.h, AMDGPUBaseInfo.h)
+# and the TableGen-generated AMDGPUGen*.inc files.  Standard `ninja install`
+# does not copy those into the install prefix.
+#
+# Point LLVM_DIR at <llvm-build>/lib/cmake/llvm.  This is what every other
+# LLVM out-of-tree project does (clang-tools-extra, bolt, etc.).
+#
+# Example:
+#   cmake -DLLVM_DIR=$HOME/llvm-build/lib/cmake/llvm ..
 find_package(LLVM REQUIRED CONFIG)
 
+if(NOT DEFINED LLVM_BUILD_MAIN_SRC_DIR OR NOT LLVM_BUILD_MAIN_SRC_DIR OR
+   NOT DEFINED LLVM_BINARY_DIR OR NOT LLVM_BINARY_DIR)
+  message(FATAL_ERROR
+    "hotswap-transpiler requires LLVM_DIR to point at a build tree, not an "
+    "install tree. The install tree does not expose AMDGPU target-private "
+    "headers (SIDefines.h, AMDGPUBaseInfo.h, AMDGPUGen*.inc). "
+    "Pass -DLLVM_DIR=<llvm-build>/lib/cmake/llvm.")
+endif()
+
 message(STATUS "Using LLVM from: ${LLVM_DIR}")
-message(STATUS "LLVM version: ${LLVM_PACKAGE_VERSION}")
+message(STATUS "LLVM source tree: ${LLVM_BUILD_MAIN_SRC_DIR}")
+message(STATUS "LLVM build tree:  ${LLVM_BINARY_DIR}")
+message(STATUS "LLVM version:     ${LLVM_PACKAGE_VERSION}")
 
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
@@ -22,7 +39,7 @@ include(AddLLVM)
 include_directories(${LLVM_INCLUDE_DIRS})
 
 # --- Link paths ---------------------------------------------------------------
-link_directories(${LLVM_INSTALL_DIR}/lib)
+link_directories(${LLVM_LIBRARY_DIRS})
 
 # --- LLVM definitions ---------------------------------------------------------
 add_definitions(${LLVM_DEFINITIONS})
@@ -33,7 +50,6 @@ add_library(hotswap-transpiler STATIC
   raise_context.cpp
   mc_state.cpp
   opcode_map.cpp
-  canonicalize.cpp
   handle_sopp.cpp
   handle_smem.cpp
   handle_sopc.cpp
@@ -51,8 +67,18 @@ add_library(hotswap-transpiler STATIC
   code_object_utils.cpp
 )
 
+# AMDGPU target-private headers (not installed by `ninja install`).
+# SIDefines.h, SIInstrInfo.h → source tree Target/AMDGPU/{,Utils}
+# AMDGPUGenInstrInfo.inc etc.  → build tree Target/AMDGPU
+target_include_directories(hotswap-transpiler PRIVATE
+  "${LLVM_BUILD_MAIN_SRC_DIR}/lib/Target/AMDGPU"
+  "${LLVM_BUILD_MAIN_SRC_DIR}/lib/Target/AMDGPU/Utils"
+  "${LLVM_BINARY_DIR}/lib/Target/AMDGPU"
+)
+
+# `llvm-mc`, `llvm-objdump` etc. live in the build tree's bin/.
 target_compile_definitions(hotswap-transpiler PRIVATE
-  LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+  LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
 )
 
 target_link_libraries(hotswap-transpiler
@@ -133,7 +159,7 @@ if(hip_FOUND)
   )
   target_compile_definitions(ir_gpu_test PRIVATE
     MVE_CO_PATH="${MVE_CO}"
-    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
   )
   target_link_libraries(ir_gpu_test
     PRIVATE
@@ -148,7 +174,7 @@ if(hip_FOUND)
   )
   target_compile_definitions(mfma_gpu_test PRIVATE
     MFMA_CO_PATH="${MFMA_CO}"
-    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
   )
   target_link_libraries(mfma_gpu_test
     PRIVATE
@@ -170,7 +196,7 @@ if(hip_FOUND)
     NATIVE_HSACO_PATH="${NATIVE_HSACO}"
     SOURCE_HSACO_PATH="${SOURCE_HSACO}"
     VECADD_CO_PATH="${VECADD_CO}"
-    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
   )
   target_link_libraries(cross_arch_gpu_test
     PRIVATE
@@ -186,7 +212,7 @@ if(hip_FOUND)
   )
   target_compile_definitions(gfx1250_gpu_test PRIVATE
     GFX1250_TEST_DATA_DIR="${GFX1250_TEST_DATA}"
-    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
   )
   target_link_libraries(gfx1250_gpu_test
     PRIVATE
@@ -201,7 +227,7 @@ if(hip_FOUND)
   )
   target_compile_definitions(integration_test PRIVATE
     GFX1250_TEST_DATA_DIR="${GFX1250_TEST_DATA}"
-    LLVM_TOOLS_DIR="${LLVM_INSTALL_DIR}/bin"
+    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
   )
   target_link_libraries(integration_test
     PRIVATE

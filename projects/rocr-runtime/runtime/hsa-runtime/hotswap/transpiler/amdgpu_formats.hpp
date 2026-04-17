@@ -3,48 +3,21 @@
 
 #include <cstdint>
 
+// Source tree: lib/Target/AMDGPU/SIDefines.h — target-private but exposed
+// through the LLVM build tree via our CMake include path. Provides the
+// authoritative `SIInstrFlags` enum and `AMDGPU::OPERAND_INPUT_MODS` operand
+// type used by the disassembler's TSFlags / OperandType fields.
+#include "SIDefines.h"
+
 namespace transpiler {
 
-// Bit constants from AMDGPU SIInstrFlags (SIDefines.h).
-// These are stable ABI — they mirror the TSFlags field of MCInstrDesc
-// for AMDGPU targets.
-namespace SIInstrFlags {
-enum : uint64_t {
-  SALU   = 1 << 0,
-  VALU   = 1 << 1,
-
-  SOP1   = 1 << 2,
-  SOP2   = 1 << 3,
-  SOPC   = 1 << 4,
-  SOPK   = 1 << 5,
-  SOPP   = 1 << 6,
-
-  VOP1   = 1 << 7,
-  VOP2   = 1 << 8,
-  VOPC   = 1 << 9,
-  VOP3   = 1 << 10,
-  VOP3P  = 1 << 12,
-
-  VINTRP = 1 << 13,
-  SDWA   = 1 << 14,
-  DPP    = 1 << 15,
-  TRANS  = 1 << 16,
-
-  MUBUF  = 1 << 17,
-  MTBUF  = 1 << 18,
-  SMRD   = 1 << 19,
-  MIMG   = 1 << 20,
-  FLAT   = 1 << 24,
-  DS     = 1 << 25,
-
-  IsMAI  = UINT64_C(1) << 54,
-};
-} // namespace SIInstrFlags
+// Alias `transpiler::SIInstrFlags` to the LLVM namespace so existing call
+// sites (`SIInstrFlags::SOPP`, `SIInstrFlags::FLAT`, etc.) keep compiling.
+namespace SIInstrFlags = llvm::SIInstrFlags;
 
 // AMDGPU target-specific operand type for VOP3 source modifiers (abs, neg).
-// Value from AMDGPU::OperandType in SIDefines.h.  Same coupling caveat as
-// SIInstrFlags — stable within a major LLVM version.
-constexpr uint8_t OPERAND_INPUT_MODS = 45;
+// Defined in llvm::AMDGPU::OperandType from SIDefines.h.
+constexpr unsigned OPERAND_INPUT_MODS = llvm::AMDGPU::OPERAND_INPUT_MODS;
 
 enum class FormatKind : uint8_t {
   SOP1,
