@@ -103,7 +103,7 @@ FFMpegVideoDecoder::~FFMpegVideoDecoder() {
             if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                 hipError_t hip_status = hipFree(p_frame.frame_ptr);
                 if (hip_status != hipSuccess) {
-                    CriticalLog(g_rocdec_logger, "hipFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
+                    RocVideoDecCriticalLog("hipFree failed! (" + ROCVIDEODEC_TOSTR(hip_status) + ")");
                 }
             } else {
                 delete[] p_frame.frame_ptr;
@@ -215,7 +215,7 @@ int FFMpegVideoDecoder::HandleVideoSequence(RocdecVideoFormatHost *format_host) 
         << disp_rect_.right << ", " << disp_rect_.bottom << "]" << std::endl
         << "\tResize       : " << target_width_ << "x" << target_height_ << std::endl
     ;
-    g_rocdec_logger.AlwaysLog(input_video_info_str_.str());
+    std::cout << input_video_info_str_.str() << std::endl;
     double elapsed_time = StopTimer(start_time);
     AddDecoderSessionOverHead(std::this_thread::get_id(), elapsed_time);
     return num_decode_surfaces;
@@ -223,7 +223,7 @@ int FFMpegVideoDecoder::HandleVideoSequence(RocdecVideoFormatHost *format_host) 
 
 bool FFMpegVideoDecoder::GetOutputSurfaceInfo(OutputSurfaceInfo **surface_info) {
     if (!disp_width_ || !disp_height_) {
-        CriticalLog(g_rocdec_logger, "FFMpegVideoDecoder is not initialized");
+        RocVideoDecCriticalLog("FFMpegVideoDecoder is not initialized");
         return false;
     }
     *surface_info = &output_surface_info_;
@@ -270,7 +270,7 @@ int FFMpegVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         if (p_frame->frame_ptr) {
             if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                 hipError_t hip_status = hipFree(p_frame->frame_ptr);
-                if (hip_status != hipSuccess) CriticalLog(g_rocdec_logger, "hipFree failed! (" + ROCDEC_TOSTR(hip_status) + ")");
+                if (hip_status != hipSuccess) RocVideoDecCriticalLog("hipFree failed! (" + ROCVIDEODEC_TOSTR(hip_status) + ")");
             } else {
                 delete[] p_frame->frame_ptr;
             }
@@ -415,7 +415,7 @@ int FFMpegVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
     int dst_pitch = disp_width_ * byte_per_pixel_;
     uint8_t *p_frame_y = p_dec_frame;
     if (!p_frame_y || !src_ptr[0]) {
-        CriticalLog(g_rocdec_logger, "HandlePictureDisplay: Invalid memory address for src/dst");
+        RocVideoDecCriticalLog("HandlePictureDisplay: Invalid memory address for src/dst");
         return 0;
     }
     uint8_t *p_src_ptr_y = static_cast<uint8_t *>(src_ptr[0]) + (disp_rect_.top + crop_rect_.top) * src_pitch[0] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
@@ -536,7 +536,7 @@ bool FFMpegVideoDecoder::ReleaseFrame(int64_t pTimestamp, bool b_flushing) {
         std::lock_guard<std::mutex> lock(mtx_vp_frame_);
         DecFrameBuffer *fb = &vp_frames_[0];
         if (pTimestamp != fb->pts) {
-            CriticalLog(g_rocdec_logger, "Decoded frame released out of order");
+            RocVideoDecCriticalLog("Decoded frame released out of order");
             return false;
         }
         vp_frames_.erase(vp_frames_.begin());     // get rid of the frames from the framestore
@@ -555,7 +555,7 @@ void FFMpegVideoDecoder::SaveFrameToFile(std::string output_file_name, void *sur
         hipError_t hip_status = hipSuccess;
         hip_status = hipMemcpyDtoH((void *)hst_ptr, surf_mem, output_image_size);
         if (hip_status != hipSuccess) {
-            CriticalLog(g_rocdec_logger, "hipMemcpyDtoH failed! (" + ROCDEC_STR(hipGetErrorName(hip_status)) + ")");
+            RocVideoDecCriticalLog("hipMemcpyDtoH failed! (" + ROCVIDEODEC_STR(hipGetErrorName(hip_status)) + ")");
             delete [] hst_ptr;
             return;
         }
