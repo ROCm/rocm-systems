@@ -17,7 +17,7 @@ import pandas as pd
 from utils.logger import console_warning
 
 if TYPE_CHECKING:
-    from utils.parser import MetricEvaluator
+    from utils.metrics.metric_evaluator import MetricEvaluator
 
 
 _MAX_DEBUG_ROWS = 5
@@ -69,7 +69,9 @@ def _print_debug_global_vars(row_expr: str, metric_evaluator: MetricEvaluator) -
 
 
 def _extract_column_data(
-    table_key: str, col_name: str, raw_pmc_df: pd.DataFrame | dict
+    table_key: str,
+    col_name: str,
+    raw_pmc_df: pd.DataFrame | dict,
 ) -> Optional[list[Any]]:
     """Extract column data from raw_pmc_df (dict or DataFrame)."""
     if isinstance(raw_pmc_df, dict) and table_key in raw_pmc_df:
@@ -90,11 +92,13 @@ def _extract_column_data(
 
 
 def _collect_debug_column_data(
-    row_expr: str, raw_pmc_df: pd.DataFrame | dict
+    row_expr: str,
+    raw_pmc_df: pd.DataFrame | dict,
 ) -> tuple[list[tuple[str, Optional[list[Any]]]], int]:
     """Collect column data and compute alignment width for debug output."""
     matched_cols = re.findall(
-        r"raw_pmc_df\[[\"'](\w+)[\"']\]\[[\"'](\w+)[\"']\]", row_expr
+        r"raw_pmc_df\[[\"'](\w+)[\"']\]\[[\"'](\w+)[\"']\]",
+        row_expr,
     )
     seen: set[tuple[str, str]] = set()
     rows_to_print: list[tuple[str, Optional[list[Any]]]] = []
@@ -114,24 +118,25 @@ def _collect_debug_column_data(
                     global_width,
                     max((len(str(v)) for v in display), default=0),
                 )
-        except (KeyError, TypeError) as e:
+        except (KeyError, TypeError) as error:
             console_warning(
-                f"Skipping entry for '{table_key}'['{col_name}']. Encountered: {e}"
+                f"Skipping entry for '{table_key}'['{col_name}']. Encountered: {error}"
             )
 
     return rows_to_print, global_width
 
 
 def _print_debug_column_data(
-    rows_to_print: list[tuple[str, Optional[list[Any]]]], global_width: int
+    rows_to_print: list[tuple[str, Optional[list[Any]]]],
+    global_width: int,
 ) -> None:
     """Print collected column data with aligned formatting."""
     for label, column_data in rows_to_print:
         if column_data is not None:
-            n = len(column_data)
+            length = len(column_data)
             display_data = column_data[:_MAX_DEBUG_ROWS]
             formatted = ", ".join(str(v).rjust(global_width) for v in display_data)
-            if n > _MAX_DEBUG_ROWS:
+            if length > _MAX_DEBUG_ROWS:
                 formatted += ", ..."
             print(f"  {label}: [{formatted}]")
         else:
@@ -160,8 +165,8 @@ def _print_debug_output(row_expr: str, metric_evaluator: MetricEvaluator) -> Non
     try:
         eval_result = metric_evaluator.eval_expression(row_expr)
         print(eval_result)
-    except Exception as e:
-        console_warning(f"Debug evaluation failed: {e}")
+    except Exception as error:
+        console_warning(f"Debug evaluation failed: {error}")
     print("~" * 40)
 
 

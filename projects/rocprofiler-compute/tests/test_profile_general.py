@@ -1915,10 +1915,8 @@ def test_comprehensive_error_paths():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import (
-        build_comparable_columns,
-        build_eval_string,
-    )
+    from utils.metrics.expression import build_eval_string
+    from utils.parser import build_comparable_columns
     from utils.utils_common import calc_builtin_var
 
     columns = build_comparable_columns("ms")

@@ -23,9 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.parser import (
-    PC_SAMPLING_NOT_ISSUE_PREFIX,
-    CodeTransformer,
+from utils.metrics.aggregation import (
     to_avg,
     to_concat,
     to_int,
@@ -33,11 +31,15 @@ from utils.parser import (
     to_median,
     to_min,
     to_mod,
-    to_noise_clamp,
     to_quantile,
     to_round,
     to_std,
     to_sum,
+)
+from utils.metrics.expression import CodeTransformer
+from utils.metrics.noise_clamper import to_noise_clamp
+from utils.parser import (
+    PC_SAMPLING_NOT_ISSUE_PREFIX,
 )
 from utils.roofline_calc import (
     CACHE_HIERARCHY,

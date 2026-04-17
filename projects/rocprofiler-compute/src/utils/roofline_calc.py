@@ -11,7 +11,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning
-from utils.parser import eval_metric
+from utils.metrics.evaluation_pipeline import eval_metric
 
 ################################################
 # Global vars

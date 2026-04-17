@@ -17,6 +17,7 @@ from rocprof_compute_tui.utils.tui_utils import (
 )
 from utils import file_io, parser, schema
 from utils.logger import console_error, console_log, demarcate
+from utils.metrics.evaluation_pipeline import eval_metric
 
 
 class tui_analysis(OmniAnalyze_Base):
@@ -120,7 +121,7 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             # Evaluate metrics aggregated across all dispatches of this kernel
-            parser.eval_metric(
+            eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
                 workload.sys_info.iloc[0],

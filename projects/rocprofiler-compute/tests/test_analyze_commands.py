@@ -1234,7 +1234,7 @@ def test_parser_utility_functions():
     import numpy as np
     import pandas as pd
 
-    from utils.parser import (
+    from utils.metrics.aggregation import (
         to_concat,
         to_int,
         to_max,
@@ -1339,7 +1339,7 @@ def test_parser_error_handling():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import (
+    from utils.metrics.expression import (
         build_eval_string,
         update_denominator_string,
     )
@@ -1381,7 +1381,7 @@ def test_ast_transformer_edge_cases():
 
     import ast
 
-    from utils.parser import CodeTransformer
+    from utils.metrics.expression import CodeTransformer
 
     transformer = CodeTransformer()
 
@@ -1422,7 +1422,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
 
     import pandas as pd
 
-    from utils.parser import eval_metric
+    from utils.metrics.evaluation_pipeline import eval_metric
 
     mock_dfs = {
         1: pd.DataFrame({
@@ -1470,6 +1470,66 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
         )
     except Exception:
         pass
+
+
+@pytest.mark.misc
+def test_eval_metric_writes_back_falsey_supported_fields():
+    """Test eval_metric normalizes falsey supported fields on the DataFrame."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    from utils.metrics.evaluation_pipeline import eval_metric
+
+    metric_df = pd.DataFrame({
+        "Metric_ID": ["1.1.0"],
+        "Metric": ["Test Metric"],
+        "Value": ["to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])"],
+        "Average": [None],
+    }).set_index("Metric_ID")
+    dfs = {1: metric_df}
+    dfs_type = {1: "metric_table"}
+    sys_info = pd.Series({
+        "ip_blocks": "standard",
+        "gpu_arch": "gfx90a",
+        "se_per_gpu": 4,
+        "pipes_per_gpu": 4,
+        "cu_per_gpu": 64,
+        "simd_per_cu": 4,
+        "sqc_per_gpu": 16,
+        "lds_banks_per_cu": 32,
+        "cur_sclk": 1800.0,
+        "cur_mclk": 1200.0,
+        "max_sclk": 2100.0,
+        "max_mclk": 1600.0,
+        "max_waves_per_cu": 40,
+        "num_hbm_channels": 4,
+        "total_l2_chan": 32,
+        "num_xcd": 1,
+        "wave_size": 64,
+    })
+    raw_pmc_df = {
+        "pmc_perf": pd.DataFrame({
+            "SQ_WAVES": [100, 200, 150],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
+    }
+
+    assert metric_df.loc["1.1.0", "Average"] is None
+
+    with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
+        eval_metric(
+            dfs,
+            dfs_type,
+            sys_info,
+            pd.DataFrame(),
+            raw_pmc_df,
+            debug=False,
+            config={},
+        )
+
+    assert metric_df.loc["1.1.0", "Value"] == 450
+    assert metric_df.loc["1.1.0", "Average"] == ""
 
 
 @pytest.mark.misc
@@ -1623,7 +1683,7 @@ def test_build_dfs_edge_cases():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import gen_counter_list
+    from utils.metrics.expression import gen_counter_list
 
     visited, counters = gen_counter_list(None)
     assert not visited
@@ -1652,7 +1712,10 @@ def test_update_functions_coverage():
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-    from utils.parser import update_denominator_string, update_normal_unit_string
+    from utils.metrics.expression import (
+        update_denominator_string,
+        update_normal_unit_string,
+    )
 
     result = update_denominator_string("SUM(SQ_WAVES) / SUM($denom)", "per_wave")
     assert "$denom" not in result
@@ -1676,7 +1739,7 @@ def test_metric_evaluation_no_valid_data():
     """Test emetric evaluation with no valid data"""
     import numpy as np
 
-    from utils.parser import MetricEvaluator
+    from utils.metrics.metric_evaluator import MetricEvaluator
 
     metric_evaluator = MetricEvaluator({}, {}, {})
     with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
@@ -1719,7 +1782,8 @@ def test_metric_evaluator_division_by_zero():
     import numpy as np
     import pandas as pd
 
-    from utils.parser import MetricEvaluator, build_eval_string
+    from utils.metrics.expression import build_eval_string
+    from utils.metrics.metric_evaluator import MetricEvaluator
 
     # ---------------------------------------------------------------
     # Helper: build a MetricEvaluator with the given pmc_perf columns
