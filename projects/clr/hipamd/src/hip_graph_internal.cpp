@@ -442,24 +442,30 @@ void GraphExec::BuildSyncPlan() {
 
     // Prepend barrier packets for segments with dependencies.
     // Optimization: when there is exactly 1 dependency and the first captured
-    // packet is an ext dispatch (vendor-specific type), embed the dep_signal
-    // directly into that packet instead of creating a separate barrier.
+    // packet is an ext kernel dispatch, embed the dep_signal directly into
+    // that packet instead of creating a separate barrier.
     if (!info.barrier_dep_indices.empty()) {
       int num_deps = static_cast<int>(info.barrier_dep_indices.size());
       bool use_ext_dep = false;
       if (num_deps == 1 && !firstBatch.dispatchPackets.empty()) {
-        // Vendor-specific packet type == 0 in bits [7:0] of the header,
-        // but the full header is non-zero (barrier/fence bits are set).
-        uint16_t first_hdr = *reinterpret_cast<const uint16_t*>(firstBatch.dispatchPackets[0]);
+        const uint8_t* pkt = firstBatch.dispatchPackets[0];
+        uint16_t first_hdr;
+        memcpy(&first_hdr, pkt, sizeof(first_hdr));
         constexpr uint16_t kPktTypeMask = 0xFF;
         constexpr uint16_t kVendorSpecificType = 0;
-        use_ext_dep = ((first_hdr & kPktTypeMask) == kVendorSpecificType) && (first_hdr != 0);
+        constexpr uint8_t kExtKernelDispatchFormat = 3;
+        uint8_t amd_format = pkt[2];
+        use_ext_dep = ((first_hdr & kPktTypeMask) == kVendorSpecificType)
+                      && (first_hdr != 0)
+                      && (amd_format == kExtKernelDispatchFormat);
       }
 
       if (use_ext_dep) {
         uint8_t* first_dispatch = firstBatch.dispatchPackets[0];
         int dep_segment_id = info.barrier_dep_indices[0];
-        sync_plan_.patch_list.push_back({first_dispatch, nullptr, dep_segment_id, -2});
+        sync_plan_.patch_list.push_back(
+            {first_dispatch, nullptr, dep_segment_id,
+             amd::Device::HwEventPatch::kExtDispatchDepSignal});
       } else {
         int barrier_count = (num_deps + 4) / 5;
 
@@ -501,10 +507,14 @@ void GraphExec::BuildSyncPlan() {
       lastBatch.dispatchPackets.push_back(completion_barrier);
       lastBatch.dispatchKernelNames.push_back(&kBarrierKernelName);
 
-      sync_plan_.patch_list.push_back({completion_barrier, nullptr, segment.id, -1});
+      sync_plan_.patch_list.push_back(
+          {completion_barrier, nullptr, segment.id,
+           amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
-      sync_plan_.patch_list.push_back({last_pkt, nullptr, segment.id, -1});
+      sync_plan_.patch_list.push_back(
+          {last_pkt, nullptr, segment.id,
+           amd::Device::HwEventPatch::kCompletionSignal});
     }
 
     if (segment.segment_ids_edges.empty()) {

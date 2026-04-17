@@ -2139,7 +2139,7 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
   else {
     stat = Hsa::agents_allow_access(1, &bkendDevice_, nullptr, ptr);
   }
-  
+
   if (stat != HSA_STATUS_SUCCESS) {
     LogPrintfError("Fail hsa_amd_agents_allow_access with err %d", stat);
     hostFree(ptr, size);
@@ -3696,12 +3696,13 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
     // Patch the flat buffer copy (dispatched to GPU) directly.
     // The original dispatchPackets pointer is retained for UpdateAQLPacket matching.
     uint8_t* raw = patch.flat_packet ? patch.flat_packet : patch.packet;
-    if (patch.dep_slot == -2) {
-      // dep_slot == -2: patch the ext dispatch packet's dep_signal directly
-      auto* ext = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(raw);
-      ext->dep_signal = sig;
-    } else if (patch.dep_slot == -1) {
-      // dep_slot == -1: patch the packet's completion signal (segment completion)
+
+    if (patch.dep_slot == HwEventPatch::kExtDispatchDepSignal) {
+      // Patch dep_signal in hsa_amd_ext_kernel_dispatch_packet_t via offset-based
+      static constexpr size_t kExtDepSignalOffset =
+          offsetof(hsa_amd_ext_kernel_dispatch_packet_t, dep_signal);
+      memcpy(raw + kExtDepSignalOffset, &sig, sizeof(sig));
+    } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
     } else {
