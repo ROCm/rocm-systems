@@ -33,8 +33,19 @@
  * This exercises the barrier/wait_until deadlock path that the analysis
  * script should detect and annotate.
  *
- * This build uses ROCSHMEM_INIT_WITH_UNIQUEID (required when
- * USE_HEAP_DEVICE_VMM_POSIX=ON, which is incompatible with MPI bootstrap).
+ * Build (adjust ROCSHMEM, MPI_HOME, GPU_TARGET for your installation):
+ *
+ *   hipcc -O2 -g -std=c++17 -fgpu-rdc \
+ *         --offload-arch=${GPU_TARGET} \
+ *         -I${ROCSHMEM}/include -I${MPI_HOME}/include \
+ *         -x hip deadlock_test.cc -x none \
+ *         ${ROCSHMEM}/lib/librocshmem.a ${MPI_HOME}/lib/libmpi.so \
+ *         -L/opt/rocm/lib -lamdhip64 -lhsa-runtime64 \
+ *         -Wl,-rpath,${MPI_HOME}/lib \
+ *         -o deadlock_test
+ *
+ * Run:
+ *   mpirun -np 2 ./deadlock_test
  */
 
 #include <rocshmem/rocshmem.hpp>
@@ -50,11 +61,8 @@ using namespace rocshmem;
  * Kernel: the workgroup performs a collective barrier.
  * When PE 0 never calls this, all other PEs stall here indefinitely.
  */
-__global__ void barrier_kernel()
-{
-    rocshmem_wg_init();
+__global__ void barrier_kernel() {
     rocshmem_barrier_all_wg();
-    rocshmem_wg_finalize();
 }
 
 int main(int argc, char **argv)
@@ -69,34 +77,19 @@ int main(int argc, char **argv)
     /* Select GPU by local MPI rank */
     const char *local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
     int local_rank = local_rank_str ? atoi(local_rank_str) : 0;
-    hipSetDevice(local_rank);
-
-    /* --- rocSHMEM init via uniqueid (required for VMM POSIX heap) --- */
-    rocshmem_uniqueid_t uid;
-    rocshmem_init_attr_t attr;
-
-    if (rank == 0) {
-        if (rocshmem_get_uniqueid(&uid) != ROCSHMEM_SUCCESS) {
-            fprintf(stderr, "rocshmem_get_uniqueid failed\n");
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-    }
-    MPI_Bcast(&uid, sizeof(uid), MPI_BYTE, 0, MPI_COMM_WORLD);
-
-    if (rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr) != ROCSHMEM_SUCCESS) {
-        fprintf(stderr, "[%d] rocshmem_set_attr_uniqueid_args failed\n", rank);
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-    if (rocshmem_init_attr(ROCSHMEM_INIT_WITH_UNIQUEID, &attr) != ROCSHMEM_SUCCESS) {
-        fprintf(stderr, "[%d] rocshmem_init_attr failed\n", rank);
+    hipError_t dev_err = hipSetDevice(local_rank);
+    if (dev_err != hipSuccess) {
+        fprintf(stderr, "[rank %d] hipSetDevice(%d) failed: %s\n",
+                rank, local_rank, hipGetErrorString(dev_err));
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
+    rocshmem_init();
     int my_pe = rocshmem_my_pe();
     printf("[PE %d/%d] initialized\n", my_pe, nranks);
     fflush(stdout);
 
-    if (my_pe == 0) {
+    if (my_pe == 1) {
         /*
          * PE 0 intentionally skips the kernel: finishes immediately,
          * leaving all other PEs stuck in the barrier forever.
