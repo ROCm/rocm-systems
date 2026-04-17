@@ -1,4 +1,7 @@
 #include "mc_state.hpp"
+#include "decoded_inst.hpp"
+#include "llvm/MC/MCInstrDesc.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetSelect.h"
 
@@ -48,6 +51,32 @@ bool initMCState(MCState &state, const std::string &targetISA) {
   state.printer.reset(state.target->createMCInstPrinter(
       triple, 0, *state.asmInfo, *state.instrInfo, *state.regInfo));
   state.printer->setPrintImmHex(true);
+
+  // Sanity-check that the hand-sized `DecodedInst::kMaxSrcs` is still large
+  // enough for every opcode this MCInstrInfo knows about. We use
+  // (NumOperands - NumDefs) as a conservative upper bound on the logical-
+  // source count: the raiser's walk can only shrink this by skipping VOP3
+  // input modifiers and the DPP/SDWA scalar fallback, never grow it. If a
+  // future LLVM adds an encoding wider than our cap, stop here rather than
+  // surprise the raiser mid-kernel. Runs once per MCState init.
+  {
+    const MCInstrInfo &ii = *state.instrInfo;
+    unsigned worst = 0;
+    for (unsigned opc = 0, end = ii.getNumOpcodes(); opc < end; ++opc) {
+      const MCInstrDesc &d = ii.get(opc);
+      unsigned nOps = d.getNumOperands();
+      unsigned nDefs = d.getNumDefs();
+      if (nOps > nDefs && (nOps - nDefs) > worst)
+        worst = nOps - nDefs;
+    }
+    if (worst > DecodedInst::kMaxSrcs)
+      report_fatal_error(Twine("transpiler: DecodedInst::kMaxSrcs (") +
+                         Twine(DecodedInst::kMaxSrcs) +
+                         ") is smaller than the widest AMDGPU operand list "
+                         "in MCInstrInfo (NumOperands-NumDefs=" +
+                         Twine(worst) + "); bump kMaxSrcs to at least " +
+                         Twine(worst));
+  }
   return true;
 }
 

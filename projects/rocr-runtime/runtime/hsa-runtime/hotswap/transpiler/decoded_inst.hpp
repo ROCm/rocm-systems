@@ -29,7 +29,15 @@ struct DecodedInst {
   bool defsEXEC = false;
   unsigned firstSrcIdx = 0;
 
-  static constexpr unsigned kMaxSrcs = 16;
+  // Upper bound on the logical-source count the raiser's walk can produce.
+  // Actual value is conservatively sized so it never clips any AMDGPU opcode
+  // LLVM ships today; the bound is checked at MCState init time against the
+  // widest `NumOperands - NumDefs` in MCInstrInfo, so a future LLVM that adds
+  // a wider encoding will fatal at startup rather than silently truncate. See
+  // `initMCState` for the check. If you bump the bound here, keep it as a
+  // safe upper limit, not a tight fit: the startup assertion already makes
+  // drift visible.
+  static constexpr unsigned kMaxSrcs = 24;
   unsigned srcMap[kMaxSrcs] = {};
   unsigned modMap[kMaxSrcs] = {};
   unsigned numSrcs = 0;

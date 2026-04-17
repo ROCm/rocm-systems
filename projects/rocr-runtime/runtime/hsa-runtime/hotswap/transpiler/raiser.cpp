@@ -26,10 +26,14 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstPrinter.h"
+#include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCRegister.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
@@ -129,35 +133,177 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         di.format = FormatKind::VOPD;
       di.firstSrcIdx = desc.getNumDefs();
 
+      // Build the logical-source view of the MCInst. We walk `desc.operands()`
+      // and classify each operand using TableGen-generated metadata only:
+      //
+      //   * Operand types carrying the AMDGPU-specific `OPERAND_INPUT_MODS`
+      //     tag are VOP3 source modifiers (neg/abs/opsel packed as an imm).
+      //     They attach to the next logical source via `modMap`.
+      //   * DPP/SDWA encodings carry a tied "old" input (fallback value for
+      //     inactive lanes, named `$old` or `$vdst_in` in TableGen). In our
+      //     all-lanes-active scalar model that slot is never read, so we
+      //     skip it. Not every tied-to-def operand is a fallback — VOP2 MAC
+      //     forms (v_fmac_f32, v_mac_f32, v_dot2c_*) tie `$src2` to the dst
+      //     and atomics tie `$vdata_in`/`$sdst_in`/`$addr_in`; in those
+      //     cases the tied operand is a real accumulator/read-modify input
+      //     and must stay in srcMap. We therefore select on the named-
+      //     operand id rather than the TIED_TO bit alone.
+      //   * Everything else is a logical source recorded in MCInst order.
+      //
+      // A reportErr helper factors out the fatal-error text builder used by
+      // the validation checks below (item 3: drift detection).
+      auto reportErr = [&](const Twine &prefix, int index, int ours,
+                           int expected) -> void {
+        std::string msg;
+        raw_string_ostream os(msg);
+        os << prefix << " for " << di.rawMnemonic
+           << " (opcode=" << inst.getOpcode() << "): index=" << index
+           << ", srcMap/modMap=" << ours << ", named=" << expected
+           << ", numSrcs=" << di.numSrcs
+           << ", numDefs=" << desc.getNumDefs()
+           << ", numOps=" << inst.getNumOperands();
+        report_fatal_error(StringRef(msg));
+      };
+
+      unsigned opc = inst.getOpcode();
+      int oldIdx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::old);
+      int vdstInIdx =
+          AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::vdst_in);
       auto opInfos = desc.operands();
-      // DPP/SDWA instructions have a tied "old" operand as the first source
-      // (fallback value for inactive lanes). In our scalar model all lanes are
-      // active, so "old" is never used — skip it so srcMap aligns with the
-      // base VOP encoding.
-      unsigned srcStart = di.firstSrcIdx;
-      if ((di.format == FormatKind::DPP || di.format == FormatKind::SDWA) &&
-          srcStart < inst.getNumOperands())
-        srcStart++;
       unsigned pendingModIdx = UINT_MAX;
-      for (unsigned i = srcStart; i < inst.getNumOperands(); ++i) {
+      for (unsigned i = di.firstSrcIdx; i < inst.getNumOperands(); ++i) {
         if (i < opInfos.size() &&
             opInfos[i].OperandType == OPERAND_INPUT_MODS) {
           pendingModIdx = i;
           continue;
         }
-        if (di.numSrcs < DecodedInst::kMaxSrcs) {
-          di.srcMap[di.numSrcs] = i;
-          di.modMap[di.numSrcs] = pendingModIdx;
-          di.numSrcs++;
+        if ((int)i == oldIdx || (int)i == vdstInIdx) {
+          pendingModIdx = UINT_MAX;
+          continue;
         }
+        if (di.numSrcs >= DecodedInst::kMaxSrcs)
+          report_fatal_error("transpiler: DecodedInst::kMaxSrcs exceeded; "
+                             "bump kMaxSrcs to match the widest LLVM operand "
+                             "list");
+        di.srcMap[di.numSrcs] = i;
+        di.modMap[di.numSrcs] = pendingModIdx;
+        di.numSrcs++;
         pendingModIdx = UINT_MAX;
       }
 
+      // Drift check A: every tied-to-def operand on this instruction must
+      // have an OpName we've explicitly classified. If LLVM introduces a new
+      // tied-input OpName we haven't audited (so we don't know whether to
+      // skip or keep it), stop and make a human decide. `kKnownTiedIn` is
+      // the exhaustive audit as of this commit. Two semantic categories:
+      //
+      //   skipped-as-fallback (DPP/SDWA inactive-lane value; never read
+      //                       in the all-lanes-active scalar model):
+      //     `old`, `vdst_in`.
+      //
+      //   kept-as-real-input (read-modify accumulator, atomic compare, or
+      //                      MAC-style third source; the instruction
+      //                      semantically reads the prior def value):
+      //     `sdst_in`, `vdata_in`, `addr_in`, `srcTiedDef`,
+      //     `src0`, `src1`, `src2`,
+      //     `src0X`, `src0Y`, `src2X`, `src2Y`,
+      //     `vsrc2X`, `vsrc2Y`.
+      //
+      // srcN and VOPD variants all appear here because SOPK `S_ADDK_I32`
+      // ties `$src0`, SOP2 `sdst,sdst_in` variants may also surface `$src0`,
+      // VALU MAC forms tie `$src2`, and VOPD3 FMAC halves tie `$src2X` /
+      // `$src2Y` (plus potentially the separate VOPD3 third source).
+      static constexpr AMDGPU::OpName kKnownTiedIn[] = {
+          AMDGPU::OpName::old,        AMDGPU::OpName::vdst_in,
+          AMDGPU::OpName::sdst_in,    AMDGPU::OpName::vdata_in,
+          AMDGPU::OpName::addr_in,    AMDGPU::OpName::srcTiedDef,
+          AMDGPU::OpName::src0,       AMDGPU::OpName::src1,
+          AMDGPU::OpName::src2,       AMDGPU::OpName::src0X,
+          AMDGPU::OpName::src0Y,      AMDGPU::OpName::src2X,
+          AMDGPU::OpName::src2Y,      AMDGPU::OpName::vsrc2X,
+          AMDGPU::OpName::vsrc2Y,
+      };
+      for (unsigned i = 0; i < inst.getNumOperands(); ++i) {
+        int tied = desc.getOperandConstraint(i, MCOI::TIED_TO);
+        if (tied < 0)
+          continue;
+        // Only flag operands tied to a def. Use-to-use ties exist in LLVM's
+        // constraint system but are not relevant to the fallback/accumulator
+        // distinction this check protects.
+        if ((unsigned)tied >= desc.getNumDefs())
+          continue;
+        bool known = false;
+        for (AMDGPU::OpName n : kKnownTiedIn) {
+          if ((int)i == AMDGPU::getNamedOperandIdx(opc, n)) {
+            known = true;
+            break;
+          }
+        }
+        if (!known)
+          reportErr("transpiler: tied-to-def operand has an OpName not in "
+                    "the audited set — classify explicitly (fallback to skip "
+                    "vs. real input to keep) before proceeding",
+                    (int)i, tied, -1);
+      }
+
+      // Drift check B: for every opcode that exposes `srcN` / `srcN_modifiers`
+      // naming (VALU, VOPC, SOP1/SOP2, a handful of scalar forms), the first
+      // N entries of srcMap / modMap must agree with LLVM's named-operand
+      // table. Catches operand-layout drift for the large majority of
+      // opcodes — but notably NOT for DS / MUBUF / FLAT / SMEM / image
+      // encodings, which don't use srcN naming; those formats are only
+      // protected by the walk's correctness and drift check A.
+      {
+        static constexpr AMDGPU::OpName kSrcNames[] = {
+            AMDGPU::OpName::src0, AMDGPU::OpName::src1,
+            AMDGPU::OpName::src2};
+        static constexpr AMDGPU::OpName kModNames[] = {
+            AMDGPU::OpName::src0_modifiers, AMDGPU::OpName::src1_modifiers,
+            AMDGPU::OpName::src2_modifiers};
+        for (unsigned k = 0; k < 3; ++k) {
+          int namedSrc = AMDGPU::getNamedOperandIdx(opc, kSrcNames[k]);
+          if (namedSrc < 0)
+            break;
+          int ourSrc =
+              (k < di.numSrcs) ? (int)di.srcMap[k] : -1;
+          if (ourSrc != namedSrc)
+            reportErr("transpiler: srcMap disagrees with OpName::srcN table",
+                      (int)k, ourSrc, namedSrc);
+          int namedMod = AMDGPU::getNamedOperandIdx(opc, kModNames[k]);
+          int ourMod = (di.modMap[k] == UINT_MAX) ? -1 : (int)di.modMap[k];
+          int expectedMod = (namedMod < 0) ? -1 : namedMod;
+          if (ourMod != expectedMod)
+            reportErr(
+                "transpiler: modMap disagrees with OpName::srcN_modifiers "
+                "table",
+                (int)k, ourMod, expectedMod);
+        }
+      }
+
+      // Identify implicit defs of wave-mask / condition-flag registers via
+      // identity constants rather than register-name string matches. We
+      // normalise through `mc2PseudoReg` first, which strips subtarget
+      // suffixes (``_gfxNplus``) and converts aliases to their canonical
+      // pseudo-register id — same pattern used by `parseReg`.
       for (MCPhysReg r : desc.implicit_defs()) {
-        StringRef rn = mc.regInfo->getName(r);
-        if (rn == "SCC") di.defsSCC = true;
-        else if (rn.starts_with("VCC")) di.defsVCC = true;
-        else if (rn.starts_with("EXEC")) di.defsEXEC = true;
+        llvm::MCRegister reg = AMDGPU::mc2PseudoReg(r);
+        switch (reg) {
+        case AMDGPU::SCC:
+          di.defsSCC = true;
+          break;
+        case AMDGPU::VCC:
+        case AMDGPU::VCC_LO:
+        case AMDGPU::VCC_HI:
+          di.defsVCC = true;
+          break;
+        case AMDGPU::EXEC:
+        case AMDGPU::EXEC_LO:
+        case AMDGPU::EXEC_HI:
+          di.defsEXEC = true;
+          break;
+        default:
+          break;
+        }
       }
 
       if (di.isBranch) {
