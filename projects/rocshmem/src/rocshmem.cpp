@@ -486,7 +486,12 @@ static void setFilesLimit() {
 }
 
 [[maybe_unused]] __host__ void rocshmem_info_get_name(char *name) {
-  std::snprintf(name, ROCSHMEM_MAX_NAME_LEN, "%s", ROCSHMEM_VENDOR_STRING);
+  size_t i = 0;
+  for (; i < ROCSHMEM_MAX_NAME_LEN - 1 && ROCSHMEM_VENDOR_STRING[i] != '\0';
+       ++i) {
+    name[i] = ROCSHMEM_VENDOR_STRING[i];
+  }
+  name[i] = '\0';
 }
 
 [[maybe_unused]] __host__ void rocshmem_vendor_get_version_info(int *major,
