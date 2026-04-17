@@ -43,16 +43,16 @@ make_nic_metric_value(std::initializer_list<uint8_t> bit_positions)
     return value;
 }
 
-const auto RX_RDMA_UCAST_BYTES_VALUE      = make_nic_metric_value({ 0 });
-const auto TX_RDMA_UCAST_BYTES_VALUE      = make_nic_metric_value({ 1 });
-const auto RX_RDMA_UCAST_PKTS_VALUE       = make_nic_metric_value({ 2 });
-const auto TX_RDMA_UCAST_PKTS_VALUE       = make_nic_metric_value({ 3 });
-const auto RX_RDMA_CNP_PKTS_VALUE         = make_nic_metric_value({ 4 });
-const auto TX_RDMA_CNP_PKTS_VALUE         = make_nic_metric_value({ 5 });
-const auto TX_RDMA_ACK_TIMEOUT_VALUE      = make_nic_metric_value({ 6 });
-const auto RESP_TX_PKT_SEQ_ERR_VALUE      = make_nic_metric_value({ 7 });
-const auto REQ_RX_PKT_SEQ_ERR_VALUE       = make_nic_metric_value({ 8 });
-const auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE  = make_nic_metric_value({ 9 });
+const auto RX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 0 });
+const auto TX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 1 });
+const auto RX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 2 });
+const auto TX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 3 });
+const auto RX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 4 });
+const auto TX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 5 });
+const auto TX_RDMA_ACK_TIMEOUT_VALUE     = make_nic_metric_value({ 6 });
+const auto RESP_TX_PKT_SEQ_ERR_VALUE     = make_nic_metric_value({ 7 });
+const auto REQ_RX_PKT_SEQ_ERR_VALUE      = make_nic_metric_value({ 8 });
+const auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = make_nic_metric_value({ 9 });
 
 struct nic_perfetto_sample
 {
@@ -169,7 +169,8 @@ struct perfetto_policy
         {
             tracks[TX_RDMA_ACK_TIMEOUT_VALUE] = {
                 "TX ACK TIMEOUT", "timeouts",
-                counter_track::emplace(device_index, addendum("TX ACK TIMEOUT"), "packets")
+                counter_track::emplace(device_index, addendum("TX ACK TIMEOUT"),
+                                       "packets")
             };
         }
 
@@ -177,7 +178,8 @@ struct perfetto_policy
         {
             tracks[RESP_TX_PKT_SEQ_ERR_VALUE] = {
                 "RESP TX PKT SEQ ERR VALUE", "errors",
-                counter_track::emplace(device_index, addendum("RESP TX PKT SEQ ERR"), "packets")
+                counter_track::emplace(device_index, addendum("RESP TX PKT SEQ ERR"),
+                                       "packets")
             };
         }
 
@@ -185,7 +187,8 @@ struct perfetto_policy
         {
             tracks[REQ_RX_PKT_SEQ_ERR_VALUE] = {
                 "REQ RX PKT SEQ ERR VALUE", "errors",
-                counter_track::emplace(device_index, addendum("REQ RX PKT SEQ ERR"), "packets")
+                counter_track::emplace(device_index, addendum("REQ RX PKT SEQ ERR"),
+                                       "packets")
             };
         }
 
@@ -193,7 +196,8 @@ struct perfetto_policy
         {
             tracks[REQ_RX_IMPL_NAK_SEQ_ERR_VALUE] = {
                 "REQ RX IMPL NAK SEQ ERR VALUE", "errors",
-                counter_track::emplace(device_index, addendum("REQ RX IMPL NAK SEQ ERR"), "packets")
+                counter_track::emplace(device_index, addendum("REQ RX IMPL NAK SEQ ERR"),
+                                       "packets")
             };
         }
     }
@@ -409,10 +413,10 @@ struct perfetto_policy
                 auto it = tracks.find(REQ_RX_IMPL_NAK_SEQ_ERR_VALUE);
                 if(it != tracks.end())
                 {
-                    TRACE_COUNTER(
-                        "nic_req_rx_impl_nak_seq_err",
-                        counter_track::at(device_index, it->second.track_index), ts,
-                        static_cast<double>(sample.metric_values.req_rx_impl_nak_seq_err));
+                    TRACE_COUNTER("nic_req_rx_impl_nak_seq_err",
+                                  counter_track::at(device_index, it->second.track_index),
+                                  ts,
+                                  static_cast<double>(sample.metric_values.req_rx_impl_nak_seq_err));
                 }
             }
         }

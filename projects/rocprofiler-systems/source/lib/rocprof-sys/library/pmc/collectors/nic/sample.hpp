@@ -63,7 +63,8 @@ serialize(uint8_t* buffer, const pmc::collectors::nic::sample& item)
         item.metric_values.rx_rdma_ucast_pkts, item.metric_values.tx_rdma_ucast_pkts,
         item.metric_values.rx_rdma_cnp_pkts, item.metric_values.tx_rdma_cnp_pkts,
         item.metric_values.tx_rdma_ack_timeout, item.metric_values.resp_tx_pkt_seq_err,
-        item.metric_values.req_rx_pkt_seq_err, item.metric_values.req_rx_impl_nak_seq_err);
+        item.metric_values.req_rx_pkt_seq_err,
+        item.metric_values.req_rx_impl_nak_seq_err);
 }
 
 template <>
