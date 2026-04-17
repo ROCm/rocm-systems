@@ -267,7 +267,34 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     }
   }
   if (sop == SemOp::DS_BPERMUTE_B32) {
-    ctx.writeReg32(op.dst(), op.src(1));
+    // Backwards permute: per-lane GATHER. Each lane reads the `src1`
+    // value from a *source* lane whose index is `src0 >> 2` (the
+    // selector is pre-scaled by the source compiler to match DS byte
+    // addressing). The previous handler was an identity copy of
+    // src(1), which silently collapsed `__shfl_xor(x, 1)` to `x` and
+    // any shuffle-based reduction to "every lane keeps its own
+    // partial" — exactly the `lane_swap` / `block_sum_shfl`
+    // compare_correctness failures. Lower through the native
+    // `amdgcn.ds_bpermute` intrinsic so the backend emits the real
+    // cross-lane gather on the target ISA.
+    //
+    // Wave-width note. `amdgcn.ds_bpermute` on the target masks the
+    // selector by `target_wave_bits - 1` in hardware. For gfx1250
+    // wave32 → gfx942 wave64 lifts, a source selector of
+    // `(lane ^ k) * 4` with `k < 32` stays inside the low 32 lanes,
+    // so the natural wave64 behaviour partitions the wave into two
+    // independent 32-lane halves that each reproduce the source's
+    // wave32 shuffle. This matches the source kernel's semantics for
+    // `lane_swap` (k=1) and the intra-warp phase of `block_sum_shfl`
+    // (k ∈ {16,8,4,2,1}); kernels that rely on `k ≥ 32` for a wave32
+    // source would need same-wave or SPMDified lowering — out of
+    // scope for this handler.
+    Value *index = op.src(0);
+    Value *src = op.src(1);
+    Function *bperm = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
+    Value *gathered = ctx.B.CreateCall(bperm, {index, src}, "bperm");
+    ctx.writeReg32(op.dst(), gathered);
     hr.handled = true;
     return hr;
   }
