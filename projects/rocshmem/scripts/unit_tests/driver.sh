@@ -65,15 +65,88 @@ timestamp=$(date "+%Y-%m-%d-%H:%M:%S")
 log_file="unit_tests_${timestamp}.log"
 mpi_timeout=$((20 * 60)) # 20 minutes in seconds
 
-# Function to execute mpirun command
+###############################################################################
+# Launcher detection helpers
+###############################################################################
+
+# Returns the launcher family: ompi_like, slurm, mpich_like, flux, torch.
+# For mpirun/mpiexec the brand is inferred from --version output.
+launcher_family() {
+  local launcher="$1"
+  case "$launcher" in
+    prterun|paratool) echo "ompi_like";  return ;;
+    srun)             echo "slurm";      return ;;
+    flux)             echo "flux";       return ;;
+    torchrun)         echo "torch";      return ;;
+  esac
+  local ver
+  ver=$("$launcher" --version 2>&1 || true)
+  if echo "$ver" | grep -qi "open.mpi\|openmpi"; then echo "ompi_like"
+  elif echo "$ver" | grep -qi "mpich\|hydra"; then echo "mpich_like"
+  else echo "mpich_like"; fi
+}
+
+# Detect which MPI launcher to use.
+detect_launcher() {
+  if [[ -n "$LAUNCHER" ]]; then echo "$LAUNCHER"; return; fi
+  if [[ -n "$SLURM_JOB_ID" ]]; then echo "srun"; return; fi
+  if [[ -n "$FLUX_JOB_ID"  ]]; then echo "flux"; return; fi
+  if [[ -n "$PBS_JOBID"    ]]; then
+    command -v mpiexec &>/dev/null && echo "mpiexec" || echo "mpirun"
+    return
+  fi
+  for candidate in mpirun mpiexec prterun paratool torchrun; do
+    command -v "$candidate" &>/dev/null && { echo "$candidate"; return; }
+  done
+  echo "mpirun"
+}
+
+# Function to execute the test under the detected launcher
 function run_mpirun {
     local np=$1
     local gtest_filter=$2
-    cmd_str="mpirun -np $np --timeout $mpi_timeout $binary_name --gtest_filter=$gtest_filter >> $log_file 2>&1"
-    echo $cmd_str
-    eval $cmd_str
 
-    # Test if mpirun failed
+    local launcher family
+    launcher=$(detect_launcher)
+    family=$(launcher_family "$launcher")
+
+    # Env preamble: POSIX `env VAR=val` captures values at call time,
+    # no side effects on the parent shell between test runs.
+    local -a _env
+    _env=( env "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384" )
+    [[ -n "$ROCSHMEM_TEST_UUID" ]] && _env+=( "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID" )
+
+    local -a cmd
+    case "$family" in
+      ompi_like)
+        cmd=( "${_env[@]}" "$launcher" -n "$np" --timeout "$mpi_timeout" )
+        ;;
+      slurm)
+        cmd=( "${_env[@]}" "$launcher" -n "$np" --time "$((mpi_timeout/60+1))" )
+        ;;
+      flux)
+        cmd=( "${_env[@]}" "$launcher" run -n "$np" --time="${mpi_timeout}s" )
+        ;;
+      torch)
+        local nproc="${TORCHRUN_NPROC_PER_NODE:-1}"
+        local nnodes=$(( (np + nproc - 1) / nproc ))
+        cmd=( "${_env[@]}" "$launcher" --nproc-per-node "$nproc" --nnodes "$nnodes" )
+        ;;
+      mpich_like|*)
+        cmd=( "${_env[@]}" "$launcher" -n "$np" )
+        ;;
+    esac
+
+    cmd+=( "$binary_name" "--gtest_filter=$gtest_filter" )
+
+    # Log the full shell-quoted command (including env VAR=val prefix) so it
+    # is visible in the log and can be copy-pasted for manual reproduction.
+    local cmd_str
+    cmd_str="$(printf '%q ' "${cmd[@]}")"
+    echo "$cmd_str"
+    "${cmd[@]}" >> "$log_file" 2>&1
+
+    # Test if the launcher failed
     if [ $? -ne 0 ]
     then
         echo "FAILED: $cmd_str" >&2

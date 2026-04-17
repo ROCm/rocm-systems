@@ -78,9 +78,11 @@ if(${ROCM_MAJOR_VERSION} LESS 7)
   list(APPEND BITCODE_COMPILE_FLAGS_BASE -DHIP_ENABLE_WARP_SYNC_BUILTINS=1)
 endif()
 
-# Add MPI include directories — rocshmem_config.h defines HAVE_EXTERNAL_MPI
-# when MPI is found, causing rocshmem_mpi.hpp to #include <mpi.h> transitively.
-if(MPI_CXX_FOUND)
+# Add MPI include directories only when compile-time MPI linkage is active.
+# Gating on HAVE_EXTERNAL_MPI (not MPI_CXX_FOUND) prevents a parent project's
+# find_package(MPI) result from leaking into the device bitcode when
+# USE_EXTERNAL_MPI=OFF or when Open MPI was detected in AUTO mode.
+if(HAVE_EXTERNAL_MPI)
   foreach(mpi_include_dir ${MPI_CXX_INCLUDE_DIRS})
     list(APPEND BITCODE_COMPILE_FLAGS_BASE -I${mpi_include_dir})
   endforeach()

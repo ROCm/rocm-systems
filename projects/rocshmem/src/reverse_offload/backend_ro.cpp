@@ -147,8 +147,23 @@ int ROBackend::backend_can_run() {
     LOG_TRACE("Could not open libmpi.so");
     return ROCSHMEM_ERROR;
   }
-  //TODO dlsym MPI_Get_library_version and verify compat when HAVE_EXTERNAL_MPI is undef
+#if !defined(HAVE_EXTERNAL_MPI)
+  // When built without a compile-time MPI link, rocSHMEM assumes Open MPI ABI
+  // for all MPI handle constants (MPI_COMM_WORLD, MPI_INT, …).  Probe one
+  // sentinel symbol to confirm the runtime library is actually Open MPI.
+  bool is_ompi = (dlsym(handle, "ompi_mpi_comm_world") != nullptr);
   dlclose(handle);
+  if (!is_ompi) {
+    LOG_WARN("libmpi.so is not Open MPI (ompi_mpi_comm_world not found).\n"
+             "  the RO backend has been built against the Open MPI ABI and cannot run with this MPI library.\n"
+             "");
+    return ROCSHMEM_ERROR;
+  }
+#else
+  // HAVE_EXTERNAL_MPI=ON: the MPI library was verified at link time.
+  // Trust the linker — no runtime brand check needed.
+  dlclose(handle);
+#endif
   return ROCSHMEM_SUCCESS;
 }
 

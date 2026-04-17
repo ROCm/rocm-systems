@@ -220,23 +220,51 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
   endif()
 
-  if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
-    find_package(MPI)
-  else()
-    message ("-- External MPI detection disabled by user")
-  endif()
-
-  if (MPI_FOUND)
-    set(HAVE_EXTERNAL_MPI ON)
-  else()
+  if (USE_EXTERNAL_MPI STREQUAL "OFF")
+    message(STATUS "External MPI detection disabled by user")
     set(HAVE_EXTERNAL_MPI OFF)
-    set(BUILD_UNIT_TESTS OFF)
-    set(BUILD_EXAMPLES OFF)
-  endif()
-
-  if (USE_EXTERNAL_MPI STREQUAL "ON")
-    if(NOT HAVE_EXTERNAL_MPI)
-      message(FATAL_ERROR "External MPI support requested but MPI support not found. Build Aborted")
+  else()
+    find_package(MPI)
+    if (MPI_FOUND)
+      if (USE_EXTERNAL_MPI STREQUAL "ON")
+        # Explicit request: always use compile-time MPI link regardless of brand
+        set(HAVE_EXTERNAL_MPI ON)
+        message(STATUS "External MPI linkage forced by user (HAVE_EXTERNAL_MPI=ON)")
+      else()
+        # AUTO mode: Open MPI is already handled via dlopen — no compile-time
+        # link needed.  Only non-Open MPI implementations require it.
+        #
+        # Detect the MPI brand by scanning mpi.h for well-known preprocessor
+        # markers.  This avoids spawning mpiexec (not always installed with the
+        # dev package) and works in cross-compilation environments.
+        #
+        #  Open MPI  : #define OPEN_MPI 1  /  #define OMPI_MAJOR_VERSION …
+        #  MPICH     : #define MPICH_VERSION  /  #define MPICH_NUMVERSION …
+        #              (also used by Intel MPI, MVAPICH, Cray MPI)
+        set(_MPI_IS_OPENMPI OFF)
+        foreach(_inc ${MPI_CXX_INCLUDE_DIRS})
+          if (EXISTS "${_inc}/mpi.h")
+            file(STRINGS "${_inc}/mpi.h" _mpi_header_lines
+                 REGEX "#define (OPEN_MPI|OMPI_MAJOR_VERSION)")
+            if (_mpi_header_lines)
+              set(_MPI_IS_OPENMPI ON)
+            endif()
+            break()
+          endif()
+        endforeach()
+        if (_MPI_IS_OPENMPI)
+          message(STATUS "Found Open MPI — using dlopen path (HAVE_EXTERNAL_MPI=OFF)")
+          set(HAVE_EXTERNAL_MPI OFF)
+        else()
+          message(STATUS "Found non-Open MPI — enabling compile-time MPI linkage (HAVE_EXTERNAL_MPI=ON)")
+          set(HAVE_EXTERNAL_MPI ON)
+        endif()
+        unset(_MPI_IS_OPENMPI)
+        unset(_mpi_header_lines)
+        unset(_inc)
+      endif()
+    else()
+      set(HAVE_EXTERNAL_MPI OFF)
     endif()
   endif()
 
@@ -401,10 +429,24 @@ if (NOT BUILD_TESTS_ONLY)
       rocm-dev
   )
 
-  rocm_export_targets(
-    TARGETS roc::rocshmem
-    NAMESPACE roc::
-  )
+  # When HAVE_EXTERNAL_MPI=ON, MPI::MPI_CXX is a PUBLIC link dependency of
+  # rocshmem and will appear in the exported rocshmem-targets.cmake.
+  # Downstream find_package(rocshmem) must therefore also call find_package(MPI)
+  # to resolve MPI::MPI_CXX before including the targets file.
+  # Inject find_dependency(MPI) into the generated rocshmem-config.cmake so
+  # this happens automatically.
+  if(HAVE_EXTERNAL_MPI)
+    rocm_export_targets(
+      TARGETS roc::rocshmem
+      NAMESPACE roc::
+      DEPENDS MPI
+    )
+  else()
+    rocm_export_targets(
+      TARGETS roc::rocshmem
+      NAMESPACE roc::
+    )
+  endif()
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
   rocm_package_setup_component(clients)

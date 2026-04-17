@@ -86,7 +86,13 @@ endif()
 # ROCSHMEM DEPENDENCY
 ###############################################################################
 find_package(hip REQUIRED PATHS /opt/rocm)
-find_package(MPI REQUIRED)
+if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
+  find_package(MPI)
+endif()
+if (NOT MPI_FOUND)
+  message(WARNING "MPI not found or disabled (USE_EXTERNAL_MPI=OFF) — skipping unit tests")
+  return()
+endif()
 
 if (BUILD_TESTS_ONLY)
   find_package(rocshmem REQUIRED PATHS /opt/rocm)

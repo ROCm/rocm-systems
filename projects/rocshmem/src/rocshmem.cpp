@@ -176,9 +176,13 @@ static void setFilesLimit() {
 
   int ret;
   ret = MPIInstance::mpilib_dl_init();
-  if (ret != ROCSHMEM_SUCCESS) {
+  if (ret == MPIInstance::MPILIB_INCOMPATIBLE) {
+    LOG_ERROR_EXIT("MPI library loaded at runtime is not Open MPI but rocSHMEM is compiled for the Open MPI ABI.\n"
+                   "  This initialization method of rocSHMEM requires the MPI library to be loaded at runtime.\n"
+                   "  ");
+  } else if (ret != ROCSHMEM_SUCCESS) {
     LOG_ERROR_EXIT("Could not initialize the MPI library.\n"
-                   "  This initialization method of rocSHMEM requires MPI library to be loaded at runtime.\n"
+                   "  This initialization method of rocSHMEM requires the MPI library to be loaded at runtime.\n"
                    "  ");
   }
 
@@ -246,7 +250,11 @@ static void setFilesLimit() {
 
   int ret;
   ret = MPIInstance::mpilib_dl_init();
-  if (ret != ROCSHMEM_SUCCESS) {
+  if (ret == MPIInstance::MPILIB_INCOMPATIBLE) {
+    LOG_ERROR_EXIT("MPI library loaded at runtime is not Open MPI but rocSHMEM is compiled for the Open MPI ABI.\n"
+                   "  This initialization method of rocSHMEM requires the MPI library to be loaded at runtime.\n"
+                   "  ");
+  } else if (ret != ROCSHMEM_SUCCESS) {
     LOG_ERROR_EXIT("Could not initialize the MPI library.\n"
                    "  This initialization method of rocSHMEM requires MPI library to be loaded at runtime.\n"
                    "  ");
@@ -256,11 +264,18 @@ static void setFilesLimit() {
   if (initialized) {
     mpilib_ftable_.Comm_size (MPI_COMM_WORLD, &world_size);
   } else {
-    // This is an Open MPI specific solution to retrieve the number of
-    // processes that have been started, value can be checked before MPI_Init
-    char *value = getenv("OMPI_COMM_WORLD_SIZE");
-    if (value != NULL) {
-      world_size = atoi(value);
+    // Retrieve the total number of launched processes before MPI_Init.
+    // Check launcher-specific env vars in preference order.
+    for (const char *var : {"OMPI_COMM_WORLD_SIZE",  // Open MPI / prterun
+                            "PMI_SIZE",               // MPICH Hydra / generic PMI1
+                            "SLURM_NTASKS",           // Slurm srun
+                            "FLUX_JOB_SIZE",          // Flux
+                            "WORLD_SIZE"}) {          // torchrun / generic
+      const char *value = getenv(var);
+      if (value != NULL) {
+        world_size = atoi(value);
+        break;
+      }
     }
     if (world_size != nranks) {
       // This solution will require MPI_Sessions. This is planned for the
@@ -432,15 +447,17 @@ static void setFilesLimit() {
   return ROCSHMEM_SUCCESS;
 }
 
-#if defined(HAVE_EXTERNAL_MPI)
 [[maybe_unused]] __host__ void rocshmem_init(MPI_Comm comm) {
   library_init(comm);
 }
-#endif
 
 [[maybe_unused]] __host__ void rocshmem_init() {
   auto ret = MPIInstance::mpilib_dl_init();
-  if (ret != ROCSHMEM_SUCCESS) {
+  if (ret == MPIInstance::MPILIB_INCOMPATIBLE) {
+    LOG_ERROR_EXIT("MPI library loaded at runtime is not Open MPI but rocSHMEM is compiled for the Open MPI ABI.\n"
+                   "  This initialization method of rocSHMEM requires the MPI library to be loaded at runtime.\n"
+                   "  ");
+  } else if (ret != ROCSHMEM_SUCCESS) {
     LOG_ERROR_EXIT("Could not initialize the MPI library.\n"
                    "  This initialization method of rocSHMEM requires the MPI library to be loaded at runtime."
                    "  ");
@@ -448,7 +465,6 @@ static void setFilesLimit() {
   library_init(MPI_COMM_WORLD);
 }
 
-#if defined(HAVE_EXTERNAL_MPI)
 [[maybe_unused]] __host__ int rocshmem_init_thread(
     [[maybe_unused]] int required, int *provided, MPI_Comm comm) {
   if (comm == static_cast<MPI_Comm>(0) || comm == MPI_COMM_NULL) {
@@ -459,7 +475,6 @@ static void setFilesLimit() {
 
   return ROCSHMEM_SUCCESS;
 }
-#endif
 
 [[maybe_unused]] __host__ int rocshmem_my_pe() {
   if (backend != nullptr) {

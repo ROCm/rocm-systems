@@ -29,10 +29,17 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_examples VERSION 1.0.0 LANGUAGES CXX)
 
-find_package(MPI)
 find_package(hip REQUIRED PATHS /opt/rocm)
 if (NOT TARGET roc::rocshmem)
   find_package(rocshmem REQUIRED PATHS /opt/rocm)
+endif()
+# In standalone mode (BUILD_TESTS_ONLY) MPI::MPI_CXX is not yet defined:
+# the parent CMakeLists.txt hasn't run, and find_package(rocshmem) only emits
+# find_dependency(MPI) when HAVE_EXTERNAL_MPI=ON.  In the AUTO+OpenMPI case
+# (HAVE_EXTERNAL_MPI=OFF), MPI is present on the system but not a rocshmem
+# link dependency, so we find it here for the examples that call MPI directly.
+if (BUILD_TESTS_ONLY AND NOT USE_EXTERNAL_MPI STREQUAL "OFF")
+  find_package(MPI)
 endif()
 
 ###############################################################################
@@ -52,8 +59,9 @@ set(EXAMPLE_SOURCES
 if (MPI_CXX_FOUND)
   list(APPEND EXAMPLE_SOURCES
     rocshmem_init_attr_test.cc)
-
   add_subdirectory(LL_MoE)
+else()
+  message(WARNING "MPI not found or disabled (USE_EXTERNAL_MPI=OFF) — skipping rocshmem_init_attr_test and LL_MoE examples")
 endif()
 
 foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)

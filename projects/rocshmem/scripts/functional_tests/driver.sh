@@ -152,6 +152,158 @@ declare -A TEST_NUMBERS=(
   ["tile_get_arbitrary"]="116"
 )
 
+###############################################################################
+# Launcher detection helpers
+###############################################################################
+
+# Returns the launcher family for the given binary:
+#   ompi_like   — Open MPI, prterun (PRRTE), paratool (PBS/OMPI wrapper)
+#   slurm       — srun
+#   mpich_like  — MPICH, Intel MPI, MVAPICH, and any unrecognised mpirun/mpiexec
+#   flux        — Flux
+#   torch       — torchrun
+# For mpirun/mpiexec the brand is inferred from --version output.
+launcher_family() {
+  local launcher="$1"
+  case "$launcher" in
+    prterun|paratool) echo "ompi_like";  return ;;
+    srun)             echo "slurm";      return ;;
+    flux)             echo "flux";       return ;;
+    torchrun)         echo "torch";      return ;;
+  esac
+  # For mpirun/mpiexec (and unknowns) probe --version to determine brand.
+  local ver
+  ver=$("$launcher" --version 2>&1 || true)
+  if echo "$ver" | grep -qi "open.mpi\|openmpi"; then
+    echo "ompi_like"
+  elif echo "$ver" | grep -qi "mpich\|hydra"; then
+    echo "mpich_like"
+  else
+    echo "mpich_like"   # safe default: fewer flags, env inherited
+  fi
+}
+
+# Detect which MPI launcher to use.  Priority:
+#   1. $LAUNCHER env var (user override)
+#   2. Job-scheduler env markers (SLURM_JOB_ID, FLUX_JOB_ID, PBS_JOBID)
+#   3. First launcher found in PATH
+detect_launcher() {
+  if [[ -n "$LAUNCHER" ]]; then
+    echo "$LAUNCHER"
+    return
+  fi
+  if [[ -n "$SLURM_JOB_ID" ]]; then
+    echo "srun"
+    return
+  fi
+  if [[ -n "$FLUX_JOB_ID" ]]; then
+    echo "flux"
+    return
+  fi
+  if [[ -n "$PBS_JOBID" ]]; then
+    command -v mpiexec &>/dev/null && echo "mpiexec" || echo "mpirun"
+    return
+  fi
+  for candidate in mpirun mpiexec prterun paratool torchrun; do
+    command -v "$candidate" &>/dev/null && { echo "$candidate"; return; }
+  done
+  echo "mpirun"
+}
+
+# Populate the array named by $3 with the full launcher command for $n ranks.
+# Switches on the launcher family so the actual launcher binary ($launcher) is
+# always used verbatim — only the surrounding flags depend on the family.
+#
+# Env vars are injected via a POSIX `env VAR=val` prefix captured at call time,
+# with no side-effects on the parent shell across test runs.
+# OMPI-like launchers additionally receive each var via -x VAR=val so that MPI
+# task slots inherit them even when spawned via a separate daemon.
+build_launcher_cmd() {
+  local launcher="$1"
+  local n="$2"
+  local -n _blc_out=$3
+
+  local family
+  family=$(launcher_family "$launcher")
+
+  # Env preamble shared by all families — values captured at call time.
+  local -a _env
+  _env=( env
+         "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
+         "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+         "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+       )
+  [[ -n "$ROCSHMEM_TEST_USE_DEFAULT_STREAM" ]] && _env+=( "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM" )
+  [[ -n "$ROCSHMEM_TEST_UUID" ]] && _env+=( "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID" )
+
+  case "$family" in
+    ompi_like)
+      # prterun, paratool, and Open MPI mpirun/mpiexec all accept -mca/-x flags.
+      # Pass env vars explicitly via -x VAR=val so task slots inherit them.
+      _blc_out=( "${_env[@]}"
+                 "$launcher"
+                 -n "$n"
+                 -mca pml "${OMPI_MCA_pml:-ucx}"
+                 -mca osc "${OMPI_MCA_osc:-ucx}"
+                 -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+                 -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
+                 -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+                 ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
+                 ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
+                 ${TIMEOUT:+--timeout "$TIMEOUT"}
+                 ${HOSTFILE:+--hostfile "$HOSTFILE"}
+                 --map-by numa
+               )
+      ;;
+    slurm)
+      # if testing mpich, substitute --mpi=pmi2
+      _blc_out=( "${_env[@]}" "$launcher"
+                 -n "$n"
+                 --mpi=pmix
+                 ${HOSTFILE:+--nodelist "$HOSTFILE"}
+                 ${TIMEOUT:+--time "$((TIMEOUT/60+1))"}
+               )
+      ;;
+    mpich_like)
+      _blc_out=( "${_env[@]}" "$launcher" -n "$n" ${HOSTFILE:+-f "$HOSTFILE"} )
+      ;;
+    flux)
+      # Flux manages node selection via its scheduler; hostfiles are not accepted.
+      if [[ -n "$HOSTFILE" ]]; then
+        echo "Warning: HOSTFILE is set but flux does not accept a hostfile; ignoring." >&2
+      fi
+      _blc_out=( "${_env[@]}" "$launcher" run -n "$n" ${TIMEOUT:+--time="${TIMEOUT}s"} )
+      ;;
+    torch)
+      # torchrun maps processes as nproc_per_node × nnodes; set
+      # TORCHRUN_NPROC_PER_NODE to match the number of GPUs per node.
+      # Multi-node rendezvous: set TORCHRUN_RDZV_ENDPOINT (host:port reachable
+      # from all nodes) and TORCHRUN_RDZV_ID; when HOSTFILE is set the first
+      # line is used as the rendezvous host.
+      local nproc="${TORCHRUN_NPROC_PER_NODE:-1}"
+      local nnodes=$(( (n + nproc - 1) / nproc ))
+      local rdzv_endpoint="${TORCHRUN_RDZV_ENDPOINT:-}"
+      if [[ -z "$rdzv_endpoint" && -n "$HOSTFILE" ]]; then
+        local _head_node
+        _head_node=$(head -n1 "$HOSTFILE")
+        rdzv_endpoint="${_head_node}:29400"
+      fi
+      rdzv_endpoint="${rdzv_endpoint:-localhost:29400}"
+      local rdzv_id="${TORCHRUN_RDZV_ID:-rocshmem-$$}"
+      _blc_out=( "${_env[@]}" "$launcher"
+                 --nproc-per-node "$nproc"
+                 --nnodes "$nnodes"
+                 --rdzv-backend c10d
+                 --rdzv-endpoint "$rdzv_endpoint"
+                 --rdzv-id "$rdzv_id"
+               )
+      ;;
+    *)
+      _blc_out=( "${_env[@]}" "$launcher" -n "$n" ${HOSTFILE:+--hostfile "$HOSTFILE"} )
+      ;;
+  esac
+}
+
 ExecTest() {
   TEST_NAME=$1
   NUM_RANKS=$2
@@ -189,34 +341,12 @@ ExecTest() {
     ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
   fi
 
-  # MPI Parameters
-  LAUNCHER=mpirun
-
-  if [[ "" != "$ROCSHMEM_TEST_USE_DEFAULT_STREAM" ]]
-  then
-    OPTIONS+=" -x ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"
-  fi
-
-  if [[ "" != "$HOSTFILE" ]]
-  then
-    OPTIONS+=" --hostfile $HOSTFILE"
-  fi
-
-  # Build command as an array to avoid command injection with eval
+  # Detect launcher, resolve its family, and build the command array.
+  local LAUNCHER_BIN LAUNCHER_FAMILY
+  LAUNCHER_BIN=$(detect_launcher)
+  LAUNCHER_FAMILY=$(launcher_family "$LAUNCHER_BIN")
   local -a cmd
-  cmd=( "$LAUNCHER"
-        -n "$NUM_RANKS"
-        -mca pml "${OMPI_MCA_pml:-ucx}"
-        -mca osc "${OMPI_MCA_osc:-ucx}"
-        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
-        -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-        -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
-        ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
-        ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
-        ${TIMEOUT:+--timeout "$TIMEOUT"}
-        ${HOSTFILE:+--hostfile "$HOSTFILE"}
-        --map-by numa
-      )
+  build_launcher_cmd "$LAUNCHER_BIN" "$NUM_RANKS" cmd
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
   cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} )
@@ -230,8 +360,9 @@ ExecTest() {
     fi
     TEST_LOG_NAME+=_"$MAX_MSG_SIZE"B
   fi
-  # Create a human-readable representation of the command for logging purposes
-  CMD="${cmd[@]}"
+  # Create a shell-quoted representation of the full command for the log header,
+  # including the env VAR=val prefix so the logged line is copy-pasteable.
+  CMD="$(printf '%q ' "${cmd[@]}")"
 
   # Determine log file name based on whether this is a retry
   if [ $IS_RETRY -eq 1 ]; then
@@ -245,7 +376,36 @@ ExecTest() {
   # Run Test
   if [ $NUM_GPUS -ge $NUM_RANKS ] || [[ "" != "$HOSTFILE" ]]; then
     echo "# $CMD >> $LOG_FILE" >"$LOG_FILE"
-    "${cmd[@]}" >>"$LOG_FILE" 2>&1
+    if [[ "$LAUNCHER_FAMILY" == "torch" && -n "$HOSTFILE" ]]; then
+      # torchrun does not SSH to remote hosts itself.  Launch one torchrun
+      # process per host in parallel then wait for all of them.
+      # Requirements: torchrun and the test binary must be in PATH on each host;
+      # the rendezvous port (default 29400) must be open between nodes.
+      # Pre-quote the full command once for use in both branches below.
+      local _cmd_str
+      _cmd_str="$(printf '%q ' "${cmd[@]}")"
+      if command -v pdsh &>/dev/null; then
+        # pdsh fans out to all hosts in parallel; ^FILE reads one host per line.
+        # -N suppresses the per-line hostname prefix so the log is clean.
+        pdsh -N -w ^"$HOSTFILE" bash -c "$_cmd_str" >>"$LOG_FILE" 2>&1
+      else
+        # Fallback: background SSH per host; collect worst exit code.
+        local -a _pids=()
+        local _host _ssh_rc=0
+        while IFS= read -r _host; do
+          [[ -z "$_host" ]] && continue
+          ssh "$_host" "$_cmd_str" >>"$LOG_FILE" 2>&1 &
+          _pids+=($!)
+        done < "$HOSTFILE"
+        for _pid in "${_pids[@]}"; do
+          wait "$_pid" || _ssh_rc=$?
+        done
+        # Propagate worst exit code to $? for the check below.
+        (( _ssh_rc == 0 ))
+      fi
+    else
+      "${cmd[@]}" >>"$LOG_FILE" 2>&1
+    fi
   else
     echo "Skip:   $TEST_LOG_NAME ($NUM_RANKS greater than $NUM_GPUS)"
   fi

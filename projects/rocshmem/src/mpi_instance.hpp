@@ -97,6 +97,15 @@ extern struct mpilib_funcs_t mpilib_ftable_;
 class MPIInstance {
   public:
     /**
+     * @brief Return value for mpilib_dl_init() when libmpi.so loaded successfully
+     *        but is not Open MPI ABI (e.g. MPICH, Intel MPI).
+     *        Internal to the library — not part of the public API.
+     *        Backends that require Open MPI will return ROCSHMEM_ERROR from
+     *        backend_can_run(); backends that do not (IPC, GDA) can continue.
+     */
+    static constexpr int MPILIB_INCOMPATIBLE = 2;
+
+    /**
      * @brief Primary constructor
      */
     MPIInstance(MPI_Comm comm);
