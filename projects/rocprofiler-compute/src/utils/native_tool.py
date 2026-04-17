@@ -9,9 +9,19 @@ from utils.utils_common import capture_subprocess_output
 
 
 class NativeTool:
+    sources_dir_name = "lib"
+    sources_build_subdir_name = "_build"
+    sources_bin_subdir_name = "bin"
+    lib_name = "librocprofiler-compute-tool.so"
+    lib_relative_path = (
+        sources_dir_name
+        + sources_build_subdir_name
+        + sources_bin_subdir_name
+        + lib_name
+    )
+
     def __init__(self) -> None:
-        self.build_dir_name = "_build"
-        self.native_collector_name = "librocprofiler-compute-tool.so"
+        pass
 
     def get_collector_library_path(
         self, compute_script_path: Path, rocprofiler_sdk_tool_path: Path
@@ -70,7 +80,7 @@ class NativeTool:
         self, rocprofiler_sdk_tool_path: Path
     ) -> Path | None:
         rocm_root_path = self.__get_installed_rocm_root_path(rocprofiler_sdk_tool_path)
-        pattern = f"lib*/rocprofiler-compute/{self.native_collector_name}"
+        pattern = f"lib*/rocprofiler-compute/{self.lib_name}"
         console_debug(f"Searching {rocm_root_path} by {pattern} for native collector")
         return self.__find_file_by_glob_pattern(rocm_root_path, pattern)
 
@@ -85,7 +95,7 @@ class NativeTool:
 
     def __find_built_collector(self, compute_script_path: Path) -> Path | None:
         source_root = self.__get_source_root(compute_script_path)
-        pattern = f"lib/{self.build_dir_name}/bin/{self.native_collector_name}"
+        pattern = self.lib_relative_path
         console_debug(f"Searching {source_root} by {pattern} for native collector")
         return self.__find_file_by_glob_pattern(source_root, pattern)
 
