@@ -158,6 +158,7 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAg
       .cachedWptr = cachedWptr_,
       .committedWptr = committedWptr_,
       .cachedHwReadIndex = (uint64_t)*(queue_.Queue_read_ptr_aql),
+      .maxWritePtr = (uint64_t)*(queue_.Queue_write_ptr_aql),
   };
 
   ANVIL_CHECK_HIP_ERROR(
