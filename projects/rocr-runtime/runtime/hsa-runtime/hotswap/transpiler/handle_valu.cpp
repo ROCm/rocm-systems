@@ -1127,6 +1127,134 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // v_cvt_pkrtz_f16_f32: pack two f32 into <2 x f16> with round-to-zero.
+  // Maps directly onto the dedicated hardware intrinsic so the backend
+  // keeps the RTZ rounding mode (a plain FPTrunc uses round-to-nearest).
+  if (sop == SemOp::V_CVT_PKRTZ_F16_F32) {
+    Value *s0 = op.srcF(0), *s1 = op.srcF(1);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    Function *fn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_cvt_pkrtz);
+    Value *v2h = ctx.B.CreateCall(fn, {s0, s1}, "pkrtz");
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(v2h, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  // v_cvt_pk_f16_f32: pack two f32 into <2 x f16> with round-to-nearest-even
+  // (the default IEEE rounding). No dedicated intrinsic exists; a pair of
+  // FPTrunc operations followed by a packed i32 assembly is the canonical
+  // lowering and the backend recognises the pattern.
+  if (sop == SemOp::V_CVT_PK_F16_F32) {
+    Value *s0 = op.srcF(0), *s1 = op.srcF(1);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    Type *halfTy = Type::getHalfTy(ctx.C);
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *h0 = ctx.B.CreateFPTrunc(s0, halfTy, "pk_h0");
+    Value *h1 = ctx.B.CreateFPTrunc(s1, halfTy, "pk_h1");
+    Value *b0 = ctx.B.CreateZExt(ctx.B.CreateBitCast(h0, i16Ty), ctx.i32Ty);
+    Value *b1 = ctx.B.CreateZExt(ctx.B.CreateBitCast(h1, i16Ty), ctx.i32Ty);
+    ctx.writeReg32(op.dst(),
+        ctx.B.CreateOr(b0, ctx.B.CreateShl(b1, 16), "pk_f16"));
+    hr.handled = true;
+    return hr;
+  }
+  // v_cvt_scalef32_pk_fp4_f32 vdst, src0_f32, src1_f32, scale_f32 op_sel:[..]
+  //
+  // Converts two f32 sources to FP4 and packs them into one of the four 8-bit
+  // slots of vdst (selected by op_sel bits 0..3), using a scalar f32 scale.
+  // The remaining slots of the old vdst value are preserved — this is
+  // captured by the intrinsic's tied `old_vdst` argument.
+  if (sop == SemOp::V_CVT_SCALEF32_PK_FP4_F32) {
+    Value *s0 = op.srcF(0), *s1 = op.srcF(1), *scale = op.srcF(2);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    if (scale->getType() != ctx.f32Ty)
+      scale = ctx.B.CreateBitCast(scale, ctx.f32Ty);
+    // Extract the destination nibble index from op_sel. LLVM disasm prints
+    // op_sel:[0,0,0,0] with the 4th entry being the slot selector.
+    int opSel[4] = {0, 0, 0, 0};
+    StringRef text(di.fullText);
+    auto pos = text.find("op_sel:");
+    if (pos != StringRef::npos) {
+      auto brk = text.find('[', pos);
+      auto end = text.find(']', brk);
+      if (brk != StringRef::npos && end != StringRef::npos) {
+        StringRef inner = text.slice(brk + 1, end);
+        SmallVector<StringRef, 4> parts;
+        inner.split(parts, ',');
+        for (unsigned i = 0; i < parts.size() && i < 4; i++) {
+          int val = 0;
+          if (!parts[i].trim().getAsInteger(10, val))
+            opSel[i] = val;
+        }
+      }
+    }
+    // Dest-slot index is packed as bits[3:2]+bit[0] per the HW op_sel
+    // layout (see LLVM's SIInstrInfo::lowerScaleCvt for reference); for the
+    // common `op_sel:[0,0,0,0]` form the selector is simply 0.
+    unsigned dstSel = (unsigned)opSel[3];
+    Value *oldVdst = ctx.regs.readReg32(ctx.B, op.dst());
+    Function *fn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_cvt_scalef32_pk_fp4_f32);
+    Value *r = ctx.B.CreateCall(
+        fn, {oldVdst, s0, s1, scale, ConstantInt::get(ctx.i32Ty, dstSel)},
+        "scalef32_pk_fp4");
+    ctx.writeReg32(op.dst(), r);
+    hr.handled = true;
+    return hr;
+  }
+  // v_mov_b64 vdst:64, src:64
+  if (sop == SemOp::V_MOV_B64) {
+    ctx.writeReg64(op.dst(), op.src64(0));
+    hr.handled = true;
+    return hr;
+  }
+  // v_swap_b32 vdstA, vdstB / uses vdstA, vdstB - exchange two VGPRs.
+  // MC encoding has two defs (vdst, vdst_in) and two uses (src0, src0_in).
+  // The old values of both registers swap: src0 -> vdst and old-vdst ->
+  // vdst_in.
+  if (sop == SemOp::V_SWAP_B32) {
+    // vdst = old src0; vdst_in(== src0's slot) = old vdst.
+    ParsedReg dstA = op.dst(0);
+    ParsedReg dstB = (di.numDefs >= 2) ? op.dst(1) : op.srcReg(0);
+    Value *vA = ctx.regs.readReg32(ctx.B, dstA);
+    Value *vB = ctx.regs.readReg32(ctx.B, dstB);
+    ctx.writeReg32(dstA, vB);
+    ctx.writeReg32(dstB, vA);
+    hr.handled = true;
+    return hr;
+  }
+  // v_cvt_f32_bf16: low 16 bits of src are interpreted as bfloat16.
+  if (sop == SemOp::V_CVT_F32_BF16) {
+    Type *bfTy = Type::getBFloatTy(ctx.C);
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Value *bits = ctx.B.CreateTrunc(op.src(0), i16Ty);
+    Value *bf = ctx.B.CreateBitCast(bits, bfTy);
+    Value *f = ctx.B.CreateFPExt(bf, ctx.f32Ty, "cvt_bf16");
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(f, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  // v_bfm_b32: D = ((1 << src0[4:0]) - 1) << src1[4:0]
+  if (sop == SemOp::V_BFM_B32) {
+    Value *width  = ctx.B.CreateAnd(op.src(0),
+        ConstantInt::get(ctx.i32Ty, 0x1F));
+    Value *offset = ctx.B.CreateAnd(op.src(1),
+        ConstantInt::get(ctx.i32Ty, 0x1F));
+    Value *ones   = ctx.B.CreateSub(
+        ctx.B.CreateShl(ConstantInt::get(ctx.i32Ty, 1), width),
+        ConstantInt::get(ctx.i32Ty, 1));
+    // width==0 must yield 0 — the 1<<0 base case would otherwise leave a
+    // single bit set. Mask it out explicitly rather than relying on the
+    // subtraction underflow.
+    Value *isZero = ctx.B.CreateICmpEQ(width, ConstantInt::get(ctx.i32Ty, 0));
+    ones = ctx.B.CreateSelect(isZero, ConstantInt::get(ctx.i32Ty, 0), ones);
+    ctx.writeReg32(op.dst(), ctx.B.CreateShl(ones, offset, "bfm"));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_CVT_PK_BF16_F32) {
     Value *s0 = op.srcF(0), *s1 = op.srcF(1);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);

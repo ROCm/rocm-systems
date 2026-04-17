@@ -95,6 +95,30 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // gfx950 ds_read_b64_tr_b8: 64 bits of 8-bit data laid out 8x8 inside the
+  // wave, then transposed across lanes. Use the LLVM intrinsic (v2i32) so
+  // the backend selects the native instruction on gfx950 and emulates it
+  // elsewhere.
+  if (sop == SemOp::DS_READ_B64_TR_B8) {
+    Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");
+    for (unsigned k = 1; k < op.nSrcs(); k++) {
+      if (di.isImm(op.srcIdx(k))) {
+        int64_t imm = di.getImm(op.srcIdx(k));
+        if (imm != 0)
+          addr = ctx.B.CreateAdd(addr, ConstantInt::get(ctx.i64Ty, imm), "ds_off");
+        break;
+      }
+    }
+    auto *ldsPtrTy = PointerType::get(ctx.C, 3);
+    Value *ptr = ctx.B.CreateIntToPtr(addr, ldsPtrTy, "tr8_ptr");
+    auto *v2i32Ty = FixedVectorType::get(ctx.i32Ty, 2);
+    Function *trFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_read_tr8_b64, {v2i32Ty});
+    Value *trResult = ctx.B.CreateCall(trFn, {ptr}, "tr8_ld");
+    ctx.writeRegVec(op.dst(), trResult);
+    hr.handled = true;
+    return hr;
+  }
 
   if (sop == SemOp::DS_LOAD_TR16_B128) {
     Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");

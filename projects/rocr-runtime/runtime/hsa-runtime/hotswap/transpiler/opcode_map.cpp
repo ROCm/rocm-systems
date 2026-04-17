@@ -116,6 +116,9 @@ static const Entry kCanonTable[] = {
     SMEM3(S_LOAD_DWORDX3,  S_LOAD_B96),
     SMEM3(S_LOAD_DWORDX4,  S_LOAD_B128),
     SMEM3(S_LOAD_DWORDX8,  S_LOAD_B256),
+    SMEM3(S_STORE_DWORD,   S_STORE_B32),
+    SMEM3(S_STORE_DWORDX2, S_STORE_B64),
+    SMEM3(S_STORE_DWORDX4, S_STORE_B128),
 
     // ---------------------------------------------------------------------
     // SOPC
@@ -217,6 +220,9 @@ static const Entry kCanonTable[] = {
     // VOP1 (canonical form is `_e64` after getVOPe64 collapses e32)
     // ---------------------------------------------------------------------
     E(V_MOV_B32_e64, V_MOV_B32),
+    E(V_MOV_B64_e64, V_MOV_B64),
+    E(V_MOV_B64_PSEUDO, V_MOV_B64),
+    E(V_SWAP_B32, V_SWAP_B32),
     E(V_NOP_e64, V_NOP),
     E(V_NOT_B32_e64, V_NOT_B32),
     E(V_BFREV_B32_e64, V_BFREV_B32),
@@ -226,6 +232,8 @@ static const Entry kCanonTable[] = {
     E(V_CVT_U32_F32_e64, V_CVT_U32_F32),
     E(V_CVT_F16_F32_e64, V_CVT_F16_F32),
     E(V_CVT_F32_F16_e64, V_CVT_F32_F16),
+    E(V_CVT_F32_BF16_e64, V_CVT_F32_BF16),
+    E(V_CVT_PK_F32_FP8_e64, V_CVT_PK_F32_FP8),
     E(V_CVT_F32_UBYTE0_e64, V_CVT_F32_UBYTE0),
     E(V_CVT_F32_UBYTE1_e64, V_CVT_F32_UBYTE1),
     E(V_CVT_F32_UBYTE2_e64, V_CVT_F32_UBYTE2),
@@ -345,6 +353,10 @@ static const Entry kCanonTable[] = {
     E(V_CVT_PK_BF16_F32_e64, V_CVT_PK_BF16_F32),
     E(V_CVT_PK_BF8_F32_e64, V_CVT_PK_BF8_F32),
     E(V_CVT_PK_FP8_F32_e64, V_CVT_PK_FP8_F32),
+    E(V_CVT_PKRTZ_F16_F32_e64, V_CVT_PKRTZ_F16_F32),
+    E(V_CVT_PK_F16_F32_e64, V_CVT_PK_F16_F32),
+    E(V_CVT_SCALEF32_PK_FP4_F32_e64, V_CVT_SCALEF32_PK_FP4_F32),
+    E(V_BFM_B32_e64, V_BFM_B32),
 
     // ---------------------------------------------------------------------
     // FP64
@@ -463,6 +475,7 @@ static const Entry kCanonTable[] = {
     // ---------------------------------------------------------------------
     E(DS_LOAD_TR16_B128, DS_LOAD_TR16_B128),
     E(DS_READ_B64_TR_B16, DS_READ_B64_TR_B16),
+    E(DS_READ_B64_TR_B8, DS_READ_B64_TR_B8),
     E(DS_READ_B32, DS_READ_B32), E(DS_READ_B64, DS_READ_B64),
     E(DS_READ_B128, DS_READ_B128),
     E(DS_READ2_B32, DS_READ2_B32), E(DS_READ2_B64, DS_READ2_B64),
