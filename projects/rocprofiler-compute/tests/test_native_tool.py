@@ -31,6 +31,26 @@ class TestNativeTool:
         )
         assert lib_path == sources_lib_path
 
+    def test_when_incorrect_compute_path_provided__asserts(
+        self, installed_rocprofv3_path: Path
+    ):
+        lib_path = None
+        with pytest.raises(AssertionError):
+            lib_path = NativeTool().get_collector_library_path(
+                Path("incorrect_compute_path"), installed_rocprofv3_path
+            )
+        assert lib_path == None
+
+    def test_when_incorrect_rocprofv3_path_provided__asserts(
+        self, installed_compute_path: Path
+    ):
+        lib_path = None
+        with pytest.raises(AssertionError):
+            lib_path = NativeTool().get_collector_library_path(
+                installed_compute_path, Path("incorrect_rocprofv3_path")
+            )
+        assert lib_path == None
+
     @pytest.fixture
     def rocm_path(self, tmp_path: Path) -> Path:
         rocm_path = tmp_path / "opt" / "rocm"
