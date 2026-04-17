@@ -5,7 +5,11 @@ part of the transpiler's `ctest` suite — they exercise a live
 Salmon-enabled `libhsa-runtime64.so` from the outside and exist to answer
 questions that can only be answered at runtime.
 
-Everything here is built separately from the main CMake project.
+Everything here is built separately from the main CMake project with
+hand-written Makefiles, deliberately: these tools link against an
+already-built `libhsa-runtime64.so` from `$ROCR_BUILD` and have no LLVM
+dependency, so they do not need — and should not pull in — the main
+project's LLVM-build-tree configuration.
 
 ## At a glance
 
