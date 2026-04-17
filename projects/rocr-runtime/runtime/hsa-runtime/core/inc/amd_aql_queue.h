@@ -388,6 +388,14 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Quit flag for async interceptor handler.
   std::atomic<bool> intercept_quit_{false};
 
+  /// @brief Reserve K * `value` ring slots for an app add_write_index while
+  /// intercept is active. Initialises the gap slots at
+  /// [start + value, start + K * value) to an INVALID header so that scans
+  /// break cleanly at the end of each app batch and the intercept path
+  /// writes its wrap output into the reserved region without colliding
+  /// with concurrent app writes.
+  uint64_t InterceptReserveSlots(uint64_t value, std::memory_order order);
+
   /// @brief Process intercepted packets from the ring buffer.
   void ProcessInterceptedPackets(hsa_signal_value_t value);
 

@@ -76,6 +76,19 @@
 namespace rocr {
 namespace AMD {
 
+namespace {
+// Forward-declared constants used by both the intercept submit path and the
+// WriteIndex reservation helpers; full definitions are in the anonymous
+// namespace further down in this file.
+static const uint16_t kInvalidHeader =
+    (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE) |
+    (1 << HSA_PACKET_HEADER_BARRIER) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+constexpr uint64_t kInterceptReserveFactor = 8;
+}  // namespace
+
+
 #define SCRATCH_ALT_RATIO 4
 
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
@@ -106,8 +119,15 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   const uint32_t min_pkts = ComputeRingBufferMinPkts();
   const uint32_t max_pkts = ComputeRingBufferMaxPkts();
 
-  // Apply sizing constraints to the ring buffer.
-  uint32_t queue_size_pkts = uint32_t(req_size_pkts);
+  // Apply sizing constraints to the ring buffer. Pre-inflate the requested
+  // size by kInterceptReserveFactor so that once intercept attaches and
+  // AddWriteIndex* over-reserves K slots per app packet, the effective
+  // backpressure threshold (sw_queue_size = queue.size - 1 in HIP and other
+  // callers) still corresponds to the same number of app kernels as it did
+  // without intercept. Without this inflation, HIP's yield loop at
+  // rocvirtual.cpp:1184 triggers K× sooner and makes high-dispatch-count
+  // workloads timeout.
+  uint32_t queue_size_pkts = uint32_t(req_size_pkts) * kInterceptReserveFactor;
   queue_size_pkts = Min(queue_size_pkts, max_pkts);
   queue_size_pkts = Max(queue_size_pkts, min_pkts);
 
@@ -495,51 +515,88 @@ uint64_t AqlQueue::CasWriteIndexRelease(uint64_t expected, uint64_t value) {
   return ret;
 }
 
+uint64_t AqlQueue::InterceptReserveSlots(uint64_t value,
+                                         std::memory_order order) {
+  // Reserve K*value slots so the app's N packets land at [start, start+value)
+  // and [start+value, start+K*value) are INVALID-header gap slots that the
+  // intercept submit owns. The gap headers are initialised BEFORE the
+  // write_dispatch_id update so any concurrent observer (handler scan, GPU)
+  // sees INVALID at those positions and won't treat them as app packets.
+  // A CAS loop (instead of fetch_add) is required so the memset of gap
+  // headers is published by the same release that reveals the new WDID.
+  core::AqlPacket* ring = reinterpret_cast<core::AqlPacket*>(ring_buf_);
+  const uint64_t mask = amd_queue_.hsa_queue.size - 1;
+  const uint64_t reserved = value * kInterceptReserveFactor;
+  uint64_t cur = atomic::Load(&amd_queue_.write_dispatch_id,
+                              std::memory_order_relaxed);
+  while (true) {
+    // Initialise the gap slots (start+value..start+reserved) as INVALID.
+    for (uint64_t pos = cur + value; pos < cur + reserved; ++pos) {
+      atomic::Store(&ring[pos & mask].packet.header, kInvalidHeader,
+                    std::memory_order_relaxed);
+    }
+    // Release publishes both the memset and the WDID advance atomically.
+    uint64_t observed = atomic::Cas(&amd_queue_.write_dispatch_id,
+                                    cur + reserved, cur,
+                                    std::memory_order_acq_rel);
+    if (observed == cur) return cur;
+    // Another claim landed first; retry from its new WDID. Any gap slots
+    // we memsetted in the losing range are benign — the winner's reservation
+    // also wants them INVALID.
+    cur = observed;
+  }
+  (void)order;  // release is conveyed via the CAS's memory_order_acq_rel
+}
+
 uint64_t AqlQueue::AddWriteIndexAcqRel(uint64_t value) {
+  if (intercept_active_.load(std::memory_order_acquire)) {
+    return InterceptReserveSlots(value, std::memory_order_acq_rel);
+  }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
                               std::memory_order_acq_rel);
-  if (!intercept_active_.load(std::memory_order_relaxed)) {
-    atomic::Store(shadow_wptr_,
-                  atomic::Load(&amd_queue_.write_dispatch_id,
-                               std::memory_order_relaxed),
-                  std::memory_order_release);
-  }
+  atomic::Store(shadow_wptr_,
+                atomic::Load(&amd_queue_.write_dispatch_id,
+                             std::memory_order_relaxed),
+                std::memory_order_release);
   return prev;
 }
 
 uint64_t AqlQueue::AddWriteIndexAcquire(uint64_t value) {
+  if (intercept_active_.load(std::memory_order_acquire)) {
+    return InterceptReserveSlots(value, std::memory_order_acquire);
+  }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
                               std::memory_order_acquire);
-  if (!intercept_active_.load(std::memory_order_relaxed)) {
-    atomic::Store(shadow_wptr_,
-                  atomic::Load(&amd_queue_.write_dispatch_id,
-                               std::memory_order_relaxed),
-                  std::memory_order_relaxed);
-  }
+  atomic::Store(shadow_wptr_,
+                atomic::Load(&amd_queue_.write_dispatch_id,
+                             std::memory_order_relaxed),
+                std::memory_order_relaxed);
   return prev;
 }
 
 uint64_t AqlQueue::AddWriteIndexRelaxed(uint64_t value) {
+  if (intercept_active_.load(std::memory_order_acquire)) {
+    return InterceptReserveSlots(value, std::memory_order_relaxed);
+  }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
                               std::memory_order_relaxed);
-  if (!intercept_active_.load(std::memory_order_relaxed)) {
-    atomic::Store(shadow_wptr_,
-                  atomic::Load(&amd_queue_.write_dispatch_id,
-                               std::memory_order_relaxed),
-                  std::memory_order_relaxed);
-  }
+  atomic::Store(shadow_wptr_,
+                atomic::Load(&amd_queue_.write_dispatch_id,
+                             std::memory_order_relaxed),
+                std::memory_order_relaxed);
   return prev;
 }
 
 uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
+  if (intercept_active_.load(std::memory_order_acquire)) {
+    return InterceptReserveSlots(value, std::memory_order_release);
+  }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
                               std::memory_order_release);
-  if (!intercept_active_.load(std::memory_order_relaxed)) {
-    atomic::Store(shadow_wptr_,
-                  atomic::Load(&amd_queue_.write_dispatch_id,
-                               std::memory_order_relaxed),
-                  std::memory_order_release);
-  }
+  atomic::Store(shadow_wptr_,
+                atomic::Load(&amd_queue_.write_dispatch_id,
+                             std::memory_order_relaxed),
+                std::memory_order_release);
   return prev;
 }
 
@@ -581,12 +638,6 @@ struct InterceptFrame {
 
 static thread_local InterceptFrame intercept_cursor = {nullptr, 0, 0};
 
-static const uint16_t kInvalidHeader =
-    (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE) |
-    (1 << HSA_PACKET_HEADER_BARRIER) |
-    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
-
 static const uint16_t kBarrierHeader =
     (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
     (1 << HSA_PACKET_HEADER_BARRIER) |
@@ -594,6 +645,15 @@ static const uint16_t kBarrierHeader =
     (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
 static const hsa_signal_value_t kDoorbellMax = 0xFFFFFFFFFFFFFFFFull;
+
+// BARRIER_AND with no dep signals and no completion signal — fires instantly
+// on the GPU and leaves no CPU-visible side effect. Used to fill any slack
+// between a wrap's output count and its K*value reservation so GPU execution
+// never encounters an INVALID packet inside the intercept-submitted region.
+static const uint16_t kNopBarrierHeader =
+    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
 
 }  // namespace
 
@@ -833,7 +893,42 @@ void AqlQueue::ProcessInterceptedPackets(hsa_signal_value_t value) {
   }
 
   intercept_next_packet_ = i;
+
+  // After the callback chain, the intercept submit may have advanced
+  // shadow_wptr_ by fewer packets than the reservation granted to the app.
+  // Pad [shadow_wptr_, scan_start + K*packet_count) with BARRIER_AND NOPs so
+  // the GPU never executes an INVALID packet inside the reserved region, then
+  // advance shadow_wptr_ to the reservation end. This also keeps
+  // intercept_next_packet_ aligned with the app's next reservation start so
+  // the next scan doesn't re-read our own injected output.
+  if (packet_count > 0) {
+    uint64_t reservation_end = intercept_next_packet_ - packet_count +
+                               packet_count * kInterceptReserveFactor;
+    uint64_t sw = atomic::Load(shadow_wptr_, std::memory_order_acquire);
+    if (sw < reservation_end) {
+      for (uint64_t pos = sw; pos < reservation_end; ++pos) {
+        core::AqlPacket* slot = &ring[pos & mask];
+        memset(&slot->barrier_and, 0, sizeof(slot->barrier_and));
+        atomic::Store(&slot->packet.header, kNopBarrierHeader,
+                      std::memory_order_release);
+      }
+      if (IsDeviceMemRingBuf() && needsPcieOrdering()) _mm_sfence();
+      atomic::Store(shadow_wptr_, reservation_end, std::memory_order_release);
+      RingHwDoorbell(reservation_end - 1);
+    }
+    intercept_next_packet_ = reservation_end;
+  }
   intercept_cursor.queue = nullptr;
+
+  // Re-arm the async handler if the app has queued more packets than this
+  // invocation processed. HSA's async-handler framework coalesces doorbell
+  // stores, so multiple app add_write_index+doorbell sequences may collapse
+  // to a single handler fire; without this kick the tail of each batch
+  // would stall until an unrelated doorbell happens to wake us again.
+  if (LoadWriteIndexRelaxed() > intercept_next_packet_ && intercept_signal_) {
+    intercept_signal_->StoreRelaxed(
+        static_cast<hsa_signal_value_t>(intercept_next_packet_));
+  }
 }
 
 void AqlQueue::GetInfoProperties(uint8_t value[8]) const {
