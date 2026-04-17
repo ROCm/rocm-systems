@@ -3,14 +3,10 @@
 
 #pragma once
 
-#include "core/components/fwd.hpp"
 #include "core/state.hpp"
+#include <atomic>
 
-#include <cstdint>
-
-namespace rocprofsys
-{
-namespace pmc
+namespace rocprofsys::pmc
 {
 
 std::atomic<State>&
@@ -42,5 +38,4 @@ postfork_child_cleanup();
 void
 postfork_parent_reinit();
 
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc
