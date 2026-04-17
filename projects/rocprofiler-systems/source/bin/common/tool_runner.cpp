@@ -234,57 +234,43 @@ parse_command_fast_path(int argc, char** argv, parser_data_t& _data)
     }
 }
 
-std::optional<int>
-parse_args(int argc, char** argv, parser_data_t& _data,
-           const rocprofsys::common_utils::tool_config& _config, bool& _fork_exec)
+using parser_t     = argparse::argument_parser;
+using parser_err_t = typename parser_t::result_type;
+
+constexpr int HELP_PADDING   = 8;
+constexpr int MAX_DESC_WIDTH = 120;
+
+bool
+needs_full_parse(int argc, char** argv)
 {
-    using parser_t     = argparse::argument_parser;
-    using parser_err_t = typename parser_t::result_type;
-
-    auto help_check = [](parser_t& parser, int _argc, char** _argv) {
-        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
-        return (parser.exists("help") || _argc == 1 ||
-                (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
-    };
-
-    auto _tool_name  = _config.tool_name;
-    auto help_action = [&_tool_name](parser_t& parser) {
-        return rocprofsys::common_utils::dispatch_help(parser, _tool_name, EXIT_SUCCESS);
-    };
-
-    get_initial_environment(_data, _config);
-
-    bool _do_parse_args = false;
     for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
     {
-        auto _arg = std::string_view{ argv[arg_idx] };
-        if(_arg == "--" || _arg == "-?" || _arg == "-h" || _arg == "--help" ||
-           _arg == "--version" || _arg == "--export-config" ||
-           _arg.find("--export-config=") == 0 || _arg == "--list-presets" ||
-           _arg == "--explain" || _arg.find("--explain=") == 0)
+        auto arg = std::string_view{ argv[arg_idx] };
+        if(arg == "--" || arg == "-?" || arg == "-h" || arg == "--help" ||
+           arg == "--version" || arg == "--export-config" ||
+           arg.find("--export-config=") == 0 || arg == "--list-presets" ||
+           arg == "--explain" || arg.find("--explain=") == 0)
         {
-            _do_parse_args = true;
-            break;
+            return true;
         }
     }
+    return argc > 1 && std::string_view{ argv[1] }.find('-') == 0;
+}
 
-    if(!_do_parse_args && argc > 1 && std::string_view{ argv[1] }.find('-') == 0)
-        _do_parse_args = true;
+bool
+help_requested(const parser_t& parser, int argc, char** argv)
+{
+    static const std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
+    return parser.exists("help") || argc == 1 ||
+           (argc > 1 && help_args.find(argv[1]) != help_args.end());
+}
 
-    if(!_do_parse_args)
-    {
-        parse_command_fast_path(argc, argv, _data);
-        return std::nullopt;
-    }
-
-    toggle_suppression(pre_main_suppression_guard);
-    rocprofsys::argparse::init_parser(_data);
-
-    signals::disable_signal_detection(signals::signal_settings::get_enabled());
-
-    auto _desc  = build_description(_config);
-    auto parser = parser_t{ basename(argv[0]), _desc };
-
+void
+configure_parser(parser_t& parser, parser_data_t& _data,
+                 const rocprofsys::common_utils::tool_config& _config,
+                 rocprofsys::common_utils::domain_flag_state& domain_state,
+                 bool&                                        _fork_exec)
+{
     parser.on_error([](parser_t&, const parser_err_t& _err) {
         stream(std::cerr, color::fatal()) << _err << "\n";
         exit(EXIT_FAILURE);
@@ -294,10 +280,10 @@ parse_args(int argc, char** argv, parser_data_t& _data,
     parser.enable_version(std::string{ _config.version_name },
                           ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
-    auto _cols = std::get<0>(console::get_columns());
-    if(_cols > parser.get_help_width() + 8)
+    auto cols = std::get<0>(console::get_columns());
+    if(cols > parser.get_help_width() + HELP_PADDING)
         parser.set_description_width(
-            std::min<int>(_cols - parser.get_help_width() - 8, 120));
+            std::min<int>(cols - parser.get_help_width() - HELP_PADDING, MAX_DESC_WIDTH));
 
     _data.processed_groups.emplace("causal");
     if(!_config.show_sample_flag()) _data.processed_environs.emplace("sampling");
@@ -305,8 +291,6 @@ parse_args(int argc, char** argv, parser_data_t& _data,
 
     rocprofsys::argparse::add_core_arguments(parser, _data);
     rocprofsys::argparse::add_extended_arguments(parser, _data);
-
-    rocprofsys::common_utils::domain_flag_state domain_state;
 
     rocprofsys::common_utils::register_preset_and_domain_arguments(
         parser, _config.tool_name, domain_state,
@@ -323,21 +307,17 @@ parse_args(int argc, char** argv, parser_data_t& _data,
             .min_count(0)
             .max_count(1)
             .dtype("boolean")
-            .action([&](parser_t& parser) { _fork_exec = parser.get<bool>("fork"); });
+            .action([&_fork_exec](parser_t& parser_ref) {
+                _fork_exec = parser_ref.get<bool>("fork");
+            });
     }
+}
 
-    auto args = rocprofsys::common_utils::translate_arguments(
-        argc, argv, domain_state.registry, _config.deprecated_flags);
-    _data.command = std::move(args.command);
-
-    auto _cerr = parser.parse_args(args.argv_ptrs.size(), args.argv_ptrs.data());
-    if(help_check(parser, argc, argv)) return help_action(parser);
-    if(_cerr) throw std::runtime_error(_cerr.what());
-
-    if(domain_state.early_exit) return *domain_state.early_exit;
-
-    tim::log::monochrome() = _data.monochrome;
-
+std::optional<int>
+apply_post_parse(parser_t& parser, parser_data_t& _data,
+                 const rocprofsys::common_utils::tool_config& _config,
+                 rocprofsys::common_utils::domain_flag_state& domain_state)
+{
     if(_config.disable_cputime_on_realtime_only())
     {
         if(parser.exists("sample-realtime") && !parser.exists("sample-cputime"))
@@ -365,6 +345,43 @@ parse_args(int argc, char** argv, parser_data_t& _data,
         _data.verbose, domain_state.registry);
 
     return std::nullopt;
+}
+
+std::optional<int>
+parse_args(int argc, char** argv, parser_data_t& _data,
+           const rocprofsys::common_utils::tool_config& _config, bool& _fork_exec)
+{
+    get_initial_environment(_data, _config);
+
+    if(!needs_full_parse(argc, argv))
+    {
+        parse_command_fast_path(argc, argv, _data);
+        return std::nullopt;
+    }
+
+    toggle_suppression(pre_main_suppression_guard);
+    rocprofsys::argparse::init_parser(_data);
+    signals::disable_signal_detection(signals::signal_settings::get_enabled());
+
+    auto parser = parser_t{ basename(argv[0]), build_description(_config) };
+
+    rocprofsys::common_utils::domain_flag_state domain_state;
+    configure_parser(parser, _data, _config, domain_state, _fork_exec);
+
+    auto args = rocprofsys::common_utils::translate_arguments(
+        argc, argv, domain_state.registry, _config.deprecated_flags);
+    _data.command = std::move(args.command);
+
+    auto parse_err = parser.parse_args(args.argv_ptrs.size(), args.argv_ptrs.data());
+    if(help_requested(parser, argc, argv))
+        return rocprofsys::common_utils::dispatch_help(parser, _config.tool_name,
+                                                       EXIT_SUCCESS);
+    if(parse_err) throw std::runtime_error(parse_err.what());
+    if(domain_state.early_exit) return domain_state.early_exit;
+
+    tim::log::monochrome() = _data.monochrome;
+
+    return apply_post_parse(parser, _data, _config, domain_state);
 }
 }  // namespace
 
