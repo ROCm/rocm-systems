@@ -29,7 +29,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -178,7 +177,8 @@ prepare_command(char* _exe, parser_data_t& _data)
     auto _new_argv = std::vector<char*>{};
     for(auto* itr : _data.command)
     {
-        if(!_injected && std::regex_search(itr, std::regex{ _data.launcher }))
+        if(!_injected &&
+           std::string_view{ itr }.find(_data.launcher) != std::string_view::npos)
         {
             _new_argv.emplace_back(_exe);
             _new_argv.emplace_back(strdup("--"));
