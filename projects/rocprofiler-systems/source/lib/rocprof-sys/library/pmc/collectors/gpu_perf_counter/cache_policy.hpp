@@ -3,10 +3,11 @@
 
 #pragma once
 
+#include "core/agent.hpp"
 #include "core/categories.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
-#include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
@@ -43,10 +45,40 @@ struct cache_policy
     /**
      * @brief Initialize track metadata for SDK PMC counters.
      *
-     * Tracks are registered per-device in initialize_pmc_metadata() because
-     * track names include the device index.
+     * Static tracks cannot be registered here because track names include the
+     * device index and counter name. Per-device tracks are registered via
+     * initialize_device_tracks().
      */
     static void initialize_tracks_metadata() {}
+
+    /**
+     * @brief Format a track name for an SDK PMC counter on a given device.
+     */
+    static std::string format_track_name(size_t gpu_id, const std::string& qname)
+    {
+        return fmt::format("GPU [{}] {} (S)", gpu_id, qname);
+    }
+
+    /**
+     * @brief Register per-device tracks for SDK PMC counters.
+     *
+     * Called once per device during config(). Registers a track per qualified
+     * counter name, mirroring the gpu collector's track registration pattern.
+     *
+     * @param gpu_id GPU device identifier.
+     * @param qualified_names Ordered list of qualified counter names from the device.
+     */
+    static void initialize_device_tracks(size_t                          gpu_id,
+                                         const std::vector<std::string>& qualified_names)
+    {
+        auto& registry = trace_cache::get_metadata_registry();
+
+        for(const auto& qname : qualified_names)
+        {
+            auto track_name = format_track_name(gpu_id, qname);
+            registry.add_track({ track_name, std::nullopt, "{}" });
+        }
+    }
 
     using counter_metadata = device_providers::rocprofiler_sdk::counter_metadata;
 
@@ -78,13 +110,13 @@ struct cache_policy
 
         for(const auto& qname : qualified_names)
         {
-            auto track_name = fmt::format("GPU [{}] {} (S)", gpu_id, qname);
-
             // Find matching counter metadata by base name prefix
             auto base_name = std::string_view{ qname };
             auto bracket   = base_name.find('[');
             if(bracket != std::string_view::npos)
+            {
                 base_name = base_name.substr(0, bracket);
+            }
 
             auto meta_it = std::find_if(
                 counter_meta.begin(), counter_meta.end(),
@@ -105,15 +137,13 @@ struct cache_policy
                 is_derived  = meta_it->is_derived ? 1 : 0;
             }
 
-            registry.add_pmc_info(
-                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  qname.c_str(), qname.c_str(), description.c_str(), LONG_DESCRIPTION,
-                  COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE, block.c_str(),
-                  expression.c_str(), is_constant, is_derived, "{}" });
+            registry.add_pmc_info({ agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE,
+                                    INSTANCE_ID, qname, qname, description,
+                                    LONG_DESCRIPTION, COMPONENT, "count",
+                                    rocprofsys::trace_cache::ABSOLUTE, block, expression,
+                                    is_constant, is_derived, "{}" });
 
-            registry.add_track({ track_name.c_str(), std::nullopt, "{}" });
-
-            name_entries.push_back({ qname, std::move(track_name) });
+            name_entries.push_back({ qname, format_track_name(gpu_id, qname) });
         }
 
         registry.set_gpu_perf_counter_counter_names(static_cast<uint32_t>(gpu_id),

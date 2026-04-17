@@ -62,6 +62,7 @@ struct gpu_perf_counter_traits
     /**
      * @brief Initialize PMC metadata for a specific device.
      *
+     * Registers per-device tracks and PMC info for each qualified counter.
      * Passes the device's qualified counter names (with dimension info) and
      * per-counter metadata (block, expression, is_constant, is_derived) to the
      * cache policy for pmc_info registration with real SDK counter properties.
@@ -69,6 +70,7 @@ struct gpu_perf_counter_traits
     template <typename Cache>
     static void init_pmc_metadata(const device_ptr_t& dev)
     {
+        Cache::initialize_device_tracks(dev->get_index(), dev->get_qualified_names());
         Cache::initialize_pmc_metadata(dev->get_index(), dev->get_qualified_names(),
                                        dev->get_counter_metadata());
     }
