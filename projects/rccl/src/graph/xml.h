@@ -19,7 +19,7 @@
 #define MAX_STR_LEN 255
 #define MAX_ATTR_COUNT 16
 #define MAX_SUBS 512	//Changed the value from 128 to 512 for CPX mode
-
+#define UALOE_GPU_FABRIC_UUID_LEN 16
 #define NODE_TYPE_NONE 0
 #define NODE_TYPE_OPEN 1
 #define NODE_TYPE_CLOSE 2
