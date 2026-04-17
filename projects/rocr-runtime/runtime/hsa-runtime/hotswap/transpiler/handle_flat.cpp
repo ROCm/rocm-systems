@@ -31,16 +31,51 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       sop == SemOp::GLOBAL_LOAD_SSHORT || sop == SemOp::GLOBAL_LOAD_UBYTE ||
       sop == SemOp::GLOBAL_LOAD_SBYTE) {
     ParsedReg dest = op.dst();
-    Value *addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
-    if (addr->getType() != ctx.ptrGlobalTy) addr = ctx.B.CreateIntToPtr(addr, ctx.ptrGlobalTy);
-    int64_t memOffset = 0;
-    for (unsigned k = 1; k < op.nSrcs(); k++)
-      if (di.isImm(op.srcIdx(k)) && di.getImm(op.srcIdx(k)) != 0)
-        memOffset = di.getImm(op.srcIdx(k));
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
-
     bool isByte = sop == SemOp::GLOBAL_LOAD_UBYTE || sop == SemOp::GLOBAL_LOAD_SBYTE;
     Type *loadTy = isByte ? ctx.i8Ty : Type::getInt16Ty(ctx.C);
+
+    // Two operand shapes share this handler:
+    //   plain form: vaddr(VGPR64), offset
+    //   SADDR form: vaddr(VGPR32), saddr(SGPR64), offset, [flags]
+    // The SADDR form can carry `scale_offset`, which multiplies the per-
+    // lane vaddr by the access element size. Without that flag the
+    // vaddr is already a byte offset. Missing this branch made every
+    // lane load from `saddr + 0 + imm_offset`, i.e. a broadcast instead
+    // of a gather, which is how `cvt_f32_bf16`'s `a[i]` fetch silently
+    // collapsed to `a[offset/elemBytes]` for every lane and handed the
+    // bf16→f32 conversion a single sampled value.
+    Value *addr = nullptr;
+    bool hasSaddr = false;
+    if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1)) {
+      ParsedReg r0 = op.srcReg(0);
+      ParsedReg r1 = op.srcReg(1);
+      // Match the dword-load handler's decoded order (src[0]=SGPR,
+      // src[1]=VGPR), not the assembler's written order.
+      if (r0.kind == ParsedReg::SGPR && r1.kind == ParsedReg::VGPR) {
+        hasSaddr = true;
+        Value *saddr = ctx.regs.readReg64(ctx.B, r0);
+        Value *vaddr = ctx.B.CreateSExt(ctx.regs.readReg32(ctx.B, r1),
+                                        ctx.i64Ty, "voff_sext");
+        if (di.fullText.find("scale_offset") != std::string::npos) {
+          int elemBytes = isByte ? 1 : 2;
+          vaddr = ctx.B.CreateMul(vaddr,
+                                  ConstantInt::get(ctx.i64Ty, elemBytes),
+                                  "scaled_voff");
+        }
+        addr = ctx.B.CreateAdd(saddr, vaddr, "saddr_vaddr");
+      }
+    }
+    if (!addr) addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+    if (addr->getType() != ctx.ptrGlobalTy) addr = ctx.B.CreateIntToPtr(addr, ctx.ptrGlobalTy);
+    int64_t memOffset = 0;
+    unsigned immStart = hasSaddr ? 2 : 1;
+    for (unsigned k = immStart; k < op.nSrcs(); k++) {
+      if (di.isImm(op.srcIdx(k))) {
+        memOffset = di.getImm(op.srcIdx(k));
+        break;
+      }
+    }
+    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
     Value *loaded = ctx.B.CreateLoad(loadTy, addr, "gload_sub");
     bool isUnsigned = sop == SemOp::GLOBAL_LOAD_UBYTE || sop == SemOp::GLOBAL_LOAD_USHORT;
     Value *ext = isUnsigned ? ctx.B.CreateZExt(loaded, ctx.i32Ty)
