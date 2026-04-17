@@ -2120,6 +2120,14 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  amd::smi::DevInfoTypes dev_type;
+  const auto& clk_type_it = kClkTypeMap.find(clk_type);
+  if (clk_type_it != kClkTypeMap.end()) {
+    dev_type = clk_type_it->second;
+  } else {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2131,16 +2139,46 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
+  // Deep sleep entry (index 0 in pp_dpm_sclk marked with 'S') is not a real
+  // DPM level; subtract it from the valid count so the bitmask only covers
+  // actual DPM levels.  Bitmask bit i maps to sysfs DPM level i, which
+  // corresponds to freqs.frequency[i] when has_deep_sleep is false, or
+  // freqs.frequency[i+1] when has_deep_sleep is true.
+  if (freqs.num_supported > 0) {
+    uint32_t max_levels = freqs.num_supported;
+    if (freqs.has_deep_sleep) {
+      max_levels--;
+    }
+    uint64_t valid_mask = (max_levels > 0) ? (1ULL << max_levels) - 1 : 0;
+    if (freq_bitmask == 0 || (freq_bitmask & ~valid_mask)) {
+      return RSMI_STATUS_INVALID_ARGS;
+    }
+  }
+
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
   // assert below is not true
   assert(dv_ind < smi.devices().size());
 
-  std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
-
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
+
+  // If the sysfs node is read-only, force DPM level is not supported
+  std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
+  bool read_only = false;
+  int ro_ret = amd::smi::isReadOnlyForAll(sysfs_path, &read_only);
+  if (ro_ret != 0) {
+    return amd::smi::ErrnoToRsmiStatus(ro_ret);
+  }
+  if (read_only) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  // bitfield_to_freq_string iterates [0, num_supported), but the validation
+  // above already guarantees no bits are set beyond the valid DPM range, so
+  // the extra iteration over the deep sleep index (if present) is harmless.
+  std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2148,24 +2186,12 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
   }
 
   rsmi_status_t status;
-  amd::smi::DevInfoTypes dev_type;
-
-  const auto& clk_type_it = kClkTypeMap.find(clk_type);
-  if (clk_type_it != kClkTypeMap.end()) {
-    dev_type = clk_type_it->second;
-  } else {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
   status = amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
 
-  // If an operation is not supported, the dev file, ie /sys/class/drm/card1/device/pp_dpm_pcie
-  // will have read-only perms, and the OS will deny access, before the request hits the driver
-  // level
   if (status == RSMI_STATUS_PERMISSION) {
-    bool read_only = false;
-    amd::smi::isReadOnlyForAll(dev->path(), &read_only);
-    if (read_only) {
+    bool post_read_only = false;
+    amd::smi::isReadOnlyForAll(sysfs_path, &post_read_only);
+    if (post_read_only) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
   }

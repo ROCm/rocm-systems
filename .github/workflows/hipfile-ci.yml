@@ -1,0 +1,105 @@
+name: hipfile-ci
+run-name: Main hipFile CI workflow to coordinate jobs for a single platform
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+      rocm_version:
+        description: "Target ROCm MAJOR.MINOR.PATCH Version"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+
+  AIS_CI_Pre-check:
+    outputs:
+      changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+    runs-on: [ubuntu-24.04]
+    steps:
+      - name: Fetching code repository...
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Git fetch base ref
+        working-directory: rocm-systems
+        run: git fetch origin "${GITHUB_BASE_REF}"
+      - name: Set CI Flags
+        working-directory: rocm-systems/projects/hipfile
+        id: ci-flags
+        run: |
+          echo "changed_dockerfile=$(./util/files-changed.sh "origin/${GITHUB_BASE_REF}" HEAD 'projects/hipfile/util/docker/DOCKERFILE.*')" >> "${GITHUB_OUTPUT}"
+
+  build_AIS_CI_image:
+    needs: AIS_CI_Pre-check
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/hipfile-image-build.yml
+    with:
+      dockerfile_changed: ${{ needs.AIS_CI_Pre-check.outputs.changed_dockerfile == '1' }}
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+
+  build_and_test:
+    # cancelled() needed. Otherwise success() implicitly added and fails if build_AIS_CI_image skipped.
+    if: ${{ !cancelled() && needs.build_AIS_CI_image.outputs.ci_image_build_satisfied == 'true' }}
+    needs: [AIS_CI_Pre-check, build_AIS_CI_image]
+    uses: ./.github/workflows/hipfile-build.yml
+    with:
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      cxx_compiler: amdclang++
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+      upload_artifacts: true
+
+  build_and_test_other_compilers:
+    # Try building on other compilers, but keep as separate job.
+    # Removes issues regarding matrix job overwriting outputs and
+    # does not propagate failures.
+    if: ${{ !cancelled() && needs.build_AIS_CI_image.outputs.ci_image_build_satisfied == 'true' }}
+    needs: [AIS_CI_Pre-check, build_AIS_CI_image]
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx_compiler:
+          - clang++
+          - g++
+    uses: ./.github/workflows/hipfile-build.yml
+    with:
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      cxx_compiler: ${{ matrix.cxx_compiler }}
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+
+  AIS_system_tests:
+    # cancelled() needed. Otherwise success() implicitly added and fails if the chained
+    # dependency build_AIS_CI_image is skipped.
+    if: ${{ !cancelled() && needs.build_and_test.result == 'success'}}
+    needs: [build_and_test]
+    uses: ./.github/workflows/hipfile-ci-system.yml
+    with:
+      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
+      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
+      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
+
+  build_and_test_NVIDIA:
+    if: ${{ !cancelled() && needs.build_AIS_CI_image.outputs.ci_image_build_satisfied == 'true' }}
+    needs: [AIS_CI_Pre-check, build_AIS_CI_image]
+    uses: ./.github/workflows/hipfile-build-nvidia.yml
+    with:
+      ci_image: ${{ needs.build_AIS_CI_image.outputs.ci_image }}
+      platform: ${{ inputs.platform }}
+      rocm_version: ${{ inputs.rocm_version }}
