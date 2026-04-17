@@ -33,7 +33,7 @@ Usage modes:
          rocgdb -batch -p <pid> -x rocgdb_deadlock_analysis.py
 
   2. Launch mode:
-       rocgdb -batch -x rocgdb_deadlock_analysis.py --args <exe> <args>
+       mpirun -n 2 -x ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1 rocgdb -batch -x rocgdb_deadlock_analysis.py -ex run --args <exe> <args>
 
   3. Interactive (already attached):
        (rocgdb) source rocgdb_deadlock_analysis.py

@@ -55,7 +55,7 @@ attach_deadlock_analysis.sh <executable_name> [--directory <dir>] [--cull[=p1,p2
 | Argument | Description |
 |---|---|
 | `executable_name` | Exact process name to search for |
-| `--directory <dir>` | Directory for per-process output files (default: `./rocshmem_deadlock_<timestamp>/`) |
+| `--directory <dir>` | Directory for per-process output files (default: `./rocshmem_deadlock_analysis_<timestamp>/`) |
 | `--cull` | Cull groups stuck in GPU barriers / gridsync using the built-in default pattern list |
 | `--cull=p1,p2,...` | Cull groups whose backtrace contains any of the comma-separated substrings |
 
@@ -90,7 +90,7 @@ Processes analyzed: 2 / 2
   PE 0     PID 12345   groups=?    (no GPU threads found)
   PE 1     PID 12346   groups=1    Waiting for remote PE memory update...
 
-Full output in: ./rocshmem_deadlock_20260416_143022/
+Full output in: ./rocshmem_deadlock_analysis_20260416_143022/
 ```
 
 - **groups** — number of distinct backtrace groups found in that process
@@ -149,14 +149,13 @@ Force colored output in the file:
 
 ### Mode 3: Launch mode
 
-Run the application under rocgdb from the start; analysis triggers on first stop:
-
+Run the application under rocgdb from the start; analysis triggers on first
+stop (e.g. `pkill --signal SIGINT my_rocshmem_app`), or when the program crashes:
 ```bash
-ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1 \
-    rocgdb -batch \
-        -x scripts/debug/rocgdb_deadlock_analysis.py \
-        --args ./my_rocshmem_app arg1 arg2
-```
+mpirun -n 2 -x ROCSHMEM_DEADLOCK_AUTO_ANALYZE=1 rocgdb -batch \
+    -x scripts/debug/rocgdb_deadlock_analysis.py \
+    -ex run \
+    --args ./my_rocshmem_app arg1 arg2
 
 ### GDB Command Reference
 
