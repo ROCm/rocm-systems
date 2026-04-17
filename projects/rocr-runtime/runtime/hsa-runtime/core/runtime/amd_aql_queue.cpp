@@ -902,20 +902,15 @@ void AqlQueue::ProcessInterceptedPackets(hsa_signal_value_t value) {
   // intercept_next_packet_ aligned with the app's next reservation start so
   // the next scan doesn't re-read our own injected output.
   if (packet_count > 0) {
+    // Advance intercept_next past the reservation's INVALID gap slots so the
+    // next scan picks up where the app's next AddWriteIndex will land.
+    // shadow_wptr_ intentionally stays at submit's end (not padded to
+    // reservation_end): the GPU only reads [read_dispatch_id, shadow_wptr_)
+    // and never encounters the gap. Letting shadow_wptr lag WDID avoids
+    // dispatching NOP barriers that would show up as scheduling bubbles in
+    // kernel-trace tests.
     uint64_t reservation_end = intercept_next_packet_ - packet_count +
                                packet_count * kInterceptReserveFactor;
-    uint64_t sw = atomic::Load(shadow_wptr_, std::memory_order_acquire);
-    if (sw < reservation_end) {
-      for (uint64_t pos = sw; pos < reservation_end; ++pos) {
-        core::AqlPacket* slot = &ring[pos & mask];
-        memset(&slot->barrier_and, 0, sizeof(slot->barrier_and));
-        atomic::Store(&slot->packet.header, kNopBarrierHeader,
-                      std::memory_order_release);
-      }
-      if (IsDeviceMemRingBuf() && needsPcieOrdering()) _mm_sfence();
-      atomic::Store(shadow_wptr_, reservation_end, std::memory_order_release);
-      RingHwDoorbell(reservation_end - 1);
-    }
     intercept_next_packet_ = reservation_end;
   }
   intercept_cursor.queue = nullptr;
