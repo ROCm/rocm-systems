@@ -38,6 +38,7 @@
 
 #include <hip/hip_runtime.h>
 #include <type_traits>
+#include <utility>
 
 namespace rocshmem {
 
@@ -93,13 +94,13 @@ __device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int
 
 // Atomics
 template <typename T, typename Op>
-__device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, Op op) {
+__device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, uint32_t qp_index,
+                                               [[maybe_unused]] const ActiveWFInfo& wf_info,
+                                               Op&& op) {
   static_assert(std::is_invocable_v<Op, T, T>, "Op must be invocable with arguments (T, T)");
   static_assert(std::is_same_v<T, std::invoke_result_t<Op, T, T>>, "Op must return T");
   static_assert(sizeof(T) == 8, "gda::internal_amo_fetch_op only implemented for 64-bit types");
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  ActiveWFInfo wf_info{pe};
-  uint32_t qp_index = get_qp_index(pe, wf_info);
 
   /**
    * Guess that the remote memory is zero by setting condition to zero.
@@ -111,8 +112,8 @@ __device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, Op op
   do {
     ActiveWFInfo loop_wf_info{pe};
     prior_val = fetch_val;
-    T desired_val = op(prior_val, value);
-    fetch_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, prior_val, loop_wf_info);
+    T desired = std::forward<Op>(op)(prior_val, value);
+    fetch_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired, prior_val, loop_wf_info);
   } while (fetch_val != prior_val);
   return fetch_val;
 }
@@ -138,7 +139,9 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   if constexpr (sizeof(T) == 8) {
-    return internal_amo_fetch_op(dst, value, pe,
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
                                  []([[maybe_unused]] T prior_val, T value) { return value; });
   } else {
     //TODO: support types other than uint64_t
@@ -149,7 +152,9 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   if constexpr (sizeof(T) == 8) {
-    return internal_amo_fetch_op(dst, value, pe,
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
                                  [](T prior_val, T value) { return prior_val & value; });
   } else {
     //TODO: support types other than uint64_t
@@ -165,7 +170,9 @@ __device__ void GDAContext::amo_and(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   if constexpr (sizeof(T) == 8) {
-    return internal_amo_fetch_op(dst, value, pe,
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
                                  [](T prior_val, T value) { return prior_val | value; });
   } else {
     //TODO: support types other than uint64_t
@@ -181,7 +188,9 @@ __device__ void GDAContext::amo_or(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   if constexpr (sizeof(T) == 8) {
-    return internal_amo_fetch_op(dst, value, pe,
+    ActiveWFInfo wf_info{pe};
+    uint32_t qp_index = get_qp_index(pe, wf_info);
+    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
                                  [](T prior_val, T value) { return prior_val ^ value; });
   } else {
     //TODO: support types other than uint64_t
@@ -918,21 +927,8 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe, int qp_in
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:internal_amo_swap only implemented for 64-bit types");
   }
-  /**
-   * Guess that the remote memory is zero by setting condition to zero.
-   * The compare-and-swap loop will execute at least twice if wrong.
-   * It may run additional times if contention on memory location.
-   */
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-  T prior_val = 0;
-  T fetch_val = 0;
-  do {
-    ActiveWFInfo loop_wf_info{pe};
-    prior_val = fetch_val;
-    T desired_val = value;
-    fetch_val = qps[qp_index].atomic_cas(base_heap[pe] + L_offset, desired_val, prior_val, loop_wf_info);
-  } while (fetch_val != prior_val);
-  return fetch_val;
+  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
+                               []([[maybe_unused]] T prior_val, T value) { return value; });
 }
 
 /******************************************************************************
