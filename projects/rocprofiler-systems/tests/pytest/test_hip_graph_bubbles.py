@@ -23,8 +23,8 @@ pytestmark = [
 # Must match RUN_ARGS in tests/rocprof-sys-hip-graph-bubbles-tests.cmake. If changed, update
 # tests/rocpd-validation-rules/hip-graph-bubbles/graph-bubbles-rules.json (kernel count = K * I,
 # graph_launch region count = I).
-_HIP_GRAPH_BUBBLES_NUM_KERNELS = "64"
-_HIP_GRAPH_BUBBLES_NUM_ITERATIONS = "6"
+_HIP_GRAPH_BUBBLES_NUM_KERNELS = "2000"
+_HIP_GRAPH_BUBBLES_NUM_ITERATIONS = "10"
 
 
 @pytest.fixture

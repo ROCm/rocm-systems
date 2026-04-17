@@ -63,7 +63,7 @@ rocprofiler_systems_add_test(
     NAME hip-graph-bubbles
     TARGET hip-graph-bubbles
     GPU ON
-    RUN_ARGS 64 6
+    RUN_ARGS 2000 10
     LABELS "hip-graph-bubbles"
     ENVIRONMENT "${_hip_graph_bubbles_environment}"
     SAMPLING_TIMEOUT 300

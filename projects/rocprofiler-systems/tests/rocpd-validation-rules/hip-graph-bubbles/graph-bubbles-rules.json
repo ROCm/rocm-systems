@@ -12,13 +12,13 @@
                 "queue",
                 "stream"
             ],
-            "min_rows": 384,
+            "min_rows": 20000,
             "validation_queries": [
                 {
                     "comparison": "equals",
-                    "description": "Kernel row count equals num_kernels * num_iterations from RUN_ARGS (64*6 here); change with RUN_ARGS and CMake/pytest.",
-                    "error_message": "Kernel count does not match 64 * 6 graph executions",
-                    "expected_result": 384,
+                    "description": "Kernel row count equals num_kernels * num_iterations from RUN_ARGS (2000*10 here); change with RUN_ARGS and CMake/pytest.",
+                    "error_message": "Kernel count does not match 2000 * 10 graph executions",
+                    "expected_result": 20000,
                     "query": "SELECT COUNT(*) AS count FROM kernels"
                 },
                 {
@@ -96,9 +96,9 @@
             "validation_queries": [
                 {
                     "comparison": "equals",
-                    "description": "roctxRangePush(graph_launch) once per iteration (6 here); must match num_iterations RUN_ARG.",
-                    "error_message": "Expected 6 roctx marker regions for graph_launch",
-                    "expected_result": 6,
+                    "description": "roctxRangePush(graph_launch) once per iteration (10 here); must match num_iterations RUN_ARG.",
+                    "error_message": "Expected 10 roctx marker regions for graph_launch",
+                    "expected_result": 10,
                     "query": "SELECT COUNT(*) AS count FROM regions WHERE category = 'rocm_marker_api' AND name LIKE '%graph_launch%'"
                 },
                 {
