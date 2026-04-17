@@ -468,7 +468,7 @@
   // Load host_trap_buffers base and per_xcc_size from TMA2
   s_load_b64        ttmp[2:3], ttmp[14:15], 0x0, scope:SCOPE_CU  // ttmp[2:3] = host_trap_buffers base
   s_load_b64        ttmp[4:5], ttmp[14:15], 0x10, scope:SCOPE_CU // ttmp4 = per_xcc_size (low 32 bits)
-  s_bitset1_b32     ttmp13, TTMP13_HT_FLAG_BIT               // set bit 22 in TTMP13
+  s_bitset1_b32     ttmp13, TTMP13_HT_FLAG_BIT_SHIFT          // set bit 22 in TTMP13
 
   // Clear the Host Trap flag in the hardware register to acknowledge the event
   s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_HT_SHIFT,1), 0
@@ -486,7 +486,7 @@
 
   // Multi-XCC: Calculate per-XCC buffer offset using SE_ID from HW_ID1
   // SE_ID bits [19:16] of HW_ID1 identify the XCC (shader engine)
-  s_getreg_b32      ttmp6, HW_REG_SHADER_HW_ID1              // Get HW_ID1
+  s_getreg_b32      ttmp6, hwreg(HW_REG_HW_ID1)              // Get HW_ID1
   s_and_b32         ttmp6, ttmp6, HW_ID1_SE_ID_MASK          // Extract SE_ID bits [19:16]
   s_lshr_b32        ttmp6, ttmp6, HW_ID1_SE_ID_SHIFT         // ttmp6 = XCC_ID (0, 1, 2, ...)
 
@@ -515,9 +515,9 @@
   s_load_b64        ttmp[2:3], ttmp[14:15], 0x8, scope:SCOPE_CU  // ttmp[2:3] = stochastic_trap_buffers base
   s_load_b64        ttmp[4:5], ttmp[14:15], 0x10, scope:SCOPE_CU // ttmp4 = per_xcc_size
 
-  s_bitset1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT            // set bit 21 in TTMP13
+  s_bitset1_b32     ttmp13, TTMP13_STOCH_FLAG_BIT_SHIFT       // set bit 23 in TTMP13
 
-  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT,1), 0 // Clear the perf_snapshot flag
+  s_setreg_imm32_b32 hwreg(HW_REG_EXCP_FLAG_PRIV, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT_SHIFT, 1), 0 // Clear the perf_snapshot flag
 
   // Wait for both loads to complete
   s_wait_kmcnt      0
@@ -531,7 +531,7 @@
   s_cbranch_scc1    .stochastic_single_xcc                   // If per_xcc_size == 0, single XCC mode
 
   // Multi-XCC: Calculate per-XCC buffer offset using SE_ID from HW_ID1
-  s_getreg_b32      ttmp6, HW_REG_SHADER_HW_ID1              // Get HW_ID1
+  s_getreg_b32      ttmp6, hwreg(HW_REG_HW_ID1)              // Get HW_ID1
   s_and_b32         ttmp6, ttmp6, HW_ID1_SE_ID_MASK          // Extract SE_ID bits [19:16]
   s_lshr_b32        ttmp6, ttmp6, HW_ID1_SE_ID_SHIFT         // ttmp6 = XCC_ID
 
@@ -1028,7 +1028,7 @@
   s_bfe_u32         ttmp6, ttmp8, (WAVE_ID_WG_BIT_POSITION | (5 << 16)) // Extract 5 bits for wave_in_wg
 
   // Extract SE_ID (XCC ID) from HW_ID1 and store in bits [10:8]
-  s_getreg_b32      ttmp7, HW_REG_SHADER_HW_ID1              // Get HW_ID1
+  s_getreg_b32      ttmp7, hwreg(HW_REG_HW_ID1)              // Get HW_ID1
   s_and_b32         ttmp7, ttmp7, HW_ID1_SE_ID_MASK          // Extract SE_ID bits [19:16]
   s_lshr_b32        ttmp7, ttmp7, (HW_ID1_SE_ID_SHIFT - 8)   // Shift SE_ID to bits [10:8]
   s_or_b32          ttmp6, ttmp6, ttmp7                      // Combine wave_in_wg and chiplet
@@ -1036,7 +1036,7 @@
   v_writelane_b32   v2, ttmp6, 0                            // Store combined value in v2
 
   // Write wave_in_group and chiplet (XCC ID on multi-XCC, 0 on single-XCC)
-  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_WAVE_IN_GROUP_CHIPLET, scope:SCOPE_SYS
+  global_store_b32  v[0:1], v2, off, offset:SAMPLE_OFF_BITFIELD, scope:SCOPE_SYS
 
   // The following is still true as we get ready to jump to correlation ID check
   // v[0:1] = &buffer[local_entry]

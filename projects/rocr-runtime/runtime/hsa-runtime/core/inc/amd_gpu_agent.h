@@ -941,9 +941,24 @@ class GpuAgent : public GpuAgentInt {
   typedef struct {
     pcs_sampling_data_t* host_trap_buffers;        // [0x00] Base of host trap buffer array
     pcs_sampling_data_t* stochastic_trap_buffers;  // [0x08] Base of stochastic trap buffer array
-    uint64_t per_xcc_size;                         // [0x10] Per-XCC stride (gfx9.4+ only)
+    uint64_t per_xcc_size;                         // [0x10] Per-XCC stride (multi-XCC GPUs only)
     uint64_t reserved_pad;                         // [0x18] Alignment padding
   } pcs_tma2_t;
+
+  // Per-XCC sampling data - cache-line aligned (64 bytes) to prevent false sharing.
+  // Each XCC accesses only its own struct, avoiding cross-XCC cache line contention.
+  // The alignas(64) ensures the struct starts at a cache line boundary, and the
+  // compiler will pad the struct size to a multiple of 64 bytes automatically.
+  struct alignas(64) per_xcc_data_t {
+    os::Thread thread;                           // Thread handle for this XCC
+    uint32_t which_buffer;                       // Current buffer selector (0 or 1)
+    hsa_signal_t done_sig0;                      // Signal for buffer 0 completion
+    hsa_signal_t done_sig1;                      // Signal for buffer 1 completion
+    std::atomic<uint64_t> host_write_offset;     // Write offset into host buffer
+    std::atomic<uint64_t> host_read_offset;      // Read offset from host buffer
+    std::mutex host_buffer_mutex;                // Per-XCC mutex for host buffer access
+    // Note: alignas(64) ensures sizeof(per_xcc_data_t) is a multiple of 64 bytes
+  };
 
   typedef struct {
     /* Per-XCC architecture for reduced atomic contention */
@@ -951,18 +966,15 @@ class GpuAgent : public GpuAgentInt {
     pcs_sampling_data_t** device_data;      // Array of pointers (size = num_xcc)
     pcs_sampling_data_t* device_data_base;  // Base of contiguous allocation
 
-    /* Per-XCC host buffers with per-XCC atomic offsets */
+    /* Per-XCC host buffers */
     uint8_t* host_buffer;
     size_t host_buffer_size;
-    std::atomic<uint64_t>* host_write_offset;  // Per-XCC write offsets (array)
-    std::atomic<uint64_t>* host_read_offset;   // Per-XCC read offsets (array)
-    std::atomic<size_t> lost_sample_count;     // Thread-safe lost sample counter
-    std::mutex host_buffer_mutex;
+    size_t per_xcc_host_buffer_size;         // Cached: host_buffer_size / num_xcc
+    size_t buf_size;                         // Cached: samples per trap buffer (from device init)
+    std::atomic<size_t> lost_sample_count;   // Thread-safe lost sample counter
 
-    /* Per-XCC thread resources (arrays of size num_xcc) */
-    os::Thread* threads;             // Array of threads
-    uint32_t* which_buffer;          // Per-XCC buffer selector
-    hsa_signal_t* done_signals;      // Cached signal handles (size = num_xcc * 2)
+    /* Per-XCC data array - cache-line aligned AoS for optimal cache behavior */
+    per_xcc_data_t* xcc_data;                // Array of per-XCC structs (size = num_xcc)
 
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
@@ -976,7 +988,8 @@ class GpuAgent : public GpuAgentInt {
   void PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id, const char* thread_name);
 
   // @brief Flush device buffers for per-XCC PC sampling architecture
-  hsa_status_t PcSamplingFlushDeviceBuffersPerXCC(pcs::PcsRuntime::PcSamplingSession& session,
+  hsa_status_t PcSamplingFlushDeviceBuffersPerXCC(pcs_data_t* pcs_data,
+                                                  pcs::PcsRuntime::PcSamplingSession& session,
                                                   uint32_t xcc_id);
 
   // @brief device handle
