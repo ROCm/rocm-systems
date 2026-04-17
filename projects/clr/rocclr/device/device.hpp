@@ -2069,7 +2069,7 @@ class Device : public RuntimeObject {
     uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
-    int dep_slot;  // -1 = completion_signal, 0-4 = dep_signal[slot]
+    int dep_slot;  // -1 = completion_signal, -2 = ext dispatch dep_signal, 0-4 = barrier dep_signal[slot]
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
