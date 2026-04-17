@@ -89,6 +89,7 @@ if(BUILD_TESTS)
     ${GTEST_INCLUDE_DIRS}
     ${PROJECT_BINARY_DIR}/include # for generated rccl.h header
     ${PROJECT_BINARY_DIR}/hipify/src/include  # for rccl_bfloat16.h
+    ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device  # for rccl_ptr.h
     ${PROJECT_BINARY_DIR}/hipify/gensrc # for rccl_bfloat16.h
     ${PROJECT_BINARY_DIR}/hipify/src # for graph/topo.h
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
