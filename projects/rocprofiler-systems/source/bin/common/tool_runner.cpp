@@ -128,12 +128,10 @@ get_initial_environment(parser_data_t&                               _data,
 {
     if(environ != nullptr)
     {
-        int idx = 0;
-        while(environ[idx] != nullptr)
+        for(int idx = 0; environ[idx] != nullptr; ++idx)
         {
-            auto* env_entry = environ[idx++];
-            _data.initial.emplace(env_entry);
-            _data.current.emplace_back(strdup(env_entry));
+            _data.initial.emplace(environ[idx]);
+            _data.current.emplace_back(environ[idx]);
         }
     }
 
@@ -168,26 +166,29 @@ get_initial_environment(parser_data_t&                               _data,
     return _data;
 }
 
+// Slots reserved when injecting the launcher prefix into the command: exe + "--".
+constexpr size_t LAUNCHER_INJECT_SLOTS = 2;
+
 void
-prepare_command(char* _exe, parser_data_t& _data)
+prepare_command(const char* _exe, parser_data_t& _data)
 {
     if(_data.launcher.empty()) return;
 
-    bool _injected = false;
-    auto _new_argv = std::vector<char*>{};
-    for(auto* itr : _data.command)
+    bool                     injected = false;
+    std::vector<std::string> new_argv;
+    new_argv.reserve(_data.command.size() + LAUNCHER_INJECT_SLOTS);
+    for(const auto& arg : _data.command)
     {
-        if(!_injected &&
-           std::string_view{ itr }.find(_data.launcher) != std::string_view::npos)
+        if(!injected && arg.find(_data.launcher) != std::string::npos)
         {
-            _new_argv.emplace_back(_exe);
-            _new_argv.emplace_back(strdup("--"));
-            _injected = true;
+            new_argv.emplace_back(_exe);
+            new_argv.emplace_back("--");
+            injected = true;
         }
-        _new_argv.emplace_back(itr);
+        new_argv.emplace_back(arg);
     }
 
-    if(!_injected)
+    if(!injected)
     {
         throw std::runtime_error(join("", "Unable to match launcher \"", _data.launcher,
                                       "\" to any arguments on the command line: \"",
@@ -195,7 +196,7 @@ prepare_command(char* _exe, parser_data_t& _data)
                                       "\""));
     }
 
-    std::swap(_data.command, _new_argv);
+    _data.command = std::move(new_argv);
 }
 
 void
@@ -221,16 +222,15 @@ parse_command_fast_path(int argc, char** argv, parser_data_t& _data)
 
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
-    auto& _outv           = _data.command;
-    bool  _past_separator = false;
+    bool past_separator = false;
     for(int arg_idx = 1; arg_idx < argc; ++arg_idx)
     {
         if(argv[arg_idx] == nullptr) continue;
 
-        if(_past_separator)
-            _outv.emplace_back(strdup(argv[arg_idx]));
+        if(past_separator)
+            _data.command.emplace_back(argv[arg_idx]);
         else if(std::string_view{ argv[arg_idx] } == "--")
-            _past_separator = true;
+            past_separator = true;
     }
 }
 
@@ -450,10 +450,7 @@ run_tool(int argc, char** argv, const tool_config& config)
 
     prepare_environment(_parse_data, config);
 
-    auto& _argv = _parse_data.command;
-    auto& _envp = _parse_data.current;
-
-    if(_argv.empty())
+    if(_parse_data.command.empty())
     {
         _print_usage();
         return EXIT_FAILURE;
@@ -465,13 +462,23 @@ run_tool(int argc, char** argv, const tool_config& config)
                                  config.output_prefix);
     if(_verbose >= 1) utils::print_command(_parse_data.command, config.output_prefix);
 
-    _argv.emplace_back(nullptr);
-    _envp.emplace_back(nullptr);
+    auto to_c_argv = [](std::vector<std::string>& src) {
+        std::vector<char*> out;
+        out.reserve(src.size() + 1);
+        for(auto& entry : src)
+            out.emplace_back(entry.data());
+        out.emplace_back(nullptr);
+        return out;
+    };
+
+    auto argv_ptrs = to_c_argv(_parse_data.command);
+    auto envp_ptrs = to_c_argv(_parse_data.current);
 
     if(_fork_exec)
     {
         auto _pid = fork();
-        if(_pid == 0) return execvpe(_argv.front(), _argv.data(), _envp.data());
+        if(_pid == 0)
+            return execvpe(argv_ptrs.front(), argv_ptrs.data(), envp_ptrs.data());
 
         auto _status = rocprofsys::mproc::wait_pid(_pid);
         auto _ec     = rocprofsys::mproc::diagnose_status(_pid, _status);
@@ -489,7 +496,7 @@ run_tool(int argc, char** argv, const tool_config& config)
         return _ec;
     }
 
-    return execvpe(_argv.front(), _argv.data(), _envp.data());
+    return execvpe(argv_ptrs.front(), argv_ptrs.data(), envp_ptrs.data());
 }
 
 }  // namespace rocprofsys::common_utils

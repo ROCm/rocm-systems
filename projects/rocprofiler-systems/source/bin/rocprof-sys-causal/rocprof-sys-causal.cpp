@@ -16,6 +16,19 @@
 
 namespace utils = rocprofsys::common_utils;
 
+namespace
+{
+std::vector<std::string>
+to_string_vec(const std::vector<char*>& argv)
+{
+    std::vector<std::string> out;
+    out.reserve(argv.size());
+    for(const auto* arg : argv)
+        if(arg != nullptr) out.emplace_back(arg);
+    return out;
+}
+}  // namespace
+
 int
 main(int argc, char** argv)
 {
@@ -61,6 +74,15 @@ main(int argc, char** argv)
         }
     }
 
+    auto to_envp_ptrs = [](std::vector<std::string>& env) {
+        std::vector<char*> out;
+        out.reserve(env.size() + 1);
+        for(auto& entry : env)
+            out.emplace_back(entry.data());
+        out.emplace_back(nullptr);
+        return out;
+    };
+
     if(!_argv.empty())
     {
         if(_causal_env.size() == 1)
@@ -71,10 +93,10 @@ main(int argc, char** argv)
             auto _verbose = get_verbose();
             if(_verbose >= 0)
                 utils::print_environment(_env, get_updated_envs(), _verbose >= 1, "0: ");
-            if(_verbose >= 1) utils::print_command(_argv, "0: ");
+            if(_verbose >= 1) utils::print_command(to_string_vec(_argv), "0: ");
             _argv.emplace_back(nullptr);
-            _env.emplace_back(nullptr);
-            return execvpe(_argv.front(), _argv.data(), _env.data());
+            auto envp_ptrs = to_envp_ptrs(_env);
+            return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());
         }
 
         forward_signals({ SIGINT, SIGTERM, SIGQUIT });
@@ -106,10 +128,11 @@ main(int argc, char** argv)
                 if(_verbose >= 0)
                     utils::print_environment(_env, get_updated_envs(), _verbose >= 1,
                                              _prefix.str());
-                if(_verbose >= 1) utils::print_command(_argv, _prefix.str());
+                if(_verbose >= 1)
+                    utils::print_command(to_string_vec(_argv), _prefix.str());
                 _argv.emplace_back(nullptr);
-                _env.emplace_back(nullptr);
-                return execvpe(_argv.front(), _argv.data(), _env.data());
+                auto envp_ptrs = to_envp_ptrs(_env);
+                return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());
             }
             else
             {

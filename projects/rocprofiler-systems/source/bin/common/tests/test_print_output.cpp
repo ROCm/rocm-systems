@@ -51,7 +51,7 @@ private:
 
 TEST_F(PrintOutputTest, PrintCommand_HasOutput)
 {
-    std::vector<char*> command_args = { make_env("./test"), make_env("arg1") };
+    std::vector<std::string> command_args = { "./test", "arg1" };
     print_command(command_args);
     auto output = get_cerr();
     EXPECT_NE(output.find("Executing"), std::string::npos);
@@ -61,32 +61,21 @@ TEST_F(PrintOutputTest, PrintCommand_HasOutput)
 
 TEST_F(PrintOutputTest, PrintCommand_WithPrefix)
 {
-    std::vector<char*> command_args = { make_env("./myapp") };
+    std::vector<std::string> command_args = { "./myapp" };
     print_command(command_args, "PREFIX: ");
     EXPECT_NE(get_cerr().find("PREFIX: "), std::string::npos);
 }
 
 TEST_F(PrintOutputTest, PrintCommand_EmptyArgv)
 {
-    std::vector<char*> command_args = {};
+    std::vector<std::string> command_args = {};
     print_command(command_args);
     EXPECT_TRUE(does_not_contain(get_cerr(), "Executing"));
 }
 
-TEST_F(PrintOutputTest, PrintCommand_NullptrEntries)
-{
-    std::vector<char*> command_args = { make_env("./test"), nullptr, make_env("arg1") };
-    print_command(command_args);
-    auto output = get_cerr();
-    EXPECT_NE(output.find("Executing"), std::string::npos);
-    EXPECT_NE(output.find("./test"), std::string::npos);
-    EXPECT_NE(output.find("arg1"), std::string::npos);
-}
-
 TEST_F(PrintOutputTest, PrintEnvironment_WithUpdates)
 {
-    std::vector<char*>                   env     = { make_env("ROCPROFSYS_TEST=value1"),
-                                                     make_env("OTHER_VAR=value2") };
+    std::vector<std::string> env = { "ROCPROFSYS_TEST=value1", "OTHER_VAR=value2" };
     std::unordered_set<std::string_view> updated = { "ROCPROFSYS_TEST" };
 
     print_environment(env, updated);
@@ -95,7 +84,7 @@ TEST_F(PrintOutputTest, PrintEnvironment_WithUpdates)
 
 TEST_F(PrintOutputTest, PrintEnvironment_WithPrefix)
 {
-    std::vector<char*>                   env     = { make_env("ROCPROFSYS_VAR=test") };
+    std::vector<std::string>             env     = { "ROCPROFSYS_VAR=test" };
     std::unordered_set<std::string_view> updated = { "ROCPROFSYS_VAR" };
 
     print_environment(env, updated, false, "MYPREFIX: ");
@@ -104,8 +93,8 @@ TEST_F(PrintOutputTest, PrintEnvironment_WithPrefix)
 
 TEST_F(PrintOutputTest, PrintEnvironment_SortsOutput)
 {
-    std::vector<char*> env = { make_env("ROCPROFSYS_Z=3"), make_env("ROCPROFSYS_A=1"),
-                               make_env("ROCPROFSYS_M=2") };
+    std::vector<std::string>             env     = { "ROCPROFSYS_Z=3", "ROCPROFSYS_A=1",
+                                                     "ROCPROFSYS_M=2" };
     std::unordered_set<std::string_view> updated = { "ROCPROFSYS_Z", "ROCPROFSYS_A",
                                                      "ROCPROFSYS_M" };
 
@@ -125,30 +114,16 @@ TEST_F(PrintOutputTest, PrintEnvironment_SortsOutput)
 
 TEST_F(PrintOutputTest, PrintEnvironment_EmptyEnv)
 {
-    std::vector<char*>                   env     = {};
+    std::vector<std::string>             env     = {};
     std::unordered_set<std::string_view> updated = {};
 
     print_environment(env, updated);
     EXPECT_TRUE(does_not_contain(get_cerr(), "ROCPROFSYS"));
 }
 
-TEST_F(PrintOutputTest, PrintEnvironment_NullEntries)
-{
-    std::vector<char*>                   env = { make_env("ROCPROFSYS_VAR=test"), nullptr,
-                                                 make_env("ROCPROFSYS_OTHER=val") };
-    std::unordered_set<std::string_view> updated = { "ROCPROFSYS_VAR",
-                                                     "ROCPROFSYS_OTHER" };
-
-    print_environment(env, updated);
-    auto output = get_cerr();
-    EXPECT_NE(output.find("ROCPROFSYS_VAR"), std::string::npos);
-    EXPECT_NE(output.find("ROCPROFSYS_OTHER"), std::string::npos);
-}
-
 TEST_F(PrintOutputTest, PrintEnvironment_GeneralVarsIncluded)
 {
-    std::vector<char*>                   env     = { make_env("ROCPROFSYS_UPDATED=1"),
-                                                     make_env("ROCPROFSYS_GENERAL=2") };
+    std::vector<std::string> env = { "ROCPROFSYS_UPDATED=1", "ROCPROFSYS_GENERAL=2" };
     std::unordered_set<std::string_view> updated = { "ROCPROFSYS_UPDATED" };
 
     print_environment(env, updated, true);
@@ -159,8 +134,7 @@ TEST_F(PrintOutputTest, PrintEnvironment_GeneralVarsIncluded)
 
 TEST_F(PrintOutputTest, PrintEnvironment_GeneralVarsExcluded)
 {
-    std::vector<char*>                   env     = { make_env("ROCPROFSYS_UPDATED=1"),
-                                                     make_env("ROCPROFSYS_GENERAL=2") };
+    std::vector<std::string> env = { "ROCPROFSYS_UPDATED=1", "ROCPROFSYS_GENERAL=2" };
     std::unordered_set<std::string_view> updated = { "ROCPROFSYS_UPDATED" };
 
     print_environment(env, updated, false);
@@ -171,7 +145,7 @@ TEST_F(PrintOutputTest, PrintEnvironment_GeneralVarsExcluded)
 
 TEST_F(PrintOutputTest, PrintEnvironment_NonRocprofsysVarsNotShown)
 {
-    std::vector<char*> env = { make_env("OTHER_VAR=value"), make_env("PATH=/usr/bin") };
+    std::vector<std::string>             env     = { "OTHER_VAR=value", "PATH=/usr/bin" };
     std::unordered_set<std::string_view> updated = {};
 
     print_environment(env, updated);

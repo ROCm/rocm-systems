@@ -168,37 +168,21 @@ struct ROCPROFSYS_INTERNAL_API env_config
 };
 
 inline void
-remove_env(std::vector<char*>& _environ, std::string_view _env_var,
+remove_env(std::vector<std::string>& _environ, std::string_view _env_var,
            const std::unordered_set<std::string>& _original_envs)
 {
     auto key = join("", _env_var, "=");
 
-    auto match = [&key](auto itr) -> bool {
-        return itr && std::string_view{ itr }.find(key) == 0;
-    };
-
-    // Free memory for matching entries
-    for(auto& itr : _environ)
-    {
-        if(match(itr))
-        {
-            std::free(itr);
-            itr = nullptr;
-        }
-    }
-
-    // Remove null entries
     _environ.erase(std::remove_if(_environ.begin(), _environ.end(),
-                                  [](const char* ptr) { return ptr == nullptr; }),
+                                  [&key](const std::string& entry) {
+                                      return std::string_view{ entry }.find(key) == 0;
+                                  }),
                    _environ.end());
 
     // Restore from original_envs if previously existed
     for(const auto& orig : _original_envs)
     {
-        if(std::string_view{ orig.data(), orig.size() }.find(key) == 0)
-        {
-            _environ.emplace_back(strdup(orig.c_str()));
-        }
+        if(std::string_view{ orig }.find(key) == 0) _environ.emplace_back(orig);
     }
 }
 
@@ -385,7 +369,7 @@ to_env_string(Tp&& val)
 
 template <typename Tp>
 inline void
-update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
+update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _env_val,
            update_mode _mode, std::string_view _join_delim,
            std::unordered_set<std::string_view>&  _updated_envs,
            const std::unordered_set<std::string>& _original_envs)
@@ -401,43 +385,36 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
     auto _key = join("", _env_var, "=");
     for(auto& itr : _environ)
     {
-        if(!itr) continue;
         if(std::string_view{ itr }.find(_key) != 0) continue;
 
         if(_weak_upd)
         {
-            if(_original_envs.find(std::string{ itr }) == _original_envs.end()) return;
+            if(_original_envs.find(itr) == _original_envs.end()) return;
         }
 
         if(_prepend || _append)
         {
-            if(std::string_view{ itr }.find(_env_val_str) == std::string_view::npos)
+            if(itr.find(_env_val_str) == std::string::npos)
             {
-                auto _val = std::string{ itr }.substr(_key.length());
-                free(itr);
+                auto _val = itr.substr(_key.length());
                 if(_prepend)
-                    itr =
-                        strdup(join('=', _env_var, join(_join_delim, _env_val_str, _val))
-                                   .c_str());
+                    itr = join('=', _env_var, join(_join_delim, _env_val_str, _val));
                 else
-                    itr =
-                        strdup(join('=', _env_var, join(_join_delim, _val, _env_val_str))
-                                   .c_str());
+                    itr = join('=', _env_var, join(_join_delim, _val, _env_val_str));
             }
         }
         else
         {
-            std::free(itr);
-            itr = strdup(join('=', _env_var, _env_val_str).c_str());
+            itr = join('=', _env_var, _env_val_str);
         }
         return;
     }
-    _environ.emplace_back(strdup(join('=', _env_var, _env_val_str).c_str()));
+    _environ.emplace_back(join('=', _env_var, _env_val_str));
 }
 
 template <typename UpdatedEnvsT>
 inline void
-add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
+add_torch_library_path(std::vector<std::string>& envp, const std::vector<char*>& argv,
                        bool verbose, UpdatedEnvsT& updated_envs)
 {
     if(argv.empty() || argv.front() == nullptr) return;
@@ -451,27 +428,23 @@ add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
 
     constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
 
-    auto is_ld_path = [&](char* entry) {
-        return entry &&
-               std::string_view{ entry }.substr(0, ld_prefix.length()) == ld_prefix;
+    auto is_ld_path = [&](const std::string& entry) {
+        return std::string_view{ entry }.substr(0, ld_prefix.length()) == ld_prefix;
     };
 
-    for(auto& entry : envp)
+    for(const auto& entry : envp)
     {
         if(!is_ld_path(entry)) continue;
 
-        std::istringstream stream{ std::string{ entry + ld_prefix.length() } };
+        std::istringstream stream{ entry.substr(ld_prefix.length()) };
         for(std::string path; std::getline(stream, path, ':');)
         {
             if(!path.empty() && seen.insert(path).second) result += ":" + path;
         }
-
-        std::free(entry);
-        entry = nullptr;
     }
 
-    envp.erase(std::remove(envp.begin(), envp.end(), nullptr), envp.end());
-    envp.emplace_back(strdup(join("", ld_prefix, result).c_str()));
+    envp.erase(std::remove_if(envp.begin(), envp.end(), is_ld_path), envp.end());
+    envp.emplace_back(join("", ld_prefix, result));
 
     updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }
@@ -486,14 +459,13 @@ add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
 /// delimiter instead.
 ///
 /// @param envp Vector of environment strings in "KEY=VALUE" format. Modified in place.
-///             Original strings are freed; new strings are allocated with strdup().
 ///
 /// Example transformations:
 ///   - PATH=/usr/bin + PATH=/usr/local/bin -> PATH=/usr/bin:/usr/local/bin
 ///   - ROCPROFSYS_PAPI_EVENTS=perf::A + ROCPROFSYS_PAPI_EVENTS=perf::B
 ///         -> ROCPROFSYS_PAPI_EVENTS=perf::A,perf::B
 inline void
-consolidate_env_entries(std::vector<char*>& envp)
+consolidate_env_entries(std::vector<std::string>& envp)
 {
     /// Returns the appropriate delimiter character for splitting/joining values.
     /// Most variables use ':' (like PATH), but some use ':' in their value syntax
@@ -569,13 +541,8 @@ consolidate_env_entries(std::vector<char*>& envp)
     std::vector<std::string_view>                  key_order;
 
     // Phase 1: Parse all entries and aggregate values by key
-    for(auto* entry : envp)
+    for(const auto& entry : envp)
     {
-        if(!entry)
-        {
-            continue;
-        }
-
         auto parsed = parse_entry(entry);
         if(!parsed)
         {
@@ -602,20 +569,13 @@ consolidate_env_entries(std::vector<char*>& envp)
     }
 
     // Phase 2: Build consolidated result
-    std::vector<char*> result;
+    std::vector<std::string> result;
     result.reserve(key_order.size());
 
     for(auto key : key_order)
     {
         const auto& data = key_map[key];
-        result.emplace_back(strdup(join_parts(key, data.parts, data.delim).c_str()));
-    }
-
-    // Phase 3: Free original entries and replace with consolidated result
-    for(auto* entry : envp)
-    {
-        std::free(entry);
-        entry = nullptr;
+        result.emplace_back(join_parts(key, data.parts, data.delim));
     }
 
     envp = std::move(result);

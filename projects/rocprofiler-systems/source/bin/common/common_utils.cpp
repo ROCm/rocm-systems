@@ -45,11 +45,10 @@ env_key(std::string_view entry) noexcept
 }  // namespace
 
 void
-print_command(const std::vector<char*>& argv, std::string_view prefix)
+print_command(const std::vector<std::string>& argv, std::string_view prefix)
 {
     auto cmd = std::accumulate(argv.begin(), argv.end(), std::string{},
-                               [](std::string acc, const char* arg) {
-                                   if(arg == nullptr) return acc;
+                               [](std::string acc, const std::string& arg) {
                                    if(!acc.empty()) acc += ' ';
                                    acc += arg;
                                    return acc;
@@ -59,14 +58,13 @@ print_command(const std::vector<char*>& argv, std::string_view prefix)
 }
 
 void
-print_environment(const std::vector<char*>&                   env,
+print_environment(const std::vector<std::string>&             env,
                   const std::unordered_set<std::string_view>& updated_envs,
                   bool include_general_vars, std::string_view prefix)
 {
     std::vector<std::string_view> entries;
     entries.reserve(env.size());
-    std::copy_if(env.begin(), env.end(), std::back_inserter(entries),
-                 [](const char* entry) { return entry != nullptr; });
+    std::copy(env.begin(), env.end(), std::back_inserter(entries));
     std::sort(entries.begin(), entries.end());
 
     auto is_updated = [&](std::string_view entry) {
@@ -359,7 +357,7 @@ validate_domain_flags(bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
 }
 
 std::map<std::string, std::string>
-collect_resolved_settings(const std::vector<char*>&              current_env,
+collect_resolved_settings(const std::vector<std::string>&        current_env,
                           const std::unordered_set<std::string>& initial_envs)
 {
     std::map<std::string, std::string> result;
@@ -375,11 +373,9 @@ collect_resolved_settings(const std::vector<char*>&              current_env,
         }
     }
 
-    for(const auto* env_entry : current_env)
+    for(const auto& env_entry : current_env)
     {
-        if(env_entry == nullptr) continue;
-
-        std::string_view entry(env_entry);
+        std::string_view entry{ env_entry };
         auto             eq_pos = entry.find('=');
         if(eq_pos == std::string_view::npos) continue;
 
@@ -398,7 +394,7 @@ collect_resolved_settings(const std::vector<char*>&              current_env,
 }
 
 void
-export_config(const std::vector<char*>&              current_env,
+export_config(const std::vector<std::string>&        current_env,
               const std::unordered_set<std::string>& initial_envs,
               const std::string& preset_name, std::string_view tool_name,
               const std::string& output_file)

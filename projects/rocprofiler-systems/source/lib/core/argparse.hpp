@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <set>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -46,8 +47,8 @@ struct parser_data
     vsettings_set_t                      processed_settings = {};
     std::unordered_set<std::string>      processed_environs = {};
     std::unordered_set<std::string>      processed_groups   = {};
-    std::vector<char*>                   current            = {};
-    std::vector<char*>                   command            = {};
+    std::vector<std::string>             current            = {};
+    std::vector<std::string>             command            = {};
     std::unordered_set<std::string_view> updated            = {};
     std::unordered_set<std::string>      initial            = {};
     grouping_filter_t                    grouping_filter    = default_grouping_filter;

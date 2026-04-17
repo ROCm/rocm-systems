@@ -152,7 +152,9 @@ add_ld_library_path(parser_data& _data)
 parser_data&
 add_torch_library_path(parser_data& _data, bool verbose)
 {
-    rocprofsys::common::add_torch_library_path(_data.current, _data.command, verbose,
+    if(_data.command.empty()) return _data;
+    const std::vector<char*> argv_view = { _data.command.front().data() };
+    rocprofsys::common::add_torch_library_path(_data.current, argv_view, verbose,
                                                _data.updated);
     return _data;
 }
