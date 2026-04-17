@@ -62,7 +62,6 @@ static const std::filesystem::path kPdiPath = STRINGIFY(DEFAULT_PDI_PATH);
 static const std::filesystem::path kInstsPath = STRINGIFY(DEFAULT_INSTS_PATH);
 
 static constexpr std::size_t N = 1024;
-static constexpr std::size_t DATA_SIZE = N * sizeof(std::uint32_t);
 
 namespace {
 
@@ -166,11 +165,11 @@ bool load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path, 
 }
 
 // ---------------------------------------------------------------------------
-// AIE ERT packet submission
+// AIE packet submission
 // ---------------------------------------------------------------------------
 
-void submit_aie_ert_packet(hsa_queue_t* queue, hsa_amd_aie_ert_start_kernel_data_t* payload,
-                           std::uint32_t payload_dwords, hsa_signal_t completion_signal) {
+std::uint64_t submit_aie_packet(hsa_queue_t* queue, hsa_amd_aie_ert_start_kernel_data_t* payload,
+                                std::uint32_t payload_dwords, hsa_signal_t completion_signal) {
   hsa_amd_aie_ert_packet_t pkt{};
   pkt.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
   pkt.header.AmdFormat = HSA_AMD_PACKET_TYPE_AIE_ERT;
@@ -188,17 +187,16 @@ void submit_aie_ert_packet(hsa_queue_t* queue, hsa_amd_aie_ert_start_kernel_data
   const std::uint64_t packet_id = wr_idx % queue->size;
   *(static_cast<hsa_amd_aie_ert_packet_t*>(queue->base_address) + packet_id) = pkt;
 
-  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  return wr_idx;
 }
 
 // ---------------------------------------------------------------------------
 // Payload builder
 // ---------------------------------------------------------------------------
 
-void fill_vector_scalar_add_payload(hsa_amd_aie_ert_start_kernel_data_t* payload, void* pdi_buf,
-                                    void* insts_buf, std::uint32_t insts_dwords, void* input,
-                                    void* output, std::uint32_t input_size,
-                                    std::uint32_t output_size) {
+void create_aie_vector_scalar_payload(hsa_amd_aie_ert_start_kernel_data_t* payload, void* pdi_buf,
+                                      void* insts_buf, std::uint32_t insts_dwords, void* input,
+                                      void* output, std::uint32_t size) {
   payload->pdi_addr = pdi_buf;
 
   // Transaction opcode
@@ -230,8 +228,8 @@ void fill_vector_scalar_add_payload(hsa_amd_aie_ert_start_kernel_data_t* payload
   idx += 2;
 
   // Sizes: 1 dword per tensor
-  payload->data[idx + 0] = input_size;
-  payload->data[idx + 1] = output_size;
+  payload->data[idx + 0] = size;
+  payload->data[idx + 1] = size;
 }
 
 }  // namespace
@@ -391,7 +389,9 @@ TEST(Dispatch, LoadInstructions) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Dispatch, VectorScalarAdd) {
+TEST(Dispatch, SingleDispatch) {
+  constexpr std::size_t payload_size = 64;
+
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
   // --- Discover AIE agent ---
@@ -451,38 +451,44 @@ TEST(Dispatch, VectorScalarAdd) {
   const auto insts_dwords = static_cast<std::uint32_t>(insts_size / sizeof(std::uint32_t));
 
   // --- Allocate I/O buffers ---
+  const std::size_t data_size = N * sizeof(std::uint32_t);
+
   std::uint32_t* input = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&input)),
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, data_size, 0, reinterpret_cast<void**>(&input)),
             HSA_STATUS_SUCCESS);
 
   std::uint32_t* output = nullptr;
   ASSERT_EQ(
-      hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&output)),
+      hsa_amd_memory_pool_allocate(data_pool, data_size, 0, reinterpret_cast<void**>(&output)),
       HSA_STATUS_SUCCESS);
 
-  std::iota(input, input + N, std::uint32_t{0});
-  std::memset(output, 0, DATA_SIZE);
+  std::iota(input, input + N, 0);
+  std::fill_n(output, N, 0);
 
-  // --- Build payload ---
+  // --- Create payload ---
   constexpr std::uint32_t NUM_SRC = 1;
   constexpr std::uint32_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;  // = 9
 
   hsa_amd_aie_ert_start_kernel_data_t* payload = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, reinterpret_cast<void**>(&payload)),
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, payload_size, 0,
+                                         reinterpret_cast<void**>(&payload)),
             HSA_STATUS_SUCCESS);
 
-  fill_vector_scalar_add_payload(payload, pdi_buf, insts_buf, insts_dwords, input, output,
-                                 static_cast<std::uint32_t>(DATA_SIZE),
-                                 static_cast<std::uint32_t>(DATA_SIZE));
+  create_aie_vector_scalar_payload(payload, pdi_buf, insts_buf, insts_dwords, input, output,
+                                   static_cast<std::uint32_t>(data_size));
 
   // --- Create completion signal ---
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
-  // --- Submit and wait ---
-  submit_aie_ert_packet(queue, payload, PACKET_DWORDS, signal);
+  // --- Submit packet ---
+  const auto wr_idx = submit_aie_packet(queue, payload, PACKET_DWORDS, signal);
 
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  // --- Ring doorbell ---
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+
+  // --- Wait for completion ---
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
   // --- Verify output: output[i] == input[i] + 1 ---
   for (std::size_t i = 0; i < N; ++i) {
@@ -500,8 +506,8 @@ TEST(Dispatch, VectorScalarAdd) {
   EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
-TEST(Dispatch, VectorScalarAdd100) {
-  static constexpr int NUM_DISPATCHES = 100;
+TEST(Dispatch, MultiDispatch) {
+  constexpr std::size_t payload_size = 64;
 
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
@@ -542,6 +548,7 @@ TEST(Dispatch, VectorScalarAdd100) {
   std::uint32_t min_queue_size = 0;
   ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
             HSA_STATUS_SUCCESS);
+  const std::uint32_t total_num_dispatches = 100;
 
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
@@ -559,50 +566,337 @@ TEST(Dispatch, VectorScalarAdd100) {
   const auto insts_dwords = static_cast<std::uint32_t>(insts_size / sizeof(std::uint32_t));
 
   // --- Allocate I/O buffers ---
+  const std::size_t data_size = N * sizeof(std::uint32_t);
+  const auto total_data_size = data_size * total_num_dispatches;
+
   std::uint32_t* input = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&input)),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      hsa_amd_memory_pool_allocate(data_pool, total_data_size, 0, reinterpret_cast<void**>(&input)),
+      HSA_STATUS_SUCCESS);
+  std::iota(input, input + N * total_num_dispatches, 0);
 
   std::uint32_t* output = nullptr;
-  ASSERT_EQ(
-      hsa_amd_memory_pool_allocate(data_pool, DATA_SIZE, 0, reinterpret_cast<void**>(&output)),
-      HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, total_data_size, 0,
+                                         reinterpret_cast<void**>(&output)),
+            HSA_STATUS_SUCCESS);
+  std::fill_n(output, N * total_num_dispatches, 0);
 
-  // --- Build payload ---
+  // --- Allocate storage for packet payload ---
   constexpr std::uint32_t NUM_SRC = 1;
   constexpr std::uint32_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;
 
-  hsa_amd_aie_ert_start_kernel_data_t* payload = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, 64, 0, reinterpret_cast<void**>(&payload)),
+  void* payload = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, (payload_size * total_num_dispatches), 0,
+                                         &payload),
             HSA_STATUS_SUCCESS);
 
   // --- Create completion signal ---
   hsa_signal_t signal{};
-  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
   // --- Dispatch loop ---
-  for (int iter = 0; iter < NUM_DISPATCHES; ++iter) {
+  for (std::uint32_t iter = 0; iter < total_num_dispatches; ++iter) {
     SCOPED_TRACE(iter);
 
-    // Reset I/O buffers
-    std::iota(input, input + N, static_cast<std::uint32_t>(iter));
-    std::memset(output, 0, DATA_SIZE);
+    auto input_ptr = input + iter * N;
+    auto output_ptr = output + iter * N;
+    auto payload_ptr = reinterpret_cast<hsa_amd_aie_ert_start_kernel_data_t*>(
+        static_cast<std::byte*>(payload) + (payload_size * iter));
 
-    fill_vector_scalar_add_payload(payload, pdi_buf, insts_buf, insts_dwords, input, output,
-                                   static_cast<std::uint32_t>(DATA_SIZE),
-                                   static_cast<std::uint32_t>(DATA_SIZE));
+    // Create payload for this dispatch
+    create_aie_vector_scalar_payload(payload_ptr, pdi_buf, insts_buf, insts_dwords, input_ptr,
+                                     output_ptr, static_cast<std::uint32_t>(data_size));
 
     // Submit
-    submit_aie_ert_packet(queue, payload, PACKET_DWORDS, signal);
+    const auto wr_idx = submit_aie_packet(queue, payload_ptr, PACKET_DWORDS, signal);
+
+    // Ring doorbell
+    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   }
 
   // Wait for completion of all dispatches
-  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
-  // Verify output: output[i] == iter + input[i] + 1
-  for (std::size_t i = 0; i < N; ++i) {
-    EXPECT_EQ(output[i], static_cast<std::uint32_t>((NUM_DISPATCHES - 1) + i + 1))
-        << "mismatch at index " << i;
+  // Verify output: output == input[i] + 1
+  for (std::size_t i = 0; i < N * total_num_dispatches; ++i) {
+    EXPECT_EQ(output[i], input[i] + 1) << "mismatch at index " << i;
+  }
+
+  // --- Cleanup ---
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(payload), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+TEST(Dispatch, MultiDispatchAsync) {
+  constexpr std::size_t payload_size = 64;
+
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  // --- Discover AIE agent ---
+  std::vector<hsa_agent_t> aie_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(aie_agents.empty());
+
+  // --- Discover memory pools ---
+  find_pool_data dev_pool_data{};
+  dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  dev_pool_data.expected_allocatable = false;
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &dev_pool_data),
+      HSA_STATUS_INFO_BREAK);
+
+  find_pool_data data_pool_data{};
+  data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  data_pool_data.expected_allocatable = true;
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &data_pool_data),
+      HSA_STATUS_INFO_BREAK);
+
+  find_pool_data kernarg_pool_data{};
+  kernarg_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+  kernarg_pool_data.expected_allocatable = true;
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool,
+                                         &kernarg_pool_data) != HSA_STATUS_INFO_BREAK) {
+    kernarg_pool_data.pool = data_pool_data.pool;
+  }
+
+  auto dev_pool = dev_pool_data.pool;
+  auto data_pool = data_pool_data.pool;
+  auto kernarg_pool = kernarg_pool_data.pool;
+
+  // --- Create queue ---
+  std::uint32_t min_queue_size = 0;
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
+            HSA_STATUS_SUCCESS);
+  const std::uint32_t total_num_dispatches = 2;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  // --- Load PDI and instructions ---
+  void* pdi_buf = nullptr;
+  std::size_t pdi_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, kPdiPath, &pdi_buf, pdi_size));
+
+  void* insts_buf = nullptr;
+  std::size_t insts_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, kInstsPath, &insts_buf, insts_size));
+  const auto insts_dwords = static_cast<std::uint32_t>(insts_size / sizeof(std::uint32_t));
+
+  // --- Allocate I/O buffers ---
+  const std::size_t data_size = N * sizeof(std::uint32_t);
+  const auto total_data_size = data_size * total_num_dispatches;
+
+  std::uint32_t* input = nullptr;
+  ASSERT_EQ(
+      hsa_amd_memory_pool_allocate(data_pool, total_data_size, 0, reinterpret_cast<void**>(&input)),
+      HSA_STATUS_SUCCESS);
+  std::iota(input, input + N * total_num_dispatches, 0);
+
+  std::uint32_t* output = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, total_data_size, 0,
+                                         reinterpret_cast<void**>(&output)),
+            HSA_STATUS_SUCCESS);
+  std::fill_n(output, N * total_num_dispatches, 0);
+
+  // --- Allocate storage for packet payload ---
+  constexpr std::uint32_t NUM_SRC = 1;
+  constexpr std::uint32_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;
+
+  void* payload = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, (payload_size * total_num_dispatches), 0,
+                                         &payload),
+            HSA_STATUS_SUCCESS);
+
+  // --- Create completion signal ---
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  // --- Dispatch loop ---
+  std::uint64_t last_wr_idx = 0;
+  for (std::uint32_t iter = 0; iter < total_num_dispatches; ++iter) {
+    SCOPED_TRACE(iter);
+
+    auto input_ptr = input + iter * N;
+    auto output_ptr = output + iter * N;
+    auto payload_ptr = reinterpret_cast<hsa_amd_aie_ert_start_kernel_data_t*>(
+        static_cast<std::byte*>(payload) + (payload_size * iter));
+
+    // Create payload for this dispatch
+    create_aie_vector_scalar_payload(payload_ptr, pdi_buf, insts_buf, insts_dwords, input_ptr,
+                                     output_ptr, static_cast<std::uint32_t>(data_size));
+
+    // Submit
+    last_wr_idx = submit_aie_packet(queue, payload_ptr, PACKET_DWORDS, signal);
+  }
+
+  // Ring doorbell
+  hsa_signal_store_screlease(queue->doorbell_signal, last_wr_idx);
+
+  // Wait for completion of all dispatches
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  // Verify output: output == input[i] + 1
+  for (std::size_t i = 0; i < N * total_num_dispatches; ++i) {
+    EXPECT_EQ(output[i], input[i] + 1) << "mismatch at index " << i;
+  }
+
+  // --- Cleanup ---
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(payload), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+TEST(Dispatch, MultiDispatchWrapAround) {
+  constexpr std::size_t payload_size = 64;
+
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  // --- Discover AIE agent ---
+  std::vector<hsa_agent_t> aie_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(aie_agents.empty());
+
+  // --- Discover memory pools ---
+  find_pool_data dev_pool_data{};
+  dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  dev_pool_data.expected_allocatable = false;
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &dev_pool_data),
+      HSA_STATUS_INFO_BREAK);
+
+  find_pool_data data_pool_data{};
+  data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  data_pool_data.expected_allocatable = true;
+  ASSERT_EQ(
+      hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &data_pool_data),
+      HSA_STATUS_INFO_BREAK);
+
+  find_pool_data kernarg_pool_data{};
+  kernarg_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+  kernarg_pool_data.expected_allocatable = true;
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool,
+                                         &kernarg_pool_data) != HSA_STATUS_INFO_BREAK) {
+    kernarg_pool_data.pool = data_pool_data.pool;
+  }
+
+  auto dev_pool = dev_pool_data.pool;
+  auto data_pool = data_pool_data.pool;
+  auto kernarg_pool = kernarg_pool_data.pool;
+
+  // --- Create queue ---
+  std::uint32_t min_queue_size = 0;
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
+            HSA_STATUS_SUCCESS);
+  const std::uint32_t initial_dispatches = min_queue_size / 2;
+  const std::uint32_t num_dispatches = 10 * min_queue_size;
+  const std::uint32_t total_num_dispatches = initial_dispatches + num_dispatches;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  // --- Load PDI and instructions ---
+  void* pdi_buf = nullptr;
+  std::size_t pdi_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, kPdiPath, &pdi_buf, pdi_size));
+
+  void* insts_buf = nullptr;
+  std::size_t insts_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, kInstsPath, &insts_buf, insts_size));
+  const auto insts_dwords = static_cast<std::uint32_t>(insts_size / sizeof(std::uint32_t));
+
+  // --- Allocate I/O buffers ---
+  const std::size_t data_size = N * sizeof(std::uint32_t);
+
+  std::uint32_t* input = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, (data_size * total_num_dispatches), 0,
+                                         reinterpret_cast<void**>(&input)),
+            HSA_STATUS_SUCCESS);
+  std::iota(input, input + (N * total_num_dispatches), 0);
+
+  std::uint32_t* output = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, (data_size * total_num_dispatches), 0,
+                                         reinterpret_cast<void**>(&output)),
+            HSA_STATUS_SUCCESS);
+  std::fill_n(output, N * total_num_dispatches, 0);
+
+  // --- Allocate storage for packet payload ---
+  constexpr std::uint32_t NUM_SRC = 1;
+  constexpr std::uint32_t PACKET_DWORDS = 3 + (NUM_SRC + 1) * 3;
+
+  void* payload = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, (payload_size * total_num_dispatches), 0,
+                                         &payload),
+            HSA_STATUS_SUCCESS);
+
+  // --- Create completion signal ---
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  // --- Initial Packets to set-up for wrap-around ---
+  for (std::uint32_t iter = 0; iter < initial_dispatches; ++iter) {
+    SCOPED_TRACE(iter);
+
+    auto input_ptr = input + iter * N;
+    auto output_ptr = output + iter * N;
+    auto payload_ptr = reinterpret_cast<hsa_amd_aie_ert_start_kernel_data_t*>(
+        reinterpret_cast<std::byte*>(payload) + payload_size * iter);
+
+    // Create packet
+    create_aie_vector_scalar_payload(payload_ptr, pdi_buf, insts_buf, insts_dwords, input_ptr,
+                                     output_ptr, static_cast<std::uint32_t>(data_size));
+
+    // Submit
+    const auto wr_idx = submit_aie_packet(queue, payload_ptr, PACKET_DWORDS, signal);
+
+    // Ring doorbell
+    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  }
+
+  // --- Dispatch loop ---
+  for (std::uint32_t iter = 0; iter < num_dispatches; ++iter) {
+    SCOPED_TRACE(iter);
+
+    auto offset = initial_dispatches + iter;
+    auto input_ptr = input + offset * N;
+    auto output_ptr = output + offset * N;
+    auto payload_ptr = reinterpret_cast<hsa_amd_aie_ert_start_kernel_data_t*>(
+        reinterpret_cast<std::byte*>(payload) + payload_size * offset);
+
+    // Create packet
+    create_aie_vector_scalar_payload(payload_ptr, pdi_buf, insts_buf, insts_dwords, input_ptr,
+                                     output_ptr, static_cast<std::uint32_t>(data_size));
+
+    // Submit
+    const auto wr_idx = submit_aie_packet(queue, payload_ptr, PACKET_DWORDS, signal);
+
+    // Ring doorbell
+    hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  }
+
+  // Wait for completion of all dispatches
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  // Verify output: output[i] == input[i] + 1
+  for (std::size_t i = 0; i < N * total_num_dispatches; ++i) {
+    EXPECT_EQ(output[i], input[i] + 1) << "mismatch at index " << i;
   }
 
   // --- Cleanup ---
