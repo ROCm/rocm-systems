@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -51,13 +52,20 @@ class TestNativeTool:
             )
         assert lib_path == None
 
-    @pytest.mark.skip()
     def test_when_no_lib_exists__builds_it(
         self, sources_path, installed_rocprofv3_path: Path, sources_compute_path: Path
     ):
-        lib_path = NativeTool().get_collector_library_path(
-            sources_compute_path, installed_rocprofv3_path
-        )
+        def mock_build_collector():
+            self.__create_file(sources_path, Path(NativeTool.lib_relative_path))
+
+        with patch.object(
+            NativeTool, "_generate_cmake_project", return_value=True
+        ) and patch.object(
+            NativeTool, "_build_cmake_project", side_effect=mock_build_collector
+        ):
+            lib_path = NativeTool().get_collector_library_path(
+                sources_compute_path, installed_rocprofv3_path
+            )
         assert lib_path == sources_path / NativeTool.lib_relative_path
 
     @pytest.fixture
