@@ -32,6 +32,7 @@
 #define LIBRARY_SRC_SDMA_ANVIL_HPP_
 
 #include <array>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -52,6 +53,7 @@ class SdmaQueue {
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
+  void dump(std::ofstream& logFile);
 
  private:
   int remoteDeviceId_;
@@ -79,6 +81,8 @@ class AnvilLib {
   void init();
   bool connect(int srcDeviceId, int dstDeviceId, int numChannels = 1);
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
+  SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
+                             int* channelIdx = nullptr);
 
  private:
   /*
@@ -111,6 +115,11 @@ class AnvilLib {
 };
 
 extern AnvilLib& anvil;
+
+// Initialize the Anvil subsystem (HSA + KFD). Idempotent.
+bool initEndpoint();
+// Mark the subsystem inactive. Does not destroy queues or shut down HSA/KFD.
+void shutdownEndpoint();
 
 inline void checkHipError(hipError_t err, const char* msg, const char* file, int line) {
   if (err != hipSuccess) {
