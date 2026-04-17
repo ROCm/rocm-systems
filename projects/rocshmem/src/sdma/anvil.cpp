@@ -209,10 +209,10 @@ void SdmaQueue::dump(std::ofstream& logFile) {
   while (it < dw_enqueued) {
     logFile << "[" << it << "] ";
     uint32_t opcode = *dwPtr & 0xFF;
+    uint32_t subop = (*dwPtr >> 8) & 0xFF;
     if (opcode == SDMA_OP_COPY) {
-      [[maybe_unused]] uint32_t subop = (*dwPtr >> 8) & 0xFF;
-#if USE_SDMA_OSS7
-      if (subop == SDMA_SUBOP_COPY_LINEAR_WAIT_SIGNAL_MI4) {
+      if (subop == SDMA_SUBOP_COPY_LINEAR_WAIT_SIGNAL_MI4 &&
+          sizeof(SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4) / sizeof(uint32_t) <= dw_enqueued - it) {
         auto* ptr = reinterpret_cast<SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4*>(dwPtr);
         logFile << "COPY_WAIT_SIGNAL_MI4 count=" << ptr->COPY_COUNT_UNION.copy_count
                 << " wait=" << ptr->HEADER_UNION.wait
@@ -227,9 +227,7 @@ void SdmaQueue::dump(std::ofstream& logFile) {
         constexpr size_t dw = sizeof(SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4) / sizeof(uint32_t);
         it += dw;
         dwPtr += dw;
-      } else
-#endif  // USE_SDMA_OSS7
-      {
+      } else {
         auto* ptr = reinterpret_cast<SDMA_PKT_COPY_LINEAR*>(dwPtr);
         logFile << "COPY count=" << ptr->COUNT_UNION.count
                 << " src=0x" << std::hex
@@ -254,8 +252,6 @@ void SdmaQueue::dump(std::ofstream& logFile) {
       it += dw;
       dwPtr += dw;
     } else if (opcode == SDMA_OP_FENCE) {
-      [[maybe_unused]] uint32_t subop = (*dwPtr >> 8) & 0xFF;
-#if USE_SDMA_OSS7
       if (subop == SDMA_SUBOP_FENCE_64B_MI4) {
         auto* ptr = reinterpret_cast<SDMA_PKT_FENCE_64B_MI4*>(dwPtr);
         logFile << "FENCE_64B_MI4"
@@ -279,9 +275,7 @@ void SdmaQueue::dump(std::ofstream& logFile) {
         constexpr size_t dw = sizeof(SDMA_PKT_FENCE_MI4) / sizeof(uint32_t);
         it += dw;
         dwPtr += dw;
-      } else
-#endif  // USE_SDMA_OSS7
-      {
+      } else {
         auto* ptr = reinterpret_cast<SDMA_PKT_FENCE*>(dwPtr);
         logFile << "FENCE data=" << ptr->DATA_UNION.data
                 << " addr=0x" << std::hex

@@ -4,11 +4,22 @@
  *
  * SDMA opcode and sub-opcode constants shared across all
  * packet-structure headers.  Top-level opcodes are common to
- * every SDMA generation; OSS7.0-specific sub-opcodes are
- * gated behind USE_SDMA_OSS7.
+ * every SDMA generation; OSS7.0-specific sub-opcodes are always
+ * defined but only used when SDMA_IS_OSS7 is set.
+ *
+ * SDMA_IS_OSS7 is detected at compile time from the HIP architecture
+ * macro __gfx950__ (MI350X / CDNA4 and later OSS7 parts).
+ * No CMake flag is needed; the compiler selects the right path per arch.
  */
 
 #pragma once
+
+/* ---- OSS7 detection: set by HIP compiler for each device arch ---- */
+#if defined(__gfx950__)
+#  define SDMA_IS_OSS7 1
+#else
+#  define SDMA_IS_OSS7 0
+#endif
 
 /* ---- Top-level opcodes (all SDMA generations) ----------- */
 const unsigned int SDMA_OP_NOP = 0;
@@ -30,7 +41,6 @@ const unsigned int SDMA_SUBOP_WRITE_LINEAR = 0;
 const unsigned int SDMA_ATOMIC_ADD64 = 47;
 
 /* ---- OSS7.0 (MI4 / MI350X+) sub-opcodes and operations -- */
-#if USE_SDMA_OSS7
 const unsigned int SDMA_SIGNAL_OP_ADD64_MI4 = 111;
 const unsigned int SDMA_WAIT_FUNC_GEQ_MI4 = 5;
 const unsigned int SDMA_SUBOP_COPY_LINEAR_PHY_MI4 = 0x8;
@@ -46,4 +56,3 @@ const unsigned int SDMA_SUBOP_FENCE_64B_MI4 = 0x2;
 const unsigned int SDMA_SUBOP_POLL_MEM_64B_MI4 = 0x5;
 const unsigned int SDMA_SUBOP_CONSTANT_FILL_MI4 = 0x0;
 const unsigned int SDMA_SUBOP_CONSTANT_FILL_PAGE_MI4 = 0x4;
-#endif /* USE_SDMA_OSS7 */
