@@ -23,6 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -194,7 +195,7 @@ class OmniAnalyze_Base:
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
-            parser.build_metric_value_string(
+            build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
