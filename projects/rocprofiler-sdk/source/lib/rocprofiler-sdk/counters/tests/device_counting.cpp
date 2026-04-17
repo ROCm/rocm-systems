@@ -506,9 +506,9 @@ protected:
         int*                             gpuMem;
         [[maybe_unused]] hipDeviceProp_t devProp;
         auto                             status = hipGetDeviceProperties(&devProp, 0);
-        CHECK_EQ(status, HSA_STATUS_SUCCESS);
+        CHECK_EQ(status, hipSuccess);
         status = hipMalloc((void**) &gpuMem, 1 * sizeof(int));
-        CHECK_EQ(status, HSA_STATUS_SUCCESS);
+        CHECK_EQ(status, hipSuccess);
 
         bool test_ran = false;
         CHECK(!supported_agents.empty());

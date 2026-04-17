@@ -26,7 +26,6 @@
 
 #include <fmt/core.h>
 #include <hsa/hsa_ext_amd.h>
-#include "glog/logging.h"
 
 #define CHECK_HSA(fn, message)                                                                     \
     {                                                                                              \

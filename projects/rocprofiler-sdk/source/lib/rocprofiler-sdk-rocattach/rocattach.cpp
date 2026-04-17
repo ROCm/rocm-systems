@@ -96,7 +96,6 @@ initialize_logging()
 {
     auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
     common::init_logging("ROCATTACH", logging_cfg);
-    FLAGS_colorlogtostderr = true;
 }
 
 session_list_t*

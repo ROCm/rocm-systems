@@ -61,7 +61,7 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-memcheck>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-glog>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-abseil>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-yaml-cpp>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>

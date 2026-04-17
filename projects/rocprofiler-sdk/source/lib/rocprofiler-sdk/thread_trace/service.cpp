@@ -27,7 +27,7 @@
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 
-#include <glog/logging.h>
+#include "lib/common/logging.hpp"
 
 #include <cstdint>
 

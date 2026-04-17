@@ -60,7 +60,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-rt "Build flags for runtime li
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-atomic "atomic library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gtest "Google Test library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-glog "Google Log library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-abseil "Abseil logging library"
+                                  INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-fmt "C++ format string library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-cxx-filesystem "C++ filesystem library"

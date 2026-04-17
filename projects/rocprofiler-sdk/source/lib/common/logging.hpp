@@ -24,7 +24,9 @@
 
 #include "lib/common/defines.hpp"
 
-#include <glog/logging.h>
+#include <absl/log/check.h>
+#include <absl/log/log.h>
+#include <absl/log/vlog_is_on.h>
 
 #include <fmt/format.h>  // usually used in conjunction with logging
 #include <fmt/ranges.h>
@@ -39,6 +41,16 @@
 #define ROCP_LOG_LEVEL_WARNING 2
 #define ROCP_LOG_LEVEL_ERROR   1
 #define ROCP_LOG_LEVEL_NONE    0
+
+// Abseil does not provide VLOG_IF or LOG_ASSERT. Define compatibility macros.
+#ifndef VLOG_IF
+#    define VLOG_IF(level, condition)                                                              \
+        if(VLOG_IS_ON(level) && (condition)) VLOG(level)
+#endif
+
+#ifndef LOG_ASSERT
+#    define LOG_ASSERT(condition) CHECK(condition)
+#endif
 
 #define ROCP_TRACE   VLOG(ROCP_LOG_LEVEL_TRACE)
 #define ROCP_INFO    LOG(INFO)
@@ -66,13 +78,30 @@ namespace rocprofiler
 {
 namespace common
 {
+/// CHECK_NOTNULL compatibility wrapper (abseil does not provide one).
+/// Returns the value so it can be used as an expression:
+///   auto* p = CHECK_NOTNULL(some_ptr);
+/// Takes by const& to support move-only types like unique_ptr.
+template <typename T>
+const T&
+check_notnull_impl(const char* expr, const T& ptr)
+{
+    CHECK(ptr != nullptr) << "'" << expr << "' Must be non NULL";
+    return ptr;
+}
+
+template <typename T>
+T&
+check_notnull_impl(const char* expr, T& ptr)
+{
+    CHECK(ptr != nullptr) << "'" << expr << "' Must be non NULL";
+    return ptr;
+}
+
 struct logging_config
 {
     bool        install_failure_handler = false;
-    bool        logtostderr             = true;
-    bool        alsologtostderr         = false;
-    bool        logdir_gitignore        = false;  // add .gitignore to logdir
-    int32_t     loglevel                = google::WARNING;
+    int32_t     loglevel                = 1;  // WARNING
     int32_t     vlog_level              = ROCP_LOG_LEVEL_WARNING;
     std::string vlog_modules            = {};
     std::string name                    = {};
@@ -86,3 +115,5 @@ void
 update_logging(const logging_config& cfg);
 }  // namespace common
 }  // namespace rocprofiler
+
+#define CHECK_NOTNULL(val) ::rocprofiler::common::check_notnull_impl(#val, (val))
