@@ -9,7 +9,7 @@ Shader engine (SE)
 The :doc:`compute units <compute-unit>` on a CDNA™ accelerator are grouped
 together into a higher-level organizational unit called a shader engine (SE):
 
-.. figure:: ../data/performance-model/selayout.png
+.. figure:: ../../data/performance-model/selayout.png
    :align: center
    :alt: Example of CU-grouping into shader engines
    :width: 800
