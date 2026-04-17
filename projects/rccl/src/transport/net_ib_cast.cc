@@ -1096,7 +1096,7 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   if(wrap_ibv_symbols() != ncclSuccess) { return ncclInternalError; }
   if(wrap_mlx5dv_symbols() != ncclSuccess) { INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled."); }
   if(wrap_ionicdv_symbols() != ncclSuccess) {
-    INFO(NCCL_NET, "NET/IB : Failed to open ionicdv symbols. Advance features like AINIC UD load balancing will be disabled.");
+    WARN("NET/IB : Failed to open ionicdv symbols. Advanced features like AINIC UD load balancing will be disabled.");
     return ncclInternalError;
   }
 
@@ -1834,9 +1834,9 @@ ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
           !(nccl_channel_last_ud[base->ibDevN][channel_type]);
     }
     if (nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udId) {
-      wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_HIGH);
+      NCCLCHECK(wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_HIGH));
     } else {
-      wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_LOW);
+      NCCLCHECK(wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_LOW));
     }
     qpInitAttr.sq_sig_all |= (1 << 16);
     if (data_qp) {

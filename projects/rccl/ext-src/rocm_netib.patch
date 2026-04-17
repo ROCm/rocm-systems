@@ -83,7 +83,7 @@
    if(wrap_ibv_symbols() != ncclSuccess) { return ncclInternalError; }
    if(wrap_mlx5dv_symbols() != ncclSuccess) { INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled."); }
 +  if(wrap_ionicdv_symbols() != ncclSuccess) {
-+    WARN("NET/IB : Failed to open ionicdv symbols. Advance features like AINIC UD load balancing will be disabled.");
++    WARN("NET/IB : Failed to open ionicdv symbols. Advanced features like AINIC UD load balancing will be disabled.");
 +    return ncclInternalError;
 +  }
  
@@ -235,9 +235,9 @@
 +          !(nccl_channel_last_ud[base->ibDevN][channel_type]);
 +    }
 +    if (nccl_channel_ud_map[base->ibDevN][channel_id][channel_type].udId) {
-+        wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_HIGH);
++        NCCLCHECK(wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_HIGH));
 +    } else {
-+        wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_LOW);
++        NCCLCHECK(wrap_ionicdv_pd_set_udma_mask(base->pd, IONIC_UDMA_MASK_LOW));
 +    }
 +    qpInitAttr.sq_sig_all |= (1 << 16);
 +    if (data_qp) {
@@ -556,7 +556,7 @@
 -  for (int r=1; r<nreqs; r++) while(slots[r].idx != idx);
 -  __sync_synchronize(); // order the nreqsPtr load against tag/rkey/addr loads below
 +  if (!comm->useCtsOffload) {
-+      slots = comm->fifo[slot];
++    slots = comm->fifo[slot];
 +    idx = comm->fifoHead+1;
 +    if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
 +    nreqs = slots[0].nreqs;
@@ -716,7 +716,7 @@
      wr.send_flags |= IBV_SEND_SIGNALED;
      wr.wr_id = req - comm->base.reqs;
      ncclIbAddEvent(req, ctsQp->devIndex, &comm->devs[ctsQp->devIndex].base);
-@@ -2712,10 +2934,16 @@
+@@ -2712,10 +2934,15 @@
  
    comm->remFifo.fifoTail++;
  
@@ -728,12 +728,11 @@
  }
  
  ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int* tags, void** mhandles, void** phandles, void** request) {
-+  ncclResult_t res = ncclSuccess;
 +  bool netOptRecvCompletionEnabled = false;
    struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
    ncclResult_t ret = ncclSuccess;
    struct ncclIbRequest* req = NULL;
-@@ -2731,6 +2959,11 @@
+@@ -2731,6 +2958,11 @@
    if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
    NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, fail);
  
@@ -745,7 +744,7 @@
    NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, fail);
    req->type = NCCL_NET_IB_REQ_RECV;
    req->sock = &comm->base.sock;
-@@ -2743,40 +2976,50 @@
+@@ -2743,40 +2975,50 @@
      req->devBases[i] = &comm->devs[i].base;
    }
  
@@ -826,7 +825,7 @@
  
    // Post to FIFO to notify sender
    TIME_START(2);
-@@ -2905,6 +3148,8 @@
+@@ -2905,6 +3147,8 @@
  }
  #endif
  
@@ -835,7 +834,7 @@
  ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
    struct ncclIbRequest *r = (struct ncclIbRequest*)request;
    ncclResult_t ret = ncclSuccess;
-@@ -2948,13 +3193,17 @@
+@@ -2948,13 +3192,17 @@
  
      int totalWrDone = 0;
      int wrDone = 0;
@@ -855,7 +854,7 @@
          if (ret != ncclSuccess) {
            failDevIdx = i;
            goto fail;
-@@ -3131,7 +3380,7 @@
+@@ -3131,7 +3379,7 @@
  }
  
  ncclNet_t ncclNetIb = {
