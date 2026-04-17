@@ -84,26 +84,26 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-
-(ROCPROFILER_SDK_PATH,
-ROCPROFILER_SDK_TESTS_PATH,
-THEROCK_BIN_PATH,
-THEROCK_CLANG_PATH,
-THEROCK_CLANG_PLUS_PATH,
-THEROCK_LIB_PATH,
-THEROCK_SYSDEPS_LIB_PATH,
-THEROCK_SYSDEPS_PATH,
-THEROCK_PATH,
+(
+    ROCPROFILER_SDK_PATH,
+    ROCPROFILER_SDK_TESTS_PATH,
+    THEROCK_BIN_PATH,
+    THEROCK_CLANG_PATH,
+    THEROCK_CLANG_PLUS_PATH,
+    THEROCK_LIB_PATH,
+    THEROCK_SYSDEPS_LIB_PATH,
+    THEROCK_SYSDEPS_PATH,
+    THEROCK_PATH,
 ) = (
-args.rocprofiler_sdk_path,
-args.rocprofiler_sdk_tests_path,
-args.therock_bin_path,
-args.therock_clang_path,
-args.therock_clang_plus_path,
-args.therock_lib_path,
-args.therock_sysdeps_lib_path,
-args.therock_sysdeps_path,
-args.therock_path,
+    args.rocprofiler_sdk_path,
+    args.rocprofiler_sdk_tests_path,
+    args.therock_bin_path,
+    args.therock_clang_path,
+    args.therock_clang_plus_path,
+    args.therock_lib_path,
+    args.therock_sysdeps_lib_path,
+    args.therock_sysdeps_path,
+    args.therock_path,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -192,7 +192,9 @@ def _cdash_build_name() -> str:
             prefix = ""
     label = _default_cdash_matrix_label() or os.getenv("THEROCK_CDASH_LABEL")
     run_key = (
-        os.getenv("GITHUB_RUN_ID") or os.getenv("THEROCK_RUN_ID") or os.getenv("ARTIFACT_RUN_ID")
+        os.getenv("GITHUB_RUN_ID")
+        or os.getenv("THEROCK_RUN_ID")
+        or os.getenv("ARTIFACT_RUN_ID")
     )
     if not run_key:
         return f"{prefix}{label}"
