@@ -56,12 +56,10 @@ TextSection extractTextSection(const std::vector<uint8_t> &elfData) {
   auto &obj = *objOrErr;
   for (const auto &sec : obj->sections()) {
     auto nameOrErr = sec.getName();
-    if (!nameOrErr)
-      continue;
+    if (!nameOrErr) { (void)llvm::toString(nameOrErr.takeError()); continue; }
     if (*nameOrErr == ".text") {
       auto contentsOrErr = sec.getContents();
-      if (!contentsOrErr)
-        continue;
+      if (!contentsOrErr) { (void)llvm::toString(contentsOrErr.takeError()); continue; }
       result.bytes.assign(contentsOrErr->begin(), contentsOrErr->end());
       result.offset = sec.getAddress();
       result.size = sec.getSize();
@@ -82,7 +80,8 @@ std::vector<std::string> listKernelNames(const std::vector<uint8_t> &elfData) {
       "", false);
   auto objOrErr = llvm::object::ObjectFile::createELFObjectFile(*bufOrErr);
   if (!objOrErr) {
-    llvm::errs() << "transpiler: listKernelNames: Failed to parse ELF\n";
+    llvm::errs() << "transpiler: listKernelNames: Failed to parse ELF: "
+                 << llvm::toString(objOrErr.takeError()) << "\n";
     return names;
   }
   auto *elf = llvm::dyn_cast<llvm::object::ELF64LEObjectFile>(objOrErr->get());
@@ -92,14 +91,17 @@ std::vector<std::string> listKernelNames(const std::vector<uint8_t> &elfData) {
   }
 
   auto sectionsOrErr = elf->getELFFile().sections();
-  if (!sectionsOrErr) return names;
+  if (!sectionsOrErr) {
+    (void)llvm::toString(sectionsOrErr.takeError());
+    return names;
+  }
 
   for (auto &shdr : *sectionsOrErr) {
     if (shdr.sh_type != 7) // SHT_NOTE
       continue;
 
     auto dataOrErr = elf->getELFFile().getSectionContents(shdr);
-    if (!dataOrErr) continue;
+    if (!dataOrErr) { (void)llvm::toString(dataOrErr.takeError()); continue; }
     auto data = *dataOrErr;
 
     size_t off = 0;
@@ -162,7 +164,8 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
       "", false);
   auto objOrErr = llvm::object::ObjectFile::createELFObjectFile(*bufOrErr);
   if (!objOrErr) {
-    llvm::errs() << "transpiler: extractKernelMeta: Failed to parse ELF\n";
+    llvm::errs() << "transpiler: extractKernelMeta: Failed to parse ELF: "
+                 << llvm::toString(objOrErr.takeError()) << "\n";
     return meta;
   }
   auto *elf = llvm::dyn_cast<llvm::object::ELF64LEObjectFile>(objOrErr->get());
@@ -173,14 +176,14 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
 
   // Find .note section
   auto sectionsOrErr = elf->getELFFile().sections();
-  if (!sectionsOrErr) return meta;
+  if (!sectionsOrErr) { (void)llvm::toString(sectionsOrErr.takeError()); return meta; }
 
   for (auto &shdr : *sectionsOrErr) {
     if (shdr.sh_type != 7) // SHT_NOTE
       continue;
 
     auto dataOrErr = elf->getELFFile().getSectionContents(shdr);
-    if (!dataOrErr) continue;
+    if (!dataOrErr) { (void)llvm::toString(dataOrErr.takeError()); continue; }
     auto data = *dataOrErr;
 
     size_t off = 0;
@@ -284,7 +287,8 @@ uint64_t findKernelSymbolOffset(const std::vector<uint8_t> &elfData,
       "", false);
   auto objOrErr = llvm::object::ObjectFile::createELFObjectFile(*bufOrErr);
   if (!objOrErr) {
-    llvm::errs() << "transpiler: findKernelSymbolOffset: Failed to parse ELF\n";
+    llvm::errs() << "transpiler: findKernelSymbolOffset: Failed to parse ELF: "
+                 << llvm::toString(objOrErr.takeError()) << "\n";
     return 0;
   }
 
@@ -303,10 +307,10 @@ uint64_t findKernelSymbolOffset(const std::vector<uint8_t> &elfData,
 
   for (const auto &sym : (*objOrErr)->symbols()) {
     auto nameOrErr = sym.getName();
-    if (!nameOrErr) continue;
+    if (!nameOrErr) { (void)llvm::toString(nameOrErr.takeError()); continue; }
     if (*nameOrErr == kernelName) {
       auto addrOrErr = sym.getAddress();
-      if (!addrOrErr) continue;
+      if (!addrOrErr) { (void)llvm::toString(addrOrErr.takeError()); continue; }
       if (*addrOrErr < textBase) {
         llvm::errs() << "transpiler: findKernelSymbolOffset: symbol address 0x"
                      << llvm::utohexstr(*addrOrErr) << " < .text base 0x"

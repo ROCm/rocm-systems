@@ -1,3 +1,5 @@
+#include "test_common.hpp"
+
 #include "../code_object_utils.hpp"
 #include "../raiser.hpp"
 
@@ -8,9 +10,13 @@
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
+#include <fcntl.h>
 #include <map>
 #include <string>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <vector>
 
 struct KernelResult {
@@ -66,37 +72,14 @@ static std::vector<std::string> collectCoFiles(const std::string &path) {
   return results;
 }
 
-
-int main(int argc, char **argv) {
-  if (argc < 2) {
-    fprintf(stderr,
-            "Usage: %s <path-to-co-files> [--isa=gfx950] [--verbose]\n"
-            "  <path> can be a single .co file or a directory (recursive)\n",
-            argv[0]);
-    return 1;
-  }
-
-  std::string path = argv[1];
-  std::string isa = "gfx942";
-  bool verbose = false;
-  for (int i = 2; i < argc; i++) {
-    if (strncmp(argv[i], "--isa=", 6) == 0)
-      isa = argv[i] + 6;
-    else if (strcmp(argv[i], "--verbose") == 0)
-      verbose = true;
-  }
-
+static void runBatchRaise(const std::string &path, const std::string &isa) {
   auto coFiles = collectCoFiles(path);
-  if (coFiles.empty()) {
-    fprintf(stderr, "ERROR: No .co files found at '%s'\n", path.c_str());
-    return 1;
-  }
+  ASSERT_FALSE(coFiles.empty()) << "No .co files found at '" << path << "'";
 
   printf("=== Batch LLVM IR Raiser Test ===\n");
   printf("Target ISA: %s\n", isa.c_str());
   printf("Code objects: %zu\n\n", coFiles.size());
 
-  std::vector<KernelResult> results;
   std::map<std::string, int> failMnemonics;
   std::map<std::string, int> failFormats;
   int totalKernels = 0, successKernels = 0, failedKernels = 0;
@@ -104,114 +87,248 @@ int main(int argc, char **argv) {
 
   for (auto &coPath : coFiles) {
     auto coData = transpiler::readFile(coPath);
-    if (coData.empty()) {
-      fprintf(stderr, "WARNING: Cannot read '%s', skipping\n", coPath.c_str());
-      continue;
-    }
+    if (coData.empty()) continue;
 
     auto kernelNames = transpiler::listKernelNames(coData);
-    if (kernelNames.empty()) {
-      if (verbose)
-        printf("  [%s] no kernels found in metadata\n", coPath.c_str());
-      continue;
-    }
+    if (kernelNames.empty()) continue;
 
     totalFiles++;
     bool anySuccess = false;
 
     auto text = transpiler::extractTextSection(coData);
-    if (!text.valid) {
-      fprintf(stderr, "WARNING: No .text in '%s', skipping\n", coPath.c_str());
-      continue;
-    }
+    if (!text.valid) continue;
 
     for (auto &kName : kernelNames) {
       totalKernels++;
       auto meta = transpiler::extractKernelMeta(coData, kName);
-
       auto raised = transpiler::raiseToIR(text.bytes, isa, kName, meta);
-
-      KernelResult kr;
-      kr.coFile = coPath;
-      kr.kernelName = kName;
-      kr.success = raised.success;
-      kr.hasDivergentExec = raised.hasDivergentExec;
-      kr.liftedCount = raised.liftedCount;
-      kr.totalCount = raised.totalCount;
 
       if (raised.success) {
         successKernels++;
         anySuccess = true;
-        if (verbose)
-          printf("  OK  %-60s %d/%d insts%s\n", kName.c_str(),
-                 raised.liftedCount, raised.totalCount,
-                 raised.hasDivergentExec ? " [EXEC divergent]" : "");
       } else {
         failedKernels++;
-        kr.failMnemonic = raised.failMnemonic.empty() ? "unknown" : raised.failMnemonic;
-        kr.failFormat = raised.failFormat.empty() ? "unknown" : raised.failFormat;
-        failMnemonics[kr.failMnemonic]++;
-        failFormats[kr.failFormat]++;
-        if (verbose)
-          printf("  FAIL %-60s -> %s [%s]\n", kName.c_str(),
-                 kr.failMnemonic.c_str(), kr.failFormat.c_str());
+        std::string mn = raised.failMnemonic.empty() ? "unknown" : raised.failMnemonic;
+        std::string fmt = raised.failFormat.empty() ? "unknown" : raised.failFormat;
+        failMnemonics[mn]++;
+        failFormats[fmt]++;
+        EXPECT_TRUE(raised.success)
+            << "Kernel '" << kName << "' in " << coPath
+            << " failed on mnemonic: " << mn << " [" << fmt << "]";
       }
-      results.push_back(kr);
     }
-
     if (anySuccess) filesWithSuccess++;
   }
 
-  // Summary
-  printf("\n");
-  printf("================================================================\n");
-  printf("                    BATCH RAISER SUMMARY\n");
-  printf("================================================================\n");
-  printf("\n");
-  printf("Code objects scanned:   %d\n", totalFiles);
-  printf("  with >= 1 success:    %d\n", filesWithSuccess);
-  printf("\n");
-  int divergentKernels = 0;
-  for (auto &kr : results)
-    if (kr.success && kr.hasDivergentExec)
-      divergentKernels++;
-
-  printf("Kernels attempted:      %d\n", totalKernels);
-  printf("  Succeeded:            %d  (%.1f%%)\n", successKernels,
-         totalKernels ? 100.0 * successKernels / totalKernels : 0.0);
-  printf("    with EXEC divergence: %d\n", divergentKernels);
-  printf("  Failed:               %d  (%.1f%%)\n", failedKernels,
-         totalKernels ? 100.0 * failedKernels / totalKernels : 0.0);
-  printf("\n");
+  printf("\nBatch Raiser Summary:\n");
+  printf("  Files: %d, Kernels: %d, Succeeded: %d (%.1f%%), Failed: %d\n",
+         totalFiles, totalKernels, successKernels,
+         totalKernels ? 100.0 * successKernels / totalKernels : 0.0,
+         failedKernels);
 
   if (!failMnemonics.empty()) {
-    // Sort by frequency
     std::vector<std::pair<int, std::string>> sorted;
     for (auto &[mn, cnt] : failMnemonics)
       sorted.push_back({cnt, mn});
     std::sort(sorted.rbegin(), sorted.rend());
-
-    printf("Top failing mnemonics:\n");
-    printf("  %-40s  %s\n", "Mnemonic", "Count");
-    printf("  %-40s  %s\n", "----------------------------------------", "-----");
+    printf("  Top failing mnemonics:\n");
     int shown = 0;
     for (auto &[cnt, mn] : sorted) {
-      printf("  %-40s  %d\n", mn.c_str(), cnt);
-      if (++shown >= 30) break;
+      printf("    %-40s  %d\n", mn.c_str(), cnt);
+      if (++shown >= 10) break;
     }
-    printf("\n");
-
-    printf("Failures by format:\n");
-    printf("  %-20s  %s\n", "Format", "Count");
-    printf("  %-20s  %s\n", "--------------------", "-----");
-    std::vector<std::pair<int, std::string>> fmtSorted;
-    for (auto &[fmt, cnt] : failFormats)
-      fmtSorted.push_back({cnt, fmt});
-    std::sort(fmtSorted.rbegin(), fmtSorted.rend());
-    for (auto &[cnt, fmt] : fmtSorted)
-      printf("  %-20s  %d\n", fmt.c_str(), cnt);
   }
 
-  printf("\n");
-  return (failedKernels > 0) ? 1 : 0;
+  EXPECT_EQ(failedKernels, 0)
+      << failedKernels << " of " << totalKernels << " kernels failed to raise";
+}
+
+// Fork-isolated batch raise: each code object is raised in a child process
+// so that report_fatal_error in one kernel does not kill the entire test.
+struct ForkRaiseStats {
+  int totalKernels;
+  int successKernels;
+  int failedKernels;
+  int crashedKernels;
+  bool done;
+};
+
+static void runBatchRaiseIsolated(const std::string &path,
+                                  const std::string &isa,
+                                  int expectedFailures) {
+  auto coFiles = collectCoFiles(path);
+  ASSERT_FALSE(coFiles.empty()) << "No .co files found at '" << path << "'";
+
+  printf("=== Batch LLVM IR Raiser Test (fork-isolated) ===\n");
+  printf("Target ISA: %s\n", isa.c_str());
+  printf("Code objects: %zu (expected failures: %d)\n\n", coFiles.size(),
+         expectedFailures);
+
+  int totalKernels = 0, successKernels = 0, failedKernels = 0,
+      crashedKernels = 0;
+
+  for (auto &coPath : coFiles) {
+    auto coData = transpiler::readFile(coPath);
+    if (coData.empty()) continue;
+    auto kernelNames = transpiler::listKernelNames(coData);
+    if (kernelNames.empty()) continue;
+    auto text = transpiler::extractTextSection(coData);
+    if (!text.valid) continue;
+
+    for (auto &kName : kernelNames) {
+      totalKernels++;
+
+      auto *shm = static_cast<ForkRaiseStats *>(
+          mmap(nullptr, sizeof(ForkRaiseStats), PROT_READ | PROT_WRITE,
+               MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+      ASSERT_NE(shm, MAP_FAILED) << "mmap failed";
+      memset(shm, 0, sizeof(ForkRaiseStats));
+
+      pid_t pid = fork();
+      if (pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
+        auto meta = transpiler::extractKernelMeta(coData, kName);
+        auto raised = transpiler::raiseToIR(text.bytes, isa, kName, meta);
+        shm->done = true;
+        shm->totalKernels = raised.success ? 1 : 0;
+        _exit(0);
+      }
+
+      int st = 0;
+      waitpid(pid, &st, 0);
+
+      if (shm->done && shm->totalKernels == 1) {
+        successKernels++;
+      } else if (!shm->done || WIFSIGNALED(st)) {
+        crashedKernels++;
+        printf("  CRASH: %s in %s\n", kName.c_str(), coPath.c_str());
+      } else {
+        failedKernels++;
+        printf("  FAIL:  %s in %s\n", kName.c_str(), coPath.c_str());
+      }
+
+      munmap(shm, sizeof(ForkRaiseStats));
+    }
+  }
+
+  int totalFailed = failedKernels + crashedKernels;
+  printf("\nBatch Raiser Summary:\n");
+  printf("  Kernels: %d, Succeeded: %d (%.1f%%), Failed: %d, Crashed: %d\n",
+         totalKernels, successKernels,
+         totalKernels ? 100.0 * successKernels / totalKernels : 0.0,
+         failedKernels, crashedKernels);
+
+  EXPECT_LE(totalFailed, expectedFailures)
+      << "Regression: expected at most " << expectedFailures
+      << " failures but got " << totalFailed;
+  if (totalFailed < expectedFailures)
+    printf("  NOTE: fewer failures than expected (%d < %d) — update the "
+           "expected count.\n", totalFailed, expectedFailures);
+}
+
+TEST(BatchRaise, Gfx1250TestData) {
+  std::string path = std::string(TEST_DATA_DIR) + "/gfx1250";
+  if (!fileExists(path))
+    GTEST_SKIP() << "Test data directory not found: " << path;
+  runBatchRaise(path, "gfx1250");
+}
+
+// AITER CK production kernels (gfx950): GEMM, FMHA, MoE, MLA, PA, TopK.
+// Fork-isolated so that report_fatal_error in one kernel doesn't kill the test.
+// Current failures (15 of 27):
+//   2 bf16gemm    — v_add_i32 unsupported
+//   2 f4gemm      — XNACK_MASK_HI crash
+//   4 f8_block_scale — CFG reconstruction edge case
+//   2 fmha_bwd    — LDS_DIRECT crash
+//   3 fmha_fwd    — v_add_i32 unsupported
+//   2 fmoe        — v_add_i32 unsupported
+TEST(BatchRaise, AiterGfx950) {
+  std::string path = AITER_CORPUS_DIR;
+  if (!fileExists(path))
+    GTEST_SKIP() << "AITER corpus not found: " << path
+                 << " (run hotswap/kernels/fetch_aiter_kernels.py)";
+  runBatchRaiseIsolated(path, "gfx942", /*expectedFailures=*/15);
+}
+
+// Ad-hoc batch raise against user-supplied directories via --raise-dir=PATH.
+// Uses fork isolation; reports all failures but does not assert a specific count.
+TEST(BatchRaise, CustomDir) {
+  if (g_config.raiseDirs.empty())
+    GTEST_SKIP() << "No --raise-dir= provided";
+
+  for (auto &dir : g_config.raiseDirs) {
+    auto coFiles = collectCoFiles(dir);
+    ASSERT_FALSE(coFiles.empty()) << "No .co files found at '" << dir << "'";
+
+    printf("=== Batch raise: %s (%zu files) ===\n", dir.c_str(),
+           coFiles.size());
+
+    int totalKernels = 0, successKernels = 0, failedKernels = 0,
+        crashedKernels = 0;
+
+    for (auto &coPath : coFiles) {
+      auto coData = transpiler::readFile(coPath);
+      if (coData.empty()) continue;
+      auto kernelNames = transpiler::listKernelNames(coData);
+      if (kernelNames.empty()) continue;
+      auto text = transpiler::extractTextSection(coData);
+      if (!text.valid) continue;
+
+      // Auto-detect ISA from the code object filename.
+      std::string isa;
+      for (auto pos = coPath.find("gfx"); pos != std::string::npos;
+           pos = coPath.find("gfx", pos + 1)) {
+        size_t j = pos + 3;
+        while (j < coPath.size() && coPath[j] >= '0' && coPath[j] <= '9') j++;
+        if (j > pos + 3) {
+          if (j < coPath.size() && coPath[j] >= 'a' && coPath[j] <= 'z') j++;
+          isa = coPath.substr(pos, j - pos);
+        }
+      }
+      if (isa.empty()) isa = "gfx942";
+
+      for (auto &kName : kernelNames) {
+        totalKernels++;
+
+        auto *shm = static_cast<ForkRaiseStats *>(
+            mmap(nullptr, sizeof(ForkRaiseStats), PROT_READ | PROT_WRITE,
+                 MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+        ASSERT_NE(shm, MAP_FAILED);
+        memset(shm, 0, sizeof(ForkRaiseStats));
+
+        pid_t pid = fork();
+        if (pid == 0) {
+          int devnull = open("/dev/null", O_WRONLY);
+          if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
+          auto meta = transpiler::extractKernelMeta(coData, kName);
+          auto raised = transpiler::raiseToIR(text.bytes, isa, kName, meta);
+          shm->done = true;
+          shm->totalKernels = raised.success ? 1 : 0;
+          _exit(0);
+        }
+
+        int st = 0;
+        waitpid(pid, &st, 0);
+
+        if (shm->done && shm->totalKernels == 1) {
+          successKernels++;
+        } else if (!shm->done || WIFSIGNALED(st)) {
+          crashedKernels++;
+          printf("  CRASH: %s in %s\n", kName.c_str(), coPath.c_str());
+        } else {
+          failedKernels++;
+          printf("  FAIL:  %s in %s\n", kName.c_str(), coPath.c_str());
+        }
+
+        munmap(shm, sizeof(ForkRaiseStats));
+      }
+    }
+
+    printf("\nSummary for %s:\n", dir.c_str());
+    printf("  Kernels: %d, Succeeded: %d (%.1f%%), Failed: %d, Crashed: %d\n",
+           totalKernels, successKernels,
+           totalKernels ? 100.0 * successKernels / totalKernels : 0.0,
+           failedKernels, crashedKernels);
+  }
 }

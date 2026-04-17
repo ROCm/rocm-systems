@@ -1,3 +1,5 @@
+#include "test_common.hpp"
+
 #include "../code_object_utils.hpp"
 #include "../pipeline.hpp"
 
@@ -13,6 +15,9 @@
 #include <string>
 #include <vector>
 
+// HIP_TRY is used inside testPostGSUKernel which returns TestResult via goto.
+// This pattern does not translate to ASSERT_* (which requires void return),
+// so we keep it as-is for the internal kernel test function.
 #define HIP_TRY(call)                                                          \
   do {                                                                         \
     hipError_t err = (call);                                                   \
@@ -61,18 +66,6 @@ struct KernelTestResult {
 
 // ============================================================================
 // PostGSU kernel name parsing and Tensile-aware argument construction.
-//
-// PostGSU kernels are the output-conversion step for Tensile GEMM with Global
-// Split U.  They compute:  D[i] = alpha * sum(WS_partitions[i]) + beta * C[i]
-//
-// Argument layout (from Tensile ContractionSolution.cpp, stridedBatched):
-//   [ptr D] [ptr WS] [ptr C]
-//   [alpha f32] [beta f32]
-//   [strideD1 u32] [strideD2 u32]
-//   [strideW1 u32] [strideW2 u32]
-//   [strideC1 u32] [strideC2 u32]
-//   [size0 u32] [size1 u32] [size2 u32]
-//   [gsu u32]
 // ============================================================================
 
 struct PostGSUInfo {
@@ -140,7 +133,6 @@ static PostGSUInfo parsePostGSUKernelName(const std::string &name) {
   return info;
 }
 
-// WS uses compute precision; D/C use storage precision.
 static int wsElemBytes(char dt) {
   switch (dt) {
   case 'D': return 8;
@@ -173,8 +165,6 @@ static void freePostGSUBuffers(PostGSUBuffers &b) {
   b.D = b.WS = b.C = nullptr;
 }
 
-// Classify the explicit arg layout of a PostGSU kernel from metadata.
-// Returns the offset of the first scalar (alpha) arg, or -1 if unrecognized.
 static int getPostGSUScalarBase(const transpiler::KernelMeta &meta) {
   std::vector<transpiler::KernelArgMeta> explicitArgs;
   for (auto &a : meta.args)
@@ -198,9 +188,6 @@ static int getPostGSUScalarBase(const transpiler::KernelMeta &meta) {
   return -1;
 }
 
-// Build kernargs for a non-_GB PostGSU kernel and fill buffers with known data.
-// WS is filled with 1.0 (compute precision), C with 2.0 (storage precision).
-// alpha=1.0, beta=1.0  →  D[i] = 1.0 * (gsu × 1.0) + 1.0 * 2.0 = gsu + 2.
 static bool
 buildPostGSUKernargs(std::vector<uint8_t> &kernargBuf,
                      const transpiler::KernelMeta &meta,
@@ -232,7 +219,6 @@ buildPostGSUKernargs(std::vector<uint8_t> &kernargBuf,
 
   (void)hipMemset(bufs.D, 0, dBytes);
 
-  // Fill WS with 1.0 in compute precision (float or double).
   if (wsByte == 4) {
     std::vector<float> wsHost(bufs.wsElemCount, 1.0f);
     (void)hipMemcpy(bufs.WS, wsHost.data(), wBytes, hipMemcpyHostToDevice);
@@ -241,7 +227,6 @@ buildPostGSUKernargs(std::vector<uint8_t> &kernargBuf,
     (void)hipMemcpy(bufs.WS, wsHost.data(), wBytes, hipMemcpyHostToDevice);
   }
 
-  // Fill C with 2.0 in storage precision.
   if (stByte == 4) {
     std::vector<float> cHost(bufs.elemCount, 2.0f);
     (void)hipMemcpy(bufs.C, cHost.data(), cBytes, hipMemcpyHostToDevice);
@@ -253,7 +238,6 @@ buildPostGSUKernargs(std::vector<uint8_t> &kernargBuf,
       std::memcpy(&bits, &val, 2);
       std::fill(cHost.begin(), cHost.end(), bits);
     } else {
-      // bf16: upper 16 bits of float representation. 2.0f = 0x40000000 → bf16 = 0x4000
       float fval = 2.0f;
       uint32_t fbits;
       std::memcpy(&fbits, &fval, 4);
@@ -266,7 +250,6 @@ buildPostGSUKernargs(std::vector<uint8_t> &kernargBuf,
     (void)hipMemcpy(bufs.C, cHost.data(), cBytes, hipMemcpyHostToDevice);
   }
 
-  // Locate where the scalar args start by scanning metadata.
   int scalarBase = getPostGSUScalarBase(meta);
   if (scalarBase < 0) {
     freePostGSUBuffers(bufs);
@@ -275,17 +258,10 @@ buildPostGSUKernargs(std::vector<uint8_t> &kernargBuf,
 
   kernargBuf.resize(meta.kernargSegmentSize, 0);
 
-  // Pointers: D, WS, C at offsets 0, 8, 16.
   std::memcpy(kernargBuf.data() + 0, &bufs.D, 8);
   std::memcpy(kernargBuf.data() + 8, &bufs.WS, 8);
   std::memcpy(kernargBuf.data() + 16, &bufs.C, 8);
 
-  // If there are u64 by_value args between pointers and the first u32 scalar,
-  // they are offsetD/offsetC — set to 0.
-  // (They'll remain zero from the resize.)
-
-  // Scalars: alpha, beta, strideD1, strideD2, strideW1, strideW2,
-  //          strideC1, strideC2, size0, size1, size2, gsu
   int off = scalarBase;
   float alpha = 1.0f, beta = 1.0f;
   uint32_t strideD1 = bufs.M, strideD2 = bufs.M * bufs.N;
@@ -317,8 +293,6 @@ buildPostGSUKernargs(std::vector<uint8_t> &kernargBuf,
   return true;
 }
 
-// Verify the D output: D[i] should be alpha*gsu*ws_val + beta*c_val.
-// For float data: expected = 1.0*gsu*1.0 + 1.0*2.0 = gsu+2
 static bool
 verifyPostGSUResult(void *dDev, const PostGSUInfo &info,
                     const PostGSUBuffers &bufs,
@@ -363,7 +337,6 @@ verifyPostGSUResult(void *dDev, const PostGSUInfo &info,
     std::vector<uint16_t> host(bufs.elemCount);
     (void)hipMemcpy(host.data(), dDev, dBytes, hipMemcpyDeviceToHost);
     for (int i = 0; i < bufs.elemCount; i++) {
-      // bf16 → float: place in upper 16 bits
       uint32_t fbits = (uint32_t)host[i] << 16;
       float fv;
       std::memcpy(&fv, &fbits, 4);
@@ -398,7 +371,6 @@ verifyPostGSUResult(void *dDev, const PostGSUInfo &info,
   return true;
 }
 
-// Compare two device buffers byte-for-byte, interpreting as the correct type.
 static int compareBuffers(void *devA, void *devB, int elemCount, int stByte,
                           float &maxAbsErr) {
   size_t bytes = (size_t)elemCount * stByte;
@@ -425,7 +397,6 @@ static int compareBuffers(void *devA, void *devB, int elemCount, int stByte,
       std::memcpy(&a, hostA.data() + off, 2);
       std::memcpy(&b, hostB.data() + off, 2);
       if (a != b) {
-        // Convert to float for error reporting (works for both fp16 and bf16).
         __half ha, hb;
         std::memcpy(&ha, &a, 2);
         std::memcpy(&hb, &b, 2);
@@ -452,11 +423,7 @@ static int compareBuffers(void *devA, void *devB, int elemCount, int stByte,
 }
 
 // ============================================================================
-// Test a single PostGSU kernel with principled argument construction.
-// 1) Transpile source→target
-// 2) Build correct PostGSU args (D,WS,C + scalars) for both native & transpiled
-// 3) Run native kernel → verify D matches expected math
-// 4) Run transpiled kernel → compare D against native output
+// Test a single PostGSU kernel (uses HIP_TRY/goto, returns TestResult).
 // ============================================================================
 static TestResult
 testPostGSUKernel(const std::string &kernelName,
@@ -509,7 +476,6 @@ testPostGSUKernel(const std::string &kernelName,
     int totalElems = nBufs.elemCount;
     int gridX = (totalElems + wgSize * info.vw - 1) / (wgSize * info.vw);
 
-    // --- Run native kernel ---
     HIP_TRY(hipModuleLoadData(&nativeMod, nativeData.data()));
     hipFunction_t nativeFunc;
     HIP_TRY(
@@ -527,7 +493,6 @@ testPostGSUKernel(const std::string &kernelName,
     HIP_TRY(hipDeviceSynchronize());
     ktr.nativeWrote = true;
 
-    // Verify native output mathematically
     int nativeMis = 0;
     float nativeErr = 0.0f;
     bool canVerify =
@@ -536,14 +501,13 @@ testPostGSUKernel(const std::string &kernelName,
       nativeCorrect = true;
     } else if (canVerify) {
       fprintf(stderr,
-              "    native math check: %d mismatches (maxErr=%e) — args may "
+              "    native math check: %d mismatches (maxErr=%e) --- args may "
               "be wrong for %s\n",
               nativeMis, nativeErr, kernelName.c_str());
       result = TestResult::Skipped;
       goto cleanup;
     }
 
-    // --- Run transpiled kernel ---
     HIP_TRY(hipModuleLoadData(&transpMod, pipeResult.hsaco.data()));
     hipFunction_t transpFunc;
     HIP_TRY(
@@ -561,7 +525,6 @@ testPostGSUKernel(const std::string &kernelName,
     HIP_TRY(hipDeviceSynchronize());
     ktr.transpWrote = true;
 
-    // Compare native D vs transpiled D
     int stByte = storageElemBytes(info.dataType);
     int cmpMis =
         compareBuffers(nBufs.D, tBufs.D, nBufs.elemCount, stByte, maxAbsErr);
@@ -593,33 +556,25 @@ cleanup:
 }
 
 // ============================================================================
-// Vecadd cross-arch test: known argument layout, verifiable results.
-// Source: gfx1250 vecadd kernel → transpile to gfx942 → execute → verify
-// C[i] = A[i] + B[i] for i in [0..N)
+// Vecadd cross-arch test
 // ============================================================================
-static int testVecaddCrossArch() {
-  printf("=== Part 1: Vecadd Cross-Architecture Test (gfx1250 → gfx942) ===\n");
-  printf("Known layout: _Z6vecaddPfS_S_i(float *A, float *B, float *C, int N)\n\n");
+static void doTestVecaddCrossArch() {
+  printf("=== Part 1: Vecadd Cross-Architecture Test (gfx1250 -> gfx942) ===\n");
 
   std::string vecaddPath = VECADD_CO_PATH;
-  auto vecaddData = transpiler::readFile(vecaddPath);
-  if (vecaddData.empty()) {
-    fprintf(stderr, "ERROR: Cannot read %s\n", vecaddPath.c_str());
-    return 1;
-  }
+  if (!fileExists(vecaddPath))
+    GTEST_SKIP() << "Code object not found (build artifact): " << vecaddPath;
 
-  // Transpile gfx1250 → gfx942
+  auto vecaddData = transpiler::readFile(vecaddPath);
+  ASSERT_FALSE(vecaddData.empty()) << "Cannot read " << vecaddPath;
+
   auto pipeResult = transpiler::runPipeline(vecaddData, "gfx1250", "gfx942",
-                                          "_Z6vecaddPfS_S_i");
-  if (!pipeResult.success) {
-    fprintf(stderr, "ERROR: Pipeline failed for vecadd gfx1250→gfx942\n");
-    return 1;
-  }
+                                            "_Z6vecaddPfS_S_i");
+  ASSERT_TRUE(pipeResult.success) << "Pipeline failed for vecadd gfx1250->gfx942";
   printf("  Raised %d/%d instructions\n", pipeResult.liftedCount,
          pipeResult.totalCount);
   printf("  Transpiled HSACO: %zu bytes\n", pipeResult.hsaco.size());
 
-  // Prepare test data
   const int N = 1024;
   std::vector<float> hA(N), hB(N), hC(N, 0.0f);
   for (int i = 0; i < N; i++) {
@@ -628,68 +583,33 @@ static int testVecaddCrossArch() {
   }
 
   float *dA = nullptr, *dB = nullptr, *dC = nullptr;
-  hipError_t err;
-  err = hipMalloc(&dA, N * sizeof(float));
-  if (err != hipSuccess) { fprintf(stderr, "hipMalloc failed\n"); return 1; }
-  err = hipMalloc(&dB, N * sizeof(float));
-  if (err != hipSuccess) { fprintf(stderr, "hipMalloc failed\n"); return 1; }
-  err = hipMalloc(&dC, N * sizeof(float));
-  if (err != hipSuccess) { fprintf(stderr, "hipMalloc failed\n"); return 1; }
+  HIP_ASSERT(hipMalloc(&dA, N * sizeof(float)));
+  HIP_ASSERT(hipMalloc(&dB, N * sizeof(float)));
+  HIP_ASSERT(hipMalloc(&dC, N * sizeof(float)));
+  HIP_ASSERT(hipMemcpy(dA, hA.data(), N * sizeof(float), hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemcpy(dB, hB.data(), N * sizeof(float), hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemset(dC, 0, N * sizeof(float)));
 
-  err = hipMemcpy(dA, hA.data(), N * sizeof(float), hipMemcpyHostToDevice);
-  if (err != hipSuccess) { fprintf(stderr, "hipMemcpy failed\n"); return 1; }
-  err = hipMemcpy(dB, hB.data(), N * sizeof(float), hipMemcpyHostToDevice);
-  if (err != hipSuccess) { fprintf(stderr, "hipMemcpy failed\n"); return 1; }
-  err = hipMemset(dC, 0, N * sizeof(float));
-  if (err != hipSuccess) { fprintf(stderr, "hipMemset failed\n"); return 1; }
-
-  // Load transpiled kernel
   hipModule_t mod;
-  err = hipModuleLoadData(&mod, pipeResult.hsaco.data());
-  if (err != hipSuccess) {
-    fprintf(stderr, "ERROR: hipModuleLoadData failed: %s\n",
-            hipGetErrorString(err));
-    return 1;
-  }
-
+  HIP_ASSERT(hipModuleLoadData(&mod, pipeResult.hsaco.data()));
   hipFunction_t kernel;
-  err = hipModuleGetFunction(&kernel, mod, "_Z6vecaddPfS_S_i");
-  if (err != hipSuccess) {
-    fprintf(stderr, "ERROR: hipModuleGetFunction failed: %s\n",
-            hipGetErrorString(err));
-    return 1;
-  }
+  HIP_ASSERT(hipModuleGetFunction(&kernel, mod, "_Z6vecaddPfS_S_i"));
 
-  // Launch
   struct { float *A, *B, *C; int N; } args = {dA, dB, dC, N};
   size_t argSize = sizeof(args);
   void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
                     HIP_LAUNCH_PARAM_END};
 
-  err = hipModuleLaunchKernel(kernel, (N + 255) / 256, 1, 1, 256, 1, 1,
-                               0, nullptr, nullptr, config);
-  if (err != hipSuccess) {
-    fprintf(stderr, "ERROR: Launch failed: %s\n", hipGetErrorString(err));
-    return 1;
-  }
-  err = hipDeviceSynchronize();
-  if (err != hipSuccess) {
-    fprintf(stderr, "ERROR: Sync failed: %s\n", hipGetErrorString(err));
-    return 1;
-  }
-
-  // Verify: C[i] should be A[i] + B[i] = i + 2*i = 3*i
-  err = hipMemcpy(hC.data(), dC, N * sizeof(float), hipMemcpyDeviceToHost);
-  if (err != hipSuccess) { fprintf(stderr, "hipMemcpy back failed\n"); return 1; }
+  HIP_ASSERT(hipModuleLaunchKernel(kernel, (N + 255) / 256, 1, 1, 256, 1, 1,
+                                   0, nullptr, nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hC.data(), dC, N * sizeof(float), hipMemcpyDeviceToHost));
 
   int errors = 0;
-  float maxRelErr = 0.0f;
   for (int i = 0; i < N; i++) {
     float expected = hA[i] + hB[i];
     float diff = std::fabs(hC[i] - expected);
-    float relErr = (expected != 0.0f) ? diff / std::fabs(expected) : diff;
-    if (relErr > maxRelErr) maxRelErr = relErr;
     if (diff > 1e-5f) {
       if (errors < 5)
         fprintf(stderr, "  MISMATCH [%d]: got %f, expected %f (diff=%e)\n",
@@ -703,76 +623,43 @@ static int testVecaddCrossArch() {
   (void)hipFree(dC);
   (void)hipModuleUnload(mod);
 
-  printf("\n  Sample outputs: C[0]=%f C[1]=%f C[100]=%f C[1023]=%f\n",
-         hC[0], hC[1], hC[100], hC[1023]);
-  printf("  Expected:       C[0]=%f C[1]=%f C[100]=%f C[1023]=%f\n",
-         0.0f, 3.0f, 300.0f, 3069.0f);
-  printf("  Max relative error: %e\n", maxRelErr);
-
-  if (errors == 0) {
-    printf("\n  VECADD CROSS-ARCH: PASSED — all %d elements correct\n", N);
-    printf("  This proves: gfx1250 binary → LLVM IR → gfx942 binary → "
-           "correct GPU execution on MI300X\n\n");
-    return 0;
-  } else {
-    printf("\n  VECADD CROSS-ARCH: FAILED — %d/%d mismatches\n\n", errors, N);
-    return 1;
-  }
+  EXPECT_EQ(errors, 0) << errors << "/" << N << " mismatches in vecadd cross-arch";
 }
 
 // ============================================================================
 // Tensile batch test: metadata-driven with PostGSU-aware verification
 // ============================================================================
-int main(int argc, char **argv) {
-  printf("=== Cross-Architecture GPU Execution Test ===\n\n");
-
-  int vecaddResult = testVecaddCrossArch();
-
-  printf("================================================================\n");
-  printf("=== Part 2: Tensile Kernels (gfx1200 → gfx942) ===\n");
-  printf("================================================================\n\n");
+static void doTestTensilePostGSU() {
+  printf("=== Part 2: Tensile Kernels (gfx1200 -> gfx942) ===\n\n");
 
   std::string nativePath = NATIVE_HSACO_PATH;
   std::string sourcePath = SOURCE_HSACO_PATH;
   std::string sourceISA = "gfx1200";
   std::string targetISA = "gfx942";
 
-  std::string filterKernel;
-  for (int i = 1; i < argc; i++) {
-    if (strncmp(argv[i], "--kernel=", 9) == 0)
-      filterKernel = argv[i] + 9;
-  }
+  if (!fileExists(nativePath))
+    GTEST_SKIP() << "Native HSACO not found (system file): " << nativePath;
+  if (!fileExists(sourcePath))
+    GTEST_SKIP() << "Source HSACO not found (system file): " << sourcePath;
 
   printf("Native (gfx942):  %s\n", nativePath.c_str());
   printf("Source (gfx1200): %s\n\n", sourcePath.c_str());
 
   auto nativeData = transpiler::readFile(nativePath);
   auto sourceData = transpiler::readFile(sourcePath);
-  if (nativeData.empty() || sourceData.empty()) {
-    fprintf(stderr, "ERROR: Failed to read hsaco files\n");
-    return 1;
-  }
+  ASSERT_FALSE(nativeData.empty()) << "Failed to read " << nativePath;
+  ASSERT_FALSE(sourceData.empty()) << "Failed to read " << sourcePath;
 
   auto kernelNames = transpiler::listKernelNames(sourceData);
   printf("Kernels in source: %zu\n\n", kernelNames.size());
 
-  if (!filterKernel.empty()) {
-    auto it = std::find(kernelNames.begin(), kernelNames.end(), filterKernel);
-    if (it == kernelNames.end()) {
-      fprintf(stderr, "ERROR: Kernel '%s' not found\n", filterKernel.c_str());
-      return 1;
-    }
-    kernelNames = {filterKernel};
-  }
-
-  std::vector<KernelTestResult> results;
   int verified = 0, pass = 0, pipelineFail = 0, hipErr = 0, mismatch = 0,
       noop = 0, skipped = 0;
   int postGSUAttempted = 0, nativeCorrectCount = 0;
 
-  for (auto &kName : kernelNames) {
-    printf("[%zu/%zu] %-60s ", results.size() + 1, kernelNames.size(),
-           kName.c_str());
+  for (size_t idx = 0; idx < kernelNames.size(); idx++) {
+    auto &kName = kernelNames[idx];
+    printf("[%zu/%zu] %-60s ", idx + 1, kernelNames.size(), kName.c_str());
     fflush(stdout);
 
     KernelTestResult ktr;
@@ -787,7 +674,6 @@ int main(int argc, char **argv) {
       testPostGSUKernel(kName, nativeData, sourceData, sourceISA, targetISA,
                         ktr);
     } else {
-      // Non-PostGSU or _GB variant: skip execution, only test pipeline.
       auto pipeResult =
           transpiler::runPipeline(sourceData, sourceISA, targetISA, kName);
       ktr.name = kName;
@@ -797,8 +683,6 @@ int main(int argc, char **argv) {
       ktr.result =
           pipeResult.success ? TestResult::Skipped : TestResult::PipelineFail;
     }
-
-    results.push_back(ktr);
 
     switch (ktr.result) {
     case TestResult::Verified:
@@ -814,10 +698,14 @@ int main(int argc, char **argv) {
     case TestResult::PipelineFail:
       pipelineFail++;
       printf("PIPELINE_FAIL\n");
+      EXPECT_NE(ktr.result, TestResult::PipelineFail)
+          << "Pipeline failed for " << kName;
       break;
     case TestResult::HipError:
       hipErr++;
       printf("HIP_ERROR\n");
+      EXPECT_NE(ktr.result, TestResult::HipError)
+          << "HIP runtime error for " << kName;
       break;
     case TestResult::Mismatch:
       mismatch++;
@@ -825,6 +713,8 @@ int main(int argc, char **argv) {
         nativeCorrectCount++;
       printf("MISMATCH  (maxErr=%e, native_correct=%s)\n", ktr.maxAbsErr,
              ktr.nativeCorrect ? "yes" : "no");
+      EXPECT_NE(ktr.result, TestResult::Mismatch)
+          << "Output mismatch for " << kName;
       break;
     case TestResult::NoOp:
       noop++;
@@ -833,47 +723,39 @@ int main(int argc, char **argv) {
     case TestResult::Skipped:
       skipped++;
       if (isPostGSU && pInfo.isGB)
-        printf("SKIPPED  (_GB grouped-batch layout — not yet supported)\n");
+        printf("SKIPPED  (_GB grouped-batch layout --- not yet supported)\n");
       else if (!isPostGSU)
-        printf("SKIPPED  (non-PostGSU base kernel — layout unknown)\n");
+        printf("SKIPPED  (non-PostGSU base kernel --- layout unknown)\n");
       else
         printf("SKIPPED\n");
       break;
     }
   }
 
-  printf("\n");
-  printf("================================================================\n");
-  printf("           CROSS-ARCH GPU EXECUTION SUMMARY\n");
-  printf("================================================================\n");
-  printf("\n");
-  printf("Part 1 — Vecadd (gfx1250 → gfx942): %s\n",
-         vecaddResult == 0 ? "PASSED" : "FAILED");
-  printf("\n");
-  printf("Part 2 — Tensile PostGSU (gfx1200 → gfx942):\n");
-  printf("  Kernels in source: %zu\n", kernelNames.size());
-  printf("  PostGSU attempted: %d  (non-_GB, Tensile-aware args)\n",
-         postGSUAttempted);
-  printf("  VERIFIED:          %d  (native math correct + transpiled "
-         "matches)\n",
-         verified);
-  printf("  PASS:              %d  (transpiled matches native)\n", pass);
-  printf("  MISMATCH:          %d\n", mismatch);
-  printf("  HIP_ERROR:         %d\n", hipErr);
-  printf("  PIPELINE_FAIL:     %d\n", pipelineFail);
-  printf("  SKIPPED:           %d  (_GB / base / unsupported)\n", skipped);
-  printf("  NOOP:              %d\n", noop);
-  printf("\n");
-  int postGSUExecuted = verified + pass + mismatch + hipErr + noop;
-  printf("  Native math correct: %d / %d  (Tensile arg layout proven "
-         "correct)\n",
-         nativeCorrectCount, postGSUExecuted);
-  printf("\n");
+  printf("\nCross-arch summary:\n");
+  printf("  PostGSU attempted: %d, VERIFIED: %d, PASS: %d\n",
+         postGSUAttempted, verified, pass);
+  printf("  MISMATCH: %d, HIP_ERROR: %d, PIPELINE_FAIL: %d, SKIPPED: %d\n",
+         mismatch, hipErr, pipelineFail, skipped);
 
-  if (verified > 0)
-    printf("  >> %d kernels VERIFIED end-to-end: RDNA binary → LLVM IR → "
-           "CDNA binary → correct GPU output on MI300X\n\n",
-           verified);
+  EXPECT_EQ(hipErr, 0)
+      << hipErr << " kernel(s) had HIP runtime errors";
+  EXPECT_EQ(pipelineFail, 0)
+      << pipelineFail << " kernel(s) failed the transpiler pipeline";
+  EXPECT_EQ(mismatch, 0)
+      << mismatch << " kernel(s) produced mismatched outputs";
+  EXPECT_GT(postGSUAttempted, 0)
+      << "No PostGSU kernels were attempted -- check input files";
+  EXPECT_GT(verified + pass, 0)
+      << "No kernels verified or passed -- all attempted kernels failed";
+}
 
-  return vecaddResult;
+class CrossArchGpu : public GpuTest {};
+
+TEST_F(CrossArchGpu, VecaddCrossArch) { doTestVecaddCrossArch(); }
+
+TEST_F(CrossArchGpu, TensilePostGSU) {
+  if (!g_config.testAll)
+    GTEST_SKIP() << "Skipped: pass --test-all to run TensilePostGSU corpus";
+  doTestTensilePostGSU();
 }

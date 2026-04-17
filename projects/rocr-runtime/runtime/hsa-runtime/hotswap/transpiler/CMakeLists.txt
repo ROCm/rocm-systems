@@ -137,106 +137,81 @@ target_link_libraries(hotswap-transpiler
     LLVMObjCARCOpts
 )
 
-# --- Batch raiser test (no HIP needed) ----------------------------------------
-add_executable(batch_raise_test
+# --- GoogleTest-based unified test binary -------------------------------------
+find_package(GTest REQUIRED)
+enable_testing()
+include(GoogleTest)
+
+set(TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../test_data")
+set(HOTSWAP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(AITER_CORPUS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../kernels/aiter_gfx950")
+set(GFX1250_TEST_DATA "${CMAKE_CURRENT_SOURCE_DIR}/../test_data/gfx1250")
+
+set(TEST_SOURCES
+  tests/test_main.cpp
   tests/batch_raise_test.cpp
-)
-target_link_libraries(batch_raise_test
-  PRIVATE
-    hotswap-transpiler
+  tests/corpus_test.cpp
 )
 
-# --- GPU tests ----------------------------------------------------------------
 find_package(hip QUIET)
 if(hip_FOUND)
-  set(HOTSWAP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
   set(MVE_CO "${HOTSWAP_DIR}/build/mve_vecadd_gfx942.co")
   set(MFMA_CO "${CMAKE_CURRENT_SOURCE_DIR}/build/mfma_gemm_gfx942_unbundled.co")
-
-  # vecadd GPU test
-  add_executable(ir_gpu_test
-    tests/ir_gpu_test.cpp
-  )
-  target_compile_definitions(ir_gpu_test PRIVATE
-    MVE_CO_PATH="${MVE_CO}"
-    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
-  )
-  target_link_libraries(ir_gpu_test
-    PRIVATE
-      -Wl,--exclude-libs,ALL
-      hotswap-transpiler
-      hip::host
-  )
-
-  # MFMA GPU test
-  add_executable(mfma_gpu_test
-    tests/mfma_gpu_test.cpp
-  )
-  target_compile_definitions(mfma_gpu_test PRIVATE
-    MFMA_CO_PATH="${MFMA_CO}"
-    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
-  )
-  target_link_libraries(mfma_gpu_test
-    PRIVATE
-      -Wl,--exclude-libs,ALL
-      hotswap-transpiler
-      hip::host
-  )
-
-  # Cross-architecture GPU test (gfx1200 -> gfx942)
   set(NATIVE_HSACO "/opt/rocm-7.2.1/lib/rocblas/library/Kernels.so-000-gfx942-xnack-.hsaco")
   set(SOURCE_HSACO "/opt/rocm-7.2.1/lib/rocblas/library/Kernels.so-000-gfx1200.hsaco")
-
-  add_executable(cross_arch_gpu_test
-    tests/cross_arch_gpu_test.cpp
-  )
   set(VECADD_CO "${HOTSWAP_DIR}/build/mve_vecadd_gfx1250.co")
 
-  target_compile_definitions(cross_arch_gpu_test PRIVATE
-    NATIVE_HSACO_PATH="${NATIVE_HSACO}"
-    SOURCE_HSACO_PATH="${SOURCE_HSACO}"
-    VECADD_CO_PATH="${VECADD_CO}"
-    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
-  )
-  target_link_libraries(cross_arch_gpu_test
-    PRIVATE
-      -Wl,--exclude-libs,ALL
-      hotswap-transpiler
-      hip::host
-  )
-
-  # gfx1250 → gfx942 end-to-end GPU test
-  set(GFX1250_TEST_DATA "${CMAKE_CURRENT_SOURCE_DIR}/../test_data/gfx1250")
-  add_executable(gfx1250_gpu_test
+  list(APPEND TEST_SOURCES
+    tests/ir_gpu_test.cpp
+    tests/mfma_gpu_test.cpp
     tests/gfx1250_gpu_test.cpp
-  )
-  target_compile_definitions(gfx1250_gpu_test PRIVATE
-    GFX1250_TEST_DATA_DIR="${GFX1250_TEST_DATA}"
-    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
-  )
-  target_link_libraries(gfx1250_gpu_test
-    PRIVATE
-      -Wl,--exclude-libs,ALL
-      hotswap-transpiler
-      hip::host
-  )
-
-  # Integration test: runPipelineAllKernels + GPU execution
-  add_executable(integration_test
     tests/integration_test.cpp
+    tests/cross_arch_gpu_test.cpp
   )
-  target_compile_definitions(integration_test PRIVATE
-    GFX1250_TEST_DATA_DIR="${GFX1250_TEST_DATA}"
-    LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
-  )
-  target_link_libraries(integration_test
-    PRIVATE
-      -Wl,--exclude-libs,ALL
-      hotswap-transpiler
-      hip::host
-  )
-
   message(STATUS "GPU tests enabled (HIP found)")
 else()
   message(STATUS "GPU tests DISABLED (HIP not found)")
 endif()
+
+add_executable(transpiler_tests ${TEST_SOURCES})
+
+target_compile_definitions(transpiler_tests PRIVATE
+  TRANSPILER_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+  TEST_DATA_DIR="${TEST_DATA_DIR}"
+  AITER_CORPUS_DIR="${AITER_CORPUS_DIR}"
+  LLVM_TOOLS_DIR="${LLVM_TOOLS_BINARY_DIR}"
+)
+
+if(hip_FOUND)
+  target_compile_definitions(transpiler_tests PRIVATE
+    MVE_CO_PATH="${MVE_CO}"
+    MFMA_CO_PATH="${MFMA_CO}"
+    NATIVE_HSACO_PATH="${NATIVE_HSACO}"
+    SOURCE_HSACO_PATH="${SOURCE_HSACO}"
+    VECADD_CO_PATH="${VECADD_CO}"
+    GFX1250_TEST_DATA_DIR="${GFX1250_TEST_DATA}"
+  )
+endif()
+
+target_link_libraries(transpiler_tests
+  PRIVATE
+    -Wl,--exclude-libs,ALL
+    hotswap-transpiler
+    GTest::GTest
+)
+
+if(hip_FOUND)
+  target_link_libraries(transpiler_tests PRIVATE hip::host)
+endif()
+
+gtest_discover_tests(transpiler_tests
+  PROPERTIES TIMEOUT 120 LABELS "transpiler"
+)
+
+# Include expected-failure (XFAIL) properties after test discovery.
+# The xfail.cmake file uses set_tests_properties(... WILL_FAIL TRUE)
+# so that known-failing tests are run and expected to fail.  If one
+# unexpectedly passes, CTest flags it.
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/xfail.cmake"
+)

@@ -145,16 +145,60 @@ these files, prefer the new name.
 
 ## Tests
 
-An ongoing effort consolidates the per-feature test executables listed in
-`CMakeLists.txt` (`batch_raise_test`, `ir_gpu_test`, `mfma_gpu_test`,
-`cross_arch_gpu_test`, `gfx1250_gpu_test`, `integration_test`) into a
-**single test binary**. Do not add new top-level test executables; add test
-cases inside the consolidated binary (ask if the new home is not obvious
-yet).
+All tests live in a single GoogleTest binary (`transpiler_tests`) orchestrated
+by CTest.  Do not add new test executables; add `TEST()` or `TEST_F()` cases
+to the appropriate `tests/*.cpp` file (or create a new `*_test.cpp` and add it
+to the `TRANSPILER_TEST_SOURCES` list in `CMakeLists.txt`).
 
-`batch_raise_test` remains the no-GPU smoke test. Any change in this
-directory must keep its raise rate on the AITER corpus stable or improve
-it.
+### Running
+
+```bash
+# Via CTest (process isolation, timeouts, xfail).
+# --output-on-failure prints GoogleTest output only for failing tests.
+ctest --test-dir build --output-on-failure
+
+# Direct binary:
+./build/transpiler_tests
+
+# Subset:
+./build/transpiler_tests --gtest_filter='BatchRaise.*'
+
+# Extended corpus (slow):
+./build/transpiler_tests --test-all --gtest_filter='Corpus.*'
+```
+
+### Test structure
+
+| File | Suite | GPU? | Purpose |
+|------|-------|:----:|---------|
+| `test_main.cpp` | — | — | GoogleTest `main()`, `--test-all` flag |
+| `test_common.hpp` | — | — | `GpuTest` fixture (with `hipDeviceReset` teardown), `HIP_ASSERT`, helpers |
+| `batch_raise_test.cpp` | `BatchRaise` | No | Raise rate on code objects / directories |
+| `corpus_test.cpp` | `Corpus` | No | System HSACO corpus, fork-isolated per ISA |
+| `ir_gpu_test.cpp` | `IrGpu` | Yes | Same-ISA vecadd roundtrip |
+| `mfma_gpu_test.cpp` | `MfmaGpu` | Yes | Same-ISA MFMA GEMM |
+| `cross_arch_gpu_test.cpp` | `CrossArchGpu` | Yes | Cross-ISA raise + execute (rocBLAS HSACOs) |
+| `gfx1250_gpu_test.cpp` | `Gfx1250Gpu` | Yes | gfx1250 Triton kernels → gfx942 |
+| `integration_test.cpp` | `Integration` | Yes | Multi-kernel raise + merge + load |
+
+### Expected failures
+
+Known-failing tests are tracked in `tests/xfail.cmake` using CTest's
+`WILL_FAIL` property.  The tests still run; CTest passes them when they fail
+as expected and **fails** them if they unexpectedly pass (so you know to
+update the xfail list).  Each xfailed test has an `// XFAIL:` comment in its
+source pointing to `xfail.cmake` with the reason.
+
+### Conventions
+
+- GPU tests inherit from `GpuTest` (calls `hipDeviceReset()` in teardown).
+- Missing build artifacts or test data → `GTEST_SKIP()` with a message, never
+  silent pass or silent skip.
+- `HIP_ASSERT(call)` for HIP calls whose failure should abort the test.
+  Use `(void)hipFree(...)` / `(void)hipModuleUnload(...)` in cleanup where
+  failure is non-fatal.
+- `batch_raise_test` is the no-GPU smoke test.  Any change must keep its
+  raise rate on the AITER corpus stable or improve it.
 
 ## Coding standards
 
@@ -236,13 +280,16 @@ This is a project-wide rule, not a style preference:
 
 ## Before you commit
 
-- Build `hotswap-transpiler` and `batch_raise_test` cleanly with the
+- Build `hotswap-transpiler` and `transpiler_tests` cleanly with the
   default CMake flow from `README.md`.
+- Run `ctest --output-on-failure` and confirm all tests pass (XFAIL tests
+  report "Passed" when they fail as expected).
 - Run `batch_raise_test` against the AITER corpus (or whatever corpus you
   have locally) and confirm the raise rate does not drop.
 - If the change touches opcode mapping, register classification, or any
   TableGen-adjacent code, read `REFACTOR_PLAN.md` first — the plan has
   already decided how the next step of that refactor should look.
 - If you renamed or added files, update `CMakeLists.txt`'s
-  `hotswap-transpiler` source list. Do not add new source files to
-  top-level `hotswap/`; everything new belongs under `transpiler/`.
+  `hotswap-transpiler` source list (or `TRANSPILER_TEST_SOURCES` for test
+  files). Do not add new source files to top-level `hotswap/`; everything
+  new belongs under `transpiler/`.

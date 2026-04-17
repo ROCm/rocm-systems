@@ -1,3 +1,5 @@
+#include "test_common.hpp"
+
 #include "../code_object_utils.hpp"
 #include "../pipeline.hpp"
 
@@ -5,35 +7,28 @@
 #include <hip/hip_fp16.h>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <vector>
 
-#define HIP_CHECK(call)                                                        \
-  do {                                                                         \
-    hipError_t err = (call);                                                   \
-    if (err != hipSuccess) {                                                   \
-      fprintf(stderr, "HIP error %d (%s) at %s:%d\n", err,                    \
-              hipGetErrorString(err), __FILE__, __LINE__);                      \
-      exit(1);                                                                 \
-    }                                                                          \
-  } while (0)
-
-static int testMfmaKernel(const char *kernelSymbol, int M, int N, int K) {
+static void testMfmaKernel(const char *kernelSymbol, int M, int N, int K) {
   printf("\n=== Testing %s: %dx%dx%d ===\n", kernelSymbol, M, N, K);
 
-  std::string coPath = MFMA_CO_PATH;
-  auto coData = transpiler::readFile(coPath);
-  if (coData.empty()) {
-    fprintf(stderr, "ERROR: Failed to read code object: %s\n", coPath.c_str());
-    return 1;
-  }
+  if (!ensureMfmaCo(TRANSPILER_SRC_DIR))
+    GTEST_SKIP() << "Could not build MFMA code object (hipcc or "
+                    "clang-offload-bundler not available)";
 
-  // Step 1: Run original kernel to get reference output
+  std::string coPath = MFMA_CO_PATH;
+  if (!fileExists(coPath))
+    GTEST_SKIP() << "MFMA code object not found: " << coPath;
+
+  auto coData = transpiler::readFile(coPath);
+  ASSERT_FALSE(coData.empty()) << "Failed to read code object: " << coPath;
+
+  // Run original kernel to get reference output
   hipModule_t origMod;
-  HIP_CHECK(hipModuleLoadData(&origMod, coData.data()));
+  HIP_ASSERT(hipModuleLoadData(&origMod, coData.data()));
   hipFunction_t origKernel;
-  HIP_CHECK(hipModuleGetFunction(&origKernel, origMod, kernelSymbol));
+  HIP_ASSERT(hipModuleGetFunction(&origKernel, origMod, kernelSymbol));
 
   std::vector<__half> hA(M * K), hB(K * N);
   for (int i = 0; i < M * K; i++)
@@ -43,12 +38,14 @@ static int testMfmaKernel(const char *kernelSymbol, int M, int N, int K) {
 
   __half *dA, *dB;
   float *dC;
-  HIP_CHECK(hipMalloc(&dA, M * K * sizeof(__half)));
-  HIP_CHECK(hipMalloc(&dB, K * N * sizeof(__half)));
-  HIP_CHECK(hipMalloc(&dC, M * N * sizeof(float)));
-  HIP_CHECK(hipMemcpy(dA, hA.data(), M * K * sizeof(__half), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(dB, hB.data(), K * N * sizeof(__half), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(dC, 0, M * N * sizeof(float)));
+  HIP_ASSERT(hipMalloc(&dA, M * K * sizeof(__half)));
+  HIP_ASSERT(hipMalloc(&dB, K * N * sizeof(__half)));
+  HIP_ASSERT(hipMalloc(&dC, M * N * sizeof(float)));
+  HIP_ASSERT(hipMemcpy(dA, hA.data(), M * K * sizeof(__half),
+                        hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemcpy(dB, hB.data(), K * N * sizeof(__half),
+                        hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemset(dC, 0, M * N * sizeof(float)));
 
   int tileSize = 16;
   int gridX = (N + tileSize - 1) / tileSize;
@@ -66,43 +63,41 @@ static int testMfmaKernel(const char *kernelSymbol, int M, int N, int K) {
                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
                     HIP_LAUNCH_PARAM_END};
 
-  HIP_CHECK(hipModuleLaunchKernel(origKernel, gridX, gridY, 1, 64, 1, 1,
-                                   0, nullptr, nullptr, config));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_ASSERT(hipModuleLaunchKernel(origKernel, gridX, gridY, 1, 64, 1, 1, 0,
+                                   nullptr, nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
 
   std::vector<float> hRef(M * N);
-  HIP_CHECK(hipMemcpy(hRef.data(), dC, M * N * sizeof(float), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipModuleUnload(origMod));
+  HIP_ASSERT(hipMemcpy(hRef.data(), dC, M * N * sizeof(float),
+                        hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipModuleUnload(origMod));
 
-  printf("  Original kernel reference: C[0]=%f C[1]=%f C[%d]=%f\n",
-         hRef[0], hRef[1], M*N-1, hRef[M*N-1]);
+  printf("  Original kernel reference: C[0]=%f C[1]=%f C[%d]=%f\n", hRef[0],
+         hRef[1], M * N - 1, hRef[M * N - 1]);
 
-  // Step 2: Run translated kernel
+  // Run translated kernel
   auto pipeResult = transpiler::runPipeline(coData, "gfx942", kernelSymbol);
-  if (!pipeResult.success) {
-    fprintf(stderr, "ERROR: Pipeline failed for %s\n", kernelSymbol);
-    HIP_CHECK(hipFree(dA)); HIP_CHECK(hipFree(dB)); HIP_CHECK(hipFree(dC));
-    return 1;
-  }
+  ASSERT_TRUE(pipeResult.success) << "Pipeline failed for " << kernelSymbol;
   printf("  Raised %d/%d instructions\n", pipeResult.liftedCount,
          pipeResult.totalCount);
 
   hipModule_t mod;
-  HIP_CHECK(hipModuleLoadData(&mod, pipeResult.hsaco.data()));
+  HIP_ASSERT(hipModuleLoadData(&mod, pipeResult.hsaco.data()));
   hipFunction_t kernel;
-  HIP_CHECK(hipModuleGetFunction(&kernel, mod, kernelSymbol));
+  HIP_ASSERT(hipModuleGetFunction(&kernel, mod, kernelSymbol));
 
-  HIP_CHECK(hipMemset(dC, 0, M * N * sizeof(float)));
+  HIP_ASSERT(hipMemset(dC, 0, M * N * sizeof(float)));
   args.C = dC;
-  HIP_CHECK(hipModuleLaunchKernel(kernel, gridX, gridY, 1, 64, 1, 1,
-                                   0, nullptr, nullptr, config));
-  HIP_CHECK(hipDeviceSynchronize());
+  HIP_ASSERT(hipModuleLaunchKernel(kernel, gridX, gridY, 1, 64, 1, 1, 0,
+                                   nullptr, nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
 
   std::vector<float> hC(M * N);
-  HIP_CHECK(hipMemcpy(hC.data(), dC, M * N * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_ASSERT(
+      hipMemcpy(hC.data(), dC, M * N * sizeof(float), hipMemcpyDeviceToHost));
 
-  printf("  Translated kernel result:  C[0]=%f C[1]=%f C[%d]=%f\n",
-         hC[0], hC[1], M*N-1, hC[M*N-1]);
+  printf("  Translated kernel result:  C[0]=%f C[1]=%f C[%d]=%f\n", hC[0],
+         hC[1], M * N - 1, hC[M * N - 1]);
 
   int errors = 0;
   float maxRelErr = 0.0f;
@@ -121,30 +116,18 @@ static int testMfmaKernel(const char *kernelSymbol, int M, int N, int K) {
   }
 
   printf("  Max relative error vs original: %e\n", maxRelErr);
-  if (errors == 0) {
-    printf("  PASSED\n");
-  } else {
-    printf("  FAILED: %d/%d mismatches\n", errors, M * N);
-  }
+  EXPECT_EQ(errors, 0)
+      << errors << "/" << (M * N) << " mismatches for " << kernelSymbol
+      << " " << M << "x" << N << "x" << K;
 
-  HIP_CHECK(hipFree(dA));
-  HIP_CHECK(hipFree(dB));
-  HIP_CHECK(hipFree(dC));
-  HIP_CHECK(hipModuleUnload(mod));
-
-  return errors;
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipModuleUnload(mod);
 }
 
-int main() {
-  printf("=== MFMA Binary Translation GPU Test ===\n");
+class MfmaGpu : public GpuTest {};
 
-  int total_errors = 0;
-
-  total_errors += testMfmaKernel("mfma_gemm_16x16", 16, 16, 16);
-  total_errors += testMfmaKernel("mfma_gemm_16x16", 32, 32, 32);
-  total_errors += testMfmaKernel("mfma_gemm_16x16", 64, 64, 64);
-
-  printf("\n=== MFMA Test %s ===\n",
-         total_errors == 0 ? "PASSED" : "FAILED");
-  return total_errors == 0 ? 0 : 1;
-}
+TEST_F(MfmaGpu, Gemm16x16x16) { testMfmaKernel("mfma_gemm_16x16", 16, 16, 16); }
+TEST_F(MfmaGpu, Gemm32x32x32) { testMfmaKernel("mfma_gemm_16x16", 32, 32, 32); }
+TEST_F(MfmaGpu, Gemm64x64x64) { testMfmaKernel("mfma_gemm_16x16", 64, 64, 64); }
