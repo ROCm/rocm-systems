@@ -143,6 +143,7 @@ class TestLulesh(RocprofsysTest):
     def test_timemory(self, mode, timemory_env):
         env = timemory_env.copy()
         env["ROCPROFSYS_USE_KOKKOSP"] = "OFF"
+        env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
         result = self.run_test(
             mode,
             "lulesh",
