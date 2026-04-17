@@ -17,11 +17,16 @@ namespace transpiler {
 // (getMCOpcode, getVOPe64, getDPPOp32, getDPPOp64, getSDWAOp, getGlobalVaddrOp),
 // and the resulting canonical pseudo is matched against a small compile-time
 // table of AMDGPU::<opcode> enum constants.
-struct OpcodeMap {
-  llvm::DenseMap<unsigned, SemOp> map;
-
+class OpcodeMap {
+public:
+  // Lookup is hot-path: called once per decoded instruction.
   SemOp lookup(unsigned opcode) const;
-  void build(const llvm::MCInstrInfo &mcii);
+
+  // Build is one-shot: called during raiser initialization.
+  void build(const llvm::MCInstrInfo &MCII);
+
+private:
+  llvm::DenseMap<unsigned, SemOp> map_;
 };
 
 } // namespace transpiler

@@ -11,9 +11,7 @@ HandlerResult handleSOPC(RaiseContext &ctx, const DecodedInst &di,
                          OpResolver &op, RaiseResult &result) {
   (void)result;
   HandlerResult hr;
-  llvm::StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
-  (void)mn;
 
   // s_set_gpr_idx_on enables GPR dynamic indexing via M0.
   // In scalar model, we store the index value to M0 and treat this as a

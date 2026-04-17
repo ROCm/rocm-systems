@@ -12,7 +12,6 @@
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include <cstring>
 #include <map>
 #include <optional>
 #include <tuple>
@@ -23,18 +22,11 @@ namespace transpiler {
 HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
                         OpResolver &op, RaiseResult &result) {
   HandlerResult hr;
+  // `mn` is retained for diagnostic messages only; dispatch is driven entirely
+  // by `sop`, which the OpcodeMap canonicalizer resolves from the DPP/SDWA/e32
+  // encoding to the base pseudo before the handler sees it.
   StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
-
-  // Strip DPP/SDWA suffix so handlers match the base mnemonic.
-  if (di.format == FormatKind::DPP || di.format == FormatKind::SDWA) {
-    for (const char *suffix : {"_dpp", "_sdwa"}) {
-      if (mn.ends_with(suffix)) {
-        mn = mn.drop_back(strlen(suffix));
-        break;
-      }
-    }
-  }
   if (sop == SemOp::V_NOP) {
     hr.handled = true;
     return hr;
@@ -844,6 +836,24 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f32Ty});
     ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "fmin"), ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_MAXIMUM_F32) {
+    Value *s0 = op.srcF(0), *s1 = op.srcF(1);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    Function *maxFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maximum, {ctx.f32Ty});
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {s0, s1}, "fmaximum"), ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::V_MINIMUM_F32) {
+    Value *s0 = op.srcF(0), *s1 = op.srcF(1);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minimum, {ctx.f32Ty});
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "fminimum"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }

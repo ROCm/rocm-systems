@@ -10,6 +10,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cassert>
 #include <cstring>
 #include <map>
 #include <optional>
@@ -313,6 +314,8 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
 
   // ---- Buffer atomics ----
   if (sop >= SemOp::BUFFER_ATOMIC_ADD && sop <= SemOp::BUFFER_ATOMIC_PK_ADD_F16) {
+    assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
+           "buffer atomic: IsAtomicRet disagrees with numDefs");
     ParsedReg srsrc = op.srcReg(0);
     Value *dw0 = ctx.regs.readReg32(ctx.B, srsrc);
     ParsedReg srsrc1 = srsrc; srsrc1.baseIdx = srsrc.baseIdx + 1;

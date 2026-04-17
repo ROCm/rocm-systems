@@ -12,8 +12,6 @@ HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
   (void)op;
   (void)result;
   HandlerResult hr;
-  llvm::StringRef mn(di.mnemonic);
-  (void)mn;
   SemOp sop = di.semOp;
 
   if (sop == SemOp::S_ENDPGM) {
@@ -71,16 +69,18 @@ HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  // s_barrier / s_barrier_wait / s_barrier_signal — emit barrier for gfx942
-  // GFX12+ splits s_barrier into signal+wait; both may be SOPP format.
-  if (di.mnemonic == "s_barrier" || di.mnemonic == "s_barrier_wait") {
+  // Barriers. GFX<12 uses a single `s_barrier`; GFX12+ splits it into a
+  // separate signal and wait (both SOPP in this format). We model signal as
+  // a no-op (the cross-wave rendezvous happens at the wait) and wait (or the
+  // legacy unified barrier) as a full LLVM `amdgcn.s.barrier` call.
+  if (sop == SemOp::S_BARRIER || sop == SemOp::S_BARRIER_WAIT) {
     Function *barrierFn =
         Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_s_barrier);
     ctx.B.CreateCall(barrierFn, {});
     hr.handled = true;
     return hr;
   }
-  if (di.mnemonic == "s_barrier_signal") {
+  if (sop == SemOp::S_BARRIER_SIGNAL) {
     hr.handled = true;
     return hr;
   }

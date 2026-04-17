@@ -11,6 +11,7 @@
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <map>
 #include <optional>
@@ -277,6 +278,10 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
 
   // flat_atomic_* — same as global_atomic but flat address space
   if (sop >= SemOp::FLAT_ATOMIC_ADD && sop <= SemOp::FLAT_ATOMIC_ADD_F32) {
+    // Contract: the RTN/non-RTN collapse in OpcodeMap relies on
+    // IsAtomicRet <=> (numDefs > 0) to decide result writeback below.
+    assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
+           "flat atomic: IsAtomicRet disagrees with numDefs");
     ParsedReg addrReg = op.srcReg(0);
     Value *addr = ctx.regs.readReg64(ctx.B, addrReg);
     Type *ptrFlatTy = PointerType::get(ctx.C, 0);
@@ -343,6 +348,8 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
 
   // ---- Global atomics ----
   if (sop >= SemOp::GLOBAL_ATOMIC_ADD && sop <= SemOp::GLOBAL_ATOMIC_PK_ADD_F16) {
+    assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
+           "global atomic: IsAtomicRet disagrees with numDefs");
     ParsedReg addrReg = op.srcReg(0);
     Value *addr = ctx.regs.readReg64(ctx.B, addrReg);
     if (addr->getType() != ctx.ptrGlobalTy) addr = ctx.B.CreateIntToPtr(addr, ctx.ptrGlobalTy);

@@ -23,7 +23,6 @@ namespace transpiler {
 HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
                         OpResolver &op, RaiseResult &result) {
   HandlerResult hr;
-  StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
 
   // VOPD instructions are printed as: "v_dual_X dst, src... :: v_dual_Y dst, src..."

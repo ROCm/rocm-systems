@@ -3,36 +3,30 @@
 #include <cstdint>
 #include <string>
 
+// AMDGPU target-private headers. They expose:
+//   AMDGPU::getMCOpcode           (declared in Utils/AMDGPUBaseInfo.h)
+//   AMDGPU::getVOPe64 / getVOPe32 / getDPPOp32 / getDPPOp64 /
+//   getSDWAOp / getBasicFromSDWAOp / getGlobalVaddrOp
+//                                  (declared in SIInstrInfo.h, implemented
+//                                   in the TableGen-generated
+//                                   AMDGPUGenInstrInfo.inc under
+//                                   `#define GET_INSTRMAP_INFO`, linked from
+//                                   libLLVMAMDGPUUtils.a).
+//
+// SIInstrInfo.h drags in the CodeGen TargetInstrInfo base, which we do not
+// use at runtime, but pulling it in is preferable to hand-rolling forward
+// declarations that would silently go stale if LLVM changes a signature.
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "SIDefines.h"
+#include "SIInstrInfo.h"
+#include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
-
-// LLVM's AMDGPU target generates a family of instruction-mapping functions via
-// TableGen (FilterClass/Maps in SIInstrInfo.td). They are emitted into
-// AMDGPUGenInstrInfo.inc under `#define GET_INSTRMAP_INFO`, instantiated in
-// llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp, and linked from
-// libLLVMAMDGPUUtils.a. Their declarations live in SIInstrInfo.h, which pulls
-// in a lot of CodeGen machinery we don't need; forward-declare them here.
-namespace llvm::AMDGPU {
-// MC (subtarget-specific real) <-> pseudo opcode.
-int32_t getMCOpcode(uint32_t Opcode, unsigned Gen);
-
-// Encoding variants: e32 <-> e64, base <-> DPP/SDWA.
-int32_t getVOPe64(uint32_t Opcode);
-int32_t getVOPe32(uint32_t Opcode);
-int32_t getDPPOp32(uint32_t Opcode);
-int32_t getDPPOp64(uint32_t Opcode);
-int32_t getSDWAOp(uint32_t Opcode);
-int32_t getBasicFromSDWAOp(uint32_t Opcode);
-
-// FLAT/GLOBAL SADDR <-> VADDR (despite the name, also covers FLAT).
-int32_t getGlobalVaddrOp(uint32_t Opcode);
-} // namespace llvm::AMDGPU
 
 namespace transpiler {
 
@@ -103,6 +97,15 @@ static const Entry kCanonTable[] = {
     E(S_SET_GPR_IDX_ON, S_SET_GPR_IDX_ON),
     E(S_SET_GPR_IDX_OFF, S_SET_GPR_IDX_OFF),
     E(S_SETVSKIP, S_SETVSKIP),
+
+    // Barriers. GFX < 12 has a single SOPP `S_BARRIER` pseudo; GFX12+ splits
+    // it into a SOPP wait and a SOP1 signal (both IMM and M0 forms). All
+    // `_ISFIRST`/`_INIT`/`_JOIN`/`_LEAVE` variants are intentionally left
+    // unmapped — the raiser does not model them yet.
+    E(S_BARRIER, S_BARRIER),
+    E(S_BARRIER_WAIT, S_BARRIER_WAIT),
+    E(S_BARRIER_SIGNAL_IMM, S_BARRIER_SIGNAL),
+    E(S_BARRIER_SIGNAL_M0, S_BARRIER_SIGNAL),
 
     // ---------------------------------------------------------------------
     // SMEM scalar loads
@@ -257,10 +260,11 @@ static const Entry kCanonTable[] = {
     E(V_FMAAK_F32, V_FMAAK_F32),
     E(V_MAX_F32_e64, V_MAX_F32),
     E(V_MIN_F32_e64, V_MIN_F32),
-    // gfx11+ IEEE-754 max/min (called `V_MAXIMUM_F32`/`V_MINIMUM_F32` in LLVM,
-    // surfaced here as the `_NUM_` SemOp the handlers already recognize).
-    E(V_MAXIMUM_F32_e64, V_MAX_NUM_F32),
-    E(V_MINIMUM_F32_e64, V_MIN_NUM_F32),
+    // gfx11+ IEEE-754 2019 maximum/minimum. These differ from V_MAX_NUM_F32 /
+    // V_MIN_NUM_F32 in their NaN semantics: maximum/minimum propagate NaN,
+    // while maxnum/minnum return the non-NaN operand.
+    E(V_MAXIMUM_F32_e64, V_MAXIMUM_F32),
+    E(V_MINIMUM_F32_e64, V_MINIMUM_F32),
     E(V_DIV_FIXUP_F32_e64, V_DIV_FIXUP_F32),
     E(V_DIV_FMAS_F32_e64, V_DIV_FMAS_F32),
     E(V_DIV_SCALE_F32_e64, V_DIV_SCALE_F32),
@@ -582,6 +586,48 @@ static const Entry kCanonTable[] = {
     E(V_ACCVGPR_WRITE_B32_e64, V_ACCVGPR_WRITE_B32),
 
     // ---------------------------------------------------------------------
+    // MFMA shapes with a single TableGen pseudo per intrinsic.
+    // Register-class variants (`_vgprcd_`, `_mac_`) collapse to the base
+    // `_e64` via pseudoAlias, so we only list the base pseudo here.
+    // ---------------------------------------------------------------------
+    E(V_MFMA_F32_16X16X16F16_e64, V_MFMA_F32_16x16x16_F16),
+    E(V_MFMA_F32_32X32X8F16_e64,  V_MFMA_F32_32x32x8_F16),
+    E(V_MFMA_F32_16X16X4F32_e64,  V_MFMA_F32_16x16x4_F32),
+    E(V_MFMA_F32_32X32X1F32_e64,  V_MFMA_F32_32x32x1_F32),
+    E(V_MFMA_F32_32X32X2F32_e64,  V_MFMA_F32_32x32x2_F32),
+    E(V_MFMA_F32_4X4X1F32_e64,    V_MFMA_F32_4x4x1_F32),
+    E(V_MFMA_F32_16X16X1F32_e64,  V_MFMA_F32_16x16x1_F32),
+    E(V_MFMA_F32_32X32X4F16_e64,  V_MFMA_F32_32x32x4_F16),
+    E(V_MFMA_F32_16X16X4F16_e64,  V_MFMA_F32_16x16x4_F16),
+    E(V_MFMA_F32_4X4X4F16_e64,    V_MFMA_F32_4x4x4_F16),
+    E(V_MFMA_I32_16X16X32I8_e64,  V_MFMA_I32_16x16x32_I8),
+    E(V_MFMA_I32_32X32X16I8_e64,  V_MFMA_I32_32x32x16_I8),
+    E(V_MFMA_I32_32X32X4I8_e64,   V_MFMA_I32_32x32x4_I8),
+    E(V_MFMA_I32_16X16X4I8_e64,   V_MFMA_I32_16x16x4_I8),
+    E(V_MFMA_I32_4X4X4I8_e64,     V_MFMA_I32_4x4x4_I8),
+    E(V_MFMA_F32_16X16X8XF32_e64, V_MFMA_F32_16x16x8_XF32),
+    E(V_MFMA_F32_32X32X4XF32_e64, V_MFMA_F32_32x32x4_XF32),
+    E(V_MFMA_F32_32X32X2BF16_e64, V_MFMA_F32_32x32x2_BF16),
+    E(V_MFMA_F32_16X16X2BF16_e64, V_MFMA_F32_16x16x2_BF16),
+    E(V_MFMA_F32_4X4X2BF16_e64,   V_MFMA_F32_4x4x2_BF16),
+    // Only the 16x16x16 and 32x32x8 1K shapes were in the legacy mnemonic
+    // table; the 4x4x4/16x16x4/32x32x4 1K variants are distinct intrinsics
+    // that the raiser does not (yet) model and therefore stay unmapped.
+    E(V_MFMA_F32_16X16X16BF16_1K_e64, V_MFMA_F32_16x16x16_BF16_1K),
+    E(V_MFMA_F32_32X32X8BF16_1K_e64,  V_MFMA_F32_32x32x8_BF16_1K),
+    E(V_MFMA_F32_16X16X32_BF16_e64, V_MFMA_F32_16x16x32_BF16),
+    E(V_MFMA_F32_32X32X16_BF16_e64, V_MFMA_F32_32x32x16_BF16),
+    E(V_MFMA_F32_16X16X32_F16_e64,  V_MFMA_F32_16x16x32_F16),
+    E(V_MFMA_F32_16X16X32_FP8_FP8_e64, V_MFMA_F32_16x16x32_FP8_FP8),
+    E(V_MFMA_F32_16X16X32_FP8_BF8_e64, V_MFMA_F32_16x16x32_FP8_BF8),
+    E(V_MFMA_F32_16X16X32_BF8_FP8_e64, V_MFMA_F32_16x16x32_BF8_FP8),
+    E(V_MFMA_F32_16X16X32_BF8_BF8_e64, V_MFMA_F32_16x16x32_BF8_BF8),
+    E(V_MFMA_F32_32X32X16_FP8_FP8_e64, V_MFMA_F32_32x32x16_FP8_FP8),
+    E(V_MFMA_F32_32X32X16_FP8_BF8_e64, V_MFMA_F32_32x32x16_FP8_BF8),
+    E(V_MFMA_F32_32X32X16_BF8_FP8_e64, V_MFMA_F32_32x32x16_BF8_FP8),
+    E(V_MFMA_F32_32X32X16_BF8_BF8_e64, V_MFMA_F32_32x32x16_BF8_BF8),
+
+    // ---------------------------------------------------------------------
     // MFMA F8F6F4: LLVM enumerates all 9 src0/src1 mantissa-type pairs as
     // separate pseudos; the raiser handles them identically.
     // ---------------------------------------------------------------------
@@ -638,10 +684,15 @@ static const Entry kCanonTable[] = {
 #undef MUBUF4
 #undef E
 
-// SIEncodingFamily from [SIDefines.h]: SI(0) .. GFX13(14), inclusive.
-// getMCOpcode(pseudo, gen) returns the MC opcode used on that subtarget
-// generation, or -1 if no real encoding exists.
-constexpr unsigned kNumEncodingFamilies = 15;
+// Iteration bound for SIEncodingFamily: the enum in SIDefines.h is a closed
+// numeric set with GFX13 as the current maximum, so we scan [0, GFX13] when
+// inverting the pseudo -> MC map.  If LLVM adds a new family the next
+// enumerator value appears here automatically and the build still compiles;
+// the static_assert keeps us honest if LLVM ever renames the sentinel we use.
+static_assert(SIEncodingFamily::GFX13 >= SIEncodingFamily::SI,
+              "SIEncodingFamily enum layout changed unexpectedly");
+constexpr unsigned kNumEncodingFamilies =
+    static_cast<unsigned>(SIEncodingFamily::GFX13) + 1;
 
 // Build a reverse map MC-opcode -> canonical pseudo by scanning every pseudo
 // opcode across all subtarget generations. This is ~O(N * 15) work at init
@@ -658,6 +709,63 @@ buildMcToPseudoMap(unsigned numOpc) {
     }
   }
   return result;
+}
+
+// Rule predicates: an optional semantic invariant the alias must preserve.
+// Every time an alias step is committed (source pseudo S collapses onto
+// target pseudo T), the firing rule's predicate is evaluated against
+// MCInstrDesc(S) and MCInstrDesc(T). A violation means LLVM renamed or
+// repurposed a pseudo in a way that breaks our naming contract, and is
+// reported as a fatal error at init time rather than silently producing
+// wrong IR at runtime.
+using RulePredicate = bool (*)(const MCInstrDesc &src, const MCInstrDesc &tgt);
+
+// `_RTN` collapse: source must be an atomic with a return value; target must
+// be the same atomic without one. The raiser uses `numDefs` as the
+// "publishes old value" signal, so that invariant must also hold.
+static bool atomicRetToNoRet(const MCInstrDesc &src, const MCInstrDesc &tgt) {
+  constexpr uint64_t kRet = SIInstrFlags::IsAtomicRet;
+  constexpr uint64_t kNoRet = SIInstrFlags::IsAtomicNoRet;
+  return (src.TSFlags & kRet) && (tgt.TSFlags & kNoRet) &&
+         src.getNumDefs() > 0 && tgt.getNumDefs() == 0;
+}
+
+// `_vgprcd_` / `_mac_` collapse: both source and target must be MFMA
+// (matrix-accumulate) pseudos.
+static bool bothAreMAI(const MCInstrDesc &src, const MCInstrDesc &tgt) {
+  constexpr uint64_t kMAI = SIInstrFlags::IsMAI;
+  return (src.TSFlags & kMAI) && (tgt.TSFlags & kMAI);
+}
+
+// Bits we require to be identical between source and target for an alias
+// collapse to be considered semantically safe. Deliberately excludes encoding
+// variation flags like `VOP3_OPSEL` (set on `_t16_` op-sel encodings but not
+// on the base `_e64`) and `renamedInGFX9` (set only on the subtarget-specific
+// pseudo). Everything listed below represents *what the handler dispatches
+// on*: instruction family (SOP/VOP/FLAT/DS/...), atomic kind, and MAI.
+static constexpr uint64_t kSemanticShapeMask =
+    // Instruction families.
+    SIInstrFlags::SOP1 | SIInstrFlags::SOP2 | SIInstrFlags::SOPC |
+    SIInstrFlags::SOPK | SIInstrFlags::SOPP | SIInstrFlags::VOP1 |
+    SIInstrFlags::VOP2 | SIInstrFlags::VOPC | SIInstrFlags::VOP3 |
+    SIInstrFlags::VOP3P | SIInstrFlags::SDWA | SIInstrFlags::DPP |
+    SIInstrFlags::MUBUF | SIInstrFlags::MTBUF | SIInstrFlags::SMRD |
+    SIInstrFlags::FLAT | SIInstrFlags::DS | SIInstrFlags::MIMG |
+    // Semantic classification (atomic kind, MAI).
+    SIInstrFlags::IsAtomicRet | SIInstrFlags::IsAtomicNoRet |
+    SIInstrFlags::IsMAI;
+
+// Subtarget-/operand-class variants (`_gfx9`, `_t16_`, `_fake16_`, `_agpr`,
+// etc.) may legitimately toggle encoding flags such as `VOP3_OPSEL` or
+// `renamedInGFX9` between source and target, but they must preserve the
+// instruction's dispatch identity: same family, same atomic kind, same MAI
+// classification, same def arity. A violation means LLVM renamed or
+// repurposed a pseudo in a way our alias map cannot safely collapse.
+static bool sameSemanticShape(const MCInstrDesc &src,
+                              const MCInstrDesc &tgt) {
+  return (src.TSFlags & kSemanticShapeMask) ==
+             (tgt.TSFlags & kSemanticShapeMask) &&
+         src.getNumDefs() == tgt.getNumDefs();
 }
 
 // Build an alias map that collapses "parallel" pseudos LLVM generates for the
@@ -679,6 +787,10 @@ buildPseudoAliasMap(const MCInstrInfo &MCII) {
   struct Rule {
     llvm::StringRef needle;
     bool isSuffix;
+    // Optional semantic check on (source, target) MCInstrDesc. A null
+    // predicate means "no validation yet" (see the older subtarget/operand
+    // markers below).
+    RulePredicate pred;
   };
   // Subtarget-specific markers ("_gfx9", "_gfx1250", ...) and operand-size
   // markers ("_t16_", "_fake16_") that LLVM injects into the pseudo name.
@@ -686,44 +798,84 @@ buildPseudoAliasMap(const MCInstrInfo &MCII) {
   // `V_BITOP3_B16_gfx1250_fake16_e64`), so the outer loop below applies these
   // rules iteratively until the name stops shrinking.
   static const Rule rules[] = {
-      {"_vi_gfx9", true},
-      {"_gfx9", true},
-      {"_gfx1250", true},
-      {"_gfx1250_", false},
-      {"_pseudo_", false},
-      {"_t16_", false},
-      {"_fake16_", false},
+      // Subtarget-specific markers. LLVM emits a dedicated pseudo per
+      // subtarget (e.g. `_gfx9`, `_gfx1250`, `_vi_gfx9`) with the same
+      // TableGen class as the base; collapsing them is sound as long as
+      // TSFlags and def arity match.
+      {"_vi_gfx9", true, sameSemanticShape},
+      {"_gfx9", true, sameSemanticShape},
+      {"_gfx1250", true, sameSemanticShape},
+      {"_gfx1250_", false, sameSemanticShape},
+      {"_pseudo_", false, sameSemanticShape},
+      // True16 / Fake16 mark the 16-bit operand encoding variant; LLVM has
+      // no dedicated TSFlag bit for this (the distinction lives in
+      // True16Predicate on the TableGen side), and the t16 encoding toggles
+      // `VOP3_OPSEL`. We cross-check that dispatch-relevant TSFlags and def
+      // arity are preserved, but tolerate encoding-bit drift.
+      {"_t16_", false, sameSemanticShape},
+      {"_fake16_", false, sameSemanticShape},
+      // MFMA register-class modifiers.  `_vgprcd_` marks a VGPR destination
+      // variant; `_mac_` marks a multiply-accumulate (tied dst/src2) variant.
+      // Both keep the same TableGen intrinsic and semantic shape, so they
+      // collapse onto the base `_e64` pseudo.
+      {"_vgprcd_", false, bothAreMAI},
+      {"_mac_", false, bothAreMAI},
+      // Atomic return-value variants: LLVM emits distinct `_RTN` pseudos for
+      // the forms that return the pre-modification value, plus `_agpr`
+      // variants that just pick an AGPR destination register class. These
+      // pseudos carry the same TableGen intrinsic and identical semantics;
+      // the only difference is whether the handler should write the result
+      // back, which the raiser already derives from `di.numDefs`
+      // (MCInstrDesc::getNumDefs()). Collapse them onto the non-RTN pseudo
+      // so both forms share a single SemOp.
+      {"_agpr", true, sameSemanticShape},
+      {"_RTN", true, atomicRetToNoRet},
   };
 
-  auto stripOnce = [&](llvm::StringRef name, std::string &out) -> bool {
-    for (const Rule &r : rules) {
+  // Returns the index of the firing rule or -1 if no rule applies.
+  auto stripOnce = [&](llvm::StringRef name, std::string &out) -> int {
+    for (size_t i = 0; i < std::size(rules); ++i) {
+      const Rule &r = rules[i];
       if (r.isSuffix) {
         if (!name.ends_with(r.needle))
           continue;
         out = name.drop_back(r.needle.size()).str();
-        return true;
+        return static_cast<int>(i);
       }
       size_t pos = name.find(r.needle);
       if (pos == llvm::StringRef::npos)
         continue;
       out = (name.substr(0, pos).str() + std::string("_") +
              name.substr(pos + r.needle.size()).str());
-      return true;
+      return static_cast<int>(i);
     }
-    return false;
+    return -1;
   };
 
   DenseMap<unsigned, unsigned> alias;
   for (const auto &kv : byName) {
     std::string cur = kv.first().str();
+    unsigned curOpc = kv.second;
     unsigned finalOpc = kv.second;
     while (true) {
       std::string next;
-      if (!stripOnce(cur, next))
+      int ruleIdx = stripOnce(cur, next);
+      if (ruleIdx < 0)
         break;
       auto it = byName.find(next);
-      if (it != byName.end() && it->second != kv.second)
-        finalOpc = it->second;
+      if (it != byName.end() && it->second != kv.second) {
+        const Rule &r = rules[ruleIdx];
+        if (r.pred && !r.pred(MCII.get(curOpc), MCII.get(it->second))) {
+          report_fatal_error(
+              Twine("opcode_map: alias rule '") + r.needle +
+              "' broke its semantic invariant while collapsing '" + cur +
+              "' -> '" + next +
+              "'. LLVM likely renamed or repurposed a pseudo; update the "
+              "alias rules or the predicate.");
+        }
+        curOpc = it->second;
+        finalOpc = curOpc;
+      }
       cur = std::move(next);
     }
     if (finalOpc != kv.second)
@@ -808,30 +960,32 @@ unsigned canonicalize(unsigned mc,
 } // namespace
 
 SemOp OpcodeMap::lookup(unsigned opcode) const {
-  auto it = map.find(opcode);
-  return it != map.end() ? it->second : SemOp::Unknown;
+  auto it = map_.find(opcode);
+  return it != map_.end() ? it->second : SemOp::Unknown;
 }
 
 void OpcodeMap::build(const MCInstrInfo &MCII) {
-  // Flatten the static table into a DenseMap for O(1) lookups during the
+  // Flatten the static kCanonTable into a DenseMap for O(1) lookups during the
   // subsequent scan over every MC opcode.
   DenseMap<unsigned, SemOp> canonToSem;
-  canonToSem.reserve(sizeof(kCanonTable) / sizeof(kCanonTable[0]));
+  canonToSem.reserve(std::size(kCanonTable));
   for (const Entry &e : kCanonTable)
     canonToSem.try_emplace(e.opc, e.sem);
 
-  unsigned numOpc = MCII.getNumOpcodes();
-  auto mcToPseudo = buildMcToPseudoMap(numOpc);
-  auto pseudoAlias = buildPseudoAliasMap(MCII);
-  auto dppToBase = buildDppToBaseMap(numOpc);
+  const unsigned numOpc = MCII.getNumOpcodes();
+  const auto mcToPseudo  = buildMcToPseudoMap(numOpc);
+  const auto pseudoAlias = buildPseudoAliasMap(MCII);
+  const auto dppToBase   = buildDppToBaseMap(numOpc);
 
-  map.clear();
-  map.reserve(numOpc / 4);
-  for (unsigned i = 0; i < numOpc; ++i) {
-    unsigned canon = canonicalize(i, MCII, mcToPseudo, pseudoAlias, dppToBase);
-    auto it = canonToSem.find(canon);
-    if (it != canonToSem.end())
-      map[i] = it->second;
+  map_.clear();
+  // Heuristic: roughly a quarter of MC opcodes carry a SemOp in practice;
+  // resizing a few times is fine for a one-shot init.
+  map_.reserve(numOpc / 4);
+  for (unsigned mc = 0; mc < numOpc; ++mc) {
+    const unsigned canon =
+        canonicalize(mc, MCII, mcToPseudo, pseudoAlias, dppToBase);
+    if (auto it = canonToSem.find(canon); it != canonToSem.end())
+      map_[mc] = it->second;
   }
 }
 

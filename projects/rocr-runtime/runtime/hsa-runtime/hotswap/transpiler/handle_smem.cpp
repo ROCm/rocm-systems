@@ -4,6 +4,7 @@
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/Debug.h"
 
+#include <cassert>
 #include <utility>
 #include <vector>
 
@@ -16,7 +17,6 @@ namespace transpiler {
 HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
                        OpResolver &op, RaiseResult &result) {
   HandlerResult hr;
-  llvm::StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
 
   if (sop == SemOp::S_LOAD_B32 || sop == SemOp::S_LOAD_B64 ||
@@ -53,7 +53,7 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     bool isKernarg = (base.kind == ParsedReg::SGPR && base.baseIdx == 0);
 
     LLVM_DEBUG(if (isKernarg && immOffset) {
-      llvm::dbgs() << "transpiler: SMEM: mn=" << mn
+      llvm::dbgs() << "transpiler: SMEM: mn=" << di.mnemonic
                    << " raw=" << di.rawMnemonic << " full=\"" << di.fullText
                    << "\" off=" << byteOffset << "\n";
     });
@@ -118,6 +118,8 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
   // HW only returns the old value when GLC=1; we always write it back,
   // which is conservative (harmless when GLC=0 since the dest is dead).
   if (sop == SemOp::S_ATOMIC_SWAP) {
+    assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
+           "s_atomic_swap: IsAtomicRet disagrees with numDefs");
     ParsedReg dataDst = op.dst();
     ParsedReg base = op.srcReg(0);
     Value *data = ctx.regs.readReg32(ctx.B, dataDst);

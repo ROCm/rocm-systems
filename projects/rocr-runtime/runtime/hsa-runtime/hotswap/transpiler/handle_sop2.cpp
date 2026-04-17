@@ -11,9 +11,7 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
                          OpResolver &op, RaiseResult &result) {
   (void)result;
   HandlerResult hr;
-  llvm::StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
-  (void)mn;
 
   // 32-bit binary ops — auto SCC via sccResult
   if (sop == SemOp::S_AND_B32) {

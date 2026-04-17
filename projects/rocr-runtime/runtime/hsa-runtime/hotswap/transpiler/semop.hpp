@@ -18,6 +18,10 @@ enum class SemOp : uint16_t {
   S_WAITCNT, S_WAIT_LOADCNT, S_WAIT_KMCNT, S_WAIT_DSCNT, S_WAIT_XCNT,
   S_WAIT_LOADCNT_DSCNT, S_WAIT_ALU,
   S_CLAUSE, S_DELAY_ALU, S_SET_GPR_IDX_ON, S_SET_GPR_IDX_OFF, S_SETVSKIP,
+  // Barriers. GFX12+ splits s_barrier into signal + wait; earlier ISAs emit a
+  // single s_barrier. Handlers model signal as a no-op and wait as a full
+  // LLVM `amdgcn.s.barrier` call.
+  S_BARRIER, S_BARRIER_WAIT, S_BARRIER_SIGNAL,
 
   // -- SMEM --
   S_LOAD_B32, S_LOAD_B64, S_LOAD_B96, S_LOAD_B128, S_LOAD_B256,
@@ -96,6 +100,8 @@ enum class SemOp : uint16_t {
   V_READLANE_B32, V_WRITELANE_B32,
   V_MED3_F32, V_MAX3_F32, V_MIN3_F32, V_MAX3_NUM_F32,
   V_MAX_NUM_F32, V_MIN_NUM_F32,
+  // IEEE-754 2019 maximum/minimum: propagate NaN (distinct from maxnum/minnum).
+  V_MAXIMUM_F32, V_MINIMUM_F32,
   V_DIV_FIXUP_F32, V_DIV_FMAS_F32, V_DIV_SCALE_F32,
   V_FMA_MIX_F32,
   V_ADD_F16, V_MUL_F16, V_SUB_F16, V_SUBREV_F16, V_MAC_F16, V_FMAC_F16,
@@ -214,8 +220,34 @@ enum class SemOp : uint16_t {
   BUFFER_ATOMIC_PK_ADD_BF16, BUFFER_ATOMIC_PK_ADD_F16,
 
   // -- MFMA --
+  // gfx950 scaled F8F6F4 variants share a per-shape intrinsic but take 9
+  // src-format sub-variants each; those are collapsed onto these four SemOps
+  // in kCanonTable.
   V_MFMA_F32_16x16x128_F8F6F4, V_MFMA_SCALE_F32_16x16x128_F8F6F4,
   V_MFMA_F32_32x32x64_F8F6F4, V_MFMA_SCALE_F32_32x32x64_F8F6F4,
+  // F32 <- F16/F32 (gfx908+). Each covers its pseudo's _e64/_vgprcd_/_mac_
+  // variants via pseudoAlias stripping in OpcodeMap::canonicalize.
+  V_MFMA_F32_16x16x16_F16, V_MFMA_F32_32x32x8_F16,
+  V_MFMA_F32_16x16x4_F32, V_MFMA_F32_32x32x1_F32, V_MFMA_F32_32x32x2_F32,
+  V_MFMA_F32_4x4x1_F32, V_MFMA_F32_16x16x1_F32,
+  V_MFMA_F32_32x32x4_F16, V_MFMA_F32_16x16x4_F16, V_MFMA_F32_4x4x4_F16,
+  // I32 <- I8.
+  V_MFMA_I32_16x16x32_I8, V_MFMA_I32_32x32x16_I8,
+  V_MFMA_I32_32x32x4_I8, V_MFMA_I32_16x16x4_I8, V_MFMA_I32_4x4x4_I8,
+  // F32 <- XF32 (gfx940+).
+  V_MFMA_F32_16x16x8_XF32, V_MFMA_F32_32x32x4_XF32,
+  // F32 <- BF16 (gfx908 2-byte variants).
+  V_MFMA_F32_32x32x2_BF16, V_MFMA_F32_16x16x2_BF16, V_MFMA_F32_4x4x2_BF16,
+  // F32 <- BF16 "1K" shapes (gfx90a+).
+  V_MFMA_F32_16x16x16_BF16_1K, V_MFMA_F32_32x32x8_BF16_1K,
+  // F32 <- BF16/F16 wide shapes (gfx950).
+  V_MFMA_F32_16x16x32_BF16, V_MFMA_F32_32x32x16_BF16,
+  V_MFMA_F32_16x16x32_F16,
+  // F32 <- FP8/BF8 (gfx940+).
+  V_MFMA_F32_16x16x32_FP8_FP8, V_MFMA_F32_16x16x32_FP8_BF8,
+  V_MFMA_F32_16x16x32_BF8_FP8, V_MFMA_F32_16x16x32_BF8_BF8,
+  V_MFMA_F32_32x32x16_FP8_FP8, V_MFMA_F32_32x32x16_FP8_BF8,
+  V_MFMA_F32_32x32x16_BF8_FP8, V_MFMA_F32_32x32x16_BF8_BF8,
 
   // -- WMMA (gfx1250) --
   V_WMMA_F32_16x16x32_F16,

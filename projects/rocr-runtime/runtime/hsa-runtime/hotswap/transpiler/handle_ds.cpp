@@ -22,7 +22,6 @@ namespace transpiler {
 HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
                         OpResolver &op, RaiseResult &result) {
   HandlerResult hr;
-  StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
 
   // Map SemOp to {dwords, loadBits, isSigned} for DS read/write

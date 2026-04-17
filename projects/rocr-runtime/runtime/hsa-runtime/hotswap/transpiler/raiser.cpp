@@ -8,6 +8,7 @@
 
 #include "mc_state.hpp"
 #include "opcode_map.hpp"
+#include "Utils/AMDGPUBaseInfo.h"
 #include "reg_file.hpp"
 #include "kernarg_layout.hpp"
 #include "raise_context.hpp"
@@ -115,8 +116,11 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
       di.tsFlags = desc.TSFlags;
       di.format = classifyFormat(desc.TSFlags);
-      // VOPD detection: mnemonic prefix is reliable across LLVM versions
-      if (StringRef(di.mnemonic).starts_with("v_dual_"))
+      // VOPD detection. LLVM's TableGen emits VOPD instructions without a
+      // dedicated SIInstrFlags bit; the canonical upstream check is whether
+      // the instruction carries the dual-issue `src0X` operand, which LLVM
+      // exposes via `AMDGPU::isVOPD(opcode)`.
+      if (AMDGPU::isVOPD(inst.getOpcode()))
         di.format = FormatKind::VOPD;
       di.firstSrcIdx = desc.getNumDefs();
 

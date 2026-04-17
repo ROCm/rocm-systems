@@ -11,9 +11,7 @@ HandlerResult handleSOPK(RaiseContext &ctx, const DecodedInst &di,
                          OpResolver &op, RaiseResult &result) {
   (void)result;
   HandlerResult hr;
-  llvm::StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
-  (void)mn;
 
   // SOPK format: dst = SDST, src(0) = sign-extended 16-bit imm
   if (sop == SemOp::S_MOVK_I32) {

@@ -13,9 +13,7 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
                          OpResolver &op, RaiseResult &result) {
   (void)result;
   HandlerResult hr;
-  llvm::StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
-  (void)mn;
 
   if (sop == SemOp::S_MOV_B32) {
     ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
@@ -189,16 +187,9 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   // S_SET_VGPR_MSB is SOPP format — handled in handleSOPP, not here.
-  // s_barrier_signal → no-op (the wait emits the actual barrier)
-  if (di.mnemonic == "s_barrier_signal") {
-    hr.handled = true;
-    return hr;
-  }
-  // s_barrier_wait → emit a full s_barrier for gfx942 synchronization
-  if (di.mnemonic == "s_barrier_wait") {
-    Function *barrierFn =
-        Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_s_barrier);
-    ctx.B.CreateCall(barrierFn, {});
+  // GFX12+ `s_barrier_signal` appears in SOP1 encoding; model it as a no-op
+  // (the paired SOPP `s_barrier_wait` does the actual rendezvous).
+  if (sop == SemOp::S_BARRIER_SIGNAL) {
     hr.handled = true;
     return hr;
   }
