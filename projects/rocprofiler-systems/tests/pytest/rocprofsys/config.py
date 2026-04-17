@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 from dataclasses import dataclass, field

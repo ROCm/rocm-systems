@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/agent_manager.hpp"
@@ -584,7 +584,8 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
     for(const auto& core : core_freq_samples)
     {
-        insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
+        insert_event_and_sample(get_track_name(core.id).c_str(),
+                                static_cast<double>(core.value));
     }
 }
 

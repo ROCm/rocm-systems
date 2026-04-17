@@ -693,8 +693,7 @@ bool Device::create() {
     hsaSettings->limit_blit_wg_ = std::max(DEBUG_CLR_LIMIT_BLIT_WG, 0x1U);
   }
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -1725,6 +1724,9 @@ bool Device::populateOCLDeviceConstants() {
   std::ignore = Hsa::system_get_info(
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
+
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
 
   if (isa().versionMajor() < 8) {
     info_.sgprsPerSimd_ = 512;

@@ -233,9 +233,7 @@ class KernelParameters : protected HeapObject {
   //! add the svmPtr execInfo into container
   void addSvmPtr(void* const* execInfoArray, size_t count) {
     execSvmPtr_.clear();
-    for (size_t i = 0; i < count; i++) {
-      execSvmPtr_.push_back(execInfoArray[i]);
-    }
+    execSvmPtr_.insert(execSvmPtr_.end(), execInfoArray, execInfoArray + count);
   }
   //! get the number of svmPtr in the execInfo container
   size_t getNumberOfSvmPtr() const { return execSvmPtr_.size(); }
