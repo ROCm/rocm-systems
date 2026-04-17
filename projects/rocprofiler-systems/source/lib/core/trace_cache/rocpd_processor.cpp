@@ -540,11 +540,26 @@ rocpd_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
         m_agent_manager->get_agent_by_type_index(_sdk_pmc.device_id, agent_type::GPU)
             .base_id;
 
+    auto& name_lookup = m_sdk_pmc_name_lookup[_sdk_pmc.device_id];
+    if(name_lookup.empty())
+    {
+        const auto* name_entries =
+            m_metadata->get_sdk_pmc_counter_names(_sdk_pmc.device_id);
+        if(name_entries)
+        {
+            for(const auto& ne : *name_entries)
+                name_lookup.emplace(ne.pmc_info_name, ne.track_name);
+        }
+    }
+
     for(const auto& entry : _sdk_pmc.entries)
     {
-        const auto pmc_name = std::string(entry.name);
-        const auto track_name =
-            fmt::format("sdk_pmc_{} [GPU {}]", entry.name, _sdk_pmc.device_id);
+        auto pmc_name  = std::string(entry.name);
+        auto lookup_it = name_lookup.find(pmc_name);
+
+        const auto& track_name =
+            (lookup_it != name_lookup.end()) ? lookup_it->second : pmc_name;
+
         m_data_processor->insert_pmc_event(event_id, base_id, pmc_name.c_str(),
                                            entry.value);
         m_data_processor->insert_sample(track_name.c_str(), _sdk_pmc.timestamp, event_id);

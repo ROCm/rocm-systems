@@ -347,7 +347,9 @@ register_sdk_pmc_source(
     const std::vector<std::vector<std::string>>& counter_names_per_agent,
     const std::vector<
         std::vector<device_providers::rocprofiler_sdk::counter_instance_info>>&
-        instance_infos_per_agent)
+        instance_infos_per_agent,
+    const std::vector<std::vector<device_providers::rocprofiler_sdk::counter_metadata>>&
+        counter_meta_per_agent)
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
@@ -356,6 +358,7 @@ register_sdk_pmc_source(
         using agent_info = pmc::device_providers::rocprofiler_sdk::agent_info;
         using instance_info_t =
             pmc::device_providers::rocprofiler_sdk::counter_instance_info;
+        using counter_meta_t = pmc::device_providers::rocprofiler_sdk::counter_metadata;
 
         auto context = rocprofiler_context_id_t{ context_handle };
         auto agents  = std::vector<agent_info>{};
@@ -369,10 +372,13 @@ register_sdk_pmc_source(
             auto instances = (i < instance_infos_per_agent.size())
                                  ? instance_infos_per_agent[i]
                                  : std::vector<instance_info_t>{};
-            agents.push_back(
-                agent_info{ rocprofiler_agent_id_t{ agent_ids[i] },
-                            rocprofiler_counter_config_id_t{ profile_configs[i] },
-                            device_indices[i], std::move(names), std::move(instances) });
+            auto meta      = (i < counter_meta_per_agent.size())
+                                 ? counter_meta_per_agent[i]
+                                 : std::vector<counter_meta_t>{};
+            agents.push_back(agent_info{
+                rocprofiler_agent_id_t{ agent_ids[i] },
+                rocprofiler_counter_config_id_t{ profile_configs[i] }, device_indices[i],
+                std::move(names), std::move(instances), std::move(meta) });
         }
 
         g_sdk_pmc_provider =

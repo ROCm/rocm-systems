@@ -58,6 +58,8 @@ register_sdk_pmc_source(
     const std::vector<std::vector<std::string>>& counter_names_per_agent,
     const std::vector<
         std::vector<device_providers::rocprofiler_sdk::counter_instance_info>>&
-        instance_infos_per_agent);
+        instance_infos_per_agent,
+    const std::vector<std::vector<device_providers::rocprofiler_sdk::counter_metadata>>&
+        counter_meta_per_agent);
 
 }  // namespace rocprofsys::pmc

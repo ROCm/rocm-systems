@@ -1467,22 +1467,41 @@ perfetto_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
     const auto _ts        = _sdk_pmc.timestamp;
     const auto _device_id = _sdk_pmc.device_id;
 
+    auto track_it = m_pmc_track_map.find(
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value));
+    if(track_it == m_pmc_track_map.end()) return;
+
+    const auto& track_info = track_it->second;
+
+    auto& name_lookup = m_sdk_pmc_name_lookup[_device_id];
+    if(name_lookup.empty())
+    {
+        const auto* name_entries = m_metadata.get_sdk_pmc_counter_names(_device_id);
+        if(name_entries)
+        {
+            for(const auto& ne : *name_entries)
+                name_lookup.emplace(ne.pmc_info_name, ne.track_name);
+        }
+    }
+
     for(const auto& entry : _sdk_pmc.entries)
     {
-        auto track_name = fmt::format("GPU [{}] {} (S)", _device_id, entry.name);
-        auto track_key  = std::hash<std::string>{}(track_name);
+        const auto  entry_name = std::string(entry.name);
+        auto        lookup_it  = name_lookup.find(entry_name);
+        const auto& track_name =
+            (lookup_it != name_lookup.end()) ? lookup_it->second : entry_name;
 
-        auto track_it = m_pmc_track_map.find(static_cast<size_t>(
-            category_enum_id<category::rocm_counter_collection>::value));
-        if(track_it != m_pmc_track_map.end())
+        auto track_key = std::hash<std::string>{}(track_name);
+
+        if(!track_info.exists_fn(track_key))
         {
-            const auto& track_info = track_it->second;
-            if(!track_info.exists_fn(track_key))
-            {
-                track_info.emplace_fn(track_key, track_name, track_info.default_units);
-            }
-            track_info.trace_fn(track_key, 0, _ts, entry.value);
+            auto display_name =
+                (lookup_it != name_lookup.end())
+                    ? track_name
+                    : fmt::format("GPU [{}] {} (S)", _device_id, entry.name);
+            track_info.emplace_fn(track_key, display_name, track_info.default_units);
         }
+        track_info.trace_fn(track_key, 0, _ts, entry.value);
     }
 }
 

@@ -29,6 +29,23 @@ struct counter_instance_info
 };
 
 /**
+ * @brief Per-counter metadata extracted from rocprofiler_counter_info_v1_t.
+ *
+ * Carries SDK counter properties that feed into pmc_info registration
+ * (block, expression, is_constant, is_derived). Built once during tool_init,
+ * propagated through provider → device → cache_policy.
+ */
+struct counter_metadata
+{
+    std::string name;
+    std::string description;
+    std::string block;
+    std::string expression;
+    bool        is_constant = false;
+    bool        is_derived  = false;
+};
+
+/**
  * @brief Per-agent info for device_counting_service.
  */
 struct agent_info
@@ -38,6 +55,7 @@ struct agent_info
     size_t                             device_index   = 0;
     std::vector<std::string>           counter_names  = {};
     std::vector<counter_instance_info> instance_infos = {};
+    std::vector<counter_metadata>      counter_meta   = {};
 };
 
 /**
@@ -113,7 +131,8 @@ public:
         {
             devices.push_back(std::make_shared<Device>(
                 m_driver_api, m_context, info.agent_id, info.profile_config,
-                info.device_index, info.counter_names, info.instance_infos));
+                info.device_index, info.counter_names, info.instance_infos,
+                info.counter_meta));
         }
 
         return devices;

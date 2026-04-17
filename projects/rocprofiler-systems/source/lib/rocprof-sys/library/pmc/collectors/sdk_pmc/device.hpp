@@ -39,17 +39,21 @@ class device
 public:
     using instance_info_vec =
         std::vector<device_providers::rocprofiler_sdk::counter_instance_info>;
+    using counter_meta_vec =
+        std::vector<device_providers::rocprofiler_sdk::counter_metadata>;
 
     device(std::shared_ptr<Driver> driver, rocprofiler_context_id_t context,
            rocprofiler_agent_id_t          agent_id,
            rocprofiler_counter_config_id_t profile_config, size_t logical_index,
-           std::vector<std::string> counter_names, instance_info_vec instance_infos = {})
+           std::vector<std::string> counter_names, instance_info_vec instance_infos = {},
+           counter_meta_vec counter_meta = {})
     : m_driver_api{ std::move(driver) }
     , m_context{ context }
     , m_agent_id{ agent_id }
     , m_profile_config{ profile_config }
     , m_index{ logical_index }
     , m_counter_names{ std::move(counter_names) }
+    , m_counter_meta{ std::move(counter_meta) }
     , m_vendor_name("AMD")
     , m_is_supported(true)
     {
@@ -57,6 +61,13 @@ public:
         m_product_name = fmt::format("GPU {}", m_index);
 
         m_supported_metrics.value = 1;  // non-zero = has counters
+
+        m_supported_metrics.capabilities.reserve(m_counter_meta.size());
+        for(const auto& meta : m_counter_meta)
+        {
+            m_supported_metrics.capabilities.push_back(
+                counter_capability{ meta.name, meta.is_derived, meta.is_constant });
+        }
 
         // Build instance_id → qualified_name lookup from pre-resolved info
         for(auto& info : instance_infos)
@@ -99,6 +110,11 @@ public:
     [[nodiscard]] const std::vector<std::string>& get_counter_names() const noexcept
     {
         return m_counter_names;
+    }
+
+    [[nodiscard]] const counter_meta_vec& get_counter_metadata() const noexcept
+    {
+        return m_counter_meta;
     }
 
     /**
@@ -185,6 +201,7 @@ private:
     rocprofiler_counter_config_id_t m_profile_config;
     size_t                          m_index;
     std::vector<std::string>        m_counter_names;
+    counter_meta_vec                m_counter_meta;
     std::string                     m_device_name;
     std::string                     m_product_name;
     std::string                     m_vendor_name;

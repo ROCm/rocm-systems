@@ -9,11 +9,14 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/sdk_pmc/sample.hpp"
 #include "library/pmc/collectors/sdk_pmc/types.hpp"
+#include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 #include "logger/debug.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::sdk_pmc
@@ -45,54 +48,78 @@ struct cache_policy
      */
     static void initialize_tracks_metadata() {}
 
+    using counter_metadata = device_providers::rocprofiler_sdk::counter_metadata;
+
     /**
      * @brief Initialize per-device PMC metadata for SDK PMC counters.
      *
-     * Registers pmc_info and tracks for each counter name provided by the
-     * device, and stores the ordered name-to-track mapping in the
-     * metadata_registry for processor use.
+     * Registers pmc_info (with block, expression, is_constant, is_derived from
+     * SDK counter info) and tracks for each qualified counter name. Stores the
+     * ordered name-to-track mapping in the metadata_registry for processor use.
      *
      * @param gpu_id GPU device identifier.
-     * @param counter_names Ordered list of counter names from the device.
+     * @param qualified_names Ordered list of qualified counter names from the device.
+     * @param counter_meta Per-counter metadata from rocprofiler_counter_info_v1_t.
      */
     static void initialize_pmc_metadata(size_t                          gpu_id,
-                                        const std::vector<std::string>& counter_names)
+                                        const std::vector<std::string>& qualified_names,
+                                        const std::vector<counter_metadata>& counter_meta)
     {
         constexpr size_t      EVENT_CODE       = 0;
         constexpr size_t      INSTANCE_ID      = 0;
         constexpr const char* LONG_DESCRIPTION = "";
         constexpr const char* COMPONENT        = "";
-        constexpr const char* BLOCK            = "";
-        constexpr const char* EXPRESSION       = "";
         constexpr const char* TARGET_ARCH      = "GPU";
 
         auto& registry = trace_cache::get_metadata_registry();
 
         std::vector<trace_cache::info::sdk_pmc_name_entry> name_entries;
-        name_entries.reserve(counter_names.size());
+        name_entries.reserve(qualified_names.size());
 
-        for(const auto& name : counter_names)
+        for(const auto& qname : qualified_names)
         {
-            auto track_name = fmt::format("sdk_pmc_{} [GPU {}]", name, gpu_id);
+            auto track_name = fmt::format("GPU [{}] {} (S)", gpu_id, qname);
 
-            // Register pmc_info
-            registry.add_pmc_info({ agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE,
-                                    INSTANCE_ID, name.c_str(), name.c_str(),
-                                    "SDK PMC hardware counter", LONG_DESCRIPTION,
-                                    COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE,
-                                    BLOCK, EXPRESSION, 0, 0 });
+            // Find matching counter metadata by base name prefix
+            auto base_name = std::string_view{ qname };
+            auto bracket   = base_name.find('[');
+            if(bracket != std::string_view::npos)
+                base_name = base_name.substr(0, bracket);
 
-            // Register track
+            auto meta_it = std::find_if(
+                counter_meta.begin(), counter_meta.end(),
+                [&](const counter_metadata& m) { return m.name == base_name; });
+
+            auto     description = std::string{ "SDK PMC hardware counter" };
+            auto     block       = std::string{};
+            auto     expression  = std::string{};
+            uint32_t is_constant = 0;
+            uint32_t is_derived  = 0;
+
+            if(meta_it != counter_meta.end())
+            {
+                if(!meta_it->description.empty()) description = meta_it->description;
+                block       = meta_it->block;
+                expression  = meta_it->expression;
+                is_constant = meta_it->is_constant ? 1 : 0;
+                is_derived  = meta_it->is_derived ? 1 : 0;
+            }
+
+            registry.add_pmc_info(
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  qname.c_str(), qname.c_str(), description.c_str(), LONG_DESCRIPTION,
+                  COMPONENT, "count", rocprofsys::trace_cache::ABSOLUTE, block.c_str(),
+                  expression.c_str(), is_constant, is_derived, "{}" });
+
             registry.add_track({ track_name.c_str(), std::nullopt, "{}" });
 
-            name_entries.push_back({ name, std::move(track_name) });
+            name_entries.push_back({ qname, std::move(track_name) });
         }
 
-        // Store ordered name mapping for processor use
         registry.set_sdk_pmc_counter_names(static_cast<uint32_t>(gpu_id),
                                            std::move(name_entries));
 
-        LOG_DEBUG("Registered {} SDK PMC counters for device {}", counter_names.size(),
+        LOG_DEBUG("Registered {} SDK PMC counters for device {}", qualified_names.size(),
                   gpu_id);
     }
 

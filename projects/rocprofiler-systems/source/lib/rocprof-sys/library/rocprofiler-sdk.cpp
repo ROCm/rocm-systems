@@ -2709,12 +2709,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         auto null_buffer = rocprofiler_buffer_id_t{ 0 };
         using instance_info_t =
             pmc::device_providers::rocprofiler_sdk::counter_instance_info;
+        using counter_meta_t = pmc::device_providers::rocprofiler_sdk::counter_metadata;
 
         auto agent_ids                = std::vector<uint64_t>{};
         auto profile_configs          = std::vector<uint64_t>{};
         auto device_indices           = std::vector<size_t>{};
         auto counter_names_per_agent  = std::vector<std::vector<std::string>>{};
         auto instance_infos_per_agent = std::vector<std::vector<instance_info_t>>{};
+        auto counter_meta_per_agent   = std::vector<std::vector<counter_meta_t>>{};
 
         auto set_profile = [](rocprofiler_context_id_t ctx, rocprofiler_agent_id_t agent,
                               rocprofiler_device_counting_agent_cb_t set_config,
@@ -2766,8 +2768,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             }
             counter_names_per_agent.push_back(std::move(names));
 
-            // Build instance_id → qualified_name map from v1 counter info
+            // Build instance_id → qualified_name map and per-counter metadata
+            // from v1 counter info
             auto instance_infos = std::vector<instance_info_t>{};
+            auto counter_meta   = std::vector<counter_meta_t>{};
             for(const auto& cid : counter_ids)
             {
                 rocprofiler_counter_info_v1_t cinfo{};
@@ -2777,6 +2781,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                     continue;
 
                 const auto base_name = std::string{ cinfo.name };
+
+                counter_meta.push_back(
+                    counter_meta_t{ base_name, cinfo.description ? cinfo.description : "",
+                                    cinfo.block ? cinfo.block : "",
+                                    cinfo.expression ? cinfo.expression : "",
+                                    static_cast<bool>(cinfo.is_constant),
+                                    static_cast<bool>(cinfo.is_derived) });
+
                 for(uint64_t inst = 0; inst < cinfo.dimensions_instances_count; ++inst)
                 {
                     const auto* dim_inst = cinfo.dimensions_instances[inst];
@@ -2797,6 +2809,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 }
             }
             instance_infos_per_agent.push_back(std::move(instance_infos));
+            counter_meta_per_agent.push_back(std::move(counter_meta));
 
             ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
                 _data->sdk_pmc_ctx, null_buffer, _agent_id, set_profile, &profile_map));
@@ -2806,7 +2819,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         {
             pmc::register_sdk_pmc_source(
                 _data->sdk_pmc_ctx.handle, agent_ids, profile_configs, device_indices,
-                counter_names_per_agent, instance_infos_per_agent);
+                counter_names_per_agent, instance_infos_per_agent,
+                counter_meta_per_agent);
         }
     }
 

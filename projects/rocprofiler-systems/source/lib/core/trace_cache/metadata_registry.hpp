@@ -165,8 +165,8 @@ struct kernel_symbol_less
  */
 struct sdk_pmc_name_entry
 {
-    std::string pmc_info_name;  ///< Counter name, e.g. "SQ_WAVES"
-    std::string track_name;     ///< Device-qualified, e.g. "sdk_pmc_SQ_WAVES [GPU 0]"
+    std::string pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
+    std::string track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
 };
 
 }  // namespace info

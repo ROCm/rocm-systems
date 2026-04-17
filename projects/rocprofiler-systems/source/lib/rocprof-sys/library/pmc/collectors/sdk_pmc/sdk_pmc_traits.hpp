@@ -62,13 +62,15 @@ struct sdk_pmc_traits
     /**
      * @brief Initialize PMC metadata for a specific device.
      *
-     * Passes the device's qualified counter names (with dimension info) to the
-     * cache policy so it can register pmc_info entries, tracks, and the name ordering.
+     * Passes the device's qualified counter names (with dimension info) and
+     * per-counter metadata (block, expression, is_constant, is_derived) to the
+     * cache policy for pmc_info registration with real SDK counter properties.
      */
     template <typename Cache>
     static void init_pmc_metadata(const device_ptr_t& dev)
     {
-        Cache::initialize_pmc_metadata(dev->get_index(), dev->get_qualified_names());
+        Cache::initialize_pmc_metadata(dev->get_index(), dev->get_qualified_names(),
+                                       dev->get_counter_metadata());
     }
 
     /**

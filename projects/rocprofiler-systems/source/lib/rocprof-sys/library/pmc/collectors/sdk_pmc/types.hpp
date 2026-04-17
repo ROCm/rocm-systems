@@ -82,16 +82,31 @@ struct metrics
 };
 
 /**
+ * @brief Per-counter capability info for SDK PMC.
+ *
+ * Derived from rocprofiler_counter_info_v1_t during device initialization,
+ * exposing whether a counter is derived or constant.
+ */
+struct counter_capability
+{
+    std::string name;
+    bool        is_derived  = false;
+    bool        is_constant = false;
+};
+
+/**
  * @brief Tracks which SDK PMC counters are enabled.
  *
  * For SDK PMC, counters are dynamically specified by name rather than a fixed
  * bitfield. The `value` field is non-zero when any counters are enabled,
- * providing compatibility with the base::collector template.
+ * providing compatibility with the base::collector template. The `capabilities`
+ * vector carries per-counter metadata from the SDK.
  */
 struct enabled_metrics
 {
-    std::vector<std::string> counter_names;
-    uint32_t                 value = 0;
+    std::vector<std::string>        counter_names;
+    std::vector<counter_capability> capabilities;
+    uint32_t                        value = 0;
 };
 
 }  // namespace rocprofsys::pmc::collectors::sdk_pmc

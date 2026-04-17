@@ -52,6 +52,9 @@ private:
     std::shared_ptr<rocpd::data_processor> m_data_processor;
     output_file_registry&                  m_output_registry;
     std::string                            m_db_output_path;
+
+    using sdk_pmc_name_map = std::unordered_map<std::string, std::string>;
+    std::unordered_map<uint32_t, sdk_pmc_name_map> m_sdk_pmc_name_lookup;
 };
 
 }  // namespace trace_cache
