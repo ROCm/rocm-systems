@@ -631,6 +631,7 @@ LOAD_ERROR:
     HsaStructureSizes sizes = {};
     sizes.StructureSizes = (HSAuint16)sizeof(HsaStructureSizes);
     sizes.SizeOfHsaNodeProperties = (HSAuint16)sizeof(HsaNodeProperties);
+    sizes.SizeOfHsaExternalHandleDesc = (HSAuint16)sizeof(HsaExternalHandleDesc);
 
     if (pfnDxgAbiCheck(&sizes) != HSAKMT_STATUS_SUCCESS) {
       debug_print("DxgAbiCheck failed!\n");
