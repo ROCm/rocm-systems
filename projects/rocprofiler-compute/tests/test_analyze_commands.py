@@ -1782,8 +1782,8 @@ def test_metric_evaluator_division_by_zero():
     import numpy as np
     import pandas as pd
 
-    from utils.metrics.metric_evaluator import MetricEvaluator
     from utils.metrics.expression import build_eval_string
+    from utils.metrics.metric_evaluator import MetricEvaluator
 
     # ---------------------------------------------------------------
     # Helper: build a MetricEvaluator with the given pmc_perf columns
