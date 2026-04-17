@@ -386,6 +386,8 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
             const auto& arr = get_array(m.xcp_stats[xcp]);
             for(size_t i = 0; i < arr.size(); ++i)
             {
+                if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16)
+                    continue;
                 auto name = format_name(static_cast<int>(xcp), static_cast<int>(i));
                 insert_metric(true, name.c_str(), name.c_str(), arr[i]);
             }
@@ -410,6 +412,8 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         if(!is_enabled) return;
         for(size_t i = 0; i < arr.size(); ++i)
         {
+            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
+
             auto suffix     = "_" + std::to_string(i);
             auto pmc_name   = std::string(base_name) + suffix;
             auto track_name = pmc_name;
