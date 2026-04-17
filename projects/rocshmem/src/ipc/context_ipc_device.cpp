@@ -37,11 +37,7 @@ namespace rocshmem {
 __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
   IPCBackend *backend{static_cast<IPCBackend *>(b)};
-  ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
-  ipcImpl_.shm_size = b->ipcImpl.shm_size;
-#if defined(USE_SDMA)
-  ipcImpl_.sdmaImpl_ = b->ipcImpl.sdmaImpl_;
-#endif
+  ipcImpl_.initFrom(b->ipcImpl);
 
   barrier_sync = backend->barrier_sync;
   fence_pool = backend->fence_pool;
@@ -70,11 +66,7 @@ __device__ void IPCContext::getmem(void *dest, const void *source, size_t nelems
 __device__ void IPCContext::putmem_nbi(void *dest, const void *source,
                                       size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-#if defined(USE_SDMA)
-  ipcImpl_.ipcCopyWithSdma(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
-#else
-  ipcImpl_.ipcCopy(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems);
-#endif
+  ipcImpl_.ipcPut(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
@@ -96,9 +88,7 @@ __device__ void IPCContext::fence(int pe) {
 
 __device__ void IPCContext::quiet() {
   fence();
-#if defined(USE_SDMA)
-  ipcImpl_.sdmaImpl_.sdmaQuietAll();
-#endif
+  ipcImpl_.ipcQuiet();
 }
 
 __device__ void IPCContext::pe_quiet(size_t pe) {
@@ -134,11 +124,7 @@ __device__ void IPCContext::getmem_wg(void *dest, const void *source,
 __device__ void IPCContext::putmem_nbi_wg(void *dest, const void *source,
                                          size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-#if defined(USE_SDMA)
-  ipcImpl_.ipcCopyWithSdma_wg(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
-#else
-  ipcImpl_.ipcCopy_wg(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems);
-#endif
+  ipcImpl_.ipcPut_wg(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi_wg(void *dest, const void *source,
@@ -167,11 +153,7 @@ __device__ void IPCContext::getmem_wave(void *dest, const void *source,
 __device__ void IPCContext::putmem_nbi_wave(void *dest, const void *source,
                                            size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-#if defined(USE_SDMA)
-  ipcImpl_.ipcCopyWithSdma_wave(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
-#else
-  ipcImpl_.ipcCopy_wave(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems);
-#endif
+  ipcImpl_.ipcPut_wave(ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi_wave(void *dest, const void *source,

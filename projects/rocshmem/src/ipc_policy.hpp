@@ -44,6 +44,7 @@ class Backend;
 class Context;
 
 class IpcOnImpl {
+ protected:
   using HEAP_BASES_T = std::vector<char *, StdAllocatorHIP<char *>>;
 
  public:
@@ -54,10 +55,6 @@ class IpcOnImpl {
   char **ipc_bases{nullptr};
 
   int *pes_with_ipc_avail{nullptr};
-
-#if defined(USE_SDMA)
-  SdmaImpl sdmaImpl_;
-#endif
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);
@@ -80,6 +77,13 @@ class IpcOnImpl {
     return false;
   }
 
+  void initFrom(const IpcOnImpl &other) {
+    ipc_bases = other.ipc_bases;
+    shm_size = other.shm_size;
+    shm_rank = other.shm_rank;
+    pes_with_ipc_avail = other.pes_with_ipc_avail;
+  }
+
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
   __device__ void ipcCopy(void *dst, void *src, size_t size);
@@ -88,38 +92,25 @@ class IpcOnImpl {
 
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size);
 
+  __device__ void ipcPut(void *dst, void *src, size_t size, int pe) {
+    ipcCopy(dst, src, size);
+  }
+
+  __device__ void ipcPut_wg(void *dst, void *src, size_t size, int pe) {
+    ipcCopy_wg(dst, src, size);
+  }
+
+  __device__ void ipcPut_wave(void *dst, void *src, size_t size, int pe) {
+    ipcCopy_wave(dst, src, size);
+  }
+
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
   __device__ __forceinline__ void ipcFence() {
     detail::atomic::threadfence<scope, order>();
   }
 
-#if defined(USE_SDMA)
-  // SDMA-aware copy methods with size-based routing
-  __device__ void ipcCopyWithSdma(void *dst, void *src, size_t size, int pe) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
-      sdmaImpl_.sdmaCopy(dst, src, size, pe);
-      return;
-    }
-    memcpy_lane(dst, src, size);
-  }
-
-  __device__ void ipcCopyWithSdma_wg(void *dst, void *src, size_t size, int pe) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
-      sdmaImpl_.sdmaCopy_wg(dst, src, size, pe);
-      return;
-    }
-    memcpy_wg(dst, src, size);
-  }
-
-  __device__ void ipcCopyWithSdma_wave(void *dst, void *src, size_t size, int pe) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
-      sdmaImpl_.sdmaCopy_wave(dst, src, size, pe);
-      return;
-    }
-    memcpy_wave(dst, src, size);
-  }
-#endif
+  __device__ void ipcQuiet() {}
 
   template <typename T>
   __device__ void ipcAMOAdd(T *val, T value) {
@@ -196,6 +187,54 @@ class IpcOnImpl {
   }
 };
 
+#if defined(USE_SDMA)
+class IpcSdmaImpl : public IpcOnImpl {
+ public:
+  SdmaImpl sdmaImpl_;
+
+  void initFrom(const IpcSdmaImpl &other) {
+    IpcOnImpl::initFrom(other);
+    sdmaImpl_ = other.sdmaImpl_;
+  }
+
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                            MPI_Comm thread_comm);
+
+  __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                            TcpBootstrap *bootstrap);
+
+  __host__ void ipcHostStop();
+
+  __device__ void ipcPut(void *dst, void *src, size_t size, int pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
+      sdmaImpl_.sdmaCopy(dst, src, size, pe);
+      return;
+    }
+    memcpy_lane(dst, src, size);
+  }
+
+  __device__ void ipcPut_wg(void *dst, void *src, size_t size, int pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
+      sdmaImpl_.sdmaCopy_wg(dst, src, size, pe);
+      return;
+    }
+    memcpy_wg(dst, src, size);
+  }
+
+  __device__ void ipcPut_wave(void *dst, void *src, size_t size, int pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
+      sdmaImpl_.sdmaCopy_wave(dst, src, size, pe);
+      return;
+    }
+    memcpy_wave(dst, src, size);
+  }
+
+  __device__ void ipcQuiet() {
+    sdmaImpl_.sdmaQuietAll();
+  }
+};
+#endif  // USE_SDMA
+
 // clang-format off
 NOWARN(-Wunused-parameter,
 class IpcOffImpl {
@@ -220,6 +259,8 @@ class IpcOffImpl {
 
   __host__ __device__ bool isIpcAvailable([[maybe_unused]] int my_pe, int target_pe, int *local_target_pe) { return false; }
 
+  void initFrom(const IpcOffImpl &) {}
+
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
 
@@ -228,6 +269,14 @@ class IpcOffImpl {
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {}
 
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {}
+
+  __device__ void ipcPut(void *dst, void *src, size_t size, int pe) {}
+
+  __device__ void ipcPut_wg(void *dst, void *src, size_t size, int pe) {}
+
+  __device__ void ipcPut_wave(void *dst, void *src, size_t size, int pe) {}
+
+  __device__ void ipcQuiet() {}
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
@@ -260,7 +309,9 @@ class IpcOffImpl {
 /*
  * Select which one of our IPC policies to use at compile time.
  */
-#if defined(USE_IPC)
+#if defined(USE_SDMA)
+typedef IpcSdmaImpl IpcImpl;
+#elif defined(USE_IPC)
 typedef IpcOnImpl IpcImpl;
 #else
 typedef IpcOffImpl IpcImpl;
