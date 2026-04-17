@@ -41,7 +41,7 @@ run_tests_all=false
 time_trace=false
 force_reduce_pipeline=false
 generate_sym_kernels=false
-warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
+warp_speed_enabled=false
 quiet_warnings=false
 build_rocshmem_support=false
 rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
@@ -88,6 +88,7 @@ function display_help()
     echo "       --verbose               Show compile commands"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "       --generate-sym-kernels  Generate symmetric memory kernels"
+    echo "       --enable-warp-speed     Build with WarpSpeed support on supported MI350/MI300 targets"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
     echo "       --rocshmem              Build with rocSHMEM support"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
@@ -124,7 +125,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,enable-mpi-tests,enable-warp-speed,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -151,6 +152,7 @@ while true; do
          --enable-mscclpp)           mscclpp_enabled=true;                                                                             shift ;;
          --enable-mscclpp-clip)      enable_mscclpp_clip=true;                                                                         shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
+         --enable-warp-speed)        warp_speed_enabled=true;                                                                          shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
     -f | --fast)                     build_local_gpu_only=true; collective_trace=false; msccl_kernel_enabled=false;                    shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
@@ -428,9 +430,11 @@ if [[ "${npkit_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_NPKIT=ON"
 fi
 
-# Enable WARP_SPEED only on MI350/MI300 platforms
+# Build with WARP_SPEED only when explicitly requested.
 if [[ "${warp_speed_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_WARP_SPEED=ON"
+else
+    cmake_common_options="${cmake_common_options} -DENABLE_WARP_SPEED=OFF"
 fi
 
 # Suppress Warnings
