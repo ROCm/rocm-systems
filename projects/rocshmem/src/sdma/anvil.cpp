@@ -34,6 +34,8 @@
 #include <fstream>
 #include <cstring>
 
+#include "sdma_pkt_struct.h"
+
 namespace rocshmem {
 namespace anvil {
 
@@ -90,6 +92,10 @@ void SetUpKFD() {
   memset(&m_SystemProperties, 0, sizeof(m_SystemProperties));
   CHECK_HSAKMT_SUCCESS(hsaKmtAcquireSystemProperties(&m_SystemProperties), "Failed!");
 }
+
+// True only after init() has run SetUpKFD. Avoids CloseKFD/hsa_shut_down at
+// exit if init was never called (e.g. USE_SDMA not triggered).
+static bool s_kfd_opened = false;
 
 void CloseKFD() { CHECK_HSAKMT_SUCCESS(hsaKmtCloseKFD(), "hsaKmtCloseKFD() failed"); }
 
@@ -179,12 +185,79 @@ SdmaQueue::~SdmaQueue() {
 
 SdmaQueueDeviceHandle* SdmaQueue::deviceHandle() const { return deviceHandle_; }
 
+void SdmaQueue::dump(std::ofstream& logFile) {
+  logFile << "Queue -> device " << remoteDeviceId_ << ": "
+          << "wptr: " << *deviceHandle_->wptr << ", "
+          << "rptr: " << *deviceHandle_->rptr << ", "
+          << "doorbell: " << *deviceHandle_->doorbell << ", "
+          << "queueBuf: " << deviceHandle_->queueBuf << ", "
+          << "committedWptr: " << *deviceHandle_->committedWptr << ", "
+          << "cachedWptr: " << *deviceHandle_->cachedWptr << std::endl;
+
+  size_t dw_enqueued =
+      std::min(*deviceHandle_->wptr, (uint64_t)SDMA_QUEUE_SIZE) / sizeof(uint32_t);
+  uint32_t* dwPtr = deviceHandle_->queueBuf;
+  uint64_t wrapped_rptr = *deviceHandle_->rptr % SDMA_QUEUE_SIZE;
+  uint64_t wrapped_wptr = *deviceHandle_->wptr % SDMA_QUEUE_SIZE;
+
+  logFile << "valid dw: " << dw_enqueued << "\nwrapped rptr: " << wrapped_rptr
+          << " dw rptr: " << wrapped_rptr / sizeof(uint32_t) << "\nwrapped wptr: " << wrapped_wptr
+          << " dw wptr: " << wrapped_wptr / sizeof(uint32_t) << std::endl;
+
+  size_t it = 0;
+  while (it < dw_enqueued) {
+    logFile << "[" << it << "] ";
+    uint32_t opcode = *dwPtr & 0xFF;
+    if (opcode == SDMA_OP_COPY) {
+      auto* ptr = reinterpret_cast<SDMA_PKT_COPY_LINEAR*>(dwPtr);
+      logFile << "COPY count=" << ptr->COUNT_UNION.count
+              << " src=0x" << std::hex
+              << ((uint64_t)ptr->SRC_ADDR_HI_UNION.src_addr_63_32 << 32 |
+                  ptr->SRC_ADDR_LO_UNION.src_addr_31_0)
+              << " dst=0x"
+              << ((uint64_t)ptr->DST_ADDR_HI_UNION.dst_addr_63_32 << 32 |
+                  ptr->DST_ADDR_LO_UNION.dst_addr_31_0)
+              << std::dec;
+      size_t dw = sizeof(SDMA_PKT_COPY_LINEAR) / sizeof(uint32_t);
+      it += dw;
+      dwPtr += dw;
+    } else if (opcode == SDMA_OP_ATOMIC) {
+      auto* ptr = reinterpret_cast<SDMA_PKT_ATOMIC*>(dwPtr);
+      logFile << "ATOMIC op=" << ptr->HEADER_UNION.operation
+              << " addr=0x" << std::hex
+              << ((uint64_t)ptr->ADDR_HI_UNION.addr_63_32 << 32 |
+                  ptr->ADDR_LO_UNION.addr_31_0)
+              << std::dec;
+      size_t dw = sizeof(SDMA_PKT_ATOMIC) / sizeof(uint32_t);
+      it += dw;
+      dwPtr += dw;
+    } else if (opcode == SDMA_OP_FENCE) {
+      auto* ptr = reinterpret_cast<SDMA_PKT_FENCE*>(dwPtr);
+      logFile << "FENCE data=" << ptr->DATA_UNION.data
+              << " addr=0x" << std::hex
+              << ((uint64_t)ptr->ADDR_HI_UNION.addr_63_32 << 32 |
+                  ptr->ADDR_LO_UNION.addr_31_0)
+              << std::dec;
+      size_t dw = sizeof(SDMA_PKT_FENCE) / sizeof(uint32_t);
+      it += dw;
+      dwPtr += dw;
+    } else {
+      logFile << "RAW 0x" << std::hex << *dwPtr << std::dec;
+      dwPtr++;
+      it++;
+    }
+    logFile << "\n";
+  }
+}
+
 AnvilLib::~AnvilLib() {
   for (auto& p : sdma_channels_) {
     p.second.clear();
   }
-  CloseKFD();
-  hsa_shut_down();
+  if (s_kfd_opened) {
+    CloseKFD();
+    hsa_shut_down();
+  }
 }
 
 void AnvilLib::init() {
@@ -204,7 +277,19 @@ void AnvilLib::init() {
     }
 
     SetUpKFD();
+    s_kfd_opened = true;
   });
+}
+
+SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
+                                     int* channelIdx) {
+  auto& vec = sdma_channels_[dstDeviceId];
+  vec.emplace_back(
+      std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, gpuAgents_[srcDeviceId], engineId));
+  if (channelIdx != nullptr) {
+    *channelIdx = static_cast<int>(vec.size() - 1);
+  }
+  return vec.back().get();
 }
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
@@ -212,8 +297,7 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   // fprintf(stdout, "SDMA: Connect from %d to %d with %d channels using engine %d\n",
   //         srcDeviceId, dstDeviceId, numChannels, engineId);
   for (int c = 0; c < numChannels; ++c) {
-    sdma_channels_[dstDeviceId].emplace_back(
-        std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, gpuAgents_[srcDeviceId], engineId));
+    createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
   }
   return true;
 }
@@ -262,6 +346,24 @@ int AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
 }
 
 AnvilLib& anvil = anvil.getInstance();
+
+// Thin wrappers matching the rocm-xio sdma-ep API style.
+// initEndpoint() is idempotent; shutdownEndpoint() only resets the flag,
+// it does not destroy queues or shut down HSA/KFD (AnvilLib destructor does
+// that at process exit).
+bool initEndpoint() {
+  try {
+    anvil.init();
+    return true;
+  } catch (const std::exception& e) {
+    fprintf(stderr, "anvil::initEndpoint: %s\n", e.what());
+    return false;
+  }
+}
+
+void shutdownEndpoint() {
+  // no-op: HSA/KFD teardown happens in AnvilLib::~AnvilLib at process exit.
+}
 
 }  // namespace anvil
 }  // namespace rocshmem
