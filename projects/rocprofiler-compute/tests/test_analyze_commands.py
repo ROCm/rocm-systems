@@ -1679,7 +1679,7 @@ def test_metric_evaluation_no_valid_data():
     """Test emetric evaluation with no valid data"""
     import numpy as np
 
-    from utils.metrics.evaluator import MetricEvaluator
+    from utils.metrics.metric_evaluator import MetricEvaluator
 
     metric_evaluator = MetricEvaluator({}, {}, {})
     with patch("builtins.eval") as mock_eval, patch("builtins.compile"):
@@ -1722,7 +1722,7 @@ def test_metric_evaluator_division_by_zero():
     import numpy as np
     import pandas as pd
 
-    from utils.metrics.evaluator import MetricEvaluator
+    from utils.metrics.metric_evaluator import MetricEvaluator
     from utils.metrics.expression import build_eval_string
 
     # ---------------------------------------------------------------

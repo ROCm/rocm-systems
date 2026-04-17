@@ -24,7 +24,7 @@ from utils.metrics.aggregation import (
     to_std,
     to_sum,
 )
-from utils.metrics.noise_clamping import to_noise_clamp
+from utils.metrics.noise_clamper import to_noise_clamp
 
 
 class MetricEvaluator:

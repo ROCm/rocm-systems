@@ -37,7 +37,7 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.expression import CodeTransformer
-from utils.metrics.noise_clamping import to_noise_clamp
+from utils.metrics.noise_clamper import to_noise_clamp
 from utils.parser import (
     PC_SAMPLING_NOT_ISSUE_PREFIX,
 )

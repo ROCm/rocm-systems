@@ -13,9 +13,9 @@ import pandas as pd
 from utils import schema
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
-from utils.metrics.evaluator import MetricEvaluator
 from utils.metrics.expression import build_eval_string
-from utils.metrics.noise_clamping import (
+from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
     print_noise_clamp_summary,

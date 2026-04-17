@@ -17,7 +17,7 @@ import pandas as pd
 from utils.logger import console_warning
 
 if TYPE_CHECKING:
-    from utils.metrics.evaluator import MetricEvaluator
+    from utils.metrics.metric_evaluator import MetricEvaluator
 
 
 _MAX_DEBUG_ROWS = 5
