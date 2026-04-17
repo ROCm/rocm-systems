@@ -34,6 +34,14 @@ THE SOFTWARE.
 #include <stdint.h>
 #include <sys/syscall.h>
 
+#if DBGINFO
+#define MSG(X) std::clog << X << std::endl;
+#define MSG_NO_NEWLINE(X) std::clog << X;
+#else
+#define MSG(X) ;
+#define MSG_NO_NEWLINE(X) ;
+#endif
+
 #define ROCDEC_TOSTR(X) std::to_string(X)
 #define ROCDEC_STR(X) std::string(X)
 
@@ -84,6 +92,8 @@ inline RocDecLogger& RocDecGetLogger() {
 #define g_rocdec_logger (RocDecGetLogger())
 
 // RAII helper for function-scope entry/exit logging.
+// Keeps the start timestamp per call-scope (stack variable), making it
+// safe for nested calls and concurrent threads sharing the same logger.
 class RocDecFuncScopeLog {
 public:
     RocDecFuncScopeLog(RocDecLogger& logger, const char* filename, int line, const char* func)
@@ -157,14 +167,6 @@ private:
 // FunctionExitLog is a no-op: exit is logged automatically when the
 // RocDecFuncScopeLog RAII object created by FunctionEntryLog goes out of scope.
 #define FunctionExitLog(logger)
-
-#if DBGINFO
-#define MSG(X) std::clog << X << std::endl;
-#define MSG_NO_NEWLINE(X) std::clog << X;
-#else
-#define MSG(X) ;
-#define MSG_NO_NEWLINE(X) ;
-#endif
 
 class rocDecodeException : public std::exception {
 public:
