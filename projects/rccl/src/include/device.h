@@ -170,7 +170,7 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
   * Device code: NCCL_LL128_LINESIZE matches the GPU target (__gfx1250__).
   * Host code: must not use NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS due to reliance
   * on NCCL_LL128_LINESIZE which is GPU arch-dependent. 
-  * Use ncclLl128LineElemsFromArch() / ncclLl128DataElemsFromArch() (archinfo.h) or
+  * Use ncclLL128LineElemsFromArch() / ncclLL128DataElemsFromArch() (archinfo.h) or
   * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). 
   * Fallback to a default value used here for host code compile. */
 
