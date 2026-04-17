@@ -15,12 +15,141 @@
 #include <CL/cl_icd.h>
 
 #include "top.hpp"
+#include "utils/util.hpp"
+
+// ICDDispatchedObject must be defined before vdi_common.hpp, which references it.
+typedef struct _cl_icd_dispatch cl_icd_dispatch;
+
+// Maps OpenCL opaque handle types to their amd::* implementations
+#define KHR_CL_TYPES_DO(F)                \
+  F(cl_context,       amd::Context)       \
+  F(cl_event,         amd::Event)         \
+  F(cl_command_queue, amd::CommandQueue)  \
+  F(cl_kernel,        amd::Kernel)        \
+  F(cl_program,       amd::Program)       \
+  F(cl_device_id,     amd::Device)        \
+  F(cl_mem,           amd::Memory)        \
+  F(cl_sampler,       amd::Sampler)
+
+#define AMD_CL_TYPES_DO(F)                    \
+  F(cl_counter_amd,     amd::Counter)         \
+  F(cl_perfcounter_amd, amd::PerfCounter)     \
+  F(cl_threadtrace_amd, amd::ThreadTrace)
+
+#define CL_TYPES_DO(F)  \
+  KHR_CL_TYPES_DO(F)    \
+  AMD_CL_TYPES_DO(F)
+
+// Define AMD-specific cl_* struct types (KHR types come from <CL/cl_icd.h>)
+#define DECLARE_AMD_CL_TYPE(CL, AMD)    \
+  typedef struct _##CL {                \
+    cl_icd_dispatch* dispatch;          \
+  }* CL;
+
+AMD_CL_TYPES_DO(DECLARE_AMD_CL_TYPE);
+
+#undef DECLARE_AMD_CL_TYPE
+
+namespace amd {
+
+// Define the cl_*_type tokens for type checking.
+//
+
+#define DEFINE_CL_TOKENS(CL, ignored) T##CL,
+
+enum cl_token { Tinvalid = 0, CL_TYPES_DO(DEFINE_CL_TOKENS) numTokens };
+
+#undef DEFINE_CL_TOKENS
+
+const size_t RuntimeObjectAlignment = NextPowerOfTwo<numTokens>::value;
+
+//! \cond ignore
+template <typename T> struct as_internal {
+  typedef void type;
+};
+
+template <typename T> struct as_external {
+  typedef void type;
+};
+
+template <typename T> struct class_token {
+  static const cl_token value = Tinvalid;
+};
+
+#define DEFINE_CL_TRAITS(CL, AMD)                         \
+                                                          \
+  template <> struct class_token<AMD> {                   \
+    static const cl_token value = T##CL;                  \
+  };                                                      \
+                                                          \
+  template <> struct as_internal<_##CL> {                 \
+    typedef AMD type;                                     \
+  };                                                      \
+  template <> struct as_internal<const _##CL> {           \
+    typedef AMD const type;                               \
+  };                                                      \
+                                                          \
+  template <> struct as_external<AMD> {                   \
+    typedef _##CL type;                                   \
+  };                                                      \
+  template <> struct as_external<const AMD> {             \
+    typedef _##CL const type;                             \
+  };
+
+CL_TYPES_DO(DEFINE_CL_TRAITS);
+
+#undef DEFINE_CL_TRAITS
+//! \endcond
+
+struct ICDDispatchedObject {
+#ifdef __HIP_PLATFORM_AMD__
+  static inline cl_icd_dispatch icdVendorDispatch_[] = {0};
+#else
+  static cl_icd_dispatch icdVendorDispatch_[];
+#endif
+  const cl_icd_dispatch* const dispatch_;
+
+ protected:
+  ICDDispatchedObject() : dispatch_(icdVendorDispatch_) {}
+
+ public:
+  static bool isValidHandle(const void* handle) { return handle != NULL; }
+
+  const void* handle() const { return static_cast<const ICDDispatchedObject*>(this); }
+  void* handle() { return static_cast<ICDDispatchedObject*>(this); }
+
+  template <typename T> static const T* fromHandle(const void* handle) {
+    return static_cast<const T*>(reinterpret_cast<const ICDDispatchedObject*>(handle));
+  }
+  template <typename T> static T* fromHandle(void* handle) {
+    return static_cast<T*>(reinterpret_cast<ICDDispatchedObject*>(handle));
+  }
+};
+
+}  // namespace amd
+
+template <typename CL> typename amd::as_internal<CL>::type* as_amd(CL* cl_obj) {
+  return cl_obj == NULL ? NULL
+                        : amd::ICDDispatchedObject::fromHandle<typename amd::as_internal<CL>::type>(
+                              static_cast<void*>(cl_obj));
+}
+
+template <typename AMD> typename amd::as_external<AMD>::type* as_cl(AMD* amd_obj) {
+  return amd_obj == NULL ? NULL
+                         : static_cast<typename amd::as_external<AMD>::type*>(amd_obj->handle());
+}
+
+template <typename CL> bool is_valid(CL* handle) {
+  return amd::as_internal<CL>::type::isValidHandle(handle);
+}
+
 #include "vdi_common.hpp"
+#include "cl_type_map.hpp"
+
+namespace amd {
 
 //! Helper function to check "properties" parameter in various functions
 int checkContextProperties(const cl_context_properties* properties, bool* offlineDevices);
-
-namespace amd {
 
 template <typename T> static inline cl_int clGetInfo(T& field, size_t param_value_size,
                                                      void* param_value,

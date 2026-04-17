@@ -17,135 +17,28 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <d3d10_1.h>
-#include <CL/cl_d3d10.h>
-#include <CL/cl_d3d11.h>
-#include <CL/cl_dx9_media_sharing.h>
 #endif
-#include <CL/cl_icd.h>
 
-
-#define KHR_CL_TYPES_DO(F)                                                                         \
-  /* OpenCL type          Runtime type */                                                          \
-  F(cl_context, Context)                                                                           \
-  F(cl_event, Event)                                                                               \
-  F(cl_command_queue, CommandQueue)                                                                \
-  F(cl_kernel, Kernel)                                                                             \
-  F(cl_program, Program)                                                                           \
-  F(cl_device_id, Device)                                                                          \
-  F(cl_mem, Memory)                                                                                \
-  F(cl_sampler, Sampler)
-
-#define AMD_CL_TYPES_DO(F)                                                                         \
-  F(cl_counter_amd, Counter)                                                                       \
-  F(cl_perfcounter_amd, PerfCounter)                                                               \
-  F(cl_threadtrace_amd, ThreadTrace)
-
-#define CL_TYPES_DO(F)                                                                             \
-  KHR_CL_TYPES_DO(F)                                                                               \
-  AMD_CL_TYPES_DO(F)
-
-// Forward declare ::cl_* types and amd::Class types
-//
-
-#define DECLARE_CL_TYPES(CL, AMD)                                                                  \
-  namespace amd {                                                                                  \
-  class AMD;                                                                                       \
-  }
-
-CL_TYPES_DO(DECLARE_CL_TYPES);
-
-#undef DECLARE_CL_TYPES
-
-typedef struct _cl_icd_dispatch cl_icd_dispatch;
-
-#define DECLARE_CL_TYPES(CL, AMD)                                                                  \
-  typedef struct _##CL {                                                                           \
-    cl_icd_dispatch* dispatch;                                                                     \
-  }* CL;
-
-AMD_CL_TYPES_DO(DECLARE_CL_TYPES);
-
-#undef DECLARE_CL_TYPES
+// Forward declarations for amd::* runtime types (replaces macro-generated declarations)
+namespace amd {
+class Context;
+class Event;
+class CommandQueue;
+class Kernel;
+class Program;
+class Device;
+class Memory;
+class Sampler;
+class Counter;
+class PerfCounter;
+class ThreadTrace;
+}  // namespace amd
 
 namespace amd {
 
-// Define the cl_*_type tokens for type checking.
-//
-
-#define DEFINE_CL_TOKENS(CL, ignored) T##CL,
-
-enum cl_token { Tinvalid = 0, CL_TYPES_DO(DEFINE_CL_TOKENS) numTokens };
-
-#undef DEFINE_CL_TOKENS
-
-const size_t RuntimeObjectAlignment = NextPowerOfTwo<numTokens>::value;
-
-//! \cond ignore
-template <typename T> struct as_internal {
-  typedef void type;
-};
-
-template <typename T> struct as_external {
-  typedef void type;
-};
-
-template <typename T> struct class_token {
-  static const cl_token value = Tinvalid;
-};
-
-#define DEFINE_CL_TRAITS(CL, AMD)                                                                  \
-                                                                                                   \
-  template <> struct class_token<AMD> {                                                            \
-    static const cl_token value = T##CL;                                                           \
-  };                                                                                               \
-                                                                                                   \
-  template <> struct as_internal<_##CL> {                                                          \
-    typedef AMD type;                                                                              \
-  };                                                                                               \
-  template <> struct as_internal<const _##CL> {                                                    \
-    typedef AMD const type;                                                                        \
-  };                                                                                               \
-                                                                                                   \
-  template <> struct as_external<AMD> {                                                            \
-    typedef _##CL type;                                                                            \
-  };                                                                                               \
-  template <> struct as_external<const AMD> {                                                      \
-    typedef _##CL const type;                                                                      \
-  };
-
-CL_TYPES_DO(DEFINE_CL_TRAITS);
-
-#undef DEFINE_CL_TRAITS
-//! \endcond
-
-struct ICDDispatchedObject {
-#ifdef __HIP_PLATFORM_AMD__
-  static inline cl_icd_dispatch icdVendorDispatch_[] = {0};
-#else
-  static cl_icd_dispatch icdVendorDispatch_[];
-#endif
-  const cl_icd_dispatch* const dispatch_;
-
- protected:
-  ICDDispatchedObject() : dispatch_(icdVendorDispatch_) {}
-
- public:
-  static bool isValidHandle(const void* handle) { return handle != NULL; }
-
-  const void* handle() const { return static_cast<const ICDDispatchedObject*>(this); }
-  void* handle() { return static_cast<ICDDispatchedObject*>(this); }
-
-  template <typename T> static const T* fromHandle(const void* handle) {
-    return static_cast<const T*>(reinterpret_cast<const ICDDispatchedObject*>(handle));
-  }
-  template <typename T> static T* fromHandle(void* handle) {
-    return static_cast<T*>(reinterpret_cast<ICDDispatchedObject*>(handle));
-  }
-};
-
 /*! \brief For all OpenCL/Runtime objects.
  */
-class RuntimeObject : public ReferenceCountedObject, public ICDDispatchedObject {
+class RuntimeObject : public ReferenceCountedObject {
  public:
   enum ObjectType {
     ObjectTypeContext = 0,
@@ -323,20 +216,5 @@ template <class T> class SysmemPool {
 };
 
 }  // namespace amd
-
-template <typename CL> typename amd::as_internal<CL>::type* as_amd(CL* cl_obj) {
-  return cl_obj == NULL ? NULL
-                        : amd::RuntimeObject::fromHandle<typename amd::as_internal<CL>::type>(
-                              static_cast<void*>(cl_obj));
-}
-
-template <typename AMD> typename amd::as_external<AMD>::type* as_cl(AMD* amd_obj) {
-  return amd_obj == NULL ? NULL
-                         : static_cast<typename amd::as_external<AMD>::type*>(amd_obj->handle());
-}
-
-template <typename CL> bool is_valid(CL* handle) {
-  return amd::as_internal<CL>::type::isValidHandle(handle);
-}
 
 #endif /*OBJECT_HPP_*/
