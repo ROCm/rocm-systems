@@ -1260,7 +1260,7 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
-RCCL_PARAM(DefaultChannels, "DEFAULT_CHANNELS", 4);
+RCCL_PARAM(DefaultChannels, "DEFAULT_CHANNELS", 1);
 static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* parent, uint64_t timers[TIMERS_INIT_COUNT]) {
   // We use 2 AllGathers
   // 1. { peerInfo, comm, compCap}
@@ -1492,9 +1492,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   ringGraph->pattern = NCCL_TOPO_PATTERN_RING;
   ringGraph->minChannels = 1;
   ringGraph->maxChannels = MAXCHANNELS/2;
-  ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels,(int32_t)rcclParamDefaultChannels()));
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
+  ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels,(int32_t)rcclParamDefaultChannels()));
   INFO(NCCL_INIT,"ringGraph->nChannels = %d ", ringGraph->nChannels);
 
   memset(treeGraph, 0, sizeof(struct ncclTopoGraph));
