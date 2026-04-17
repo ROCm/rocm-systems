@@ -436,7 +436,7 @@ def test_tier2_commands_use_valid_tools():
     """Tier 2 recommendations include commands with valid tool names."""
     from rocinsight.analyze import generate_recommendations
 
-    VALID_TOOLS = {"rocprofv3", "rocprof-sys", "rocprof-compute"}
+    VALID_TOOLS = {"rocprofv3", "rocprof-sys-sample", "rocprof-sys-instrument", "rocprof-sys-run", "rocprof-compute"}
     recs = generate_recommendations(
         _empty_breakdown(),
         [],

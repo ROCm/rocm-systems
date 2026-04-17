@@ -78,6 +78,42 @@ schema_path = pkg_resources.files("rocinsight.ai_analysis") / "docs" / "analysis
 
 ---
 
+## v0.5.0 — 2026-04-13
+
+**ROCM-21553: Proposed improvements after first tests.**
+
+**New optional fields in recommendation objects:**
+- `confidence` (`number | null`, 0.0–1.0): Analysis confidence level for the
+  recommendation. Higher values indicate more data-driven confidence.
+
+**New optional top-level fields:**
+- `kernel_resources`: Per-kernel VGPR/SGPR/LDS/scratch usage and theoretical
+  occupancy (architecture-specific). Includes `arch`, `arch_specs`, and
+  `kernels` array with occupancy sub-objects.
+- `api_breakdown`: Per-HIP-API call duration breakdown with `api_calls` array,
+  `launch_overhead_ns`, and `total_api_ns`.
+- `roctx_regions`: roctx marker region analysis with per-region kernel/memcpy
+  correlation and unranged activity breakdown. `null` when no markers present.
+
+**Changed recommendation categories:**
+- `"Compute Bottleneck"` replaced by context-aware labels:
+  - `"Kernel Hotspot"` (Tier 1, no counters)
+  - `"Compute-Bound Kernel"` (Tier 2, GPU util > 90%)
+  - `"Mixed Bottleneck Kernel"` (Tier 2, GPU util 70–90%)
+  - `"Memory-Bound Kernel"` (Tier 2, GPU util < 70%)
+- New categories: `"Warmup"`, `"Profiling Scope"`, `"GPU Utilization (Scoped)"`
+
+**Changed `estimated_impact` values:** Now data-driven (reference actual metrics)
+instead of generic percentage ranges.
+
+**Tool command fixes:**
+- `rocprof-sys` (deprecated wrapper) → `rocprof-sys-sample` (recommended)
+- `--trace-gpu-memory` (nonexistent) → `--trace --device`
+- Schema tool enum expanded: `rocprof-sys-sample`, `rocprof-sys-instrument`,
+  `rocprof-sys-run` added alongside existing `rocprofv3` and `rocprof-compute`
+
+---
+
 ## v0.3.2 — 2026-03-25
 
 **No schema changes.** Branding, output routing, and LLM hardening only.
