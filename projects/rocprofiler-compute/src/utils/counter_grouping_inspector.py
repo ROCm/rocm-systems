@@ -8,6 +8,11 @@ Counter grouping inspector for rocprofiler-compute.
 Parses GFX architecture YAML configs and outputs counter grouping analysis
 without requiring GPU, rocprofiler, or full rocprof-compute initialization.
 
+Perfmon bin-packing uses ``OmniSoC_Base._allocate_perfmon_counter_files`` from
+``soc_base.py`` (including ``profiling_counter_grouping_policy.yaml`` via the
+same metric-aware coalesce pass as profiling). This script does not implement a
+parallel grouping algorithm.
+
 Usage:
     ./src/utils/counter_grouping_inspector.py --arch gfx942
     ./src/utils/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
@@ -23,6 +28,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 # Ensure src directory is in Python path for imports
 _src_dir = Path(__file__).resolve().parent.parent
@@ -32,6 +38,7 @@ if str(_src_dir) not in sys.path:
 # Import from existing modules to maintain single source of truth
 from rocprof_compute_soc.soc_base import (  # noqa: E402
     CounterFile,
+    OmniSoC_Base,
     flat_counters_in_perfmon_file,
     is_tcc_channel_counter,
 )
@@ -306,154 +313,33 @@ def detect_counters(
     return counters, effective_blocks
 
 
-def _group_present_counters(
-    all_counters: set[str],
-    same_bucket_groups: list[set[str]] | None,
-) -> list[list[str]]:
-    """Return policy groups that have at least two counters present in the full set.
-
-    Uses the FULL counter set (not remaining) to allow shared counters
-    to appear in multiple metric groups.
-    """
-    if not same_bucket_groups:
-        return []
-
-    grouped: list[list[str]] = []
-    seen_groups: set[tuple[str, ...]] = set()
-
-    for group in same_bucket_groups:
-        members = sorted(counter for counter in group if counter in all_counters)
-        if len(members) < 2:
-            continue
-
-        key = tuple(members)
-        if key in seen_groups:
-            continue
-
-        seen_groups.add(key)
-        grouped.append(members)
-
-    return grouped
-
-
-def _allocate_same_bucket_groups(
-    work: list[str],
-    perfmon_config: dict[str, int],
-    same_bucket_groups: list[set[str]] | None,
-    start_file_count: int,
-    all_counters: set[str],
-) -> tuple[list[CounterFile], list[str], int]:
-    """Allocate policy-prioritized counter groups before general first-fit placement.
-
-    For each metric group in the policy, ALL counters are forced into the same
-    bucket. This guarantees single-pass collection for policy metrics, even if
-    it means exceeding hardware limits for that bucket.
-
-    Counters that are shared between metrics will appear in MULTIPLE buckets
-    to ensure each metric gets all its counters in a single pass.
-    """
-    grouped_buckets: list[CounterFile] = []
-    remaining = list(work)
-    file_count = start_file_count
-
-    # Use FULL counter set to determine group membership (allow shared counters)
-    for members in _group_present_counters(all_counters, same_bucket_groups):
-        bucket = CounterFile(str(file_count), perfmon_config)
-        added_members: list[str] = []
-
-        # Force ALL counters from the metric into this bucket
-        for counter in members:
-            bucket.add(counter)  # Ignore return value - force add
-            added_members.append(counter)
-            # Remove from remaining if still present (may already be gone)
-            if counter in remaining:
-                remaining.remove(counter)
-
-        if len(added_members) >= 2:
-            file_count += 1
-            grouped_buckets.append(bucket)
-
-    return grouped_buckets, remaining, file_count
-
-
-def _rebuild_tcc_channel_file_map(
-    output_files: list[CounterFile],
-) -> dict[str, CounterFile]:
-    """Map TCC counter base name to the bucket that holds its channel instances."""
-    result: dict[str, CounterFile] = {}
-    for bucket in output_files:
-        for ctr in flat_counters_in_perfmon_file(bucket):
-            if is_tcc_channel_counter(ctr):
-                result[ctr.split("[")[0]] = bucket
-    return result
-
-
 def allocate_buckets(
     counters: set[str],
     perfmon_config: dict[str, int],
-    same_bucket_groups: list[set[str]] | None = None,
+    arch: str,
+    config_dir: Path,
 ) -> list[CounterFile]:
-    """Allocate counters to perfmon bucket files.
+    """Allocate counters using ``OmniSoC_Base._allocate_perfmon_counter_files`` (profiling path)."""
+    mspec = MagicMock()
+    mspec.rocminfo_lines = None
+    # TCC template expansion only; values mirror unit-test defaults when no GPU.
+    mspec.num_xcd = 1
+    mspec.l2_banks = 4
 
-    TCC channel counters (e.g., TCC_HIT[0], TCC_HIT[1]) are co-located in the
-    same bucket to match the profiling behavior in soc_base.py.
-    """
-    output_files: list[CounterFile] = []
-    work = sorted(list(counters))
+    args = MagicMock()
+    args.config_dir = str(config_dir.resolve())
+    args.membw_analysis = False
 
-    for counter in work.copy():
-        if (
-            "LEVEL" in counter
-            and not counter.endswith("_sum")
-            and not is_tcc_channel_counter(counter)
-        ):
-            work.remove(counter)
-            # CounterFile automatically adds "pmc_perf_" prefix
-            output_files.append(CounterFile(counter, perfmon_config))
-            output_files[-1].add(counter)
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, mspec)
+    soc.set_arch(arch)
+    soc.set_perfmon_config(perfmon_config)
 
-            accum_counter = counter.replace("LEVEL", "ACCUM")
-            if accum_counter in work:
-                work.remove(accum_counter)
-            output_files[-1].add(accum_counter)
+    work = set(counters)
+    work.discard("SQ_ACCUM_PREV_HIRES")
+    work = soc._expand_tcc_template_counters(work)
 
-    file_count = 0
-    grouped_files, work, file_count = _allocate_same_bucket_groups(
-        work,
-        perfmon_config,
-        same_bucket_groups,
-        file_count,
-        counters,  # Pass full counter set for group membership check
-    )
-    output_files.extend(grouped_files)
-
-    # Build TCC channel co-location map (same behavior as profiling)
-    tcc_channel_file_map = _rebuild_tcc_channel_file_map(output_files)
-
-    for ctr in work:
-        # TCC channel counters should be co-located with same base name
-        if is_tcc_channel_counter(ctr):
-            base_name = ctr.split("[")[0]
-            existing_bucket = tcc_channel_file_map.get(base_name)
-            if existing_bucket:
-                existing_bucket.add(ctr)
-                continue
-
-        added = False
-        for output_file in output_files:
-            if output_file.add(ctr):
-                added = True
-                # Track TCC channel counters for co-location
-                if is_tcc_channel_counter(ctr):
-                    tcc_channel_file_map[ctr.split("[")[0]] = output_file
-                break
-
-        if not added:
-            # CounterFile automatically adds "pmc_perf_" prefix
-            output_files.append(CounterFile(str(file_count), perfmon_config))
-            file_count += 1
-            output_files[-1].add(ctr)
-
+    output_files, _file_count, _accu = soc._allocate_perfmon_counter_files(work)
     return output_files
 
 
@@ -541,21 +427,15 @@ def print_bucket_plan(output_files: list[CounterFile], arch: str) -> None:
     print(output, end="")
 
 
-def _counter_to_buckets_map(
+def _counter_to_bucket_map(
     output_files: list[CounterFile],
-) -> dict[str, set[str]]:
-    """Map each PMC counter string to ALL perfmon bucket labels it appears in.
-
-    Since counters can be duplicated across buckets for single-pass collection,
-    we need to track all buckets each counter appears in.
-    """
-    result: dict[str, set[str]] = {}
+) -> dict[str, str]:
+    """Map each PMC counter string to its perfmon bucket label."""
+    result: dict[str, str] = {}
     for counter_file in output_files:
         label = counter_file.file_name_txt.replace(".txt", "")
         for ctr in flat_counters_in_perfmon_file(counter_file):
-            if ctr not in result:
-                result[ctr] = set()
-            result[ctr].add(label)
+            result[ctr] = label
     return result
 
 
@@ -564,16 +444,11 @@ def generate_multi_bucket_metrics(
     config_dir: Path,
     arch: str,
 ) -> str:
-    """Generate metrics that span multiple buckets as a string.
-
-    A metric is considered "single bucket" if ALL its counters appear together
-    in at least ONE bucket. This accounts for counter duplication across buckets
-    for single-pass collection guarantees.
-    """
+    """Generate metrics that span multiple buckets as a string."""
     from io import StringIO
 
     buf = StringIO()
-    counter_to_buckets = _counter_to_buckets_map(output_files)
+    counter_to_bucket = _counter_to_bucket_map(output_files)
 
     multi_rows: list[tuple[str, str, int, str, int, str]] = []
     single_rows: list[tuple[str, str, int, str, str]] = []
@@ -584,47 +459,30 @@ def generate_multi_bucket_metrics(
     ):
         total_metrics += 1
         hw = parse_counters(metric_yaml)
-
-        # Get all buckets that contain each counter
-        counter_bucket_sets: list[set[str]] = []
+        buckets: set[str] = set()
         for c in hw:
-            bs = counter_to_buckets.get(c)
-            if bs is not None:
-                counter_bucket_sets.append(bs)
-
-        if not counter_bucket_sets:
-            # No counters in any bucket - skip
-            continue
-
-        # Find buckets that contain ALL of this metric's counters
-        # (intersection of all counter bucket sets)
-        common_buckets = counter_bucket_sets[0].copy()
-        for bs in counter_bucket_sets[1:]:
-            common_buckets &= bs
+            b = counter_to_bucket.get(c)
+            if b is not None:
+                buckets.add(b)
 
         panel_s = str(panel_id) if panel_id is not None else "-"
-
-        if common_buckets:
-            # All counters are together in at least one bucket - single bucket metric
-            single_rows.append((
-                file_id,
-                panel_s,
-                metric_idx,
-                metric_name,
-                min(sorted(common_buckets)),  # Report first common bucket
-            ))
-        else:
-            # Counters span multiple buckets with no single bucket containing all
-            all_buckets: set[str] = set()
-            for bs in counter_bucket_sets:
-                all_buckets |= bs
+        n_b = len(buckets)
+        if n_b > 1:
             multi_rows.append((
                 file_id,
                 panel_s,
                 metric_idx,
                 metric_name,
-                len(all_buckets),
-                ", ".join(sorted(all_buckets)),
+                n_b,
+                ", ".join(sorted(buckets)),
+            ))
+        elif n_b == 1:
+            single_rows.append((
+                file_id,
+                panel_s,
+                metric_idx,
+                metric_name,
+                next(iter(buckets)),
             ))
 
     multi_pct = (100.0 * len(multi_rows) / total_metrics) if total_metrics else 0.0
@@ -812,105 +670,6 @@ def get_supported_archs() -> list[str]:
     return list(mi_gpu_specs.get_gpu_series_dict().keys())
 
 
-def load_grouping_policy(
-    config_dir: Path,
-    arch: str,
-) -> list[set[str]]:
-    """Load same-bucket priority groups from profiling_counter_grouping_policy.yaml.
-
-    Reads the policy file and extracts counters for each INDIVIDUAL metric
-    in the blocks/panels listed in same_bucket_priority_metric_ids.
-
-    When a block ID like "2" or panel ID like "2.1" is specified, this function
-    iterates over each individual metric in that block/panel and creates a
-    separate group for each metric's counters.
-
-    Returns:
-        List of counter sets where each set contains counters for ONE metric
-        that should be co-located in the same bucket (single pass).
-    """
-    policy_file = config_dir / "profiling_counter_grouping_policy.yaml"
-    if not policy_file.is_file():
-        return []
-
-    try:
-        with open(policy_file, encoding="utf-8") as f:
-            policy = yaml.safe_load(f)
-    except (OSError, yaml.YAMLError) as e:
-        print(f"Warning: Could not load grouping policy: {e}", file=sys.stderr)
-        return []
-
-    if not isinstance(policy, dict):
-        return []
-
-    architectures = policy.get("architectures", {})
-    if not isinstance(architectures, dict):
-        return []
-
-    arch_policy = architectures.get(arch, {})
-    if not isinstance(arch_policy, dict):
-        return []
-
-    priority_ids = arch_policy.get("same_bucket_priority_metric_ids", {})
-    if not isinstance(priority_ids, dict) or not priority_ids:
-        return []
-
-    # For each policy entry, iterate over individual metrics and create groups
-    metric_groups: list[set[str]] = []
-
-    for metric_id in priority_ids:
-        # Check if this is a full metric ID (x.x.x) or a block/panel ID (x or x.x)
-        parts = metric_id.split(".")
-        if len(parts) == 3:
-            # Full metric ID - just get counters for this one metric
-            for (
-                file_id,
-                panel_id,
-                metric_idx,
-                _metric_name,
-                metric_yaml,
-            ) in iter_yaml_metrics(config_dir, arch):
-                # Convert file_id to block number
-                block_num = str(int(file_id) // 100)
-                full_id = (
-                    f"{block_num}.{panel_id % 100 if panel_id else 0}.{metric_idx}"
-                )
-                if full_id == metric_id:
-                    counters = parse_counters(metric_yaml)
-                    if len(counters) >= 2:
-                        metric_groups.append(counters)
-                    break
-        else:
-            # Block or panel ID - iterate over all metrics in that scope
-            target_block = parts[0] if parts else None
-            target_panel = int(parts[1]) if len(parts) > 1 else None
-
-            for (
-                file_id,
-                panel_id,
-                metric_idx,
-                _metric_name,
-                metric_yaml,
-            ) in iter_yaml_metrics(config_dir, arch):
-                # Convert file_id (like "0200") to block number (like "2")
-                block_num = str(int(file_id) // 100)
-
-                # Check if this metric matches the policy scope
-                if target_block and block_num != target_block:
-                    continue
-                if target_panel is not None:
-                    panel_table_id = panel_id % 100 if panel_id else 0
-                    if panel_table_id != target_panel:
-                        continue
-
-                # Extract counters for this individual metric
-                counters = parse_counters(metric_yaml)
-                if len(counters) >= 2:
-                    metric_groups.append(counters)
-
-    return metric_groups
-
-
 def main() -> None:
     # Get supported architectures dynamically from mi_gpu_specs
     supported_archs = get_supported_archs()
@@ -992,21 +751,13 @@ Examples:
         print("No counters found!", file=sys.stderr)
         sys.exit(1)
 
-    # Load grouping policy from profiling_counter_grouping_policy.yaml
-    same_bucket_groups = load_grouping_policy(config_dir, arch)
-
     if args.verbose:
         print(f"Collected {len(counters)} unique counters:")
         for c in sorted(counters):
             print(f"  - {c}")
         print()
-        if same_bucket_groups:
-            print(f"Loaded grouping policy with {len(same_bucket_groups)} group(s):")
-            for i, group in enumerate(same_bucket_groups):
-                print(f"  Group {i}: {len(group)} counters")
-            print()
 
-    output_files = allocate_buckets(counters, perfmon_config, same_bucket_groups)
+    output_files = allocate_buckets(counters, perfmon_config, arch, config_dir)
 
     # Handle output formats
     if args.output:
