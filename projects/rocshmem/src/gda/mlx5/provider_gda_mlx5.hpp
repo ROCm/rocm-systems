@@ -274,11 +274,12 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
   uint64_t post;
   uint32_t lock;
   uint16_t depth;
+  uint16_t depth_mask;
 
   __host__ inline gda_mlx5_device_sq(gda_mlx5_wqe* buf, __be32* dbrec,
                                      gda_mlx5_doorbell* db, uint16_t depth)
     : gda_mlx5_device_queue{buf, dbrec},
-      db{db}, post{0}, lock{0}, depth{depth} { }
+      db{db}, post{0}, lock{0}, depth{depth}, depth_mask{static_cast<uint16_t>(depth - 1)} { }
 
   __host__ inline gda_mlx5_device_sq() : gda_mlx5_device_sq{nullptr, nullptr, nullptr, 0} { }
 
