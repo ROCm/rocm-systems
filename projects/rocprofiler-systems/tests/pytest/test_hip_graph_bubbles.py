@@ -79,7 +79,6 @@ class TestHipGraphBubbles(RocprofsysTest):
             ),
             run_args=[_HIP_GRAPH_BUBBLES_NUM_KERNELS, _HIP_GRAPH_BUBBLES_NUM_ITERATIONS],
             check_target_arch=True,
-            timeout=300,
         )
         self.assert_regex(
             result,

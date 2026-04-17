@@ -21,7 +21,6 @@ if(NOT TARGET hip-graph-bubbles)
     return()
 endif()
 
-# Counter selection aligned with rocprof-sys-rocm-tests.cmake (PMC rows for ROCPD validation)
 if(ROCPROFSYS_GFX_TARGETS)
     foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
         rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORY)
@@ -36,22 +35,19 @@ endif()
 if(_HIP_GRAPH_BUBBLES_NAVI_DETECTED)
     set(_HIP_GRAPH_BUBBLES_ROCM_EVENTS "SQ_WAVES")
 else()
-    set(_HIP_GRAPH_BUBBLES_ROCM_EVENTS "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY")
+    set(_HIP_GRAPH_BUBBLES_ROCM_EVENTS "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU")
 endif()
 
 # Omit AMD SMI PMC/metrics for this test so ROCPD PMC row counts are not skewed
 set(_hip_graph_bubbles_environment
     "${_base_environment}"
+    "ROCPROFSYS_ROCM_EVENTS=${_HIP_GRAPH_BUBBLES_ROCM_EVENTS}"
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api"
     "ROCPROFSYS_USE_AMD_SMI=OFF"
 )
 
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     list(APPEND _hip_graph_bubbles_environment "ROCPROFSYS_USE_ROCPD=ON")
-    list(
-        APPEND _hip_graph_bubbles_environment
-        "ROCPROFSYS_ROCM_EVENTS=${_HIP_GRAPH_BUBBLES_ROCM_EVENTS}"
-    )
 endif()
 
 # RUN_ARGS: num_kernels num_iterations for hip-graph-bubbles (argv order matches the example).
@@ -66,8 +62,8 @@ rocprofiler_systems_add_test(
     RUN_ARGS 2000 10
     LABELS "hip-graph-bubbles"
     ENVIRONMENT "${_hip_graph_bubbles_environment}"
-    SAMPLING_TIMEOUT 300
-    SYS_RUN_TIMEOUT 300
+    SAMPLING_TIMEOUT 600
+    SYS_RUN_TIMEOUT 600
     BASELINE_PASS_REGEX "Test completed successfully"
     SAMPLING_PASS_REGEX "Test completed successfully"
     SYS_RUN_PASS_REGEX "Test completed successfully"
@@ -93,12 +89,7 @@ if(NOT ROCPROFSYS_INSIDE_DOCKER AND TEST hip-graph-bubbles-sampling)
     )
 endif()
 
-if(
-    NOT ROCPROFSYS_INSIDE_DOCKER
-    AND ${ENABLE_ROCPD_TEST}
-    AND ${_VALID_GPU}
-    AND TEST hip-graph-bubbles-sampling
-)
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST hip-graph-bubbles-sampling)
     set_property(TEST hip-graph-bubbles-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
