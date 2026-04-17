@@ -40,7 +40,7 @@
 namespace rocshmem {
 
 #if defined(USE_SDMA)
-class SdmaOnImpl {
+class SdmaImpl {
  public:
   // Configuration (set from environment variables during init)
   size_t sdmaThreshold{128};  // Use SDMA for transfers >= 128B
@@ -179,42 +179,6 @@ class SdmaOnImpl {
 #endif  // __HIPCC__ || __CUDACC__
 };
 #endif  // USE_SDMA
-
-// clang-format off
-NOWARN(-Wunused-parameter,
-class SdmaOffImpl {
- public:
-  size_t sdmaThreshold{8192};
-  size_t minChunkPerChannel{4096};
-  int numChannels{2};
-  void** deviceHandles_d{nullptr};
-  int shm_size{0};
-  int my_pe{0};
-  int local_rank{0};
-
-  __host__ void sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {}
-  __host__ void sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap) {}
-  __host__ void sdmaHostStop() {}
-
-  __host__ __device__ bool isSdmaAvailable(int src_pe, int target_pe) { return false; }
-
-  __device__ void sdmaCopy(void* dst, void* src, size_t size, int pe) {}
-  __device__ void sdmaCopy_wave(void* dst, void* src, size_t size, int pe) {}
-  __device__ void sdmaCopy_wg(void* dst, void* src, size_t size, int pe) {}
-  __device__ void sdmaQuiet(int pe) {}
-  __device__ void sdmaQuietAll() {}
-};
-)
-// clang-format on
-
-/*
- * Select which one of our SDMA policies to use at compile time.
- */
-#if defined(USE_SDMA)
-typedef SdmaOnImpl SdmaImpl;
-#else
-typedef SdmaOffImpl SdmaImpl;
-#endif
 
 }  // namespace rocshmem
 

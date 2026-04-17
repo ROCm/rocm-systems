@@ -134,9 +134,6 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     mpilib_ftable_.Group_free(&thread_grp);
   }
 
-#if defined(USE_SDMA)
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, thread_comm);
-#endif
 }
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
@@ -211,9 +208,6 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     std::copy(shm_ranks.begin(), shm_ranks.end(), pes_with_ipc_avail);
   }
 
-#if defined(USE_SDMA)
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, bootstr);
-#endif
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
@@ -229,10 +223,6 @@ __host__ void IpcOnImpl::ipcHostStop() {
   if (nullptr != pes_with_ipc_avail) {
     CHECK_HIP(hipFree(pes_with_ipc_avail));
   }
-
-#if defined(USE_SDMA)
-  sdmaImpl_.sdmaHostStop();
-#endif
 }
 
 __device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size) {
@@ -246,5 +236,26 @@ __device__ void IpcOnImpl::ipcCopy_wave(void *dst, void *src, size_t size) {
 __device__ void IpcOnImpl::ipcCopy_wg(void *dst, void *src, size_t size) {
   memcpy_wg(dst, src, size);
 }
+
+#if defined(USE_SDMA)
+
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                                       MPI_Comm thread_comm) {
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, thread_comm);
+}
+
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+                                       TcpBootstrap *bootstrap) {
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, bootstrap);
+}
+
+__host__ void IpcSdmaImpl::ipcHostStop() {
+  sdmaImpl_.sdmaHostStop();
+  IpcOnImpl::ipcHostStop();
+}
+
+#endif  // USE_SDMA
 
 }  // namespace rocshmem
