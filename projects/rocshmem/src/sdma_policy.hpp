@@ -43,9 +43,9 @@ namespace rocshmem {
 class SdmaOnImpl {
  public:
   // Configuration (set from environment variables during init)
-  size_t sdmaThreshold{8192};  // Use SDMA for transfers >= 8KB
+  size_t sdmaThreshold{128};  // Use SDMA for transfers >= 128B
   size_t minChunkPerChannel{4096};  // Minimum bytes per channel to avoid over-parallelization
-  int numChannels{2};
+  int numChannels{1};
 
   // Device resources - 2D array: [shm_size * numChannels]
   // Index as: deviceHandles_d[local_pe * numChannels + channel_idx]
