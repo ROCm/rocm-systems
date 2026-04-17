@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "backends/sqlite_backend.hpp"
+#include "data_storage/backends/sqlite_backend.hpp"
 
 #include "rocpdsna/reader_types.hpp"
 

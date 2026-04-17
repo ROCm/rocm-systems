@@ -92,6 +92,35 @@ struct writer_t
     void register_string(std::string_view str);
 
     /***
+     * @brief Register a category (v4+ only)
+     * @param category_info Category info to register
+     * @note In v3, categories are stored as strings via register_string()
+     */
+    void register_category_info(const writer_types::category_info_t& category_info);
+
+    /***
+     * @brief Register an address range info (v4+ only)
+     * @param address_range Address range info to register
+     * @note In v3, address ranges are embedded in call_stack/line_info JSONB
+     */
+    void register_address_range_info(
+        const writer_types::address_range_info_t& address_range);
+
+    /***
+     * @brief Register source code info (v4+ only)
+     * @param source_code Source code info to register
+     * @note In v3, source code is embedded in line_info JSONB column
+     */
+    void register_source_code_info(const writer_types::source_code_info_t& source_code);
+
+    /***
+     * @brief Register program counter info (v4+ only)
+     * @param pc_info PC info to register
+     * @note In v3, PC info is embedded in call_stack/line_info JSONB
+     */
+    void register_pc_info(const writer_types::pc_info_t& pc_info);
+
+    /***
      * @brief Insert region data into rocpd and create sample which will reference the
      * track
      * @param region_data Region data which will be inserted into rocpd

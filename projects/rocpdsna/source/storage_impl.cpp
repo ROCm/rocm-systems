@@ -45,6 +45,17 @@ struct storage_t::impl::database_factory_t
 storage_t::impl::impl(std::string database_path, std::string uuid)
 : m_database_path(std::move(database_path))
 , m_uuid(std::move(uuid))
+{
+    m_version =
+        rocpdsna::version_t{ 3, 0, 0 };  // Default to version 3.0.0 if not specified
+}
+
+storage_t::impl::impl(std::string database_path,
+                      std::string uuid,
+                      version_t   schema_version)
+: m_version(schema_version)
+, m_database_path(std::move(database_path))
+, m_uuid(std::move(uuid))
 {}
 
 std::string

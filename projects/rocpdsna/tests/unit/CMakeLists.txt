@@ -1,11 +1,11 @@
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright(c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
+# of this software and associated documentation files(the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
@@ -30,6 +30,10 @@ set(UNIT_TEST_SOURCES
     table_select_query_test.cpp
     database_test.cpp
     json_serializer_test.cpp
+    schema_v3_details_structure_test.cpp
+    schema_v4_details_structure_test.cpp
+    schema_v4_value_insertion_test.cpp
+    schema_v3_value_insertion_test.cpp
 )
 
 add_executable(rocpdsna_unit_tests ${UNIT_TEST_SOURCES})
@@ -80,3 +84,20 @@ gtest_discover_tests(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     PROPERTIES LABELS "unit"
 )
+
+# Pass USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD and API variant to tests
+if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
+    target_compile_definitions(
+        rocpdsna_unit_tests
+        PRIVATE
+            USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1
+            ROCPD_SQL_HAS_SCHEMA_VERSION=${ROCPD_SQL_HAS_SCHEMA_VERSION}
+    )
+else()
+    target_compile_definitions(
+        rocpdsna_unit_tests
+        PRIVATE
+            USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0
+            ROCPD_SQL_HAS_SCHEMA_VERSION=0
+    )
+endif()

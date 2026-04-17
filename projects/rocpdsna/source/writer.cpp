@@ -87,6 +87,31 @@ writer_t::register_string(std::string_view str)
 }
 
 void
+writer_t::register_category_info(const writer_types::category_info_t& category_info)
+{
+    m_impl->register_category_info(category_info);
+}
+
+void
+writer_t::register_address_range_info(
+    const writer_types::address_range_info_t& address_range)
+{
+    m_impl->register_address_range_info(address_range);
+}
+
+void
+writer_t::register_source_code_info(const writer_types::source_code_info_t& source_code)
+{
+    m_impl->register_source_code_info(source_code);
+}
+
+void
+writer_t::register_pc_info(const writer_types::pc_info_t& pc_info)
+{
+    m_impl->register_pc_info(pc_info);
+}
+
+void
 writer_t::insert_region_data(const writer_types::region_data_t&       region_data,
                              const writer_types::trace_environment_t& trace_environment)
 {

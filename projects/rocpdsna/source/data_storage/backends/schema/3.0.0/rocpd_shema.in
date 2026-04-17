@@ -3,10 +3,10 @@
 
 namespace rocpd {
 namespace data_storage {
-namespace schema {
+namespace schema_v3 {
 
 constexpr const char* @SCHEMA_NAME_UPPER@_SQL = "@SQL_CONTENT@";
 
-} // namespace schema
+} // namespace schema_v3
 } // namespace data_storage
 } // namespace rocpd
