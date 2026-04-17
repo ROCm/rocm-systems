@@ -834,7 +834,9 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
         amdsmiFabricDeviceInfo fabInfo_dev;
         amdsmiFabricDeviceInfo fabInfo;
         if (amd_smi_getFabricDeviceInfo(dev, &fabInfo_dev) == ncclSuccess && amd_smi_getFabricDeviceInfo(i, &fabInfo) == ncclSuccess) {
-          if (fabInfo_dev.cliqueId == fabInfo.cliqueId && (memcmp(fabInfo_dev.clusterUuid, fabInfo.clusterUuid, UALOE_GPU_FABRIC_UUID_LEN) == 0)) {
+          if (fabInfo_dev.fabricSupported && fabInfo.fabricSupported &&
+              fabInfo_dev.cliqueId == fabInfo.cliqueId &&
+              (memcmp(fabInfo_dev.clusterUuid, fabInfo.clusterUuid, UALOE_GPU_FABRIC_UUID_LEN) == 0)) {
             canUseUALoE = true;
           }
         }
