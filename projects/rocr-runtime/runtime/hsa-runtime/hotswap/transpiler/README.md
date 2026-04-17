@@ -15,10 +15,11 @@ against a pre-built LLVM with AMDGPU support.
 
 | Dependency | Required? | Version | Notes |
 |-----------|:---------:|---------|-------|
-| **LLVM** (with AMDGPU backend) | **Yes** | 18+ (tested with 23.0.0git) | Must include `llc`, `llvm-mc`, `ld.lld` |
+| **LLVM** (with AMDGPU backend) | **Yes** | 18+ (tested with 23.0.0git) | **Build tree**, not install tree. Must include `llc`, `llvm-mc`, `ld.lld` |
 | **CMake** | **Yes** | 3.20+ | |
 | **Ninja** | Recommended | any | `apt install ninja-build` |
 | **C++17 compiler** | **Yes** | GCC 11+ or Clang 15+ | |
+| **GoogleTest** | **Yes** | 1.10+ | `apt install libgtest-dev` (Ubuntu 22.04+ ships CMake config files) |
 | **HIP + ROCm** | Optional | ROCm 6.x / 7.x | Only for GPU execution tests |
 | **AMD GPU** | Optional | MI300X (gfx942) recommended | Only for GPU execution tests |
 
@@ -28,7 +29,11 @@ kernels produce correct results on hardware.
 
 ### Building LLVM with AMDGPU support
 
-If you don't already have a suitable LLVM install, build one:
+If you don't already have a suitable LLVM build, build one.  **Do not run
+`ninja install`** — the transpiler links against the LLVM *build tree*, not
+an install prefix, because it reaches into `Target/AMDGPU` for target-private
+headers (`SIDefines.h`, `AMDGPUBaseInfo.h`) and the TableGen-generated
+`AMDGPUGen*.inc` files, neither of which are copied by `ninja install`.
 
 ```bash
 git clone https://github.com/llvm/llvm-project.git
@@ -36,22 +41,25 @@ cd llvm-project
 cmake -S llvm -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_TARGETS_TO_BUILD="AMDGPU" \
-  -DLLVM_ENABLE_PROJECTS="lld" \
-  -DCMAKE_INSTALL_PREFIX=$HOME/shared-llvm
-ninja -C build install
+  -DLLVM_ENABLE_PROJECTS="lld"
+ninja -C build
 ```
 
 This gives you the LLVM libraries the transpiler links against, plus the tools
-(`llc`, `llvm-mc`, `ld.lld`) it invokes during the IR-to-HSACO pipeline.
+(`llc`, `llvm-mc`, `ld.lld`) it invokes during the IR-to-HSACO pipeline.  The
+build tree's `lib/cmake/llvm/` directory is what you point `LLVM_DIR` at below.
 
 ## Building the transpiler
+
+Point `LLVM_DIR` at `<llvm-build>/lib/cmake/llvm` (the same convention every
+other LLVM out-of-tree project uses).
 
 ```bash
 cd projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler
 mkdir build && cd build
 
 cmake .. -G Ninja \
-  -DLLVM_INSTALL_DIR=$HOME/shared-llvm \
+  -DLLVM_DIR=$HOME/llvm-project/build/lib/cmake/llvm \
   -DCMAKE_CXX_COMPILER=clang++
 
 ninja transpiler_tests
@@ -115,8 +123,8 @@ by CTest.  All paths below assume you are in `hotswap/transpiler/build`.
 ```bash
 # Build (GPU tests auto-skip if HIP is unavailable):
 cmake .. -G Ninja \
-  -DCMAKE_PREFIX_PATH="/opt/rocm;$HOME/shared-llvm" \
-  -DLLVM_INSTALL_DIR=$HOME/shared-llvm \
+  -DCMAKE_PREFIX_PATH="/opt/rocm;$HOME/llvm-project/build" \
+  -DLLVM_DIR=$HOME/llvm-project/build/lib/cmake/llvm \
   -Dhip_DIR=/opt/rocm/lib/cmake/hip \
   -DCMAKE_CXX_COMPILER=clang++
 ninja transpiler_tests
@@ -252,12 +260,18 @@ Currently handled:
 
 ## Troubleshooting
 
-**`LLVM not found`** — Set `-DLLVM_INSTALL_DIR=` to the prefix where LLVM is
-installed (the directory containing `lib/cmake/llvm/`).
+**`LLVM not found`** — Set `-DLLVM_DIR=` to `<llvm-build>/lib/cmake/llvm`
+(the LLVM *build tree*, not an install prefix).  The configure step will
+fail with a clear error if you point it at an install tree.
+
+**`Could not find a package configuration file provided by "GTest"`** —
+Install GoogleTest development files (`apt install libgtest-dev` on Ubuntu
+22.04+, or build/install upstream GoogleTest and set `-DGTest_DIR=<prefix>/lib/cmake/GTest`).
 
 **`llc` / `llvm-mc` / `ld.lld` not found at runtime** — The pipeline shells
-out to these tools at `${LLVM_INSTALL_DIR}/bin/`.  Make sure they exist there.
-The path is baked in at CMake configure time via the `LLVM_TOOLS_DIR` define.
+out to these tools at `<llvm-build>/bin/`.  Make sure they exist there.  The
+path is baked in at CMake configure time via the `LLVM_TOOLS_DIR` define,
+which is derived from LLVM's own `LLVM_TOOLS_BINARY_DIR`.
 
 **GPU tests not built** — CMake prints `GPU tests DISABLED (HIP not found)`.
 Pass `-Dhip_DIR=/opt/rocm/lib/cmake/hip` or add ROCm to `CMAKE_PREFIX_PATH`.
