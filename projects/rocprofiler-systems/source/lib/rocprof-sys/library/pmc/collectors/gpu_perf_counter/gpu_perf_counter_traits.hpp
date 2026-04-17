@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "library/pmc/collectors/sdk_pmc/device.hpp"
-#include "library/pmc/collectors/sdk_pmc/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/device.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
@@ -13,7 +13,7 @@
 #include <memory>
 #include <vector>
 
-namespace rocprofsys::pmc::collectors::sdk_pmc
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
 using ::rocprofsys::pmc::device_filter;
@@ -29,11 +29,11 @@ using ::rocprofsys::pmc::device_type;
  * @tparam DriverProvider The device provider type (rocprofiler_sdk::provider).
  */
 template <typename DriverProvider>
-struct sdk_pmc_traits
+struct gpu_perf_counter_traits
 {
     // Required type aliases for base::collector
-    using metrics_t         = pmc::collectors::sdk_pmc::metrics;
-    using enabled_metrics_t = pmc::collectors::sdk_pmc::enabled_metrics;
+    using metrics_t         = pmc::collectors::gpu_perf_counter::metrics;
+    using enabled_metrics_t = pmc::collectors::gpu_perf_counter::enabled_metrics;
     using device_t          = device<typename DriverProvider::driver_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
@@ -47,7 +47,7 @@ struct sdk_pmc_traits
     template <typename Settings>
     [[nodiscard]] static device_filter get_device_filter()
     {
-        return Settings::get_sdk_pmc_device_filter();
+        return Settings::get_gpu_perf_counter_device_filter();
     }
 
     /**
@@ -56,7 +56,7 @@ struct sdk_pmc_traits
     template <typename Settings>
     [[nodiscard]] static enabled_metrics_t get_enabled_metrics()
     {
-        return Settings::get_sdk_pmc_enabled_metrics();
+        return Settings::get_gpu_perf_counter_enabled_metrics();
     }
 
     /**
@@ -111,7 +111,7 @@ struct sdk_pmc_traits
                                                const enabled_metrics_t& enabled,
                                                uint64_t                 timestamp)
     {
-        return dev->get_sdk_pmc_metrics(enabled, timestamp);
+        return dev->get_gpu_perf_counter_metrics(enabled, timestamp);
     }
 
     /**
@@ -168,4 +168,4 @@ struct sdk_pmc_traits
     }
 };
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

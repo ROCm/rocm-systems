@@ -615,17 +615,17 @@ metadata_registry::get_string_list() const
 }
 
 void
-metadata_registry::set_sdk_pmc_counter_names(
-    uint32_t device_id, std::vector<info::sdk_pmc_name_entry> entries)
+metadata_registry::set_gpu_perf_counter_counter_names(
+    uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries)
 {
-    m_sdk_pmc_counter_names[device_id] = std::move(entries);
+    m_gpu_perf_counter_counter_names[device_id] = std::move(entries);
 }
 
-const std::vector<info::sdk_pmc_name_entry>*
-metadata_registry::get_sdk_pmc_counter_names(uint32_t device_id) const
+const std::vector<info::gpu_perf_counter_name_entry>*
+metadata_registry::get_gpu_perf_counter_counter_names(uint32_t device_id) const
 {
-    auto it = m_sdk_pmc_counter_names.find(device_id);
-    if(it == m_sdk_pmc_counter_names.end()) return nullptr;
+    auto it = m_gpu_perf_counter_counter_names.find(device_id);
+    if(it == m_gpu_perf_counter_counter_names.end()) return nullptr;
     return &it->second;
 }
 

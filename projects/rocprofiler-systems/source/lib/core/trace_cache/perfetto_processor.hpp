@@ -49,7 +49,7 @@ public:
     void handle(const gpu_pmc_sample& sample);
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
-    void handle(const sdk_pmc_sample& sample);
+    void handle(const gpu_perf_counter_sample& sample);
     void handle(const backtrace_region_sample& sample);
     void handle(const kfd_sample& sample);
 
@@ -95,8 +95,9 @@ private:
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     output_file_registry&                            m_output_registry;
 
-    using sdk_pmc_name_map = std::unordered_map<std::string, std::string>;
-    std::unordered_map<uint32_t, sdk_pmc_name_map> m_sdk_pmc_name_lookup;
+    using gpu_perf_counter_name_map = std::unordered_map<std::string, std::string>;
+    std::unordered_map<uint32_t, gpu_perf_counter_name_map>
+        m_gpu_perf_counter_name_lookup;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

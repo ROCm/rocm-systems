@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "library/pmc/collectors/sdk_pmc/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 #include "logger/debug.hpp"
 
@@ -17,7 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rocprofsys::pmc::collectors::sdk_pmc
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
 /**
@@ -146,7 +146,7 @@ public:
      * @param timestamp Current timestamp in nanoseconds.
      * @return Collected counter values.
      */
-    [[nodiscard]] metrics get_sdk_pmc_metrics(
+    [[nodiscard]] metrics get_gpu_perf_counter_metrics(
         [[maybe_unused]] const enabled_metrics& enabled,
         [[maybe_unused]] uint64_t               timestamp)
     {
@@ -212,4 +212,4 @@ private:
     std::unordered_map<uint64_t, std::string> m_instance_map;
 };
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

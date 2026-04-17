@@ -8,7 +8,7 @@ add_subdirectory(common)
 add_subdirectory(base)
 add_subdirectory(gpu)
 add_subdirectory(cpu)
-add_subdirectory(sdk_pmc)
+add_subdirectory(gpu_perf_counter)
 
 # Conditionally compile NIC collector based on AINIC support
 # ROCPROFSYS_BUILD_AINIC is set in cmake/Packages.cmake based on:
@@ -30,7 +30,7 @@ set(pmc_collectors_sources
     ${pmc_base_sources}
     ${pmc_gpu_sources}
     ${pmc_cpu_sources}
-    ${pmc_sdk_pmc_sources}
+    ${pmc_gpu_perf_counter_sources}
     ${pmc_nic_sources}
 )
 

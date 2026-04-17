@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/pmc/collectors/sdk_pmc/sample.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 
 #include <gtest/gtest.h>
 
@@ -9,10 +9,10 @@
 #include <cstdint>
 #include <string_view>
 
-using namespace rocprofsys::pmc::collectors::sdk_pmc;
+using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
 using namespace rocprofsys::trace_cache;
 
-namespace rocprofsys::pmc::collectors::sdk_pmc::testing
+namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 {
 
 class SdkPmcSampleTest : public ::testing::Test
@@ -141,4 +141,4 @@ TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)
     EXPECT_EQ(second_result.entries[1].name, "C");
 }
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc::testing
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing

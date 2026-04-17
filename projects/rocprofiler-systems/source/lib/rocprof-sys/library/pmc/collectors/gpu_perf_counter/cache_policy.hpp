@@ -7,8 +7,8 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/collectors/sdk_pmc/sample.hpp"
-#include "library/pmc/collectors/sdk_pmc/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
 #include "logger/debug.hpp"
 
@@ -19,14 +19,14 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys::pmc::collectors::sdk_pmc
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
 /**
  * @brief Output policy for writing SDK PMC samples to the trace cache.
  *
  * Registers pmc_info and track metadata during config(), then stores
- * batched sdk_pmc_sample records during sampling. Processors resolve
+ * batched gpu_perf_counter_sample records during sampling. Processors resolve
  * counter names via metadata_registry at post-processing time.
  */
 struct cache_policy
@@ -73,7 +73,7 @@ struct cache_policy
 
         auto& registry = trace_cache::get_metadata_registry();
 
-        std::vector<trace_cache::info::sdk_pmc_name_entry> name_entries;
+        std::vector<trace_cache::info::gpu_perf_counter_name_entry> name_entries;
         name_entries.reserve(qualified_names.size());
 
         for(const auto& qname : qualified_names)
@@ -116,8 +116,8 @@ struct cache_policy
             name_entries.push_back({ qname, std::move(track_name) });
         }
 
-        registry.set_sdk_pmc_counter_names(static_cast<uint32_t>(gpu_id),
-                                           std::move(name_entries));
+        registry.set_gpu_perf_counter_counter_names(static_cast<uint32_t>(gpu_id),
+                                                    std::move(name_entries));
 
         LOG_DEBUG("Registered {} SDK PMC counters for device {}", qualified_names.size(),
                   gpu_id);
@@ -126,7 +126,7 @@ struct cache_policy
     /**
      * @brief Store an SDK PMC sample to the trace cache.
      *
-     * Writes one sdk_pmc_sample per device per tick with all counter
+     * Writes one gpu_perf_counter_sample per device per tick with all counter
      * entries (qualified name + value) batched.
      */
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
@@ -141,9 +141,9 @@ struct cache_policy
             entries.push_back(sample_entry{ counter.name, counter.value });
         }
 
-        trace_cache::get_buffer_storage().store(trace_cache::sdk_pmc_sample{
+        trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
             static_cast<uint32_t>(device_id), timestamp, std::move(entries) });
     }
 };
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

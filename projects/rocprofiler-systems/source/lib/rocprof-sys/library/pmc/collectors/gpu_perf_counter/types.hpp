@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys::pmc::collectors::sdk_pmc
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
 /**
@@ -109,4 +109,4 @@ struct enabled_metrics
     uint32_t                        value = 0;
 };
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

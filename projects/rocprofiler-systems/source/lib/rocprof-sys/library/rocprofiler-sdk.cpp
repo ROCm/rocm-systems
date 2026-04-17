@@ -18,7 +18,7 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/collectors/sdk_pmc/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -2697,7 +2697,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // --- SDK PMC Device Counting Service (polled hardware counters) ---
     if(!_counter_events.empty() && !_data->gpu_agents.empty())
     {
-        ROCPROFILER_CALL(rocprofiler_create_context(&_data->sdk_pmc_ctx));
+        ROCPROFILER_CALL(rocprofiler_create_context(&_data->gpu_perf_counter_ctx));
 
         using profile_map_t =
             std::unordered_map<uint64_t, rocprofiler_profile_config_id_t>;
@@ -2792,34 +2792,36 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 for(uint64_t inst = 0; inst < cinfo.dimensions_instances_count; ++inst)
                 {
                     const auto* dim_inst = cinfo.dimensions_instances[inst];
-                    auto        dims =
-                        std::vector<pmc::collectors::sdk_pmc::dimension_position>{};
+                    auto        dims     = std::vector<
+                                   pmc::collectors::gpu_perf_counter::dimension_position>{};
                     for(uint64_t dim_idx = 0; dim_idx < dim_inst->dimensions_count;
                         ++dim_idx)
                     {
                         dims.push_back(
-                            { pmc::collectors::sdk_pmc::abbreviate_dimension_name(
-                                  dim_inst->dimensions[dim_idx]->dimension_name),
+                            { pmc::collectors::gpu_perf_counter::
+                                  abbreviate_dimension_name(
+                                      dim_inst->dimensions[dim_idx]->dimension_name),
                               dim_inst->dimensions[dim_idx]->index });
                     }
                     instance_infos.push_back(
                         { dim_inst->instance_id,
-                          pmc::collectors::sdk_pmc::make_qualified_name(base_name,
-                                                                        dims) });
+                          pmc::collectors::gpu_perf_counter::make_qualified_name(
+                              base_name, dims) });
                 }
             }
             instance_infos_per_agent.push_back(std::move(instance_infos));
             counter_meta_per_agent.push_back(std::move(counter_meta));
 
             ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
-                _data->sdk_pmc_ctx, null_buffer, _agent_id, set_profile, &profile_map));
+                _data->gpu_perf_counter_ctx, null_buffer, _agent_id, set_profile,
+                &profile_map));
         }
 
         if(!agent_ids.empty())
         {
-            pmc::register_sdk_pmc_source(
-                _data->sdk_pmc_ctx.handle, agent_ids, profile_configs, device_indices,
-                counter_names_per_agent, instance_infos_per_agent,
+            pmc::register_gpu_perf_counter_source(
+                _data->gpu_perf_counter_ctx.handle, agent_ids, profile_configs,
+                device_indices, counter_names_per_agent, instance_infos_per_agent,
                 counter_meta_per_agent);
         }
     }

@@ -6,8 +6,8 @@
 #include "core/config.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
-#include "library/pmc/collectors/sdk_pmc/types.hpp"
 #include "logger/debug.hpp"
 #include <cstdint>
 
@@ -162,7 +162,7 @@ struct settings_policy
     /**
      * @brief Get SDK PMC device filter (reuses GPU device filter).
      */
-    static gpu::device_filter get_sdk_pmc_device_filter() noexcept
+    static gpu::device_filter get_gpu_perf_counter_device_filter() noexcept
     {
         return get_device_filter();
     }
@@ -174,9 +174,10 @@ struct settings_policy
      * to indicate counters are active. The actual counter list is injected
      * into the provider via constructor.
      */
-    static sdk_pmc::enabled_metrics get_sdk_pmc_enabled_metrics() noexcept
+    static gpu_perf_counter::enabled_metrics
+    get_gpu_perf_counter_enabled_metrics() noexcept
     {
-        sdk_pmc::enabled_metrics result;
+        gpu_perf_counter::enabled_metrics result;
         result.value = 1;  // non-zero = enabled
         return result;
     }

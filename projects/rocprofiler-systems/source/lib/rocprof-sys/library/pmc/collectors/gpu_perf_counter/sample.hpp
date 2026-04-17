@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys::pmc::collectors::sdk_pmc
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
 /**
@@ -34,7 +34,7 @@ struct sample_entry
 struct sample : trace_cache::cacheable_t
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
-        trace_cache::type_identifier_t::sdk_pmc_sample
+        trace_cache::type_identifier_t::gpu_perf_counter_sample
     };
 
     sample() = default;
@@ -49,17 +49,17 @@ struct sample : trace_cache::cacheable_t
     std::vector<sample_entry> entries;
 };
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
 
 namespace rocprofsys::trace_cache
 {
 
 /// @brief SDK PMC sample type alias
-using sdk_pmc_sample = pmc::collectors::sdk_pmc::sample;
+using gpu_perf_counter_sample = pmc::collectors::gpu_perf_counter::sample;
 
 template <>
 inline void
-serialize(uint8_t* buffer, const pmc::collectors::sdk_pmc::sample& item)
+serialize(uint8_t* buffer, const pmc::collectors::gpu_perf_counter::sample& item)
 {
     size_t     pos         = 0;
     const auto num_entries = static_cast<uint32_t>(item.entries.size());
@@ -74,11 +74,11 @@ serialize(uint8_t* buffer, const pmc::collectors::sdk_pmc::sample& item)
 }
 
 template <>
-inline pmc::collectors::sdk_pmc::sample
+inline pmc::collectors::gpu_perf_counter::sample
 deserialize(uint8_t*& buffer)
 {
-    pmc::collectors::sdk_pmc::sample item;
-    uint32_t                         num_entries = 0;
+    pmc::collectors::gpu_perf_counter::sample item;
+    uint32_t                                  num_entries = 0;
     utility::parse_value(buffer, item.device_id, item.timestamp, num_entries);
     item.entries.resize(num_entries);
     for(uint32_t i = 0; i < num_entries; ++i)
@@ -90,7 +90,7 @@ deserialize(uint8_t*& buffer)
 
 template <>
 inline size_t
-get_size(const pmc::collectors::sdk_pmc::sample& item)
+get_size(const pmc::collectors::gpu_perf_counter::sample& item)
 {
     size_t total_size = utility::get_size(item.device_id, item.timestamp,
                                           static_cast<uint32_t>(item.entries.size()));

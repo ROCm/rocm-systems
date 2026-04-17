@@ -528,23 +528,25 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
+rocpd_processor_t::handle(
+    [[maybe_unused]] const gpu_perf_counter_sample& _gpu_perf_counter)
 {
-    if(_sdk_pmc.entries.empty()) return;
+    if(_gpu_perf_counter.entries.empty()) return;
 
     const auto* _name            = "rocm_counter_collection";
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
     auto base_id =
-        m_agent_manager->get_agent_by_type_index(_sdk_pmc.device_id, agent_type::GPU)
+        m_agent_manager
+            ->get_agent_by_type_index(_gpu_perf_counter.device_id, agent_type::GPU)
             .base_id;
 
-    auto& name_lookup = m_sdk_pmc_name_lookup[_sdk_pmc.device_id];
+    auto& name_lookup = m_gpu_perf_counter_name_lookup[_gpu_perf_counter.device_id];
     if(name_lookup.empty())
     {
         const auto* name_entries =
-            m_metadata->get_sdk_pmc_counter_names(_sdk_pmc.device_id);
+            m_metadata->get_gpu_perf_counter_counter_names(_gpu_perf_counter.device_id);
         if(name_entries)
         {
             for(const auto& ne : *name_entries)
@@ -552,7 +554,7 @@ rocpd_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
         }
     }
 
-    for(const auto& entry : _sdk_pmc.entries)
+    for(const auto& entry : _gpu_perf_counter.entries)
     {
         auto pmc_name  = std::string(entry.name);
         auto lookup_it = name_lookup.find(pmc_name);
@@ -562,7 +564,8 @@ rocpd_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
 
         m_data_processor->insert_pmc_event(event_id, base_id, pmc_name.c_str(),
                                            entry.value);
-        m_data_processor->insert_sample(track_name.c_str(), _sdk_pmc.timestamp, event_id);
+        m_data_processor->insert_sample(track_name.c_str(), _gpu_perf_counter.timestamp,
+                                        event_id);
     }
 }
 

@@ -10,7 +10,7 @@ add_subdirectory(rocprofiler_sdk)
 set(pmc_device_provider_sources
     ${pmc_amd_smi_provider_sources}
     ${pmc_procfs_provider_sources}
-    ${pmc_sdk_pmc_provider_sources}
+    ${pmc_gpu_perf_counter_provider_sources}
 )
 
 # Add to parent variable (will be used by pmc CMakeLists.txt)

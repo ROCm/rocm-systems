@@ -1462,10 +1462,11 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
+perfetto_processor_t::handle(
+    [[maybe_unused]] const gpu_perf_counter_sample& _gpu_perf_counter)
 {
-    const auto _ts        = _sdk_pmc.timestamp;
-    const auto _device_id = _sdk_pmc.device_id;
+    const auto _ts        = _gpu_perf_counter.timestamp;
+    const auto _device_id = _gpu_perf_counter.device_id;
 
     auto track_it = m_pmc_track_map.find(
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value));
@@ -1473,10 +1474,11 @@ perfetto_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
 
     const auto& track_info = track_it->second;
 
-    auto& name_lookup = m_sdk_pmc_name_lookup[_device_id];
+    auto& name_lookup = m_gpu_perf_counter_name_lookup[_device_id];
     if(name_lookup.empty())
     {
-        const auto* name_entries = m_metadata.get_sdk_pmc_counter_names(_device_id);
+        const auto* name_entries =
+            m_metadata.get_gpu_perf_counter_counter_names(_device_id);
         if(name_entries)
         {
             for(const auto& ne : *name_entries)
@@ -1484,7 +1486,7 @@ perfetto_processor_t::handle([[maybe_unused]] const sdk_pmc_sample& _sdk_pmc)
         }
     }
 
-    for(const auto& entry : _sdk_pmc.entries)
+    for(const auto& entry : _gpu_perf_counter.entries)
     {
         const auto  entry_name = std::string(entry.name);
         auto        lookup_it  = name_lookup.find(entry_name);

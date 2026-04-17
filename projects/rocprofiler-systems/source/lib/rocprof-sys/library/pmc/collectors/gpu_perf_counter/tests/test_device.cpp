@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/pmc/collectors/sdk_pmc/device.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/device_providers/rocprofiler_sdk/drivers/tests/mock_driver.hpp"
 
 #include <gmock/gmock.h>
@@ -9,7 +9,7 @@
 
 #include <memory>
 
-using namespace rocprofsys::pmc::collectors::sdk_pmc;
+using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
 using ::testing::_;
 using ::testing::Return;
 using ::testing::StrictMock;
@@ -19,7 +19,7 @@ using MockDriver = ::testing::StrictMock<
 using instance_info_t =
     rocprofsys::pmc::device_providers::rocprofiler_sdk::counter_instance_info;
 
-namespace rocprofsys::pmc::collectors::sdk_pmc::testing
+namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 {
 
 class SdkPmcDeviceTest : public ::testing::Test
@@ -95,7 +95,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
     enabled_metrics enabled;
     enabled.value = 1;
 
-    auto result = dev.get_sdk_pmc_metrics(enabled, 1000000);
+    auto result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.counters.size(), 2U);
     EXPECT_EQ(result.counters[0].name, "SQ_WAVES");
@@ -137,7 +137,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
     enabled_metrics enabled;
     enabled.value = 1;
 
-    auto result = dev.get_sdk_pmc_metrics(enabled, 1000000);
+    auto result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.counters.size(), 4U);
     EXPECT_EQ(result.counters[0].name, "SQC_ICACHE_HITS[WGP=0,SA=0,SE=0]");
@@ -179,7 +179,7 @@ TEST_F(SdkPmcDeviceTest, SampleSkipsUnknownInstanceIds)
     enabled_metrics enabled;
     enabled.value = 1;
 
-    auto result = dev.get_sdk_pmc_metrics(enabled, 1000000);
+    auto result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.counters.size(), 1U);
     EXPECT_EQ(result.counters[0].name, "SQ_WAVES");
@@ -197,7 +197,7 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
     enabled_metrics enabled;
     enabled.value = 1;
 
-    auto result = dev.get_sdk_pmc_metrics(enabled, 1000000);
+    auto result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.counters.empty());
 }
@@ -218,7 +218,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
     enabled_metrics enabled;
     enabled.value = 1;
 
-    auto result = dev.get_sdk_pmc_metrics(enabled, 1000000);
+    auto result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.counters.empty());
 }
@@ -255,4 +255,4 @@ TEST_F(SdkPmcDeviceTest, QualifiedNameHelpers)
               "SQC_ICACHE_HITS[WGP=0,SA=1,SE=2]");
 }
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc::testing
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing

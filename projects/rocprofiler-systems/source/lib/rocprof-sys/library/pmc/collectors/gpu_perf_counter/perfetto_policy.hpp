@@ -4,7 +4,7 @@
 #pragma once
 
 #include "core/perfetto.hpp"
-#include "library/pmc/collectors/sdk_pmc/types.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
@@ -15,30 +15,30 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys::pmc::collectors::sdk_pmc
+namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
 namespace detail
 {
 
-struct sdk_pmc_perfetto_sample
+struct gpu_perf_counter_perfetto_sample
 {
     uint64_t timestamp = 0;
     metrics  metric_values;
 };
 
-struct sdk_pmc_perfetto_device_data
+struct gpu_perf_counter_perfetto_device_data
 {
-    std::unique_ptr<std::vector<sdk_pmc_perfetto_sample>> samples;
+    std::unique_ptr<std::vector<gpu_perf_counter_perfetto_sample>> samples;
     // track_index per counter name (counter_name -> track index in
     // perfetto_counter_track)
     std::map<std::string, size_t> counter_tracks;
 };
 
-inline std::map<size_t, sdk_pmc_perfetto_device_data>&
+inline std::map<size_t, gpu_perf_counter_perfetto_device_data>&
 get_perfetto_data()
 {
-    static std::map<size_t, sdk_pmc_perfetto_device_data> data;
+    static std::map<size_t, gpu_perf_counter_perfetto_device_data> data;
     return data;
 }
 
@@ -65,7 +65,8 @@ struct perfetto_policy
         {
             auto idx                         = entry.device->get_index();
             detail::get_perfetto_data()[idx] = {
-                std::make_unique<std::vector<detail::sdk_pmc_perfetto_sample>>(), {}
+                std::make_unique<std::vector<detail::gpu_perf_counter_perfetto_sample>>(),
+                {}
             };
         }
     }
@@ -105,7 +106,7 @@ struct perfetto_policy
         }
 
         it->second.samples->emplace_back(
-            detail::sdk_pmc_perfetto_sample{ timestamp, metric_values });
+            detail::gpu_perf_counter_perfetto_sample{ timestamp, metric_values });
     }
 
     /**
@@ -153,4 +154,4 @@ struct perfetto_policy
     }
 };
 
-}  // namespace rocprofsys::pmc::collectors::sdk_pmc
+}  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

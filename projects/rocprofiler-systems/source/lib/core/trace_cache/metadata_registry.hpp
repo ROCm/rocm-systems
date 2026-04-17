@@ -161,9 +161,9 @@ struct kernel_symbol_less
  * @brief Maps a sample value index to its pmc_info and track names.
  *
  * Stored in metadata_registry per device. Processors use these to
- * emit pmc_events and samples from batched sdk_pmc_sample values.
+ * emit pmc_events and samples from batched gpu_perf_counter_sample values.
  */
-struct sdk_pmc_name_entry
+struct gpu_perf_counter_name_entry
 {
     std::string pmc_info_name;  ///< Qualified counter name, e.g. "SQ_WAVES[WGP=0,SA=0]"
     std::string track_name;     ///< Perfetto track name, e.g. "GPU [0] SQ_WAVES (S)"
@@ -228,8 +228,8 @@ struct metadata_registry
      * @param device_id Device index.
      * @param entries Ordered list of counter name entries matching sample value order.
      */
-    void set_sdk_pmc_counter_names(uint32_t                              device_id,
-                                   std::vector<info::sdk_pmc_name_entry> entries);
+    void set_gpu_perf_counter_counter_names(
+        uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
 
     /**
      * @brief Get the ordered counter names for a device's batched PMC sample.
@@ -237,8 +237,8 @@ struct metadata_registry
      * @param device_id Device index.
      * @return Pointer to the entry vector, or nullptr if not registered.
      */
-    const std::vector<info::sdk_pmc_name_entry>* get_sdk_pmc_counter_names(
-        uint32_t device_id) const;
+    const std::vector<info::gpu_perf_counter_name_entry>*
+    get_gpu_perf_counter_counter_names(uint32_t device_id) const;
 
 private:
     common::synchronized<info::process> m_process{};
@@ -266,7 +266,8 @@ private:
     };
 
     // SDK PMC counter name ordering: device_id -> ordered name entries
-    std::map<uint32_t, std::vector<info::sdk_pmc_name_entry>> m_sdk_pmc_counter_names{};
+    std::map<uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
+        m_gpu_perf_counter_counter_names{};
 
     using callback_rename_map_t =
         std::map<rocprofiler_tracing_operation_t, std::string_view>;
