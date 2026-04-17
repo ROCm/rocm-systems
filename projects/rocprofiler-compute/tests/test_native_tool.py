@@ -40,7 +40,7 @@ class TestNativeTool:
             lib_path = NativeTool().get_collector_library_path(
                 Path("incorrect_compute_path"), installed_rocprofv3_path
             )
-        assert lib_path == None
+        assert lib_path is None
 
     def test_when_incorrect_rocprofv3_path_provided__asserts(
         self, installed_compute_path: Path
@@ -50,18 +50,19 @@ class TestNativeTool:
             lib_path = NativeTool().get_collector_library_path(
                 installed_compute_path, Path("incorrect_rocprofv3_path")
             )
-        assert lib_path == None
+        assert lib_path is None
 
     def test_when_no_lib_exists__builds_it(
         self, sources_path, installed_rocprofv3_path: Path, sources_compute_path: Path
     ):
-        def mock_build_collector():
+        def mock_build_collector(_src_path: Path) -> None:
             self.__create_file(sources_path, Path(NativeTool.lib_relative_path))
 
-        with patch.object(
-            NativeTool, "_generate_cmake_project", return_value=True
-        ) and patch.object(
-            NativeTool, "_build_cmake_project", side_effect=mock_build_collector
+        with (
+            patch.object(NativeTool, "_generate_cmake_project", return_value=True),
+            patch.object(
+                NativeTool, "_build_cmake_project", side_effect=mock_build_collector
+            ),
         ):
             lib_path = NativeTool().get_collector_library_path(
                 sources_compute_path, installed_rocprofv3_path
