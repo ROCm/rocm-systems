@@ -7,7 +7,6 @@
 
 import argparse
 import logging
-import multiprocessing
 import os
 import platform
 import re
@@ -15,7 +14,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 
@@ -320,9 +318,8 @@ def _generate_dashboard(cmake_cmd: str) -> str:
     group = "TheRock"  # Group for the dashboard
     ARGN = "${ARGN}"  # Arguments for dashboard submission
 
-    REPO_SOURCE_DIR = Path(__file__).resolve().parent
-    print(f"REPO_SOURCE_DIR: {REPO_SOURCE_DIR}")
-    sys.exit(1)
+    # TheRock superproject root (run-therock-ci.py lives at rocm-systems/.github/scripts/).
+    repo_source_dir = str(Path(__file__).resolve().parents[3])
     # Generate initial dashboard.cmake content with minimum necessary version and dashboard_submit macro
     _script = f"""
     cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
@@ -354,7 +351,7 @@ def _generate_dashboard(cmake_cmd: str) -> str:
     set(STAGES "START;UPDATE;CONFIGURE;BUILD;TEST;SUBMIT")
 
     ctest_start({model} GROUP {group})
-    ctest_update(SOURCE "{REPO_SOURCE_DIR}" RETURN_VALUE _update_ret
+    ctest_update(SOURCE "{repo_source_dir}" RETURN_VALUE _update_ret
                     CAPTURE_CMAKE_ERROR _update_err)
     ctest_configure(BUILD "{BINARY_DIR}" RETURN_VALUE _configure_ret)
     dashboard_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
