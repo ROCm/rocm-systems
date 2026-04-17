@@ -137,6 +137,14 @@ target_link_libraries(hotswap-transpiler
     LLVMObjCARCOpts
 )
 
+# --- Per-file raiser CLI (kerneldex coverage contract) ------------------------
+# A small standalone binary that raises every kernel in a single .co/.hsaco
+# file, fork-isolated, and emits the OK/FAIL line protocol that
+# `kerneldex coverage --tool` parses. No gtest dependency so it can live
+# outside the test harness and be invoked directly as a coverage tool.
+add_executable(raise_cli raise_cli.cpp)
+target_link_libraries(raise_cli PRIVATE hotswap-transpiler)
+
 # --- GoogleTest-based unified test binary -------------------------------------
 find_package(GTest REQUIRED)
 enable_testing()
@@ -167,6 +175,8 @@ if(hip_FOUND)
     tests/gfx1250_gpu_test.cpp
     tests/integration_test.cpp
     tests/cross_arch_gpu_test.cpp
+    tests/divergent_exec_gpu_test.cpp
+    tests/divergent_vgpr_gpu_test.cpp
   )
   message(STATUS "GPU tests enabled (HIP found)")
 else()
@@ -215,3 +225,7 @@ gtest_discover_tests(transpiler_tests
 set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/xfail.cmake"
 )
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/lit_tests/CMakeLists.txt)
+  add_subdirectory(lit_tests)
+endif()

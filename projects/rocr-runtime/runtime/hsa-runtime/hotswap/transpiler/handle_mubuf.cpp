@@ -155,7 +155,7 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
               {srd, voffset, soffset, auxFlags}, "buf_ld");
           Value *ext = isBufSigned ? ctx.B.CreateSExt(loaded, ctx.i32Ty)
                                    : ctx.B.CreateZExt(loaded, ctx.i32Ty);
-          ctx.regs.writeReg32(ctx.B, vdata, ext);
+          ctx.writeReg32(vdata, ext);
         } else {
           Function *bufLdI16 = Intrinsic::getOrInsertDeclaration(
               &ctx.M,
@@ -165,7 +165,7 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
               {srd, voffset, soffset, auxFlags}, "buf_ld");
           Value *ext = isBufSigned ? ctx.B.CreateSExt(loaded, ctx.i32Ty)
                                    : ctx.B.CreateZExt(loaded, ctx.i32Ty);
-          ctx.regs.writeReg32(ctx.B, vdata, ext);
+          ctx.writeReg32(vdata, ext);
         }
       } else if (dwords == 1) {
         Function *bufLd = Intrinsic::getOrInsertDeclaration(
@@ -174,7 +174,7 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
             {ctx.i32Ty});
         Value *loaded = ctx.B.CreateCall(bufLd,
             {srd, voffset, soffset, auxFlags}, "buf_ld");
-        ctx.regs.writeReg32(ctx.B, vdata, loaded);
+        ctx.writeReg32(vdata, loaded);
       } else {
         auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
         Function *bufLd = Intrinsic::getOrInsertDeclaration(
@@ -183,7 +183,7 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
             {vecTy});
         Value *loaded = ctx.B.CreateCall(bufLd,
             {srd, voffset, soffset, auxFlags}, "buf_ld");
-        ctx.regs.writeRegVec(ctx.B, vdata, loaded);
+        ctx.writeRegVec(vdata, loaded);
       }
       hr.handled = true;
     return hr;
@@ -218,12 +218,14 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
       if (isSubDword) {
         Type *memTy = Type::getIntNTy(ctx.C, loadBits);
         Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, storeData), memTy);
-        ctx.B.CreateStore(val, storePtr);
+        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
       } else if (dwords == 1) {
-        ctx.B.CreateStore(ctx.regs.readReg32(ctx.B, storeData), storePtr);
+        Value *val = ctx.regs.readReg32(ctx.B, storeData);
+        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
       } else {
         auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
-        ctx.B.CreateStore(ctx.regs.readRegVec(ctx.B, storeData, vecTy), storePtr);
+        Value *val = ctx.regs.readRegVec(ctx.B, storeData, vecTy);
+        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
       }
       hr.handled = true;
     return hr;
@@ -306,7 +308,7 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     Value *ldsAddr = ctx.regs.readReg32(ctx.B, m0Reg);
     auto *ldsPtrTy = PointerType::get(ctx.C, 3);
     Value *ldsPtr = ctx.B.CreateIntToPtr(ldsAddr, ldsPtrTy);
-    ctx.B.CreateStore(loaded, ldsPtr);
+    ctx.emitUnderExec([&] { ctx.B.CreateStore(loaded, ldsPtr); });
 
     hr.handled = true;
     return hr;
@@ -358,7 +360,10 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
         return hr;
     }
     if (isFP) data = ctx.B.CreateBitCast(data, atomicTy);
-    ctx.B.CreateAtomicRMW(atomicOp, gep, data, MaybeAlign(), AtomicOrdering::Monotonic);
+    ctx.emitUnderExec([&] {
+      ctx.B.CreateAtomicRMW(atomicOp, gep, data, MaybeAlign(),
+                            AtomicOrdering::Monotonic);
+    });
     hr.handled = true;
     return hr;
   }

@@ -1,0 +1,32 @@
+# -*- Python -*-
+"""CMake-generated site configuration for llvm-lit (do not edit in the build tree).
+
+CMake configure_file(@ONLY) fills TRANSPILER_BUILD_DIR, LIT_SOURCE_DIR, tool paths,
+and LIT_FIXTURE_*_CO variables declared in lit_tests/CMakeLists.txt.
+"""
+
+import os
+
+config.transpiler_build_dir = r"@TRANSPILER_BUILD_DIR@"
+config.raise_cli = r"@LIT_TOOL_RAISE_CLI@"
+config.file_check = r"@LIT_TOOL_FILECHECK@"
+config.not_tool = r"@LIT_TOOL_NOT@"
+config.test_source_root = r"@LIT_SOURCE_DIR@"
+# Keep lit's per-test `Output/` artifacts (the generated `.script` files
+# and any tmpfiles a test writes to `%t`) out of the source tree. Without
+# this, lit defaults to co-locating `Output/` next to each .ll in the
+# source dir, which pollutes `git status` after every run.
+config.test_exec_root = os.path.dirname(os.path.abspath(__file__))
+
+# Single source of truth for fixture paths; lit.cfg.py maps tags to %<tag>_co.
+config.fixtures = {
+    "abort_gate": r"@LIT_FIXTURE_ABORT_GATE_CO@",
+    "cross_wave_warn": r"@LIT_FIXTURE_CROSS_WAVE_WARN_CO@",
+    "divergent_vgpr_ir": r"@LIT_FIXTURE_DIVERGENT_VGPR_IR_CO@",
+    "scalar_exec_writers": r"@LIT_FIXTURE_SCALAR_EXEC_WRITERS_CO@",
+    "saveexec": r"@LIT_FIXTURE_SAVEEXEC_CO@",
+}
+
+lit_config.load_config(
+    config, os.path.join(r"@LIT_SOURCE_DIR@", "lit.cfg.py")
+)

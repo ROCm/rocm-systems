@@ -111,7 +111,7 @@ HandlerResult handleMFMA(RaiseContext &ctx, const DecodedInst &di,
   // AGPR moves travel through the MFMA format bit but are not MFMA ops.
   if (sop == SemOp::V_ACCVGPR_WRITE_B32 ||
       sop == SemOp::V_ACCVGPR_READ_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    ctx.writeReg32(op.dst(), op.src(0));
     hr.handled = true;
     return hr;
   }
@@ -205,7 +205,7 @@ HandlerResult handleMFMA(RaiseContext &ctx, const DecodedInst &di,
         ctx.B.CreateCall(mfmaFn, {a, b, c, cbsz, abid, blgp}, "mfma");
   }
 
-  ctx.regs.writeRegVec(ctx.B, dest, callRet);
+  ctx.writeRegVec(dest, callRet);
   hr.handled = true;
   return hr;
 }

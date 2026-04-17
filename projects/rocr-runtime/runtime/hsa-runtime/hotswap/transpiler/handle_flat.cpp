@@ -50,7 +50,7 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       ext = ctx.B.CreateOr(ctx.B.CreateAnd(prev, ConstantInt::get(ctx.i32Ty, 0xFFFF)),
                        ctx.B.CreateShl(ext, 16), "d16hi");
     }
-    ctx.regs.writeReg32(ctx.B, dest, ext);
+    ctx.writeReg32(dest, ext);
     hr.handled = true;
     return hr;
   }
@@ -98,7 +98,7 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
 
     if (loadDwords == 1) {
-      ctx.regs.writeReg32(ctx.B, dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "gload"), ctx.i32Ty));
+      ctx.writeReg32(dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "gload"), ctx.i32Ty));
     } else {
       Type *vecTy = FixedVectorType::get(ctx.i32Ty, loadDwords);
       Value *loaded = ctx.B.CreateLoad(vecTy, addr, "gload");
@@ -106,7 +106,7 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
         ParsedReg sub = dest;
         sub.baseIdx = dest.baseIdx + d;
         sub.width = 1;
-        ctx.regs.writeReg32(ctx.B, sub, ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
+        ctx.writeReg32(sub, ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
       }
     }
     hr.handled = true;
@@ -174,12 +174,14 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     if (storeDwords == 0) {
       Type *memTy = Type::getIntNTy(ctx.C, storeBits);
       Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, stData), memTy);
-      ctx.B.CreateStore(val, addr);
+      ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else if (storeDwords == 1) {
-      ctx.B.CreateStore(ctx.regs.readReg32(ctx.B, stData), addr);
+      Value *val = ctx.regs.readReg32(ctx.B, stData);
+      ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else {
       auto *vecTy = FixedVectorType::get(ctx.i32Ty, storeDwords);
-      ctx.B.CreateStore(ctx.regs.readRegVec(ctx.B, stData, vecTy), addr);
+      Value *val = ctx.regs.readRegVec(ctx.B, stData, vecTy);
+      ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     }
     hr.handled = true;
     return hr;
@@ -202,7 +204,7 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     Value *loaded = ctx.B.CreateLoad(loadTy, addr, "flat_load_sub");
     bool isUnsigned = sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_USHORT;
     Value *ext = isUnsigned ? ctx.B.CreateZExt(loaded, ctx.i32Ty) : ctx.B.CreateSExt(loaded, ctx.i32Ty);
-    ctx.regs.writeReg32(ctx.B, dest, ext);
+    ctx.writeReg32(dest, ext);
     hr.handled = true;
     return hr;
   }
@@ -225,13 +227,13 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
 
     if (loadDwords == 1) {
-      ctx.regs.writeReg32(ctx.B, dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "flat_load"), ctx.i32Ty));
+      ctx.writeReg32(dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "flat_load"), ctx.i32Ty));
     } else {
       Type *vecTy = FixedVectorType::get(ctx.i32Ty, loadDwords);
       Value *loaded = ctx.B.CreateLoad(vecTy, addr, "flat_load");
       for (int d = 0; d < loadDwords; d++) {
         ParsedReg sub = dest; sub.baseIdx = dest.baseIdx + d; sub.width = 1;
-        ctx.regs.writeReg32(ctx.B, sub, ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
+        ctx.writeReg32(sub, ctx.B.CreateExtractElement(loaded, ctx.B.getInt32(d)));
       }
     }
     hr.handled = true;
@@ -265,12 +267,14 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     if (storeDwords == 0) {
       Type *memTy = Type::getIntNTy(ctx.C, storeBits);
       Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, stData), memTy);
-      ctx.B.CreateStore(val, addr);
+      ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else if (storeDwords == 1) {
-      ctx.B.CreateStore(ctx.regs.readReg32(ctx.B, stData), addr);
+      Value *val = ctx.regs.readReg32(ctx.B, stData);
+      ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     } else {
       auto *vecTy = FixedVectorType::get(ctx.i32Ty, storeDwords);
-      ctx.B.CreateStore(ctx.regs.readRegVec(ctx.B, stData, vecTy), addr);
+      Value *val = ctx.regs.readRegVec(ctx.B, stData, vecTy);
+      ctx.emitUnderExec([&] { ctx.B.CreateStore(val, addr); });
     }
     hr.handled = true;
     return hr;
@@ -302,10 +306,15 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       ParsedReg srcPair = op.srcReg(dataIdx);
       ParsedReg newReg = srcPair; newReg.baseIdx += 1; newReg.width = 1;
       Value *newVal = ctx.regs.readReg32(ctx.B, newReg);
-      auto *cas = ctx.B.CreateAtomicCmpXchg(addr, cmpVal, newVal,
-        MaybeAlign(), AtomicOrdering::SequentiallyConsistent,
-        AtomicOrdering::SequentiallyConsistent);
-      if (di.numDefs > 0) ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateExtractValue(cas, 0));
+      ctx.emitUnderExec([&] {
+        auto *cas = ctx.B.CreateAtomicCmpXchg(
+            addr, cmpVal, newVal, MaybeAlign(),
+            AtomicOrdering::SequentiallyConsistent,
+            AtomicOrdering::SequentiallyConsistent);
+        if (di.numDefs > 0)
+          ctx.regs.writeReg32(ctx.B, op.dst(),
+                              ctx.B.CreateExtractValue(cas, 0));
+      });
       hr.handled = true;
     return hr;
     }
@@ -335,13 +344,16 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
         hr.handled = false;
         return hr;
     }
-    auto *rmw = ctx.B.CreateAtomicRMW(atomicOp, addr, data,
-      MaybeAlign(), AtomicOrdering::SequentiallyConsistent);
-    if (di.numDefs > 0) {
-      Value *retVal = rmw;
-      if (isFP) retVal = ctx.B.CreateBitCast(retVal, ctx.i32Ty);
-      ctx.regs.writeReg32(ctx.B, op.dst(), retVal);
-    }
+    ctx.emitUnderExec([&] {
+      auto *rmw = ctx.B.CreateAtomicRMW(
+          atomicOp, addr, data, MaybeAlign(),
+          AtomicOrdering::SequentiallyConsistent);
+      if (di.numDefs > 0) {
+        Value *retVal = rmw;
+        if (isFP) retVal = ctx.B.CreateBitCast(retVal, ctx.i32Ty);
+        ctx.regs.writeReg32(ctx.B, op.dst(), retVal);
+      }
+    });
     hr.handled = true;
     return hr;
   }
@@ -369,9 +381,14 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       ParsedReg srcPair = op.srcReg(dataIdx);
       ParsedReg newReg = srcPair; newReg.baseIdx += 1; newReg.width = 1;
       Value *newVal = ctx.regs.readReg32(ctx.B, newReg);
-      auto *cas = ctx.B.CreateAtomicCmpXchg(addr, cmpVal, newVal,
-        MaybeAlign(), AtomicOrdering::Monotonic, AtomicOrdering::Monotonic);
-      if (di.numDefs > 0) ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateExtractValue(cas, 0));
+      ctx.emitUnderExec([&] {
+        auto *cas = ctx.B.CreateAtomicCmpXchg(
+            addr, cmpVal, newVal, MaybeAlign(), AtomicOrdering::Monotonic,
+            AtomicOrdering::Monotonic);
+        if (di.numDefs > 0)
+          ctx.regs.writeReg32(ctx.B, op.dst(),
+                              ctx.B.CreateExtractValue(cas, 0));
+      });
       hr.handled = true;
     return hr;
     }
@@ -406,12 +423,14 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
         return hr;
     }
     if (isFP) data = ctx.B.CreateBitCast(data, atomicTy);
-    Value *prev = ctx.B.CreateAtomicRMW(atomicOp, addr, data, MaybeAlign(),
-                                     AtomicOrdering::Monotonic);
-    if (di.numDefs > 0) {
-      if (isFP) prev = ctx.B.CreateBitCast(prev, ctx.i32Ty);
-      ctx.regs.writeReg32(ctx.B, op.dst(), prev);
-    }
+    ctx.emitUnderExec([&] {
+      Value *prev = ctx.B.CreateAtomicRMW(atomicOp, addr, data, MaybeAlign(),
+                                          AtomicOrdering::Monotonic);
+      if (di.numDefs > 0) {
+        if (isFP) prev = ctx.B.CreateBitCast(prev, ctx.i32Ty);
+        ctx.regs.writeReg32(ctx.B, op.dst(), prev);
+      }
+    });
     hr.handled = true;
     return hr;
   }

@@ -3,8 +3,13 @@
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h" // AMDGPU::VCC, AMDGPU::EXEC, ...
 #include "SIDefines.h"                        // AMDGPU::HWEncoding::*
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -224,8 +229,12 @@ Value *RaiseContext::readOp32(const DecodedInst &di, unsigned opIdx) {
   if (di.isReg(opIdx)) {
     ParsedReg pr = parseReg(di.getReg(opIdx), opIdx);
     if (pr.kind == ParsedReg::VCC) {
-      Value *v = regs.loadVCC(B);
-      return B.CreateSExt(v, i32Ty);
+      // Reading VCC as an i32 (wave32 wave-mask, or low 32 bits on
+      // wave64) is a cross-lane collection: emit amdgcn.ballot so each
+      // lane gets the same bit-mask assembled from all lanes' per-lane
+      // VCC bits. On wave64 this is the low 32 lanes; upper-half reads
+      // are separately materialised via readOp64.
+      return regs.readVCCAsWaveMask(B, i32Ty);
     }
     if (pr.kind == ParsedReg::EXEC) {
       Value *v = regs.loadExec(B);
@@ -266,7 +275,7 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
   if (di.isReg(opIdx)) {
     ParsedReg pr = parseReg(di.getReg(opIdx), opIdx);
     if (pr.kind == ParsedReg::VCC)
-      return B.CreateSExt(regs.loadVCC(B), i64Ty);
+      return regs.readVCCAsWaveMask(B, i64Ty);
     if (pr.kind == ParsedReg::EXEC) {
       Value *v = regs.loadExec(B);
       if (v->getType() != i64Ty)
@@ -294,11 +303,181 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
   return UndefValue::get(i64Ty);
 }
 
+Value *RaiseContext::emitLaneActiveBit() {
+  // Memoisation (see RaiseContext::resetLaneActiveCache docs).
+  //
+  // Dominance argument for reusing a cached i1 across blocks within a
+  // single source instruction's emission:
+  //
+  //   Each emitUnderExec diamond is structurally linear:
+  //
+  //     preBB ──┬─▶ doBB ──▶ skipBB
+  //             └────────────▶ skipBB   (the conditional skip edge)
+  //
+  //   Chaining N emitUnderExecs yields
+  //     preBB → (doBB1 → skipBB1) → (doBB2 → skipBB2) → … → skipBBN
+  //
+  //   where every successor BB has preBB on its dominator path. So an
+  //   i1 defined in preBB dominates every subsequent doBB/skipBB emitted
+  //   by the same source-instruction handler.
+  //
+  // The reuse invariant is therefore maintained by the invalidation
+  // contract alone:
+  //   * The raiser main loop calls `resetLaneActiveCache` at every
+  //     source-instruction boundary, covering (a) possible EXEC writes
+  //     by the prior instruction and (b) jumps into offset-keyed
+  //     named BBs where the prior `active` no longer dominates.
+  //   * `ctx.storeExec` resets on EXEC mutation.
+  //   * Any handler that writes EXEC via a lower-level path is
+  //     responsible for calling `resetLaneActiveCache` itself (the
+  //     allow-list audit in raiser.cpp documents that all such sites
+  //     route through `ctx.storeExec` or `writeReg*`→`storeExec`).
+  //
+  // Consequently, a cache *hit* is valid regardless of whether the
+  // current BB equals `cachedLaneActiveBB`.
+  if (cachedLaneActive)
+    return cachedLaneActive;
+
+  // Derive lane id 0..waveSize-1 from mbcnt with an all-ones mask. mbcnt_lo
+  // counts set bits in mask[0..31] below the current lane, and we pass -1
+  // so every bit is set; the result is therefore the lane id for wave32
+  // and the low-half lane id for wave64. mbcnt_hi then folds in the upper
+  // half for wave64. The wave-size check is on the *target* ISA because
+  // lane_id is a runtime property of the hardware the raised IR runs on.
+  Function *mbcntLo = Intrinsic::getOrInsertDeclaration(
+      &M, Intrinsic::amdgcn_mbcnt_lo);
+  Value *allOnes = ConstantInt::getSigned(i32Ty, -1);
+  Value *zero32 = ConstantInt::get(i32Ty, 0);
+  Value *laneId = B.CreateCall(mbcntLo, {allOnes, zero32}, "spe_lane_lo");
+  if (!targetIsa.isWave32()) {
+    Function *mbcntHi = Intrinsic::getOrInsertDeclaration(
+        &M, Intrinsic::amdgcn_mbcnt_hi);
+    laneId = B.CreateCall(mbcntHi, {allOnes, laneId}, "spe_lane_id");
+  }
+
+  // Project the target-lane id onto the source EXEC mask. The model is:
+  //
+  //   target wave (waveMaskTy wide) is partitioned into
+  //   `waveMaskBits / execBits` sub-waves of source-width lanes, each
+  //   running an independent "source-wave replica". A target lane is
+  //   active iff bit `(lane_id MOD source_wave_bits)` of the source EXEC
+  //   mask is set.
+  //
+  // Why modulo: on wave32-source → wave64-target, the target hardware
+  // dispatches 64 independent threads per wave even though the source was
+  // authored for 32. The source EXEC mask logically applies to each half
+  // identically (a source-level `s_and_b32 exec_lo, ..., mask` masks the
+  // same source thread positions in both halves). This matches the
+  // behaviour of the AMDGPU runtime when a wave32 kernel is lifted onto
+  // wave64 hardware — upper-half lanes are *not* disabled, they are
+  // additional source-threads of the same kernel.
+  //
+  // Same-wave (wave32→wave32 or wave64→wave64) and narrowing
+  // (wave64→wave32) cases are the identity: lane_id < source_wave_bits
+  // already, so the modulo is a no-op, and the shift happens at source
+  // width which is where the source ISA's EXEC encoding naturally lives.
+  //
+  // Shifting at source width also sidesteps the LLVM-IR poison rule that
+  // `lshr iN, M` is poison for M >= N: the pre-modulo clamps the shift
+  // into [0, execBits).
+  Value *execVal = regs.loadExec(B);
+  Type *execTy = execVal->getType();
+  unsigned execBits = execTy->getPrimitiveSizeInBits();
+  Value *laneIdInExec = B.CreateZExtOrTrunc(laneId, execTy, "spe_lane_idx");
+  // execBits is a power of two (32 or 64), so modulo is bitwise AND.
+  Value *laneMod = B.CreateAnd(
+      laneIdInExec, ConstantInt::get(execTy, execBits - 1),
+      "spe_lane_mod");
+  Value *shifted = B.CreateLShr(execVal, laneMod, "spe_exec_at_lane");
+  Value *bit = B.CreateAnd(shifted, ConstantInt::get(execTy, 1), "spe_exec_bit");
+  Value *active =
+      B.CreateICmpNE(bit, ConstantInt::get(execTy, 0), "spe_lane_active");
+  cachedLaneActive = active;
+  cachedLaneActiveBB = B.GetInsertBlock();
+  return active;
+}
+
+void RaiseContext::writeReg32(ParsedReg pr, Value *v) {
+  if (pr.kind == ParsedReg::VGPR || pr.kind == ParsedReg::AGPR) {
+    emitUnderExec([&] { regs.writeReg32(B, pr, v); });
+  } else {
+    regs.writeReg32(B, pr, v);
+    // regs.writeReg32 dispatches to storeExec when pr.kind == EXEC. The
+    // lane_active memo must be invalidated so subsequent emitUnderExec
+    // calls recompute against the new EXEC value rather than the pre-
+    // write snapshot. See resetLaneActiveCache docs in raise_context.hpp.
+    if (pr.kind == ParsedReg::EXEC)
+      resetLaneActiveCache();
+  }
+}
+
+void RaiseContext::writeReg64(ParsedReg pr, Value *v) {
+  if (pr.kind == ParsedReg::VGPR || pr.kind == ParsedReg::AGPR) {
+    emitUnderExec([&] { regs.writeReg64(B, pr, v); });
+  } else {
+    regs.writeReg64(B, pr, v);
+    if (pr.kind == ParsedReg::EXEC)
+      resetLaneActiveCache();
+  }
+}
+
+void RaiseContext::writeRegVec(ParsedReg pr, Value *v) {
+  if (pr.kind == ParsedReg::VGPR || pr.kind == ParsedReg::AGPR) {
+    emitUnderExec([&] { regs.writeRegVec(B, pr, v); });
+  } else {
+    // Vector SGPR writes can't target EXEC (EXEC is scalar/pair, never
+    // vector), so no cache invalidation is needed.
+    regs.writeRegVec(B, pr, v);
+  }
+}
+
+void RaiseContext::writeRegExecWidth(ParsedReg pr, Value *v) {
+  // Wave-level commit. SGPR-pair / VCC / EXEC writes carry the wave mask
+  // itself and are computed cross-lane (ballot / sext-i1 today), so they
+  // must not be predicated on the per-lane EXEC bit.
+  regs.writeRegExecWidth(B, pr, v);
+  if (pr.kind == ParsedReg::EXEC)
+    resetLaneActiveCache();
+}
+
+void RaiseContext::storeVGPR32(int idx, Value *v) {
+  emitUnderExec([&] { regs.storeVGPR32(B, idx, v); });
+}
+
+void RaiseContext::storeVGPR64(int idx, Value *v) {
+  emitUnderExec([&] { regs.storeVGPR64(B, idx, v); });
+}
+
+void RaiseContext::storeAGPR32(int idx, Value *v) {
+  emitUnderExec([&] { regs.storeAGPR32(B, idx, v); });
+}
+
+void RaiseContext::emitUnderExec(llvm::function_ref<void()> body) {
+  Value *active = emitLaneActiveBit();
+  BasicBlock *preBB = B.GetInsertBlock();
+  Function *F = preBB->getParent();
+  BasicBlock *doBB = BasicBlock::Create(C, "spe_do", F);
+  BasicBlock *skipBB = BasicBlock::Create(C, "spe_skip", F);
+  B.CreateCondBr(active, doBB, skipBB);
+
+  B.SetInsertPoint(doBB);
+  body();
+  // `body()` normally falls through without terminating. If a handler ever
+  // ends its emission with an unconditional control-flow op (shouldn't
+  // happen for the side-effectful ops we wrap, but defensively handled),
+  // don't double-terminate doBB.
+  if (!B.GetInsertBlock()->getTerminator())
+    B.CreateBr(skipBB);
+
+  B.SetInsertPoint(skipBB);
+}
+
+
 Value *RaiseContext::readOpExecWidth(const DecodedInst &di, unsigned opIdx) {
   if (di.isReg(opIdx)) {
     ParsedReg pr = parseReg(di.getReg(opIdx), opIdx);
     if (pr.kind == ParsedReg::VCC)
-      return B.CreateSExt(regs.loadVCC(B), regs.execTy);
+      return regs.readVCCAsWaveMask(B, regs.execTy);
     if (pr.kind == ParsedReg::EXEC)
       return regs.loadExec(B);
     if (pr.kind == ParsedReg::SGPR) {

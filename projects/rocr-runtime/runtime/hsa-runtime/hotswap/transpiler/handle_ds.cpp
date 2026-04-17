@@ -91,7 +91,7 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     Value *asDwords = ctx.B.CreateBitCast(
         trResult, FixedVectorType::get(ctx.i32Ty, 2), "tr64_dw");
     ParsedReg dest = op.dst();
-    ctx.regs.writeRegVec(ctx.B, dest, asDwords);
+    ctx.writeRegVec(dest, asDwords);
     hr.handled = true;
     return hr;
   }
@@ -185,7 +185,7 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
 
     ParsedReg dest = op.dst();
     for (unsigned j = 0; j < 4; j++)
-      ctx.regs.storeVGPR32(ctx.B, dest.baseIdx + j, outDw[j]);
+      ctx.storeVGPR32(dest.baseIdx + j, outDw[j]);
 
     hr.handled = true;
     return hr;
@@ -213,12 +213,13 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
       if (dwords == 0) {
         Type *memTy = Type::getIntNTy(ctx.C, loadBits);
         Value *v = ctx.B.CreateLoad(memTy, ptr, "ds_ld");
-        ctx.regs.writeReg32(ctx.B, dest, isSigned ? ctx.B.CreateSExt(v, ctx.i32Ty) : ctx.B.CreateZExt(v, ctx.i32Ty));
+        ctx.writeReg32(dest, isSigned ? ctx.B.CreateSExt(v, ctx.i32Ty)
+                                      : ctx.B.CreateZExt(v, ctx.i32Ty));
       } else if (dwords == 1) {
-        ctx.regs.writeReg32(ctx.B, dest, ctx.B.CreateLoad(ctx.i32Ty, ptr, "ds_ld"));
+        ctx.writeReg32(dest, ctx.B.CreateLoad(ctx.i32Ty, ptr, "ds_ld"));
       } else {
         auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
-        ctx.regs.writeRegVec(ctx.B, dest, ctx.B.CreateLoad(vecTy, ptr, "ds_ld"));
+        ctx.writeRegVec(dest, ctx.B.CreateLoad(vecTy, ptr, "ds_ld"));
       }
       hr.handled = true;
     return hr;
@@ -227,19 +228,22 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
       ParsedReg stData = op.srcReg(1);
       if (dwords == 0) {
         Type *memTy = Type::getIntNTy(ctx.C, loadBits);
-        ctx.B.CreateStore(ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, stData), memTy), ptr);
+        Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, stData), memTy);
+        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, ptr); });
       } else if (dwords == 1) {
-        ctx.B.CreateStore(ctx.regs.readReg32(ctx.B, stData), ptr);
+        Value *val = ctx.regs.readReg32(ctx.B, stData);
+        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, ptr); });
       } else {
         auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
-        ctx.B.CreateStore(ctx.regs.readRegVec(ctx.B, stData, vecTy), ptr);
+        Value *val = ctx.regs.readRegVec(ctx.B, stData, vecTy);
+        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, ptr); });
       }
       hr.handled = true;
     return hr;
     }
   }
   if (sop == SemOp::DS_BPERMUTE_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), op.src(1));
+    ctx.writeReg32(op.dst(), op.src(1));
     hr.handled = true;
     return hr;
   }

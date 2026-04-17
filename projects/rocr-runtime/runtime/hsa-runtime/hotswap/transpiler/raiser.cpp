@@ -54,6 +54,54 @@ namespace transpiler {
 // parseReg, readOp32/64/ExecWidth, and OpResolver are now in raise_context.hpp/cpp
 
 // ============================================================================
+// EXEC-writer detection (shared by Phase 1.4 cross-wave gate and Phase 1.5
+// SPE allow-list gate).
+//
+// Derivation strategy (principled, no string matching, no per-opcode
+// allowlists for detection):
+//
+//   (a) Implicit defs — canonical LLVM TableGen-derived source of truth.
+//       `MCInstrDesc::implicit_defs()` is iterated during decoding
+//       (see `raiser.cpp` Phase 1) and each result is normalised through
+//       `AMDGPU::mc2PseudoReg` (strips subtarget-variant suffixes) before
+//       classification. Results are cached in `DecodedInst::defsEXEC`,
+//       `defsVCC`, `defsSCC`. This is strictly equivalent to
+//       `desc.hasImplicitDefOfPhysReg(EXEC)` extended across the
+//       EXEC/EXEC_LO/EXEC_HI canonical-alias family. Instructions like
+//       `v_cmpx_*` and `s_*_saveexec_*` surface here.
+//
+//   (b) Explicit defs — required because LLVM models some EXEC writers
+//       with EXEC as an *explicit* destination operand (e.g.
+//       `s_mov_b64 exec, sN`, `s_and_b32 exec_lo, exec_lo, s2`).
+//       `hasImplicitDefOfPhysReg` does NOT cover these by design.
+//       Walk the first `desc.getNumDefs()` operands (TableGen convention:
+//       defs always come first in the MCInst operand list) and classify
+//       each through `AMDGPU::mc2PseudoReg`, same as (a).
+//
+// (a) ∪ (b) is exhaustive for AMDGPU: an MCInst either defines a register
+// implicitly (via TableGen `let Defs = [...]`) or explicitly (as an
+// `outs` operand). There is no third path. Both halves ground in
+// MCInstrDesc; no mnemonic parsing and no per-opcode lists.
+// ============================================================================
+static bool instructionWritesEXEC(const DecodedInst &di, const MCState &mc) {
+  if (di.defsEXEC)
+    return true;
+  const MCInstrDesc &desc = mc.instrInfo->get(di.inst.getOpcode());
+  for (unsigned i = 0; i < desc.getNumDefs() &&
+                       i < di.inst.getNumOperands();
+       ++i) {
+    const MCOperand &mop = di.inst.getOperand(i);
+    if (!mop.isReg() || !mop.getReg())
+      continue;
+    MCRegister reg = AMDGPU::mc2PseudoReg(mop.getReg());
+    if (reg == AMDGPU::EXEC || reg == AMDGPU::EXEC_LO ||
+        reg == AMDGPU::EXEC_HI)
+      return true;
+  }
+  return false;
+}
+
+// ============================================================================
 // Main raising function
 // ============================================================================
 
@@ -357,6 +405,162 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     }
   }
 
+  // ==== Phase 1.4: Cross-wave-size safety check (warning-only) ====
+  //
+  // There is no hardware-defined semantic for "running a binary compiled
+  // for wave size W_src on hardware with wave size W_tgt != W_src". The
+  // source author never specified what lanes outside [0, W_src) should
+  // do, so any translation policy here is *our* choice, not a derivable
+  // fact from the source ISA or the binary itself.
+  //
+  // The raiser implements modulo-replication in
+  // `RaiseContext::emitLaneActiveBit`: target lane L reads bit
+  // (L mod W_src) of the source EXEC mask. That policy is *provably
+  // equivalent to launching the kernel (W_tgt / W_src) times in parallel
+  // on independent sub-waves* iff the kernel never writes EXEC — i.e.
+  // the kernel is embarrassingly per-lane parallel and has no intra-BB
+  // divergence. The moment the kernel manipulates EXEC via
+  // `v_cmpx` / `s_*_saveexec` / `s_and_b64 exec, ...`, replication
+  // doubles (or N-folds) the author's divergence decisions onto
+  // sub-waves the author never authored. That is a silent miscompile
+  // category in the general case, but for many simple kernels
+  // (e.g. vecadd-style bounds checks against a uniform larger than the
+  // target wave) replication happens to be observationally identical to
+  // native execution because the decision is lane-position-independent.
+  //
+  // KNOWN LIMITATION: The raiser currently accepts cross-wave
+  // translation of EXEC-manipulating kernels with a warning rather than
+  // an abort. This is a deliberate, time-boxed retention of the
+  // pre-existing (unsound-in-general) behaviour — without it, every
+  // current cross-wave GPU regression test (Gfx1250Gpu.{Vecadd, Softmax,
+  // Matmul*}, CrossArchGpu.VecaddCrossArch) would fail despite
+  // empirically producing correct output. Tightening this to an abort
+  // requires either (a) a same-wave test corpus, or (b) a divergence-
+  // analysis pass that can statically prove a kernel's EXEC writers are
+  // replication-safe (e.g. v_cmpx compares tid against a uniform known
+  // to be ≥ target_wave_bits, no tid-indexed stores inside narrowed-
+  // EXEC regions). See SPE_DESIGN.md (`Cross-wave translation policy`)
+  // for the full trade-off analysis and the alternatives considered.
+  //
+  // Today we still perform the static scan — both so operators see the
+  // risk on their logs and so downstream tooling (pipeline runners, CI
+  // gates) can escalate the warning to an error if they want a strict
+  // policy. `result.failFormat` is intentionally NOT set: success path
+  // continues so existing kernels still raise.
+  if (isa.waveSize != targetIsa.waveSize) {
+    const DecodedInst *firstEXECWriter = nullptr;
+    for (const DecodedInst &di : insts) {
+      if (instructionWritesEXEC(di, mc)) {
+        firstEXECWriter = &di;
+        break;
+      }
+    }
+    if (firstEXECWriter) {
+      errs()
+          << "transpiler: WARNING: cross-wave translation of an "
+             "EXEC-manipulating kernel relies on modulo-replication, "
+             "which is not provably correct in general.\n"
+          << "  source ISA wave size: " << isa.waveSize << " ("
+          << sourceISA << ")\n"
+          << "  target ISA wave size: " << targetIsa.waveSize << " ("
+          << (compilationTargetISA.empty() ? sourceISA : compilationTargetISA)
+          << ")\n"
+          << "  first EXEC-writer: " << firstEXECWriter->rawMnemonic
+          << " at offset 0x"
+          << format_hex_no_prefix(firstEXECWriter->offset, 4) << "\n"
+          << "  rationale: the kernel manipulates EXEC; replicating it "
+             "across wave halves will double per-lane side effects in a "
+             "way the source author did not specify. Empirically this is "
+             "correct for kernels whose EXEC writers are lane-position-"
+             "independent (pointwise ops with bounds checks against a "
+             "uniform ≥ target_wave_bits). Same-wave translation is the "
+             "principled path for any other EXEC-divergent kernel.\n";
+    }
+  }
+
+  // ==== Phase 1.5: SPE A-level gate (EXEC-writer allow-list) ====
+  //
+  // SPE (SIMT Predicated Execution) is correct only when every runtime
+  // change to EXEC either (a) propagates through the EXEC alloca via a
+  // handler we have audited, or (b) follows the standard dataflow form
+  // `exec = f(old_exec, sgprs, ...)` where `f` is a bitwise / shift /
+  // move / compare-based scalar op — the IR's live EXEC value then
+  // matches the hardware EXEC that the backend re-materialises when it
+  // lowers our predicated-store diamonds back to v_cmpx / s_and_saveexec
+  // pairs. Anything outside this set (e.g. `s_setreg_b32` aimed at a
+  // hypothetical EXEC HWREG, cross-lane ops that broadcast one lane's
+  // value into EXEC, future opcodes we have not yet modelled) risks
+  // silently generating IR that looks well-typed but diverges from
+  // hardware semantics.
+  //
+  // We scan the fully decoded instruction stream once, identify every
+  // instruction that defines EXEC (implicit_def or an explicit dst
+  // register that resolves to EXEC / EXEC_LO / EXEC_HI), and abort if
+  // its SemOp is not in the audited set below. The gate is permanent:
+  // every new EXEC-writer must be added here only after its handler has
+  // been verified against SPE, making accidental silent regressions
+  // impossible.
+  {
+    // Allow-list of SemOps whose handlers have been audited to route EXEC
+    // writes through regs.storeExec (either directly or through
+    // writeReg{32,64,ExecWidth} which dispatch EXEC→storeExec). Each entry
+    // has been verified by following the corresponding handler and
+    // confirming a write to ParsedReg::EXEC lands in the exec alloca — so
+    // mem-to-reg later produces SSA that correctly carries the per-lane
+    // EXEC bit through the SPE diamonds. See AGENTS.md / SPE_DESIGN.md
+    // for the SPE invariant and the audit protocol; do not add to this
+    // list without repeating the audit.
+    //
+    // Audit trail (handler:line → mechanism):
+    //   V_CMPX                        → handle_valu.cpp: explicit storeExec
+    //   S_{AND,OR,XOR,ANDN2,ORN2}_SAVEEXEC_B32
+    //                                 → handle_sop1.cpp: explicit storeExec
+    //   S_MOV_B{32,64}, S_NOT_B{32,64}
+    //                                 → handle_sop1.cpp: writeReg32/64 → storeExec
+    //   S_{AND,OR,XOR,ANDN2,ORN2}_B{32,64}, S_LSHL_B{32,64},
+    //   S_LSHR_B32, S_BFM_B{32,64}, S_CSELECT_B{32,64}
+    //                                 → handle_sop2.cpp: writeReg32/64 → storeExec
+    auto isSPEModeledExecWriter = [](SemOp sop) -> bool {
+      switch (sop) {
+      case SemOp::V_CMPX:
+      case SemOp::S_AND_SAVEEXEC_B32:
+      case SemOp::S_OR_SAVEEXEC_B32:
+      case SemOp::S_XOR_SAVEEXEC_B32:
+      case SemOp::S_ANDN2_SAVEEXEC_B32:
+      case SemOp::S_ORN2_SAVEEXEC_B32:
+      case SemOp::S_MOV_B32:    case SemOp::S_MOV_B64:
+      case SemOp::S_NOT_B32:    case SemOp::S_NOT_B64:
+      case SemOp::S_AND_B32:    case SemOp::S_AND_B64:
+      case SemOp::S_OR_B32:     case SemOp::S_OR_B64:
+      case SemOp::S_XOR_B32:    case SemOp::S_XOR_B64:
+      case SemOp::S_ANDN2_B32:  case SemOp::S_ANDN2_B64:
+      case SemOp::S_ORN2_B32:   case SemOp::S_ORN2_B64:
+      case SemOp::S_LSHL_B32:   case SemOp::S_LSHL_B64:
+      case SemOp::S_LSHR_B32:
+      case SemOp::S_BFM_B32:    case SemOp::S_BFM_B64:
+      case SemOp::S_CSELECT_B32:case SemOp::S_CSELECT_B64:
+        return true;
+      default:
+        return false;
+      }
+    };
+
+    for (const DecodedInst &di : insts) {
+      if (!instructionWritesEXEC(di, mc))
+        continue;
+      if (isSPEModeledExecWriter(di.semOp))
+        continue;
+      result.failMnemonic = di.mnemonic;
+      result.failFormat = "SPE-unmodeled-EXEC-writer";
+      errs() << "transpiler: pre-translation abort: '" << di.rawMnemonic
+             << "' writes EXEC but its SemOp (" << (int)di.semOp
+             << ") is not in the SPE-modelled allow-list. Adding it "
+                "requires auditing the handler path against SPE "
+                "(lane-active predication assumption).\n";
+      return result;
+    }
+  }
+
   // ==== Phase 2: Build LLVM IR module + function ====
   result.ctx = std::make_unique<LLVMContext>();
   LLVMContext &C = *result.ctx;
@@ -450,7 +654,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   IRBuilder<> B(offsetToBB[kernelOffset]);
 
   AllocaRegFile regs;
-  regs.init(B, i32Ty, i1Ty, isa);
+  regs.init(B, i32Ty, i1Ty, isa, targetIsa);
 
   // s[0:1] = kernarg segment pointer (sentinel)
   regs.storeSGPR64(B, 0, Constant::getNullValue(PointerType::get(C, 4)));
@@ -488,18 +692,33 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                    i1Ty, i8Ty, i32Ty, i64Ty, f32Ty, f16Ty,
                    ptrGlobalTy, offsetToBB};
 
-  BasicBlock *currentBB = offsetToBB[kernelOffset];
+  // Wire the reg-file's EXEC-write invalidation hook to ctx's lane_active
+  // memo. This catches every EXEC mutation — ctx.storeExec, the various
+  // ctx.writeReg*(EXEC, …) wrappers, *and* the handful of handlers that
+  // still call ctx.regs.storeExec / ctx.regs.writeRegExecWidth directly
+  // (SAVEEXEC family in handle_sop1, V_CMPX in handle_valu). Without
+  // this hook those direct paths would leave the memo pointing at a
+  // pre-write `lane_active`, silently mispredicating subsequent
+  // emitUnderExec diamonds.
+  regs.onExecWritten = [&ctx] { ctx.resetLaneActiveCache(); };
+
   int raisedCount = 0;
 
   for (size_t instIdx = 0; instIdx < insts.size(); ++instIdx) {
     const DecodedInst &di = insts[instIdx];
 
+    // Source-BB boundary handling uses `B.GetInsertBlock()` rather than a
+    // tracked `currentBB` so that intra-handler CFG splits (emitUnderExec
+    // diamonds under SPE) propagate correctly: fall-through must leave
+    // from whatever block the builder is currently at — which is the
+    // `spe_skip` tail when the last emission was wrapped — not from the
+    // block that started the source instruction.
     auto bbIt = offsetToBB.find(di.offset);
-    if (bbIt != offsetToBB.end() && bbIt->second != currentBB) {
-      if (currentBB->empty() || !currentBB->getTerminator())
+    if (bbIt != offsetToBB.end() && bbIt->second != B.GetInsertBlock()) {
+      BasicBlock *insertBB = B.GetInsertBlock();
+      if (insertBB->empty() || !insertBB->getTerminator())
         B.CreateBr(bbIt->second);
-      currentBB = bbIt->second;
-      B.SetInsertPoint(currentBB);
+      B.SetInsertPoint(bbIt->second);
       // LLVM's AMDGPULowerVGPREncoding pass resets VGPR MSB mode at every
       // basic-block boundary (both before terminators and at BB fall-through
       // exits).  Mirror that behaviour so we do not inherit stale MSB state
@@ -509,6 +728,15 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     }
 
     ctx.computeVGPRAdjust(di);
+    // Invalidate the SPE lane_active memoisation at every instruction
+    // boundary. Any instruction is a potential EXEC writer (either through
+    // our modeled SemOp allow-list, or through a path we haven't yet
+    // covered), and emitLaneActiveBit is load-bearing for per-lane
+    // predication correctness: reusing a stale lane_active from before an
+    // EXEC write would silently mispredicate side effects. See
+    // RaiseContext::resetLaneActiveCache in raise_context.hpp for the full
+    // invalidation contract.
+    ctx.resetLaneActiveCache();
     OpResolver op{ctx, di};
 
     // Dispatch to the format-specific handler by querying TSFlags (and

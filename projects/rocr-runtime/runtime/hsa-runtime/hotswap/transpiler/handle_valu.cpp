@@ -35,14 +35,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   }
   // ---- v_mov_b32 ----
   if (sop == SemOp::V_MOV_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    ctx.writeReg32(op.dst(), op.src(0));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_PERMLANE16_B32 || sop == SemOp::V_PERMLANEX16_B32 ||
       sop == SemOp::V_PERMLANE64_B32) {
     if (di.numDefs >= 1 && di.numSrcs >= 1) {
-      ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+      ctx.writeReg32(op.dst(), op.src(0));
     }
     hr.handled = true;
     return hr;
@@ -55,19 +55,39 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     ParsedReg dstReg = op.dst();
     Value *oldDst = ctx.regs.readReg32(ctx.B, dstReg);
     Value *oldSrc = op.src(0);
-    ctx.regs.writeReg32(ctx.B, dstReg, oldSrc);
+    ctx.writeReg32(dstReg, oldSrc);
     int src0OutIdx = AMDGPU::getNamedOperandIdx(
         di.inst.getOpcode(), AMDGPU::OpName::src0_out);
     if (src0OutIdx >= 0 && di.isReg(src0OutIdx)) {
       ParsedReg src0Out = ctx.parseReg(di.getReg(src0OutIdx), src0OutIdx);
-      ctx.regs.writeReg32(ctx.B, src0Out, oldDst);
+      ctx.writeReg32(src0Out, oldDst);
     }
     hr.handled = true;
     return hr;
   }
-  // In our scalar model v_readfirstlane_b32 is a VGPR→SGPR move
+  // v_readfirstlane_b32 sDST, vSRC: broadcast the value of vSRC from the
+  // lowest-numbered active lane (or lane 0 if EXEC==0) to sDST. This is a
+  // cross-lane primitive — a plain per-lane move would leave each lane
+  // seeing its own vSRC value, and every downstream consumer that treats
+  // sDST as uniform (e.g. an s_mov, an s_load base address, a branch
+  // condition) would observe divergent content that the backend assumed
+  // was uniform. Emit the native `llvm.amdgcn.readfirstlane.i32` so the
+  // backend lowers it to hardware v_readfirstlane_b32.
+  //
+  // We route the result through ctx.writeReg32, which for an SGPR dst is
+  // *not* wrapped in `emitUnderExec` (see RaiseContext::writeReg32 —
+  // SGPR/EXEC-width writes bypass predication). The intrinsic itself is
+  // the cross-lane op: its result is uniform across the wave by
+  // construction, so per-lane predication on the store would be wrong
+  // (it would let an inactive lane keep a stale sDST value while its
+  // active neighbours observe the new broadcast, breaking the uniformity
+  // invariant).
   if (sop == SemOp::V_READFIRSTLANE_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    Function *rfl = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_readfirstlane, {ctx.i32Ty});
+    Value *src = ctx.B.CreateZExtOrTrunc(op.src(0), ctx.i32Ty, "rfl_src");
+    Value *val = ctx.B.CreateCall(rfl, {src}, "readfirstlane");
+    ctx.writeReg32(op.dst(), val);
     hr.handled = true;
     return hr;
   }
@@ -75,25 +95,25 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   // ---- Type conversions ----
   if (sop == SemOp::V_CVT_F32_U32) {
     Value *r = ctx.B.CreateUIToFP(op.src(0), ctx.f32Ty, "cvt");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(r, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(r, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_F32_I32) {
     Value *r = ctx.B.CreateSIToFP(op.src(0), ctx.f32Ty, "cvt");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(r, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(r, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_U32_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateFPToUI(s, ctx.i32Ty, "cvt"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateFPToUI(s, ctx.i32Ty, "cvt"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_I32_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateFPToSI(s, ctx.i32Ty, "cvt"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateFPToSI(s, ctx.i32Ty, "cvt"));
     hr.handled = true;
     return hr;
   }
@@ -101,7 +121,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Value *h = ctx.B.CreateFPTrunc(s, Type::getHalfTy(ctx.C), "cvt");
     Value *bits = ctx.B.CreateBitCast(h, Type::getInt16Ty(ctx.C));
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(bits, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(bits, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -110,7 +130,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
     Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateFMul(a, b, "mul_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -119,7 +139,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
     Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateFAdd(a, b, "add_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -128,7 +148,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
     Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateFSub(a, b, "sub_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -138,7 +158,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
     Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maxnum, {ctx.f16Ty});
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {a, b}, "max_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -150,7 +170,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *acc = ctx.B.CreateBitCast(ctx.regs.readReg32(ctx.B, op.dst()), v2f16);
     Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {v2f16});
     Value *res = ctx.B.CreateCall(fma, {s0, s1, acc}, "pk_fmac");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -162,7 +182,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *acc = ctx.B.CreateBitCast(ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, op.dst()), i16Ty), ctx.f16Ty);
     Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f16Ty});
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, acc}, "mac_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -171,7 +191,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *a = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
     Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateFSub(b, a, "subrev_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -180,7 +200,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
     Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::floor, {ctx.f16Ty});
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {s}, "floor_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -188,7 +208,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Type *i16Ty = Type::getInt16Ty(ctx.C);
     Value *s = ctx.B.CreateTrunc(op.src(0), i16Ty);
     Value *res = ctx.B.CreateUIToFP(s, ctx.f16Ty, "cvt_f16_u16");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(ctx.B.CreateBitCast(res, i16Ty), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(ctx.B.CreateBitCast(res, i16Ty), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -196,7 +216,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Type *i16Ty = Type::getInt16Ty(ctx.C);
     Value *s = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(0), i16Ty), ctx.f16Ty);
     Value *res = ctx.B.CreateFPToUI(s, i16Ty, "cvt_u16_f16");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -206,7 +226,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s1 = ctx.B.CreateTrunc(op.src(1), i16Ty);
     Function *ldexpFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::ldexp, {ctx.f16Ty, i16Ty});
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(ldexpFn, {s0, s1}, "ldexp_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -216,7 +236,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *b = ctx.B.CreateBitCast(ctx.B.CreateTrunc(op.srcF(1), i16Ty), ctx.f16Ty);
     Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f16Ty});
     Value *res = ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {a, b}, "min_f16"), i16Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -231,7 +251,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     else if (sop == SemOp::V_MAX_I16) cmp = ctx.B.CreateICmpSGT(a, b);
     else                               cmp = ctx.B.CreateICmpSLT(a, b);
     Value *res = ctx.B.CreateSelect(cmp, a, b, "i16sel");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -242,7 +262,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
                                    ConstantInt::get(i16Ty, 0xF));
     Value *base = ctx.B.CreateTrunc(op.src(1), i16Ty);
     Value *res = ctx.B.CreateAShr(base, shamt, "vashr16");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -252,7 +272,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
                                    ConstantInt::get(i16Ty, 0xF));
     Value *base = ctx.B.CreateTrunc(op.src(1), i16Ty);
     Value *res = ctx.B.CreateLShr(base, shamt, "vlshr16");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -262,14 +282,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
                                    ConstantInt::get(i16Ty, 0xF));
     Value *base = ctx.B.CreateTrunc(op.src(1), i16Ty);
     Value *res = ctx.B.CreateShl(base, shamt, "vlshl16");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_PACK_B32_F16) {
     Value *lo = ctx.B.CreateAnd(op.src(0), ConstantInt::get(ctx.i32Ty, 0xFFFF));
     Value *hi = ctx.B.CreateShl(ctx.B.CreateAnd(op.src(1), ConstantInt::get(ctx.i32Ty, 0xFFFF)), 16);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateOr(lo, hi, "pack_f16"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateOr(lo, hi, "pack_f16"));
     hr.handled = true;
     return hr;
   }
@@ -277,63 +297,63 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *bits = ctx.B.CreateTrunc(op.src(0), Type::getInt16Ty(ctx.C));
     Value *h = ctx.B.CreateBitCast(bits, Type::getHalfTy(ctx.C));
     Value *f = ctx.B.CreateFPExt(h, ctx.f32Ty, "cvt");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(f, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(f, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_F32_UBYTE0) {
     Value *byte = ctx.B.CreateAnd(op.src(0), ConstantInt::get(ctx.i32Ty, 0xFF));
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_F32_UBYTE1) {
     Value *byte = ctx.B.CreateAnd(ctx.B.CreateLShr(op.src(0), 8), ConstantInt::get(ctx.i32Ty, 0xFF));
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_F32_UBYTE2) {
     Value *byte = ctx.B.CreateAnd(ctx.B.CreateLShr(op.src(0), 16), ConstantInt::get(ctx.i32Ty, 0xFF));
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_F32_UBYTE3) {
     Value *byte = ctx.B.CreateLShr(op.src(0), 24);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(byte, ctx.f32Ty), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_BFREV_B32) {
     Function *brev = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::bitreverse, {ctx.i32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateCall(brev, {op.src(0)}, "bfrev"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateCall(brev, {op.src(0)}, "bfrev"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_NOT_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateNot(op.src(0), "vnot"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateNot(op.src(0), "vnot"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_RCP_IFLAG_F32 || sop == SemOp::V_RCP_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Value *r = ctx.B.CreateFDiv(ConstantFP::get(ctx.f32Ty, 1.0), s, "rcp");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(r, ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(r, ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_EXP_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *exp2Fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::exp2, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(exp2Fn, {s}, "exp"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(exp2Fn, {s}, "exp"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_LOG_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *log2Fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::log2, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(log2Fn, {s}, "log"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(log2Fn, {s}, "log"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -341,14 +361,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Value *s1 = op.src(1);
     Function *ldexpFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::ldexp, {ctx.f32Ty, ctx.i32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(ldexpFn, {s0, s1}, "ldexp"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(ldexpFn, {s0, s1}, "ldexp"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_SQRT_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *sqrtFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::sqrt, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(sqrtFn, {s}, "sqrt"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(sqrtFn, {s}, "sqrt"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -356,28 +376,28 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *sqrtFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::sqrt, {ctx.f32Ty});
     Value *sq = ctx.B.CreateCall(sqrtFn, {s}, "sqrt");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFDiv(ConstantFP::get(ctx.f32Ty, 1.0), sq, "rsq"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFDiv(ConstantFP::get(ctx.f32Ty, 1.0), sq, "rsq"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_FLOOR_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *floorFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::floor, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(floorFn, {s}, "floor"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(floorFn, {s}, "floor"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CEIL_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *ceilFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::ceil, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(ceilFn, {s}, "ceil"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(ceilFn, {s}, "ceil"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_TRUNC_F32) {
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *truncFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::trunc, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(truncFn, {s}, "trunc"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(truncFn, {s}, "trunc"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -385,14 +405,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s = ctx.B.CreateBitCast(op.srcF(0), ctx.f32Ty);
     Function *floorFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::floor, {ctx.f32Ty});
     Value *fl = ctx.B.CreateCall(floorFn, {s}, "floor");
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFSub(s, fl, "fract"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFSub(s, fl, "fract"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
 
   // ---- Simple 2-src integer ALU ----
   if (sop == SemOp::V_ADD_NC_U32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAdd(op.src(0), op.src(1), "vadd"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateAdd(op.src(0), op.src(1), "vadd"));
     hr.handled = true;
     return hr;
   }
@@ -409,12 +429,12 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
                                 ? Intrinsic::sadd_sat
                                 : Intrinsic::ssub_sat;
       Value *res = ctx.B.CreateBinaryIntrinsic(satID, s0, s1);
-      ctx.regs.writeReg32(ctx.B, op.dst(), res);
+      ctx.writeReg32(op.dst(), res);
     } else {
       Value *res = (sop == SemOp::V_ADD_I32)
                        ? ctx.B.CreateAdd(s0, s1, "vadd_i32")
                        : ctx.B.CreateSub(s0, s1, "vsub_i32");
-      ctx.regs.writeReg32(ctx.B, op.dst(), res);
+      ctx.writeReg32(op.dst(), res);
     }
     hr.handled = true;
     return hr;
@@ -423,7 +443,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::V_ADD_CO_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     Value *res = ctx.B.CreateAdd(s0, s1, "vadd_co");
-    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    ctx.writeReg32(op.dst(), res);
     auto *ov = ctx.B.CreateIntrinsic(Intrinsic::uadd_with_overflow, {ctx.i32Ty}, {s0, s1});
     ctx.regs.storeVCC(ctx.B, ctx.B.CreateExtractValue(ov, 1));
     hr.handled = true;
@@ -433,7 +453,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::V_SUB_CO_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     Value *res = ctx.B.CreateSub(s0, s1, "vsub_co");
-    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    ctx.writeReg32(op.dst(), res);
     ctx.regs.storeVCC(ctx.B, ctx.B.CreateICmpULT(s0, s1));
     hr.handled = true;
     return hr;
@@ -442,7 +462,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::V_SUBREV_CO_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     Value *res = ctx.B.CreateSub(s1, s0, "vsubrev_co");
-    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    ctx.writeReg32(op.dst(), res);
     ctx.regs.storeVCC(ctx.B, ctx.B.CreateICmpULT(s1, s0));
     hr.handled = true;
     return hr;
@@ -455,7 +475,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *diff2 = ctx.B.CreateSub(diff1, bin, "vsub_ci");
     Value *b1 = ctx.B.CreateICmpULT(s0, s1);
     Value *b2 = ctx.B.CreateICmpULT(diff1, bin);
-    ctx.regs.writeReg32(ctx.B, op.dst(), diff2);
+    ctx.writeReg32(op.dst(), diff2);
     ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(b1, b2));
     hr.handled = true;
     return hr;
@@ -468,7 +488,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *diff2 = ctx.B.CreateSub(diff1, bin, "vsubrev_ci");
     Value *b1 = ctx.B.CreateICmpULT(s1, s0);
     Value *b2 = ctx.B.CreateICmpULT(diff1, bin);
-    ctx.regs.writeReg32(ctx.B, op.dst(), diff2);
+    ctx.writeReg32(op.dst(), diff2);
     ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(b1, b2));
     hr.handled = true;
     return hr;
@@ -484,7 +504,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *step2 = ctx.B.CreateCall(uaddOv, {sum1, cin});
     Value *res   = ctx.B.CreateExtractValue(step2, 0, "vadd_ci");
     Value *c2    = ctx.B.CreateExtractValue(step2, 1);
-    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    ctx.writeReg32(op.dst(), res);
     ctx.regs.storeVCC(ctx.B, ctx.B.CreateOr(c1, c2));
     hr.handled = true;
     return hr;
@@ -493,92 +513,92 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::V_MAD_CO_U64_U32) {
     Value *a = ctx.B.CreateZExt(op.src(0), ctx.i64Ty), *b = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
     Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src64(2), "vmad_co64");
-    ctx.regs.writeReg64(ctx.B, op.dst(0), res);
+    ctx.writeReg64(op.dst(0), res);
     hr.handled = true;
     return hr;
   }
   // v_mad_u32: D.u32 = S0.u32 * S1.u32 + S2.u32 (no carry)
   if (sop == SemOp::V_MAD_U32) {
     Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(op.src(0), op.src(1)), op.src(2), "vmad_u32");
-    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    ctx.writeReg32(op.dst(), res);
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_OR_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateOr(op.src(0), op.src(1), "vor"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateOr(op.src(0), op.src(1), "vor"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_AND_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAnd(op.src(0), op.src(1), "vand"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateAnd(op.src(0), op.src(1), "vand"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MUL_LO_U32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateMul(op.src(0), op.src(1), "vmul"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateMul(op.src(0), op.src(1), "vmul"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_SUB_NC_U32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSub(op.src(0), op.src(1), "vsub"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateSub(op.src(0), op.src(1), "vsub"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_SUBREV_NC_U32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSub(op.src(1), op.src(0), "vsubrev"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateSub(op.src(1), op.src(0), "vsubrev"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_XOR_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateXor(op.src(0), op.src(1), "vxor"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateXor(op.src(0), op.src(1), "vxor"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_XNOR_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateNot(ctx.B.CreateXor(op.src(0), op.src(1)), "vxnor"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateNot(ctx.B.CreateXor(op.src(0), op.src(1)), "vxnor"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MAX_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpUGT(s0, s1), s0, s1, "vmax"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpUGT(s0, s1), s0, s1, "vmax"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MIN_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpULT(s0, s1), s0, s1, "vmin"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpULT(s0, s1), s0, s1, "vmin"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MAX_I32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpSGT(s0, s1), s0, s1, "vmax"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpSGT(s0, s1), s0, s1, "vmax"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MIN_I32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpSLT(s0, s1), s0, s1, "vmin"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateSelect(ctx.B.CreateICmpSLT(s0, s1), s0, s1, "vmin"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MUL_HI_U32) {
     Value *a = ctx.B.CreateZExt(op.src(0), ctx.i64Ty), *b = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateTrunc(ctx.B.CreateLShr(ctx.B.CreateMul(a, b), 32), ctx.i32Ty, "vmulhi"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateTrunc(ctx.B.CreateLShr(ctx.B.CreateMul(a, b), 32), ctx.i32Ty, "vmulhi"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MUL_HI_I32) {
     Value *a = ctx.B.CreateSExt(op.src(0), ctx.i64Ty), *b = ctx.B.CreateSExt(op.src(1), ctx.i64Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateTrunc(ctx.B.CreateAShr(ctx.B.CreateMul(a, b), 32), ctx.i32Ty, "vmulhi"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateTrunc(ctx.B.CreateAShr(ctx.B.CreateMul(a, b), 32), ctx.i32Ty, "vmulhi"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MUL_U32_U24) {
     Value *a = ctx.B.CreateAnd(op.src(0), ConstantInt::get(ctx.i32Ty, 0xFFFFFF));
     Value *b = ctx.B.CreateAnd(op.src(1), ConstantInt::get(ctx.i32Ty, 0xFFFFFF));
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateMul(a, b, "mul24"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateMul(a, b, "mul24"));
     hr.handled = true;
     return hr;
   }
@@ -587,7 +607,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     a = ctx.B.CreateAShr(a, 8);
     Value *b = ctx.B.CreateShl(op.src(1), 8);
     b = ctx.B.CreateAShr(b, 8);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateMul(a, b, "mul24i"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateMul(a, b, "mul24i"));
     hr.handled = true;
     return hr;
   }
@@ -604,7 +624,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       b = ctx.B.CreateAShr(ctx.B.CreateShl(b, 28), 28);
       acc = ctx.B.CreateAdd(acc, ctx.B.CreateMul(a, b));
     }
-    ctx.regs.writeReg32(ctx.B, op.dst(), acc);
+    ctx.writeReg32(op.dst(), acc);
     hr.handled = true;
     return hr;
   }
@@ -619,7 +639,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       Value *b = ctx.B.CreateSExt(ctx.B.CreateTrunc(ctx.B.CreateLShr(s1, shift), i8Ty), ctx.i32Ty);
       acc = ctx.B.CreateAdd(acc, ctx.B.CreateMul(a, b));
     }
-    ctx.regs.writeReg32(ctx.B, op.dst(), acc);
+    ctx.writeReg32(op.dst(), acc);
     hr.handled = true;
     return hr;
   }
@@ -633,14 +653,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *b_hi = ctx.B.CreateSExt(ctx.B.CreateTrunc(ctx.B.CreateLShr(s1, 16), i16Ty), ctx.i32Ty);
     Value *dot = ctx.B.CreateAdd(ctx.B.CreateMul(a_lo, b_lo), ctx.B.CreateMul(a_hi, b_hi));
     Value *acc = ctx.regs.readReg32(ctx.B, op.dst());
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAdd(acc, dot, "dot2c"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateAdd(acc, dot, "dot2c"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MUL_HI_U32_U24) {
     Value *a = ctx.B.CreateZExt(ctx.B.CreateAnd(op.src(0), ConstantInt::get(ctx.i32Ty, 0xFFFFFF)), ctx.i64Ty);
     Value *b = ctx.B.CreateZExt(ctx.B.CreateAnd(op.src(1), ConstantInt::get(ctx.i32Ty, 0xFFFFFF)), ctx.i64Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateTrunc(ctx.B.CreateLShr(ctx.B.CreateMul(a, b), 32), ctx.i32Ty, "mulhi24"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateTrunc(ctx.B.CreateLShr(ctx.B.CreateMul(a, b), 32), ctx.i32Ty, "mulhi24"));
     hr.handled = true;
     return hr;
   }
@@ -648,14 +668,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *a = ctx.B.CreateAShr(ctx.B.CreateShl(op.src(0), 8), 8);
     Value *b = ctx.B.CreateAShr(ctx.B.CreateShl(op.src(1), 8), 8);
     Value *a64 = ctx.B.CreateSExt(a, ctx.i64Ty), *b64 = ctx.B.CreateSExt(b, ctx.i64Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateTrunc(ctx.B.CreateAShr(ctx.B.CreateMul(a64, b64), 32), ctx.i32Ty, "mulhi24i"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateTrunc(ctx.B.CreateAShr(ctx.B.CreateMul(a64, b64), 32), ctx.i32Ty, "mulhi24i"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MAD_U32_U24) {
     Value *a = ctx.B.CreateAnd(op.src(0), ConstantInt::get(ctx.i32Ty, 0xFFFFFF));
     Value *b = ctx.B.CreateAnd(op.src(1), ConstantInt::get(ctx.i32Ty, 0xFFFFFF));
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src(2), "mad24"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src(2), "mad24"));
     hr.handled = true;
     return hr;
   }
@@ -694,7 +714,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Function *wl = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_writelane, {ctx.i32Ty});
     Value *newVal = ctx.B.CreateCall(wl, {val, lane, oldVal}, "writelane");
-    ctx.regs.writeReg32(ctx.B, dst, newVal);
+    ctx.writeReg32(dst, newVal);
     hr.handled = true;
     return hr;
   }
@@ -725,7 +745,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Function *rl = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_readlane, {ctx.i32Ty});
     Value *val = ctx.B.CreateCall(rl, {src, lane}, "readlane");
-    ctx.regs.writeReg32(ctx.B, op.dst(), val);
+    ctx.writeReg32(op.dst(), val);
     hr.handled = true;
     return hr;
   }
@@ -742,7 +762,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *isZeroWidth = ctx.B.CreateICmpEQ(width, ConstantInt::get(ctx.i32Ty, 0));
     Value *result = ctx.B.CreateAnd(shifted, mask, "bfe");
     result = ctx.B.CreateSelect(isZeroWidth, ConstantInt::get(ctx.i32Ty, 0), result);
-    ctx.regs.writeReg32(ctx.B, op.dst(), result);
+    ctx.writeReg32(op.dst(), result);
     hr.handled = true;
     return hr;
   }
@@ -750,14 +770,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::V_MBCNT_LO_U32_B32) {
     Function *mbcnt = Intrinsic::getOrInsertDeclaration(&ctx.M,
         Intrinsic::amdgcn_mbcnt_lo, {});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateCall(mbcnt, {op.src(0), op.src(1)}, "mbcnt_lo"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateCall(mbcnt, {op.src(0), op.src(1)}, "mbcnt_lo"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_MBCNT_HI_U32_B32) {
     Function *mbcnt = Intrinsic::getOrInsertDeclaration(&ctx.M,
         Intrinsic::amdgcn_mbcnt_hi, {});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateCall(mbcnt, {op.src(0), op.src(1)}, "mbcnt_hi"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateCall(mbcnt, {op.src(0), op.src(1)}, "mbcnt_hi"));
     hr.handled = true;
     return hr;
   }
@@ -766,7 +786,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = op.src64(0), *s1 = op.src64(1);
     auto *f64Ty = Type::getDoubleTy(ctx.C);
     s0 = ctx.B.CreateBitCast(s0, f64Ty); s1 = ctx.B.CreateBitCast(s1, f64Ty);
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFAdd(s0, s1, "vadd_f64"), ctx.i64Ty));
+    ctx.writeReg64(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFAdd(s0, s1, "vadd_f64"), ctx.i64Ty));
     hr.handled = true;
     return hr;
   }
@@ -774,7 +794,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = op.src64(0), *s1 = op.src64(1);
     auto *f64Ty = Type::getDoubleTy(ctx.C);
     s0 = ctx.B.CreateBitCast(s0, f64Ty); s1 = ctx.B.CreateBitCast(s1, f64Ty);
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFMul(s0, s1, "vmul_f64"), ctx.i64Ty));
+    ctx.writeReg64(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFMul(s0, s1, "vmul_f64"), ctx.i64Ty));
     hr.handled = true;
     return hr;
   }
@@ -790,43 +810,43 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     s0 = ctx.B.CreateBitCast(s0, f64Ty); s1 = ctx.B.CreateBitCast(s1, f64Ty);
     if (s2->getType() != f64Ty) s2 = ctx.B.CreateBitCast(s2, f64Ty);
     Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {f64Ty});
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, s2}, "vfma_f64"), ctx.i64Ty));
+    ctx.writeReg64(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, s2}, "vfma_f64"), ctx.i64Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_F64_U32) {
     auto *f64Ty = Type::getDoubleTy(ctx.C);
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(op.src(0), f64Ty, "cvt_f64_u32"), ctx.i64Ty));
+    ctx.writeReg64(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateUIToFP(op.src(0), f64Ty, "cvt_f64_u32"), ctx.i64Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_F64_I32) {
     auto *f64Ty = Type::getDoubleTy(ctx.C);
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateSIToFP(op.src(0), f64Ty, "cvt_f64_i32"), ctx.i64Ty));
+    ctx.writeReg64(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateSIToFP(op.src(0), f64Ty, "cvt_f64_i32"), ctx.i64Ty));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_CVT_U32_F64) {
     auto *f64Ty = Type::getDoubleTy(ctx.C);
     Value *v = ctx.B.CreateBitCast(op.src64(0), f64Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateFPToUI(v, ctx.i32Ty, "cvt_u32_f64"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateFPToUI(v, ctx.i32Ty, "cvt_u32_f64"));
     hr.handled = true;
     return hr;
   }
 
   // ---- Reversed-operand shifts ----
   if (sop == SemOp::V_LSHRREV_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateLShr(op.src(1), op.src(0), "vlshr"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateLShr(op.src(1), op.src(0), "vlshr"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_LSHLREV_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateShl(op.src(1), op.src(0), "vlshl"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateShl(op.src(1), op.src(0), "vlshl"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_ASHRREV_I32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAShr(op.src(1), op.src(0), "vashr"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateAShr(op.src(1), op.src(0), "vashr"));
     hr.handled = true;
     return hr;
   }
@@ -836,7 +856,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = op.srcF(0), *s1 = op.srcF(1);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFAdd(s0, s1, "fadd"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFAdd(s0, s1, "fadd"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -844,7 +864,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = op.srcF(0), *s1 = op.srcF(1);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFMul(s0, s1, "fmul"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFMul(s0, s1, "fmul"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -852,7 +872,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = op.srcF(0), *s1 = op.srcF(1);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFSub(s0, s1, "fsub"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFSub(s0, s1, "fsub"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -860,7 +880,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = op.srcF(0), *s1 = op.srcF(1);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFSub(s1, s0, "fsubrev"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateFSub(s1, s0, "fsubrev"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -869,7 +889,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     Function *maxFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maxnum, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {s0, s1}, "fmax"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {s0, s1}, "fmax"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -878,7 +898,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "fmin"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "fmin"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -887,7 +907,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     Function *maxFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maximum, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {s0, s1}, "fmaximum"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {s0, s1}, "fmaximum"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -896,7 +916,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minimum, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "fminimum"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "fminimum"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -906,7 +926,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     if (s2->getType() != ctx.f32Ty) s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
     Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, s2}, "fma"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, s2}, "fma"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -917,7 +937,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     if (dv->getType() != ctx.f32Ty) dv = ctx.B.CreateBitCast(dv, ctx.f32Ty);
     Function *fmuladd = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fmuladd, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, dstReg, ctx.B.CreateBitCast(ctx.B.CreateCall(fmuladd, {s0, s1, dv}, "fmac"), ctx.i32Ty));
+    ctx.writeReg32(dstReg, ctx.B.CreateBitCast(ctx.B.CreateCall(fmuladd, {s0, s1, dv}, "fmac"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -930,7 +950,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (k->getType() != ctx.f32Ty) k = ctx.B.CreateBitCast(k, ctx.f32Ty);
     if (s2->getType() != ctx.f32Ty) s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
     Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, k, s2}, "fmamk"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, k, s2}, "fmamk"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -941,7 +961,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
     if (k->getType() != ctx.f32Ty) k = ctx.B.CreateBitCast(k, ctx.f32Ty);
     Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, k}, "fmaak"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, k}, "fmaak"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -963,7 +983,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
                                                      {ctx.f32Ty});
     Value *r = ctx.B.CreateCall(fn, {s0, s1,
                  selectNumerator ? ctx.B.getTrue() : ctx.B.getFalse()}, "divscale");
-    ctx.regs.writeReg32(ctx.B, op.dst(0), ctx.B.CreateBitCast(ctx.B.CreateExtractValue(r, 0), ctx.i32Ty));
+    ctx.writeReg32(op.dst(0), ctx.B.CreateBitCast(ctx.B.CreateExtractValue(r, 0), ctx.i32Ty));
     // Write the boolean flag to the actual SDST destination (operand 1):
     // vcc_lo, sN, or null. The kernel saves flags to SGPRs and later
     // restores them to VCC via s_mov_b32 before each v_div_fmas_f32.
@@ -987,7 +1007,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s2 = ctx.B.CreateBitCast(op.srcF(2), ctx.f32Ty);
     Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_div_fixup,
                                                      {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {s0, s1, s2}, "divfixup"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {s0, s1, s2}, "divfixup"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -998,34 +1018,34 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_div_fmas,
                                                      {ctx.f32Ty});
     Value *vcc = ctx.regs.loadVCC(ctx.B);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {s0, s1, s2, vcc}, "divfmas"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(fn, {s0, s1, s2, vcc}, "divfmas"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
 
   // ---- 3-source integer VOP3 ----
   if (sop == SemOp::V_ADD3_U32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAdd(ctx.B.CreateAdd(op.src(0), op.src(1)), op.src(2), "vadd3"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateAdd(ctx.B.CreateAdd(op.src(0), op.src(1)), op.src(2), "vadd3"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_LSHL_ADD_U32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAdd(ctx.B.CreateShl(op.src(0), op.src(1)), op.src(2), "vlshl_add"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateAdd(ctx.B.CreateShl(op.src(0), op.src(1)), op.src(2), "vlshl_add"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_LSHL_OR_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateOr(ctx.B.CreateShl(op.src(0), op.src(1)), op.src(2), "vlshlor"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateOr(ctx.B.CreateShl(op.src(0), op.src(1)), op.src(2), "vlshlor"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_AND_OR_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateOr(ctx.B.CreateAnd(op.src(0), op.src(1)), op.src(2), "vandor"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateOr(ctx.B.CreateAnd(op.src(0), op.src(1)), op.src(2), "vandor"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_OR3_B32) {
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateOr(ctx.B.CreateOr(op.src(0), op.src(1)), op.src(2), "vor3"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateOr(ctx.B.CreateOr(op.src(0), op.src(1)), op.src(2), "vor3"));
     hr.handled = true;
     return hr;
   }
@@ -1068,7 +1088,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     }
     if (sop == SemOp::V_BITOP3_B16)
       result = ctx.B.CreateAnd(result, ConstantInt::get(ctx.i32Ty, 0xFFFF));
-    ctx.regs.writeReg32(ctx.B, op.dst(), result);
+    ctx.writeReg32(op.dst(), result);
     hr.handled = true;
     return hr;
   }
@@ -1079,7 +1099,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s2->getType() != ctx.f32Ty) s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
     Function *maxFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maxnum, {ctx.f32Ty});
     Value *m01 = ctx.B.CreateCall(maxFn, {s0, s1});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {m01, s2}, "max3"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {m01, s2}, "max3"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -1090,7 +1110,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (s2->getType() != ctx.f32Ty) s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
     Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f32Ty});
     Value *m01 = ctx.B.CreateCall(minFn, {s0, s1});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {m01, s2}, "min3"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {m01, s2}, "min3"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -1103,7 +1123,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f32Ty});
     Value *mn01 = ctx.B.CreateCall(minFn, {s0, s1});
     Value *mx01 = ctx.B.CreateCall(maxFn, {s0, s1});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {mn01, ctx.B.CreateCall(minFn, {mx01, s2})}, "med3"), ctx.i32Ty));
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {mn01, ctx.B.CreateCall(minFn, {mx01, s2})}, "med3"), ctx.i32Ty));
     hr.handled = true;
     return hr;
   }
@@ -1116,7 +1136,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *bf1 = ctx.B.CreateFPTrunc(s1, bfTy, "tobf16_1");
     Value *bits0 = ctx.B.CreateZExt(ctx.B.CreateBitCast(bf0, Type::getInt16Ty(ctx.C)), ctx.i32Ty);
     Value *bits1 = ctx.B.CreateZExt(ctx.B.CreateBitCast(bf1, Type::getInt16Ty(ctx.C)), ctx.i32Ty);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateOr(bits0, ctx.B.CreateShl(bits1, 16), "pk_bf16"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateOr(bits0, ctx.B.CreateShl(bits1, 16), "pk_bf16"));
     hr.handled = true;
     return hr;
   }
@@ -1131,7 +1151,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *oldVal = (op.nSrcs() >= 3) ? op.src(2) : ConstantInt::get(ctx.i32Ty, 0);
     bool wordSel = (op.nSrcs() >= 4 && di.isImm(op.srcIdx(3))) ? (op.srcImm(3) != 0) : false;
     Function *cvtFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_cvt_pk_fp8_f32);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateCall(cvtFn,
+    ctx.writeReg32(op.dst(), ctx.B.CreateCall(cvtFn,
         {s0, s1, oldVal, ConstantInt::get(ctx.i1Ty, wordSel)}, "pk_fp8"));
     hr.handled = true;
     return hr;
@@ -1143,14 +1163,14 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *oldVal = (op.nSrcs() >= 3) ? op.src(2) : ConstantInt::get(ctx.i32Ty, 0);
     bool wordSel = (op.nSrcs() >= 4 && di.isImm(op.srcIdx(3))) ? (op.srcImm(3) != 0) : false;
     Function *cvtFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_cvt_pk_bf8_f32);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateCall(cvtFn,
+    ctx.writeReg32(op.dst(), ctx.B.CreateCall(cvtFn,
         {s0, s1, oldVal, ConstantInt::get(ctx.i1Ty, wordSel)}, "pk_bf8"));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::V_PERM_B32) {
     Function *permFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_perm);
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateCall(permFn, {op.src(0), op.src(1), op.src(2)}, "perm"));
+    ctx.writeReg32(op.dst(), ctx.B.CreateCall(permFn, {op.src(0), op.src(1), op.src(2)}, "perm"));
     hr.handled = true;
     return hr;
   }
@@ -1161,7 +1181,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *src = op.src64(1);
     if (src->getType() != ctx.i64Ty) src = ctx.B.CreateBitOrPointerCast(src, ctx.i64Ty);
     Value *shamtExt = ctx.B.CreateZExt(shamt, ctx.i64Ty);
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateShl(src, shamtExt, "shl"));
+    ctx.writeReg64(op.dst(), ctx.B.CreateShl(src, shamtExt, "shl"));
     hr.handled = true;
     return hr;
   }
@@ -1174,7 +1194,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     if (src2->getType() != ctx.i64Ty) src2 = ctx.B.CreateBitOrPointerCast(src2, ctx.i64Ty);
     Value *shamtExt = ctx.B.CreateZExt(shamt, ctx.i64Ty);
     Value *shifted = ctx.B.CreateShl(src0, shamtExt);
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateAdd(shifted, src2, "lshl_add"));
+    ctx.writeReg64(op.dst(), ctx.B.CreateAdd(shifted, src2, "lshl_add"));
     hr.handled = true;
     return hr;
   }
@@ -1182,7 +1202,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s0 = op.src64(0), *s1 = op.src64(1);
     if (s0->getType() != ctx.i64Ty) s0 = ctx.B.CreateBitOrPointerCast(s0, ctx.i64Ty);
     if (s1->getType() != ctx.i64Ty) s1 = ctx.B.CreateBitOrPointerCast(s1, ctx.i64Ty);
-    ctx.regs.writeReg64(ctx.B, op.dst(), ctx.B.CreateAdd(s0, s1, "vadd64"));
+    ctx.writeReg64(op.dst(), ctx.B.CreateAdd(s0, s1, "vadd64"));
     hr.handled = true;
     return hr;
   }
@@ -1191,8 +1211,8 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::V_MAD_U64_U32) {
     Value *a = ctx.B.CreateZExt(op.src(0), ctx.i64Ty), *b = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
     Value *res = ctx.B.CreateAdd(ctx.B.CreateMul(a, b), op.src64(2), "vmad64");
-    ctx.regs.writeReg64(ctx.B, op.dst(0), res);
-    ctx.regs.writeReg64(ctx.B, op.dst(1), ConstantInt::get(ctx.i64Ty, 0));
+    ctx.writeReg64(op.dst(0), res);
+    ctx.writeReg64(op.dst(1), ConstantInt::get(ctx.i64Ty, 0));
     hr.handled = true;
     return hr;
   }
@@ -1270,7 +1290,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
         ParsedReg d = op.dst();
         if (d.kind == ParsedReg::SGPR) {
           Value *mask = ctx.B.CreateSExt(cmp, ctx.regs.execTy);
-          ctx.regs.writeRegExecWidth(ctx.B, d, mask);
+          ctx.writeRegExecWidth(d, mask);
         } else {
           ctx.regs.storeVCC(ctx.B, cmp);
         }
@@ -1286,7 +1306,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   // Handle op_sel_hi, neg_lo, neg_hi modifiers.
   if (sop >= SemOp::V_PK_ADD_F32 && sop <= SemOp::V_PK_MOV_B32) {
     if (sop == SemOp::V_PK_MOV_B32) {
-      ctx.regs.writeReg64(ctx.B, op.dst(), op.src64(0));
+      ctx.writeReg64(op.dst(), op.src64(0));
       hr.handled = true;
     return hr;
     }
@@ -1376,7 +1396,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {v2f32});
       res = ctx.B.CreateCall(fn, {s0, s1, s2}, "pk_fma");
     }
-    ctx.regs.writeRegVec(ctx.B, op.dst(), res);
+    ctx.writeRegVec(op.dst(), res);
     hr.handled = true;
     return hr;
   }
@@ -1410,7 +1430,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       result_val = emitWMMAtoMFMA(ctx, a, b, c);
     }
 
-    ctx.regs.writeRegVec(ctx.B, dest, result_val);
+    ctx.writeRegVec(dest, result_val);
     hr.handled = true;
     return hr;
   }
@@ -1464,7 +1484,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *s1 = readMixSrc(1);
     Value *s2 = readMixSrc(2);
     Function *fmaFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f32Ty});
-    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateBitCast(
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(
         ctx.B.CreateCall(fmaFn, {s0, s1, s2}, "fma_mix"), ctx.i32Ty));
     hr.handled = true;
     return hr;
@@ -1487,7 +1507,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
         cond = ctx.regs.loadVCC(ctx.B);
     }
     if (!cond) cond = ctx.regs.loadVCC(ctx.B);
-    ctx.regs.writeReg32(ctx.B, dest, ctx.B.CreateSelect(cond, src1, src0, "cndmask"));
+    ctx.writeReg32(dest, ctx.B.CreateSelect(cond, src1, src0, "cndmask"));
     hr.handled = true;
     return hr;
   }

@@ -3,3 +3,6 @@
 triton/
 __pycache__/
 *.pyc
+/projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/scope_discovery/
+/projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/SPE_DESIGN.md
+/projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/CROSS_LANE_SURVEY.md

@@ -129,7 +129,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       if (operands.size() < 2) return false;
       Value *srcVal = readVOPDSrc(operands[1]);
       if (!srcVal) return false;
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, srcVal);
+      ctx.storeVGPR32(dstIdx, srcVal);
       return true;
     }
 
@@ -139,7 +139,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       Value *cond = ctx.regs.loadVCC(ctx.B);
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateSelect(cond, s1, s0, "vopd_cndmask"));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateSelect(cond, s1, s0, "vopd_cndmask"));
       return true;
     }
 
@@ -149,7 +149,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFAdd(s0, s1, "vopd_fadd"), ctx.i32Ty));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFAdd(s0, s1, "vopd_fadd"), ctx.i32Ty));
       return true;
     }
 
@@ -159,7 +159,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFMul(s0, s1, "vopd_fmul"), ctx.i32Ty));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFMul(s0, s1, "vopd_fmul"), ctx.i32Ty));
       return true;
     }
 
@@ -169,7 +169,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFSub(s0, s1, "vopd_fsub"), ctx.i32Ty));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateBitCast(ctx.B.CreateFSub(s0, s1, "vopd_fsub"), ctx.i32Ty));
       return true;
     }
 
@@ -181,7 +181,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       Value *dv = ctx.B.CreateBitCast(ctx.regs.loadVGPR32(ctx.B, dstIdx), ctx.f32Ty);
       Function *fmuladd = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fmuladd, {ctx.f32Ty});
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(fmuladd, {s0, s1, dv}, "vopd_fmac"), ctx.i32Ty));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(fmuladd, {s0, s1, dv}, "vopd_fmac"), ctx.i32Ty));
       return true;
     }
 
@@ -190,7 +190,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s0 = readVOPDSrc(operands[1]);
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateAdd(s0, s1, "vopd_add"));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateAdd(s0, s1, "vopd_add"));
       return true;
     }
 
@@ -200,7 +200,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       if (vopMn == "v_subrev_nc_u32") std::swap(s0, s1);
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateSub(s0, s1, "vopd_sub"));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateSub(s0, s1, "vopd_sub"));
       return true;
     }
 
@@ -209,7 +209,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s0 = readVOPDSrc(operands[1]);
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateShl(s1, s0, "vopd_shl"));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateShl(s1, s0, "vopd_shl"));
       return true;
     }
 
@@ -218,7 +218,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s0 = readVOPDSrc(operands[1]);
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateAnd(s0, s1, "vopd_and"));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateAnd(s0, s1, "vopd_and"));
       return true;
     }
 
@@ -227,7 +227,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s0 = readVOPDSrc(operands[1]);
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateLShr(s1, s0, "vopd_lshr"));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateLShr(s1, s0, "vopd_lshr"));
       return true;
     }
 
@@ -240,7 +240,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
       Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma, {ctx.f32Ty});
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, s2}, "vopd_fma"), ctx.i32Ty));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(fma, {s0, s1, s2}, "vopd_fma"), ctx.i32Ty));
       return true;
     }
 
@@ -251,7 +251,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       Function *maxFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::maxnum, {ctx.f32Ty});
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {s0, s1}, "vopd_fmax"), ctx.i32Ty));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(maxFn, {s0, s1}, "vopd_fmax"), ctx.i32Ty));
       return true;
     }
 
@@ -262,7 +262,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       if (!s0 || !s1) return false;
       s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty); s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
       Function *minFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::minnum, {ctx.f32Ty});
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "vopd_fmin"), ctx.i32Ty));
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateBitCast(ctx.B.CreateCall(minFn, {s0, s1}, "vopd_fmin"), ctx.i32Ty));
       return true;
     }
 
@@ -298,7 +298,7 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       for (int i = 0; i < 8; i++)
         if (lut & (1 << i))
           result = ctx.B.CreateOr(result, minterms[i]);
-      ctx.regs.storeVGPR32(ctx.B, dstIdx, result);
+      ctx.storeVGPR32(dstIdx, result);
       return true;
     }
 
