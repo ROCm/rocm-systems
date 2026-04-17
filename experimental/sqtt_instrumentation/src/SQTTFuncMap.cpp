@@ -1,0 +1,122 @@
+#include "SQTTPass.h"
+
+#include "llvm/IR/Constants.h"
+
+using namespace llvm;
+
+void SQTTInstrumentPass::emitFuncMap(Module& M)
+{
+    std::string mapData;
+    // Instrumented device functions: "F:ID:name"
+    for (auto& [id, name] : FuncMap)
+    {
+        mapData += "F:";
+        mapData += std::to_string(id);
+        mapData += ':';
+        mapData += name;
+        mapData += '\n';
+    }
+    // Kernels (not instrumented, for name/vaddr lookup): "K:name"
+    for (auto& name : KernelNames)
+    {
+        mapData += "K:";
+        mapData += name;
+        mapData += '\n';
+    }
+    // Named user markers: "U:ID:name" for scope, "P:ID:name" for points
+    for (auto& entry : UserMarkers)
+    {
+        mapData += entry.IsPoint ? "P:" : "U:";
+        mapData += std::to_string(entry.ID);
+        mapData += ':';
+        mapData += entry.Name;
+        mapData += '\n';
+    }
+    // Point markers (barriers, memory ops): "P:ID:name"
+    if (Config.InstrumentBarriers)
+    {
+        mapData += "P:" + std::to_string(BarrierSignalID) + ":barrier_signal\n";
+        mapData += "P:" + std::to_string(BarrierWaitID) + ":barrier_wait\n";
+        mapData += "P:" + std::to_string(BarrierFullID) + ":barrier\n";
+    }
+    if (Config.InstrumentMemory)
+    {
+        mapData += "P:" + std::to_string(VmemLoadID) + ":vmem_load\n";
+        mapData += "P:" + std::to_string(VmemStoreID) + ":vmem_store\n";
+    }
+    // Address trace: wave size and per-op unique IDs
+    if (AddrTraceWaveSize > 0)
+    {
+        mapData += "W:";
+        mapData += std::to_string(AddrTraceWaveSize);
+        mapData += '\n';
+    }
+    for (auto& entry : AddrTraceEntries)
+    {
+        mapData += "P:";
+        mapData += std::to_string(entry.ID);
+        mapData += ':';
+        mapData += entry.Kind;
+        if (!entry.SourceLoc.empty())
+        {
+            mapData += '@';
+            mapData += entry.SourceLoc;
+        }
+        mapData += '\n';
+    }
+
+    LLVMContext& Ctx = M.getContext();
+    Constant* StrConst = ConstantDataArray::getString(
+        Ctx,
+        mapData,
+        /*AddNull=*/true
+    );
+
+    // Use addrspace(1) for AMDGPU global memory
+    unsigned AS = M.getDataLayout().getDefaultGlobalsAddressSpace();
+    auto* GV = new GlobalVariable(
+        M,
+        StrConst->getType(),
+        /*isConstant=*/true,
+        GlobalValue::InternalLinkage,
+        StrConst,
+        ".sqtt_func_id_map",
+        /*InsertBefore=*/nullptr,
+        GlobalVariable::NotThreadLocal,
+        AS
+    );
+    GV->setSection(".sqtt_funcmap");
+    GV->setAlignment(Align(1));
+
+    // Append to llvm.used to prevent stripping
+    SmallVector<Constant*, 1> UsedVals;
+    Constant* GVPtr = ConstantExpr::getPointerBitCastOrAddrSpaceCast(GV, PointerType::getUnqual(Ctx));
+    UsedVals.push_back(GVPtr);
+
+    auto* UsedTy = ArrayType::get(PointerType::getUnqual(Ctx), 1);
+    auto* UsedInit = ConstantArray::get(UsedTy, UsedVals);
+
+    GlobalVariable* LLVMUsed = M.getGlobalVariable("llvm.used");
+    if (LLVMUsed)
+    {
+        SmallVector<Constant*, 8> Ops;
+        if (auto* Init = LLVMUsed->getInitializer())
+        {
+            if (auto* CA = dyn_cast<ConstantArray>(Init))
+            {
+                for (unsigned i = 0; i < CA->getNumOperands(); i++) Ops.push_back(CA->getOperand(i));
+            }
+        }
+        Ops.push_back(GVPtr);
+        auto* NewTy = ArrayType::get(PointerType::getUnqual(Ctx), Ops.size());
+        auto* NewInit = ConstantArray::get(NewTy, Ops);
+        LLVMUsed->eraseFromParent();
+        auto* NewUsed = new GlobalVariable(M, NewTy, false, GlobalValue::AppendingLinkage, NewInit, "llvm.used");
+        NewUsed->setSection("llvm.metadata");
+    }
+    else
+    {
+        auto* NewUsed = new GlobalVariable(M, UsedTy, false, GlobalValue::AppendingLinkage, UsedInit, "llvm.used");
+        NewUsed->setSection("llvm.metadata");
+    }
+}

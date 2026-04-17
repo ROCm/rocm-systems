@@ -1,0 +1,686 @@
+#!/usr/bin/env python3
+"""
+Shared data loading and parsing for SQTT trace analysis tools.
+
+Provides:
+  - Funcmap extraction and parsing (from code object ELF sections)
+  - Shaderdata record loading (from JSON trace output)
+  - Occupancy/wave-span loading
+  - Marker decoding
+  - Address trace preprocessing (extracts addr_trace blocks from records)
+  - Demangling utilities
+  - Auto-discovery of trace directories and code objects
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from collections import defaultdict
+from dataclasses import dataclass, field
+from glob import glob
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Funcmap extraction
+# ---------------------------------------------------------------------------
+
+def find_llvm_tool(name: str) -> Optional[str]:
+    """Find an LLVM tool, preferring ROCm installation."""
+    import shutil
+    candidates = [
+        f"/opt/rocm-7.3.0/lib/llvm/bin/{name}",
+        f"/opt/rocm/llvm/bin/{name}",
+        f"/opt/rocm/lib/llvm/bin/{name}",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return shutil.which(name)
+
+
+def read_funcmap(code_object: str) -> str:
+    """Read .sqtt_funcmap section from a code object."""
+    objcopy = find_llvm_tool("llvm-objcopy")
+    if not objcopy:
+        return ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            tmp = f.name
+        subprocess.run(
+            [objcopy, f"--dump-section=.sqtt_funcmap={tmp}", code_object],
+            capture_output=True, timeout=10, check=True)
+        with open(tmp, "r") as f:
+            data = f.read()
+        os.unlink(tmp)
+        return data
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError, OSError):
+        return ""
+
+
+def demangle_name(name: str) -> str:
+    """Demangle a single C++ symbol using c++filt."""
+    return demangle_names([name])[0]
+
+
+def demangle_names(names: list[str]) -> list[str]:
+    """Batch-demangle C++ symbols through a single c++filt invocation."""
+    if not names:
+        return []
+    try:
+        r = subprocess.run(
+            ["c++filt"], input="\n".join(names),
+            capture_output=True, text=True, timeout=30)
+        if r.returncode == 0:
+            result = r.stdout.strip().split("\n")
+            if len(result) == len(names):
+                return result
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return list(names)
+
+
+@dataclass
+class FuncMap:
+    """ID-to-name mapping from .sqtt_funcmap sections.
+
+    The unified marker dict maps id -> (name, type) where type is one of:
+      "function" -- enter/exit scope marker (F: prefix)
+      "user"     -- user scope marker (U: prefix)
+      "point"    -- point marker: barriers, memory ops, user points (P: prefix)
+    """
+    markers: dict[int, tuple[str, str]] = field(default_factory=dict)
+    kernels: list[str] = field(default_factory=list)
+    wave_size: int = 0  # from W: entry (32 or 64), 0 if unknown
+
+    def resolve(self, marker_id: int) -> tuple[str, str]:
+        """Returns (name, type). Type determines scope vs point behavior."""
+        if marker_id in self.markers:
+            return self.markers[marker_id]
+        return (f"event#{marker_id}", "function")
+
+
+def parse_funcmap(raw: str) -> FuncMap:
+    """Parse raw .sqtt_funcmap content.
+
+    Format v2 prefixes:
+        F:id:name  -- function (enter/exit scope)
+        U:id:name  -- user scope marker
+        P:id:name  -- point marker (barrier, memory op, user point)
+        K:name     -- kernel (for vaddr lookup, not instrumented)
+    """
+    fm = FuncMap()
+    for line in raw.splitlines():
+        line = line.strip().rstrip("\x00")
+        if not line or ":" not in line:
+            continue
+        prefix, rest = line.split(":", 1)
+        prefix = prefix.strip()
+        rest = rest.strip()
+        if not rest:
+            continue
+        if prefix == "W":
+            try:
+                fm.wave_size = int(rest)
+            except ValueError:
+                pass
+        elif prefix == "K":
+            fm.kernels.append(rest)
+        elif prefix in ("F", "U", "P"):
+            if ":" not in rest:
+                continue
+            id_str, name = rest.split(":", 1)
+            try:
+                mid = int(id_str)
+            except ValueError:
+                continue
+            type_map = {"F": "function", "U": "user", "P": "point"}
+            fm.markers[mid] = (name, type_map[prefix])
+    return fm
+
+
+def parse_code_object_id(path: str) -> Optional[int]:
+    """Extract code_object_id from a filename like '*_code_object_id_2.out'."""
+    import re
+    m = re.search(r'code_object_id_(\d+)', os.path.basename(path))
+    return int(m.group(1)) if m else None
+
+
+def load_funcmaps(code_objects: list[str], do_demangle: bool) -> dict[int, FuncMap]:
+    """Load funcmaps per code object, keyed by code_object_id."""
+    per_co: dict[int, FuncMap] = {}
+    for co in code_objects:
+        co_id = parse_code_object_id(co)
+        if co_id is None:
+            print(f"Warning: cannot extract code_object_id from {co}",
+                  file=sys.stderr)
+            continue
+        raw = read_funcmap(co)
+        if not raw:
+            continue
+        fm = parse_funcmap(raw)
+        per_co[co_id] = fm
+
+    if do_demangle:
+        all_names: list[str] = []
+        index: list[tuple[int, str, int]] = []
+        for co_id, fm in per_co.items():
+            for k, (name, mtype) in fm.markers.items():
+                index.append((co_id, "marker", k))
+                all_names.append(name)
+            for i, k in enumerate(fm.kernels):
+                index.append((co_id, "kernel", i))
+                all_names.append(k)
+        demangled = demangle_names(all_names)
+        for (co_id, fld, key), name in zip(index, demangled):
+            if fld == "marker":
+                _, mtype = per_co[co_id].markers[key]
+                per_co[co_id].markers[key] = (name, mtype)
+            else:
+                per_co[co_id].kernels[key] = name
+
+    return per_co
+
+
+def build_kernel_to_co(per_co: dict[int, FuncMap]) -> dict[str, int]:
+    """Map kernel mangled names to code_object_id."""
+    k2co: dict[str, int] = {}
+    for co_id, fm in per_co.items():
+        for k in fm.kernels:
+            k2co[k] = co_id
+    return k2co
+
+
+# ---------------------------------------------------------------------------
+# Shaderdata loading
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ShaderRecord:
+    time: int
+    value: int
+    cu: int
+    simd: int
+    wave_id: int
+    flags: int
+
+
+def decode_marker(value: int) -> tuple[int, bool, bool]:
+    """Decode marker value -> (id, enter, exit_prev)."""
+    exit_prev = bool(value & 0x1)
+    enter = bool(value & 0x2)
+    marker_id = value >> 2
+    return marker_id, enter, exit_prev
+
+
+def _load_shaderdata_from_dir(trace_dir: str) -> list[ShaderRecord]:
+    """Load shaderdata records from a single ui_* trace directory."""
+    records = []
+
+    filenames_path = os.path.join(trace_dir, "filenames.json")
+    shaderdata_files = []
+
+    if os.path.exists(filenames_path):
+        with open(filenames_path) as f:
+            meta = json.load(f)
+        sd_filenames = meta.get("shaderdata_filenames", {})
+        for se_id, file_list in sd_filenames.items():
+            for entry in file_list:
+                fname = entry[0] if isinstance(entry, list) else entry
+                shaderdata_files.append(os.path.join(trace_dir, fname))
+    else:
+        shaderdata_files = sorted(
+            glob(os.path.join(trace_dir, "shaderdata_*.json")),
+            key=lambda p: [int(x) for x in os.path.splitext(os.path.basename(p))[0].split("_")[1:]],
+        )
+
+    for path in shaderdata_files:
+        if not os.path.exists(path):
+            continue
+        with open(path) as f:
+            data = json.load(f)
+        for rec in data.get("records", []):
+            records.append(ShaderRecord(
+                time=rec[0], value=rec[1],
+                cu=rec[2], simd=rec[3],
+                wave_id=rec[4], flags=rec[5],
+            ))
+
+    return records
+
+
+def load_shaderdata(trace_dir: str) -> list[ShaderRecord]:
+    """Load and time-sort shaderdata records from a single trace directory."""
+    records = _load_shaderdata_from_dir(trace_dir)
+    records.sort(key=lambda r: r.time)
+    return records
+
+
+# ---------------------------------------------------------------------------
+# Occupancy loading -- wave launch/retire timeline
+# ---------------------------------------------------------------------------
+
+@dataclass
+class WaveSpan:
+    """A time range during which a wave was running a specific dispatch."""
+    launch_time: int
+    retire_time: int  # -1 if not yet retired
+    dispatch_id: int
+
+
+def load_occupancy(trace_dir: str) -> tuple[dict[str, str], dict[tuple, list[WaveSpan]]]:
+    """
+    Parse occupancy.json from a trace directory.
+
+    Returns:
+        dispatches: dict mapping dispatch_id (str) -> kernel name/description
+        wave_spans: dict mapping (cu, simd, wave_slot) -> sorted list of WaveSpan
+    """
+    path = os.path.join(trace_dir, "occupancy.json")
+    if not os.path.exists(path):
+        return {}, {}
+
+    with open(path) as f:
+        data = json.load(f)
+
+    dispatches = data.get("dispatches", {})
+
+    events: dict[tuple, list[tuple]] = defaultdict(list)
+    for key, val in data.items():
+        if key in ("dispatches", "version") or not isinstance(val, list):
+            continue
+        for rec in val:
+            if len(rec) < 6:
+                continue
+            time, cu, simd, wslot, is_launch, dispatch_id = rec[:6]
+            events[(cu, simd, wslot)].append((time, is_launch, dispatch_id))
+
+    wave_spans: dict[tuple, list[WaveSpan]] = {}
+    for wave_key, evts in events.items():
+        evts.sort(key=lambda e: e[0])
+        spans: list[WaveSpan] = []
+        pending: Optional[WaveSpan] = None
+        for time, is_launch, dispatch_id in evts:
+            if is_launch:
+                if pending:
+                    pending.retire_time = time
+                    spans.append(pending)
+                pending = WaveSpan(launch_time=time, retire_time=-1,
+                                   dispatch_id=dispatch_id)
+            else:
+                if pending:
+                    pending.retire_time = time
+                    spans.append(pending)
+                    pending = None
+        if pending:
+            pending.retire_time = 2**63
+            spans.append(pending)
+        wave_spans[wave_key] = spans
+
+    return dispatches, wave_spans
+
+
+def find_wave_span_at(spans: list[WaveSpan], time: int) -> Optional[WaveSpan]:
+    """Find the most recent WaveSpan at or before a given time.
+
+    Trace data records can arrive after a dispatch retires (the wave is
+    still draining), so we match to the most recent span whose
+    launch_time <= time rather than requiring strict [launch, retire]
+    containment.
+    """
+    lo, hi = 0, len(spans) - 1
+    result = None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        s = spans[mid]
+        if s.launch_time <= time:
+            result = s
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return result
+
+
+def merge_folded(all_folded: list[dict[str, tuple[int, int]]]) -> dict[str, tuple[int, int]]:
+    """Merge folded stack counts from multiple independent time domains."""
+    merged_cycles: dict[str, int] = defaultdict(int)
+    merged_execs: dict[str, int] = defaultdict(int)
+    for folded in all_folded:
+        for stack, (cycles, execs) in folded.items():
+            merged_cycles[stack] += cycles
+            merged_execs[stack] += execs
+    return {k: (merged_cycles[k], merged_execs[k]) for k in merged_cycles}
+
+
+# ---------------------------------------------------------------------------
+# Address trace preprocessing
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AddressTrace:
+    """A single memory operation with per-lane addresses.
+
+    Only active lanes (EXEC bit set) are stored in the addresses list.
+    Inactive lane data is discarded during parsing since those VGPRs
+    contain garbage.
+    """
+    kind: str           # "load", "store", "lds_load", "lds_store"
+    time: int
+    cu: int
+    simd: int
+    wave_id: int
+    exec_mask: int      # 64-bit EXEC mask
+    addresses: list[int]  # active lanes only; 64-bit for memory, 32-bit for LDS
+    marker_id: int = 0  # unique per-op marker ID from funcmap
+    source_loc: str = ""  # "file.hip:42" if compiled with -g
+
+    def active_lane_count(self) -> int:
+        """Return count of active lanes (same as len(addresses))."""
+        return len(self.addresses)
+
+
+# Map funcmap name prefix -> (kind, is_64bit)
+# Funcmap entries may have @source:line suffix (e.g. "addr_trace_load@file.hip:42")
+# Order matters: longer/more-specific prefixes first to avoid false matches.
+_ADDR_TRACE_PREFIXES = [
+    # LDS atomics (before lds_load/lds_store)
+    ("addr_trace_lds_atomic",           "lds_atomic",           False),
+    ("addr_trace_lds_load",             "lds_load",             False),
+    ("addr_trace_lds_store",            "lds_store",            False),
+    # Global atomics (before load/store)
+    ("addr_trace_atomic",               "atomic",               True),
+    ("addr_trace_load",                 "load",                 True),
+    ("addr_trace_store",                "store",                True),
+    # Buffer ops — component-based protocol (handled separately)
+    ("addr_trace_struct_buffer_atomic", "struct_buffer_atomic", None),
+    ("addr_trace_struct_buffer_load",   "struct_buffer_load",   None),
+    ("addr_trace_struct_buffer_store",  "struct_buffer_store",  None),
+    ("addr_trace_buffer_atomic",        "buffer_atomic",        None),
+    ("addr_trace_buffer_load",          "buffer_load",          None),
+    ("addr_trace_buffer_store",         "buffer_store",         None),
+    # ds_permute/ds_bpermute — 32-bit index per lane
+    ("addr_trace_ds_bpermute",          "ds_bpermute",          False),
+    ("addr_trace_ds_permute",           "ds_permute",           False),
+]
+
+
+def _match_addr_trace(name: str) -> Optional[tuple[str, Optional[bool], str]]:
+    """Match a funcmap name against address trace prefixes.
+
+    Returns (kind, is_64bit, source_loc) or None if not an addr trace.
+    is_64bit is None for buffer ops (component-based protocol).
+    The source_loc is the part after '@', or "" if absent.
+    """
+    for prefix, kind, is_64bit in _ADDR_TRACE_PREFIXES:
+        if name == prefix or name.startswith(prefix + "@"):
+            source_loc = name[len(prefix) + 1:] if "@" in name else ""
+            return kind, is_64bit, source_loc
+    return None
+
+
+def _is_buffer_trace(kind: str) -> bool:
+    """Check if trace kind uses the buffer component protocol."""
+    return "buffer" in kind
+
+
+def _is_struct_buffer(kind: str) -> bool:
+    """Check if trace kind is a struct buffer (has vindex)."""
+    return kind.startswith("struct_buffer")
+
+def parse_address_block(
+    records: list[ShaderRecord],
+    start_idx: int,
+    header_rec: ShaderRecord,
+    name: str,
+    marker_id: int,
+    wave_size: int,
+) -> tuple[Optional[AddressTrace], int]:
+    """Parse an address trace block starting at the header marker.
+
+    Expected record sequence for memory/LDS/atomic/permute:
+        [start_idx]   header marker  (already decoded as addr_trace_*)
+        [start_idx+1] exec_lo
+        [start_idx+2] exec_hi       (0 on wave32)
+        [start_idx+3..] lane addresses (2 per lane for 64-bit, 1 for 32-bit)
+
+    For buffer ops (component-based protocol):
+        [start_idx]   header marker
+        [start_idx+1] exec_lo
+        [start_idx+2] exec_hi
+        [start_idx+3] rsrc_lo
+        [start_idx+4] rsrc_hi
+        [start_idx+5] soffset
+        [start_idx+6..] per-lane voffset (wave_size tokens)
+        (struct only:) per-lane vindex (wave_size tokens)
+
+    The wave_size (from W: funcmap entry) determines how many lane
+    addresses to read.  No sentinel -- we trust the thread trace data.
+
+    Returns (AddressTrace, next_index) or (None, next_index) on parse failure.
+    """
+    match = _match_addr_trace(name)
+    if match is None:
+        return None, start_idx + 1
+
+    kind, is_64bit, source_loc = match
+    i = start_idx + 1  # skip header
+
+    if wave_size not in (32, 64):
+        return None, i
+
+    # Need at least exec_lo + exec_hi
+    if i + 1 >= len(records):
+        return None, len(records)
+
+    exec_lo = records[i].value & 0xFFFFFFFF
+    exec_hi = records[i + 1].value & 0xFFFFFFFF
+    exec_mask = exec_lo | (exec_hi << 32)
+    i += 2
+
+    # Buffer ops use component-based protocol
+    if _is_buffer_trace(kind):
+        return _parse_buffer_block(
+            records, i, header_rec, kind, source_loc,
+            marker_id, wave_size, exec_mask)
+
+    # Standard per-lane address trace (memory, LDS, atomic, permute)
+    tokens_per_lane = 2 if is_64bit else 1
+    total_tokens = wave_size * tokens_per_lane
+    if i + total_tokens > len(records):
+        return None, len(records)
+
+    addresses = []
+    if is_64bit:
+        for lane in range(wave_size):
+            addr_lo = records[i].value & 0xFFFFFFFF
+            addr_hi = records[i + 1].value & 0xFFFFFFFF
+            i += 2
+            if (exec_mask >> lane) & 1:
+                addresses.append(addr_lo | (addr_hi << 32))
+    else:
+        for lane in range(wave_size):
+            val = records[i].value & 0xFFFFFFFF
+            i += 1
+            if (exec_mask >> lane) & 1:
+                addresses.append(val)
+
+    trace = AddressTrace(
+        kind=kind,
+        time=header_rec.time,
+        cu=header_rec.cu,
+        simd=header_rec.simd,
+        wave_id=header_rec.wave_id,
+        exec_mask=exec_mask,
+        addresses=addresses,
+        marker_id=marker_id,
+        source_loc=source_loc,
+    )
+    return trace, i
+
+
+def _parse_buffer_block(
+    records: list[ShaderRecord],
+    i: int,
+    header_rec: ShaderRecord,
+    kind: str,
+    source_loc: str,
+    marker_id: int,
+    wave_size: int,
+    exec_mask: int,
+) -> tuple[Optional[AddressTrace], int]:
+    """Parse buffer component block after exec mask has been read.
+
+    Protocol: rsrc_lo, rsrc_hi, soffset, then per-lane voffset.
+    For struct buffers: additionally per-lane vindex.
+    Reconstructs full addresses: base + soffset + voffset[lane].
+    """
+    is_struct = _is_struct_buffer(kind)
+
+    # Fixed tokens: rsrc_lo, rsrc_hi, soffset
+    if i + 3 > len(records):
+        return None, len(records)
+
+    rsrc_lo = records[i].value & 0xFFFFFFFF
+    rsrc_hi = records[i + 1].value & 0xFFFFFFFF
+    soffset = records[i + 2].value & 0xFFFFFFFF
+    i += 3
+
+    # Per-lane voffset
+    if i + wave_size > len(records):
+        return None, len(records)
+
+    voffsets = []
+    for lane in range(wave_size):
+        voffsets.append(records[i].value & 0xFFFFFFFF)
+        i += 1
+
+    # For struct buffers: per-lane vindex
+    vindices = None
+    if is_struct:
+        if i + wave_size > len(records):
+            return None, len(records)
+        vindices = []
+        for lane in range(wave_size):
+            vindices.append(records[i].value & 0xFFFFFFFF)
+            i += 1
+
+    # Reconstruct addresses for active lanes
+    # Base address from rsrc descriptor: bits [47:0]
+    base_addr = (rsrc_lo | (rsrc_hi << 32)) & 0xFFFFFFFFFFFF
+
+    addresses = []
+    for lane in range(wave_size):
+        if (exec_mask >> lane) & 1:
+            addr = base_addr + soffset + voffsets[lane]
+            addresses.append(addr)
+
+    trace = AddressTrace(
+        kind=kind,
+        time=header_rec.time,
+        cu=header_rec.cu,
+        simd=header_rec.simd,
+        wave_id=header_rec.wave_id,
+        exec_mask=exec_mask,
+        addresses=addresses,
+        marker_id=marker_id,
+        source_loc=source_loc,
+    )
+    return trace, i
+
+
+def preprocess_records(
+    records: list[ShaderRecord],
+    funcmap: FuncMap,
+) -> tuple[list[ShaderRecord], list[AddressTrace]]:
+    """Extract address trace blocks from the record stream.
+
+    Address trace blocks span multiple consecutive s_ttracedata records
+    (header + exec + addresses), but the raw shaderdata stream interleaves
+    records from all active waves.  We demultiplex by (cu, simd, wave_id)
+    so each wave's records are contiguous before parsing address blocks.
+
+    Returns:
+        markers: all non-address-trace records (for build_stacks)
+        addr_traces: structured AddressTrace objects
+    """
+    markers: list[ShaderRecord] = []
+    addr_traces: list[AddressTrace] = []
+
+    # First pass: identify address-trace headers and split records
+    # into per-wave streams for those waves that have address traces.
+    # Non-address-trace records go directly to markers.
+    #
+    # A record is an address-trace header if decoding its value gives
+    # a marker_id that resolves to an addr_trace_* funcmap entry.
+    # All subsequent records from the same (cu, simd, wave_id) until
+    # the next header belong to the same address trace block.
+
+    # Group all records by wave identity, preserving time order
+    per_wave: dict[tuple[int, int, int], list[ShaderRecord]] = defaultdict(list)
+    wave_has_addr_trace: set[tuple[int, int, int]] = set()
+
+    for rec in records:
+        key = (rec.cu, rec.simd, rec.wave_id)
+        per_wave[key].append(rec)
+        # Check if this record is an address trace header
+        marker_id, enter, exit_prev = decode_marker(rec.value)
+        name, mtype = funcmap.resolve(marker_id)
+        if _match_addr_trace(name) is not None:
+            wave_has_addr_trace.add(key)
+
+    # Process each wave's records
+    for key, wave_records in per_wave.items():
+        if key not in wave_has_addr_trace:
+            # No address traces in this wave -- all records are markers
+            markers.extend(wave_records)
+            continue
+
+        # Parse this wave's contiguous record stream
+        i = 0
+        while i < len(wave_records):
+            rec = wave_records[i]
+            marker_id, enter, exit_prev = decode_marker(rec.value)
+            name, mtype = funcmap.resolve(marker_id)
+
+            if _match_addr_trace(name) is not None:
+                trace, i = parse_address_block(
+                    wave_records, i, rec, name, marker_id, funcmap.wave_size)
+                if trace:
+                    addr_traces.append(trace)
+            else:
+                markers.append(rec)
+                i += 1
+
+    # Re-sort markers by time since we processed per-wave
+    markers.sort(key=lambda r: r.time)
+
+    return markers, addr_traces
+
+
+# ---------------------------------------------------------------------------
+# Auto-discovery
+# ---------------------------------------------------------------------------
+
+def discover_base_dir(base: str) -> tuple[list[str], list[str]]:
+    """
+    Auto-discover trace directories and code objects under a base directory.
+
+    Searches recursively for:
+      - ui_*/shaderdata_*.json  -> trace directories
+      - *code_object_id*.out   -> code objects
+    """
+    trace_dirs: list[str] = []
+    code_objects: list[str] = []
+
+    for root, dirs, files in os.walk(base):
+        for f in files:
+            if f.startswith("shaderdata_") and f.endswith(".json"):
+                if root not in trace_dirs:
+                    trace_dirs.append(root)
+            if "code_object_id" in f and f.endswith(".out"):
+                code_objects.append(os.path.join(root, f))
+
+    return sorted(trace_dirs), sorted(code_objects)
