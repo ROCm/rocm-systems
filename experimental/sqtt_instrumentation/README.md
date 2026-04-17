@@ -1,0 +1,526 @@
+# SQTT Instrumentation for AMDGPU
+
+Insert `s_ttracedata` markers into HIP device code for SQTT/ATT tracing.
+Two modes: manual user markers and automatic instrumentation via an LLVM pass plugin.
+Zero runtime cost when disabled.
+
+## Prerequisites
+
+- ROCm 7.x with hipcc
+- CMake 3.20+
+- Target: gfx906+ (CDNA/GCN) or gfx10+ (RDNA)
+
+## Building the pass plugin
+
+```bash
+cmake -B build
+cmake --build build
+```
+
+This produces `build/SQTTInstrumentPass.so`.
+
+## Quick start
+
+### User markers only
+
+Add markers to your HIP code and compile with `-DSQTT_ENABLED=1`:
+
+```cpp
+#include "sqtt_trace.hpp"
+
+__global__ void my_kernel(float *data, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    sqtt_marker_enter("work");
+    data[idx] = do_work(data[idx]);
+    sqtt_marker_exit("work");
+}
+```
+
+```bash
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+Without `-DSQTT_ENABLED=1` (or with `-DSQTT_ENABLED=0`), all marker calls
+compile to nothing. You can leave them in production code permanently.
+
+### User markers with scope filtering
+
+The pass wraps every `s_ttracedata` call with a scope check so that only
+waves on matching CUs/SIMDs/WGs emit markers:
+
+```bash
+# Only CU 0, SIMD 0, all workgroups
+SQTT_SCOPE_CU=0x1 SQTT_SCOPE_SIMD=0x1 \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+By default the pass limits markers to CU 0-1 (`SQTT_SCOPE_CU=0x3`).
+
+### Automatic function instrumentation
+
+Automatically insert entry/exit markers into device functions that exceed
+a size threshold. Kernels (`__global__`) are not instrumented because
+SQTT already generates wave start/end markers for them.
+
+```bash
+SQTT_INSTRUMENT_FUNCTIONS=10 \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+Use weighted cost instead of instruction count:
+
+```bash
+SQTT_INSTRUMENT_FUNCTIONS=cost:50 \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+### Automatic barrier instrumentation (gfx12)
+
+Insert point markers around `s_barrier_signal` and `s_barrier_wait`:
+
+```bash
+SQTT_INSTRUMENT_BARRIERS=1 \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+### Automatic memory operation markers
+
+Insert point markers around groups of global/buffer/flat memory operations
+(LDS and private/scratch are excluded):
+
+```bash
+SQTT_INSTRUMENT_MEMORY=2:5 \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+Format: `N:M` where N = number of memory ops per marker, M = max instruction
+gap between ops in the same sequence. `2:5` means "emit one marker per 2 ops,
+sequence breaks if gap > 5 instructions." With N=1, every memory op gets its
+own marker. Separate IDs are used for loads (`vmem_load`) and stores
+(`vmem_store`). Loads and stores are never mixed in the same group — a
+load/store transition always splits the sequence.
+
+### Memory address tracing
+
+Dump per-lane virtual addresses for every memory operation into the trace
+stream. Each memory op gets a unique marker ID with source location, enabling
+cache line utilization analysis, stride detection, and coalescing analysis:
+
+```bash
+SQTT_TRACE_ADDRESSES=memory \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+Trace LDS addresses only:
+
+```bash
+SQTT_TRACE_ADDRESSES=lds \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+Trace both global and LDS:
+
+```bash
+SQTT_TRACE_ADDRESSES=memory,lds \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+`SQTT_TRACE_ADDRESSES` and `SQTT_INSTRUMENT_MEMORY` are mutually exclusive.
+Address tracing emits a header marker for every op, making
+`SQTT_INSTRUMENT_MEMORY` redundant.
+
+Analyze address traces after capture:
+
+```bash
+rocprofv3 --att -d trace_output -- ./my_app
+python3 tools/sqtt_memory_trace.py trace_output/ -o addresses.json
+python3 tools/sqtt_memory_trace.py trace_output/ --summary
+```
+
+The trace protocol emits a header marker, the EXEC mask, and then
+per-lane addresses for all lanes (wave size determined from the ISA target
+and stored in the funcmap as `W:64` or `W:32`). The decoder filters by
+the EXEC mask to report only active lanes. The parser demultiplexes
+interleaved records from concurrent waves by grouping on `(cu, simd, wave_id)`
+before parsing each wave's address block.
+
+### Everything together
+
+All options compose. User markers, auto-function, auto-barrier, memory ops,
+and scope filtering work simultaneously:
+
+```bash
+SQTT_INSTRUMENT_FUNCTIONS=cost:50 \
+SQTT_INSTRUMENT_BARRIERS=1 \
+SQTT_INSTRUMENT_MEMORY=2:5 \
+SQTT_SCOPE_CU=0x1 \
+SQTT_SCOPE_SIMD=0x1 \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ my_kernel.hip -o my_kernel
+```
+
+## Marker API
+
+```cpp
+// Named markers (requires pass plugin, auto-assigned IDs, deduplication)
+sqtt_marker_enter("my_scope");      // push scope
+sqtt_marker_exit("my_scope");       // pop scope
+sqtt_marker_point("checkpoint");    // point event (no push/pop)
+
+// Numeric markers (sched_barrier(0) on each side; pass plugin adds the
+// SQTT_MEM_BARRIER-controlled boundary on top)
+sqtt_marker_enter(uint32_t id);     // push scope
+sqtt_marker_exit(uint32_t id);      // pop scope
+sqtt_marker_point(uint32_t id);     // point event
+```
+
+### Named markers (recommended)
+
+Use string-based markers for readable trace output with automatic ID management:
+
+```cpp
+#include "sqtt_trace.hpp"
+
+__global__ void my_kernel(float *data, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    sqtt_marker_enter("load_phase");
+    float val = data[idx];
+    sqtt_marker_exit("load_phase");
+
+    sqtt_marker_enter("compute_phase");
+    val = val * val + 1.0f;
+    sqtt_marker_exit("compute_phase");
+
+    sqtt_marker_point("store_begin");
+    data[idx] = val;
+}
+```
+
+Named markers require the pass plugin (`-fpass-plugin=build/SQTTInstrumentPass.so`).
+The pass:
+
+1. Finds all `sqtt_marker_enter("...")`, `sqtt_marker_exit("...")`, and
+   `sqtt_marker_point("...")` calls
+2. Assigns unique IDs (starting at 1) with deduplication -- the same string
+   at multiple call sites gets the same ID
+3. Fuses adjacent exit+enter pairs into single `s_ttracedata` instructions
+   with `exit_prev=true`, halving the overhead for scope transitions
+4. Replaces each call with `s_ttracedata` + scope checks
+5. Records `U:ID:name` entries in the `.sqtt_funcmap` section
+
+If you forget to load the pass plugin, you get a linker error
+("undefined reference to `__sqtt_named_marker_enter`") -- no silent miscompilation.
+
+When `SQTT_ENABLED=0` (the default), all markers compile to nothing.
+
+### Numeric markers
+
+For cases where you don't need the pass plugin, use numeric IDs directly.
+The header shifts the ID into bits [31:2] and sets the appropriate flags.
+Exit markers always emit `EXIT_PREV` (value 1) regardless of the ID passed.
+
+## Scope control and environment variables
+
+All variables are read at **compile time**. They configure the pass plugin
+or the preprocessor, not runtime behavior.
+
+### Master switch (preprocessor define)
+
+| Variable | Values | Default | Description |
+|---|---|---|---|
+| `SQTT_ENABLED` | `0`, `1` | `0` | Pass as `-DSQTT_ENABLED=1` to hipcc. When 0, all user marker calls compile to nothing. |
+
+### Scope control plugin options (environment variables)
+
+Set these as env vars before the hipcc command. The pass plugin reads them
+directly via `getenv()`.
+
+| Variable | Format | Default | Description |
+|---|---|---|---|
+| `SQTT_SCOPE_WAVE` | hex bitmask or `-1` | `-1` (all) | Which waves emit markers. Wave 0-31, bits [31:0]. |
+| `SQTT_SCOPE_SIMD` | hex bitmask or `-1` | `0xF` (all 4) | Which SIMDs emit markers. 4 SIMDs, bits [3:0]. |
+| `SQTT_SCOPE_CU` | hex bitmask or `-1` | `0x3` (CU 0-1) | Which CUs emit markers. Bit N = CU N. |
+| `SQTT_SCOPE_WG` | hex bitmask or `-1` | `-1` (all) | Which workgroups emit markers. WG 0-31, bits [31:0]. |
+| `SQTT_INSTRUMENT_FUNCTIONS` | `N` or `cost:N` | off | Instrument device functions exceeding threshold. `20` = instruction count > 20. `cost:100` = weighted cost > 100. |
+| `SQTT_INSTRUMENT_BARRIERS` | `0`, `1` | `0` | Instrument barriers. Consecutive signal+wait pairs fuse to a single marker. |
+| `SQTT_INSTRUMENT_MEMORY` | `N:M` | off | Instrument memory ops. N = ops per marker, M = max gap. `2:5` = 1 marker per 2 ops, sequence breaks at gap > 5. Covers global, buffer, flat (not LDS/scratch). |
+| `SQTT_TRACE_ADDRESSES` | `memory`, `lds`, or both | off | Trace per-lane virtual addresses. Mutually exclusive with `SQTT_INSTRUMENT_MEMORY`. `memory` = global/buffer/flat, `lds` = LDS (AS=3). Expensive. |
+| `SQTT_MEM_BARRIER` | `none` / `asm` / `fence` (or `0` / `1` / `2`) | `fence` | Reordering boundary planted around every marker. `fence` (default) emits `fence syncscope("workgroup") acq_rel`, lowering to `s_waitcnt lgkmcnt(0)` -- free in non-LDS code, anchors markers against post-RA sinking and block placement. `asm` plants an empty `~{memory}` inline asm (IR/MIR-only constraint, no machine code). `none` disables both. Default favors marker accuracy; opt down for tight kernels. |
+
+## Examples
+
+### User markers in a real kernel (`test/kernels/heavy.cpp`)
+
+The FP8 GEMM kernel in `heavy.cpp` uses named markers to annotate producer/consumer
+threads and individual phases (memory loads, LDS stores, MFMA compute). Here is the
+consumer thread's inner loop, showing how markers bracket each phase:
+
+```cpp
+sqtt_marker_enter("Consumer Thread");
+
+// ...
+
+for (int k1=0; k1 < KDIM; k1 += 2*SHMBLOCK)
+{
+    // ...
+    for (int k2=0; k2 < 2*SHMBLOCK; k2 += SHMBLOCK)
+    {
+        sqtt_marker_enter("Wait for producer");
+        __syncthreads();
+        sqtt_marker_exit("Wait for producer");
+
+        sqtt_marker_enter("Load matrix from DS");
+        // ... load from shared memory into registers ...
+        sqtt_marker_exit("Load matrix from DS");
+
+        sqtt_marker_enter("MFMA Section");
+        for (int n=0; n<HEIGHT; n++) for (int r1=0; r1<WIDTH; r1++)
+        {
+            Vec4 res = mfma(a0_load[r1], a1_load[r1], b0_load[n], b1_load[n]);
+            for (int m=0; m<4; m++) reg_res[r1][m*HEIGHT + n] += scal[r1][m] * res[m];
+        }
+        sqtt_marker_exit("MFMA Section");
+    }
+}
+
+sqtt_marker_exit("Consumer Thread");
+```
+
+Build with the pass plugin, capture a trace, and generate the flamegraph:
+
+```bash
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ test/kernels/heavy.cpp -o heavy
+
+rocprofv3 --att -d trace_heavy -- ./heavy
+python3 tools/sqtt_flamegraph.py trace_heavy/ --demangle --show
+```
+
+The resulting flamegraph shows each phase as a nested scope under "Consumer Thread":
+
+![Flamegraph with user markers from heavy.cpp](docs/marker.png)
+
+### Automatic function instrumentation (`test/kernels/auto.hip`)
+
+The `auto.hip` test contains a kernel calling device functions of varying size.
+Functions exceeding the threshold are automatically instrumented with entry/exit
+markers -- no source changes needed:
+
+```cpp
+__device__ float add_one(float x)
+{
+    asm volatile("v_add_f32 %0, %1, 1" : "=v"(x) : "v"(x));
+    // ...
+    return x;
+}
+
+__device__ float heavy_compute(int iters, float* out)
+{
+    float result = out[threadIdx.x];
+    for (int i = 0; i < iters; i++) {
+        result = add_one(result);
+        result = result / (result + 1.0f);
+        // ...
+    }
+    return result;
+}
+
+__global__ void compute_kernel(float *out, const float *in, int size, int iters) {
+    // ...
+    float val = heavy_compute(iters, shm);
+    out[idx] = add_one(val);
+}
+```
+
+Build with automatic function instrumentation, capture a trace, and generate the flamegraph:
+
+```bash
+SQTT_INSTRUMENT_FUNCTIONS=10 \
+hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ test/kernels/auto.hip -o auto
+
+rocprofv3 --att -d trace_auto -- ./auto
+python3 tools/sqtt_flamegraph.py trace_auto/ --demangle --show
+```
+
+Both `heavy_compute` and `add_one` get automatic entry/exit markers:
+
+![Flamegraph with automatic function instrumentation from auto.hip](docs/function.png)
+
+## Generating flamegraphs
+
+After capturing an SQTT trace with rocprofv3, generate an interactive
+flamegraph:
+
+```bash
+# Capture trace
+rocprofv3 --att -d trace_output -- ./my_app
+
+# Generate flamegraph (folded stacks to stdout, SVG to disk)
+python3 tools/sqtt_flamegraph.py trace_output/ --demangle
+
+# Open in browser
+python3 tools/sqtt_flamegraph.py trace_output/ --demangle --show
+
+# Filter to specific CU/SIMD/wave
+python3 tools/sqtt_flamegraph.py trace_output/ --demangle --cu 0 --simd 0
+
+# Speedscope JSON output
+python3 tools/sqtt_flamegraph.py trace_output/ --format speedscope -o trace.json
+```
+
+The flamegraph tool:
+- Auto-discovers `ui_*/shaderdata_*.json` and `*code_object_id*.out` files
+- Processes each `ui_*` directory as an independent time domain
+- Resolves kernel names and dispatch IDs from occupancy data
+- Generates interactive SVG with search and hover tooltips
+- Point markers (barriers, memory ops, user points) are dropped from the
+  flamegraph -- they have no meaningful cycle attribution. Inspect them via
+  `sqtt_decode_funcmap.py` or the raw shaderdata records.
+
+## Decoding the function map
+
+Auto-instrumented binaries contain a `.sqtt_funcmap` section mapping IDs to
+function names. Extract it from the code object:
+
+```bash
+# Extract code object from the binary
+llvm-objdump --offloading my_kernel
+
+# Decode the function map (resolves ELF vaddrs)
+python3 tools/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942
+
+# With demangled names
+python3 tools/sqtt_decode_funcmap.py my_kernel.0.hipv4-amdgcn-amd-amdhsa--gfx942 --demangle
+```
+
+Example output:
+
+```
+  Type        ID               Vaddr  Name
+  ----       ---               -----  ----
+kernel         -  0x0000000000001900  my_kernel(float*, int)
+  user         1                   -  load_phase
+  user         2                   -  compute_phase
+  func         3  0x0000000000001000  do_work(float)
+ point         4                   -  barrier_signal
+ point         5                   -  barrier_wait
+ point         6                   -  barrier
+```
+
+With address tracing, the funcmap also contains per-op entries with source
+locations and a wave size entry:
+
+```
+  wave_size: 64
+ point         1                   -  addr_trace_load@my_kernel.hip:10
+ point         2                   -  addr_trace_store@my_kernel.hip:12
+```
+
+### Weighted cost model
+
+When using `SQTT_INSTRUMENT_FUNCTIONS=cost:N`, instructions are weighted:
+
+| Weight | Instructions |
+|---|---|
+| 0 | phi, alloca, debug intrinsics, lifetime markers, unreachable |
+| 1 | Arithmetic, comparisons, branches, conversions |
+| 4 | LDS loads/stores, `ds_*` intrinsics |
+| 10 | Global/flat memory loads and stores |
+| 16 | `mfma_*` / `wmma_*` matrix operations |
+
+## ID encoding
+
+Marker values are packed into 2 flag bits so that small IDs can use the faster
+`s_ttracedata_imm` instruction (8-bit immediate, gfx10+). Larger IDs fall back
+to `s_ttracedata` (32-bit m0, all targets).
+
+```
+Both instructions share the same bit layout:
+
+  Bit  0:      exit previous scope (pop top)
+  Bit  1:      enter scope (push)
+  Bits [7:2]:  6-bit ID   (s_ttracedata_imm, IDs 0-63)
+  Bits [31:2]: 30-bit ID  (s_ttracedata, IDs 0-1G)
+
+Decoding (works for both):
+  exit_prev = val & 1
+  is_enter  = (val >> 1) & 1
+  id        = val >> 2
+```
+
+The pass plugin automatically selects `s_ttracedata_imm` when the encoded value
+fits in 8 bits and the target is gfx10+. IDs 1-63 use the fast path on RDNA.
+Exit markers are always `s_ttracedata_imm 1` (no m0 setup needed).
+
+The marker type (function, user, barrier, memory) is determined by looking up
+the ID in the `.sqtt_funcmap` section, not from encoding bits.
+
+**Semantics:**
+
+| enter | exit_prev | id     | meaning                                    |
+|-------|-----------|--------|--------------------------------------------|
+| 0     | 1         | 0      | exit (pop top scope)                       |
+| 0     | 0         | 0      | no-op (reserved)                           |
+| 0     | 0         | any    | point marker (no scope change)             |
+| 1     | 0         | any    | enter scope (push)                         |
+| 1     | 1         | any    | exit previous + enter this ID (transition) |
+
+**IDs** are allocated dynamically from a unified pool. No reserved ranges.
+With all features enabled, a typical allocation looks like:
+
+```
+  1-N         auto-instrumented functions
+  N+1         barrier_signal          (if SQTT_INSTRUMENT_BARRIERS=1)
+  N+2         barrier_wait
+  N+3         barrier
+  N+4         vmem_load               (if SQTT_INSTRUMENT_MEMORY set)
+  N+5         vmem_store
+  N+6+        user markers
+  M+1..M+K    addr_trace_* per-op IDs (if SQTT_TRACE_ADDRESSES set)
+```
+
+When address tracing is enabled, each memory operation gets its own unique
+marker ID. The funcmap records `P:ID:addr_trace_load@file.hip:42` with
+source location for correlation.
+
+## Verifying instrumentation
+
+Check that markers appear in the IR:
+
+```bash
+SQTT_INSTRUMENT_FUNCTIONS=5 \
+hipcc -DSQTT_ENABLED=1 \
+      -fpass-plugin=build/SQTTInstrumentPass.so \
+      -I include/ -S -emit-llvm my_kernel.hip -o - \
+      | grep ttracedata
+```
+
+Check that disabled builds have no markers:
+
+```bash
+hipcc -I include/ -S -emit-llvm my_kernel.hip -o - | grep ttracedata
+# (should produce no output)
+```
