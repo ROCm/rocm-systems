@@ -201,20 +201,19 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
                                           int size) {
   switch (size) {
     case 2: {
+      [[maybe_unused]] int16_t val16{*(reinterpret_cast<int16_t*>(val))};
 #if defined(__gfx90a__)
-      int16_t val16{*(reinterpret_cast<int16_t*>(val))};
       asm volatile("global_store_short %0, %1, off glc slc" : : "v"(dst), "v"(val16));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      int16_t val16{*(reinterpret_cast<int16_t*>(val))};
       asm volatile("global_store_short %0, %1, off sc0 sc1" : : "v"(dst), "v"(val16));
 #endif
 #if defined(__gfx1100__)
-      int32_t val32{*(reinterpret_cast<int32_t*>(val))};
+      int32_t val32{static_cast<int32_t>(val16)};
       asm volatile("global_store_short %0, %1, off glc slc" : : "v"(dst), "v"(val32));
 #endif
 #if defined(__gfx1201__)
-      int32_t val32{*(reinterpret_cast<int32_t*>(val))};
+      int32_t val32{static_cast<int32_t>(val16)};
       asm volatile("global_store_b16 %0, %1, off scope:SCOPE_SYS" : : "v"(dst), "v"(val32));
 #endif
       break;
