@@ -37,6 +37,10 @@ inputs:
     description: 'Enable ROCJPEG build'
     required: false
     default: 'false'
+  enable-rocprof-trace-decoder-build:
+    description: 'Enable rocprof-trace-decoder build'
+    required: false
+    default: 'false'
   install-nightly-rocm:
     description: 'Install latest nightly ROCm'
     required: false
@@ -228,6 +232,27 @@ runs:
         cmake --build build-rocjpeg --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocjpeg --target install
         echo "✅ ROCJPEG Installation complete!"
+
+    - name: Build and Install rocprof-trace-decoder
+      if: ${{ inputs.enable-rocprof-trace-decoder-build == 'true' }}
+      shell: bash
+      working-directory: projects/rocprof-trace-decoder
+      run: |
+        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        echo "Install rocprof-trace-decoder..."
+        rm -f ${{ inputs.rocm-path }}/lib/librocprof-trace-decoder*
+        rm -f ${{ inputs.rocm-path }}/lib64/librocprof-trace-decoder*
+        cmake -B build-rocprof-trace-decoder \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          .
+        cmake --build build-rocprof-trace-decoder --target all --parallel ${{ inputs.build-jobs }}
+        cmake --build build-rocprof-trace-decoder --target install
+        echo "✅ rocprof-trace-decoder Installation complete!"
 
     - name: Remove old ROCProfiler SDK artifacts
       shell: bash
