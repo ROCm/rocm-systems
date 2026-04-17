@@ -10,6 +10,7 @@
 
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCRegister.h"
 
 #include <map>
 
@@ -70,7 +71,7 @@ struct RaiseContext {
 
   llvm::BasicBlock *lookupBB(uint64_t addr);
 
-  ParsedReg parseReg(unsigned reg, int mciOpIdx = -1) const;
+  ParsedReg parseReg(llvm::MCRegister reg, int mciOpIdx = -1) const;
 
   // Operand reading — mirrors the lambdas in the original raiseToIR.
   llvm::Value *readOp32(const DecodedInst &di, unsigned opIdx);

@@ -52,12 +52,16 @@ void RaiseContext::computeVGPRAdjust(const DecodedInst &di) {
   }
 }
 
-// Count how many 32-bit sub-registers make up `reg`. A plain 32-bit register
-// has no sub0 (getSubReg returns 0) and is reported as width 1. Tuples
+// Count how many 32-bit sub-registers make up `reg`. A 32-bit register has
+// no sub0 (getSubReg returns 0) and is reported as width 1. Tuples
 // (SGPR0_SGPR1, VReg_128, ...) walk sub0, sub1, ... until exhausted.
+// The loop is bounded by the target's declared sub-reg index count so it
+// terminates even if a future TableGen change introduced a cycle in the
+// sub-reg graph.
 static int computeRegWidth32(const MCRegisterInfo &MRI, MCRegister reg) {
+  const unsigned maxSubIdx = MRI.getNumSubRegIndices();
   int w = 0;
-  for (unsigned subIdx = AMDGPU::sub0; /**/; ++subIdx) {
+  for (unsigned subIdx = AMDGPU::sub0; subIdx < maxSubIdx; ++subIdx) {
     if (!MRI.getSubReg(reg, subIdx))
       break;
     ++w;
@@ -65,9 +69,21 @@ static int computeRegWidth32(const MCRegisterInfo &MRI, MCRegister reg) {
   return w ? w : 1;
 }
 
-ParsedReg RaiseContext::parseReg(unsigned reg, int mciOpIdx) const {
+// Locate `reg` inside `RC` and return its 0-based position. Used where the
+// hardware encoding is not what we want (TTMPs live at generation-specific
+// HW slots 108+ or 112+, but downstream we index a logical `ttmp[16]`
+// array). Relies only on TableGen's declared class membership — no enum
+// arithmetic assumptions.
+static int findIndexInClass(const MCRegisterClass &RC, MCRegister reg) {
+  for (unsigned i = 0, e = RC.getNumRegs(); i != e; ++i)
+    if (RC.getRegister(i) == reg)
+      return static_cast<int>(i);
+  return -1;
+}
+
+ParsedReg RaiseContext::parseReg(MCRegister reg, int mciOpIdx) const {
   ParsedReg pr;
-  if (reg == 0) {
+  if (!reg) {
     pr.kind = ParsedReg::NOREG;
     return pr;
   }
@@ -79,23 +95,24 @@ ParsedReg RaiseContext::parseReg(unsigned reg, int mciOpIdx) const {
   // sub0/sub1/... chain from the disassembler.
   const int width = computeRegWidth32(MRI, reg);
 
-  // Normalise away subtarget-specific aliases so the switch below can use
-  // target-agnostic register constants:
-  //   TTMP8_gfx9plus            -> TTMP8
-  //   FLAT_SCR_LO_vi            -> FLAT_SCR_LO
-  //   SGPR_NULL64_gfx11plus     -> SGPR_NULL
-  //   M0_gfx11plus              -> M0
-  MCRegister pseudo = AMDGPU::mc2PseudoReg(MCRegister(reg));
-
-  // A tuple (e.g. VReg_64) classifies as whatever its first 32-bit lane is.
-  // For a 32-bit register getSubReg returns 0 and we use the register
-  // itself. mc2PseudoReg on a tuple keeps it a tuple, so we need sub0 here.
-  MCRegister lane = MRI.getSubReg(pseudo, AMDGPU::sub0);
+  // Reduce everything to a canonical 32-bit pseudo for class/enum lookups:
+  //   * sub0 on the as-decoded register picks the first 32-bit lane out
+  //     of a tuple (sub-reg graph is authoritative on the real MC reg).
+  //   * mc2PseudoReg then strips any subtarget suffix:
+  //       TTMP8_gfx9plus         -> TTMP8
+  //       FLAT_SCR_LO_vi         -> FLAT_SCR_LO
+  //       SGPR_NULL64_gfx11plus  -> SGPR_NULL
+  //       M0_gfx11plus           -> M0
+  MCRegister lane = MRI.getSubReg(reg, AMDGPU::sub0);
   if (!lane)
-    lane = pseudo;
+    lane = reg;
   lane = AMDGPU::mc2PseudoReg(lane);
 
   switch (lane) {
+  // Wave-mask registers. The ``_LO`` / ``_HI`` halves get the same
+  // classification as the full pair; downstream VCC/EXEC handling routes
+  // through loadVCC/storeVCC (which already respects wave size), so the
+  // ``width`` field is informational here rather than load-bearing.
   case AMDGPU::VCC_LO:
   case AMDGPU::VCC_HI:
     pr.kind = ParsedReg::VCC;
@@ -121,7 +138,7 @@ ParsedReg RaiseContext::parseReg(unsigned reg, int mciOpIdx) const {
   case AMDGPU::FLAT_SCR_LO:
   case AMDGPU::FLAT_SCR_HI:
     pr.kind = ParsedReg::FLAT_SCR;
-    pr.width = width; // 2 for the pair, 1 for a single half
+    pr.width = width;
     return pr;
   // GFX11+ uses SGPR_NULL / SGPR_NULL_HI (and the 64-bit pair SGPR_NULL64)
   // as carry-discard sinks, e.g. `v_mad_co_u64_u32 ..., null, ...`. They
@@ -134,15 +151,14 @@ ParsedReg RaiseContext::parseReg(unsigned reg, int mciOpIdx) const {
     break;
   }
 
-  // Family classification via the HW encoding flag bits. `getEncodingValue`
-  // on the as-decoded register returns the correct HWEncoding payload even
-  // for subtarget-specific aliases.
+  // Family classification via the HW encoding flag bits. getEncodingValue
+  // returns the correct HWEncoding payload for both pseudos and subtarget-
+  // specific aliases. IS_VGPR (bit 10) and IS_AGPR (bit 11) are defined as
+  // disjoint in SIRegisterInfo.td, so checking either first is correct;
+  // AGPR goes first only because it is the more specific case.
   unsigned enc = MRI.getEncodingValue(reg);
   unsigned hwIdx = enc & AMDGPU::HWEncoding::REG_IDX_MASK;
 
-  // AGPR must be checked before VGPR: on gfx90a the AGPR encoding can set
-  // both IS_VGPR and IS_AGPR (the shared VGPR/AGPR operand slot), so
-  // checking IS_AGPR first disambiguates.
   if (enc & AMDGPU::HWEncoding::IS_AGPR) {
     pr.kind = ParsedReg::AGPR;
     pr.baseIdx = hwIdx;
@@ -160,19 +176,23 @@ ParsedReg RaiseContext::parseReg(unsigned reg, int mciOpIdx) const {
     return pr;
   }
 
-  // TTMPs live at a generation-specific HW encoding (108+ or 112+). Use
-  // the AMDGPU::TTMP<N> pseudo values as a source of truth so we report the
-  // 0..15 logical index expected by the TTMP register file.
-  if (lane >= AMDGPU::TTMP0 && lane <= AMDGPU::TTMP15) {
+  // TTMPs live at a generation-specific HW encoding (108+ on gfx9+ vs 112+
+  // on gfx8), so we cannot use the raw encoding as the logical 0..15
+  // index. Locate the lane inside TTMP_32RegClass instead; the class is
+  // defined as `(add (sequence "TTMP%u", 0, 15))` so position == index.
+  const MCRegisterClass &TTMP32 =
+      MRI.getRegClass(AMDGPU::TTMP_32RegClassID);
+  if (int idx = findIndexInClass(TTMP32, lane); idx >= 0) {
     pr.kind = ParsedReg::TTMP;
-    pr.baseIdx = lane - AMDGPU::TTMP0;
+    pr.baseIdx = idx;
     pr.width = width;
     return pr;
   }
 
-  // SReg_32RegClass is the canonical 32-bit scalar set (SGPR0..SGPR105).
-  // We reach here only after ruling out special scalars above.
-  if (MRI.getRegClass(AMDGPU::SReg_32RegClassID).contains(lane)) {
+  // SGPR_32 is the narrow class for `SGPR0..SGPR105`; SReg_32 would also
+  // include VCC_LO, EXEC_LO, FLAT_SCR_LO, M0, TTMP_32, SGPR_NULL, and the
+  // SRC_* inline-value registers, which we have already ruled out above.
+  if (MRI.getRegClass(AMDGPU::SGPR_32RegClassID).contains(lane)) {
     pr.kind = ParsedReg::SGPR;
     pr.baseIdx = hwIdx;
     pr.width = width;
