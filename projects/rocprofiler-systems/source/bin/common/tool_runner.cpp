@@ -53,8 +53,6 @@ namespace
 {
 using rocprofsys::common::update_mode;
 
-auto original_envs = std::unordered_set<std::string>{};
-
 std::string
 replace_all(std::string str, std::string_view from, std::string_view replacement)
 {
@@ -110,8 +108,10 @@ toggle_suppression(std::tuple<bool, bool> _inp)
     return _out;
 }
 
-// timemory reads config files during static init; suppress until we explicitly init
-auto initial_suppression = toggle_suppression({ true, true });
+// Suppresses timemory env-parsing during static init; replayed in parse_args.
+// Captured value holds the prior settings so they can be restored once we
+// have control inside main() and can decide when parsing should run.
+auto pre_main_suppression_guard = toggle_suppression({ true, true });
 
 int
 get_verbose(parser_data_t& _data)
@@ -134,7 +134,6 @@ get_initial_environment(parser_data_t&                               _data,
             auto* env_entry = environ[idx++];
             _data.initial.emplace(env_entry);
             _data.current.emplace_back(strdup(env_entry));
-            original_envs.emplace(env_entry);
         }
     }
 
@@ -143,7 +142,7 @@ get_initial_environment(parser_data_t&                               _data,
     {
         rocprofsys::common::update_env(_data.current, env::SCRIPT_PATH, _libexecpath,
                                        update_mode::REPLACE, ":", _data.updated,
-                                       original_envs);
+                                       _data.initial);
     }
 
     const bool verbose = (get_verbose(_data) > 0);
@@ -152,7 +151,7 @@ get_initial_environment(parser_data_t&                               _data,
     {
         rocprofsys::common::update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir,
                                        update_mode::APPEND, ":", _data.updated,
-                                       original_envs);
+                                       _data.initial);
         auto        current_ld = getenv("LD_LIBRARY_PATH");
         std::string new_ld     = current_ld ? (llvm_dir + ":" + current_ld) : llvm_dir;
         setenv("LD_LIBRARY_PATH", new_ld.c_str(), 1);
@@ -163,7 +162,7 @@ get_initial_environment(parser_data_t&                               _data,
         auto _mode = get_env<std::string>(std::string{ env::MODE }, "sampling", false);
         rocprofsys::common::update_env(_data.current, env::USE_SAMPLING,
                                        (_mode != "causal"), update_mode::REPLACE, ":",
-                                       _data.updated, original_envs);
+                                       _data.updated, _data.initial);
     }
 
     return _data;
@@ -217,7 +216,7 @@ prepare_environment(parser_data_t&                               _data,
 void
 parse_command_fast_path(int argc, char** argv, parser_data_t& _data)
 {
-    toggle_suppression(initial_suppression);
+    toggle_suppression(pre_main_suppression_guard);
     rocprofsys::argparse::init_parser(_data);
 
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
@@ -278,7 +277,7 @@ parse_args(int argc, char** argv, parser_data_t& _data,
         return std::nullopt;
     }
 
-    toggle_suppression(initial_suppression);
+    toggle_suppression(pre_main_suppression_guard);
     rocprofsys::argparse::init_parser(_data);
 
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
@@ -314,7 +313,7 @@ parse_args(int argc, char** argv, parser_data_t& _data,
         [&](std::string_view key, std::string_view val) {
             rocprofsys::common::update_env(_data.current, std::string{ key },
                                            std::string{ val }, update_mode::REPLACE, ":",
-                                           _data.updated, original_envs);
+                                           _data.updated, _data.initial);
         });
 
     if(_config.enable_fork())
@@ -344,7 +343,7 @@ parse_args(int argc, char** argv, parser_data_t& _data,
         if(parser.exists("sample-realtime") && !parser.exists("sample-cputime"))
             rocprofsys::common::update_env(_data.current, env::SAMPLING_CPUTIME, false,
                                            update_mode::REPLACE, ":", _data.updated,
-                                           original_envs);
+                                           _data.initial);
     }
 
     if(parser.exists("profile") && parser.exists("flat-profile"))
@@ -354,7 +353,7 @@ parse_args(int argc, char** argv, parser_data_t& _data,
     if(domain_state.export_config_requested)
     {
         rocprofsys::common_utils::export_config(
-            _data.current, original_envs, domain_state.active_preset_name,
+            _data.current, _data.initial, domain_state.active_preset_name,
             _config.tool_name, domain_state.export_config_file);
         return EXIT_SUCCESS;
     }
