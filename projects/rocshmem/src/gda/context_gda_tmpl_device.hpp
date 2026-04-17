@@ -143,7 +143,6 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   } else {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_swap only implemented for 64-bit types");
-    return T{};
   }
 }
 
@@ -155,7 +154,6 @@ __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   } else {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_and only implemented for 64-bit types");
-    return T{};
   }
 }
 
@@ -172,7 +170,6 @@ __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   } else {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_or only implemented for 64-bit types");
-    return T{};
   }
 }
 
@@ -189,7 +186,6 @@ __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   } else {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_xor only implemented for 64-bit types");
-    return T{};
   }
 }
 
@@ -221,7 +217,6 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
   } else {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_add only implemented for 64-bit types");
-    return T{};
   }
 }
 
@@ -235,7 +230,6 @@ __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
   } else {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_cas only implemented for 64-bit types");
-    return T{};
   }
 }
 
@@ -912,7 +906,6 @@ __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe, int 
   if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:internal_amo_fetch_add only implemented for 64-bit types");
-    return T{};
   }
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
   return qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
@@ -924,7 +917,6 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe, int qp_in
   if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:internal_amo_swap only implemented for 64-bit types");
-    return T{};
   }
   /**
    * Guess that the remote memory is zero by setting condition to zero.

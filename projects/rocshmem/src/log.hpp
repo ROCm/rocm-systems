@@ -126,6 +126,7 @@ namespace rocshmem {
         __VA_OPT__(__VA_ARGS__,)                                              \
         __func__, __FILE__, __LINE__);                                        \
   abort();                                                                    \
+  __builtin_unreachable();                                                    \
 } while (0)
 
 #define LOG_WARN(fmt, ...) do {                                               \
@@ -259,6 +260,7 @@ void dprintf(const char* fmt, const Args&... args) {
         : "E%04dw%04ut%04u " fmt "\t" __FILE__ ":%d\n",                       \
         __VA_OPT__(__VA_ARGS__,) __LINE__);                                   \
   abort();                                                                    \
+  __builtin_unreachable();                                                    \
 } while (0)
 
 #ifdef BUILD_DEBUG_DEVICE
