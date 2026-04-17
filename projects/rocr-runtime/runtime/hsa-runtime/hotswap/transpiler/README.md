@@ -381,7 +381,7 @@ transpiler/
 ├── raiser.hpp / raiser.cpp     # Orchestration: disassemble → IR → mem2reg
 ├── pipeline.hpp / pipeline.cpp # IR → llc → llvm-mc → ld.lld → HSACO
 ├── code_object_utils.hpp/.cpp  # ELF parsing, kernel metadata extraction
-├── amdgpu_formats.hpp          # TSFlags → FormatKind classification
+├── amdgpu_formats.hpp          # SIInstrFlags alias + diagnostic format labels
 ├── semop.hpp                   # Architecture-neutral semantic opcodes
 ├── isa_profile.hpp             # Per-target architectural properties
 ├── decoded_inst.hpp            # Disassembled instruction representation

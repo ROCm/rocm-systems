@@ -9,6 +9,8 @@
 // type used by the disassembler's TSFlags / OperandType fields.
 #include "SIDefines.h"
 
+#include "Utils/AMDGPUBaseInfo.h" // AMDGPU::isVOPD
+
 namespace transpiler {
 
 // Alias `transpiler::SIInstrFlags` to the LLVM namespace so existing call
@@ -19,74 +21,34 @@ namespace SIInstrFlags = llvm::SIInstrFlags;
 // Defined in llvm::AMDGPU::OperandType from SIDefines.h.
 constexpr unsigned OPERAND_INPUT_MODS = llvm::AMDGPU::OPERAND_INPUT_MODS;
 
-enum class FormatKind : uint8_t {
-  SOP1,
-  SOP2,
-  SOPC,
-  SOPK,
-  SOPP,
-  VOP1,
-  VOP2,
-  VOP3,
-  VOPC,
-  VOP3P,
-  SMEM,
-  FLAT,
-  MUBUF,
-  DS,
-  MFMA,
-  DPP,
-  SDWA,
-  VOPD,
-  Unknown,
-};
-
-// VOPD detection cannot use TSFlags — the VOPD3 bit position varies across
-// LLVM versions.  Use classifyFormatWithMnemonic() which checks the mnemonic.
-inline FormatKind classifyFormat(uint64_t tsFlags) {
-  if (tsFlags & SIInstrFlags::IsMAI)  return FormatKind::MFMA;
-  // DPP/SDWA must be checked before VOP1/VOP2 because they have both bits set.
-  if (tsFlags & SIInstrFlags::DPP)    return FormatKind::DPP;
-  if (tsFlags & SIInstrFlags::SDWA)   return FormatKind::SDWA;
-  if (tsFlags & SIInstrFlags::SOPP)   return FormatKind::SOPP;
-  if (tsFlags & SIInstrFlags::SOPC)   return FormatKind::SOPC;
-  if (tsFlags & SIInstrFlags::SOP1)   return FormatKind::SOP1;
-  if (tsFlags & SIInstrFlags::SOP2)   return FormatKind::SOP2;
-  if (tsFlags & SIInstrFlags::SOPK)   return FormatKind::SOPK;
-  if (tsFlags & SIInstrFlags::VOPC)   return FormatKind::VOPC;
-  if (tsFlags & SIInstrFlags::VOP3P)  return FormatKind::VOP3P;
-  if (tsFlags & SIInstrFlags::VOP3)   return FormatKind::VOP3;
-  if (tsFlags & SIInstrFlags::VOP2)   return FormatKind::VOP2;
-  if (tsFlags & SIInstrFlags::VOP1)   return FormatKind::VOP1;
-  if (tsFlags & SIInstrFlags::SMRD)   return FormatKind::SMEM;
-  if (tsFlags & SIInstrFlags::FLAT)   return FormatKind::FLAT;
-  if (tsFlags & SIInstrFlags::MUBUF)  return FormatKind::MUBUF;
-  if (tsFlags & SIInstrFlags::DS)     return FormatKind::DS;
-  return FormatKind::Unknown;
-}
-
-inline const char *formatName(FormatKind fk) {
-  switch (fk) {
-  case FormatKind::SOP1:    return "SOP1";
-  case FormatKind::SOP2:    return "SOP2";
-  case FormatKind::SOPC:    return "SOPC";
-  case FormatKind::SOPK:    return "SOPK";
-  case FormatKind::SOPP:    return "SOPP";
-  case FormatKind::VOP1:    return "VOP1";
-  case FormatKind::VOP2:    return "VOP2";
-  case FormatKind::VOP3:    return "VOP3";
-  case FormatKind::VOPC:    return "VOPC";
-  case FormatKind::VOP3P:   return "VOP3P";
-  case FormatKind::SMEM:    return "SMEM";
-  case FormatKind::FLAT:    return "FLAT";
-  case FormatKind::MUBUF:   return "MUBUF";
-  case FormatKind::DS:      return "DS";
-  case FormatKind::MFMA:    return "MFMA";
-  case FormatKind::DPP:     return "DPP";
-  case FormatKind::SDWA:    return "SDWA";
-  case FormatKind::VOPD:    return "VOPD";
-  case FormatKind::Unknown: return "Unknown";
-  }
+// Human-readable format label for diagnostics. There is no runtime dispatch
+// on this string — it is consumed only by error messages in the decoder.
+// The precedence of the TSFlags tests below mirrors LLVM's own decoder:
+//   * `IsMAI` is a VOP3 subclass, so check before VOP3.
+//   * `DPP` / `SDWA` are orthogonal encoding bits that coexist with
+//     VOP1/VOP2/VOPC; check them first so those aren't misnamed as VOP1/2.
+//   * `VOP3P` coexists with `VOP3` on some subtargets; check VOP3P first.
+//   * VOPD has no dedicated TSFlags bit (LLVM's VOPD3 bit varies across
+//     versions); use `AMDGPU::isVOPD(opc)` instead.
+inline const char *formatName(uint64_t flags, unsigned opc) {
+  if (llvm::AMDGPU::isVOPD(opc))     return "VOPD";
+  if (flags & SIInstrFlags::IsMAI)   return "MFMA";
+  if (flags & SIInstrFlags::DPP)     return "DPP";
+  if (flags & SIInstrFlags::SDWA)    return "SDWA";
+  if (flags & SIInstrFlags::SOPP)    return "SOPP";
+  if (flags & SIInstrFlags::SOPC)    return "SOPC";
+  if (flags & SIInstrFlags::SOP1)    return "SOP1";
+  if (flags & SIInstrFlags::SOP2)    return "SOP2";
+  if (flags & SIInstrFlags::SOPK)    return "SOPK";
+  if (flags & SIInstrFlags::VOPC)    return "VOPC";
+  if (flags & SIInstrFlags::VOP3P)   return "VOP3P";
+  if (flags & SIInstrFlags::VOP3)    return "VOP3";
+  if (flags & SIInstrFlags::VOP2)    return "VOP2";
+  if (flags & SIInstrFlags::VOP1)    return "VOP1";
+  if (flags & SIInstrFlags::SMRD)    return "SMEM";
+  if (flags & SIInstrFlags::FLAT)    return "FLAT";
+  if (flags & SIInstrFlags::MUBUF)   return "MUBUF";
+  if (flags & SIInstrFlags::DS)      return "DS";
   return "Unknown";
 }
 

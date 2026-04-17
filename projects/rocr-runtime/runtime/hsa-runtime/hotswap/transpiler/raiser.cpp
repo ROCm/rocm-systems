@@ -124,13 +124,6 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       di.size = instSize;
 
       di.tsFlags = desc.TSFlags;
-      di.format = classifyFormat(desc.TSFlags);
-      // VOPD detection. LLVM's TableGen emits VOPD instructions without a
-      // dedicated SIInstrFlags bit; the canonical upstream check is whether
-      // the instruction carries the dual-issue `src0X` operand, which LLVM
-      // exposes via `AMDGPU::isVOPD(opcode)`.
-      if (AMDGPU::isVOPD(inst.getOpcode()))
-        di.format = FormatKind::VOPD;
       di.firstSrcIdx = desc.getNumDefs();
 
       // Build the logical-source view of the MCInst. We walk `desc.operands()`
@@ -499,28 +492,50 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     ctx.computeVGPRAdjust(di);
     OpResolver op{ctx, di};
 
+    // Dispatch to the format-specific handler by querying TSFlags (and
+    // `AMDGPU::isVOPD` for the one encoding without a dedicated flag bit)
+    // directly, rather than going through a hand-rolled FormatKind enum.
+    // Check precedence mirrors LLVM's decoder:
+    //   * VOPD first — it has no TSFlags bit; detect by named-operand id.
+    //   * IsMAI before VOP3 — MFMA is a VOP3 subclass with its own handler.
+    //   * DPP / SDWA / VOPC / VOP3P / VOP3 / VOP2 / VOP1 all route to
+    //     handleVALU, so they're collapsed into one mask test; ordering
+    //     within the VOP family is therefore irrelevant here.
+    //   * Scalar / memory family bits are mutually exclusive.
+    // `default: break;` semantics are preserved: anything without a matching
+    // bit falls through with `hr.handled == false` and hits the unsupported-
+    // instruction error path below.
+    const uint64_t kVALU =
+        SIInstrFlags::DPP | SIInstrFlags::SDWA | SIInstrFlags::VOP1 |
+        SIInstrFlags::VOP2 | SIInstrFlags::VOP3 | SIInstrFlags::VOPC |
+        SIInstrFlags::VOP3P;
+    const uint64_t flags = di.tsFlags;
+    const unsigned opc = di.inst.getOpcode();
     HandlerResult hr;
-    switch (di.format) {
-    case FormatKind::SOPP:  hr = handleSOPP(ctx, di, op, result); break;
-    case FormatKind::SMEM:  hr = handleSMEM(ctx, di, op, result); break;
-    case FormatKind::SOPC:  hr = handleSOPC(ctx, di, op, result); break;
-    case FormatKind::SOP1:  hr = handleSOP1(ctx, di, op, result); break;
-    case FormatKind::SOPK:  hr = handleSOPK(ctx, di, op, result); break;
-    case FormatKind::SOP2:  hr = handleSOP2(ctx, di, op, result); break;
-    case FormatKind::DPP:
-    case FormatKind::SDWA:
-    case FormatKind::VOP1:
-    case FormatKind::VOP2:
-    case FormatKind::VOP3:
-    case FormatKind::VOPC:
-    case FormatKind::VOP3P:  hr = handleVALU(ctx, di, op, result); break;
-    case FormatKind::FLAT:   hr = handleFLAT(ctx, di, op, result); break;
-    case FormatKind::DS:     hr = handleDS(ctx, di, op, result); break;
-    case FormatKind::MUBUF:  hr = handleMUBUF(ctx, di, op, result); break;
-    case FormatKind::MFMA:   hr = handleMFMA(ctx, di, op, result); break;
-    case FormatKind::VOPD:   hr = handleVOPD(ctx, di, op, result); break;
-    default: break;
-    }
+    if (AMDGPU::isVOPD(opc))
+      hr = handleVOPD(ctx, di, op, result);
+    else if (flags & SIInstrFlags::IsMAI)
+      hr = handleMFMA(ctx, di, op, result);
+    else if (flags & kVALU)
+      hr = handleVALU(ctx, di, op, result);
+    else if (flags & SIInstrFlags::SOPP)
+      hr = handleSOPP(ctx, di, op, result);
+    else if (flags & SIInstrFlags::SOPC)
+      hr = handleSOPC(ctx, di, op, result);
+    else if (flags & SIInstrFlags::SOP1)
+      hr = handleSOP1(ctx, di, op, result);
+    else if (flags & SIInstrFlags::SOP2)
+      hr = handleSOP2(ctx, di, op, result);
+    else if (flags & SIInstrFlags::SOPK)
+      hr = handleSOPK(ctx, di, op, result);
+    else if (flags & SIInstrFlags::SMRD)
+      hr = handleSMEM(ctx, di, op, result);
+    else if (flags & SIInstrFlags::FLAT)
+      hr = handleFLAT(ctx, di, op, result);
+    else if (flags & SIInstrFlags::MUBUF)
+      hr = handleMUBUF(ctx, di, op, result);
+    else if (flags & SIInstrFlags::DS)
+      hr = handleDS(ctx, di, op, result);
 
     // Handler may have set failure on result directly (e.g. SMEM kernarg fail)
     if (!hr.handled && !result.failMnemonic.empty())
@@ -538,10 +553,10 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     }
 
     result.failMnemonic = di.mnemonic;
-    result.failFormat = formatName(di.format);
+    result.failFormat = formatName(di.tsFlags, di.inst.getOpcode());
     errs() << "transpiler: Unsupported instruction: " << di.mnemonic
            << " (raw: " << di.rawMnemonic << ")"
-           << " [format=" << formatName(di.format) << "]"
+           << " [format=" << result.failFormat << "]"
            << " at offset 0x" << format_hex(di.offset, 1) << "\n";
     return result;
   }

@@ -23,7 +23,6 @@ struct DecodedInst {
   uint64_t size = 0;
 
   uint64_t tsFlags = 0;
-  FormatKind format = FormatKind::Unknown;
   bool defsSCC = false;
   bool defsVCC = false;
   bool defsEXEC = false;

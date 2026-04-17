@@ -84,13 +84,17 @@ DPP (Data Parallel Primitives) instructions permute data across lanes in a
 wavefront. In the scalar model, all lanes are uniform, so any permutation is
 identity. The raiser handles DPP by:
 
-1. During decode, `classifyFormat()` routes DPP to `FormatKind::DPP` via
-   TSFlags (checked *before* VOP1/VOP2 to avoid misclassification).
-2. The srcMap builder skips the tied "old" operand (index `firstSrcIdx`)
-   for DPP instructions, so `op.src(0)` maps to the actual first data source,
-   not the fallback value.
-3. In the format switch, DPP falls through to the VALU handler after stripping
-   the `_dpp` suffix from the mnemonic.
+1. During decode, the dispatch in `raiser.cpp` routes instructions whose
+   TSFlags set `SIInstrFlags::DPP` (or `SDWA`, or any VOP* bit) to the VALU
+   handler — the `DPP`/`SDWA` bits are checked as part of the same mask as
+   `VOP1`/`VOP2`/`VOP3`/`VOPC`/`VOP3P`, so the ordering within the VOP
+   family is irrelevant; MFMA is checked first because `IsMAI` is a VOP3
+   subclass.
+2. The srcMap builder skips the tied scalar-fallback operand (the one named
+   `$old` or `$vdst_in` in TableGen) for these encodings, so `op.src(0)`
+   maps to the actual first data source, not the fallback value.
+3. After routing, the VALU handler strips the `_dpp` suffix from the
+   mnemonic and reuses the base VOP handler.
 
 **Why this is principled within the scalar model**: The "old" operand is the
 fallback value for lanes where the DPP permutation has no valid source (e.g.,
@@ -197,15 +201,22 @@ crash on register shift amounts.
 
 ### 3a. Format-based dispatch with DPP/SDWA fall-through [STRENGTH — PRINCIPLED]
 
-`classifyFormat()` routes instructions by TSFlags. DPP and SDWA are checked
-*before* VOP1/VOP2 (since DPP instructions have both bits set) and route to
-the same VALU handler case with mnemonic suffix stripping.
+`raiser.cpp` dispatches directly on `MCInstrDesc::TSFlags` (with
+`AMDGPU::isVOPD(opc)` for the one encoding that has no dedicated flag bit).
+DPP / SDWA / VOPC / VOP3P / VOP3 / VOP2 / VOP1 all route to the same VALU
+handler, so they're collapsed into a single mask test. `IsMAI` is checked
+first because MFMA is a VOP3 subclass with its own handler.
 
 The dispatch chain is:
 ```
-TSFlags → FormatKind::DPP → strip "_dpp" suffix → fall through to VALU handlers
-TSFlags → FormatKind::SDWA → strip "_sdwa" suffix → fall through to VALU handlers
-TSFlags → FormatKind::VOP1/VOP2/VOP3/VOPC/VOP3P → VALU handlers
+AMDGPU::isVOPD(opc)              → handleVOPD
+TSFlags & IsMAI                  → handleMFMA
+TSFlags & (DPP|SDWA|VOP1|VOP2|
+          VOP3|VOPC|VOP3P)       → handleVALU
+                                   (VALU then strips _dpp/_sdwa suffixes
+                                    and dispatches to the base VOP handler)
+TSFlags & SOPP/SOPC/SOP1/SOP2/
+          SOPK/SMRD/FLAT/MUBUF/DS → respective handler
 ```
 
 This is principled because:
@@ -431,7 +442,7 @@ bf16 fadd), branching, and control flow.
 | NOREG returns zero | MEDIUM | `srcReg()` returns `OTHER`; `isSrcReg()` API |
 | VOP3P immediate zeroed | MEDIUM | Fail loudly on non-register source |
 | SCC carry semantics | LOW | `uadd.with.overflow` / `icmp ult` |
-| DPP suffix stripping hazard | LOW | Removed; DPP/SDWA in `classifyFormat()` |
+| DPP suffix stripping hazard | LOW | Removed; DPP/SDWA routed via TSFlags in the dispatch |
 | bf16 pack truncation | LOW | `fptrunc` to `bfloat` |
 
 ### Coverage extensions (earlier pass)
@@ -461,7 +472,7 @@ bf16 fadd), branching, and control flow.
 |-----------|-----|
 | **EXEC as i64 alloca** | Real value tracked through CFG via `PromoteMemToReg`; branches conditional; saveexec faithful |
 | **Operand resolution** (srcMap + modMap + DPP skip) | TSFlags-driven srcMap adjustment for DPP; VOP3 neg/abs via `srcF()`; operand-index bugs structurally impossible |
-| **Format dispatch** (TSFlags → FormatKind → handler) | DPP/SDWA checked before VOP; suffix stripped after routing; base VOP handlers shared |
+| **Format dispatch** (TSFlags → handler) | Direct if/else on `SIInstrFlags` bits + `AMDGPU::isVOPD(opc)`; MFMA checked before VOP3; DPP/SDWA/VOPC/VOP3P/VOP3/VOP2/VOP1 collapsed into one VALU mask test |
 | **Auto SCC writeback** (implicit_defs → sccResult) | Hardware metadata determines when to write; `sccHandled` override explicit |
 | **Register model** (AllocaInst + PromoteMemToReg) | Standard LLVM pass; EXEC/M0/FLAT_SCR have dedicated allocas |
 | **SCC carry model** | Overflow intrinsic / unsigned comparison for add/sub |
