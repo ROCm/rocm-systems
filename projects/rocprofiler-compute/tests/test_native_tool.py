@@ -39,8 +39,11 @@ class TestNativeTool:
     def installed_compute_path(self, rocm_path: Path) -> Path:
         return self.create_rocm_opt_file(rocm_path, Path("bin/rocprof-compute"))
 
-    @pytest.fixture()
-    def installed_lib_path(self, rocm_path: Path) -> Path:
+    @pytest.fixture(params=["lib", "lib32", "lib64"])
+    def installed_lib_path(
+        self, rocm_path: Path, request: pytest.FixtureRequest
+    ) -> Path:
         return self.create_rocm_opt_file(
-            rocm_path, Path("lib/rocprofiler-compute/librocprofiler-compute-tool.so")
+            rocm_path,
+            Path(f"{request.param}/rocprofiler-compute/librocprofiler-compute-tool.so"),
         )
