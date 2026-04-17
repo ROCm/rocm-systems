@@ -26,10 +26,10 @@ from utils.utils_common import (
 
 # NB:
 # Ammolite is unique gemstone from the Rocky Mountains.
-# "ammolite__" is a special internal prefix to mark build-in global variables
-# calculated or parsed from raw data sources. Its range is only in this file.
-# Any other general prefixes string, like "buildin__", might be used by the
-# editor. Whenever change it to a new one, replace all appearances in this file.
+# "ammolite__" is a special internal prefix used by the shared metrics
+# evaluation code to mark build-in global variables calculated or parsed from
+# raw data sources. Other generic prefixes, like "buildin__", might be used by
+# the editor. Whenever this prefix changes, update all shared metric helpers.
 
 # 001 is ID of pmc_kernel_top.csv table
 PMC_KERNEL_TOP_TABLE_ID: int = 1

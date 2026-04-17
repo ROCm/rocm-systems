@@ -48,7 +48,7 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
             "LDSBw",
             "MFMAF6F4Flops",
         ]
-        # initialize peaks to 0
+        # initialize peaks to NaN
         for peak_name in peak_names:
             empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = np.nan
 

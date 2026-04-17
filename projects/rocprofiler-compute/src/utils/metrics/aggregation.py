@@ -28,7 +28,7 @@ def to_max(*args: Any) -> float | np.ndarray:
         isinstance(args[0], pd.Series) or isinstance(args[1], pd.Series)
     ):
         return np.maximum(args[0], args[1])
-    elif max(args) == None:
+    elif max(args) is None:
         return np.nan
     else:
         return max(args)
