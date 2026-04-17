@@ -530,8 +530,13 @@ uint64_t AqlQueue::InterceptReserveSlots(uint64_t value,
   uint64_t cur = atomic::Load(&amd_queue_.write_dispatch_id,
                               std::memory_order_relaxed);
   while (true) {
-    // Initialise the gap slots (start+value..start+reserved) as INVALID.
-    for (uint64_t pos = cur + value; pos < cur + reserved; ++pos) {
+    // Initialise all reserved slots (including the app's own value slots) as
+    // INVALID. The app will atomically overwrite the header on each of its
+    // value slots when it writes its packet; between reservation and the
+    // app's write, the slot shows INVALID so a scan (triggered by
+    // self-rearm, not the app's own doorbell) correctly stops here and
+    // doesn't treat stale prior ring content as an app packet.
+    for (uint64_t pos = cur; pos < cur + reserved; ++pos) {
       atomic::Store(&ring[pos & mask].packet.header, kInvalidHeader,
                     std::memory_order_relaxed);
     }
@@ -548,8 +553,13 @@ uint64_t AqlQueue::InterceptReserveSlots(uint64_t value,
   (void)order;  // release is conveyed via the CAS's memory_order_acq_rel
 }
 
+static bool kr_disabled() {
+  static const bool v = getenv("SHADOW_WPTR_NO_KRESERVE") != nullptr;
+  return v;
+}
+
 uint64_t AqlQueue::AddWriteIndexAcqRel(uint64_t value) {
-  if (intercept_active_.load(std::memory_order_acquire)) {
+  if (intercept_active_.load(std::memory_order_acquire) && !kr_disabled()) {
     return InterceptReserveSlots(value, std::memory_order_acq_rel);
   }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
@@ -562,7 +572,7 @@ uint64_t AqlQueue::AddWriteIndexAcqRel(uint64_t value) {
 }
 
 uint64_t AqlQueue::AddWriteIndexAcquire(uint64_t value) {
-  if (intercept_active_.load(std::memory_order_acquire)) {
+  if (intercept_active_.load(std::memory_order_acquire) && !kr_disabled()) {
     return InterceptReserveSlots(value, std::memory_order_acquire);
   }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
@@ -575,7 +585,7 @@ uint64_t AqlQueue::AddWriteIndexAcquire(uint64_t value) {
 }
 
 uint64_t AqlQueue::AddWriteIndexRelaxed(uint64_t value) {
-  if (intercept_active_.load(std::memory_order_acquire)) {
+  if (intercept_active_.load(std::memory_order_acquire) && !kr_disabled()) {
     return InterceptReserveSlots(value, std::memory_order_relaxed);
   }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
@@ -588,7 +598,7 @@ uint64_t AqlQueue::AddWriteIndexRelaxed(uint64_t value) {
 }
 
 uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
-  if (intercept_active_.load(std::memory_order_acquire)) {
+  if (intercept_active_.load(std::memory_order_acquire) && !kr_disabled()) {
     return InterceptReserveSlots(value, std::memory_order_release);
   }
   uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
