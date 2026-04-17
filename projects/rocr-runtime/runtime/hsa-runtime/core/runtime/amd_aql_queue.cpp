@@ -135,8 +135,17 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   // Allocate GPU-visible shadow write pointer.
   // The GPU/CP polls this address instead of write_dispatch_id directly.
+  // The BO must carry the AQL-queue-object flags so KFD pins it for wptr polling;
+  // on MES-scheduled agents GTTAccess and NonPaged are also required (matches the
+  // SharedQueue allocation path in GpuAgent::QueueCreate).
+  core::MemoryRegion::AllocateFlags shadow_flags =
+      agent->isMES()
+          ? (core::MemoryRegion::AllocateGTTAccess | core::MemoryRegion::AllocateNonPaged |
+             core::MemoryRegion::AllocateQueueObject)
+          : core::MemoryRegion::AllocateQueueObject;
   shadow_wptr_ = static_cast<volatile uint64_t*>(
-      agent->system_allocator()(sizeof(uint64_t), 8, 0));
+      core::Runtime::runtime_singleton_->system_allocator()(
+          sizeof(uint64_t), MemoryRegion::GetPageSize(), shadow_flags, agent->node_id()));
   if (shadow_wptr_ == nullptr) throw std::bad_alloc();
   *shadow_wptr_ = 0;
 
