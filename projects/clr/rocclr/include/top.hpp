@@ -28,7 +28,7 @@
 #endif /*_WIN32*/
 
 #include "utils/macros.hpp"
-#include "CL/opencl.h"
+#include "amd_types.hpp"
 
 #if defined(CL_VERSION_2_0)
 /* Deprecated in OpenCL 2.0 */
