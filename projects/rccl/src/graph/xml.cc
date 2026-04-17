@@ -828,21 +828,56 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t rocmDev
     for (int i=0; i<deviceCnt; i++) {
       if (i != dev) {
         amdsmi_link_type_t amdsmi_type;
-        int hops, count;
-        if (amd_smi_getLinkInfo(dev, i, &amdsmi_type, &hops, &count) == ncclSuccess) {
-          if (amdsmi_type == AMDSMI_LINK_TYPE_XGMI && hops == 1) {
-            char busIdStr[] = "00000000:00:00.0";
-            NCCLCHECK(amd_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
-            char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-            for (int c=0; c<NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
-              lowerId[c] = tolower(busIdStr[c]);
-              if (busIdStr[c] == 0) break;
+        // Based on amd-smi team, there will be a new UALoE link type
+        // First, we will check if UALoE is supported, if not we will check for XGMI links
+        bool canUseUALoE = false;
+        if(amd_smi_canUseScaleUpFabric(dev, i, canUseUALoE) == ncclSuccess && canUseUALoE) {
+          char busIdStr[] = "00000000:00:00.0";
+          NCCLCHECK(amd_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
+          char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+          for (int c=0; c<NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+            lowerId[c] = tolower(busIdStr[c]);
+            if (busIdStr[c] == 0) break;
+          }
+          NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
+          if (nvlNode == NULL) {
+            NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
+            NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
+            amdsmiFabricDeviceInfo fabInfo;
+            if(amd_smi_getFabricDeviceInfo(i, &fabInfo) == ncclSuccess) {
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 1));
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "accelerator_id", fabInfo.acceleratorId));
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "bandwidth", fabInfo.bandwidth));
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "latency", fabInfo.latency));
+              NCCLCHECK(xmlSetAttrLong(nvlNode, "ppod_id", fabInfo.ppodId));
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "ppod_size", fabInfo.ppodSize));
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_id", fabInfo.vpodId));
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_size", fabInfo.vpodSize));
+              // We don't have a way to get the number of links between two devices when using UALoE, so we will set it to 1 to avoid breaking topology construction.
+              // This is not ideal, but it will allow us to use UALoE without having to wait for a new version of amd-smi that returns the number of links.
+              // We can update this later when we have that information available.
+              // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE and update this code accordingly.
+              NCCLCHECK(xmlSetAttrInt(nvlNode, "count", 1));
             }
-            NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-            if (nvlNode == NULL) {
-              NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
-              NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
-              NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
+          }
+        } else {
+          int hops, count;
+          if (amd_smi_getLinkInfo(dev, i, &amdsmi_type, &hops, &count) == ncclSuccess) {
+            if (amdsmi_type == AMDSMI_LINK_TYPE_XGMI && hops == 1) {
+              char busIdStr[] = "00000000:00:00.0";
+              NCCLCHECK(amd_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
+              char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+              for (int c=0; c<NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+                lowerId[c] = tolower(busIdStr[c]);
+                if (busIdStr[c] == 0) break;
+              }
+              NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
+              if (nvlNode == NULL) {
+                NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &nvlNode));
+                NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
+                NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count));
+                NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 0));
+              }
             }
           }
         }
