@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -213,7 +214,7 @@ prepare_environment(parser_data_t&                               _data,
     rocprofsys::common::consolidate_env_entries(_data.current);
 }
 
-parser_data_t&
+void
 parse_command_fast_path(int argc, char** argv, parser_data_t& _data)
 {
     toggle_suppression(initial_suppression);
@@ -232,11 +233,9 @@ parse_command_fast_path(int argc, char** argv, parser_data_t& _data)
         else if(std::string_view{ argv[arg_idx] } == "--")
             _past_separator = true;
     }
-
-    return _data;
 }
 
-parser_data_t&
+std::optional<int>
 parse_args(int argc, char** argv, parser_data_t& _data,
            const rocprofsys::common_utils::tool_config& _config, bool& _fork_exec)
 {
@@ -249,21 +248,9 @@ parse_args(int argc, char** argv, parser_data_t& _data,
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };
 
-    auto _pec        = EXIT_SUCCESS;
     auto _tool_name  = _config.tool_name;
-    auto help_action = [&_pec, &_tool_name, argc, argv](parser_t& parser) {
-        if(_pec != EXIT_SUCCESS)
-        {
-            std::stringstream msg;
-            msg << "Error in command:";
-            for(int arg_idx = 0; arg_idx < argc; ++arg_idx)
-                msg << " " << argv[arg_idx];
-            msg << "\n\n";
-            stream(std::cerr, color::fatal()) << msg.str();
-            std::cerr << std::flush;
-        }
-
-        rocprofsys::common_utils::dispatch_help(parser, _tool_name, _pec);
+    auto help_action = [&_tool_name](parser_t& parser) {
+        return rocprofsys::common_utils::dispatch_help(parser, _tool_name, EXIT_SUCCESS);
     };
 
     get_initial_environment(_data, _config);
@@ -285,7 +272,11 @@ parse_args(int argc, char** argv, parser_data_t& _data,
     if(!_do_parse_args && argc > 1 && std::string_view{ argv[1] }.find('-') == 0)
         _do_parse_args = true;
 
-    if(!_do_parse_args) return parse_command_fast_path(argc, argv, _data);
+    if(!_do_parse_args)
+    {
+        parse_command_fast_path(argc, argv, _data);
+        return std::nullopt;
+    }
 
     toggle_suppression(initial_suppression);
     rocprofsys::argparse::init_parser(_data);
@@ -341,10 +332,10 @@ parse_args(int argc, char** argv, parser_data_t& _data,
     _data.command = std::move(args.command);
 
     auto _cerr = parser.parse_args(args.argv_ptrs.size(), args.argv_ptrs.data());
-    if(help_check(parser, argc, argv))
-        help_action(parser);
-    else if(_cerr)
-        throw std::runtime_error(_cerr.what());
+    if(help_check(parser, argc, argv)) return help_action(parser);
+    if(_cerr) throw std::runtime_error(_cerr.what());
+
+    if(domain_state.early_exit) return *domain_state.early_exit;
 
     tim::log::monochrome() = _data.monochrome;
 
@@ -365,7 +356,7 @@ parse_args(int argc, char** argv, parser_data_t& _data,
         rocprofsys::common_utils::export_config(
             _data.current, original_envs, domain_state.active_preset_name,
             _config.tool_name, domain_state.export_config_file);
-        throw rocprofsys::common_utils::cli_done{ EXIT_SUCCESS };
+        return EXIT_SUCCESS;
     }
 
     rocprofsys::common_utils::run_post_parse_validation(
@@ -374,7 +365,7 @@ parse_args(int argc, char** argv, parser_data_t& _data,
         domain_state.cpu_domain_enabled, domain_state.parallel_domain_enabled,
         _data.verbose, domain_state.registry);
 
-    return _data;
+    return std::nullopt;
 }
 }  // namespace
 
@@ -436,13 +427,8 @@ run_tool(int argc, char** argv, const tool_config& config)
     auto _parse_data = parser_data_t{};
     auto _fork_exec  = false;
 
-    try
-    {
-        parse_args(argc, argv, _parse_data, config, _fork_exec);
-    } catch(const cli_done& done)
-    {
-        return done.exit_code;
-    }
+    if(auto exit_code = parse_args(argc, argv, _parse_data, config, _fork_exec))
+        return *exit_code;
 
     if(config.enable_launcher()) prepare_command(argv[0], _parse_data);
 

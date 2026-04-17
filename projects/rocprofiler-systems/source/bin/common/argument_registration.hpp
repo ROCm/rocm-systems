@@ -12,6 +12,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -27,14 +28,15 @@ namespace common_utils
  */
 struct domain_flag_state
 {
-    preset_registry registry;
-    std::string     active_preset_name;
-    bool            export_config_requested = false;
-    std::string     export_config_file;
-    bool            gpu_domain_enabled      = false;
-    bool            rocm_domain_enabled     = false;
-    bool            cpu_domain_enabled      = false;
-    bool            parallel_domain_enabled = false;
+    preset_registry    registry;
+    std::string        active_preset_name;
+    bool               export_config_requested = false;
+    std::string        export_config_file;
+    bool               gpu_domain_enabled      = false;
+    bool               rocm_domain_enabled     = false;
+    bool               cpu_domain_enabled      = false;
+    bool               parallel_domain_enabled = false;
+    std::optional<int> early_exit;
 };
 
 using argument_parser = tim::argparse::argument_parser;
@@ -42,8 +44,9 @@ using argument_parser = tim::argparse::argument_parser;
 /**
  * Registers all preset and domain arguments on an argument parser.
  *
- * @note Terminal argument actions (--list-presets, --explain) throw
- *       cli_done to exit gracefully with proper cleanup.
+ * @note Terminal argument actions (--list-presets, --explain) record their
+ *       exit code in domain_flag_state::early_exit; the caller short-circuits
+ *       after parser.parse_args() returns.
  *
  * @tparam EnvUpdater Callable with signature void(std::string_view key, std::string_view
  * val)
@@ -98,7 +101,7 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         .max_count(0)
         .action([&state, tool_name](argument_parser&) {
             state.registry.list(tool_name);
-            throw common_utils::cli_done{ EXIT_SUCCESS };
+            state.early_exit = EXIT_SUCCESS;
         });
 
     parser
@@ -111,13 +114,12 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
             if(preset_name.empty())
             {
                 std::cerr << "[rocprof-sys] --explain requires a preset name\n";
-                throw common_utils::cli_done{ EXIT_FAILURE };
+                state.early_exit = EXIT_FAILURE;
+                return;
             }
-            if(!state.registry.explain(preset_name, tool_name))
-            {
-                throw common_utils::cli_done{ EXIT_FAILURE };
-            }
-            throw common_utils::cli_done{ EXIT_SUCCESS };
+            state.early_exit = state.registry.explain(preset_name, tool_name)
+                                   ? EXIT_SUCCESS
+                                   : EXIT_FAILURE;
         });
 
     parser.start_group("DOMAIN OPTIONS", "High-level domain flags for composable "

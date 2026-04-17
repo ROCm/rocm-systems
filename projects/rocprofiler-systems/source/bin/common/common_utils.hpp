@@ -19,19 +19,6 @@ namespace rocprofsys
 namespace common_utils
 {
 /**
- * Thrown by argument actions that require immediate program termination
- * (e.g., --list-presets, --explain, --help). Caught at the parse_args
- * call site to exit gracefully with proper RAII cleanup.
- */
-struct cli_done
-{
-    int exit_code;
-    explicit cli_done(int code) noexcept
-    : exit_code(code)
-    {}
-};
-
-/**
  * Result of translating command-line arguments for the argument parser.
  * Owns any translated strings so their lifetime covers the parse_args call.
  */
@@ -123,10 +110,10 @@ capture_help_text(ParserT& parser)
 
 /**
  * Shared help dispatch: handles --help (compact), --help=<topic>, --help=all.
- * @throws cli_done after printing help output.
+ * Returns the exit code the caller should use to terminate the program.
  */
 template <typename ParserT>
-void
+int
 dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 {
     std::string topic;
@@ -170,7 +157,7 @@ dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
             std::cerr << "\n  --help=all  Show all options\n";
         }
     }
-    throw cli_done{ exit_code };
+    return exit_code;
 }
 
 }  // namespace common_utils
