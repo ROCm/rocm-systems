@@ -172,19 +172,18 @@ RUNTIME_ENTRY_RET(cl_context, clCreateContextFromType,
   }
 
   // Get the devices of the given type.
-  cl_uint num_devices;
   bool offlineDevices = (info.flags_ & amd::Context::OfflineDevices) ? true : false;
-  if (!amd::Device::getDeviceIDs(static_cast<amd::DeviceType>(device_type), 0, NULL, &num_devices, offlineDevices)) {
+  std::vector<amd::Device*> amdDevices =
+      amd::Device::getDevices(static_cast<amd::DeviceType>(device_type), offlineDevices);
+  if (amdDevices.empty()) {
     *not_null(errcode_ret) = CL_DEVICE_NOT_FOUND;
     return (cl_context)0;
   }
 
-  assert(num_devices > 0 && "Should have returned an error!");
+  cl_uint num_devices = (cl_uint)amdDevices.size();
   cl_device_id* devices = (cl_device_id*)alloca(num_devices * sizeof(cl_device_id));
-
-  if (!amd::Device::getDeviceIDs(static_cast<amd::DeviceType>(device_type), num_devices, devices, NULL, offlineDevices)) {
-    *not_null(errcode_ret) = CL_DEVICE_NOT_FOUND;
-    return (cl_context)0;
+  for (cl_uint i = 0; i < num_devices; ++i) {
+    devices[i] = as_cl(amdDevices[i]);
   }
 
   // Create a new context with the devices

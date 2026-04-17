@@ -60,6 +60,37 @@ static constexpr const char* OclExtensionsString[] = {"cl_khr_fp64 ",
 #endif
                                                       NULL};
 
+// OpenCL-layer helper: enumerate devices into a cl_device_id[] output buffer.
+// Moved from rocclr/device/device.cpp since it uses as_cl() (opencl boundary).
+static bool getDeviceIDsHelper(amd::DeviceType deviceType, uint32_t numEntries,
+                               cl_device_id* devices, uint32_t* numDevices,
+                               bool offlineDevices) {
+  if (numDevices != nullptr && devices == nullptr) {
+    *numDevices = (uint32_t)amd::Device::numDevices(deviceType, offlineDevices);
+    return (*numDevices > 0) ? true : false;
+  }
+  assert(devices != nullptr && "check the code above");
+
+  std::vector<amd::Device*> ret = amd::Device::getDevices(deviceType, offlineDevices);
+  if (ret.size() == 0) {
+    *not_null(numDevices) = 0;
+    return false;
+  }
+
+  auto it = ret.cbegin();
+  uint32_t count = std::min(numEntries, (uint32_t)ret.size());
+  while (count--) {
+    *devices++ = as_cl(*it++);
+    --numEntries;
+  }
+  while (numEntries--) {
+    *devices++ = (cl_device_id)0;
+  }
+
+  *not_null(numDevices) = (uint32_t)ret.size();
+  return true;
+}
+
 /*! \addtogroup API
  *  @{
  *
@@ -238,7 +269,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDs,
     return CL_INVALID_DEVICE_TYPE;
   }
   // Get all available devices
-  if (!amd::Device::getDeviceIDs(static_cast<amd::DeviceType>(device_type), num_entries, devices, num_devices, false)) {
+  if (!getDeviceIDsHelper(static_cast<amd::DeviceType>(device_type), num_entries, devices, num_devices, false)) {
     return CL_DEVICE_NOT_FOUND;
   }
 

@@ -1015,36 +1015,6 @@ size_t Device::numDevices(amd::DeviceType type, bool offlineDevices) {
   return result;
 }
 
-bool Device::getDeviceIDs(amd::DeviceType deviceType, uint32_t numEntries, cl_device_id* devices,
-                          uint32_t* numDevices, bool offlineDevices) {
-  if (numDevices != nullptr && devices == nullptr) {
-    *numDevices = (uint32_t)amd::Device::numDevices(deviceType, offlineDevices);
-    return (*numDevices > 0) ? true : false;
-  }
-  assert(devices != nullptr && "check the code above");
-
-  std::vector<amd::Device*> ret = amd::Device::getDevices(deviceType, offlineDevices);
-  if (ret.size() == 0) {
-    *not_null(numDevices) = 0;
-    return false;
-  }
-
-  auto it = ret.cbegin();
-  uint32_t count = std::min(numEntries, (uint32_t)ret.size());
-
-  while (count--) {
-    *devices++ = as_cl(*it++);
-    --numEntries;
-  }
-  while (numEntries--) {
-    *devices++ = (cl_device_id)0;
-  }
-
-  *not_null(numDevices) = (uint32_t)ret.size();
-  return true;
-}
-
-
 bool Device::enableP2P(amd::Device* ptrDev) {
   assert(ptrDev != nullptr);
   std::scoped_lock lock(lockP2P_);

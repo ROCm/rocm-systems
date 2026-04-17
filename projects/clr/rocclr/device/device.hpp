@@ -427,8 +427,8 @@ struct Info : public amd::EmbeddedObject {
   //! Describes the command-queue properties supported of the host queue.
   amd::QueueProperties queueProperties_;
 
-  //! The platform associated with this device
-  cl_platform_id platform_;
+  //! The platform associated with this device (opaque platform handle; CL translation at opencl boundary)
+  intptr_t platform_;
 
   //! Device name string
   char name_[0x40];
@@ -1727,13 +1727,6 @@ class Device : public RuntimeObject {
 
   static size_t numDevices(amd::DeviceType type,  //!< Device type
                            bool offlineDevices    //!< Enable offline devices
-  );
-
-  static bool getDeviceIDs(amd::DeviceType deviceType,  //!< Device type
-                           uint32_t numEntries,          //!< Number of entries in the array
-                           cl_device_id* devices,        //!< Array of the device ID(s)
-                           uint32_t* numDevices,         //!< Number of available devices
-                           bool offlineDevices           //!< Report offline devices
   );
 
   const device::Info& info() const { return info_; }
