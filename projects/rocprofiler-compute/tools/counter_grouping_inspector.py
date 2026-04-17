@@ -8,10 +8,13 @@ Counter grouping inspector for rocprofiler-compute.
 Parses GFX architecture YAML configs and outputs counter grouping analysis
 without requiring GPU, rocprofiler, or full rocprof-compute initialization.
 
-Perfmon bin-packing uses ``OmniSoC_Base._allocate_perfmon_counter_files`` from
-``soc_base.py`` (including ``profiling_counter_grouping_policy.yaml`` via the
-same metric-aware coalesce pass as profiling). This script does not implement a
-parallel grouping algorithm.
+Counter discovery uses ``OmniSoC_Base.detect_counters``; perfmon layout and
+YAML emission use ``OmniSoC_Base.perfmon_coalesce`` (which calls
+``_allocate_perfmon_counter_files`` and writes under ``<workload>/perfmon/``),
+matching the profiling path in ``soc_base.py``. ``get_rocprof_supported_counters``
+is stubbed so the tool runs without rocprofiler. Bucket views reuse a second
+``_allocate_perfmon_counter_files`` call on the same counter set (same result as
+the coalesce pass).
 
 Usage (from the ``rocprofiler-compute`` project root):
     ./tools/counter_grouping_inspector.py --arch gfx942
@@ -25,6 +28,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -43,11 +47,6 @@ from rocprof_compute_soc.soc_base import (  # noqa: E402
     is_tcc_channel_counter,
 )
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils_common import (  # noqa: E402
-    METRIC_ID_RE,
-    convert_metric_id_to_panel_info,
-    get_panel_alias,
-)
 from vendored import yaml  # noqa: E402
 
 
@@ -149,198 +148,60 @@ def iter_yaml_metrics(
                 yield stem_id, panel_id, idx, metric_name, metric_text
 
 
-def append_analysis_yaml_for_filter_token(
-    raw_token: str,
-    config_filename_dict: dict[str, Path],
-    config_root_dir: Path,
-    texts: list[str],
-    panel_alias_dict: dict[str, str],
-) -> None:
-    """Append YAML content for a filter token (metric ID or alias)."""
-    block_id = raw_token
-
-    # Check if it's a metric ID (x.x.x format)
-    if METRIC_ID_RE.match(block_id):
-        pass
-    elif block_id in panel_alias_dict:
-        # It's an alias like "lds", "l1i", etc.
-        block_id = panel_alias_dict[block_id]
-        print(f"alias: {raw_token} -> block id: {block_id}", file=sys.stderr)
-    else:
-        # Treat as file ID (like "0200")
-        if block_id in config_filename_dict:
-            with open(config_filename_dict[block_id]) as stream:
-                texts.append(stream.read())
-            return
-        print(
-            f"Warning: Unknown block/alias: {raw_token} not found in {config_root_dir}",
-            file=sys.stderr,
-        )
-        return
-
-    file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
-
-    if file_id not in config_filename_dict:
-        print(
-            f"Warning: Skipping {block_id}: file id {file_id} not found in "
-            f"{config_root_dir}",
-            file=sys.stderr,
-        )
-        return
-
-    with open(config_filename_dict[file_id]) as stream:
-        try:
-            file_config = yaml.safe_load(stream)
-        except yaml.YAMLError as exc:
-            print(
-                f"Warning: Skipping {block_id}: failed to parse YAML from "
-                f"{config_filename_dict[file_id]}: {exc}",
-                file=sys.stderr,
-            )
-            return
-
-    if not isinstance(file_config, dict):
-        print(
-            f"Warning: Skipping {block_id}: expected mapping at root of "
-            f"{config_filename_dict[file_id]}",
-            file=sys.stderr,
-        )
-        return
-
-    if panel_id is None:
-        texts.append(yaml.dump(file_config, sort_keys=False))
-        return
-
-    panel_config = file_config.get("Panel Config", {})
-    if not isinstance(panel_config, dict):
-        print(
-            f"Warning: Skipping {block_id}: invalid 'Panel Config' in "
-            f"{config_filename_dict[file_id]}",
-            file=sys.stderr,
-        )
-        return
-
-    data_source = panel_config.get("data source", [])
-    if not isinstance(data_source, list):
-        print(
-            f"Warning: Skipping {block_id}: invalid 'data source' in "
-            f"{config_filename_dict[file_id]}",
-            file=sys.stderr,
-        )
-        return
-
-    panel_dict = {
-        metric_table["id"]: metric_table
-        for section in data_source
-        if isinstance(section, dict)
-        for metric_table in [section.get("metric_table")]
-        if isinstance(metric_table, dict) and "id" in metric_table
-    }
-
-    if panel_id not in panel_dict:
-        print(
-            f"Warning: Skipping {block_id}: metric table {panel_id} not found in "
-            f"{config_filename_dict[file_id]}",
-            file=sys.stderr,
-        )
-        return
-
-    if metric_id is None:
-        texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
-        return
-
-    metrics = panel_dict[panel_id].get("metric", {})
-    if not isinstance(metrics, dict):
-        print(
-            f"Warning: Skipping {block_id}: invalid metric table format for "
-            f"panel id {panel_id}",
-            file=sys.stderr,
-        )
-        return
-
-    metric_list = list(metrics.items())
-    if metric_id >= len(metric_list):
-        print(
-            f"Warning: Skipping {block_id}: metric id {metric_id} not found in "
-            f"panel id {panel_id}",
-            file=sys.stderr,
-        )
-        return
-
-    metric_name, metric_body = metric_list[metric_id]
-    texts.append(yaml.dump({metric_name: metric_body}, sort_keys=False))
+def _rocprof_supported_superset(counters: set[str]) -> set[str]:
+    """Return a fake rocprofiler avail set so ``perfmon_coalesce`` skips unsupported warnings."""
+    out = set(counters)
+    for ctr in counters:
+        if is_tcc_channel_counter(ctr):
+            out.add(ctr.split("[", 1)[0])
+    return out
 
 
-def detect_counters(
-    config_dir: Path,
+def run_soc_detect_and_coalesce(
     arch: str,
-    filter_blocks: list[str] | None = None,
-) -> tuple[set[str], list[str]]:
-    """Detect all counters from YAML configs for the given architecture."""
-    config_root = config_dir / arch
-    if not config_root.is_dir():
-        print(f"Error: Config directory not found: {config_root}", file=sys.stderr)
-        sys.exit(1)
-
-    config_files = {f.name.split("_")[0]: f for f in config_root.glob("*.yaml")}
-    panel_alias_dict = get_panel_alias()
-
-    texts: list[str] = []
-    effective_blocks: list[str] = filter_blocks or []
-
-    if not effective_blocks:
-        default_config_files = {
-            block_id: filename
-            for block_id, filename in config_files.items()
-            if block_id != "3000"
-        }
-        for filename in default_config_files.values():
-            with open(filename) as stream:
-                texts.append(stream.read())
-    else:
-        for block_token in effective_blocks:
-            append_analysis_yaml_for_filter_token(
-                block_token,
-                config_files,
-                config_root,
-                texts,
-                panel_alias_dict,
-            )
-
-    counters = parse_counters("\n".join(texts))
-    counters.discard("SQ_ACCUM_PREV_HIRES")
-
-    return counters, effective_blocks
-
-
-def allocate_buckets(
-    counters: set[str],
+    config_dir: Path,
+    filter_blocks: list[str] | None,
     perfmon_config: dict[str, int],
-    arch: str,
-    config_dir: Path,
-) -> list[CounterFile]:
-    """Allocate counters using ``OmniSoC_Base._allocate_perfmon_counter_files`` (profiling path)."""
+    workload_root: Path,
+) -> tuple[set[str], list[CounterFile]]:
+    """Run SoC counter detection and perfmon coalesce; write YAML under ``workload_root/perfmon/``."""
     mspec = MagicMock()
     mspec.rocminfo_lines = None
-    # TCC template expansion only; values mirror unit-test defaults when no GPU.
     mspec.num_xcd = 1
     mspec.l2_banks = 4
 
-    args = MagicMock()
-    args.config_dir = str(config_dir.resolve())
-    args.membw_analysis = False
+    fb = list(filter_blocks) if filter_blocks else []
+    args = argparse.Namespace(
+        path=str(workload_root.resolve()),
+        config_dir=str(config_dir.resolve()),
+        filter_blocks=fb,
+        membw_analysis=False,
+        set_selected=None,
+        roof_only=False,
+        spatial_multiplexing=None,
+        no_roof=True,
+        device=0,
+    )
 
     with patch("rocprof_compute_soc.soc_base.console_debug"):
         soc = OmniSoC_Base(args, mspec)
     soc.set_arch(arch)
     soc.set_perfmon_config(perfmon_config)
 
-    work = set(counters)
-    work.discard("SQ_ACCUM_PREV_HIRES")
-    work = soc._expand_tcc_template_counters(work)
+    counters, _fb = soc.detect_counters()
+    counters = counters - {"SQ_ACCUM_PREV_HIRES"}
+    if not counters:
+        return set(), []
 
-    output_files, _file_count, _accu = soc._allocate_perfmon_counter_files(work)
-    return output_files
+    soc.get_rocprof_supported_counters = (  # type: ignore[method-assign]
+        lambda c=counters: _rocprof_supported_superset(c)
+    )
+
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc.perfmon_coalesce(counters)
+
+    output_files, _fc, _accu = soc._allocate_perfmon_counter_files(counters)
+    return counters, output_files
 
 
 def _global_ip_column_widths(
@@ -745,20 +606,44 @@ Examples:
         )
         sys.exit(1)
 
-    counters, _filter_blocks = detect_counters(config_dir, arch, args.block)
-
-    if not counters:
-        print("No counters found!", file=sys.stderr)
+    config_arch = config_dir / arch
+    if not config_arch.is_dir():
+        print(f"Error: Architecture config directory not found: {config_arch}", file=sys.stderr)
         sys.exit(1)
 
-    if args.verbose:
-        print(f"Collected {len(counters)} unique counters:")
-        for c in sorted(counters):
-            print(f"  - {c}")
-        print()
+    with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
+        workload_root = Path(tmpdir)
+        counters, output_files = run_soc_detect_and_coalesce(
+            arch, config_dir, args.block, perfmon_config, workload_root
+        )
 
-    output_files = allocate_buckets(counters, perfmon_config, arch, config_dir)
+        if not counters:
+            print("No counters found!", file=sys.stderr)
+            sys.exit(1)
 
+        if args.verbose:
+            print(f"Collected {len(counters)} unique counters:")
+            for c in sorted(counters):
+                print(f"  - {c}")
+            print()
+            perfmon_dir = workload_root / "perfmon"
+            if perfmon_dir.is_dir():
+                written = sorted(p.name for p in perfmon_dir.iterdir())
+                print(f"Perfmon YAML directory ({perfmon_dir}): {len(written)} file(s)")
+                for name in written:
+                    print(f"  - {name}")
+                print()
+
+        _emit_inspector_output(args, output_files, config_dir, arch)
+
+
+def _emit_inspector_output(
+    args: argparse.Namespace,
+    output_files: list[CounterFile],
+    config_dir: Path,
+    arch: str,
+) -> None:
+    """Write or print bucket plan and multi-bucket metrics (stdout or --output)."""
     # Handle output formats
     if args.output:
         output_path = args.output
