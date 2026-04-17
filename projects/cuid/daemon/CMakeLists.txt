@@ -18,9 +18,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-message("                           Cmake amdcuid_daemon                           ")
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message(
+    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
+)
+message(
+    "                           Cmake amdcuid_daemon                           "
+)
+message(
+    "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&"
+)
 
 message("")
 message("Build Configuration:")
@@ -45,26 +51,34 @@ add_executable(${AMDCUID_DAEMON_EXECUTABLE} ${SRC_LIST})
 
 find_package(Threads REQUIRED)
 # Link against the CUID library
-target_link_libraries(${AMDCUID_DAEMON_EXECUTABLE} amdcuid_static OpenSSL::Crypto Threads::Threads)
+target_link_libraries(
+    ${AMDCUID_DAEMON_EXECUTABLE}
+    amdcuid_static
+    OpenSSL::Crypto
+    Threads::Threads
+)
 
 # Include directories
 target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
 if(WIN32)
-    set(CONFIG_INSTALL_DIR "CONFIG")  # Relative to prefix
+    set(CONFIG_INSTALL_DIR "CONFIG") # Relative to prefix
 else()
     set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/${AMDCUID}/config")
 endif()
 
 # Pass the version-independent shared config directory to the daemon at compile
 # time so that multi-version installs all reference the same HMAC key and conf.
-target_compile_definitions(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE
-    AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
+target_compile_definitions(
+    ${AMDCUID_DAEMON_EXECUTABLE}
+    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
+)
 
 # Install the daemon
 install(
     TARGETS ${AMDCUID_DAEMON_EXECUTABLE}
     DESTINATION bin
-    COMPONENT ${DAEMON_COMPONENT})
+    COMPONENT ${DAEMON_COMPONENT}
+)
 
 set(DAEMON_CONFIG_FILE amdcuid_daemon.conf)
 
@@ -88,40 +102,53 @@ if(UNIX AND NOT APPLE)
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/amdcuid_daemon.service.in
         ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_daemon.service
-        @ONLY)
+        @ONLY
+    )
+
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_daemon.service
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${AMDCUID}
+        COMPONENT ${DAEMON_COMPONENT}
+    )
 
     # Post-installation script for udev rules / service registration.
-    # The choice between install udev rules + systemd service (daemonize=true)
-    # or simple cron job (daemonize=false) is made at install time by
-    # reading the deployed config file, so it correctly reflects any
-    # user edits made after the build.
+    # The choice between a persistent service with udev rules (daemonize=true)
+    # or a one-shot boot run (daemonize=false) is made at install time by
+    # reading the deployed config file. To apply subsequent config changes,
+    # edit the config file then rerun the post-install script to have the udev
+    # rules and service symlink updated to match the new config and restart the
+    # service using `sudo systemctl restart amdcuid_daemon`.
 
     # Generate the post-install shell script from a template, substituting the
     # install prefix and config directory baked-in at cmake configure time.
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/postinst.in
         ${CMAKE_CURRENT_BINARY_DIR}/postinst
-        @ONLY)
+        @ONLY
+    )
 
     # Configure the pre-removal script (mirrors postinst: stops service, removes
     # udev rules, cron job, and systemd service symlink).
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/prerm.in
         ${CMAKE_CURRENT_BINARY_DIR}/prerm
-        @ONLY)
+        @ONLY
+    )
 
     # Also install both scripts so they can be re-run manually after a cmake --install.
     install(
         PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/postinst
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
         RENAME amdcuid_postinst.sh
-        COMPONENT ${DAEMON_COMPONENT})
+        COMPONENT ${DAEMON_COMPONENT}
+    )
 
     install(
         PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/prerm
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
         RENAME amdcuid_prerm.sh
-        COMPONENT ${DAEMON_COMPONENT})
+        COMPONENT ${DAEMON_COMPONENT}
+    )
 endif()
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

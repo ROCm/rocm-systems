@@ -22,8 +22,8 @@
 # Pre-removal script for amdcuid daemon.
 # Template processed by CMake to generate the installed 'prerm' script.
 # Do not edit the generated 'prerm' script directly; edit this 'prerm.in' template instead.
-# This script stops and removes the daemon service, udev rules, and cron job
-# that were installed by the post-install script.
+# This script stops and removes the daemon service, udev rules, and systemd
+# service symlink that were installed by the post-install script.
 #
 # NOTE: /etc/amdcuid/ (the HMAC key and config) is intentionally left in place
 # so that reinstalls preserve existing CUID values.  To fully purge configuration
@@ -31,7 +31,6 @@
 
 SERVICE_NAME="amdcuid_daemon"
 UDEV_RULES_FILE="/etc/udev/rules.d/90-amdcuid.rules"
-CRON_FILE="/etc/cron.d/amdcuid"
 
 # Determine the systemd unit directory used by this distro.
 if [ -f /etc/debian_version ]; then
@@ -65,10 +64,4 @@ if [ -f "$UDEV_RULES_FILE" ]; then
     rm -f "$UDEV_RULES_FILE"
     udevadm control --reload-rules 2>/dev/null || true
     udevadm trigger 2>/dev/null || true
-fi
-
-# Cron job
-if [ -f "$CRON_FILE" ]; then
-    echo "Removing cron job: $CRON_FILE"
-    rm -f "$CRON_FILE"
 fi

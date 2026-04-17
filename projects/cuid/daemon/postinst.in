@@ -23,16 +23,14 @@
 # Template processed by CMake to generate the installed 'postinst' script.
 # Do not edit the generated 'postinst' script directly; edit this 'postinst.in' template instead.
 # This script reads the daemon config file to decide whether to install udev
-# rules (daemonize=true) or a cron job (daemonize=false) for the daemon.
+# rules (daemonize=true) or a one-shot boot service (daemonize=false) for the daemon.
 
 CONFIG_DIR="@AMDCUID_SHARED_CONFIG_DIR@"
 VERSIONED_CONFIG_FILE="@CMAKE_INSTALL_PREFIX@/@CONFIG_INSTALL_DIR@/amdcuid_daemon.conf"
 CONFIG_FILE="$CONFIG_DIR/amdcuid_daemon.conf"
 HMAC_KEY_FILE="$CONFIG_DIR/hmac_key.bin"
 TOOL_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_tool"
-DAEMON_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_daemon"
 UDEV_RULES_FILE="/etc/udev/rules.d/90-amdcuid.rules"
-CRON_FILE="/etc/cron.d/amdcuid"
 SERVICE_NAME="amdcuid_daemon"
 
 # Determine the correct systemd unit directory.
@@ -74,14 +72,8 @@ else
     echo "HMAC key already exists at $HMAC_KEY_FILE; leaving it unchanged."
 fi
 
-# remove any existing service, udev rules, or cron job in case we're upgrading from a previous install with different settings
-# cron job
-if [ -f "$CRON_FILE" ]; then
-    echo "Removing existing cron job for amdcuid daemon..."
-    rm -f "$CRON_FILE"
-fi
-
-# Systemd service
+# Remove any existing service or udev rules in case we're upgrading from a
+# previous install with different settings.
 if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
     echo "Stopping $SERVICE_NAME..."
     systemctl stop "$SERVICE_NAME" || true
@@ -100,7 +92,6 @@ fi
 
 systemctl daemon-reload 2>/dev/null || true
 
-# Udev rules
 if [ -f "$UDEV_RULES_FILE" ]; then
     echo "Removing udev rules: $UDEV_RULES_FILE"
     rm -f "$UDEV_RULES_FILE"
@@ -111,9 +102,8 @@ fi
 DAEMONIZE=$(grep "^daemonize=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '[:space:]')
 
 if [ "$DAEMONIZE" = "true" ]; then
-    # The daemon runs as a persistent service that wakes on udev device events.
-    # Install the udev rules first so the daemon is triggered on device changes,
-    # then register and start the service so it is ready to receive those events.
+    # Persistent mode: install udev rules so the daemon is notified on device
+    # changes, then enable and start the service.
     echo "Setting up udev rules for amdcuid daemon..."
     cat > "$UDEV_RULES_FILE" << EOF
 # AMD CUID daemon udev rules
@@ -122,20 +112,18 @@ SUBSYSTEM=="net", ACTION=="add|remove|change", RUN+="$TOOL_BIN --notify-daemon"
 EOF
     udevadm control --reload-rules
     udevadm trigger
-
-    # create a symlink to the service file in the systemd directory so it can be registered and started.
-    if [ -d /run/systemd/system ]; then
-        ln -s -f -r @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/amdcuid/amdcuid_daemon.service "$SYSTEMD_UNIT_DIR"/amdcuid_daemon.service
-    fi
-
-    echo "Registering amdcuid_daemon as a systemd service..."
-    systemctl daemon-reload
-    systemctl enable "$SERVICE_NAME"
-    systemctl start "$SERVICE_NAME"
-else
-    # Resource-constrained mode: skip the persistent service and udev rules.
-    # Instead, install a cron job so the daemon runs once at boot to generate
-    # CUIDs and then exits.
-    echo "Daemon mode not enabled; installing boot-time cron job for amdcuid daemon..."
-    echo "@reboot root $DAEMON_BIN" > "$CRON_FILE"
 fi
+
+# Install, enable, and start the service regardless of mode.
+# When daemonize=false the daemon runs once on start and exits with code 0;
+# Restart=on-failure in the unit file will not trigger on a clean exit, so
+# no additional unit type is required.
+# To apply future config changes, edit the config file then run:
+#   sudo systemctl restart amdcuid_daemon
+if [ -d /run/systemd/system ]; then
+    ln -s -f -r @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/amdcuid/amdcuid_daemon.service \
+        "$SYSTEMD_UNIT_DIR/amdcuid_daemon.service"
+fi
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME"
+systemctl start "$SERVICE_NAME"
