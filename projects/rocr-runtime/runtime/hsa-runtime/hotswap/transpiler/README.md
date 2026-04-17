@@ -160,13 +160,33 @@ GPU tests use `GTEST_SKIP()` when code objects or HIP are unavailable.
 Known-failing tests are tracked in `tests/xfail.cmake` (CTest `WILL_FAIL`) —
 they still run, but CTest expects them to fail and flags unexpected passes.
 
-### Standalone tests (not part of the CMake project)
+### Standalone tools and end-to-end tests (not part of the CMake project)
 
-These require a Salmon-enabled ROCR build (`$ROCR_BUILD`).  See the source
-files for build and run instructions:
+These require a Salmon-enabled ROCR build (`$ROCR_BUILD`) because they
+link against (or load through) the live `libhsa-runtime64.so` rather
+than the transpiler library. They are built separately from
+`transpiler_tests`.
 
-- **`hotswap_load_test`** (`tests/hotswap_load_test.cpp`) — loads `.co` files
-  via the HSA API, triggering Salmon raise + load.  No HIP needed.
+- **`tools/compare_transpilers`** (`tools/compare_transpilers.cpp`,
+  `tools/Makefile`) — **load-level smoke test**: does the code object
+  load + freeze under the legacy byte-level transpiler and under
+  Salmon?  Accepts a single `.co`/`.hsaco` file or a directory and
+  reports per-file agreement between the two engines.  The kernel is
+  never dispatched, so a `PASS` does NOT imply numerical correctness —
+  a miscompilation is invisible to this tool.  Fork-isolates every
+  `(file, mode)` pair because ROCR's engine selection
+  (`HSA_HOTSWAP_IR_RAISER`) is frozen at first use.  Use as the cheap
+  first filter over a corpus; use `compare_correctness/` to actually
+  dispatch and diff outputs.  See `tools/README.md` for build/run
+  instructions, output format, and exit-code conventions.
+- **`tools/compare_correctness/`** — head-to-head **numerical**
+  comparison of the two engines.  Authored HIP kernels (one `.hip` per
+  recipe) are compiled to both gfx942 and gfx1250, dispatched in
+  isolated child processes under `native` / `legacy` / `salmon`, and
+  their outputs are compared to a CPU reference.  Complements
+  `compare_transpilers`: load success does not imply correct numerical
+  output, and this tool measures the latter.  See
+  `tools/compare_correctness/README.md`.
 - **`salmon_hip_test`** (`tests/salmon_hip_test.cpp`) + **`libsalmon_intercept.so`**
   (`tests/salmon_intercept.cpp`) — full end-to-end HIP integration: load a
   gfx950 kernel, dispatch on gfx942, verify correctness.

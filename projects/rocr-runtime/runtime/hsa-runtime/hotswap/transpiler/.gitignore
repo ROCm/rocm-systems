@@ -4,6 +4,15 @@ build*/
 __pycache__/
 *.pyc
 
-tests/hotswap_load_test
 tests/salmon_hip_test
 tests/salmon_integration_test
+tools/compare_transpilers
+tools/compare_correctness/compare_correctness
+tools/compare_correctness/libsalmon_intercept.so
+tools/compare_correctness/kernels/build/
+tools/compare_correctness/RESULTS.md
+
+# Upstream projects/rocr-runtime/.gitignore ignores every file named
+# "Makefile" anywhere beneath it; un-ignore our hand-written tool Makefiles.
+!tools/Makefile
+!tools/compare_correctness/Makefile
