@@ -37,7 +37,7 @@ parser.add_argument(
     metavar="ARGS",
     help="Arguments for ctest (CMAKE_CTEST_ARGUMENTS), without leading 'ctest'",
 )
-    parser.add_argument(
+parser.add_argument(
     "--rocprofiler-sdk-path",
     type=Path,
     default=_DEFAULT_ROCPROFILER_SDK_PATH,
