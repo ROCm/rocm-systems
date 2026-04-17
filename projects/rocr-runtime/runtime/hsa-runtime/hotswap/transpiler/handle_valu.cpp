@@ -1,4 +1,5 @@
 #include "handlers.hpp"
+#include "opcode_map.hpp"
 #include "raiser.hpp"
 #include "wmma_lowering.hpp"
 
@@ -1154,136 +1155,75 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // ---- Vector compares (VOPC e32 and VOP3 e64) ----
-  // Helper lambda: map SemOp to ICmp/FCmp predicate for v_cmp_* instructions
-  {
-    auto vcmpICmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
-      switch (s) {
-      case SemOp::V_CMP_EQ_U32: case SemOp::V_CMP_EQ_I32:
-      case SemOp::V_CMP_EQ_U64: return CmpInst::ICMP_EQ;
-      case SemOp::V_CMP_NE_U32: case SemOp::V_CMP_NE_I32:
-      case SemOp::V_CMP_NE_U64: return CmpInst::ICMP_NE;
-      case SemOp::V_CMP_GT_I32: case SemOp::V_CMP_GT_I64: return CmpInst::ICMP_SGT;
-      case SemOp::V_CMP_GE_I32: case SemOp::V_CMP_GE_I64: return CmpInst::ICMP_SGE;
-      case SemOp::V_CMP_LT_I32: case SemOp::V_CMP_LT_I64: return CmpInst::ICMP_SLT;
-      case SemOp::V_CMP_LE_I32: case SemOp::V_CMP_LE_I64: return CmpInst::ICMP_SLE;
-      case SemOp::V_CMP_GT_U32: case SemOp::V_CMP_GT_U64: return CmpInst::ICMP_UGT;
-      case SemOp::V_CMP_GE_U32: case SemOp::V_CMP_GE_U64: return CmpInst::ICMP_UGE;
-      case SemOp::V_CMP_LT_U32: case SemOp::V_CMP_LT_U64: return CmpInst::ICMP_ULT;
-      case SemOp::V_CMP_LE_U32: case SemOp::V_CMP_LE_U64: return CmpInst::ICMP_ULE;
-      default: return std::nullopt;
-      }
-    };
-    auto vcmpFCmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
-      switch (s) {
-      case SemOp::V_CMP_GT_F32: case SemOp::V_CMP_GT_F16: case SemOp::V_CMP_GT_F64: return CmpInst::FCMP_OGT;
-      case SemOp::V_CMP_GE_F32: case SemOp::V_CMP_GE_F16: case SemOp::V_CMP_GE_F64: return CmpInst::FCMP_OGE;
-      case SemOp::V_CMP_LT_F32: case SemOp::V_CMP_LT_F16: case SemOp::V_CMP_LT_F64: return CmpInst::FCMP_OLT;
-      case SemOp::V_CMP_LE_F32: case SemOp::V_CMP_LE_F16: case SemOp::V_CMP_LE_F64: return CmpInst::FCMP_OLE;
-      case SemOp::V_CMP_EQ_F32: case SemOp::V_CMP_EQ_F16: case SemOp::V_CMP_EQ_F64: return CmpInst::FCMP_OEQ;
-      case SemOp::V_CMP_NE_F32: case SemOp::V_CMP_NE_F16: case SemOp::V_CMP_NE_F64:
-      case SemOp::V_CMP_NEQ_F32: case SemOp::V_CMP_NEQ_F16: case SemOp::V_CMP_NEQ_F64:
-      case SemOp::V_CMP_LG_F32: case SemOp::V_CMP_LG_F16: case SemOp::V_CMP_LG_F64: return CmpInst::FCMP_ONE;
-      case SemOp::V_CMP_NLT_F32: case SemOp::V_CMP_NLT_F16: case SemOp::V_CMP_NLT_F64: return CmpInst::FCMP_UGE;
-      case SemOp::V_CMP_NLE_F32: case SemOp::V_CMP_NLE_F16: case SemOp::V_CMP_NLE_F64: return CmpInst::FCMP_UGT;
-      case SemOp::V_CMP_NGT_F32: case SemOp::V_CMP_NGT_F16: case SemOp::V_CMP_NGT_F64: return CmpInst::FCMP_ULE;
-      case SemOp::V_CMP_NGE_F32: case SemOp::V_CMP_NGE_F16: case SemOp::V_CMP_NGE_F64: return CmpInst::FCMP_ULT;
-      case SemOp::V_CMP_U_F32: case SemOp::V_CMP_U_F16: case SemOp::V_CMP_U_F64: return CmpInst::FCMP_UNO;
-      case SemOp::V_CMP_O_F32: case SemOp::V_CMP_O_F16: case SemOp::V_CMP_O_F64: return CmpInst::FCMP_ORD;
-      case SemOp::V_CMP_NLG_F32: return CmpInst::FCMP_UEQ;
-      default: return std::nullopt;
-      }
-    };
-    auto vcmpxICmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
-      switch (s) {
-      case SemOp::V_CMPX_EQ_U32: case SemOp::V_CMPX_EQ_I32: return CmpInst::ICMP_EQ;
-      case SemOp::V_CMPX_NE_U32: case SemOp::V_CMPX_NE_I32: return CmpInst::ICMP_NE;
-      case SemOp::V_CMPX_GT_I32: return CmpInst::ICMP_SGT;
-      case SemOp::V_CMPX_GE_I32: return CmpInst::ICMP_SGE;
-      case SemOp::V_CMPX_LT_I32: return CmpInst::ICMP_SLT;
-      case SemOp::V_CMPX_LE_I32: return CmpInst::ICMP_SLE;
-      case SemOp::V_CMPX_GT_U32: return CmpInst::ICMP_UGT;
-      case SemOp::V_CMPX_GE_U32: return CmpInst::ICMP_UGE;
-      case SemOp::V_CMPX_LT_U32: return CmpInst::ICMP_ULT;
-      case SemOp::V_CMPX_LE_U32: return CmpInst::ICMP_ULE;
-      default: return std::nullopt;
-      }
-    };
-    auto vcmpxFCmpPred = [](SemOp s) -> std::optional<CmpInst::Predicate> {
-      switch (s) {
-      case SemOp::V_CMPX_GT_F32: case SemOp::V_CMPX_GT_F16: return CmpInst::FCMP_OGT;
-      case SemOp::V_CMPX_GE_F32: case SemOp::V_CMPX_GE_F16: return CmpInst::FCMP_OGE;
-      case SemOp::V_CMPX_LT_F32: case SemOp::V_CMPX_LT_F16: return CmpInst::FCMP_OLT;
-      case SemOp::V_CMPX_LE_F32: case SemOp::V_CMPX_LE_F16: return CmpInst::FCMP_OLE;
-      case SemOp::V_CMPX_EQ_F32: case SemOp::V_CMPX_EQ_F16: return CmpInst::FCMP_OEQ;
-      case SemOp::V_CMPX_NE_F32: case SemOp::V_CMPX_NE_F16:
-      case SemOp::V_CMPX_NEQ_F32: case SemOp::V_CMPX_NEQ_F16:
-      case SemOp::V_CMPX_LG_F32: case SemOp::V_CMPX_LG_F16: return CmpInst::FCMP_ONE;
-      case SemOp::V_CMPX_NLT_F32: return CmpInst::FCMP_UGE;
-      case SemOp::V_CMPX_NLE_F32: return CmpInst::FCMP_UGT;
-      case SemOp::V_CMPX_NGT_F32: return CmpInst::FCMP_ULE;
-      case SemOp::V_CMPX_NGE_F32: return CmpInst::FCMP_ULT;
-      default: return std::nullopt;
-      }
-    };
-
-    // Determine if this is a 64-bit integer compare
-    bool is64 = sop == SemOp::V_CMP_EQ_U64 || sop == SemOp::V_CMP_NE_U64 ||
-                sop == SemOp::V_CMP_GT_U64 || sop == SemOp::V_CMP_GE_U64 ||
-                sop == SemOp::V_CMP_LT_U64 || sop == SemOp::V_CMP_LE_U64 ||
-                sop == SemOp::V_CMP_GT_I64 || sop == SemOp::V_CMP_GE_I64 ||
-                sop == SemOp::V_CMP_LT_I64 || sop == SemOp::V_CMP_LE_I64;
-    bool isF64 = sop == SemOp::V_CMP_EQ_F64 || sop == SemOp::V_CMP_NE_F64 ||
-                 sop == SemOp::V_CMP_NEQ_F64 ||
-                 sop == SemOp::V_CMP_GT_F64 || sop == SemOp::V_CMP_GE_F64 ||
-                 sop == SemOp::V_CMP_LT_F64 || sop == SemOp::V_CMP_LE_F64 ||
-                 sop == SemOp::V_CMP_LG_F64 ||
-                 sop == SemOp::V_CMP_NLT_F64 || sop == SemOp::V_CMP_NLE_F64 ||
-                 sop == SemOp::V_CMP_NGT_F64 || sop == SemOp::V_CMP_NGE_F64 ||
-                 sop == SemOp::V_CMP_U_F64 || sop == SemOp::V_CMP_O_F64;
-
-    // v_cmp_* integer
-    if (auto pred = vcmpICmpPred(sop)) {
-      Value *s0 = is64 ? op.src64(0) : op.src(0);
-      Value *s1 = is64 ? op.src64(1) : op.src(1);
-      if (!s0 || !s1) {
-        llvm::errs() << "transpiler: " << mn << ": missing operand\n";
-        result.failMnemonic = di.mnemonic;
-        result.failFormat = "VALU";
-        hr.handled = false;
-        return hr;
-      }
-      Value *cmp = ctx.B.CreateICmp(*pred, s0, s1, "vcmp");
-      if (di.numDefs >= 1) {
-        ParsedReg d = op.dst();
-        if (d.kind == ParsedReg::SGPR) {
-          Value *mask = ctx.B.CreateSExt(cmp, ctx.regs.execTy);
-          ctx.regs.writeRegExecWidth(ctx.B, d, mask);
-        } else {
-          ctx.regs.storeVCC(ctx.B, cmp);
-        }
-      } else {
-        ctx.regs.storeVCC(ctx.B, cmp);
-      }
-      hr.handled = true;
-    return hr;
+  // ---- Vector compares (V_CMP_* / V_CMPX_* across VOPC e32 / VOP3 e64) ----
+  //
+  // The ~100 V_CMP_* and V_CMPX_* MC opcodes collapse onto two SemOps
+  // (V_CMP, V_CMPX); the per-opcode metadata (ICmp/FCmp predicate, element
+  // width, int/float kind) is looked up via `di.vcmp`, populated at decode
+  // time by OpcodeMap. That keeps this handler linear in the number of
+  // abstract shapes (2) rather than in the number of AMDGPU opcodes.
+  if (sop == SemOp::V_CMP || sop == SemOp::V_CMPX) {
+    const VCmpMeta *m = di.vcmp;
+    if (!m) {
+      llvm::errs() << "transpiler: " << mn
+                   << ": V_CMP/V_CMPX reached handler without VCmpMeta "
+                      "(OpcodeMap::build should have populated it)\n";
+      result.failMnemonic = di.mnemonic;
+      result.failFormat = "VALU";
+      hr.handled = false;
+      return hr;
     }
-    // v_cmp_* float
-    if (auto pred = vcmpFCmpPred(sop)) {
-      Value *s0, *s1;
-      if (isF64) {
+
+    // Fetch operands at the correct width. For 64-bit integer compares we
+    // read as i64; for 64-bit float compares we read as i64 and bitcast.
+    // 16- and 32-bit values both come through the 32-bit reader; we only
+    // bitcast the 32-bit float case to f32 (matches prior behaviour: F16
+    // is left as whatever `srcF` returns so the low 16 bits drive the
+    // compare, same as the unchanged pre-refactor path).
+    Value *s0 = nullptr, *s1 = nullptr;
+    if (m->isFloat) {
+      if (m->bits == 64) {
         auto *f64Ty = Type::getDoubleTy(ctx.C);
         s0 = ctx.B.CreateBitCast(op.src64(0), f64Ty);
         s1 = ctx.B.CreateBitCast(op.src64(1), f64Ty);
       } else {
-        s0 = op.srcF(0); s1 = op.srcF(1);
-        bool isF32 = sop >= SemOp::V_CMP_EQ_F32 && sop <= SemOp::V_CMP_O_F32;
-        if (isF32) {
-          if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
-          if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+        s0 = op.srcF(0);
+        s1 = op.srcF(1);
+        if (m->bits == 32) {
+          if (s0->getType() != ctx.f32Ty)
+            s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+          if (s1->getType() != ctx.f32Ty)
+            s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
         }
       }
-      Value *cmp = ctx.B.CreateFCmp(*pred, s0, s1, "vcmpf");
+    } else {
+      if (m->bits == 64) {
+        s0 = op.src64(0);
+        s1 = op.src64(1);
+      } else {
+        s0 = op.src(0);
+        s1 = op.src(1);
+      }
+    }
+    if (!s0 || !s1) {
+      llvm::errs() << "transpiler: " << mn << ": missing operand\n";
+      result.failMnemonic = di.mnemonic;
+      result.failFormat = "VALU";
+      hr.handled = false;
+      return hr;
+    }
+
+    Value *cmp = m->isFloat ? ctx.B.CreateFCmp(m->pred, s0, s1, "vcmpf")
+                            : ctx.B.CreateICmp(m->pred, s0, s1, "vcmp");
+
+    if (sop == SemOp::V_CMPX) {
+      // Compare-and-exec: result ANDs into EXEC.
+      Value *mask = ctx.B.CreateSExt(cmp, ctx.regs.execTy);
+      Value *curExec = ctx.regs.loadExec(ctx.B);
+      ctx.regs.storeExec(ctx.B, ctx.B.CreateAnd(curExec, mask, "cmpx_exec"));
+    } else {
+      // Vanilla V_CMP: write to SGPR-pair destination (e64 with sdst) or
+      // VCC (e32, or e64 whose sdst is VCC).
       if (di.numDefs >= 1) {
         ParsedReg d = op.dst();
         if (d.kind == ParsedReg::SGPR) {
@@ -1295,39 +1235,9 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       } else {
         ctx.regs.storeVCC(ctx.B, cmp);
       }
-      hr.handled = true;
-    return hr;
     }
-
-    // v_cmpx_* integer: compare and write result to EXEC mask
-    if (auto pred = vcmpxICmpPred(sop)) {
-      Value *s0 = op.src(0), *s1 = op.src(1);
-      if (!s0 || !s1) { llvm::errs() << "transpiler: " << mn << ": missing operand\n"; result.failMnemonic = di.mnemonic;
-        result.failFormat = "VALU";
-        hr.handled = false;
-        return hr; }
-      Value *cmp = ctx.B.CreateICmp(*pred, s0, s1, "vcmpx");
-      Value *mask = ctx.B.CreateSExt(cmp, ctx.regs.execTy);
-      Value *curExec = ctx.regs.loadExec(ctx.B);
-      ctx.regs.storeExec(ctx.B, ctx.B.CreateAnd(curExec, mask, "cmpx_exec"));
-      hr.handled = true;
+    hr.handled = true;
     return hr;
-    }
-    // v_cmpx_* float
-    if (auto pred = vcmpxFCmpPred(sop)) {
-      Value *s0 = op.srcF(0), *s1 = op.srcF(1);
-      bool isF32 = sop >= SemOp::V_CMPX_EQ_F32 && sop <= SemOp::V_CMPX_NGE_F32;
-      if (isF32) {
-        if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
-        if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
-      }
-      Value *cmp = ctx.B.CreateFCmp(*pred, s0, s1, "vcmpxf");
-      Value *mask = ctx.B.CreateSExt(cmp, ctx.regs.execTy);
-      Value *curExec = ctx.regs.loadExec(ctx.B);
-      ctx.regs.storeExec(ctx.B, ctx.B.CreateAnd(curExec, mask, "cmpx_exec"));
-      hr.handled = true;
-    return hr;
-    }
   }
 
   // ---- VOP3P packed ops (2x fp32 in 2 dwords) ----

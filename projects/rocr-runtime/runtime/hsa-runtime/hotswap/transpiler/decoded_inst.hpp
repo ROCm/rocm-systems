@@ -9,6 +9,10 @@
 #include <string>
 
 namespace transpiler {
+struct VCmpMeta;
+}
+
+namespace transpiler {
 
 struct DecodedInst {
   std::string mnemonic;
@@ -23,6 +27,9 @@ struct DecodedInst {
   uint64_t size = 0;
 
   uint64_t tsFlags = 0;
+  // Non-null iff `semOp == V_CMP || semOp == V_CMPX`. Points into the
+  // OpcodeMap side-table; stable for the lifetime of the map.
+  const VCmpMeta *vcmp = nullptr;
   bool defsSCC = false;
   bool defsVCC = false;
   bool defsEXEC = false;

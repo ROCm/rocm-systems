@@ -117,6 +117,8 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       di.mnemonic = stripEncoding(StringRef(di.rawMnemonic)).str();
       di.inst = inst;
       di.semOp = opcMap.lookup(inst.getOpcode());
+      if (di.semOp == SemOp::V_CMP || di.semOp == SemOp::V_CMPX)
+        di.vcmp = opcMap.lookupVCmp(inst.getOpcode());
       di.numDefs = desc.getNumDefs();
       di.isBranch = desc.isBranch();
       di.isConditionalBranch = desc.isConditionalBranch();

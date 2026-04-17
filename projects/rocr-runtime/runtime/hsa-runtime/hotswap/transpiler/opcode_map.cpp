@@ -1,6 +1,7 @@
 #include "opcode_map.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 // AMDGPU target-private headers. They expose:
@@ -361,78 +362,11 @@ static const Entry kCanonTable[] = {
     E(V_PERMLANE64_B32, V_PERMLANE64_B32),
 
     // ---------------------------------------------------------------------
-    // VOPC integer (canonical is `_e64`)
-    // ---------------------------------------------------------------------
-    E(V_CMP_EQ_U32_e64, V_CMP_EQ_U32), E(V_CMP_NE_U32_e64, V_CMP_NE_U32),
-    E(V_CMP_GT_U32_e64, V_CMP_GT_U32), E(V_CMP_GE_U32_e64, V_CMP_GE_U32),
-    E(V_CMP_LT_U32_e64, V_CMP_LT_U32), E(V_CMP_LE_U32_e64, V_CMP_LE_U32),
-    E(V_CMP_EQ_I32_e64, V_CMP_EQ_I32), E(V_CMP_NE_I32_e64, V_CMP_NE_I32),
-    E(V_CMP_GT_I32_e64, V_CMP_GT_I32), E(V_CMP_GE_I32_e64, V_CMP_GE_I32),
-    E(V_CMP_LT_I32_e64, V_CMP_LT_I32), E(V_CMP_LE_I32_e64, V_CMP_LE_I32),
-    E(V_CMP_EQ_U64_e64, V_CMP_EQ_U64), E(V_CMP_NE_U64_e64, V_CMP_NE_U64),
-    E(V_CMP_GT_U64_e64, V_CMP_GT_U64), E(V_CMP_GE_U64_e64, V_CMP_GE_U64),
-    E(V_CMP_LT_U64_e64, V_CMP_LT_U64), E(V_CMP_LE_U64_e64, V_CMP_LE_U64),
-    E(V_CMP_GT_I64_e64, V_CMP_GT_I64), E(V_CMP_GE_I64_e64, V_CMP_GE_I64),
-    E(V_CMP_LT_I64_e64, V_CMP_LT_I64), E(V_CMP_LE_I64_e64, V_CMP_LE_I64),
-
-    // ---------------------------------------------------------------------
-    // VOPC float
-    // ---------------------------------------------------------------------
-    // LLVM names the ordered-not-equal float predicate `NEQ`, not `NE` (which
-    // is integer-only). The legacy `V_CMP_NE_F*` SemOps therefore remain
-    // unmapped; handlers already consume the `NEQ` SemOps.
-    E(V_CMP_EQ_F32_e64, V_CMP_EQ_F32),
-    E(V_CMP_GT_F32_e64, V_CMP_GT_F32), E(V_CMP_GE_F32_e64, V_CMP_GE_F32),
-    E(V_CMP_LT_F32_e64, V_CMP_LT_F32), E(V_CMP_LE_F32_e64, V_CMP_LE_F32),
-    E(V_CMP_LG_F32_e64, V_CMP_LG_F32),
-    E(V_CMP_NEQ_F32_e64, V_CMP_NEQ_F32),
-    E(V_CMP_NLT_F32_e64, V_CMP_NLT_F32), E(V_CMP_NLE_F32_e64, V_CMP_NLE_F32),
-    E(V_CMP_NGT_F32_e64, V_CMP_NGT_F32), E(V_CMP_NGE_F32_e64, V_CMP_NGE_F32),
-    E(V_CMP_NLG_F32_e64, V_CMP_NLG_F32),
-    E(V_CMP_U_F32_e64, V_CMP_U_F32), E(V_CMP_O_F32_e64, V_CMP_O_F32),
-    E(V_CMP_EQ_F16_e64, V_CMP_EQ_F16),
-    E(V_CMP_GT_F16_e64, V_CMP_GT_F16), E(V_CMP_GE_F16_e64, V_CMP_GE_F16),
-    E(V_CMP_LT_F16_e64, V_CMP_LT_F16), E(V_CMP_LE_F16_e64, V_CMP_LE_F16),
-    E(V_CMP_LG_F16_e64, V_CMP_LG_F16),
-    E(V_CMP_NEQ_F16_e64, V_CMP_NEQ_F16),
-    E(V_CMP_NLT_F16_e64, V_CMP_NLT_F16), E(V_CMP_NLE_F16_e64, V_CMP_NLE_F16),
-    E(V_CMP_NGT_F16_e64, V_CMP_NGT_F16), E(V_CMP_NGE_F16_e64, V_CMP_NGE_F16),
-    E(V_CMP_U_F16_e64, V_CMP_U_F16), E(V_CMP_O_F16_e64, V_CMP_O_F16),
-    E(V_CMP_EQ_F64_e64, V_CMP_EQ_F64),
-    E(V_CMP_GT_F64_e64, V_CMP_GT_F64), E(V_CMP_GE_F64_e64, V_CMP_GE_F64),
-    E(V_CMP_LT_F64_e64, V_CMP_LT_F64), E(V_CMP_LE_F64_e64, V_CMP_LE_F64),
-    E(V_CMP_LG_F64_e64, V_CMP_LG_F64),
-    E(V_CMP_NEQ_F64_e64, V_CMP_NEQ_F64),
-    E(V_CMP_NLT_F64_e64, V_CMP_NLT_F64), E(V_CMP_NLE_F64_e64, V_CMP_NLE_F64),
-    E(V_CMP_NGT_F64_e64, V_CMP_NGT_F64), E(V_CMP_NGE_F64_e64, V_CMP_NGE_F64),
-    E(V_CMP_U_F64_e64, V_CMP_U_F64), E(V_CMP_O_F64_e64, V_CMP_O_F64),
-
-    // ---------------------------------------------------------------------
-    // CMPX integer
-    // ---------------------------------------------------------------------
-    E(V_CMPX_EQ_U32_e64, V_CMPX_EQ_U32), E(V_CMPX_NE_U32_e64, V_CMPX_NE_U32),
-    E(V_CMPX_GT_U32_e64, V_CMPX_GT_U32), E(V_CMPX_GE_U32_e64, V_CMPX_GE_U32),
-    E(V_CMPX_LT_U32_e64, V_CMPX_LT_U32), E(V_CMPX_LE_U32_e64, V_CMPX_LE_U32),
-    E(V_CMPX_EQ_I32_e64, V_CMPX_EQ_I32), E(V_CMPX_NE_I32_e64, V_CMPX_NE_I32),
-    E(V_CMPX_GT_I32_e64, V_CMPX_GT_I32), E(V_CMPX_GE_I32_e64, V_CMPX_GE_I32),
-    E(V_CMPX_LT_I32_e64, V_CMPX_LT_I32), E(V_CMPX_LE_I32_e64, V_CMPX_LE_I32),
-
-    // ---------------------------------------------------------------------
-    // CMPX float
-    // ---------------------------------------------------------------------
-    E(V_CMPX_EQ_F32_e64, V_CMPX_EQ_F32),
-    E(V_CMPX_GT_F32_e64, V_CMPX_GT_F32), E(V_CMPX_GE_F32_e64, V_CMPX_GE_F32),
-    E(V_CMPX_LT_F32_e64, V_CMPX_LT_F32), E(V_CMPX_LE_F32_e64, V_CMPX_LE_F32),
-    E(V_CMPX_LG_F32_e64, V_CMPX_LG_F32),
-    E(V_CMPX_NEQ_F32_e64, V_CMPX_NEQ_F32),
-    E(V_CMPX_NLT_F32_e64, V_CMPX_NLT_F32), E(V_CMPX_NLE_F32_e64, V_CMPX_NLE_F32),
-    E(V_CMPX_NGT_F32_e64, V_CMPX_NGT_F32), E(V_CMPX_NGE_F32_e64, V_CMPX_NGE_F32),
-    E(V_CMPX_EQ_F16_e64, V_CMPX_EQ_F16),
-    E(V_CMPX_GT_F16_e64, V_CMPX_GT_F16), E(V_CMPX_GE_F16_e64, V_CMPX_GE_F16),
-    E(V_CMPX_LT_F16_e64, V_CMPX_LT_F16), E(V_CMPX_LE_F16_e64, V_CMPX_LE_F16),
-    E(V_CMPX_LG_F16_e64, V_CMPX_LG_F16),
-    E(V_CMPX_NEQ_F16_e64, V_CMPX_NEQ_F16),
-
+    // VOPC (V_CMP_* and V_CMPX_*) are NOT enumerated here. They're picked up
+    // by scanning canonical pseudo names in `OpcodeMap::build` and routed to
+    // the two collapsed SemOps (V_CMP / V_CMPX) with metadata (predicate,
+    // element width, int/float) in the `vcmp_` side table.
+    //
     // ---------------------------------------------------------------------
     // VOP3P (canonical is bare pseudo name, no _e64)
     // ---------------------------------------------------------------------
@@ -981,11 +915,93 @@ unsigned canonicalize(unsigned mc,
   return p;
 }
 
+// Parse a canonical vector-compare pseudo name into (predicate, bits, kind).
+// Accepted shape: `V_CMP_<PRED>_<TYPE><BITS>_e64` where
+//   PRED  ∈ {EQ, NE, GT, GE, LT, LE, LG, NEQ, NLT, NLE, NGT, NGE, NLG, U, O}
+//   TYPE  ∈ {U, I, F}
+//   BITS  ∈ {16, 32, 64}
+// and an optional `V_CMPX_` prefix plays the role of `V_CMP_`. Returns
+// `std::nullopt` for anything else; caller is responsible for only passing
+// compare-family pseudos.
+//
+// Rationale: LLVM exposes `AMDGPU::getVCMPXOpFromVCMP` as a V_CMP → V_CMPX
+// mapping, but no public helper that hands back a CmpInst::Predicate or
+// element width. Rather than hand-list 100 opcode→metadata pairs we parse
+// the pseudo name once at init time; the same token grammar is already
+// hard-coded in LLVM's TableGen for these instructions.
+std::optional<VCmpMeta> parseVCmpPseudoName(llvm::StringRef name) {
+  llvm::StringRef rest = name;
+  if (!rest.consume_front("V_CMPX_") && !rest.consume_front("V_CMP_"))
+    return std::nullopt;
+  if (!rest.consume_back("_e64"))
+    return std::nullopt;
+
+  auto [predTok, typeTok] = rest.rsplit('_');
+  if (predTok.empty() || typeTok.size() < 2)
+    return std::nullopt;
+
+  const char typeCh = typeTok[0];
+  unsigned bits = 0;
+  if (typeTok.drop_front().getAsInteger(10, bits))
+    return std::nullopt;
+  if (bits != 16 && bits != 32 && bits != 64)
+    return std::nullopt;
+
+  using llvm::CmpInst;
+  VCmpMeta m{CmpInst::BAD_ICMP_PREDICATE, static_cast<uint8_t>(bits), false};
+
+  if (typeCh == 'F') {
+    m.isFloat = true;
+    // Float predicates: ordered variants set the O-prefix predicates;
+    // N-prefixed AMDGPU names select the "unordered-or-..." complements.
+    if (predTok == "EQ")        m.pred = CmpInst::FCMP_OEQ;
+    else if (predTok == "GT")   m.pred = CmpInst::FCMP_OGT;
+    else if (predTok == "GE")   m.pred = CmpInst::FCMP_OGE;
+    else if (predTok == "LT")   m.pred = CmpInst::FCMP_OLT;
+    else if (predTok == "LE")   m.pred = CmpInst::FCMP_OLE;
+    // LG ("less or greater"), NE, and NEQ all mean "ordered and !=" in
+    // AMDGPU's model and all lower to FCMP_ONE.
+    else if (predTok == "LG" || predTok == "NE" || predTok == "NEQ")
+                                m.pred = CmpInst::FCMP_ONE;
+    else if (predTok == "NLT")  m.pred = CmpInst::FCMP_UGE;
+    else if (predTok == "NLE")  m.pred = CmpInst::FCMP_UGT;
+    else if (predTok == "NGT")  m.pred = CmpInst::FCMP_ULE;
+    else if (predTok == "NGE")  m.pred = CmpInst::FCMP_ULT;
+    // NLG ("not (less or greater)") is the unordered-or-equal complement.
+    else if (predTok == "NLG")  m.pred = CmpInst::FCMP_UEQ;
+    else if (predTok == "U")    m.pred = CmpInst::FCMP_UNO;
+    else if (predTok == "O")    m.pred = CmpInst::FCMP_ORD;
+    else return std::nullopt;
+  } else if (typeCh == 'U' || typeCh == 'I') {
+    const bool isSigned = typeCh == 'I';
+    if (predTok == "EQ")        m.pred = CmpInst::ICMP_EQ;
+    else if (predTok == "NE")   m.pred = CmpInst::ICMP_NE;
+    else if (predTok == "GT")   m.pred = isSigned ? CmpInst::ICMP_SGT
+                                                   : CmpInst::ICMP_UGT;
+    else if (predTok == "GE")   m.pred = isSigned ? CmpInst::ICMP_SGE
+                                                   : CmpInst::ICMP_UGE;
+    else if (predTok == "LT")   m.pred = isSigned ? CmpInst::ICMP_SLT
+                                                   : CmpInst::ICMP_ULT;
+    else if (predTok == "LE")   m.pred = isSigned ? CmpInst::ICMP_SLE
+                                                   : CmpInst::ICMP_ULE;
+    else return std::nullopt;
+  } else {
+    return std::nullopt;
+  }
+
+  return m;
+}
+
 } // namespace
 
 SemOp OpcodeMap::lookup(unsigned opcode) const {
   auto it = map_.find(opcode);
   return it != map_.end() ? it->second : SemOp::Unknown;
+}
+
+const VCmpMeta *OpcodeMap::lookupVCmp(unsigned opcode) const {
+  auto it = vcmp_.find(opcode);
+  return it != vcmp_.end() ? &it->second : nullptr;
 }
 
 void OpcodeMap::build(const MCInstrInfo &MCII) {
@@ -1002,14 +1018,36 @@ void OpcodeMap::build(const MCInstrInfo &MCII) {
   const auto dppToBase   = buildDppToBaseMap(numOpc);
 
   map_.clear();
+  vcmp_.clear();
   // Heuristic: roughly a quarter of MC opcodes carry a SemOp in practice;
   // resizing a few times is fine for a one-shot init.
   map_.reserve(numOpc / 4);
   for (unsigned mc = 0; mc < numOpc; ++mc) {
     const unsigned canon =
         canonicalize(mc, MCII, mcToPseudo, pseudoAlias, dppToBase);
-    if (auto it = canonToSem.find(canon); it != canonToSem.end())
+    if (auto it = canonToSem.find(canon); it != canonToSem.end()) {
       map_[mc] = it->second;
+      continue;
+    }
+    // The canonical pseudo was not enumerated in `kCanonTable`. Check if it
+    // belongs to the V_CMP / V_CMPX family (which is handled via metadata
+    // side-table rather than per-opcode enumeration). Use the canonical
+    // pseudo's name so we don't have to re-canonicalize any DPP/SDWA
+    // variants (those have already been folded by `canonicalize`).
+    if (canon >= numOpc)
+      continue;
+    llvm::StringRef canonName = MCII.getName(canon);
+    const bool isCmp  = canonName.starts_with("V_CMP_");
+    const bool isCmpX = canonName.starts_with("V_CMPX_");
+    if (!isCmp && !isCmpX)
+      continue;
+    if (auto meta = parseVCmpPseudoName(canonName)) {
+      map_[mc] = isCmpX ? SemOp::V_CMPX : SemOp::V_CMP;
+      vcmp_.try_emplace(mc, *meta);
+    }
+    // Names that start with V_CMP_ but don't parse (e.g. a hypothetical
+    // future family) are left as SemOp::Unknown so the raiser reports them
+    // loudly rather than silently producing wrong IR.
   }
 }
 
