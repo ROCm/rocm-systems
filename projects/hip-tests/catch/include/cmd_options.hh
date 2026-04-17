@@ -10,7 +10,6 @@
 #include <limits>
 
 struct CmdOptions {
-  int iterations = 5;
   int warmups = 5;
   int cg_iterations = 1;
   double cg_reduction_factor = 6.25;

@@ -19,6 +19,7 @@
 
 #include <cmd_options.hh>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <resource_guards.hh>
 
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
@@ -114,10 +115,10 @@ class CpuTimer : public Timer {
 template <typename Derived> class Benchmark {
  public:
   Benchmark()
-      : iterations_(cmd_options.iterations),
-        warmups_(cmd_options.warmups),
+      : warmups_(cmd_options.warmups),
         display_output_(!cmd_options.no_display),
         progress_bar_(cmd_options.progress) {
+    iterations_ = TestParameterStore::instance().getIterationsForCurrentLevel();
     benchmark_name_ = Catch::getResultCapture().getCurrentTestName();
   }
 

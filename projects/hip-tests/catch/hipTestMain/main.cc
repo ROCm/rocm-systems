@@ -18,9 +18,6 @@ int main(int argc, char** argv) {
   using namespace Catch::Clara;
   // clang-format off
   auto cli = session.cli()
-    | Opt(cmd_options.iterations, "iterations")
-        ["-I"]["--iterations"]
-        ("Number of iterations used for performance tests (default: 1000)")
     | Opt(cmd_options.warmups, "warmups")
         ["-W"]["--warmups"]
         ("Number of warmup iterations used for performance tests (default: 100)")
