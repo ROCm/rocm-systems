@@ -1,6 +1,8 @@
 #include "handlers.hpp"
 #include "raiser.hpp"
 
+#include "amdgpu_formats.hpp" // SIInstrFlags
+#include "opcode_map.hpp"
 #include "semop.hpp"
 #include "Utils/AMDGPUBaseInfo.h" // AMDGPU::getNamedOperandIdx, AMDGPU::OpName
 #include "llvm/ADT/DenseMap.h"
@@ -11,6 +13,8 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/MC/MCInstrDesc.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -204,6 +208,38 @@ HandlerResult handleMFMA(RaiseContext &ctx, const DecodedInst &di,
   ctx.regs.writeRegVec(ctx.B, dest, callRet);
   hr.handled = true;
   return hr;
+}
+
+// Drift-detection for the one column of MFMA metadata that stays
+// hand-rolled: `SemOp -> Intrinsic::ID`. Every MFMA-format MC opcode
+// the decoder can reach at runtime must either (a) have a SemOp entry
+// in `mfmaIntrinsicTable()`, or (b) be one of the two AGPR-move
+// pseudos that `handleMFMA` short-circuits. Anything else is a silent
+// coverage gap: the raiser would hit the "Unknown MFMA" path at
+// per-kernel lift time instead of telling us at startup that the
+// canon table and the handler table disagree. This is the same
+// discipline `initMCState`'s `kMaxSrcs` check uses -- run once, fail
+// loudly, no per-kernel surprises.
+void verifyMFMACoverage(const MCInstrInfo &MCII, const OpcodeMap &opcMap) {
+  const auto &table = mfmaIntrinsicTable();
+  for (unsigned opc = 0, end = MCII.getNumOpcodes(); opc < end; ++opc) {
+    const MCInstrDesc &desc = MCII.get(opc);
+    if (!(desc.TSFlags & llvm::SIInstrFlags::IsMAI))
+      continue;
+    SemOp sop = opcMap.lookup(opc);
+    if (sop == SemOp::Unknown)
+      continue; // Opcode not modelled in kCanonTable -- fails at raise
+                // time with "Unknown MFMA"; not a drift we own here.
+    if (sop == SemOp::V_ACCVGPR_WRITE_B32 ||
+        sop == SemOp::V_ACCVGPR_READ_B32)
+      continue; // Handled specially above; no intrinsic entry needed.
+    if (table.find(sop) == table.end())
+      report_fatal_error(
+          Twine("transpiler: MFMA-format opcode #") + Twine(opc) +
+          " maps to SemOp " + Twine(static_cast<int>(sop)) +
+          " but `mfmaIntrinsicTable` has no entry for it. Either add the "
+          "Intrinsic::ID row or remove the SemOp from `kCanonTable`.");
+  }
 }
 
 } // namespace transpiler

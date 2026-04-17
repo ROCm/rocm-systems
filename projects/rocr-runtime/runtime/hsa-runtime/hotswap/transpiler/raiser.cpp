@@ -83,6 +83,10 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   OpcodeMap opcMap;
   opcMap.build(*mc.instrInfo);
 
+  // Fail loudly if any MFMA-format SemOp is missing a handler row. Cheap
+  // startup walk that catches table drift before any kernel is lifted.
+  verifyMFMACoverage(*mc.instrInfo, opcMap);
+
   // ==== Phase 1: Disassemble + identify block boundaries ====
   ArrayRef<uint8_t> bytes(textBytes.data(), textBytes.size());
   uint64_t totalSize = textBytes.size();

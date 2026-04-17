@@ -3,9 +3,18 @@
 
 #include "raise_context.hpp"
 
+namespace llvm {
+class MCInstrInfo;
+} // namespace llvm
+
 namespace transpiler {
 
+class OpcodeMap;
 struct RaiseResult;
+
+// Asserts every MFMA-format opcode the disassembler can decode has a SemOp
+// handler entry. See `handle_mfma.cpp` for details.
+void verifyMFMACoverage(const llvm::MCInstrInfo &MCII, const OpcodeMap &opcMap);
 
 HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
                          OpResolver &op, RaiseResult &result);
