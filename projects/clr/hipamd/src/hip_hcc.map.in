@@ -602,6 +602,8 @@ global:
     hipLaunchKernelExC;
     hipDrvLaunchKernelEx;
     hipMemGetHandleForAddressRange;
+    hipOccupancyMaxPotentialClusterSize;
+    hipOccupancyMaxActiveClusters;
 local:
     *;
 } hip_6.4;

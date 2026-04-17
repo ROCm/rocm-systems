@@ -1082,6 +1082,12 @@ bool Device::populateOCLDeviceConstants() {
       Hsa::agent_get_info(bkendDevice_, HSA_AGENT_INFO_CACHE_SIZE, cachesize)) {
     return false;
   }
+
+  if ((isa().versionMajor() == 12 && isa().versionMinor() == 5 && isa().versionStepping() == 0)
+       && (info_.globalMemCacheLineSize_ < 256)) {
+    info_.globalMemCacheLineSize_ = 256;
+  }
+
   assert(cachesize[0] > 0);
   info_.globalMemCacheSize_ = cachesize[0];
 
@@ -1574,6 +1580,13 @@ bool Device::populateOCLDeviceConstants() {
       max_waves_per_cu *= 2;
     }
 
+    if (HSA_STATUS_SUCCESS !=
+        hsa_agent_get_info(bkendDevice_,
+                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                           &info_.numberOfShaderEngines_)) {
+      return false;
+    }
+
     info_.maxThreadsPerCU_ = info_.wavefrontWidth_ * max_waves_per_cu;
     uint32_t cache_sizes[4];
     /* FIXIT [skudchad] -  Seems like hardcoded in HSA backend so 0*/
@@ -1724,6 +1737,18 @@ bool Device::populateOCLDeviceConstants() {
   std::ignore = Hsa::system_get_info(
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
+  // devices with no cluster support; max size is 0
+  info_.clusterMaxSize_ = 0;
+
+  hsa_status_t hsaStatus = hsa_agent_get_info(
+      bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE),
+      &info_.clusterMaxSize_);
+
+
+  // this is required for clustered kernel launches; but it might not be supported in older rocr,
+  // so invalid argument might no be necessarily an error
+  if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus)
+    LogError("HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE query failed");
 
   info_.gpuDirectRdmaWithHipVmmSupported_ =
       info_.virtualMemoryManagement_ && info_.dmabufSupported_;

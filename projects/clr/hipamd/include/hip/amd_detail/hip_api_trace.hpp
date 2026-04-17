@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 26
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 27
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -685,6 +685,10 @@ typedef hipError_t (*t_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)(
 typedef hipError_t (*t_hipOccupancyMaxPotentialBlockSize)(int* gridSize, int* blockSize,
                                                           const void* f, size_t dynSharedMemPerBlk,
                                                           int blockSizeLimit);
+typedef hipError_t (*t_hipOccupancyMaxActiveClusters)(int* numClusters, const void* f,
+                                                      const hipLaunchConfig_t* launchConfig);
+typedef hipError_t (*t_hipOccupancyMaxPotentialClusterSize)(int* clusterSize, const void* f,
+                                                            const hipLaunchConfig_t* config);
 typedef hipError_t (*t_hipPeekAtLastError)(void);
 typedef hipError_t (*t_hipPointerGetAttribute)(void* data, hipPointer_attribute attribute,
                                                hipDeviceptr_t ptr);
@@ -1736,8 +1740,12 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
   t_hipMemPrefetchBatchAsync hipMemPrefetchBatchAsync_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
+  t_hipOccupancyMaxPotentialClusterSize hipOccupancyMaxPotentialClusterSize_fn;
+  t_hipOccupancyMaxActiveClusters hipOccupancyMaxActiveClusters_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
 
   // ******************************************************************************************* //
   //
@@ -1745,7 +1753,7 @@ struct HipDispatchTable {
   //
   // ******************************************************************************************* //
   // KEEP AT END OF STRUCT
-  // 1) DO NOT REORDER ANY EXIST MEMBERS
+  // 1) DO NOT REORDER ANY EXISTING MEMBERS
   // 2) INCREASE STEP VERSION DEFINE BEFORE ADDING NEW MEMBERS
   // 3) INSERT NEW MEMBERS UNDER APPROPRIATE STEP VERSION COMMENT
   // 4) GENERATE COMMENT FOR NEXT STEP VERSION

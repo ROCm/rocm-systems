@@ -1503,7 +1503,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       hflags.ui32.IPCHandle = 1;
       hflags.ui32.SysMem = isDmabufSysmem;
       hflags.ui32.UpdateMetadata = 0;
-      HsaHandleImportResult res;
+      HsaHandleImportResult res = {};
       HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
