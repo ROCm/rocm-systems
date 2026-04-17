@@ -442,8 +442,13 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeHostNumaId:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
+      break;
     case hipDeviceAttributeDmaBufSupported:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().dmabufSupported_);
+      break;
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+      *pi = static_cast<int>(
+          g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
       break;
     case hipDeviceAttributeExpertSchedMode:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);

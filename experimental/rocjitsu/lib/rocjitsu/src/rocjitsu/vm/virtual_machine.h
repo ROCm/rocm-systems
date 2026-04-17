@@ -7,7 +7,6 @@
 #ifndef ROCJITSU_VM_VIRTUAL_MACHINE_H_
 #define ROCJITSU_VM_VIRTUAL_MACHINE_H_
 
-#include "rocjitsu/vm/driver.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/component.h"
@@ -57,12 +56,6 @@ public:
   /// @returns Const pointer to the GPU memory.
   const amdgpu::GpuMemory *memory() const { return soc_->memory(); }
 
-  /// @brief Return the hardware driver interface.
-  /// @returns Reference to the driver.
-  Driver &driver() { return driver_; }
-  /// @returns Const reference to the driver.
-  const Driver &driver() const { return driver_; }
-
   /// @brief Return the configuration used to construct this VM.
   /// @returns Const reference to the VM configuration.
   const Config &config() const { return config_; }
@@ -70,7 +63,6 @@ public:
 private:
   Config config_;
   SoC *soc_ = nullptr;
-  Driver driver_{*this};
 };
 
 } // namespace rocjitsu

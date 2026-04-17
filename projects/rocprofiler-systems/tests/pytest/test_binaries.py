@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Tests rocprof-sys binaries
@@ -197,6 +197,7 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
         test_args = [
             "--simulate",
+            "--dump-info",
             "--print-format",
             "json",
             "txt",

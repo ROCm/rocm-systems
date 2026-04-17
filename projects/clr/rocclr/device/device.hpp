@@ -660,6 +660,7 @@ struct Info : public amd::EmbeddedObject {
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
+  bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 };
 
 //! Device settings
@@ -1838,7 +1839,7 @@ class Device : public RuntimeObject {
    */
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = kNoAtomics,
-                          const void* agentInfo = nullptr) const {
+                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }
@@ -1857,7 +1858,7 @@ class Device : public RuntimeObject {
   } AllocationFlags;
 
   virtual void* deviceLocalAlloc(
-      size_t size, const AllocationFlags& flags = AllocationFlags{}) const {
+      size_t size, const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const {
     ShouldNotCallThis();
     return NULL;
   }

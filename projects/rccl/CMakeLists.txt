@@ -145,7 +145,8 @@ set(DEFAULT_GPUS
       gfx1102
       gfx1151
       gfx1200
-      gfx1201)
+      gfx1201
+      gfx1250)
 
 # Load CMake modules
 #==================================================================================================
@@ -642,6 +643,9 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+## Install tuner config directory for CSV-based tuner
+file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
+rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl

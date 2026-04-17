@@ -817,11 +817,13 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
   status = amd::Comgr::get_metadata_list_size(printfMeta, &printfSize);
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    std::string buf;
+    size_t originalSize = printfStr->size();
+    printfStr->reserve(originalSize + printfSize);
     for (size_t i = 0; i < printfSize; ++i) {
       amd_comgr_metadata_node_t str;
       status = amd::Comgr::index_list_metadata(printfMeta, i, &str);
 
+      std::string buf;
       if (status == AMD_COMGR_STATUS_SUCCESS) {
         status = getMetaBuf(str, &buf);
         amd::Comgr::destroy_metadata(str);
@@ -831,10 +833,11 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
                 "Comgr API failed with status: %d \n", status);
         amd::Comgr::destroy_metadata(printfMeta);
+        printfStr->resize(originalSize);  // restore the original size of the vector
         return false;
       }
 
-      printfStr->push_back(buf);
+      printfStr->push_back(std::move(buf));
     }
   }
 

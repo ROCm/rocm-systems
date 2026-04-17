@@ -193,7 +193,7 @@ Device::~Device() {
 
   if (coopHostcallBuffer_) {
     amd::disableHostcalls(coopHostcallBuffer_);
-    context().svmFree(coopHostcallBuffer_);
+    hostFree(coopHostcallBuffer_);
     coopHostcallBuffer_ = nullptr;
   }
   // Release cached map targets
@@ -232,7 +232,7 @@ Device::~Device() {
                 "Deleting hostcall buffer %p for hardware queue %p", qInfo.hostcallBuffer_,
                 qIter->first->base_address);
         amd::disableHostcalls(qInfo.hostcallBuffer_);
-        context().svmFree(qInfo.hostcallBuffer_);
+        hostFree(qInfo.hostcallBuffer_);
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
@@ -693,8 +693,7 @@ bool Device::create() {
     hsaSettings->limit_blit_wg_ = std::max(DEBUG_CLR_LIMIT_BLIT_WG, 0x1U);
   }
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -1726,6 +1725,9 @@ bool Device::populateOCLDeviceConstants() {
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
 
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
+
   if (isa().versionMajor() < 8) {
     info_.sgprsPerSimd_ = 512;
   } else if (isa().versionMajor() < 10) {
@@ -2084,7 +2086,7 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
 
 // ================================================================================================
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agentInfo, bool allowAllAgentsAccess) const {
   void* ptr = nullptr;
   uint32_t memFlags = 0;
   if (mem_seg == kKernArg) {
@@ -2104,7 +2106,15 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
     return nullptr;
   }
 
-  stat = Hsa::agents_allow_access(gpu_agents_.size(), &gpu_agents_[0], nullptr, ptr);
+  // Allow access to all GPU agents if the flag is set
+  // otherwise only allow access to the local backend device.
+  if (allowAllAgentsAccess) {
+    stat = Hsa::agents_allow_access(gpu_agents_.size(), &gpu_agents_[0], nullptr, ptr);
+  }
+  else {
+    stat = Hsa::agents_allow_access(1, &bkendDevice_, nullptr, ptr);
+  }
+  
   if (stat != HSA_STATUS_SUCCESS) {
     LogPrintfError("Fail hsa_amd_agents_allow_access with err %d", stat);
     hostFree(ptr, size);
@@ -2253,7 +2263,7 @@ void Device::releaseMemory(void* ptr, size_t size) const {
   }
 }
 
-void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const {
+void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags, bool allowAllAgentsAccess) const {
   const hsa_amd_memory_pool_t& pool =
       (flags.pseudo_fine_grain_ && gpu_ext_fine_grained_segment_.handle)
           ? gpu_ext_fine_grained_segment_
@@ -2288,11 +2298,14 @@ void* Device::deviceLocalAlloc(size_t size, const AllocationFlags& flags) const 
     return nullptr;
   }
 
-  if (isP2pEnabled() && deviceAllowAccess(ptr) == false) {
-    LogError("Allow p2p access for memory allocation");
-    memFree(ptr, size);
-    return nullptr;
+  if (allowAllAgentsAccess) {
+    if (isP2pEnabled() && deviceAllowAccess(ptr) == false) {
+      LogError("Allow p2p access for memory allocation");
+      memFree(ptr, size);
+      return nullptr;
+    }
   }
+
   return ptr;
 }
 
@@ -3290,7 +3303,7 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
               "Deleting hostcall buffer %p for hardware queue %p", hostcallBufferToFree,
               queue->base_address);
       amd::disableHostcalls(hostcallBufferToFree);
-      context().svmFree(hostcallBufferToFree);
+      hostFree(hostcallBufferToFree);
     }
     Hsa::queue_destroy(queue);
   }
@@ -3335,7 +3348,7 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   auto size = amd::getHostcallBufferSize(numPackets);
   auto align = amd::getHostcallBufferAlignment();
 
-  void* buffer = context().svmAlloc(size, align, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS);
+  void* buffer = hostAlloc(size, align, kAtomics, cpu_agent_info_, false);
   if (!buffer) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to create hostcall buffer for hardware queue %p", queue->base_address);
@@ -3930,6 +3943,9 @@ ProfilingSignal::~ProfilingSignal() {
 cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
   cl_int cl_error = CL_SUCCESS;
   switch (hsa_status) {
+    case HSA_STATUS_ERROR_OUT_OF_RESOURCES:
+      cl_error = CL_OUT_OF_RESOURCES;
+      break;
     case HSA_STATUS_ERROR_EXCEPTION:
       cl_error = CL_INVALID_OPERATION;
       break;
@@ -3998,7 +4014,16 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
               errorMsg, status);
     }
 
-    if (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR) {
+    // Core dumps generally provide limited value for OOM, so do not let
+    // DumpCoreFile() be the reason to abort in that case. OOM should still
+    // honor HIP_SKIP_ABORT_ON_GPU_ERROR consistently.
+    const bool is_oom = (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+    const bool should_abort =
+      is_oom
+        ? !HIP_SKIP_ABORT_ON_GPU_ERROR
+        : (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR);
+
+    if (should_abort) {
       abort();
     }
     amd::Device::gpu_error_ = ConvertHSAErrorIntoCLError(status);
