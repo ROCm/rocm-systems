@@ -1,4 +1,9 @@
 build*/
 *.o
+*.so
 __pycache__/
 *.pyc
+
+tests/hotswap_load_test
+tests/salmon_hip_test
+tests/salmon_integration_test
