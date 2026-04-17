@@ -7062,6 +7062,9 @@ gfx12_architecture_t::write_pseudo_register (const wave_t &wave,
       wave.read_register (amdgpu_regnum_t::state_priv, &state_priv_reg);
       wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
 
+      memcpy (reinterpret_cast<std::byte *> (&state_priv_reg) + offset, value,
+              value_size);
+
       ttmp6 &= ~ttmp6_saved_status_halt_mask;
       if (state_priv_reg & sq_wave_state_priv_halt_mask)
         ttmp6 |= ttmp6_saved_status_halt_mask;
