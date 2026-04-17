@@ -22,8 +22,11 @@
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#include <sstream>
 #include <string_view>
 #include <vector>
 
@@ -352,4 +355,251 @@ TEST(codeobj_library, inline_annotation)
     EXPECT_GE(max_depth, min_depth)
         << "Deepest inline call stack was " << max_depth << " levels (expected >= " << min_depth
         << "). DWARF inlined subroutine traversal may be broken.";
+}
+
+namespace
+{
+// Strip the trailing ":<col>" off "file:line:col" -> "file:line", and normalize
+// llvm-symbolizer's "no info" rendering ("??:?", "??:0", "<file>:0") to the
+// same convention used by code_printing.hpp ("<file>:?" or empty).
+std::string
+normalize_fileline(std::string_view s)
+{
+    if(s.empty()) return {};
+
+    // strip trailing :col (if present and numeric/?). llvm-symbolizer emits
+    // "file:line:col"; we only carry "file:line", so drop everything after the
+    // last ':' if it is the third colon-delimited field.
+    auto last_colon  = s.rfind(':');
+    auto first_colon = s.find(':');
+    if(last_colon != std::string_view::npos && last_colon != first_colon)
+        s = s.substr(0, last_colon);
+
+    // collapse "??:?" / "??:0" to empty (== our "no info")
+    if(s == "??:?" || s == "??:0") return {};
+
+    // collapse trailing ":0" to ":?" (line 0 in DWARF == "no specific line")
+    if(s.size() >= 2 && s.substr(s.size() - 2) == ":0")
+        return std::string(s.substr(0, s.size() - 2)) + ":?";
+
+    return std::string(s);
+}
+
+// Compare two file:line strings by basename (path component after last '/'),
+// ignoring path-prefix differences across machines/builds.
+bool
+fileline_basename_equal(std::string_view a, std::string_view b)
+{
+    if(a == b) return true;
+    if(a.empty() || b.empty()) return a == b;
+
+    auto basename = [](std::string_view s) {
+        auto colon = s.rfind(':');
+        if(colon == std::string_view::npos) return s;
+        auto path  = s.substr(0, colon);
+        auto slash = path.rfind('/');
+        if(slash == std::string_view::npos) return s;
+        return std::string_view{s.data() + slash + 1, s.size() - slash - 1};
+    };
+
+    return basename(a) == basename(b);
+}
+
+// Split our comment ("file:line -> file:line -> ...") into a list of frames.
+std::vector<std::string>
+split_our_comment(std::string_view comment)
+{
+    std::vector<std::string> out;
+    if(comment.empty()) return out;
+
+    constexpr std::string_view sep = rocprofiler::sdk::codeobj::disassembly::Instruction::separator;
+    size_t                     pos = 0;
+    while(pos <= comment.size())
+    {
+        auto next = comment.find(sep, pos);
+        if(next == std::string_view::npos)
+        {
+            out.emplace_back(comment.substr(pos));
+            break;
+        }
+        out.emplace_back(comment.substr(pos, next - pos));
+        pos = next + sep.size();
+    }
+    return out;
+}
+
+// Run llvm-symbolizer once with all addresses fed on stdin via a tmp file, and
+// return its parsed output: outer vector is one entry per address (in order),
+// inner vector is the inline-chain frames as "file:line" (innermost first),
+// already normalized for "no info" lines.
+std::vector<std::vector<std::string>>
+run_llvm_symbolizer(const std::string&           symbolizer,
+                    const std::string&           obj_path,
+                    const std::vector<uint64_t>& addrs,
+                    const std::string&           tmp_dir)
+{
+    std::vector<std::vector<std::string>> result(addrs.size());
+    if(addrs.empty()) return result;
+
+    std::string addrs_path = tmp_dir + "/codeobj_dwarf_addrs.txt";
+    {
+        std::ofstream addrs_file(addrs_path);
+        if(!addrs_file) return result;
+        for(auto a : addrs)
+            addrs_file << "0x" << std::hex << a << '\n';
+    }
+
+    // --inlines:        emit the inline chain (innermost first)
+    // --output-style=LLVM: default; "func\nfile:line:col\n\n" per address
+    // --demangle=1:     default; we ignore function names anyway
+    std::ostringstream cmd;
+    cmd << '"' << symbolizer << "\" --obj=\"" << obj_path << "\" --inlines --output-style=LLVM < \""
+        << addrs_path << '"';
+
+    std::unique_ptr<FILE, int (*)(FILE*)> pipe(::popen(cmd.str().c_str(), "r"), &::pclose);
+    if(!pipe) return result;
+
+    std::string raw;
+    {
+        char buf[4096];
+        while(size_t n = std::fread(buf, 1, sizeof(buf), pipe.get()))
+            raw.append(buf, n);
+    }
+
+    // Parse: per-address record terminated by an empty line; each record is a
+    // sequence of (function_name, file:line:col) line pairs.
+    std::istringstream is(raw);
+    std::string        line;
+    size_t             addr_idx    = 0;
+    bool               expect_func = true;  // alternates between function-name and file:line:col
+
+    while(std::getline(is, line))
+    {
+        if(addr_idx >= addrs.size()) break;
+        if(line.empty())
+        {
+            ++addr_idx;
+            expect_func = true;
+            continue;
+        }
+        if(expect_func)
+            expect_func = false;  // skip function name line
+        else
+        {
+            result[addr_idx].emplace_back(normalize_fileline(line));
+            expect_func = true;
+        }
+    }
+    return result;
+}
+}  // namespace
+
+/**
+ * Differential test: every 4-byte address inside each kernel symbol must yield
+ * the same source-line / inline-chain attribution from CodeobjDecoderComponent
+ * as it does from llvm-symbolizer.  Both tools parse the same .debug_line in
+ * the same ELF — disagreement is a bug on one side, and llvm-symbolizer has
+ * had years more scrutiny.
+ *
+ * Specifically guards against the bugs the recent line-attribution fix exists
+ * to prevent: ranges spilling past end_sequence rows, and ranges spilling
+ * across gaps in DWARF coverage.
+ *
+ * Skipped at runtime if llvm-symbolizer was not available at configure time.
+ */
+TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
+{
+#ifndef LLVM_SYMBOLIZER_PATH
+    GTEST_SKIP() << "LLVM_SYMBOLIZER_PATH not defined";
+#else
+    const std::string symbolizer = LLVM_SYMBOLIZER_PATH;
+    if(symbolizer.empty()) GTEST_SKIP() << "llvm-symbolizer not found at configure time";
+
+    std::string obj_path = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(obj_path.empty()) << "syncthreads_kernel.bin not found";
+
+    std::ifstream file(obj_path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    CodeobjDecoderComponent comp(objdata.data(), objdata.size());
+    ASSERT_FALSE(comp.m_symbol_map.empty());
+
+    // Walk every instruction in every kernel symbol and collect (vaddr, our-comment).
+    // Stepping by inst->size (rather than the 4-byte AMDGPU minimum) avoids
+    // calling amd_comgr_disassemble_instruction on mid-instruction addresses,
+    // which throws.  Both sides still see the exact same address set, so any
+    // disagreement is a real DWARF-attribution bug.
+    std::vector<uint64_t>    addrs;
+    std::vector<std::string> ours;
+    for(auto& [kaddr, sym] : comp.m_symbol_map)
+    {
+        uint64_t va = kaddr;
+        while(va < kaddr + sym.mem_size)
+        {
+            auto faddr = comp.va2fo(va);
+            if(!faddr) break;
+            std::unique_ptr<disassembly::Instruction> inst;
+            try
+            {
+                inst = comp.disassemble_instruction(*faddr, va);
+            } catch(...)
+            {
+                break;
+            }
+            if(!inst || inst->size == 0) break;
+            addrs.push_back(va);
+            ours.push_back(inst->comment);
+            va += inst->size;
+        }
+    }
+    ASSERT_FALSE(addrs.empty());
+
+    auto theirs = run_llvm_symbolizer(symbolizer, obj_path, addrs, CODEOBJ_BINARY_DIR);
+    ASSERT_EQ(theirs.size(), addrs.size())
+        << "llvm-symbolizer returned a different number of address records";
+
+    size_t mismatches = 0;
+    for(size_t i = 0; i < addrs.size(); ++i)
+    {
+        auto  our_frames   = split_our_comment(ours[i]);
+        auto& their_frames = theirs[i];
+
+        // Both empty == both report "no info" for this address. OK.
+        if(our_frames.empty() && their_frames.empty()) continue;
+
+        bool ok = our_frames.size() == their_frames.size();
+        if(ok)
+        {
+            for(size_t f = 0; f < our_frames.size(); ++f)
+            {
+                if(!fileline_basename_equal(normalize_fileline(our_frames[f]), their_frames[f]))
+                {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
+        if(!ok && mismatches < 10)
+        {
+            std::ostringstream our_s, their_s;
+            for(auto& f : our_frames)
+                our_s << '[' << f << ']';
+            for(auto& f : their_frames)
+                their_s << '[' << f << ']';
+            ADD_FAILURE() << "addr=0x" << std::hex << addrs[i] << std::dec
+                          << "\n  ours  : " << our_s.str() << "\n  theirs: " << their_s.str();
+            ++mismatches;
+        }
+        else if(!ok)
+        {
+            ++mismatches;
+        }
+    }
+
+    EXPECT_EQ(mismatches, 0u) << mismatches << " of " << addrs.size()
+                              << " addresses disagreed with llvm-symbolizer";
+#endif
 }
