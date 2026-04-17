@@ -166,10 +166,13 @@ union ncclLLFifoLine {
 // Make sure the clean mask will last for at least NCCL_NSTEPS
 static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
 
- /* IMPORTANT Note ragarding LL128 macros settings below:
-  * These fallbacks are defined here as a workaround to allow RCCL to compile 
-  * when these values are referenced by host code but need to be set based on 
-  * GFX architecture. */ 
+ /* IMPORTANT Note regarding LL128 macros settings in RCCL below:
+  * Device code: NCCL_LL128_LINESIZE matches the GPU target (__gfx1250__).
+  * Host code: must not use NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS due to reliance
+  * on NCCL_LL128_LINESIZE which is GPU arch-dependent. 
+  * Use ncclLl128LineElemsFromArch() / ncclLl128DataElemsFromArch() (archinfo.h) or
+  * comm->ll128LineElems / comm->ll128DataElems (and proxyState->* in the net proxy). 
+  * Fallback to a default value used here for host code compile. */
 
 #if __HIP_DEVICE_COMPILE__
 #if defined (__gfx1250__)

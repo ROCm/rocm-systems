@@ -2248,6 +2248,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->cudaArch = cudaArch;
   comm->archName = archName;
   comm->cuCount = cuCount;
+  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
+  comm->ll128LineElems = ncclLL128LineElemsFromArch(comm->archName);
+  comm->ll128DataElems = ncclLL128DataElemsFromArch(comm->archName);
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 
