@@ -15,6 +15,7 @@ protected:
                                      const std::vector<std::string>& counters_pmc0,
                                      const std::vector<std::string>& counters_pmc1 = {});
     void invoke_record_callback(uint64_t counter_id, const std::string& counter_name, double counter_value);
+    void invoke_tool_tracing_callback(uint64_t kernel_id);
 
     static std::string convert_counters_per_pmc_to_str(const std::vector<std::vector<std::string>>& counters_per_pmc);
     static std::string convert_counters_to_str(const std::vector<std::string>& counters);

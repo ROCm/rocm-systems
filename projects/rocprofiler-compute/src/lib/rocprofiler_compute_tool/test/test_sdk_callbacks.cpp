@@ -157,18 +157,8 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
     constexpr uint64_t kernel_id_0 = 10;
     constexpr uint64_t kernel_id_1 = 20;
 
-    rocprofiler_callback_tracing_record_t                                  record  = {};
-    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
-    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
-    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
-    record.payload   = &payload;
-
-    payload.kernel_id = kernel_id_0;
-    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
-
-    payload.kernel_id = kernel_id_1;
-    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+    invoke_tool_tracing_callback(kernel_id_0);
+    invoke_tool_tracing_callback(kernel_id_1);
 
     EXPECT_EQ(m_tool_data->target_kernel_ids.size(), 2);
     EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id_0);
@@ -243,6 +233,19 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
     EXPECT_EQ(m_tool_data->counter_records[0].kernel_id, dispatch_data.dispatch_info.kernel_id);
     EXPECT_EQ(m_tool_data->counter_records[0].LDS_memory_size,
               dispatch_data.dispatch_info.group_segment_size);
+}
+
+void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id)
+{
+    rocprofiler_callback_tracing_record_t                                  record  = {};
+    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
+    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = &payload;
+
+    payload.kernel_id = kernel_id;
+    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
 }
 
 std::string TestSdkCallbacks::convert_counters_per_pmc_to_str(
