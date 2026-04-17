@@ -1473,6 +1473,66 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
+def test_eval_metric_writes_back_falsey_supported_fields():
+    """Test eval_metric normalizes falsey supported fields on the DataFrame."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    from utils.metrics.evaluation_pipeline import eval_metric
+
+    metric_df = pd.DataFrame({
+        "Metric_ID": ["1.1.0"],
+        "Metric": ["Test Metric"],
+        "Value": ["to_sum(raw_pmc_df['pmc_perf']['SQ_WAVES'])"],
+        "Average": [None],
+    }).set_index("Metric_ID")
+    dfs = {1: metric_df}
+    dfs_type = {1: "metric_table"}
+    sys_info = pd.Series({
+        "ip_blocks": "standard",
+        "gpu_arch": "gfx90a",
+        "se_per_gpu": 4,
+        "pipes_per_gpu": 4,
+        "cu_per_gpu": 64,
+        "simd_per_cu": 4,
+        "sqc_per_gpu": 16,
+        "lds_banks_per_cu": 32,
+        "cur_sclk": 1800.0,
+        "cur_mclk": 1200.0,
+        "max_sclk": 2100.0,
+        "max_mclk": 1600.0,
+        "max_waves_per_cu": 40,
+        "num_hbm_channels": 4,
+        "total_l2_chan": 32,
+        "num_xcd": 1,
+        "wave_size": 64,
+    })
+    raw_pmc_df = {
+        "pmc_perf": pd.DataFrame({
+            "SQ_WAVES": [100, 200, 150],
+            "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
+        })
+    }
+
+    assert metric_df.loc["1.1.0", "Average"] is None
+
+    with patch("utils.metrics.evaluation_pipeline.BUILD_IN_VARS", {}):
+        eval_metric(
+            dfs,
+            dfs_type,
+            sys_info,
+            pd.DataFrame(),
+            raw_pmc_df,
+            debug=False,
+            config={},
+        )
+
+    assert metric_df.loc["1.1.0", "Value"] == 450
+    assert metric_df.loc["1.1.0", "Average"] == ""
+
+
+@pytest.mark.misc
 def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
     """Test basic filters that should work"""
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:

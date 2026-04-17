@@ -218,7 +218,7 @@ def eval_metric(
                         else:
                             # If not insert nan, the whole col might be treated
                             # as string but not number if there is NONE
-                            row[expr] = ""
+                            df.at[row_id, expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
         noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
