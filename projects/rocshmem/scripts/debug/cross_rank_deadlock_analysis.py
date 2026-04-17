@@ -69,7 +69,7 @@ class Colors:
 
 
 def _detect_color():
-    val = os.environ.get('ROCSHMEM_DEADLOCK_COLOR', 'auto').lower()
+    val = os.environ.get('ROCSHMEM_DEADLOCK_COLOR', 'always').lower()
     if val in ('1', 'yes', 'true', 'always'):
         return True
     if val in ('0', 'no', 'false', 'never'):

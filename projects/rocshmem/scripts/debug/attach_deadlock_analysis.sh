@@ -31,7 +31,7 @@
 #   ./attach_deadlock_analysis.sh <executable_name> [options]
 #
 # Options:
-#   --directory <dir>      Output directory (default: ./rocshmem_deadlock_<timestamp>)
+#   --directory <dir>      Output directory (default: rocshmem_deadlock_analysis_<timestamp>)
 #   --cull                 Cull groups stuck in GPU barriers / gridsync (built-in patterns)
 #   --cull=p1,p2,...       Cull groups whose backtrace contains any of the given substrings
 #   --check-lanes          Enable per-lane register divergence check inside each group

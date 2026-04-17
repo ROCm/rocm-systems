@@ -113,8 +113,19 @@ int main(int argc, char **argv)
         printf("[PE %d] launching barrier kernel (will deadlock)\n", my_pe);
         fflush(stdout);
         barrier_kernel<<<dim3(1), dim3(64), 0, 0>>>();
+        hipError_t launch_err = hipGetLastError();
+        if (launch_err != hipSuccess) {
+            fprintf(stderr, "[PE %d] barrier_kernel launch failed: %s\n",
+                    my_pe, hipGetErrorString(launch_err));
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
         /* This hipDeviceSynchronize blocks until the kernel finishes — never. */
-        hipDeviceSynchronize();
+        hipError_t sync_err = hipDeviceSynchronize();
+        if (sync_err != hipSuccess) {
+            fprintf(stderr, "[PE %d] hipDeviceSynchronize failed: %s\n",
+                    my_pe, hipGetErrorString(sync_err));
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
     }
 
     printf("[PE %d] done\n", my_pe);

@@ -36,9 +36,9 @@ wait loops.
 mpirun -np 4 ./my_rocshmem_app &
 
 # 2. Attach to all instances, analyze, save output
-./scripts/debug/attach_deadlock_analysis.sh my_rocshmem_app --directory /tmp/analysis
+./scripts/debug/attach_deadlock_analysis.sh my_rocshmem_app
 
-# Output is written to ./rocshmem_deadlock_<timestamp>/
+# Output is written to ./rocshmem_deadlock_analysis_<timestamp>/
 # A compact summary is printed to stdout.
 ```
 
@@ -244,8 +244,8 @@ Unique backtrace groups: 2
          may itself be deadlocked in mlx5_poll_cq_until.
 
 === Summary ===
-  1 wavefront(s) stuck in rocSHMEM API calls
-  63 wavefront(s) in user code / other
+  1 wavefront(s) inside rocSHMEM
+  63 wavefront(s) outside rocSHMEM
 ```
 
 ### Reading the Output
