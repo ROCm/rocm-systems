@@ -100,13 +100,8 @@ __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {
                       hipMemcpyHostToDevice));
   delete[] handles_h;
 
-  // Allocate signal arrays for completion tracking (one per PE per channel)
-  CHECK_HIP(hipMalloc(&signalPtrs, total_handles * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(signalPtrs, 0, total_handles * sizeof(uint64_t)));
-
-  CHECK_HIP(hipMalloc(&expectedSignals, total_handles * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(expectedSignals, 0, total_handles * sizeof(uint64_t)));
 }
+
 
 __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstrap) {
   my_pe = pe;
@@ -165,27 +160,14 @@ __host__ void SdmaOnImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootst
                       hipMemcpyHostToDevice));
   delete[] handles_h;
 
-  // Allocate signal arrays for completion tracking (one per PE per channel)
-  CHECK_HIP(hipMalloc(&signalPtrs, total_handles * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(signalPtrs, 0, total_handles * sizeof(uint64_t)));
-
-  CHECK_HIP(hipMalloc(&expectedSignals, total_handles * sizeof(uint64_t)));
-  CHECK_HIP(hipMemset(expectedSignals, 0, total_handles * sizeof(uint64_t)));
 }
+
 
 __host__ void SdmaOnImpl::sdmaHostStop() {
   // fprintf(stdout, "PE %d: SDMA stop\n", my_pe);
   if (deviceHandles_d != nullptr) {
     CHECK_HIP(hipFree(deviceHandles_d));
     deviceHandles_d = nullptr;
-  }
-  if (signalPtrs != nullptr) {
-    CHECK_HIP(hipFree(signalPtrs));
-    signalPtrs = nullptr;
-  }
-  if (expectedSignals != nullptr) {
-    CHECK_HIP(hipFree(expectedSignals));
-    expectedSignals = nullptr;
   }
 }
 

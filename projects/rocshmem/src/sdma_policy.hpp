@@ -50,8 +50,6 @@ class SdmaOnImpl {
   // Device resources - 2D array: [shm_size * numChannels]
   // Index as: deviceHandles_d[local_pe * numChannels + channel_idx]
   anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
-  uint64_t* signalPtrs{nullptr};
-  uint64_t* expectedSignals{nullptr};
   int shm_size{0};
   int my_pe{0};
   int local_rank{0};
@@ -83,11 +81,7 @@ class SdmaOnImpl {
     int idx = local_pe * numChannels;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
-      // printf("[SDMA] sdmaCopy: dst=%p src=%p size=%zu pe=%d idx=%d\n",
-      //        dst, src, size, pe, idx);
-      anvil::putWithSignal(*handle, dst, src, size, &signalPtrs[idx]);
-      __hip_atomic_fetch_add(&expectedSignals[idx], 1,
-                             __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      anvil::put(*handle, dst, src, size);
     }
   }
 
@@ -119,11 +113,7 @@ class SdmaOnImpl {
       if (handle != nullptr && chunk_size > 0) {
         char* dst_chunk = static_cast<char*>(dst) + offset;
         char* src_chunk = static_cast<char*>(src) + offset;
-        // printf("[SDMA] sdmaCopy_wave: lane=%d dst=%p src=%p size=%zu pe=%d ch=%d idx=%d\n",
-        //        lane_id, dst_chunk, src_chunk, chunk_size, pe, channel_idx, idx);
-        anvil::putWithSignal(*handle, dst_chunk, src_chunk, chunk_size, &signalPtrs[idx]);
-        __hip_atomic_fetch_add(&expectedSignals[idx], 1,
-                               __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        anvil::put(*handle, dst_chunk, src_chunk, chunk_size);
       }
     }
   }
@@ -154,37 +144,35 @@ class SdmaOnImpl {
       if (handle != nullptr && chunk_size > 0) {
         char* dst_chunk = static_cast<char*>(dst) + offset;
         char* src_chunk = static_cast<char*>(src) + offset;
-        // printf("[SDMA] sdmaCopy_wg: thread=%d dst=%p src=%p size=%zu pe=%d ch=%d idx=%d\n",
-        //        thread_id, dst_chunk, src_chunk, chunk_size, pe, channel_idx, idx);
-        anvil::putWithSignal(*handle, dst_chunk, src_chunk, chunk_size, &signalPtrs[idx]);
-        __hip_atomic_fetch_add(&expectedSignals[idx], 1,
-                               __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        anvil::put(*handle, dst_chunk, src_chunk, chunk_size);
       }
     }
     __syncthreads();
   }
 
   // Wait for SDMA completions for a specific PE (all channels)
+  // Uses rptr-based polling via anvil::quiet()
   __device__ void sdmaQuiet(int pe) {
     int local_pe = pe % shm_size;
-    // printf("[SDMA] sdmaQuiet: pe=%d\n", pe);
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = local_pe * numChannels + ch;
-      uint64_t expected = __hip_atomic_load(&expectedSignals[idx],
-                                            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      anvil::waitForSignal(reinterpret_cast<HSAuint64*>(&signalPtrs[idx]), expected);
+      anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+      if (handle != nullptr) {
+        anvil::quiet(*handle);
+      }
     }
   }
 
   // Wait for all SDMA completions (all PEs, all channels)
+  // Uses rptr-based polling via anvil::quiet()
   __device__ void sdmaQuietAll() {
-    // printf("[SDMA] sdmaQuietAll: shm_size=%d\n", shm_size);
     for (int pe = 0; pe < shm_size; pe++) {
       for (int ch = 0; ch < numChannels; ch++) {
         int idx = pe * numChannels + ch;
-        uint64_t expected = __hip_atomic_load(&expectedSignals[idx],
-                                              __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        anvil::waitForSignal(reinterpret_cast<HSAuint64*>(&signalPtrs[idx]), expected);
+        anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
+        if (handle != nullptr) {
+          anvil::quiet(*handle);
+        }
       }
     }
   }
@@ -200,8 +188,6 @@ class SdmaOffImpl {
   size_t minChunkPerChannel{4096};
   int numChannels{2};
   void** deviceHandles_d{nullptr};
-  uint64_t* signalPtrs{nullptr};
-  uint64_t* expectedSignals{nullptr};
   int shm_size{0};
   int my_pe{0};
   int local_rank{0};
