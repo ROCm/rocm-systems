@@ -6,7 +6,6 @@ import re
 import shlex
 import shutil
 import sys
-import tempfile
 import time
 from abc import abstractmethod
 from pathlib import Path
@@ -20,8 +19,8 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.native_tool import NativeTool
 from utils.utils_common import (
-    capture_subprocess_output,
     format_time,
     get_job_rank_and_size,
     is_only_pc_sampling,
@@ -32,7 +31,6 @@ from utils.utils_exceptions import (
     NoScriptInCommandError,
     PythonScriptNotFoundError,
 )
-from utils.native_tool import NativeTool
 from utils.utils_profile import gen_sysinfo, pc_sampling_prof, run_prof
 from vendored import yaml
 
@@ -355,7 +353,10 @@ class RocProfCompute_Base:
             and not is_only_pc_sampling(args.filter_blocks)
         ):
             native_tool = NativeTool()
-            native_tool_path = native_tool.get_collector_library_path(args.rocprofiler_sdk_tool_path)
+            rocprof_compute_script_path = Path(sys.argv[0]).resolve()
+            native_tool_path = native_tool.get_collector_library_path(
+                rocprof_compute_script_path, args.rocprofiler_sdk_tool_path
+            )
 
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path)

@@ -1,32 +1,24 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
+import shlex
+import tempfile
 from pathlib import Path
-import sys
+
 from utils.logger import console_debug, console_error
 from utils.utils_common import capture_subprocess_output
-import tempfile
-import shlex
 
 
 class NativeTool:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def get_collector_library_path(self, rocprofiler_sdk_tool_path: Path):
-        # Native counter collection tool is only compatible with
-        # rocprofiler-sdk public API for ROCm version >= 7.x.x
-
-        # PC sampling only profile does not need native tool
-
-        # Do not use native tool in attach
-        # mode until we figure out how multiple tools can attach
-        # TODO: Figure out how multiple tools can attach
-        # Use native counter collection tool
-        # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
-        # (lib, lib64, lib32, etc. depending on distribution)
-        script_path = Path(sys.argv[0]).resolve()
+    def get_collector_library_path(
+        self, rocprof_compute_script_path: Path, rocprofiler_sdk_tool_path: Path
+    ) -> None:
         native_tool_base_path = (
-            script_path.parents[2] if len(script_path.parents) >= 3 else Path()
+            rocprof_compute_script_path.parents[2]
+            if len(rocprof_compute_script_path.parents) >= 3
+            else Path()
         )
         native_tool_glob_pattern = (
             "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
