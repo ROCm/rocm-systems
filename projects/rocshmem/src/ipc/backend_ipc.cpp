@@ -345,13 +345,20 @@ void IPCBackend::ctx_destroy(Context *ctx) {
   delete ro_net_host_ctx;
 }
 
-void IPCBackend::reset_backend_stats() {
-  assert(false);
+void IPCBackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
 }
 
-void IPCBackend::dump_backend_stats() {
-  assert(false);
+void IPCBackend::accumulate_default_host_ctx_stats() {
+  if (default_host_ctx)
+    globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }
+
 
 void IPCBackend::initIPC() {
   const auto &heap_bases{heap.get_heap_bases()};

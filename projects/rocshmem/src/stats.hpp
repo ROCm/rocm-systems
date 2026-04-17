@@ -172,6 +172,14 @@ class Stats {
     for (int i = 0; i < I; i++) incStat(i, otherStats.getStat(i));
   }
 
+  // Host-side accumulation: plain addition into an already-host-accessible
+  // Stats object (e.g. globalStats in hipHostMalloc memory).  Not atomic —
+  // must only be called from the host when no GPU kernels are concurrently
+  // writing to this object or to otherStats.
+  __host__ void hostAccumulateStats(const Stats<I> &otherStats) {
+    for (int i = 0; i < I; i++) stats[i] += otherStats.getStat(i);
+  }
+
   __host__ __device__ void resetStats() {
     memset(&stats, 0, sizeof(StatType) * I);
   }
@@ -240,6 +248,7 @@ class NullStats {
   __host__ __device__ void endTimer(uint64_t start, int index) {}
   __host__ __device__ void incStat(int index, int value = 1) {}
   __host__ __device__ void accumulateStats(const NullStats<I> &otherStats) {}
+  __host__ void hostAccumulateStats(const NullStats<I> &otherStats) {}
   __host__ __device__ void resetStats() {}
   __host__ __device__ StatType getStat(int index) const { return 0; }
 };

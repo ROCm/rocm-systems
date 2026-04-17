@@ -614,6 +614,15 @@ int GDABackend::buffer_unregister(void *addr) {
   return err;
 }
 
+void GDABackend::accumulate_ctx_device_stats() {
+  ROCStats tmp;
+  for (size_t i = 0; i < envvar::max_num_contexts; i++) {
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
+                        hipMemcpyDeviceToHost));
+    globalStats.hostAccumulateStats(tmp);
+  }
+}
+
 void GDABackend::buffer_unregister_all() {
   /* Deregister all buffers with QPs */
   for (size_t i = 0; i < num_qps; i++) {
@@ -628,9 +637,11 @@ void GDABackend::reset_backend_stats() {
   assert(false);
 }
 
-void GDABackend::dump_backend_stats() {
-  assert(false);
+void GDABackend::accumulate_default_host_ctx_stats() {
+  if (default_host_ctx)
+    globalHostStats.accumulateStats(default_host_ctx->ctxHostStats);
 }
+
 
 __host__ void GDABackend::global_exit(int status) {
   if (backend_comm != MPI_COMM_NULL)
