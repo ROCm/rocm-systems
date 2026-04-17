@@ -10,15 +10,13 @@
  * packet, union-per-DWORD with named bitfields + raw DW_N_DATA
  * accessor, and a static_assert on the total size.
  *
- * Gate inclusion on USE_SDMA_OSS7 so that pre-OSS7 builds never
- * see these types.
+ * These types are always defined; use SDMA_IS_OSS7 (from sdma_opcodes.h)
+ * to guard code paths that emit or decode OSS7 packets.
  */
 
 #pragma once
 
 #include "sdma_opcodes.h"
-
-#if USE_SDMA_OSS7
 
 /* ---------------------------------------------------------------
  * SDMA_PKT_COPY_LINEAR_PHY_MI4   (OP=0x1  SUB_OP=0x8)
@@ -408,5 +406,3 @@ typedef struct SDMA_PKT_FENCE_64B_MI4_TAG {
 } SDMA_PKT_FENCE_64B_MI4;
 static_assert(sizeof(SDMA_PKT_FENCE_64B_MI4) == 5 * sizeof(unsigned int),
               "SDMA_PKT_FENCE_64B_MI4 must be 5 DWORDs");
-
-#endif /* USE_SDMA_OSS7 */

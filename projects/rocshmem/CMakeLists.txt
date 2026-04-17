@@ -45,7 +45,6 @@ option(USE_RO "Enable RO conduit" ON)
 option(USE_IPC "Enable IPC support (using HIP)" OFF)
 option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
-option(USE_SDMA_OSS7 "Enable OSS7 SDMA packet format (MI350X / CDNA4+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
@@ -191,9 +190,6 @@ if (NOT BUILD_TESTS_ONLY)
     find_library(NUMA_LIB numa REQUIRED)
     find_library(DRM_LIB drm PATHS /opt/amdgpu/lib/x86_64-linux-gnu REQUIRED)
     find_library(DRM_AMDGPU_LIB drm_amdgpu PATHS /opt/amdgpu/lib/x86_64-linux-gnu REQUIRED)
-    if (USE_SDMA_OSS7)
-      message(STATUS "SDMA OSS7 (MI350X+) packet format enabled")
-    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -288,10 +284,6 @@ if (NOT BUILD_TESTS_ONLY)
   if(${ROCM_MAJOR_VERSION} LESS 7)
     # ROCm 6.x requires us to explicitly enable warp sync builtins
     target_compile_definitions(${PROJECT_NAME} PRIVATE HIP_ENABLE_WARP_SYNC_BUILTINS=1)
-  endif()
-
-  if (USE_SDMA AND USE_SDMA_OSS7)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_SDMA_OSS7=1)
   endif()
 
   #############################################################################
