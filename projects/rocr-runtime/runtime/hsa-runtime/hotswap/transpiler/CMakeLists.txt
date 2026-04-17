@@ -5,6 +5,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# When this CMakeLists is the top-level project we build the raise_cli driver
+# and the gtest-based transpiler_tests binary. When it is pulled in by a
+# parent project (e.g. ROCR) via add_subdirectory we only build the library.
+# A parent may still opt in explicitly by setting HOTSWAP_TRANSPILER_BUILD_TOOLS
+# before add_subdirectory.
+if(NOT DEFINED HOTSWAP_TRANSPILER_BUILD_TOOLS)
+  if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(HOTSWAP_TRANSPILER_BUILD_TOOLS ON)
+  else()
+    set(HOTSWAP_TRANSPILER_BUILD_TOOLS OFF)
+  endif()
+endif()
+
 # --- Paths to LLVM ------------------------------------------------------------
 # We require an LLVM *build tree* (not an install tree) because the raiser uses
 # AMDGPU target-private headers (SIDefines.h, SIInstrInfo.h, AMDGPUBaseInfo.h)
@@ -70,10 +83,24 @@ add_library(hotswap-transpiler STATIC
 # AMDGPU target-private headers (not installed by `ninja install`).
 # SIDefines.h, SIInstrInfo.h → source tree Target/AMDGPU/{,Utils}
 # AMDGPUGenInstrInfo.inc etc.  → build tree Target/AMDGPU
+# These are PRIVATE because no public header (pipeline.hpp, transpiler.hpp)
+# exposes AMDGPU-private LLVM types, so consumers (e.g. ROCR) do not need
+# these paths to compile against us.
 target_include_directories(hotswap-transpiler PRIVATE
   "${LLVM_BUILD_MAIN_SRC_DIR}/lib/Target/AMDGPU"
   "${LLVM_BUILD_MAIN_SRC_DIR}/lib/Target/AMDGPU/Utils"
   "${LLVM_BINARY_DIR}/lib/Target/AMDGPU"
+)
+
+# Allow this static library to be linked into a shared library
+# (libhsa-runtime64.so when consumed from ROCR).
+set_target_properties(hotswap-transpiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# Public headers consumed by parent projects (pipeline.hpp, transpiler.hpp).
+# Use the hotswap/ root so consumers can write `#include "hotswap/transpiler/pipeline.hpp"`
+# or `#include "hotswap/transpiler.hpp"`, matching existing ROCR usage.
+target_include_directories(hotswap-transpiler PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
 )
 
 # `llvm-mc`, `llvm-objdump` etc. live in the build tree's bin/.
@@ -136,6 +163,8 @@ target_link_libraries(hotswap-transpiler
     LLVMLinker
     LLVMObjCARCOpts
 )
+
+if(HOTSWAP_TRANSPILER_BUILD_TOOLS)
 
 # --- Per-file raiser CLI (kerneldex coverage contract) ------------------------
 # A small standalone binary that raises every kernel in a single .co/.hsaco
@@ -229,3 +258,5 @@ set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/lit_tests/CMakeLists.txt)
   add_subdirectory(lit_tests)
 endif()
+
+endif() # HOTSWAP_TRANSPILER_BUILD_TOOLS

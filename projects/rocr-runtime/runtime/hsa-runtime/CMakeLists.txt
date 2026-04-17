@@ -255,48 +255,22 @@ if(ROCR_ENABLE_HOTSWAP)
 
   if(ROCR_ENABLE_IR_RAISER)
     message(STATUS "HotSwap IR Raiser: enabled")
-    llvm_map_components_to_libnames(IR_RAISER_LLVM_LIBS
-      Core IRReader Target AsmParser AsmPrinter SelectionDAG GlobalISel
-      CodeGen CodeGenTypes MIRParser ScalarOpts TransformUtils Analysis
-      InstCombine AggressiveInstCombine Instrumentation Vectorize Passes
-      ProfileData ipo ObjCARCOpts Linker BitReader BitWriter BitstreamReader
-      BinaryFormat Object Remarks Demangle TextAPI FrontendOffloading
-      FrontendOpenMP DebugInfoDWARF DebugInfoCodeView CFGuard Symbolize
-      DebugInfoMSF DebugInfoPDB)
-    list(APPEND SRCS
-      hotswap/transpiler/raiser.cpp
-      hotswap/transpiler/raise_context.cpp
-      hotswap/transpiler/mc_state.cpp
-      hotswap/transpiler/opcode_map.cpp
-      hotswap/transpiler/canonicalize.cpp
-      hotswap/transpiler/handle_sopp.cpp
-      hotswap/transpiler/handle_smem.cpp
-      hotswap/transpiler/handle_sopc.cpp
-      hotswap/transpiler/handle_sop1.cpp
-      hotswap/transpiler/handle_sopk.cpp
-      hotswap/transpiler/handle_sop2.cpp
-      hotswap/transpiler/handle_valu.cpp
-      hotswap/transpiler/handle_flat.cpp
-      hotswap/transpiler/handle_ds.cpp
-      hotswap/transpiler/handle_mubuf.cpp
-      hotswap/transpiler/handle_mfma.cpp
-      hotswap/transpiler/handle_vopd.cpp
-      hotswap/transpiler/wmma_lowering.cpp
-      hotswap/transpiler/pipeline.cpp
-      hotswap/transpiler/code_object_utils.cpp)
-    target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/hotswap/transpiler)
-    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${IR_RAISER_LLVM_LIBS})
-    # LLVM_TOOLS_BINARY_DIR is set by find_package(LLVM) for build trees;
-    # for install trees it may be empty, so fall back to <prefix>/bin.
-    if(LLVM_TOOLS_BINARY_DIR)
-      set(_IR_RAISER_TOOLS_DIR "${LLVM_TOOLS_BINARY_DIR}")
-    else()
-      set(_IR_RAISER_TOOLS_DIR "${LLVM_INSTALL_PREFIX}/bin")
-    endif()
+    # Consume the transpiler as a proper subproject: we link against the
+    # `hotswap-transpiler` static library target rather than recompiling its
+    # sources here. The transpiler encapsulates its own LLVM dependency
+    # (including AMDGPU target-private headers), so ROCR stays free of
+    # LLVM-internal include paths and of the transpiler's source list.
+    #
+    # EXCLUDE_FROM_ALL keeps the transpiler's optional test/CLI artifacts out
+    # of the default ROCR build; HOTSWAP_TRANSPILER_BUILD_TOOLS further gates
+    # them so GTest/HIP are not required to build libhsa-runtime64.so.
+    add_subdirectory(
+      ${CMAKE_CURRENT_SOURCE_DIR}/hotswap/transpiler
+      ${CMAKE_CURRENT_BINARY_DIR}/hotswap/transpiler
+      EXCLUDE_FROM_ALL)
+    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE hotswap-transpiler)
     target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE
-      ROCR_HOTSWAP_IR_RAISER=1
-      LLVM_TOOLS_DIR="${_IR_RAISER_TOOLS_DIR}")
+      ROCR_HOTSWAP_IR_RAISER=1)
   endif()
 endif()
 
