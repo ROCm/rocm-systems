@@ -13,6 +13,10 @@ template <typename Derived>
 class info_registration_writer_interface : public api_writer_base<Derived>
 {
 public:
+    // =========================================================================
+    // Core info registration methods (v3+)
+    // =========================================================================
+
     void register_node_info(const writer_types::node_info_t& node_info)
     {
         this->self().register_node_info_impl(node_info);
@@ -66,6 +70,47 @@ public:
     }
 
     void register_string(std::string_view str) { this->self().register_string_impl(str); }
+
+    // =========================================================================
+    // v4+ specific info registration methods
+    // =========================================================================
+
+    /**
+     * @brief Register a category (v4+ only)
+     * @note In v3, categories are stored as strings via register_string()
+     */
+    void register_category_info(const writer_types::category_info_t& category_info)
+    {
+        this->self().register_category_info_impl(category_info);
+    }
+
+    /**
+     * @brief Register an address range info (v4+ only)
+     * @note In v3, address ranges are embedded in call_stack/line_info JSONB
+     */
+    void register_address_range_info(
+        const writer_types::address_range_info_t& address_range)
+    {
+        this->self().register_address_range_info_impl(address_range);
+    }
+
+    /**
+     * @brief Register source code info (v4+ only)
+     * @note In v3, source code is embedded in line_info JSONB column
+     */
+    void register_source_code_info(const writer_types::source_code_info_t& source_code)
+    {
+        this->self().register_source_code_info_impl(source_code);
+    }
+
+    /**
+     * @brief Register program counter info (v4+ only)
+     * @note In v3, PC info is embedded in call_stack/line_info JSONB
+     */
+    void register_pc_info(const writer_types::pc_info_t& pc_info)
+    {
+        this->self().register_pc_info_impl(pc_info);
+    }
 };
 
 }  // namespace rocpdsna

@@ -32,7 +32,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
-
+#define VERSION (rocpdsna::version_t{ 3, 0, 0 })
 namespace
 {
 
@@ -45,7 +45,9 @@ using namespace rocpdsna::writer_types;
 // Standard data insert counts for benchmarking
 // Use ->Arg() to select: 10k (quick), 100k (standard), 1000k (stress)
 constexpr size_t COUNT_10K   = 10000;
+constexpr size_t COUNT_30K   = 30000;
 constexpr size_t COUNT_100K  = 100000;
+constexpr size_t COUNT_300K  = 300000;
 constexpr size_t COUNT_1000K = 1000000;
 
 // ============================================================================
@@ -235,9 +237,10 @@ public:
     {
         m_database_path =
             "benchmark_writer_" + std::to_string(state.thread_index()) + ".db";
-        m_uuid    = std::to_string(state.thread_index());
-        m_storage = std::make_unique<rocpdsna::storage_t>(m_database_path, m_uuid);
-        m_writer  = std::make_shared<rocpdsna::writer_t>(std::move(m_storage));
+        m_uuid = std::to_string(state.thread_index());
+        m_storage =
+            std::make_unique<rocpdsna::storage_t>(m_database_path, m_uuid, VERSION);
+        m_writer = std::make_shared<rocpdsna::writer_t>(std::move(m_storage));
         setup_schema();
     }
 
@@ -320,9 +323,10 @@ public:
     {
         m_database_path =
             "benchmark_registration_" + std::to_string(state.thread_index()) + ".db";
-        m_uuid    = std::to_string(state.thread_index());
-        m_storage = std::make_unique<rocpdsna::storage_t>(m_database_path, m_uuid);
-        m_writer  = std::make_shared<rocpdsna::writer_t>(std::move(m_storage));
+        m_uuid = std::to_string(state.thread_index());
+        m_storage =
+            std::make_unique<rocpdsna::storage_t>(m_database_path, m_uuid, VERSION);
+        m_writer = std::make_shared<rocpdsna::writer_t>(std::move(m_storage));
     }
 
     void TearDown(const benchmark::State&) override
@@ -372,7 +376,9 @@ BENCHMARK_REGISTER_F(registration_fixture, register_threads)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
-    ->Args({ COUNT_100K });
+    ->Args({ COUNT_30K })
+    ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K });
 
 // Benchmark: Register multiple kernel symbols
 BENCHMARK_DEFINE_F(registration_fixture, register_kernel_symbols)(benchmark::State& state)
@@ -406,7 +412,9 @@ BENCHMARK_REGISTER_F(registration_fixture, register_kernel_symbols)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
-    ->Args({ COUNT_100K });
+    ->Args({ COUNT_30K })
+    ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K });
 
 // Benchmark: Register PMC descriptions
 BENCHMARK_DEFINE_F(registration_fixture, register_pmc_info)(benchmark::State& state)
@@ -447,7 +455,9 @@ BENCHMARK_REGISTER_F(registration_fixture, register_pmc_info)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
-    ->Args({ COUNT_100K });
+    ->Args({ COUNT_30K })
+    ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K });
 
 // Benchmark: Full schema registration (realistic setup)
 BENCHMARK_DEFINE_F(registration_fixture, register_full_schema)(benchmark::State& state)
@@ -551,7 +561,9 @@ BENCHMARK_REGISTER_F(writer_fixture, kernel_dispatch)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
+    ->Args({ COUNT_30K })
     ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K })
     ->Args({ COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, memory_copy)(benchmark::State& state)
@@ -585,7 +597,9 @@ BENCHMARK_REGISTER_F(writer_fixture, memory_copy)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
+    ->Args({ COUNT_30K })
     ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K })
     ->Args({ COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, memory_alloc)(benchmark::State& state)
@@ -616,7 +630,9 @@ BENCHMARK_REGISTER_F(writer_fixture, memory_alloc)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
+    ->Args({ COUNT_30K })
     ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K })
     ->Args({ COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, region)(benchmark::State& state)
@@ -645,7 +661,9 @@ BENCHMARK_REGISTER_F(writer_fixture, region)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
+    ->Args({ COUNT_30K })
     ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K })
     ->Args({ COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, region_with_args)(benchmark::State& state)
@@ -716,7 +734,9 @@ BENCHMARK_REGISTER_F(writer_fixture, region_with_args)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
+    ->Args({ COUNT_30K })
     ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K })
     ->Args({ COUNT_1000K });
 
 BENCHMARK_DEFINE_F(writer_fixture, pmc_event)(benchmark::State& state)
@@ -748,7 +768,9 @@ BENCHMARK_REGISTER_F(writer_fixture, pmc_event)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
+    ->Args({ COUNT_30K })
     ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K })
     ->Args({ COUNT_1000K });
 
 // ============================================================================
@@ -847,7 +869,9 @@ BENCHMARK_REGISTER_F(writer_fixture, end_to_end_mixed)
     ->Unit(benchmark::kSecond)
     ->Iterations(1)
     ->Args({ COUNT_10K })
+    ->Args({ COUNT_30K })
     ->Args({ COUNT_100K })
+    ->Args({ COUNT_300K })
     ->Args({ COUNT_1000K });
 
 }  // namespace

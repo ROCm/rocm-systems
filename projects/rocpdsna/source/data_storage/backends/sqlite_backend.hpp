@@ -5,6 +5,7 @@
 
 #include "common/traits.hpp"
 #include "debug.hpp"
+#include "rocpdsna/storage_types.hpp"  // For rocpdsna::version_t struct
 #include "spdlog/fmt/bundled/core.h"
 
 #include <sqlite3.h>
@@ -205,7 +206,7 @@ public:
     // =========================================================================
     // Schema & admin
     // =========================================================================
-    void                      initialize_schema();
+    void                      initialize_schema(::rocpdsna::version_t version);
     void                      execute(const std::string& query);
     void                      flush();
     [[nodiscard]] std::string get_uuid() const;

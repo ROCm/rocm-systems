@@ -186,6 +186,7 @@ if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
         rocpdsna-objects
         PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
+            $<$<COMPILE_LANGUAGE:CXX>:ROCPD_SQL_HAS_SCHEMA_VERSION=${ROCPD_SQL_HAS_SCHEMA_VERSION}>
     )
 else()
     target_include_directories(
@@ -197,6 +198,7 @@ else()
         rocpdsna-objects
         PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
+            $<$<COMPILE_LANGUAGE:CXX>:ROCPD_SQL_HAS_SCHEMA_VERSION=0>
     )
 endif()
 

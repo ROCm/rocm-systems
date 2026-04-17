@@ -34,7 +34,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-
+#define VERSION (rocpdsna::version_t{ 3, 0, 0 })
 namespace
 {
 
@@ -46,7 +46,9 @@ using namespace rocpdsna::writer_types;
 
 // Configurable event counts for parallel scaling tests
 constexpr size_t COUNT_10K   = 10000;
+constexpr size_t COUNT_30K   = 30000;
 constexpr size_t COUNT_100K  = 100000;
+constexpr size_t COUNT_300K  = 300000;
 constexpr size_t COUNT_1000K = 1000000;
 
 // ============================================================================
@@ -69,7 +71,7 @@ struct thread_context
         database_path = "benchmark_writer_parallel_" + std::to_string(thread_id) + ".db";
 
         const std::string uuid = std::to_string(thread_id);
-        storage = std::make_unique<rocpdsna::storage_t>(database_path, uuid);
+        storage = std::make_unique<rocpdsna::storage_t>(database_path, uuid, VERSION);
         writer  = std::make_shared<rocpdsna::writer_t>(std::move(storage));
 
         constexpr size_t node_id = 1;
@@ -328,11 +330,21 @@ BENCHMARK_REGISTER_F(parallel_writer_fixture, scaling_test)
     ->Args({ 2, COUNT_10K })
     ->Args({ 4, COUNT_10K })
     ->Args({ 8, COUNT_10K })
+    // in_memory: 30k events - quick validation
+    ->Args({ 1, COUNT_30K })
+    ->Args({ 2, COUNT_30K })
+    ->Args({ 4, COUNT_30K })
+    ->Args({ 8, COUNT_30K })
     // in_memory: 100k events - standard benchmark
     ->Args({ 1, COUNT_100K })
     ->Args({ 2, COUNT_100K })
     ->Args({ 4, COUNT_100K })
     ->Args({ 8, COUNT_100K })
+    // in_memory: 300k events - standard benchmark
+    ->Args({ 1, COUNT_300K })
+    ->Args({ 2, COUNT_300K })
+    ->Args({ 4, COUNT_300K })
+    ->Args({ 8, COUNT_300K })
     // in_memory: 1000k events - stress test
     ->Args({ 1, COUNT_1000K })
     ->Args({ 2, COUNT_1000K })
