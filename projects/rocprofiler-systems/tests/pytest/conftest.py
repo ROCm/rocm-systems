@@ -815,10 +815,10 @@ def _standardize_test_name(item: pytest.Item, verbose: bool = False) -> None:
             test_name = test_name[1:]
     full_name = f"{class_name}-{test_name}" if class_name else test_name
     formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
-    formatted_name = formatted_name.replace("-", "_")
-    while "__" in formatted_name:
-        formatted_name = formatted_name.replace("__", "_")
-    formatted_name = formatted_name.strip("_")
+    while "--" in formatted_name:
+        formatted_name = formatted_name.replace("--", "-")
+    formatted_name = formatted_name.strip("-")
+    formatted_name = formatted_name.lower()
 
     item.stash[_original_nodeid_key] = item.nodeid
     # nodeid is what is used to display the test name in the terminal
@@ -831,7 +831,6 @@ def _standardize_test_name(item: pytest.Item, verbose: bool = False) -> None:
 
     # Allow -k filtering by the formatted name
     item.extra_keyword_matches.add(formatted_name)
-    item.extra_keyword_matches.add(formatted_name.lower())
 
 
 def _ctest_generate_tests(
@@ -939,11 +938,11 @@ def _ctest_generate_tests(
 
     # Ensure that the configuration header can be generated
     lines.append(
-        'add_test("RocprofilerSystems_pytest_config" "${_ROCPROFSYS_EXE}"'
+        'add_test("rocprofiler-systems-pytest-config" "${_ROCPROFSYS_EXE}"'
         ' "${_ROCPROFSYS_EXE_ARGS}"'
         ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")'
     )
-    lines.append('set_tests_properties("RocprofilerSystems_pytest_config" PROPERTIES')
+    lines.append('set_tests_properties("rocprofiler-systems-pytest-config" PROPERTIES')
     lines.append('    FIXTURES_SETUP "rocprofsys-global-tmp-files"')
     lines.append('    LABELS "prerequisite;global"')
     lines.append("    TIMEOUT 10")
@@ -1060,11 +1059,11 @@ def _ctest_generate_tests(
 
     # Generate a cleanup test that runs pytest --ctest-mode=cleanup
     lines.append(
-        'add_test("RocprofilerSystems_test_cleanup" "${_ROCPROFSYS_EXE}"'
+        'add_test("rocprofiler-systems-test-cleanup" "${_ROCPROFSYS_EXE}"'
         ' "${_ROCPROFSYS_EXE_ARGS}"'
         ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")'
     )
-    lines.append('set_tests_properties("RocprofilerSystems_test_cleanup" PROPERTIES')
+    lines.append('set_tests_properties("rocprofiler-systems-test-cleanup" PROPERTIES')
     lines.append('    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"')
     lines.append('    LABELS "cleanup;global"')
     lines.append("    TIMEOUT 30")

@@ -151,7 +151,7 @@ If a test requires significant resources, mark it with `@pytest.mark.serialize` 
 If a test depends on the output of another test, use `depends_on` and `preserve` together:
 
 - `@pytest.mark.preserve("file1", "file2", ...)` — Prevents files from being deleted after the test completes, even when `ROCPROFSYS_KEEP_TEST_OUTPUT=0`.
-- `@pytest.mark.depends_on("TestName_method")` - Declares a CTest dependency. The argument is the standardized test name (see `_standardize_test_name()` in `conftest.py`).
+- `@pytest.mark.depends_on("name-method")` - Declares a CTest dependency. The argument is the standardized test name (see `_standardize_test_name()` in `conftest.py`).
 
 ```python
 class TestProducer(RocprofsysTest):
@@ -160,9 +160,9 @@ class TestProducer(RocprofsysTest):
         ...
 
 class TestConsumer(RocprofsysTest):
-    @pytest.mark.depends_on("Producer_generate")
+    @pytest.mark.depends_on("producer-generate")
     def test_consume(self, test_output_base):
-        file_path = test_output_base / "Producer_generate" / "coverage.json"
+        file_path = test_output_base / "producer-generate" / "coverage.json"
         ...
 ```
 
