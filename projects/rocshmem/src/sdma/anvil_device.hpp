@@ -46,11 +46,11 @@
 namespace rocshmem {
 namespace anvil {
 
-constexpr uint32_t SDMA_QUEUE_SIZE = 256 * 1024;  // 256KB
+constexpr uint32_t SDMA_QUEUE_SIZE = 1024 * 1024;  // 1MB (matches rocm-xio sdma-ep)
 constexpr HSA_QUEUE_PRIORITY DEFAULT_PRIORITY = HSA_QUEUE_PRIORITY_NORMAL;
 constexpr unsigned int DEFAULT_QUEUE_PERCENTAGE = 100;
 constexpr int MAX_RETRIES = 1 << 30;
-constexpr bool BREAK_ON_RETRIES = true;
+constexpr bool BREAK_ON_RETRIES = false;
 
 #if defined(__HIPCC__) || defined(__CUDACC__)
 
@@ -103,7 +103,7 @@ __device__ __forceinline__ bool waitForSignal(HSAuint64* addr, uint64_t expected
   int retries = 0;
   while (true) {
     uint64_t value = __hip_atomic_load(addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-    if (value == expected) {
+    if (value >= expected) {  // >= not == to avoid infinite spin if signal overshoots
       return true;
     }
     if constexpr (BREAK_ON_RETRIES) {
@@ -181,8 +181,10 @@ struct SdmaQueueDeviceHandle {
 
     uint64_t base_index_in_dwords = WrapIntoRing(pendingWptr) / sizeof(uint32_t);
 
+    // First DWORD encodes the NOP count per SDMA spec; remaining DWORDs are zero
     for (int i = 0; i < numOffsetDwords; i++) {
-      __hip_atomic_store(queueBuf + base_index_in_dwords + i, 0, __ATOMIC_RELAXED,
+      uint32_t val = (i == 0) ? (((numOffsetDwords - 1) & 0xFFFF) << 16) : 0;
+      __hip_atomic_store(queueBuf + base_index_in_dwords + i, val, __ATOMIC_RELAXED,
                          __HIP_MEMORY_SCOPE_AGENT);
     }
     pendingWptr += offset;
