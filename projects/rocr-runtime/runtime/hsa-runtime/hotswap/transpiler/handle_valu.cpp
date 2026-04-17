@@ -4,6 +4,7 @@
 #include "wmma_lowering.hpp"
 
 #include "semop.hpp"
+#include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -42,6 +43,24 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       sop == SemOp::V_PERMLANE64_B32) {
     if (di.numDefs >= 1 && di.numSrcs >= 1) {
       ctx.regs.writeReg32(ctx.B, op.dst(), op.src(0));
+    }
+    hr.handled = true;
+    return hr;
+  }
+  // gfx950 lane-swap: exchange vdst and src0 across lanes 0..15↔16..31 (or
+  // 0..31↔32..63). Two defs (vdst, src0_out) and two uses (vdst_in, src0).
+  // Scalar model: swap the two VGPR values.
+  if (sop == SemOp::V_PERMLANE16_SWAP_B32 ||
+      sop == SemOp::V_PERMLANE32_SWAP_B32) {
+    ParsedReg dstReg = op.dst();
+    Value *oldDst = ctx.regs.readReg32(ctx.B, dstReg);
+    Value *oldSrc = op.src(0);
+    ctx.regs.writeReg32(ctx.B, dstReg, oldSrc);
+    int src0OutIdx = AMDGPU::getNamedOperandIdx(
+        di.inst.getOpcode(), AMDGPU::OpName::src0_out);
+    if (src0OutIdx >= 0 && di.isReg(src0OutIdx)) {
+      ParsedReg src0Out = ctx.parseReg(di.getReg(src0OutIdx), src0OutIdx);
+      ctx.regs.writeReg32(ctx.B, src0Out, oldDst);
     }
     hr.handled = true;
     return hr;
@@ -372,8 +391,31 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   }
 
   // ---- Simple 2-src integer ALU ----
-  if (sop == SemOp::V_ADD_NC_U32 || sop == SemOp::V_ADD_I32_legacy) {
+  if (sop == SemOp::V_ADD_NC_U32) {
     ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateAdd(op.src(0), op.src(1), "vadd"));
+    hr.handled = true;
+    return hr;
+  }
+  // GFX9 VOP3-only v_add_i32 / v_sub_i32: plain add/sub when clamp=0,
+  // signed saturation (saddsat/ssubsat) when clamp=1.
+  if (sop == SemOp::V_ADD_I32 || sop == SemOp::V_SUB_I32) {
+    Value *s0 = op.src(0), *s1 = op.src(1);
+    int clampIdx = AMDGPU::getNamedOperandIdx(
+        di.inst.getOpcode(), AMDGPU::OpName::clamp);
+    bool clamped = clampIdx >= 0 && di.isImm(clampIdx) &&
+                   di.getImm(clampIdx) != 0;
+    if (clamped) {
+      Intrinsic::ID satID = (sop == SemOp::V_ADD_I32)
+                                ? Intrinsic::sadd_sat
+                                : Intrinsic::ssub_sat;
+      Value *res = ctx.B.CreateBinaryIntrinsic(satID, s0, s1);
+      ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    } else {
+      Value *res = (sop == SemOp::V_ADD_I32)
+                       ? ctx.B.CreateAdd(s0, s1, "vadd_i32")
+                       : ctx.B.CreateSub(s0, s1, "vsub_i32");
+      ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    }
     hr.handled = true;
     return hr;
   }
@@ -477,7 +519,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  if (sop == SemOp::V_SUB_NC_U32 || sop == SemOp::V_SUB_I32_legacy) {
+  if (sop == SemOp::V_SUB_NC_U32) {
     ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateSub(op.src(0), op.src(1), "vsub"));
     hr.handled = true;
     return hr;

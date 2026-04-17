@@ -274,6 +274,10 @@ static const Entry kCanonTable[] = {
     E(V_ADD_U32_e64, V_ADD_NC_U32),
     E(V_SUB_U32_e64, V_SUB_NC_U32),
     E(V_SUBREV_U32_e64, V_SUBREV_NC_U32),
+    // GFX9 VOP3-only signed add/sub (saddsat/ssubsat when clamp is set,
+    // plain add/sub otherwise). Distinct from the legacy GFX10+ NC variants.
+    E(V_ADD_I32_e64, V_ADD_I32),
+    E(V_SUB_I32_e64, V_SUB_I32),
     E(V_ADD_CO_U32_e64, V_ADD_CO_U32),
     E(V_ADDC_U32_e64, V_ADD_CO_CI_U32),
     E(V_SUB_CO_U32_e64, V_SUB_CO_U32),
@@ -360,6 +364,10 @@ static const Entry kCanonTable[] = {
     E(V_PERMLANE16_B32_e64, V_PERMLANE16_B32),
     E(V_PERMLANEX16_B32_e64, V_PERMLANEX16_B32),
     E(V_PERMLANE64_B32, V_PERMLANE64_B32),
+    E(V_PERMLANE16_SWAP_B32_e32, V_PERMLANE16_SWAP_B32),
+    E(V_PERMLANE16_SWAP_B32_e64, V_PERMLANE16_SWAP_B32),
+    E(V_PERMLANE32_SWAP_B32_e32, V_PERMLANE32_SWAP_B32),
+    E(V_PERMLANE32_SWAP_B32_e64, V_PERMLANE32_SWAP_B32),
 
     // ---------------------------------------------------------------------
     // VOPC (V_CMP_* and V_CMPX_*) are NOT enumerated here. They're picked up
@@ -454,6 +462,7 @@ static const Entry kCanonTable[] = {
     // DS
     // ---------------------------------------------------------------------
     E(DS_LOAD_TR16_B128, DS_LOAD_TR16_B128),
+    E(DS_READ_B64_TR_B16, DS_READ_B64_TR_B16),
     E(DS_READ_B32, DS_READ_B32), E(DS_READ_B64, DS_READ_B64),
     E(DS_READ_B128, DS_READ_B128),
     E(DS_READ2_B32, DS_READ2_B32), E(DS_READ2_B64, DS_READ2_B64),

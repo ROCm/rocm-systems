@@ -236,19 +236,13 @@ TEST(BatchRaise, Gfx1250TestData) {
 
 // AITER CK production kernels (gfx950): GEMM, FMHA, MoE, MLA, PA, TopK.
 // Fork-isolated so that report_fatal_error in one kernel doesn't kill the test.
-// Current failures (15 of 27):
-//   2 bf16gemm    — v_add_i32 unsupported
-//   2 f4gemm      — XNACK_MASK_HI crash
-//   4 f8_block_scale — CFG reconstruction edge case
-//   2 fmha_bwd    — LDS_DIRECT crash
-//   3 fmha_fwd    — v_add_i32 unsupported
-//   2 fmoe        — v_add_i32 unsupported
+// All 27 kernels raise successfully as of 2026-04-16.
 TEST(BatchRaise, AiterGfx950) {
   std::string path = AITER_CORPUS_DIR;
   if (!fileExists(path))
     GTEST_SKIP() << "AITER corpus not found: " << path
                  << " (run hotswap/kernels/fetch_aiter_kernels.py)";
-  runBatchRaiseIsolated(path, "gfx942", /*expectedFailures=*/15);
+  runBatchRaiseIsolated(path, "gfx950", /*expectedFailures=*/0);
 }
 
 // Ad-hoc batch raise against user-supplied directories via --raise-dir=PATH.

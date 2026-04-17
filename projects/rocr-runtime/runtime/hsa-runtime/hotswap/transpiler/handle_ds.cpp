@@ -68,6 +68,34 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
   //      This exchanges rows and columns so that each lane, which started
   //      with 8 values from consecutive M positions for one K column, now
   //      holds 8 values from different K columns for its M position.
+  // gfx950 ds_read_b64_tr_b16: LDS transpose read, returns 64 bits as
+  // v4i16 (4 × i16). Emit the LLVM intrinsic so the backend can lower it
+  // to the correct instruction for the target ISA (native on gfx950,
+  // software-emulated on targets that lack it).
+  if (sop == SemOp::DS_READ_B64_TR_B16) {
+    Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");
+    for (unsigned k = 1; k < op.nSrcs(); k++) {
+      if (di.isImm(op.srcIdx(k))) {
+        int64_t imm = di.getImm(op.srcIdx(k));
+        if (imm != 0)
+          addr = ctx.B.CreateAdd(addr, ConstantInt::get(ctx.i64Ty, imm), "ds_off");
+        break;
+      }
+    }
+    auto *ldsPtrTy = PointerType::get(ctx.C, 3);
+    Value *ptr = ctx.B.CreateIntToPtr(addr, ldsPtrTy, "tr64_ptr");
+    auto *v4i16Ty = FixedVectorType::get(Type::getInt16Ty(ctx.C), 4);
+    Function *trFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_read_tr16_b64, {v4i16Ty});
+    Value *trResult = ctx.B.CreateCall(trFn, {ptr}, "tr64_ld");
+    Value *asDwords = ctx.B.CreateBitCast(
+        trResult, FixedVectorType::get(ctx.i32Ty, 2), "tr64_dw");
+    ParsedReg dest = op.dst();
+    ctx.regs.writeRegVec(ctx.B, dest, asDwords);
+    hr.handled = true;
+    return hr;
+  }
+
   if (sop == SemOp::DS_LOAD_TR16_B128) {
     Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");
     for (unsigned k = 1; k < op.nSrcs(); k++) {

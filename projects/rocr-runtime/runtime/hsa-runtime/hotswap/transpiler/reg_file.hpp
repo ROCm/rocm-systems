@@ -148,6 +148,18 @@ struct AllocaRegFile {
     if (pr.kind == ParsedReg::FLAT_SCR) return B.CreateLoad(B.getInt32Ty(), flatScr[0], "fscr_val");
     if (pr.kind == ParsedReg::TTMP && pr.baseIdx >= 0 && pr.baseIdx < MAX_TTMP)
       return B.CreateLoad(B.getInt32Ty(), ttmp[pr.baseIdx], "ttmp_val");
+    // GFX9 src_lds_direct (encoding 254): reads one dword from LDS at the
+    // byte address in M0.  There is NO auto-increment of M0 on GFX9 — the
+    // kernel manages M0 explicitly between reads.  (GFX11+ DSDIR
+    // `lds_direct_load` does auto-increment; if we ever raise GFX11+
+    // kernels that use DSDIR, the increment must be modeled separately.)
+    if (pr.kind == ParsedReg::LDS_DIRECT) {
+      auto *i32Ty = B.getInt32Ty();
+      llvm::Value *addr = B.CreateLoad(i32Ty, m0, "m0_lds_off");
+      auto *ldsPtr = llvm::PointerType::get(i32Ty->getContext(), 3);
+      llvm::Value *ptr = B.CreateIntToPtr(addr, ldsPtr, "lds_direct_ptr");
+      return B.CreateLoad(i32Ty, ptr, "lds_direct_val");
+    }
     return nullptr;
   }
   llvm::Value *loadExec(llvm::IRBuilder<> &B) {

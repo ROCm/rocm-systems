@@ -197,7 +197,7 @@ The transpiler targets production AMDGPU kernels compiled for the GFX9 family
 (MI200/MI300 — gfx90a, gfx940, gfx942, gfx950) and GFX12/GFX1250 (RDNA4+).
 Coverage depends on which instruction patterns a kernel uses.
 
-### AITER kernels (gfx942/gfx950)
+### AITER kernels (gfx950)
 
 Tested against 27 representative AITER CK kernels (GEMM, FMHA, MoE, MLA,
 paged-attention, topk-softmax, etc.).  The `BatchRaise.AiterGfx950` test
@@ -205,50 +205,45 @@ validates these numbers on every run.
 
 | Metric | Value |
 |--------|-------|
-| Kernels raised | **12 / 27 (44.4%)** |
-| Remaining failures | 15 (see breakdown below) |
+| Kernels raised | **27 / 27 (100%)** |
+| Remaining failures | 0 |
 
-Successfully raised kernel families:
-- **FP8 GEMM block-scale** (2 of 2)
+All kernel families raise successfully:
+- **BF16 GEMM** (2 of 2)
+- **FP4 GEMM** (2 of 2)
+- **FP8 GEMM block-scale** (4 of 4)
+- **FP8 GEMM** (2 of 2)
 - **INT8 GEMM** (2 of 2)
+- **FMHA forward** (3 of 3)
+- **FMHA backward** (2 of 2)
+- **MoE** (2 of 2, plus 2-stage variants)
 - **MLA** (bf16 attention decode, 2 of 2)
 - **Paged attention** (bf16 no-quant, 2 of 2)
 - **TopK softmax** (f32 and bf16, 2 of 2)
-- **MoE 2-stage** (fp8 block-scale, 2 of 2)
-
-### Known failures
-
-| Kernels | Count | Root cause |
-|---------|:-----:|------------|
-| `bf16gemm` | 2 | `v_add_i32` unsupported in VOP3 |
-| `f4gemm` | 2 | `XNACK_MASK_HI` register not classified (crash) |
-| `f8_block_scale` | 4 | CFG reconstruction edge case ("terminator in middle of BB") |
-| `fmha_v3_bwd` | 2 | `LDS_DIRECT` operand (crash) |
-| `fmha_v3_fwd` | 3 | `v_add_i32` unsupported in VOP3 |
-| `fmoe` | 2 | `v_add_i32` unsupported in VOP3 |
 
 ### Known limitations
 
 | Category | Description |
 |----------|-------------|
-| **`v_add_i32` (gfx950)** | GFX9 `v_add_i32` in VOP3 encoding is not yet mapped. Blocks bf16gemm, fmha_fwd, fmoe. |
-| **`XNACK_MASK_HI`** | Register not classified by `parseReg`; triggers `report_fatal_error`. Blocks f4gemm. |
-| **IR verification failures** | 4 f8_block_scale kernels fail IR verification due to a CFG reconstruction edge case. |
-| **`LDS_DIRECT` operand** | The LDS_DIRECT pseudo-register triggers a fatal error in fmha_bwd kernels. |
 | **WMMA (gfx1250)** | Wave Matrix Multiply support is being added by a separate effort. |
 
 ### Instruction coverage highlights
 
-The transpiler handles the full GFX9 instruction set including:
+The transpiler handles a large subset of the GFX9/gfx950 instruction set.
+Coverage is validated against the AITER corpus above; kernels using
+instructions not listed here will fail with "Unsupported instruction".
+Currently handled:
 - Scalar ALU (SOP1/SOP2/SOPK/SOPC), including carry-chain operations
-- Vector ALU (VOP1/VOP2/VOP3), including GFX9 naming variants (v_add_u32 → v_add_co_u32)
+- Vector ALU (VOP1/VOP2/VOP3), including GFX9 naming variants and `v_add_i32`/`v_sub_i32`
+- Lane-swap operations (`v_permlane16_swap_b32`, `v_permlane32_swap_b32`)
 - Packed f16 ops (v_pk_fmac_f16, v_pk_add_f32, v_pk_fma_f32)
 - Dot product accumulate (v_dot2c_i32_i16, v_dot4c_i32_i8, v_dot8c_i32_i4)
-- MFMA (matrix fused multiply-add, including scaled variants)
+- MFMA (matrix fused multiply-add, including scaled F8F6F4 variants)
 - MUBUF with buffer resource descriptors (loads, stores, atomics, LDS-direct)
 - SMEM (scalar loads, s_atomic_swap)
 - FLAT/GLOBAL memory (loads, stores, atomics including pk_add_bf16/f16)
-- DS (LDS reads/writes, including strided and 128-bit)
+- DS (LDS reads/writes, including strided, 128-bit, and transpose reads)
+- LDS_DIRECT operand support (direct LDS reads via M0 address)
 - VOPC/CMPX (vector comparisons with VCC/EXEC writeback)
 - Control flow (branches, saveexec, EXEC mask management)
 - VOPD (dual-issue instructions, gfx12+)

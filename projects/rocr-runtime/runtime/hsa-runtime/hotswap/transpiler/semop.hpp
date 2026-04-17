@@ -118,6 +118,7 @@ enum class SemOp : uint16_t {
 
   V_MAX_U32, V_MIN_U32, V_MAX_I32, V_MIN_I32,
   V_PERMLANE16_B32, V_PERMLANEX16_B32, V_PERMLANE64_B32,
+  V_PERMLANE16_SWAP_B32, V_PERMLANE32_SWAP_B32,
 
   // -- VOPC (V_CMP_* and V_CMPX_*) --
   //
@@ -134,10 +135,13 @@ enum class SemOp : uint16_t {
 
   V_BITOP3_B32, V_BITOP3_B16,
 
+  // GFX9 VOP3-only v_add/sub_i32 — plain add/sub when clamp=0,
+  // saddsat/ssubsat when clamp=1.
+  V_ADD_I32, V_SUB_I32,
+
   // -- 64-bit vector ops --
   V_LSHLREV_B64, V_LSHL_ADD_U64, V_ADD_NC_U64,
   V_MAD_U64_U32, V_MAD_CO_U64_U32,
-  V_ADD_I32_legacy, V_SUB_I32_legacy,
 
   // -- FLAT / GLOBAL / SCRATCH memory --
   FLAT_LOAD_UBYTE, FLAT_LOAD_SBYTE, FLAT_LOAD_USHORT, FLAT_LOAD_SSHORT,
@@ -170,6 +174,7 @@ enum class SemOp : uint16_t {
 
   // -- DS --
   DS_LOAD_TR16_B128,
+  DS_READ_B64_TR_B16,
   DS_READ_B32, DS_READ_B64, DS_READ_B128,
   DS_READ2_B32, DS_READ2_B64,
   DS_READ_U16, DS_READ_I16, DS_READ_U8, DS_READ_I8,

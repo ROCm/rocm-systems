@@ -8,7 +8,27 @@ when it's gone. One-liners unless a plan is actually useful.
 
 ## Open
 
-*(none — add entries here)*
+- **M0 register: audit all producers and consumers for correctness.**
+  M0 is used as an implicit address operand by several instruction families
+  and the current handling is ad-hoc across handler files:
+  - `handle_mubuf.cpp`: `buffer_load_*_lds` stores to LDS at M0, but does
+    not advance M0 afterwards. If multiple `buffer_load_*_lds` fire in
+    sequence the raiser relies on the kernel having explicit `s_mov_b32 m0`
+    instructions between them. Verify this assumption against real kernels.
+  - `handle_sopc.cpp`: `s_set_gpr_idx_on` writes M0 but the GPR dynamic
+    indexing effect is not modeled. This is documented as a known limitation
+    but should be revisited if AITER kernels start using GPR indexing.
+  - `reg_file.hpp`: `LDS_DIRECT` reads from LDS at M0. On GFX9 there is
+    no auto-increment of M0 (unlike GFX11+ DSDIR `lds_direct_load`), so
+    the current implementation is correct. But if GFX11+ kernels are ever
+    raised, the DSDIR auto-increment will need explicit modeling.
+  - `handle_ds.cpp`: `ds_bpermute` uses M0 for byte-lane control but the
+    handler passes M0 through correctly. No known issue.
+  - General concern: M0 is a single 32-bit alloca shared by all these
+    uses. If a kernel interleaves M0 uses (e.g. buffer_load_lds followed
+    by ds_bpermute) the raiser must preserve M0's value correctly across
+    the entire instruction stream. Add a test that exercises interleaved
+    M0 usage patterns.
 
 ## How to work on one
 

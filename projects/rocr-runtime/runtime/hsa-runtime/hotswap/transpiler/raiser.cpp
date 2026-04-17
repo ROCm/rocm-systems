@@ -271,11 +271,24 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
           int namedMod = AMDGPU::getNamedOperandIdx(opc, kModNames[k]);
           int ourMod = (di.modMap[k] == UINT_MAX) ? -1 : (int)di.modMap[k];
           int expectedMod = (namedMod < 0) ? -1 : namedMod;
-          if (ourMod != expectedMod)
-            reportErr(
-                "transpiler: modMap disagrees with OpName::srcN_modifiers "
-                "table",
-                (int)k, ourMod, expectedMod);
+          if (ourMod != expectedMod) {
+            // Scaled MFMA instructions (ScaledMAIInst in TableGen) append
+            // src0_modifiers / src1_modifiers AFTER all source operands,
+            // not interleaved as in VOP3. Our walk can't discover them
+            // because it only looks for OPERAND_INPUT_MODS *before* each
+            // source. Repair the modMap from LLVM's authoritative named-
+            // operand table, but ONLY for MAI-format instructions so we
+            // don't silently mask future layout drift in other formats.
+            bool isMAI = di.tsFlags & SIInstrFlags::IsMAI;
+            if (isMAI && namedMod >= 0 && ourMod == -1) {
+              di.modMap[k] = (unsigned)namedMod;
+            } else {
+              reportErr(
+                  "transpiler: modMap disagrees with OpName::srcN_modifiers "
+                  "table",
+                  (int)k, ourMod, expectedMod);
+            }
+          }
         }
       }
 

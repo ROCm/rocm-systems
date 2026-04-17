@@ -147,6 +147,22 @@ ParsedReg RaiseContext::parseReg(MCRegister reg, int mciOpIdx) const {
   case AMDGPU::SGPR_NULL_HI:
     pr.kind = ParsedReg::NOREG;
     return pr;
+  // XNACK_MASK controls page-fault retry masking per lane. On data-center
+  // GPUs (MI300/MI350) XNACK is typically disabled and the register has no
+  // effect on compute semantics. We treat it as NOREG (reads→zero,
+  // writes→nop). If a kernel compiled with XNACK enabled relies on the
+  // mask for correctness, this approximation is wrong — but such kernels
+  // are not expected in practice.
+  case AMDGPU::XNACK_MASK_LO:
+  case AMDGPU::XNACK_MASK_HI:
+    pr.kind = ParsedReg::NOREG;
+    return pr;
+  // LDS_DIRECT (src_lds_direct, enc 254): reads a dword from LDS at the
+  // byte offset held in M0. Used as a VALU source after buffer_load_*_lds.
+  case AMDGPU::LDS_DIRECT:
+    pr.kind = ParsedReg::LDS_DIRECT;
+    pr.width = 1;
+    return pr;
   default:
     break;
   }
