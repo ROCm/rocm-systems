@@ -291,11 +291,11 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
   if (use_host_ptr) {
     // If the host pointer is already allocated, map it to svm fine grain buffer
     *ptr =
-        amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR, size,
+        amd::SvmBuffer::malloc(ctx, amd::MemFlags::SvmFineGrain | amd::MemFlags::UseHostPtr, size,
                                (align == 0) ? dev.info().memBaseAddrAlign_ : align, nullptr, *ptr);
   } else {
-    *ptr = amd::SvmBuffer::malloc(ctx, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR, size,
-                                  (align == 0) ? dev.info().memBaseAddrAlign_ : align);
+    *ptr = amd::SvmBuffer::malloc(ctx, amd::MemFlags::SvmFineGrain | amd::MemFlags::AllocHostPtr,
+                                  size, (align == 0) ? dev.info().memBaseAddrAlign_ : align);
   }
   if (*ptr == nullptr) {
     return hipErrorMemoryAllocation;

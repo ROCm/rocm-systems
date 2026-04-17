@@ -111,7 +111,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  void* ptr = amd::SvmBuffer::malloc(*amdContext, ihipFlags, size, dev_info.memBaseAddrAlign_,
+  void* ptr = amd::SvmBuffer::malloc(*amdContext, static_cast<amd::MemFlags>(ihipFlags), size, dev_info.memBaseAddrAlign_,
                                      useHostDevice ? curDevContext->svmDevices()[0] : nullptr);
 
   // Handle out of memory cases,

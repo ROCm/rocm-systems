@@ -177,7 +177,7 @@ RUNTIME_ENTRY_RET_NOERRCODE(void*, clSVMAlloc,
   }
 
   amd::Context& amdContext = *as_amd(context);
-  return amd::SvmBuffer::malloc(amdContext, flags, size, alignment);
+  return amd::SvmBuffer::malloc(amdContext, static_cast<amd::MemFlags>(flags), size, alignment);
 }
 RUNTIME_EXIT
 

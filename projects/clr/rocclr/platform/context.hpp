@@ -138,7 +138,7 @@ class Context : public RuntimeObject {
    * @param flags The flags to create a svm space
    * @param curDev The current device
    */
-  void* svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags = CL_MEM_READ_WRITE,
+  void* svmAlloc(size_t size, size_t alignment, amd::MemFlags flags = amd::MemFlags::ReadWrite,
                  const amd::Device* curDev = nullptr, void* svmPtr = nullptr);
 
   /**

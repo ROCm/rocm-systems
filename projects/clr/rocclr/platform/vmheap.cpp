@@ -41,7 +41,7 @@ bool VmHeap::CommitMemory(void* addr, size_t size) {
   auto padded_size = alignUp(size, granularity);
 
   // Allocate physical memory
-  void* ptr = SvmBuffer::malloc(device_->context(), ROCCLR_MEM_PHYMEM, padded_size,
+  void* ptr = SvmBuffer::malloc(device_->context(), amd::MemFlags::PhyMem, padded_size,
                                 dev_info.memBaseAddrAlign_, nullptr);
   if (ptr == nullptr) {
     LogPrintfError("Failed to allocate physical memory %zd", padded_size);

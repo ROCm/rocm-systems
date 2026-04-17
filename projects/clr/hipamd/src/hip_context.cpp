@@ -41,7 +41,7 @@ void init(bool* status) {
   // Print the current path of the library
   amd::Os::PrintLibraryLocation();
   // Enumerate and initialize GPU devices
-  const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
+  const std::vector<amd::Device*>& devices = amd::Device::getDevices(amd::DeviceType::GPU, false);
   const size_t device_count = devices.size();
   g_devices.reserve(device_count);
 

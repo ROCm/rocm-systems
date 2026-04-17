@@ -163,7 +163,7 @@ NullDevice::NullDevice() : amd::Device(), palName_(nullptr) {}
 bool NullDevice::init() {
   // Create offline devices for all ISAs not already associated with an online
   // device. This allows code objects to be compiled for all supported ISAs.
-  std::vector<Device*> devices = getDevices(CL_DEVICE_TYPE_GPU, false);
+  std::vector<Device*> devices = getDevices(amd::DeviceType::GPU, false);
   for (const amd::Isa* isa = amd::Isa::begin(); isa != amd::Isa::end(); isa++) {
     if (!isa->runtimePalSupported() || (isa->sramecc() == amd::Isa::Feature::Any) ||
         (isa->xnack() == amd::Isa::Feature::Any)) {
@@ -1284,7 +1284,7 @@ static void parseRequestedDeviceList(const char* requestedDeviceList,
 
 // ================================================================================================
 bool Device::init() {
-  gStartDevice = amd::Device::numDevices(CL_DEVICE_TYPE_GPU, true);
+  gStartDevice = amd::Device::numDevices(amd::DeviceType::GPU, true);
   bool useDeviceList = false;
   requestedDevices_t requestedDevices;
 
@@ -1390,7 +1390,7 @@ bool Device::init() {
                                          &comp_info);
           // Check P2P capability
           if (comp_info.flags.peerTransferRead && comp_info.flags.peerTransferWrite) {
-            devices()[device0]->p2pDevices_.push_back(as_cl(devices()[device1]));
+            devices()[device0]->p2pDevices_.push_back(devices()[device1]);
             devices()[device1]->p2p_access_devices_.push_back(devices()[device0]);
           }
         }
@@ -1399,7 +1399,7 @@ bool Device::init() {
 
     // Query active devices only
     constexpr bool kNoOfflineDevices = false;
-    std::vector<amd::Device*> devices = getDevices(CL_DEVICE_TYPE_GPU, kNoOfflineDevices);
+    std::vector<amd::Device*> devices = getDevices(amd::DeviceType::GPU, kNoOfflineDevices);
     if (devices.size() > 0) {
       // Create a dummy context for internal memory allocations on all reported devices
       glb_ctx_ = new amd::Context(devices, amd::Context::Info());
@@ -2367,14 +2367,14 @@ bool Device::deviceAllowAccess(void* ptr) const {
   return true;
 }
 
-void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
+void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, amd::MemFlags flags,
                        void* svmPtr) const {
   constexpr bool kForceAllocation = true;
   alignment = std::max(alignment, static_cast<size_t>(info_.memBaseAddrAlign_));
 
   if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
     // set interprocess for IPC memory support
-    flags |= ROCCLR_MEM_INTERPROCESS;
+    flags = flags | amd::MemFlags::Interprocess;
   }
 
   amd::Memory* mem = nullptr;

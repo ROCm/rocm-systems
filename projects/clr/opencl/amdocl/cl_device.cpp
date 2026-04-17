@@ -16,6 +16,50 @@
 
 #include <cstdlib>  // for alloca
 
+// OpenCL extension string — opencl-layer only, not used by rocclr internals.
+// Must stay in sync with the OclExtensions enum in device.hpp.
+static constexpr const char* OclExtensionsString[] = {"cl_khr_fp64 ",
+                                                      "cl_amd_fp64 ",
+                                                      "cl_khr_select_fprounding_mode ",
+                                                      "cl_khr_global_int32_base_atomics ",
+                                                      "cl_khr_global_int32_extended_atomics ",
+                                                      "cl_khr_local_int32_base_atomics ",
+                                                      "cl_khr_local_int32_extended_atomics ",
+                                                      "cl_khr_int64_base_atomics ",
+                                                      "cl_khr_int64_extended_atomics ",
+                                                      "cl_khr_3d_image_writes ",
+                                                      "cl_khr_byte_addressable_store ",
+                                                      "cl_khr_fp16 ",
+                                                      "cl_khr_gl_sharing ",
+                                                      "cl_khr_gl_depth_images ",
+                                                      "cl_ext_device_fission ",
+                                                      "cl_amd_device_attribute_query ",
+                                                      "cl_amd_vec3 ",
+                                                      "cl_amd_printf ",
+                                                      "cl_amd_media_ops ",
+                                                      "cl_amd_media_ops2 ",
+                                                      "cl_amd_popcnt ",
+#if defined(_WIN32)
+                                                      "cl_khr_d3d10_sharing ",
+                                                      "cl_khr_d3d11_sharing ",
+                                                      "cl_khr_dx9_media_sharing ",
+#endif
+                                                      "cl_khr_image2d_from_buffer ",
+                                                      "cl_amd_bus_addressable_memory ",
+                                                      "cl_amd_c11_atomics ",
+                                                      "cl_khr_spir ",
+                                                      "cl_khr_subgroups ",
+                                                      "cl_khr_gl_event ",
+                                                      "cl_khr_depth_images ",
+                                                      "cl_khr_mipmap_image ",
+                                                      "cl_khr_mipmap_image_writes ",
+                                                      "cl_amd_copy_buffer_p2p ",
+                                                      "cl_amd_assembly_program ",
+#if defined(_WIN32)
+                                                      "cl_amd_planar_yuv",
+#endif
+                                                      NULL};
+
 /*! \addtogroup API
  *  @{
  *
@@ -194,7 +238,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDs,
     return CL_INVALID_DEVICE_TYPE;
   }
   // Get all available devices
-  if (!amd::Device::getDeviceIDs(device_type, num_entries, devices, num_devices, false)) {
+  if (!amd::Device::getDeviceIDs(static_cast<amd::DeviceType>(device_type), num_entries, devices, num_devices, false)) {
     return CL_DEVICE_NOT_FOUND;
   }
 
@@ -417,7 +461,8 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
         return amd::clGetInfo(num_p2p_devices, param_value_size, param_value, param_value_size_ret);
       }
       case CL_DEVICE_P2P_DEVICES_AMD: {
-        uint valueSize = as_amd(device)->p2pDevices_.size() * sizeof(cl_device_id);
+        const auto& p2pDevs = as_amd(device)->p2pDevices_;
+        uint valueSize = p2pDevs.size() * sizeof(cl_device_id);
         if (param_value != NULL) {
           if ((param_value_size < valueSize) || (param_value_size == 0)) {
             return CL_INVALID_VALUE;
@@ -425,7 +470,11 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
         } else {
           return CL_INVALID_VALUE;
         }
-        memcpy(param_value, as_amd(device)->p2pDevices_.data(), valueSize);
+        // Convert amd::Device* entries to cl_device_id at the opencl boundary
+        cl_device_id* out = static_cast<cl_device_id*>(param_value);
+        for (size_t i = 0; i < p2pDevs.size(); ++i) {
+          out[i] = as_cl(p2pDevs[i]);
+        }
         *not_null(param_value_size_ret) = valueSize;
         if (param_value != NULL && param_value_size > valueSize) {
           ::memset(static_cast<char*>(param_value) + valueSize, '\0', param_value_size - valueSize);

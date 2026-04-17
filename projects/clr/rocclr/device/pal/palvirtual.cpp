@@ -1478,7 +1478,10 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
     }
   }
 
-  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
+  type = static_cast<cl_command_type>(getCopyCommandType(
+      static_cast<amd::CommandType>(type),
+      static_cast<amd::MemObjectType>(srcMem.getType()),
+      static_cast<amd::MemObjectType>(dstMem.getType())));
 
   bool result = false;
 
@@ -3928,7 +3931,7 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
   auto align = amd::getHostcallBufferAlignment();
 
   hostcallBuffer_ = dev().svmAlloc(dev().context(), size, align,
-                                   CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, nullptr);
+                                   amd::MemFlags::SvmFineGrain | amd::MemFlags::SvmAtomics, nullptr);
   if (!hostcallBuffer_) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create hostcall buffer");
     return nullptr;

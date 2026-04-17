@@ -278,7 +278,7 @@ void Device::WaitForHsaAsyncHandlersIdle() {
 bool NullDevice::init() {
   // Create offline devices for all ISAs not already associated with an online
   // device. This allows code objects to be compiled for all supported ISAs.
-  std::vector<Device*> devices = getDevices(CL_DEVICE_TYPE_GPU, false);
+  std::vector<Device*> devices = getDevices(amd::DeviceType::GPU, false);
   for (const amd::Isa* isa = amd::Isa::begin(); isa != amd::Isa::end(); isa++) {
     if (!isa->runtimeRocSupported()) {
       continue;
@@ -354,7 +354,7 @@ bool Device::init() {
   // If there are no GPUs available, hsa_init will fail with HSA_STATUS_ERROR_OUT_OF_RESOURCES
   // but for NoGpu tests to pass, true needs to be returned
   constexpr bool kNoOfflineDevices = false;
-  std::vector<amd::Device*> devices = getDevices(CL_DEVICE_TYPE_GPU, kNoOfflineDevices);
+  std::vector<amd::Device*> devices = getDevices(amd::DeviceType::GPU, kNoOfflineDevices);
   if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES && devices.size() == 0) {
     return true;
   }
@@ -464,7 +464,7 @@ bool Device::init() {
   }
 
   // Query active devices only
-  devices = getDevices(CL_DEVICE_TYPE_GPU, kNoOfflineDevices);
+  devices = getDevices(amd::DeviceType::GPU, kNoOfflineDevices);
   if (devices.size() > 0) {
     bool p2p_available = false;
     // Loop through all available devices
@@ -475,7 +475,7 @@ bool Device::init() {
         for (auto device2 : devices) {
           if (agent.handle == static_cast<Device*>(device2)->getBackendDevice().handle) {
             // Device2 can have access to device1
-            device2->p2pDevices_.push_back(as_cl(device1));
+            device2->p2pDevices_.push_back(device1);
             device1->p2p_access_devices_.push_back(device2);
             p2p_available = true;
           }
@@ -507,7 +507,7 @@ bool Device::init() {
     if (amd::IS_HIP) {
       mg_sync_ = reinterpret_cast<address>(
           glb_ctx_->svmAlloc(kMGInfoSizePerDevice * devices.size(), kMGInfoSizePerDevice,
-                             (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)));
+                             amd::MemFlags::SvmFineGrain | amd::MemFlags::SvmAtomics));
       if (mg_sync_ == nullptr) {
         LogError("mgpu sync buffer alloc failed");
         return false;
@@ -2338,7 +2338,7 @@ void Device::updateFreeMemory(size_t size, bool free) {
 }
 
 // ================================================================================================
-void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
+void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, amd::MemFlags flags,
                        void* svmPtr) const {
   amd::Memory* mem = nullptr;
   void* svmPtrUsed = reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr);
@@ -2349,7 +2349,7 @@ void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_
     if (mem != nullptr) {
       return mem->getSvmPtr();
     }
-    if (flags & CL_MEM_USE_HOST_PTR) {
+    if (static_cast<uint64_t>(flags & amd::MemFlags::UseHostPtr)) {
       svmPtrUsed = svmPtr;
     } else {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot find svm_ptr: %p", svmPtr);
@@ -3304,6 +3304,62 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
     Hsa::queue_destroy(queue);
   }
 }
+
+void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
+                                        const std::vector<uint32_t>& cuMask) {
+  decltype(queuePool_)::value_type::iterator qIter;
+  bool found = false;
+
+  amd::ScopedLock l(active_queue_access_);
+  if (!coop_queue) {
+    for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
+      qIter = it.find(queue);
+      if (qIter != it.end()) {
+        found = true;
+        break;
+      }
+    }
+    assert(found && "Couldn't find queue");
+
+    if (qIter->second.hostcallBuffer_) {
+      return qIter->second.hostcallBuffer_;
+    }
+  } else {
+    if (coopHostcallBuffer_) {
+      return coopHostcallBuffer_;
+    }
+  }
+
+  // The number of packets required in each buffer is at least equal to the
+  // maximum number of waves supported by the device.
+  auto wavesPerCu = info().maxThreadsPerCU_ / info().wavefrontWidth_;
+  auto numPackets = info().maxComputeUnits_ * wavesPerCu;
+
+  auto size = amd::getHostcallBufferSize(numPackets);
+  auto align = amd::getHostcallBufferAlignment();
+
+  void* buffer = context().svmAlloc(size, align,
+                                    amd::MemFlags::SvmFineGrain | amd::MemFlags::SvmAtomics);
+  if (!buffer) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to create hostcall buffer for hardware queue %p", queue->base_address);
+    return nullptr;
+  }
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created hostcall buffer %p for hardware queue %p", buffer,
+          queue->base_address);
+  if (!coop_queue) {
+    qIter->second.hostcallBuffer_ = buffer;
+  } else {
+    coopHostcallBuffer_ = buffer;
+  }
+  if (!amd::enableHostcalls(*this, buffer, numPackets)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
+            buffer);
+    return nullptr;
+  }
+  return buffer;
+}
+
 
 bool Device::findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attrs) {
   return findLinkInfo((static_cast<const roc::Device*>(&other_device))->gpuvm_segment_, link_attrs);

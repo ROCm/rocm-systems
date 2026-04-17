@@ -2646,7 +2646,10 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       dstDevMem = dev().getRocMemory(bufferFromImageDst);
     }
   }
-  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
+  type = static_cast<cl_command_type>(getCopyCommandType(
+      static_cast<amd::CommandType>(type),
+      static_cast<amd::MemObjectType>(srcMem.getType()),
+      static_cast<amd::MemObjectType>(dstMem.getType())));
   switch (type) {
     case CL_COMMAND_SVM_MEMCPY:
     case CL_COMMAND_COPY_BUFFER: {

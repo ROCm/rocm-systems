@@ -198,47 +198,9 @@ enum OclExtensions {
   ClExtTotal
 };
 
-static constexpr const char* OclExtensionsString[] = {"cl_khr_fp64 ",
-                                                      "cl_amd_fp64 ",
-                                                      "cl_khr_select_fprounding_mode ",
-                                                      "cl_khr_global_int32_base_atomics ",
-                                                      "cl_khr_global_int32_extended_atomics ",
-                                                      "cl_khr_local_int32_base_atomics ",
-                                                      "cl_khr_local_int32_extended_atomics ",
-                                                      "cl_khr_int64_base_atomics ",
-                                                      "cl_khr_int64_extended_atomics ",
-                                                      "cl_khr_3d_image_writes ",
-                                                      "cl_khr_byte_addressable_store ",
-                                                      "cl_khr_fp16 ",
-                                                      "cl_khr_gl_sharing ",
-                                                      "cl_khr_gl_depth_images ",
-                                                      "cl_ext_device_fission ",
-                                                      "cl_amd_device_attribute_query ",
-                                                      "cl_amd_vec3 ",
-                                                      "cl_amd_printf ",
-                                                      "cl_amd_media_ops ",
-                                                      "cl_amd_media_ops2 ",
-                                                      "cl_amd_popcnt ",
-#if defined(_WIN32)
-                                                      "cl_khr_d3d10_sharing ",
-                                                      "cl_khr_d3d11_sharing ",
-                                                      "cl_khr_dx9_media_sharing ",
-#endif
-                                                      "cl_khr_image2d_from_buffer ",
-                                                      "cl_amd_bus_addressable_memory ",
-                                                      "cl_amd_c11_atomics ",
-                                                      "cl_khr_spir ",
-                                                      "cl_khr_subgroups ",
-                                                      "cl_khr_gl_event ",
-                                                      "cl_khr_depth_images ",
-                                                      "cl_khr_mipmap_image ",
-                                                      "cl_khr_mipmap_image_writes ",
-                                                      "cl_amd_copy_buffer_p2p ",
-                                                      "cl_amd_assembly_program ",
-#if defined(_WIN32)
-                                                      "cl_amd_planar_yuv",
-#endif
-                                                      NULL};
+// OclExtensionsString[] has been moved to opencl/amdocl/cl_device.cpp
+// (opencl-layer only; rocclr uses getExtensionString() which accesses it
+// through the file-local definition in device.cpp)
 
 static constexpr int AmdVendor = 0x1002;
 
@@ -260,8 +222,8 @@ class Kernel;
 
 //! Physical device properties.
 struct Info : public amd::EmbeddedObject {
-  //! The OpenCL device type.
-  cl_device_type type_;
+  //! The device type.
+  amd::DeviceType type_;
 
   //! A unique device vendor identifier.
   uint32_t vendorId_;
@@ -388,12 +350,12 @@ struct Info : public amd::EmbeddedObject {
   uint32_t minDataTypeAlignSize_;
 
   //! Describes single precision floating point capability of the device.
-  cl_device_fp_config halfFPConfig_;
-  cl_device_fp_config singleFPConfig_;
-  cl_device_fp_config doubleFPConfig_;
+  amd::FpConfig halfFPConfig_;
+  amd::FpConfig singleFPConfig_;
+  amd::FpConfig doubleFPConfig_;
 
   //! Type of global memory cache supported.
-  cl_device_mem_cache_type globalMemCacheType_;
+  amd::MemCacheType globalMemCacheType_;
 
   //! Size of global memory cache line in bytes.
   uint32_t globalMemCacheLineSize_;
@@ -414,7 +376,7 @@ struct Info : public amd::EmbeddedObject {
   uint32_t maxConstantArgs_;
 
   //! This is used to determine the type of local memory that is available
-  cl_device_local_mem_type localMemType_;
+  amd::LocalMemType localMemType_;
 
   //! Size of local memory arena in bytes.
   uint64_t localMemSize_;
@@ -448,10 +410,10 @@ struct Info : public amd::EmbeddedObject {
   uint32_t compilerAvailable_;
 
   //! Describes the execution capabilities of the device.
-  cl_device_exec_capabilities executionCapabilities_;
+  amd::ExecCapabilities executionCapabilities_;
 
   //! Describes the SVM capabilities of the device.
-  cl_device_svm_capabilities svmCapabilities_;
+  amd::SvmCapabilities svmCapabilities_;
 
   //! Preferred alignment for OpenCL fine-grained SVM atomic types.
   uint32_t preferredPlatformAtomicAlignment_;
@@ -463,7 +425,7 @@ struct Info : public amd::EmbeddedObject {
   uint32_t preferredLocalAtomicAlignment_;
 
   //! Describes the command-queue properties supported of the host queue.
-  cl_command_queue_properties queueProperties_;
+  amd::QueueProperties queueProperties_;
 
   //! The platform associated with this device
   cl_platform_id platform_;
@@ -519,7 +481,7 @@ struct Info : public amd::EmbeddedObject {
   uint32_t maxAtomicCounters_;
 
   //! Returns the topology for the device
-  cl_device_topology_amd deviceTopology_;
+  amd::DeviceTopology deviceTopology_;
 
   //! Returns PCI Bus Domain ID
   uint32_t pciDomainID;
@@ -602,7 +564,7 @@ struct Info : public amd::EmbeddedObject {
   uint32_t maxPipePacketSize_;
 
   //! The command-queue properties supported of the device queue.
-  cl_command_queue_properties queueOnDeviceProperties_;
+  amd::QueueProperties queueOnDeviceProperties_;
   //! The preferred size of the device queue in bytes
   uint32_t queueOnDevicePreferredSize_;
   //! The max size of the device queue in bytes
@@ -1398,21 +1360,21 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   }
 
   //! Get copy command type from original copy command type and memory object types
-  cl_command_type getCopyCommandType(cl_command_type type, const cl_mem_object_type srcType,
-                                 const cl_mem_object_type dstType) {
-    if (srcType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-      if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-        type = CL_COMMAND_COPY_BUFFER;
-      } else if (dstType == CL_MEM_OBJECT_BUFFER) {
-        type = CL_COMMAND_COPY_BUFFER;
-      } else if (type == CL_COMMAND_COPY_IMAGE) {
-        type = CL_COMMAND_COPY_BUFFER_TO_IMAGE;
+  amd::CommandType getCopyCommandType(amd::CommandType type, const amd::MemObjectType srcType,
+                                 const amd::MemObjectType dstType) {
+    if (srcType == amd::MemObjectType::Image1DBuffer) {
+      if (dstType == amd::MemObjectType::Image1DBuffer) {
+        type = amd::CommandType::CopyBuffer;
+      } else if (dstType == amd::MemObjectType::Buffer) {
+        type = amd::CommandType::CopyBuffer;
+      } else if (type == amd::CommandType::CopyImage) {
+        type = amd::CommandType::CopyBufferToImage;
       }
-    } else if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-      if (srcType == CL_MEM_OBJECT_BUFFER) {
-        type = CL_COMMAND_COPY_BUFFER;
-      } else if (type == CL_COMMAND_COPY_IMAGE) {
-        type = CL_COMMAND_COPY_IMAGE_TO_BUFFER;
+    } else if (dstType == amd::MemObjectType::Image1DBuffer) {
+      if (srcType == amd::MemObjectType::Buffer) {
+        type = amd::CommandType::CopyBuffer;
+      } else if (type == amd::CommandType::CopyImage) {
+        type = amd::CommandType::CopyImageToBuffer;
       }
     }
     return type;
@@ -1759,40 +1721,39 @@ class Device : public RuntimeObject {
   //! Shutdown the device layer
   static void tearDown();
 
-  static std::vector<Device*> getDevices(cl_device_type type,  //!< Device type
-                                         bool offlineDevices   //!< Enable offline devices
+  static std::vector<Device*> getDevices(amd::DeviceType type,  //!< Device type
+                                         bool offlineDevices    //!< Enable offline devices
   );
 
-  static size_t numDevices(cl_device_type type,  //!< Device type
-                           bool offlineDevices   //!< Enable offline devices
+  static size_t numDevices(amd::DeviceType type,  //!< Device type
+                           bool offlineDevices    //!< Enable offline devices
   );
 
-  static bool getDeviceIDs(cl_device_type deviceType,  //!< Device type
-                           uint32_t numEntries,        //!< Number of entries in the array
-                           cl_device_id* devices,      //!< Array of the device ID(s)
-                           uint32_t* numDevices,       //!< Number of available devices
-                           bool offlineDevices         //!< Report offline devices
+  static bool getDeviceIDs(amd::DeviceType deviceType,  //!< Device type
+                           uint32_t numEntries,          //!< Number of entries in the array
+                           cl_device_id* devices,        //!< Array of the device ID(s)
+                           uint32_t* numDevices,         //!< Number of available devices
+                           bool offlineDevices           //!< Report offline devices
   );
 
   const device::Info& info() const { return info_; }
 
   //! Return svm support capability.
   bool svmSupport() const {
-    return (info().svmCapabilities_ &
-            (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER |
-             CL_DEVICE_SVM_FINE_GRAIN_SYSTEM)) != 0
-               ? true
-               : false;
+    return static_cast<uint64_t>(
+               info().svmCapabilities_ &
+               (amd::SvmCapabilities::CoarseGrainBuffer | amd::SvmCapabilities::FineGrainBuffer |
+                amd::SvmCapabilities::FineGrainSystem)) != 0;
   }
 
   //! check svm FGS support capability.
   inline bool isFineGrainedSystem(bool FGSOPT = false) const {
-    return FGSOPT && (info().svmCapabilities_ & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM) != 0 ? true
-                                                                                      : false;
+    return FGSOPT && static_cast<uint64_t>(info().svmCapabilities_ &
+                                           amd::SvmCapabilities::FineGrainSystem) != 0;
   }
 
   //! Return this device's type.
-  cl_device_type type() const { return info().type_ & ~(CL_DEVICE_TYPE_DEFAULT); }
+  amd::DeviceType type() const { return info().type_ & ~amd::DeviceType::Default; }
 
   //! Create a new virtual device environment.
   virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL) = 0;
@@ -1931,7 +1892,7 @@ class Device : public RuntimeObject {
   /**
    * @copydoc amd::Context::svmAlloc
    */
-  virtual void* svmAlloc(Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
+  virtual void* svmAlloc(Context& context, size_t size, size_t alignment, amd::MemFlags flags,
                          void* svmPtr) const = 0;
   /**
    * @copydoc amd::Context::svmFree
@@ -2102,7 +2063,7 @@ class Device : public RuntimeObject {
                                    const std::vector<void*>& hw_events) const {}
 
   virtual const bool isFineGrainSupported() const {
-    return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
+    return static_cast<uint64_t>(info().svmCapabilities_ & amd::SvmCapabilities::Atomics) != 0;
   }
 
   /// @brief  Creates HW user event for OpenCL implementation
@@ -2164,7 +2125,7 @@ class Device : public RuntimeObject {
   static std::vector<Device*>& devices() { return *devices_; }
 
   // P2P devices that are accessible from the current device
-  std::vector<cl_device_id> p2pDevices_;
+  std::vector<amd::Device*> p2pDevices_;
 
   // P2P devices for memory allocation. This list contains devices that can have access to the
   // current device
@@ -2349,7 +2310,7 @@ class Device : public RuntimeObject {
   uint8_t group_mem_carveout_hint_; //!< LDS carveout
  private:
   const Isa* isa_;  //!< Device isa
-  bool IsTypeMatching(cl_device_type type, bool offlineDevices);
+  bool IsTypeMatching(amd::DeviceType type, bool offlineDevices);
 
 #if defined(WITH_HSA_DEVICE)
   static AppProfile* rocAppProfile_;

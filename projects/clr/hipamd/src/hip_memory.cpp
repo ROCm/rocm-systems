@@ -334,7 +334,7 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
     return hipErrorOutOfMemory;
   }
 
-  *ptr = amd::SvmBuffer::malloc(*amdContext, flags, sizeBytes, dev_info.memBaseAddrAlign_,
+  *ptr = amd::SvmBuffer::malloc(*amdContext, static_cast<amd::MemFlags>(flags), sizeBytes, dev_info.memBaseAddrAlign_,
                                 useHostDevice ? curDevContext->svmDevices()[0] : nullptr);
 
   if (*ptr == nullptr) {
@@ -986,7 +986,7 @@ hipError_t ihipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t heigh
     return hipErrorOutOfMemory;
   }
 
-  *ptr = amd::SvmBuffer::malloc(*hip::getCurrentDevice()->asContext(), 0, sizeBytes,
+  *ptr = amd::SvmBuffer::malloc(*hip::getCurrentDevice()->asContext(), amd::MemFlags::None, sizeBytes,
                                 device->info().memBaseAddrAlign_);
 
   if (*ptr == nullptr) {

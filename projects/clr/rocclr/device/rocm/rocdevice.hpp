@@ -210,11 +210,11 @@ class NullDevice : public amd::Device {
   }
 
   //! Just returns nullptr for the dummy device
-  void* svmAlloc(amd::Context& context,   //!< The context used to create a buffer
-                 size_t size,             //!< size of svm spaces
-                 size_t alignment,        //!< alignment requirement of svm spaces
-                 cl_svm_mem_flags flags,  //!< flags of creation svm spaces
-                 void* svmPtr             //!< existing svm pointer for mGPU case
+  void* svmAlloc(amd::Context& context,  //!< The context used to create a buffer
+                 size_t size,            //!< size of svm spaces
+                 size_t alignment,       //!< alignment requirement of svm spaces
+                 amd::MemFlags flags,    //!< flags of creation svm spaces
+                 void* svmPtr           //!< existing svm pointer for mGPU case
   ) const override {
     ShouldNotReachHere();
     return nullptr;
@@ -450,7 +450,7 @@ class Device : public NullDevice {
   void memFree(void* ptr, size_t size) const;
 
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
-                         cl_svm_mem_flags flags = CL_MEM_READ_WRITE, void* svmPtr = nullptr) const override;
+                         amd::MemFlags flags = amd::MemFlags::ReadWrite, void* svmPtr = nullptr) const override;
 
   virtual void svmFree(void* ptr) const override;
 

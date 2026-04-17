@@ -184,7 +184,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     if (state_.use_vm_heap_) {
       dev_ptr = Alloc(size);
     } else {
-      dev_ptr = amd::SvmBuffer::malloc(*context, flags, size, dev_info.memBaseAddrAlign_, nullptr);
+      dev_ptr = amd::SvmBuffer::malloc(*context, static_cast<amd::MemFlags>(flags), size, dev_info.memBaseAddrAlign_, nullptr);
     }
     if (dev_ptr == nullptr) {
       size_t free = 0, total = 0;

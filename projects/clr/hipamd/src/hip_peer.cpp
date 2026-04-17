@@ -32,7 +32,7 @@ hipError_t canAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId) {
   peer_device = g_devices[peerDeviceId]->devices()[0];
   *canAccessPeer =
       static_cast<int>(std::find(device->p2pDevices_.begin(), device->p2pDevices_.end(),
-                                 as_cl(peer_device)) != device->p2pDevices_.end());
+                                 peer_device) != device->p2pDevices_.end());
   return hipSuccess;
 }
 
