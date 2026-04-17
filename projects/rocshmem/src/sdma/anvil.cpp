@@ -35,6 +35,7 @@
 #include <cstring>
 
 #include "sdma_pkt_struct.h"
+#include "sdma_pkt_struct_mi4.h"
 
 namespace rocshmem {
 namespace anvil {
@@ -209,18 +210,39 @@ void SdmaQueue::dump(std::ofstream& logFile) {
     logFile << "[" << it << "] ";
     uint32_t opcode = *dwPtr & 0xFF;
     if (opcode == SDMA_OP_COPY) {
-      auto* ptr = reinterpret_cast<SDMA_PKT_COPY_LINEAR*>(dwPtr);
-      logFile << "COPY count=" << ptr->COUNT_UNION.count
-              << " src=0x" << std::hex
-              << ((uint64_t)ptr->SRC_ADDR_HI_UNION.src_addr_63_32 << 32 |
-                  ptr->SRC_ADDR_LO_UNION.src_addr_31_0)
-              << " dst=0x"
-              << ((uint64_t)ptr->DST_ADDR_HI_UNION.dst_addr_63_32 << 32 |
-                  ptr->DST_ADDR_LO_UNION.dst_addr_31_0)
-              << std::dec;
-      size_t dw = sizeof(SDMA_PKT_COPY_LINEAR) / sizeof(uint32_t);
-      it += dw;
-      dwPtr += dw;
+      [[maybe_unused]] uint32_t subop = (*dwPtr >> 8) & 0xFF;
+#if USE_SDMA_OSS7
+      if (subop == SDMA_SUBOP_COPY_LINEAR_WAIT_SIGNAL_MI4) {
+        auto* ptr = reinterpret_cast<SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4*>(dwPtr);
+        logFile << "COPY_WAIT_SIGNAL_MI4 count=" << ptr->COPY_COUNT_UNION.copy_count
+                << " wait=" << ptr->HEADER_UNION.wait
+                << " signal=" << ptr->HEADER_UNION.signal
+                << " src=0x" << std::hex
+                << ((uint64_t)ptr->SRC_ADDR_HI_UNION.src_addr_63_32 << 32 |
+                    ptr->SRC_ADDR_LO_UNION.src_addr_31_0)
+                << " dst=0x"
+                << ((uint64_t)ptr->DST_ADDR_HI_UNION.dst_addr_63_32 << 32 |
+                    ptr->DST_ADDR_LO_UNION.dst_addr_31_0)
+                << std::dec;
+        constexpr size_t dw = sizeof(SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4) / sizeof(uint32_t);
+        it += dw;
+        dwPtr += dw;
+      } else
+#endif  // USE_SDMA_OSS7
+      {
+        auto* ptr = reinterpret_cast<SDMA_PKT_COPY_LINEAR*>(dwPtr);
+        logFile << "COPY count=" << ptr->COUNT_UNION.count
+                << " src=0x" << std::hex
+                << ((uint64_t)ptr->SRC_ADDR_HI_UNION.src_addr_63_32 << 32 |
+                    ptr->SRC_ADDR_LO_UNION.src_addr_31_0)
+                << " dst=0x"
+                << ((uint64_t)ptr->DST_ADDR_HI_UNION.dst_addr_63_32 << 32 |
+                    ptr->DST_ADDR_LO_UNION.dst_addr_31_0)
+                << std::dec;
+        size_t dw = sizeof(SDMA_PKT_COPY_LINEAR) / sizeof(uint32_t);
+        it += dw;
+        dwPtr += dw;
+      }
     } else if (opcode == SDMA_OP_ATOMIC) {
       auto* ptr = reinterpret_cast<SDMA_PKT_ATOMIC*>(dwPtr);
       logFile << "ATOMIC op=" << ptr->HEADER_UNION.operation
@@ -232,15 +254,44 @@ void SdmaQueue::dump(std::ofstream& logFile) {
       it += dw;
       dwPtr += dw;
     } else if (opcode == SDMA_OP_FENCE) {
-      auto* ptr = reinterpret_cast<SDMA_PKT_FENCE*>(dwPtr);
-      logFile << "FENCE data=" << ptr->DATA_UNION.data
-              << " addr=0x" << std::hex
-              << ((uint64_t)ptr->ADDR_HI_UNION.addr_63_32 << 32 |
-                  ptr->ADDR_LO_UNION.addr_31_0)
-              << std::dec;
-      size_t dw = sizeof(SDMA_PKT_FENCE) / sizeof(uint32_t);
-      it += dw;
-      dwPtr += dw;
+      [[maybe_unused]] uint32_t subop = (*dwPtr >> 8) & 0xFF;
+#if USE_SDMA_OSS7
+      if (subop == SDMA_SUBOP_FENCE_64B_MI4) {
+        auto* ptr = reinterpret_cast<SDMA_PKT_FENCE_64B_MI4*>(dwPtr);
+        logFile << "FENCE_64B_MI4"
+                << " addr=0x" << std::hex
+                << ((uint64_t)ptr->ADDR_HI_UNION.addr_63_32 << 32 |
+                    (uint64_t)ptr->ADDR_LO_UNION.addr_31_3 << 3)
+                << " data=0x"
+                << ((uint64_t)ptr->DATA_HI_UNION.data_63_32 << 32 |
+                    ptr->DATA_LO_UNION.data_31_0)
+                << std::dec;
+        constexpr size_t dw = sizeof(SDMA_PKT_FENCE_64B_MI4) / sizeof(uint32_t);
+        it += dw;
+        dwPtr += dw;
+      } else if (subop == SDMA_SUBOP_FENCE_MI4) {
+        auto* ptr = reinterpret_cast<SDMA_PKT_FENCE_MI4*>(dwPtr);
+        logFile << "FENCE_MI4 data=" << ptr->DATA_UNION.data
+                << " addr=0x" << std::hex
+                << ((uint64_t)ptr->ADDR_HI_UNION.fence_addr_hi << 32 |
+                    ptr->ADDR_LO_UNION.fence_addr_lo)
+                << std::dec;
+        constexpr size_t dw = sizeof(SDMA_PKT_FENCE_MI4) / sizeof(uint32_t);
+        it += dw;
+        dwPtr += dw;
+      } else
+#endif  // USE_SDMA_OSS7
+      {
+        auto* ptr = reinterpret_cast<SDMA_PKT_FENCE*>(dwPtr);
+        logFile << "FENCE data=" << ptr->DATA_UNION.data
+                << " addr=0x" << std::hex
+                << ((uint64_t)ptr->ADDR_HI_UNION.addr_63_32 << 32 |
+                    ptr->ADDR_LO_UNION.addr_31_0)
+                << std::dec;
+        size_t dw = sizeof(SDMA_PKT_FENCE) / sizeof(uint32_t);
+        it += dw;
+        dwPtr += dw;
+      }
     } else {
       logFile << "RAW 0x" << std::hex << *dwPtr << std::dec;
       dwPtr++;
