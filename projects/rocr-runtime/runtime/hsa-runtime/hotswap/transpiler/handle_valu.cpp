@@ -1444,7 +1444,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     Value *c = ctx.regs.readRegVec(ctx.B, srcC, v8f32Ty);
 
     Value *result_val;
-    if (ctx.targetIsa.hasWMMA) {
+    if (ctx.targetIsa.hasWMMA12) {
       Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
           &ctx.M, Intrinsic::amdgcn_wmma_f32_16x16x32_f16,
           {v8f32Ty, v16f16Ty});

@@ -62,13 +62,18 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   RaiseResult result;
 
   MCState mc;
-  if (!initMCState(mc, sourceISA))
-    return result;
+  initMCState(mc, sourceISA);
 
-  ISAProfile isa = ISAProfile::fromTarget(StringRef(sourceISA));
-  ISAProfile targetIsa = compilationTargetISA.empty()
-      ? isa
-      : ISAProfile::fromTarget(StringRef(compilationTargetISA));
+  ISAProfile isa = ISAProfile::fromSubtarget(*mc.subtargetInfo);
+  // When the caller does not specify a distinct compilation target we raise
+  // in place and reuse the source profile; otherwise we spin up a throwaway
+  // MCSubtargetInfo just to snapshot the target's feature bits.
+  ISAProfile targetIsa = isa;
+  std::unique_ptr<MCSubtargetInfo> targetSTI;
+  if (!compilationTargetISA.empty()) {
+    targetSTI = buildSubtargetInfo(*mc.target, compilationTargetISA);
+    targetIsa = ISAProfile::fromSubtarget(*targetSTI);
+  }
 
   // Build opcode → SemOp map from MCInstrInfo
   OpcodeMap opcMap;
@@ -303,11 +308,12 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   regs.storeVCC(B, ConstantInt::getFalse(i1Ty));
   regs.storeSCC(B, ConstantInt::getFalse(i1Ty));
 
-  // On RDNA3+ (gfx12xx), the hardware command processor uses TTMP registers
-  // for workgroup scheduling.
-  //   ttmp9 = workgroup_id_x (accelerated launch)
+  // On gfx12+ the hardware command processor uses TTMP registers for
+  // workgroup scheduling (RDNA4+ / CDNA-next layout):
+  //   ttmp9        = workgroup_id_x  (accelerated launch)
   //   ttmp8[29:25] = wave_id within workgroup (subgroup ID)
-  if (isa.target.find("gfx12") != std::string::npos) {
+  // gfx11 (RDNA3) passes these via SGPRs set up by the CP instead.
+  if (AMDGPU::isGFX12Plus(*mc.subtargetInfo)) {
     B.CreateStore(B.CreateCall(fnWorkgroupIdX, {}, "ttmp9_wg_id"), regs.ttmp[9]);
 
     // wave_id = workitem_id_x / wavefront_size (32 for gfx12)

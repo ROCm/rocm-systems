@@ -1,9 +1,24 @@
 #include "mc_state.hpp"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetSelect.h"
 
 using namespace llvm;
 
 namespace transpiler {
+
+const char kAMDGPUTriple[] = "amdgcn-amd-amdhsa";
+
+std::unique_ptr<MCSubtargetInfo>
+buildSubtargetInfo(const Target &target, StringRef isa) {
+  Triple triple(kAMDGPUTriple);
+  std::unique_ptr<MCSubtargetInfo> sti(
+      target.createMCSubtargetInfo(triple, isa, ""));
+  if (!sti)
+    report_fatal_error(Twine("transpiler: failed to create MCSubtargetInfo "
+                             "for ISA '") +
+                       isa + "'");
+  return sti;
+}
 
 bool initMCState(MCState &state, const std::string &targetISA) {
   LLVMInitializeAMDGPUTargetInfo();
@@ -13,18 +28,16 @@ bool initMCState(MCState &state, const std::string &targetISA) {
   LLVMInitializeAMDGPUAsmParser();
   LLVMInitializeAMDGPUAsmPrinter();
 
-  Triple triple("amdgcn-amd-amdhsa");
+  Triple triple(kAMDGPUTriple);
   std::string error;
   state.target = TargetRegistry::lookupTarget(triple, error);
-  if (!state.target) {
-    errs() << "transpiler: Target lookup failed: " << error << "\n";
-    return false;
-  }
+  if (!state.target)
+    report_fatal_error(Twine("transpiler: Target lookup for '") +
+                       kAMDGPUTriple + "' failed: " + error);
 
   state.instrInfo.reset(state.target->createMCInstrInfo());
   state.regInfo.reset(state.target->createMCRegInfo(triple));
-  state.subtargetInfo.reset(
-      state.target->createMCSubtargetInfo(triple, targetISA, ""));
+  state.subtargetInfo = buildSubtargetInfo(*state.target, targetISA);
   state.asmInfo.reset(state.target->createMCAsmInfo(
       *state.regInfo, triple, MCTargetOptions()));
   state.ctx = std::make_unique<MCContext>(triple, state.asmInfo.get(),

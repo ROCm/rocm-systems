@@ -27,7 +27,18 @@ struct MCState {
   std::unique_ptr<llvm::MCInstPrinter> printer;
 };
 
+// The AMDGPU triple shared by every MC object we construct here.
+extern const char kAMDGPUTriple[];
+
 bool initMCState(MCState &state, const std::string &targetISA);
+
+// Thin wrapper around Target::createMCSubtargetInfo for the AMDGPU triple.
+// Returns a fully populated MCSubtargetInfo (feature bits honour the CPU
+// name). Aborts via report_fatal_error on failure — we never want a silent
+// empty subtarget.
+std::unique_ptr<llvm::MCSubtargetInfo>
+buildSubtargetInfo(const llvm::Target &target, llvm::StringRef isa);
+
 std::string getMnemonic(const MCState &mc, const llvm::MCInst &inst);
 llvm::StringRef stripEncoding(llvm::StringRef mn);
 
