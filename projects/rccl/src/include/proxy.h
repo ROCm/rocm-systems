@@ -230,7 +230,9 @@ struct ncclProxyArgs {
 // Make sure we have enough to store two full rounds of operations on all channels.
 // Otherwise we'd be unable to post half of them to free new elements. Each
 // p2p work contains a send and recv proxy op hence the 2x before it.
-#define MAX_OPS_PER_PEER (2*MAXCHANNELS*2*NCCL_MAX_DEV_WORK_P2P_PER_BATCH)
+// Doubled from the original 2x multiplier to 4x to avoid proxy pool exhaustion
+// when Direct AllGather + P2P batching produces large kernel plans at >=64 nodes.
+#define MAX_OPS_PER_PEER (4*MAXCHANNELS*2*NCCL_MAX_DEV_WORK_P2P_PER_BATCH)
 
 struct ncclProxyOpsPool {
   struct ncclProxyOp ops[MAX_OPS_PER_PEER*NCCL_MAX_LOCAL_RANKS];
