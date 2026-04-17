@@ -14,10 +14,11 @@ class NativeTool:
 
     def get_collector_library_path(
         self, rocprof_compute_script_path: Path, rocprofiler_sdk_tool_path: Path
-    ) -> None:
+    ) -> Path:
+        native_tool_path = None
         native_tool_base_path = (
-            rocprof_compute_script_path.parents[2]
-            if len(rocprof_compute_script_path.parents) >= 3
+            rocprof_compute_script_path.parents[1]
+            if len(rocprof_compute_script_path.parents) >= 2
             else Path()
         )
         native_tool_glob_pattern = (
@@ -34,7 +35,6 @@ class NativeTool:
                 f"Glob pattern: {native_tool_glob_pattern}\n"
                 "Building native tool now."
             )
-            native_tool_path = None
         if not (native_tool_path and Path(native_tool_path).is_file()):
             # Build native counter collection tool if not exists
             native_tool_path = str(
@@ -74,3 +74,4 @@ class NativeTool:
                     "Please ensure the native tool library is installed "
                     "or source files are present."
                 )
+        return Path(native_tool_path)
