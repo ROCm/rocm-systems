@@ -27,6 +27,7 @@
 
 #include <dlfcn.h>
 #include "ibv_core.hpp"
+#include "gda/nic_policy.hpp"
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
@@ -58,6 +59,26 @@ inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
 inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
 inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
 
+struct NicDevice {
+  std::string nic_name;
+  struct ibv_device *device = nullptr;
+  struct ibv_context *context = nullptr;
+  struct ibv_device_attr device_attr {};
+  struct ibv_pd *pd_orig = nullptr;
+  struct ibv_port_attr portinfo {};
+  union ibv_gid gid {};
+  int port = 1;
+  int gid_index = 0;
+  uint32_t gid_type = 0;
+  struct ibv_mr *heap_mr = nullptr;
+
+  /* GDA_IONIC & GDA_MLX5*/
+  struct ibv_pd *pd_parent = nullptr;
+
+  /* GDA_IONIC */
+  struct ibv_pd *pd_uxdma[2] = {nullptr, nullptr};
+};
+
 class GDABackend : public Backend {
  private:
   typedef struct dest_info {
@@ -67,23 +88,12 @@ class GDABackend : public Backend {
     union ibv_gid gid;
   } dest_info_t;
 
-  const char *requested_nic = nullptr;
-  struct ibv_device *device = nullptr;
-  struct ibv_context *context = nullptr;;
-  struct ibv_device_attr device_attr;
-  struct ibv_pd *pd_orig = nullptr;
   enum GDAProvider gda_provider = GDAProvider::UNSET;
 
-  struct ibv_port_attr portinfo;
-  union ibv_gid gid;
-  int port = 1;
-  int gid_index = 0;
-  uint32_t gid_type = IBV_GID_TYPE_IB;
-
   uint32_t *heap_rkey = nullptr;
-  struct ibv_mr *heap_mr = nullptr;
 
-  std::string debug_str;
+  std::vector<NicDevice> nic_devices_;
+  int num_nics_{0};
 
   uint32_t inline_threshold = 8;
   QueuePair *host_qps = nullptr;
@@ -99,12 +109,7 @@ class GDABackend : public Backend {
   HIPAllocator *qp_allocator_{nullptr};
   /* GDA_BNXT END */
 
-  /* GDA_IONIC & GDA_MLX5 START */
-  struct ibv_pd *pd_parent = nullptr;
-  /* GDA_IONIC & GDA_MLX5 END */
-
   /* GDA_IONIC START */
-  struct ibv_pd *pd_uxdma[2];
   void *gpu_db_page = nullptr;
   uint64_t *gpu_db_cq = nullptr;
   uint64_t *gpu_db_sq = nullptr;
@@ -114,10 +119,19 @@ class GDABackend : public Backend {
   std::vector<mlx5_devx_qp> mlx5_qps;
   /* GDA_MLX5 END */
 
+  NicPolicy nic_policy_ {NicPolicy::ROUND_ROBIN};
+
+  /**
+   * Effective QPs per PE per context type.
+   * Exposed so GDAContext can read them.
+   */
+  size_t qps_per_pe_default_ctx_ {1};
+  size_t qps_per_pe_usr_ctx_ {1};
+
   /**
    * Determine number of QPs to create per PE =
-   * ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX +
-   * ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX * ROCSHMEM_MAX_NUM_CONTEXTS
+   * qps_per_pe_default_ctx_ +
+   * qps_per_pe_usr_ctx_ * ROCSHMEM_MAX_NUM_CONTEXTS
    */
   size_t num_qps_per_pe {1};
 
@@ -127,10 +141,26 @@ class GDABackend : public Backend {
    */
   uint32_t num_qps {1};
 
- /**
-   * @brief Choose nic device according to locality/user preferences
+  /**
+   * @brief Select one or more NICs based on topology/env vars.
+   *        Populates nic_devices_ (always at least 1 entry).
    */
-  void select_nic();
+  void select_nics();
+  
+  void configure_nic_policy();
+  void log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe, int qp_offset);
+
+  int nic_idx_for_qp(int qp_idx) const {
+    return ComputeNicIdxForQp(
+        qp_idx, num_pes, num_nics_,
+        static_cast<int>(qps_per_pe_default_ctx_),
+        static_cast<int>(qps_per_pe_usr_ctx_),
+        nic_policy_);
+  }
+
+  NicDevice& nic_for_qp(int qp_idx) {
+    return nic_devices_[nic_idx_for_qp(qp_idx)];
+  }
 
   /**
    * @brief return user-preferred GDA provider (or NONE if not specified)
@@ -382,14 +412,14 @@ class GDABackend : public Backend {
   void open_ib_device();
 
   /**
-   * @brief Validated the rocSHMEM will run with the currently open InfiniBand Device
+   * @brief Validated the rocSHMEM will run with the InfiniBand Device
    */
-  void validate_ib_device();
+  void validate_ib_device(NicDevice &nic);
 
   /**
    * @brief Selects the best GID index
    */
-  void select_gid_index();
+  void select_gid_index(NicDevice &nic);
 
   /**
    * @brief Create all CQs and QPs
@@ -445,8 +475,8 @@ class GDABackend : public Backend {
 
   static void pd_release(ibv_pd* pd, void* pd_context, void* ptr, uint64_t resource_type);
 
-  void create_parent_domain();
-  void ionic_setup_parent_domain(struct ibv_parent_domain_init_attr* pattr);
+  void create_parent_domain(NicDevice &nic);
+  void ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr);
 
   void setup_gpu_qps();
   void cleanup_gpu_qps();
@@ -480,7 +510,7 @@ class GDABackend : public Backend {
   char *team_pool_bitmask_{nullptr};
 
   /**
-   * @brief Bitmask to store the reduced result of bitmasks on pariticipating
+   * @brief Bitmask to store the reduced result of bitmasks on participating
    * PEs
    *
    * With no thread-safety for this bitmask, multithreaded creation of teams is

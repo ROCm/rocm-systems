@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@
 #include "palGpuMemoryBindable.h"
 #include "palDestroyable.h"
 #include "palImage.h"
+#include "palPipelineAbi.h"
 #include "palShaderLibrary.h"
 #include "palSpan.h"
 #include <utility>
@@ -58,20 +59,8 @@ namespace Pal
 struct GpuMemSubAllocInfo;
 enum class PrimitiveTopology : uint8;
 
-/// Specifies a shader type (i.e., what stage of the pipeline this shader was written for).
-enum class ShaderType : uint32
-{
-    Compute = 0,
-    Task,
-    Vertex,
-    Hull,
-    Domain,
-    Geometry,
-    Mesh,
-    Pixel,
-
-    Count
-};
+/// PAL's public shader-stage enumeration is defined by the Pipeline ABI.
+using ShaderType = Util::Abi::ApiShaderType;
 
 /// Number of shader program types supported by PAL.
 constexpr uint32 NumShaderTypes = static_cast<uint32>(ShaderType::Count);
@@ -240,10 +229,14 @@ union PipelineCreateFlags
     struct
     {
         uint32 clientInternal        :  1; ///< Internal pipeline not created by the application.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 971
         uint32 reverseWorkgroupOrder :  1; ///< Indicates that any Dispatch using this pipeline should execute in
                                            ///  reverse workgroup order. This superceeds the flag on the CommandBuffer
                                            ///  (dispatchPingPongWalk) - always forcing reverse workgroup order! This
                                            ///  is a best effort as not all implementations or Queues may support this.
+#else
+        uint32 reserved971           :  1; ///< Reserved for future use.
+#endif
         uint32 reserved              : 30; ///< Reserved for future use.
     };
     uint32 u32All;                         ///< Flags packed as 32-bit uint.
@@ -294,17 +287,71 @@ struct ComputePipelineIndirectFuncInfo
                               ///  pipeline creation.
 };
 
+/// A structure that represents any 3D arrangement of threads or thread groups as part of a compute shader dispatch.
+///
+/// This structure is halfway between Extent3d and Offset3d, depending on the context it may represent an offset or
+/// an extent. Essentially it's meaning is tied to the concept of 3D thread or thread group grids rather than generic
+/// contexts like "extent" or "offset". Whether it represents threads or thread groups is also context specific.
+struct DispatchDims
+{
+    uint32 x; ///< Threads or thread groups in the X dimension.
+    uint32 y; ///< Threads or thread groups in the Y dimension.
+    uint32 z; ///< Threads or thread groups in the Z dimension.
+
+    /// Computes the volume of this 3D arrangement of threads or thread groups.
+    ///
+    /// @returns the total number of threads or threads groups this struct represents.
+    uint32 Flatten() const { return x * y * z; }
+};
+
+// There are some places where we'd like to directly cast DispatchDims to an array of three uint32s.
+static_assert(sizeof(DispatchDims) == sizeof(uint32) * 3, "DispatchDims not castable to uint32*");
+
+/// Component-wise addition of two DispatchDims.
+///
+/// @param [in] l  The left-hand argument.
+/// @param [in] r  The right-hand argument.
+///
+/// @returns A new DispatchDims which contains the sum of 'l' and 'r' along each dimension.
+inline DispatchDims operator+(DispatchDims l, DispatchDims r) { return {l.x + r.x, l.y + r.y, l.z + r.z}; }
+
+/// Component-wise addition of one DispatchDims into another.
+///
+/// @param [in] l  The left-hand argument.
+/// @param [in] r  The right-hand argument.
+///
+/// @returns A reference to 'l' after it is updated to the sum of 'l' and 'r'.
+inline DispatchDims& operator+=(DispatchDims& l, DispatchDims r) { return l = (l + r); }
+
+/// Component-wise multiplication of two DispatchDims.
+///
+/// @param [in] l  The left-hand argument.
+/// @param [in] r  The right-hand argument.
+///
+/// @returns A new DispatchDims which contains the product of 'l' and 'r' along each dimension.
+inline DispatchDims operator*(DispatchDims l, DispatchDims r) { return {l.x * r.x, l.y * r.y, l.z * r.z}; }
+
+/// Component-wise multiplication of one DispatchDims into another.
+///
+/// @param [in] l  The left-hand argument.
+/// @param [in] r  The right-hand argument.
+///
+/// @returns A reference to 'l' after it is updated to the product of 'l' and 'r'.
+inline DispatchDims& operator*=(DispatchDims& l, DispatchDims r) { return l = (l * r); }
+
 /// Specifies properties for creation of a compute @ref IPipeline object.  Input structure to
 /// IDevice::CreateComputePipeline().
 struct ComputePipelineCreateInfo
 {
-    PipelineCreateFlags flags;                 ///< Flags controlling pipeline creation.
+    PipelineCreateFlags  flags;                ///< Flags controlling pipeline creation.
 
-    const void*         pPipelineBinary;       ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
+    const void*          pPipelineBinary;      ///< Pointer to Pipeline ELF binary implementing the Pipeline ABI
                                                ///  interface. The Pipeline ELF contains pre-compiled shaders,
                                                ///  register values, and additional metadata.
-    size_t              pipelineBinarySize;    ///< Size of Pipeline ELF binary in bytes.
-    uint32              maxFunctionCallDepth;  ///< Maximum depth for indirect function calls. Not used for a new
+    size_t               pipelineBinarySize;   ///< Size of Pipeline ELF binary in bytes.
+    GetContentsCallback* pGetContents;         ///< Callback to get ELF contents; can be nullptr if client never
+                                               ///  provides an archive with empty members.
+    uint32               maxFunctionCallDepth; ///< Maximum depth for indirect function calls. Not used for a new
                                                ///  path ray-tracing pipeline as the compiler has pre-calculated
                                                ///  stack requirements.
     bool disablePartialDispatchPreemption; ///< Prevents scenarios where a subset of the dispatched thread groups are
@@ -313,7 +360,14 @@ struct ComputePipelineCreateInfo
                                            ///  instruction level (CWSR) is not. This setting is useful for allowing
                                            ///  dispatches with interdependent thread groups.
     DispatchInterleaveSize interleaveSize; ///< Controls how many thread groups are sent to one SE before switching to
-                                           ///  the next one.
+                                           ///  the next one. Will be ignored if interleaveDims is set
+    DispatchDims           interleaveDims; ///< Controls how many thread groups are sent to one SE before switching to
+                                           ///  the next one. Takes priority over interleaveSize if both are set
+
+    TriState reverseWorkgroupOrder; ///< Indicates that any Dispatch using this pipeline should execute in
+                                    ///  reverse workgroup order. This superceeds the flag on the CommandBuffer
+                                    ///  (dispatchPingPongWalk) - always forcing reverse workgroup order! This
+                                    ///  is a best effort as not all implementations or Queues may support this.
 
     /// PAL expects a fixed 3D thread group size for each compute pipeline but the HSA ABI supports dynamic group sizes.
     /// If this pipeline's ELF binary metadata doesn't specify a fixed thread group size, this should be used to force
@@ -395,15 +449,9 @@ struct ColorTargetInfo
 /// Specifies color target state in properties for creation of a graphics
 struct ColorTargetState
 {
-    bool    alphaToCoverageEnable;           ///< Enable alpha to coverage.
-    bool    dualSourceBlendEnable;           ///< Blend state bound at draw time will use a dual source blend mode.
-    LogicOp logicOp;                         ///< Logic operation to perform.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 904
-    bool    uavExportSingleDraw;             ///< When UAV export is enabled, acts as a hint that only a single draw
-                                             ///  is done on a color target with this or subsequent pipelines before
-                                             ///  a barrier. Improves performance by allowing pipelines to overlap.
-#endif
-
+    bool            alphaToCoverageEnable;   ///< Enable alpha to coverage.
+    bool            dualSourceBlendEnable;   ///< Blend state bound at draw time will use a dual source blend mode.
+    LogicOp         logicOp;                 ///< Logic operation to perform.
     ColorTargetInfo target[MaxColorTargets]; ///< Per-MRT color target info.
 };
 
@@ -417,6 +465,8 @@ struct GraphicsPipelineCreateInfo
                                                ///  interface. The Pipeline ELF contains pre-compiled shaders,
                                                ///  register values, and additional metadata.
     size_t              pipelineBinarySize;    ///< Size of Pipeline ELF binary in bytes.
+    GetContentsCallback*   pGetContents;       ///< Callback to get ELF contents; can be nullptr if client never
+                                               ///  provides an archive with empty members.
     const IShaderLibrary** ppShaderLibraries;  ///< An array of graphics @ref IShaderLibrary object. pPipelineBinary
                                                ///  and ppShaderLibraries can't be valid at the same time.
                                                ///  If the client does not know whether the pipeline is complete,
@@ -467,6 +517,10 @@ struct GraphicsPipelineCreateInfo
     DispatchInterleaveSize    taskInterleaveSize;  ///< Ignored for pipelines without a task shader. For pipelines with
                                                    ///  a task shader, controls how many thread groups are sent to one
                                                    ///  SE before switching to the next one.
+    DispatchDims              taskInterleaveDims;  ///< Ignored for pipelines without a task shader. For pipelines with
+                                                   ///  a task shader, controls how many thread groups are sent to one
+                                                   ///  SE before switching to the next one.
+                                                   ///  Takes priority over taskInterleaveSize if both are set
     LdsPsGroupSizeOverride ldsPsGroupSizeOverride; ///< Whether to override ldsPsGroupSize setting for pipeline.
 
     TriState groupLaunchGuarantee; ///< Force the group launch guarantee mechanism on or off. This feature will throttle
@@ -567,71 +621,26 @@ struct PipelineInfo
 
     uint32 unifiedRgsNameHash; ///< 32-bit hash of unified RGS name, 0 otherwise
 
+    /// The number of threads that can effectively participate in a workgroup.
+    /// Case 1: dynamic VGPR. The number of available waves may be limited by
+    /// Compiler, so the active wave count is <= numWavesPerSimd
+    /// Case 2: neural rendering, helper waves may reduce the number of available
+    /// waves, resulting in an active wave count that is < numWavesPerSimd.
+    uint32 availableThreadsPerWg;
+
 };
-
-/// A structure that represents any 3D arrangement of threads or thread groups as part of a compute shader dispatch.
-///
-/// This structure is halfway between Extent3d and Offset3d, depending on the context it may represent an offset or
-/// an extent. Essentially it's meaning is tied to the concept of 3D thread or thread group grids rather than generic
-/// contexts like "extent" or "offset". Whether it represents threads or thread groups is also context specific.
-struct DispatchDims
-{
-    uint32 x; ///< Threads or thread groups in the X dimension.
-    uint32 y; ///< Threads or thread groups in the Y dimension.
-    uint32 z; ///< Threads or thread groups in the Z dimension.
-
-    /// Computes the volume of this 3D arrangement of threads or thread groups.
-    ///
-    /// @returns the total number of threads or threads groups this struct represents.
-    uint32 Flatten() const { return x * y * z; }
-};
-
-// There are some places where we'd like to directly cast DispatchDims to an array of three uint32s.
-static_assert(sizeof(DispatchDims) == sizeof(uint32) * 3, "DispatchDims not castable to uint32*");
-
-/// Component-wise addition of two DispatchDims.
-///
-/// @param [in] l  The left-hand argument.
-/// @param [in] r  The right-hand argument.
-///
-/// @returns A new DispatchDims which contains the sum of 'l' and 'r' along each dimension.
-inline DispatchDims operator+(DispatchDims l, DispatchDims r) { return {l.x + r.x, l.y + r.y, l.z + r.z}; }
-
-/// Component-wise addition of one DispatchDims into another.
-///
-/// @param [in] l  The left-hand argument.
-/// @param [in] r  The right-hand argument.
-///
-/// @returns A reference to 'l' after it is updated to the sum of 'l' and 'r'.
-inline DispatchDims& operator+=(DispatchDims& l, DispatchDims r) { return l = (l + r); }
-
-/// Component-wise multiplication of two DispatchDims.
-///
-/// @param [in] l  The left-hand argument.
-/// @param [in] r  The right-hand argument.
-///
-/// @returns A new DispatchDims which contains the product of 'l' and 'r' along each dimension.
-inline DispatchDims operator*(DispatchDims l, DispatchDims r) { return {l.x * r.x, l.y * r.y, l.z * r.z}; }
-
-/// Component-wise multiplication of one DispatchDims into another.
-///
-/// @param [in] l  The left-hand argument.
-/// @param [in] r  The right-hand argument.
-///
-/// @returns A reference to 'l' after it is updated to the product of 'l' and 'r'.
-inline DispatchDims& operator*=(DispatchDims& l, DispatchDims r) { return l = (l * r); }
 
 /// Used to represent API level shader stage.
 enum ShaderStageFlagBits : uint32
 {
-    ApiShaderStageCompute  = (1u << static_cast<uint32>(ShaderType::Compute)),
+    ApiShaderStageCompute  = (1u << static_cast<uint32>(ShaderType::Cs)),
     ApiShaderStageTask     = (1u << static_cast<uint32>(ShaderType::Task)),
-    ApiShaderStageVertex   = (1u << static_cast<uint32>(ShaderType::Vertex)),
-    ApiShaderStageHull     = (1u << static_cast<uint32>(ShaderType::Hull)),
-    ApiShaderStageDomain   = (1u << static_cast<uint32>(ShaderType::Domain)),
-    ApiShaderStageGeometry = (1u << static_cast<uint32>(ShaderType::Geometry)),
+    ApiShaderStageVertex   = (1u << static_cast<uint32>(ShaderType::Vs)),
+    ApiShaderStageHull     = (1u << static_cast<uint32>(ShaderType::Hs)),
+    ApiShaderStageDomain   = (1u << static_cast<uint32>(ShaderType::Ds)),
+    ApiShaderStageGeometry = (1u << static_cast<uint32>(ShaderType::Gs)),
     ApiShaderStageMesh     = (1u << static_cast<uint32>(ShaderType::Mesh)),
-    ApiShaderStagePixel    = (1u << static_cast<uint32>(ShaderType::Pixel)),
+    ApiShaderStagePixel    = (1u << static_cast<uint32>(ShaderType::Ps)),
 };
 
 /// Reports shader stats. Multiple bits set in the shader stage mask indicates that multiple shaders have been combined

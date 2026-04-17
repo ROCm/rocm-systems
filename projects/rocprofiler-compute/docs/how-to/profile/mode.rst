@@ -387,6 +387,12 @@ of raw performance counter data produced by the underlying
    * These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
    * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
+.. note::
+
+   Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
+   ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
+   ``.db`` files will be retained by default and the analyze step will read them directly.
+
 
 .. _filtering:
 
@@ -713,7 +719,7 @@ Roofline options (profile)
 
 .. note::
 
-  For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
+  For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/cdna/cdna-performance-model`
 
 
 Roofline only

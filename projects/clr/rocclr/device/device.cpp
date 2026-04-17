@@ -245,6 +245,7 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
       {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
   };
   return std::make_pair(std::begin(supportedIsas_), std::end(supportedIsas_));
@@ -614,8 +615,7 @@ Device::BlitProgram::~BlitProgram() {
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
                                  const std::string& extraOptions) {
-  std::vector<amd::Device*> devices;
-  devices.push_back(device);
+  std::vector<amd::Device*> devices{device};
   int32_t retval = CL_SUCCESS;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
@@ -674,12 +674,17 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
+  if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
+    // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
+    // Without this, roc::Device::init() returns true & disables PAL path in below code
+    GPU_ENABLE_PAL = 1;
+  }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
 // GPU stack. The order of initialization is signiicant and if changed
 // amd::Device::registerDevice() must be accordingly modified.
 #if defined(WITH_HSA_DEVICE)
-  if ((GPU_ENABLE_PAL != 1) || flagIsDefault(GPU_ENABLE_PAL)) {
+  if ((GPU_ENABLE_PAL == 0) || (GPU_ENABLE_PAL == 2)) {
     // Return value of roc::Device::init()
     // If returned false, error initializing HSA stack.
     // If returned true, either HSA not installed or HSA stack
@@ -1251,6 +1256,7 @@ Settings::Settings() : value_(0) {
   }
 
   gwsInitSupported_ = true;
+  groupMemCarveout_ = false;
 }
 
 void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,
