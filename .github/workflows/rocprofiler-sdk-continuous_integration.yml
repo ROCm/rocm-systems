@@ -113,7 +113,7 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v5
         with:
           sparse-checkout: |
@@ -121,6 +121,7 @@ jobs:
             projects/rocprofiler-sdk
             projects/aqlprofile
             projects/rocprofiler-register
+            projects/rocprof-trace-decoder
             projects/rocr-runtime
             projects/clr
             projects/hip
@@ -197,6 +198,26 @@ jobs:
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
           ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: ccache
+
+      - &build_and_install_rocprof_trace_decoder
+        name: Build and Install rocprof-trace-decoder
+        shell: bash
+        working-directory: projects/rocprof-trace-decoder
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          echo "Install rocprof-trace-decoder..."
+          rm -f ${{ env.ROCM_PATH }}/lib/librocprof-trace-decoder*
+          cmake -B build-rocprof-trace-decoder \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
+            .
+          cmake --build build-rocprof-trace-decoder --target all --parallel 16
+          cmake --build build-rocprof-trace-decoder --target install
+          echo "✅ rocprof-trace-decoder Installation complete!"
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -336,7 +357,7 @@ jobs:
       OS_TYPE: ${{ matrix.system.os }}
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v5
         with:
           sparse-checkout: |
@@ -344,6 +365,7 @@ jobs:
             projects/rocprofiler-sdk
             projects/aqlprofile
             projects/rocprofiler-register
+            projects/rocprof-trace-decoder
             projects/rocr-runtime
             projects/clr
             projects/hip
@@ -407,6 +429,26 @@ jobs:
           install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
           ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
+
+      - name: Build and Install rocprof-trace-decoder
+        shell: bash
+        working-directory: projects/rocprof-trace-decoder
+        run: |
+          echo "Install rocprof-trace-decoder..."
+          rm -f ${{ env.ROCM_PATH }}/lib/librocprof-trace-decoder*
+          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
+          source ${{ env.PYTHON_VENV_ACTIVATE }}
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          cmake -B build-rocprof-trace-decoder \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/local/bin/sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/local/bin/sccache \
+            .
+          cmake --build build-rocprof-trace-decoder --target all --parallel 16
+          cmake --build build-rocprof-trace-decoder --target install
+          echo "✅ rocprof-trace-decoder Installation complete!"
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -477,7 +519,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
       uses: actions/checkout@v5
       with:
         sparse-checkout: |
@@ -485,6 +527,7 @@ jobs:
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
+          projects/rocprof-trace-decoder
           projects/rocr-runtime
           projects/clr
           projects/hip
@@ -552,6 +595,8 @@ jobs:
         install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
         ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
         ccache-variant: ccache
+
+    - *build_and_install_rocprof_trace_decoder
 
     - name: Configure, Build, and Test
       timeout-minutes: 45

@@ -51,6 +51,29 @@ struct GetOption<TagT, TagT<T>, Options...> : GetOption<TagT, Options...> {
 };
 
 } // namespace metaprogramming
+
+/// @brief Helper variable template that is always false but depends on a type parameter.
+///
+/// @details Used in `if constexpr` / `static_assert` chains to produce a
+/// deferred (non-eagerly evaluated) compile error for unhandled template
+/// specializations.  A bare `static_assert(false, ...)` inside a constexpr
+/// branch is ill-formed even when the branch is never taken; replacing it with
+/// `static_assert(always_false_v<T>, ...)` is well-formed and only fires when
+/// the branch is actually instantiated.
+///
+/// @tparam T  Any type — the assertion fires when the enclosing template is
+///            instantiated with a specialization that has no handler.
+///
+/// Example:
+/// @code
+/// template <AccMode M> void resolve_acc() {
+///   if constexpr (M == AccMode::Unified) { ... }
+///   else if constexpr (M == AccMode::Separate) { ... }
+///   else { static_assert(util::always_false_v<AccMode>, "unhandled AccMode"); }
+/// }
+/// @endcode
+template <typename T> inline constexpr bool always_false_v = false;
+
 } // namespace util
 
 #endif // UTIL_META_PROGRAMMING_H_

@@ -2,7 +2,6 @@ name: rocprofiler-sdk Code Coverage
 
 permissions:
   contents: read
-  pull-requests: write
 
 on:
   workflow_dispatch:
@@ -75,6 +74,9 @@ env:
 jobs:
   code-coverage:
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    permissions:
+      contents: write
+      pull-requests: write
     strategy:
       # fail-fast: false
       matrix:
@@ -296,7 +298,7 @@ jobs:
     - id: generatereport
       name: Generate Code Coverage Comment
       if: github.event_name == 'pull_request'
-      timeout-minutes: 5
+      timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       shell: bash
       run: |
@@ -310,7 +312,7 @@ jobs:
         which -a git
         git --version
 
-        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.ROCPROFILER_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.GITHUB_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
 
         echo -e "\n${PWD}:"
         ls -la .
@@ -341,7 +343,7 @@ jobs:
 
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
-      timeout-minutes: 5
+      timeout-minutes: 10
       uses: actions/github-script@v6
       env:
         COMMENT_BODY: |
@@ -352,7 +354,7 @@ jobs:
           ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
           </details>
       with:
-        github-token: ${{ secrets.ROCPROFILER_TOKEN }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
           const commentIdentifier = '<!-- code-coverage-comment-identifier -->'; // Used to identify codecov comment
             const commentBody = process.env.COMMENT_BODY;

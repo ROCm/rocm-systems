@@ -6,73 +6,34 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
-#include "util/bitfield.h"
-
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
 
 namespace rocjitsu {
 namespace cdna4 {
 
-/// @brief CDNA4 MODE register layout (one 32-bit scalar register per wavefront).
-/// @details Bit positions follow the "Shader Processor Input (SPI)" section of
-/// the CDNA4 ISA specification. Each accessor returns a lightweight proxy that
-/// supports read (implicit integral conversion) and write (operator=).
-class StatusReg : public ::util::Bitfield<32> {
-public:
-  using Bitfield::Bitfield;
-  using Bitfield::operator=;
-  StatusReg(const StatusReg &) = default;
-  StatusReg &operator=(const StatusReg &) = default;
+/// @brief CDNA4 ISA traits (GFX950, Wave64, dedicated AccVGPR file, GFX9 S_WAITCNT).
+///
+/// @details Overrides `MAX_ACC_VGPRS_PER_WF = 256` (CDNA4 retains the
+/// dedicated AccVGPR register file from CDNA2/3).
+/// All other constants inherit from `amdgpu::CdnaIsaBase`.
+///
+/// CDNA4 is GFX11-generation hardware but retains the single monolithic
+/// S_WAITCNT instruction from the GFX9 encoding family; hence
+/// `WAITCNT_LGKMCNT_MASK = 0x0F` is inherited unchanged from `CdnaIsaBase`.
+///
+/// StatusReg uses the shared `amdgpu::CdnaStatusReg` layout including
+/// COND_DBG_USER and COND_DBG_SYS (both active on CDNA3/4 hardware).
+struct Isa : amdgpu::CdnaIsaBase {
+  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
+      256; ///< Unified AccVGPR file (src encoding alias at 768).
 
-  auto SCC() { return member<0, 0>(); }
-  auto SCC() const { return member<0, 0>(); }
-  auto SPI_PRIO() { return member<1, 2>(); }
-  auto SPI_PRIO() const { return member<1, 2>(); }
-  auto WAVE_PRIO() { return member<3, 4>(); }
-  auto WAVE_PRIO() const { return member<3, 4>(); }
-  auto PRIV() { return member<5, 5>(); }
-  auto PRIV() const { return member<5, 5>(); }
-  auto TRAP_EN() { return member<6, 6>(); }
-  auto TRAP_EN() const { return member<6, 6>(); }
-  auto EXECZ() { return member<9, 9>(); }
-  auto EXECZ() const { return member<9, 9>(); }
-  auto VCCZ() { return member<10, 10>(); }
-  auto VCCZ() const { return member<10, 10>(); }
-  auto IN_TG() { return member<11, 11>(); }
-  auto IN_TG() const { return member<11, 11>(); }
-  auto IN_BARRIER() { return member<12, 12>(); }
-  auto IN_BARRIER() const { return member<12, 12>(); }
-  auto HALT() { return member<13, 13>(); }
-  auto HALT() const { return member<13, 13>(); }
-  auto TRAP() { return member<14, 14>(); }
-  auto TRAP() const { return member<14, 14>(); }
-  auto VALID() { return member<16, 16>(); }
-  auto VALID() const { return member<16, 16>(); }
-  auto ECC_ERR() { return member<17, 17>(); }
-  auto ECC_ERR() const { return member<17, 17>(); }
-  auto PERF_EN() { return member<19, 19>(); }
-  auto PERF_EN() const { return member<19, 19>(); }
-  auto COND_DBG_USER() { return member<20, 20>(); }
-  auto COND_DBG_USER() const { return member<20, 20>(); }
-  auto COND_DBG_SYS() { return member<21, 21>(); }
-  auto COND_DBG_SYS() const { return member<21, 21>(); }
-  auto ALLOW_REPLAY() { return member<22, 22>(); }
-  auto ALLOW_REPLAY() const { return member<22, 22>(); }
-};
-
-struct Isa {
-  static constexpr uint32_t WF_SIZE = 64;           ///< Lanes per wavefront (SIMD64).
-  static constexpr uint32_t MAX_SGPRS_PER_WF = 104; ///< Max scalar GPRs per wavefront.
-  static constexpr uint32_t MAX_VGPRS_PER_WF = 256; ///< Max vector GPRs per wavefront.
-
-  using Context = amdgpu::Wavefront;
   using Decoder = cdna4::Decoder;
   using MachineInst = cdna4::MachineInst;
   using OperandType = cdna4::OperandType;
-  using StatusReg = cdna4::StatusReg;
+  using StatusReg = amdgpu::CdnaStatusReg;
 };
 
 } // namespace cdna4

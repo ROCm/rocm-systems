@@ -227,19 +227,6 @@ namespace rocshmem
     return -1;
   }
 
-  // Structure to track information about IBV devices
-  struct IbvDevice
-  {
-    ibv_device* devicePtr;
-    std::string name;
-    std::string busId;
-    bool        hasActivePort;
-    int         numaNode;
-    int         gidIndex;
-    std::string gidDescriptor;
-    bool        isRoce;
-  };
-
   // Function to collect information about IBV devices
   //========================================================================================
   static bool IsConfiguredGid(union ibv_gid const& gid)
@@ -354,7 +341,7 @@ namespace rocshmem
     return ROCSHMEM_SUCCESS;
   }
 
-  static vector<IbvDevice>& GetIbvDeviceList()
+  vector<IbvDevice> const& GetIbvDeviceList()
   {
     static bool isInitialized = false;
     static vector<IbvDevice> ibvDeviceList = {};
@@ -375,7 +362,7 @@ namespace rocshmem
           ibvDevice.name = deviceList[i]->name;
           ibvDevice.hasActivePort = false;
           {
-            struct ibv_context *context = ibv.open_device(ibvDevice.devicePtr);
+            struct ibv_context *context = ibv.open_device(static_cast<ibv_device*>(ibvDevice.devicePtr));
             if (context) {
               struct ibv_device_attr deviceAttr;
               if (!ibv.query_device(context, &deviceAttr)) {
@@ -405,7 +392,7 @@ namespace rocshmem
           }
           ibvDevice.busId = "";
           {
-            std::string device_path(ibvDevice.devicePtr->dev_path);
+            std::string device_path(static_cast<ibv_device*>(ibvDevice.devicePtr)->dev_path);
             if (std::filesystem::exists(device_path)) {
               std::string pciPath = std::filesystem::canonical(device_path + "/device").string();
               std::size_t pos = pciPath.find_last_of('/');
@@ -702,6 +689,17 @@ namespace rocshmem
     return nullptr;
   }
 
+  static PCIeNode const* GetChildLeadingTo(PCIeNode const* parent,
+                                           std::string const& descendant)
+  {
+    if (!parent) return nullptr;
+    for (auto const& child : parent->children) {
+      if (GetPCIeNode(descendant, &child))
+        return &child;
+    }
+    return nullptr;
+  }
+
   // Public wrapper for GetLcaBetweenNodesRecursive
   PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
                                      std::string const& node1Address,
@@ -818,6 +816,107 @@ namespace rocshmem
     return GetIbvDeviceList()[nicIndex].numaNode;
   }
 
+  NicPathType ParseNicMergeLevel(const std::string &level_str)
+  {
+    std::string upper = level_str;
+    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    if (upper == "PIX") return NIC_PATH_PIX;
+    if (upper == "PXB") return NIC_PATH_PXB;
+    if (upper == "PHB") return NIC_PATH_PHB;
+    if (upper == "SYS") return NIC_PATH_SYS;
+    LOG_WARN("Unknown NET_MERGE_LEVEL '%s', defaulting to SYS",
+             level_str.c_str());
+    return NIC_PATH_SYS;
+  }
+
+  std::vector<std::string> ParseNicList(const std::string &csv)
+  {
+    std::vector<std::string> result;
+    std::stringstream ss(csv);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+      size_t start = token.find_first_not_of(' ');
+      size_t end   = token.find_last_not_of(' ');
+      if (start != std::string::npos)
+        result.push_back(token.substr(start, end - start + 1));
+    }
+    return result;
+  }
+
+  std::string SelectRankGroup(const std::string &spec, int rank)
+  {
+    std::vector<std::string> groups;
+    std::stringstream ss(spec);
+    std::string group;
+    while (std::getline(ss, group, ';')) {
+      size_t start = group.find_first_not_of(' ');
+      size_t end   = group.find_last_not_of(' ');
+      if (start != std::string::npos)
+        groups.push_back(group.substr(start, end - start + 1));
+    }
+    if (groups.empty()) return spec;
+    return groups[static_cast<size_t>(rank) % groups.size()];
+  }
+
+  NicPathType ComputeGpuNicPathType(int gpuIndex, const std::string &nicBusId, int nicNuma)
+  {
+    char hipPciBusId[64];
+    if (hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), gpuIndex) != hipSuccess)
+      return NIC_PATH_SYS;
+
+    std::string gpuBusId(hipPciBusId);
+
+    // Use the PCIe tree LCA (Lowest Common Ancestor) to classify the path.
+    // The tree mirrors the sysfs PCIe hierarchy.
+    // Classification strategy:
+    //   LCA is a PCIe device/bridge (address contains ':') -> PIX or PXB
+    //   LCA is above root complex or tree unavailable      -> PHB or SYS (NUMA
+    //   check)
+    PCIeNode const* root = GetPCIeTreeRoot();
+
+    PCIeNode const* lca = GetLcaBetweenNodes(root, gpuBusId, nicBusId);
+    if (lca) {
+      // Check if LCA has a PCIe BDF-style address (contains ':')
+      bool lcaIsPCIeNode = lca->address.find(':') != std::string::npos;
+
+      if (lcaIsPCIeNode) {
+        int lcaDepth = GetLcaDepth(lca->address, root);
+        int gpuDepth = GetLcaDepth(gpuBusId, root);
+
+        if (lcaDepth > 0 && gpuDepth > 0) {
+          // hops = number of PCIe switches between GPU and the common ancestor
+          int hops = gpuDepth - lcaDepth;
+
+          // 1 hop: GPU and NIC share the same direct parent switch -> PIX
+          if (hops == 1) return NIC_PATH_PIX;
+
+          // >1 hops: multiple switches apart. Check if GPU and NIC branches
+          // share the same secondary bus number at the LCA level
+          // if so, they are still within the same switch fabric -> PIX
+          if (hops > 1) {
+            auto const* gpuChild = GetChildLeadingTo(lca, gpuBusId);
+            auto const* nicChild = GetChildLeadingTo(lca, nicBusId);
+            if (gpuChild && nicChild && gpuChild != nicChild) {
+              int gpuChildBus = ExtractBusNumber(gpuChild->address);
+              int nicChildBus = ExtractBusNumber(nicChild->address);
+              if (gpuChildBus >= 0 && gpuChildBus == nicChildBus)
+                return NIC_PATH_PIX;
+            }
+            // Different switch branches within the same root complex -> PXB
+            return NIC_PATH_PXB;
+          }
+        }
+      }
+    }
+
+    // Fallback: use NUMA node to distinguish PHB vs SYS
+    int gpuNuma = GetClosestCpuNumaToGpu(gpuIndex);
+    if (gpuNuma >= 0 && nicNuma >= 0 && gpuNuma == nicNuma) {
+      return NIC_PATH_PHB;
+    }
+    return NIC_PATH_SYS;
+  }
+
   static bool hasExactMatch(const std::string& namesList, const std::string& name) {
     std::stringstream ss(namesList);
     std::string token;
@@ -830,7 +929,24 @@ namespace rocshmem
     return false;
   }
 
-  int GetClosestNicToGpu(int gpuIndex, const char* hca_list, const char** dev_name)
+  std::vector<std::string> BuildFilteredNicAddresses(const char* hca_list) {
+    auto const& ibvDeviceList = GetIbvDeviceList();
+    std::string excludeList((nullptr != hca_list && hca_list[0] == '^') ? &hca_list[1] : "");
+    std::string includeList((nullptr != hca_list && hca_list[0] != '^') ? hca_list : "");
+
+    std::vector<std::string> addresses(ibvDeviceList.size());
+    for (size_t i = 0; i < ibvDeviceList.size(); i++) {
+      auto const& dev = ibvDeviceList[i];
+      bool is_excluded = hasExactMatch(excludeList, dev.name)
+                      || (includeList.length() && !hasExactMatch(includeList, dev.name));
+      if (dev.hasActivePort && !is_excluded) {
+        addresses[i] = dev.busId;
+      }
+    }
+    return addresses;
+  }
+
+  int GetClosestNicToGpu(int gpuIndex, const char* hca_list, std::string *dev_name)
   {
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
@@ -843,15 +959,7 @@ namespace rocshmem
     if (!isInitialized) {
       closestNicId.resize(numGpus, -1);
 
-      // Build up list of NIC bus addresses
-      std::vector<std::string> ibvAddressList;
-      std::string excludeList((nullptr != hca_list && hca_list[0] == '^')? &hca_list[1]: "");
-      std::string includeList((nullptr != hca_list && hca_list[0] != '^')? hca_list: "");
-      for (auto const& ibvDevice : ibvDeviceList) {
-        auto is_excluded = hasExactMatch(excludeList, ibvDevice.name)
-                        || (includeList.length() && !hasExactMatch(includeList, ibvDevice.name));
-        ibvAddressList.push_back((ibvDevice.hasActivePort && !is_excluded) ? ibvDevice.busId : "");
-      }
+      auto ibvAddressList = BuildFilteredNicAddresses(hca_list);
 
       // Track how many times a device has been assigned as "closest"
       // This allows distributed work across devices using multiple ports (sharing the same busID)
@@ -917,10 +1025,63 @@ namespace rocshmem
     LOG_TRACE("GPU Device id: %d closest NIC id : %d name: %s", gpuIndex, closestIdx,
            (-1 != closestIdx)? ibvDeviceList[closestIdx].name.c_str(): "none-found");
     if (dev_name != nullptr && closestIdx != -1) {
-      *dev_name = strdup(ibvDeviceList[closestIdx].name.c_str());
+      *dev_name = ibvDeviceList[closestIdx].name;
     }
 
     return closestNicId[gpuIndex];
+  }
+
+  int GetClosestNicsToGpu(int gpuIndex, const char* hca_list,
+                          NicPathType max_path_type,
+                          std::vector<std::string> &nic_names)
+  {
+    auto const& ibvDeviceList = GetIbvDeviceList();
+    int numGpus = GetNumDevices(rocshmem::EXE_GPU);
+    nic_names.clear();
+
+    if (gpuIndex < 0 || gpuIndex >= numGpus) return -1;
+
+    char hipPciBusId[64];
+    auto err = hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), gpuIndex);
+    if (err != hipSuccess) return -1;
+
+    auto ibvAddressList = BuildFilteredNicAddresses(hca_list);
+
+    struct NicDist {
+      int idx;
+      int distance;
+      NicPathType pathType;
+    };
+    std::vector<NicDist> candidates;
+
+    for (size_t i = 0; i < ibvDeviceList.size(); i++) {
+      if (ibvAddressList[i].empty()) continue;
+
+      auto pathType = ComputeGpuNicPathType(gpuIndex, ibvDeviceList[i].busId,
+                                            ibvDeviceList[i].numaNode);
+      if (pathType > max_path_type) continue;
+
+      int dist = GetBusIdDistance(hipPciBusId, ibvAddressList[i]);
+      constexpr int kUnknownDistance = 9999;
+      candidates.push_back(
+          {static_cast<int>(i), dist >= 0 ? dist : kUnknownDistance, pathType});
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const NicDist& a, const NicDist& b) {
+                if (a.pathType != b.pathType) return a.pathType < b.pathType;
+                return a.distance < b.distance;
+              });
+
+    if (candidates.empty()) {
+      return -1;
+    }
+
+    for (auto const& c : candidates) {
+      nic_names.push_back(ibvDeviceList[c.idx].name);
+    }
+
+    return static_cast<int>(candidates.size());
   }
 
   static int RemappedCpuIndex(int origIdx)

@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/agent_manager.hpp"

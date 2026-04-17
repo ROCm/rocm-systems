@@ -226,7 +226,7 @@ Fabric.
 .. note::
 
    The stalls in Sec 17.4 are presented as a percentage of the total number
-   active L2 cycles, summed over :doc:`all L2 channels </conceptual/l2-cache>`.
+   active L2 cycles, summed over :doc:`all L2 channels </conceptual/cdna/l2-cache>`.
 
 .. _infinity-fabric-ex3:
 
