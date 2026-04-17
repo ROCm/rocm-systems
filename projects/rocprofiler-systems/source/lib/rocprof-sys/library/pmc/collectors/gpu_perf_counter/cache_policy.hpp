@@ -156,20 +156,22 @@ struct cache_policy
     /**
      * @brief Store an SDK PMC sample to the trace cache.
      *
-     * Writes one gpu_perf_counter_sample per device per tick with all counter
-     * entries (qualified name + value) batched.
+     * Filters metric_values to only include counters that are in the
+     * enabled ∩ supported set, then writes one gpu_perf_counter_sample
+     * per device per tick.
      */
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& /*enabled_metrics_cfg*/,
                              const enabled_metrics& /*supported_metrics*/,
                              const metrics& metric_values, uint64_t timestamp)
     {
+        const auto& counters = metric_values.counters;
+        if(counters.empty()) return;
+
         std::vector<sample_entry> entries;
-        entries.reserve(metric_values.counters.size());
-        for(const auto& counter : metric_values.counters)
-        {
-            entries.push_back(sample_entry{ counter.name, counter.value });
-        }
+        entries.reserve(counters.size());
+        for(const auto& ctr : counters)
+            entries.push_back({ ctr.name, ctr.value });
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_perf_counter_sample{
             static_cast<uint32_t>(device_id), timestamp, std::move(entries) });

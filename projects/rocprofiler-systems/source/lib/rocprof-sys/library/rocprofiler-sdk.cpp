@@ -2427,6 +2427,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto _callback_domains = rocprofiler_sdk::get_callback_domains();
     auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
     auto _counter_events   = rocprofiler_sdk::get_rocm_events();
+    auto _pmc_events       = rocprofiler_sdk::get_gpu_perf_counters();
     auto _version          = rocprofiler_sdk::get_version();
     if(_version.formatted == 0)
     {
@@ -2437,7 +2438,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->client_fini = fini_func;
 
     _data->initialize();
-    if(!_counter_events.empty()) _data->initialize_event_info();
+    if(!_counter_events.empty() || !_pmc_events.empty()) _data->initialize_event_info();
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
 
@@ -2695,7 +2696,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 
     // --- SDK PMC Device Counting Service (polled hardware counters) ---
-    if(!_counter_events.empty() && !_data->gpu_agents.empty())
+    // Controlled by ROCPROFSYS_GPU_PERF_COUNTERS (independent from ROCM_EVENTS).
+    // Flow: query all supported counters → intersect with user request → configure SDK.
+    if(!_pmc_events.empty() && !_data->gpu_agents.empty())
     {
         ROCPROFILER_CALL(rocprofiler_create_context(&_data->gpu_perf_counter_ctx));
 
@@ -2718,6 +2721,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         auto instance_infos_per_agent = std::vector<std::vector<instance_info_t>>{};
         auto counter_meta_per_agent   = std::vector<std::vector<counter_meta_t>>{};
 
+        const bool pmc_collect_all =
+            (_pmc_events.size() == 1 &&
+             (_pmc_events[0] == "all" || _pmc_events[0] == "ALL"));
+
         auto set_profile = [](rocprofiler_context_id_t ctx, rocprofiler_agent_id_t agent,
                               rocprofiler_device_counting_agent_cb_t set_config,
                               void*                                  user_data) {
@@ -2733,46 +2740,54 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         {
             const auto _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
 
-            auto events_it = _data->agent_events.find(_agent_id);
-            if(events_it == _data->agent_events.end() || events_it->second.empty())
+            auto agent_info_it = _data->agent_counter_info.find(_agent_id);
+            if(agent_info_it == _data->agent_counter_info.end())
             {
+                LOG_DEBUG("Skipping GPU agent {} for PMC — no counter info",
+                          _agent_id.handle);
+                continue;
+            }
+
+            // Build the list of counter IDs to configure: intersect supported
+            // with user-requested names (or take all if "all").
+            auto pmc_counter_ids = std::vector<rocprofiler_counter_id_t>{};
+            auto names           = std::vector<std::string>{};
+
+            for(const auto& ci : agent_info_it->second)
+            {
+                if(ci.name == nullptr) continue;
+
+                bool requested = pmc_collect_all ||
+                                 std::find(_pmc_events.begin(), _pmc_events.end(),
+                                           std::string{ ci.name }) != _pmc_events.end();
+                if(requested)
+                {
+                    pmc_counter_ids.push_back(ci.id);
+                    names.emplace_back(ci.name);
+                }
+            }
+
+            if(pmc_counter_ids.empty())
+            {
+                LOG_DEBUG("No matching PMC counters for GPU agent {}", _agent_id.handle);
                 continue;
             }
 
             auto profile = rocprofiler_profile_config_id_t{};
             ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                _agent_id, events_it->second.data(), events_it->second.size(), &profile));
+                _agent_id, pmc_counter_ids.data(), pmc_counter_ids.size(), &profile));
 
             profile_map[_agent_id.handle] = profile;
             agent_ids.push_back(_agent_id.handle);
             profile_configs.push_back(profile.handle);
             device_indices.push_back(itr.device_id);
-
-            // Resolve counter IDs back to names for the SDK PMC device
-            auto  agent_info_it = _data->agent_counter_info.find(_agent_id);
-            auto& counter_ids   = events_it->second;
-            auto  names         = std::vector<std::string>{};
-            if(agent_info_it != _data->agent_counter_info.end())
-            {
-                for(const auto& cid : counter_ids)
-                {
-                    for(const auto& ci : agent_info_it->second)
-                    {
-                        if(ci.id.handle == cid.handle && ci.name != nullptr)
-                        {
-                            names.emplace_back(ci.name);
-                            break;
-                        }
-                    }
-                }
-            }
             counter_names_per_agent.push_back(std::move(names));
 
             // Build instance_id → qualified_name map and per-counter metadata
             // from v1 counter info
             auto instance_infos = std::vector<instance_info_t>{};
             auto counter_meta   = std::vector<counter_meta_t>{};
-            for(const auto& cid : counter_ids)
+            for(const auto& cid : pmc_counter_ids)
             {
                 rocprofiler_counter_info_v1_t cinfo{};
                 const auto cinfo_status = rocprofiler_query_counter_info(

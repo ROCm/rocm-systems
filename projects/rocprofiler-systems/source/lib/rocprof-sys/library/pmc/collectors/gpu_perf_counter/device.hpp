@@ -45,22 +45,18 @@ public:
     device(std::shared_ptr<Driver> driver, rocprofiler_context_id_t context,
            rocprofiler_agent_id_t          agent_id,
            rocprofiler_counter_config_id_t profile_config, size_t logical_index,
-           std::vector<std::string> counter_names, instance_info_vec instance_infos = {},
-           counter_meta_vec counter_meta = {})
+           instance_info_vec instance_infos = {}, counter_meta_vec counter_meta = {})
     : m_driver_api{ std::move(driver) }
     , m_context{ context }
     , m_agent_id{ agent_id }
     , m_profile_config{ profile_config }
     , m_index{ logical_index }
-    , m_counter_names{ std::move(counter_names) }
     , m_counter_meta{ std::move(counter_meta) }
-    , m_vendor_name("AMD")
-    , m_is_supported(true)
     {
         m_device_name  = fmt::format("GPU {}", m_index);
         m_product_name = fmt::format("GPU {}", m_index);
 
-        m_supported_metrics.value = 1;  // non-zero = has counters
+        m_supported_metrics.value = 1;
 
         m_supported_metrics.capabilities.reserve(m_counter_meta.size());
         for(const auto& meta : m_counter_meta)
@@ -69,14 +65,13 @@ public:
                 counter_capability{ meta.name, meta.is_derived, meta.is_constant });
         }
 
-        // Build instance_id → qualified_name lookup from pre-resolved info
         for(auto& info : instance_infos)
         {
             m_instance_map[info.instance_id] = std::move(info.qualified_name);
         }
     }
 
-    [[nodiscard]] bool is_supported() const noexcept { return m_is_supported; }
+    [[nodiscard]] bool is_supported() const noexcept { return !m_instance_map.empty(); }
 
     [[nodiscard]] enabled_metrics get_supported_metrics() const noexcept
     {
@@ -94,7 +89,8 @@ public:
 
     [[nodiscard]] const std::string& get_vendor_name() const noexcept
     {
-        return m_vendor_name;
+        static const std::string vendor = "AMD";
+        return vendor;
     }
 
     [[nodiscard]] rocprofiler_agent_id_t get_agent_id() const noexcept
@@ -105,11 +101,6 @@ public:
     [[nodiscard]] rocprofiler_counter_config_id_t get_profile_config() const noexcept
     {
         return m_profile_config;
-    }
-
-    [[nodiscard]] const std::vector<std::string>& get_counter_names() const noexcept
-    {
-        return m_counter_names;
     }
 
     [[nodiscard]] const counter_meta_vec& get_counter_metadata() const noexcept
@@ -200,13 +191,10 @@ private:
     rocprofiler_agent_id_t          m_agent_id;
     rocprofiler_counter_config_id_t m_profile_config;
     size_t                          m_index;
-    std::vector<std::string>        m_counter_names;
     counter_meta_vec                m_counter_meta;
     std::string                     m_device_name;
     std::string                     m_product_name;
-    std::string                     m_vendor_name;
     enabled_metrics                 m_supported_metrics;
-    bool                            m_is_supported = false;
 
     // instance_id → qualified counter name (built at construction)
     std::unordered_map<uint64_t, std::string> m_instance_map;

@@ -43,8 +43,12 @@ protected:
 
 TEST_F(SdkPmcDeviceTest, DeviceProperties)
 {
+    auto instances = device<MockDriver>::instance_info_vec{
+        instance_info_t{ 10, "SQ_WAVES" },
+    };
+
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index, {});
+                           test_index, std::move(instances));
 
     EXPECT_EQ(dev.get_index(), 0U);
     EXPECT_EQ(dev.get_name(), "GPU 0");
@@ -53,6 +57,14 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
     EXPECT_NE(dev.get_supported_metrics().value, 0U);
     EXPECT_EQ(dev.get_agent_id().handle, 42U);
     EXPECT_EQ(dev.get_profile_config().handle, 100U);
+}
+
+TEST_F(SdkPmcDeviceTest, EmptyDeviceNotSupported)
+{
+    device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
+                           test_index);
+
+    EXPECT_FALSE(dev.is_supported());
 }
 
 TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
@@ -74,7 +86,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
     };
 
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index, {}, std::move(instances));
+                           test_index, std::move(instances));
 
     rocprofiler_counter_record_t records[2];
     records[0].id            = 10;
@@ -115,7 +127,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
     };
 
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index, {}, std::move(instances));
+                           test_index, std::move(instances));
 
     rocprofiler_counter_record_t records[4];
     for(int i = 0; i < 4; ++i)
@@ -158,7 +170,7 @@ TEST_F(SdkPmcDeviceTest, SampleSkipsUnknownInstanceIds)
     };
 
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index, {}, std::move(instances));
+                           test_index, std::move(instances));
 
     rocprofiler_counter_record_t records[2];
     records[0].id            = 10;
@@ -231,7 +243,7 @@ TEST_F(SdkPmcDeviceTest, GetQualifiedNames)
     };
 
     device<MockDriver> dev(mock_driver, test_context, test_agent_id, test_profile_config,
-                           test_index, {}, std::move(instances));
+                           test_index, std::move(instances));
 
     auto names = dev.get_qualified_names();
     ASSERT_EQ(names.size(), 2U);

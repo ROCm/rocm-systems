@@ -131,8 +131,7 @@ public:
         {
             devices.push_back(std::make_shared<Device>(
                 m_driver_api, m_context, info.agent_id, info.profile_config,
-                info.device_index, info.counter_names, info.instance_infos,
-                info.counter_meta));
+                info.device_index, info.instance_infos, info.counter_meta));
         }
 
         return devices;

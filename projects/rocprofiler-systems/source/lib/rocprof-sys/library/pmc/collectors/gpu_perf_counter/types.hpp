@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
@@ -99,14 +100,31 @@ struct counter_capability
  *
  * For SDK PMC, counters are dynamically specified by name rather than a fixed
  * bitfield. The `value` field is non-zero when any counters are enabled,
- * providing compatibility with the base::collector template. The `capabilities`
- * vector carries per-counter metadata from the SDK.
+ * providing compatibility with the base::collector template. When `collect_all`
+ * is set, all supported counters are collected. Otherwise, only counters
+ * whose base name appears in `counter_names` are collected.
  */
 struct enabled_metrics
 {
     std::vector<std::string>        counter_names;
+    std::unordered_set<std::string> counter_names_set;
     std::vector<counter_capability> capabilities;
-    uint32_t                        value = 0;
+    uint32_t                        value       = 0;
+    bool                            collect_all = false;
+
+    void build_lookup()
+    {
+        counter_names_set.insert(counter_names.begin(), counter_names.end());
+    }
+
+    [[nodiscard]] bool is_counter_enabled(std::string_view name) const
+    {
+        if(collect_all) return true;
+        auto bracket = name.find('[');
+        if(bracket != std::string_view::npos)
+            return counter_names_set.count(std::string(name.substr(0, bracket))) > 0;
+        return counter_names_set.count(std::string(name)) > 0;
+    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

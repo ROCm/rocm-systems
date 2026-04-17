@@ -659,6 +659,24 @@ get_rocm_events()
         " ,;\t\n");
 }
 
+std::vector<std::string>
+get_gpu_perf_counters()
+{
+    return tim::delimit(get_setting_value<std::string>("ROCPROFSYS_GPU_PERF_COUNTERS")
+                            .value_or(std::string{}),
+                        " ,;\t\n");
+}
+
+bool
+get_group_by_queue(void)
+{
+    std::optional<bool> _group_by_queue =
+        config::get_setting_value<bool>("ROCPROFSYS_ROCM_GROUP_BY_QUEUE");
+    bool _ret = _group_by_queue.value_or(true);
+
+    return _ret;
+}
+
 std::vector<std::int32_t>
 get_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
