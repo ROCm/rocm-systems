@@ -99,13 +99,16 @@ __device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, uint3
                                                Op&& op) {
   static_assert(std::is_invocable_v<Op, T, T>, "Op must be invocable with arguments (T, T)");
   static_assert(std::is_same_v<T, std::invoke_result_t<Op, T, T>>, "Op must return T");
-  static_assert(sizeof(T) == 8, "gda::internal_amo_fetch_op only implemented for 64-bit types");
+  if constexpr (sizeof(T) != 8) {
+    //TODO: support types other than uint64_t
+    LOGD_ERROR_ABORT("gda::internal_amo_fetch_op only implemented for 64-bit types");
+  }
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
 
   /**
-   * Guess that the remote memory is zero by setting condition to zero.
-   * The compare-and-swap loop will execute at least twice if wrong.
-   * It may run additional times if contention on memory location.
+   * Guess that the prior value of the remote memory is zero by initializing prior_val to zero.
+   * The compare-and-swap loop will execute at least twice if this guess is wrong.
+   * It may run additional times if there is contention on the memory location.
    */
   T prior_val = 0;
   T fetch_val = 0;
@@ -120,15 +123,14 @@ __device__ T GDAContext::internal_amo_fetch_op(void *dst, T value, int pe, uint3
 
 template <typename T>
 __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_add only implemented for 64-bit types");
   }
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  qps[qp_index].atomic_nofetch(base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
@@ -138,28 +140,26 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                                 []([[maybe_unused]] T prior_val, T value) { return value; });
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_swap only implemented for 64-bit types");
   }
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
+                               []([[maybe_unused]] T prior_val, T value) { return value; });
 }
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                                 [](T prior_val, T value) { return prior_val & value; });
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_and only implemented for 64-bit types");
   }
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
+                               [](T prior_val, T value) { return prior_val & value; });
 }
 
 template <typename T>
@@ -169,15 +169,14 @@ __device__ void GDAContext::amo_and(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                                 [](T prior_val, T value) { return prior_val | value; });
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_or only implemented for 64-bit types");
   }
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
+                               [](T prior_val, T value) { return prior_val | value; });
 }
 
 template <typename T>
@@ -187,15 +186,14 @@ __device__ void GDAContext::amo_or(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
-                                 [](T prior_val, T value) { return prior_val ^ value; });
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_xor only implemented for 64-bit types");
   }
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  return internal_amo_fetch_op(dst, value, pe, qp_index, wf_info,
+                               [](T prior_val, T value) { return prior_val ^ value; });
 }
 
 template <typename T>
@@ -205,41 +203,38 @@ __device__ void GDAContext::amo_xor(void *dst, T value, int pe) {
 
 template <typename T>
 __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, wf_info);
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_cas only implemented for 64-bit types");
   }
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, value, cond, wf_info);
 }
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    return qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_add only implemented for 64-bit types");
   }
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  return qps[qp_index].atomic_fetch(base_heap[pe] + L_offset, value, 0, wf_info);
 }
 
 template <typename T>
 __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
-  if constexpr (sizeof(T) == 8) {
-    uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
-    ActiveWFInfo wf_info{pe};
-    uint32_t qp_index = get_qp_index(pe, wf_info);
-    return qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
-  } else {
+  if constexpr (sizeof(T) != 8) {
     //TODO: support types other than uint64_t
     LOGD_ERROR_ABORT("gda:amo_fetch_cas only implemented for 64-bit types");
   }
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  ActiveWFInfo wf_info{pe};
+  uint32_t qp_index = get_qp_index(pe, wf_info);
+  return qps[qp_index].atomic_cas(base_heap[pe] + L_offset, value, cond, wf_info);
 }
 
 // Collectives TODO: loosely adapted from IPC, needs review
