@@ -56,13 +56,16 @@
 }
 
 [[maybe_unused]] static int get_launcher_local_rank() {
-    char *local_rank_str = nullptr;
-
-    local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
-    if (nullptr != local_rank_str) {
-        return atoi(local_rank_str);
+    // Check launcher-specific env vars in priority order
+    for (const char* var : {"OMPI_COMM_WORLD_LOCAL_RANK",  // Open MPI / prterun
+                             "SLURM_LOCALID",               // SLURM
+                             "FLUX_TASK_LOCAL_ID",          // Flux
+                             "PMIX_LOCAL_RANK",             // PMIx / MPICH
+                             "PBS_O_TASKNUM",               // PBS/Torque
+                             "LOCAL_RANK"}) {               // torchrun / generic
+        const char* v = getenv(var);
+        if (v) return atoi(v);
     }
-
     return -1;
 }
 

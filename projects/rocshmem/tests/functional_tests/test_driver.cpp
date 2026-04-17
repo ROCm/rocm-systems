@@ -137,12 +137,30 @@ int main(int argc, char *argv[]) {
   /***
    * Select a GPU
    */
-  char* ompi_local_rank = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
-  if (nullptr == ompi_local_rank) {
-    printf("Could not determine local rank, use Open MPI `mpiexec`\n");
+  // Determine the node-local GPU rank from the job launcher's env vars
+  auto get_local_rank = []() -> int {
+    for (const char* var : {"OMPI_COMM_WORLD_LOCAL_RANK",  // Open MPI / prterun
+                             "SLURM_LOCALID",               // SLURM
+                             "FLUX_TASK_LOCAL_ID",          // Flux
+                             "PMIX_LOCAL_RANK",             // PMIx / MPICH
+                             "PBS_O_TASKNUM",               // PBS/Torque
+                             "LOCAL_RANK"}) {               // torchrun / generic
+      const char* v = getenv(var);
+      if (v) return atoi(v);
+    }
+    return -1;
+  };
+  int local_rank = get_local_rank();
+  if (local_rank < 0) {
+    fprintf(stderr,
+        "Could not determine local GPU rank.\n"
+        "Supported env vars: OMPI_COMM_WORLD_LOCAL_RANK (Open MPI/prterun), "
+        "SLURM_LOCALID (SLURM), FLUX_TASK_LOCAL_ID (Flux), "
+        "PMIX_LOCAL_RANK (PMIx/MPICH), PBS_O_TASKNUM (PBS/Torque), "
+        "LOCAL_RANK (torchrun)\n");
     abort();
   }
-  CHECK_HIP(hipSetDevice(atoi(ompi_local_rank)));
+  CHECK_HIP(hipSetDevice(local_rank));
 
   /**
    * Must initialize rocshmem to access arguments needed by the tester.

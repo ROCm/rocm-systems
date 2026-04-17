@@ -95,6 +95,20 @@ int MPIInstance::mpilib_dl_init() {
   DLSYM_HELPER(mpilib_ftable_, MPI_, mpilib_handle_, Fetch_and_op);
 
 #if !defined(HAVE_EXTERNAL_MPI)
+  // Probe one sentinel symbol to confirm the runtime library is Open MPI.
+  // MPICH and other implementations do not export ompi_* globals.
+  // Close and null the handle: ompi_symbols_ is unpopulated so any call
+  // that uses MPI_COMM_WORLD / MPI_INT / … would dereference a null pointer.
+  // Callers that receive MPILIB_INCOMPATIBLE must not invoke any MPI operation.
+  if (!dlsym(mpilib_handle_, "ompi_mpi_comm_world")) {
+    LOG_WARN("libmpi.so is not Open MPI (ompi_mpi_comm_world not found).\n"
+             "  The runtime MPI library is likely MPICH or similar.\n"
+             "  Features and backends that require Open MPI ABI will not load.\n"
+             "");
+    dlclose(mpilib_handle_);
+    mpilib_handle_ = nullptr;
+    return MPIInstance::MPILIB_INCOMPATIBLE;
+  }
   DLSYM_VAR_HELPER(ompi_symbols_, mpilib_handle_, ompi_mpi_comm_world);
   DLSYM_VAR_HELPER(ompi_symbols_, mpilib_handle_, ompi_mpi_comm_null);
   DLSYM_VAR_HELPER(ompi_symbols_, mpilib_handle_, ompi_mpi_datatype_null);
