@@ -133,12 +133,19 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // Zero the amd_queue_ structure to clear RPTR/WPTR before queue attach.
   memset(&amd_queue_, 0, sizeof(amd_queue_));
 
+  // Allocate GPU-visible shadow write pointer.
+  // The GPU/CP polls this address instead of write_dispatch_id directly.
+  shadow_wptr_ = static_cast<volatile uint64_t*>(
+      agent->system_allocator()(sizeof(uint64_t), 8, 0));
+  if (shadow_wptr_ == nullptr) throw std::bad_alloc();
+  *shadow_wptr_ = 0;
+
   // Initialize and map a HW AQL queue.
   HsaQueueResource queue_rsrc = {0};
   queue_rsrc.Queue_read_ptr_aql = (uint64_t*)&amd_queue_.read_dispatch_id;
 
-  // Hardware write pointer supports AQL semantics.
-  queue_rsrc.Queue_write_ptr_aql = (uint64_t*)&amd_queue_.write_dispatch_id;
+  // GPU polls shadow_wptr_ for the write pointer.
+  queue_rsrc.Queue_write_ptr_aql = const_cast<uint64_t*>(shadow_wptr_);
 
   // Populate amd_queue_ structure.
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
@@ -433,66 +440,391 @@ uint64_t AqlQueue::LoadWriteIndexRelaxed() {
 void AqlQueue::StoreWriteIndexRelaxed(uint64_t value) {
   atomic::Store(&amd_queue_.write_dispatch_id, value,
                 std::memory_order_relaxed);
+  if (!intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_, value, std::memory_order_relaxed);
+  }
 }
 
 void AqlQueue::StoreWriteIndexRelease(uint64_t value) {
   atomic::Store(&amd_queue_.write_dispatch_id, value,
                 std::memory_order_release);
+  if (!intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_, value, std::memory_order_release);
+  }
 }
 
 uint64_t AqlQueue::CasWriteIndexAcqRel(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acq_rel);
+  uint64_t ret = atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+                             std::memory_order_acq_rel);
+  if (ret == expected && !intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_, value, std::memory_order_release);
+  }
+  return ret;
 }
 uint64_t AqlQueue::CasWriteIndexAcquire(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acquire);
+  uint64_t ret = atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+                             std::memory_order_acquire);
+  if (ret == expected && !intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_, value, std::memory_order_relaxed);
+  }
+  return ret;
 }
 uint64_t AqlQueue::CasWriteIndexRelaxed(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_relaxed);
+  uint64_t ret = atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+                             std::memory_order_relaxed);
+  if (ret == expected && !intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_, value, std::memory_order_relaxed);
+  }
+  return ret;
 }
 uint64_t AqlQueue::CasWriteIndexRelease(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_release);
+  uint64_t ret = atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+                             std::memory_order_release);
+  if (ret == expected && !intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_, value, std::memory_order_release);
+  }
+  return ret;
 }
 
 uint64_t AqlQueue::AddWriteIndexAcqRel(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_acq_rel);
+  uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
+                              std::memory_order_acq_rel);
+  if (!intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_,
+                  atomic::Load(&amd_queue_.write_dispatch_id,
+                               std::memory_order_relaxed),
+                  std::memory_order_release);
+  }
+  return prev;
 }
 
 uint64_t AqlQueue::AddWriteIndexAcquire(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_acquire);
+  uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
+                              std::memory_order_acquire);
+  if (!intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_,
+                  atomic::Load(&amd_queue_.write_dispatch_id,
+                               std::memory_order_relaxed),
+                  std::memory_order_relaxed);
+  }
+  return prev;
 }
 
 uint64_t AqlQueue::AddWriteIndexRelaxed(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_relaxed);
+  uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
+                              std::memory_order_relaxed);
+  if (!intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_,
+                  atomic::Load(&amd_queue_.write_dispatch_id,
+                               std::memory_order_relaxed),
+                  std::memory_order_relaxed);
+  }
+  return prev;
 }
 
 uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                     std::memory_order_release);
+  uint64_t prev = atomic::Add(&amd_queue_.write_dispatch_id, value,
+                              std::memory_order_release);
+  if (!intercept_active_.load(std::memory_order_relaxed)) {
+    atomic::Store(shadow_wptr_,
+                  atomic::Load(&amd_queue_.write_dispatch_id,
+                               std::memory_order_relaxed),
+                  std::memory_order_release);
+  }
+  return prev;
 }
 
-void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
+void AqlQueue::RingHwDoorbell(hsa_signal_value_t value) {
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
   } else {
-    // Hardware doorbell supports AQL semantics.
     _mm_sfence();
     *(signal_.hardware_doorbell_ptr) = uint64_t(value);
-    /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
-  return;
+}
+
+void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
+  if (intercept_active_.load(std::memory_order_acquire)) {
+    // Intercept mode: wake the interceptor instead of ringing HW doorbell.
+    if (intercept_signal_) intercept_signal_->StoreRelaxed(value);
+    return;
+  }
+  RingHwDoorbell(value);
 }
 
 void AqlQueue::StoreRelease(hsa_signal_value_t value) {
   std::atomic_thread_fence(std::memory_order_release);
   StoreRelaxed(value);
+}
+
+// ---------------------------------------------------------------------------
+// Packet interception support
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct InterceptFrame {
+  AqlQueue* queue;
+  uint64_t pkt_index;
+  size_t interceptor_index;
+};
+
+static thread_local InterceptFrame intercept_cursor = {nullptr, 0, 0};
+
+static const uint16_t kInvalidHeader =
+    (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE) |
+    (1 << HSA_PACKET_HEADER_BARRIER) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+
+static const uint16_t kBarrierHeader =
+    (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+    (1 << HSA_PACKET_HEADER_BARRIER) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+    (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+
+static const hsa_signal_value_t kDoorbellMax = 0xFFFFFFFFFFFFFFFFull;
+
+}  // namespace
+
+void AqlQueue::AddInterceptor(hsa_amd_queue_intercept_handler callback, void* data) {
+  assert(callback != nullptr && "Packet intercept callback was nullptr.");
+  interceptors_.push_back(std::make_pair(callback, data));
+}
+
+bool AqlQueue::IsInterceptRetryPending(uint64_t current_read_index) const {
+  return intercept_retry_index_ > current_read_index;
+}
+
+hsa_status_t AqlQueue::AttachIntercept() {
+  // Create the async intercept signal.
+  if (!core::g_use_interrupt_wait)
+    intercept_signal_ = new core::DefaultSignal(kDoorbellMax);
+  else
+    intercept_signal_ = new core::InterruptSignal(kDoorbellMax);
+
+  // Pre-allocate staging buffer for wrap-around.
+  intercept_staging_.resize(amd_queue_.hsa_queue.size);
+
+  // Install the final submit handler as the first interceptor in the chain.
+  interceptors_.insert(interceptors_.begin(),
+                       std::make_pair((hsa_amd_queue_intercept_handler)InterceptSubmit, (void*)this));
+
+  // Set initial state.
+  intercept_next_packet_ = LoadWriteIndexRelaxed();
+  intercept_retry_index_ = 0;
+  intercept_quit_ = false;
+
+  // Register async handler for device-side dispatches.
+  auto err = core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+      core::Signal::Convert(intercept_signal_), HSA_SIGNAL_CONDITION_NE,
+      intercept_signal_->LoadRelaxed(), HandleInterceptDoorbell, this);
+  if (err != HSA_STATUS_SUCCESS) {
+    intercept_signal_->DestroySignal();
+    intercept_signal_ = nullptr;
+    return err;
+  }
+
+  // Activate interception — write index ops stop advancing shadow_wptr_.
+  intercept_active_.store(true, std::memory_order_release);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t AqlQueue::DetachIntercept() {
+  // Deactivate — write index ops resume advancing shadow_wptr_.
+  intercept_active_.store(false, std::memory_order_release);
+
+  // Drain: advance shadow_wptr_ to current write_dispatch_id.
+  uint64_t wptr = LoadWriteIndexRelaxed();
+  atomic::Store(shadow_wptr_, wptr, std::memory_order_release);
+  if (wptr > 0) RingHwDoorbell(wptr - 1);
+
+  // Kill the async handler.
+  if (intercept_signal_) {
+    intercept_signal_->StoreRelaxed(kDoorbellMax);
+    intercept_quit_ = true;
+    hsa_signal_value_t val = intercept_signal_->ExchRelaxed(1);
+    if (val != 0)
+      intercept_signal_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1ull, HSA_WAIT_STATE_BLOCKED);
+    intercept_signal_->DestroySignal();
+    intercept_signal_ = nullptr;
+  }
+
+  interceptors_.clear();
+  intercept_overflow_.clear();
+  return HSA_STATUS_SUCCESS;
+}
+
+bool AqlQueue::HandleInterceptDoorbell(hsa_signal_value_t value, void* arg) {
+  AqlQueue* queue = reinterpret_cast<AqlQueue*>(arg);
+  if (queue->intercept_quit_) {
+    queue->intercept_signal_->StoreRelaxed(0);
+    return false;
+  }
+  queue->intercept_signal_->StoreRelaxed(kDoorbellMax);
+  queue->ProcessInterceptedPackets(value);
+  return true;
+}
+
+void AqlQueue::InterceptPacketWriter(const void* pkts, uint64_t pkt_count) {
+  assert(intercept_cursor.interceptor_index > 0 &&
+         "Packet intercept error: final submit handler must not call PacketWriter.\n");
+  --intercept_cursor.interceptor_index;
+  auto& handler = intercept_cursor.queue->interceptors_[intercept_cursor.interceptor_index];
+  handler.first(pkts, pkt_count, intercept_cursor.pkt_index, handler.second,
+                InterceptPacketWriter);
+  ++intercept_cursor.interceptor_index;
+}
+
+void AqlQueue::InterceptSubmit(const void* pkts, uint64_t pkt_count,
+                               uint64_t user_pkt_index, void* data,
+                               hsa_amd_queue_intercept_packet_writer writer) {
+  AqlQueue* queue = reinterpret_cast<AqlQueue*>(data);
+  const core::AqlPacket* packets = (const core::AqlPacket*)pkts;
+
+  uint64_t submitted = queue->SubmitInterceptedPackets(packets, pkt_count);
+  if (submitted == pkt_count) return;
+
+  // Stash unsubmitted packets for later.
+  assert(queue->intercept_overflow_.empty() &&
+         "Packet intercept error: overflow buffer not empty.\n");
+  for (uint64_t i = submitted; i < pkt_count; i++)
+    queue->intercept_overflow_.push_back(packets[i]);
+}
+
+uint64_t AqlQueue::SubmitInterceptedPackets(const core::AqlPacket* packets, uint64_t count) {
+  if (count == 0) return 0;
+
+  core::AqlPacket* ring = reinterpret_cast<core::AqlPacket*>(ring_buf_);
+  uint64_t mask = amd_queue_.hsa_queue.size - 1;
+
+  while (true) {
+    // shadow_wptr_ is the GPU-visible write pointer — it's where we write next.
+    uint64_t write = atomic::Load(shadow_wptr_, std::memory_order_relaxed);
+    uint64_t read = LoadReadIndexRelaxed();
+    uint64_t free_slots = amd_queue_.hsa_queue.size - (write - read);
+    bool pending_retry = IsInterceptRetryPending(read);
+
+    uint64_t submitted_count = count;
+
+    if (submitted_count >= amd_queue_.hsa_queue.size) {
+      submitted_count = free_slots - (pending_retry ? 0 : 1);
+    } else if (free_slots < submitted_count + (pending_retry ? 0 : 1)) {
+      if (!intercept_overflow_.empty() && free_slots > (pending_retry ? 1 : 2)) {
+        submitted_count = free_slots - (pending_retry ? 0 : 1);
+      } else {
+        submitted_count = 0;
+      }
+    }
+
+    // Insert retry barrier if we can't submit everything.
+    if (submitted_count < count && !pending_retry) {
+      assert(free_slots >= 1 &&
+             "Packet intercept error: no free slot for retry barrier packet.\n");
+      uint64_t barrier = atomic::Load(shadow_wptr_, std::memory_order_relaxed);
+      // Write barrier packet.
+      ring[barrier & mask].packet.body = {};
+      ring[barrier & mask].barrier_and.completion_signal =
+          core::Signal::Convert(intercept_signal_);
+      if (IsDeviceMemRingBuf() && needsPcieOrdering()) _mm_sfence();
+      atomic::Store(&ring[barrier & mask].barrier_and.header, kBarrierHeader,
+                    std::memory_order_release);
+      // Advance shadow_wptr_ for the barrier.
+      atomic::Store(shadow_wptr_, barrier + 1, std::memory_order_release);
+      RingHwDoorbell(barrier);
+      intercept_retry_index_ = barrier;
+      write = barrier + 1;
+    }
+
+    if (submitted_count == 0) return 0;
+
+    // Write packets to the ring buffer.
+    uint64_t first_header = 0;
+    for (uint64_t i = 0; i < submitted_count; i++) {
+      if (i == 0) {
+        // Write body first, leave header as INVALID until all written.
+        ring[(write + i) & mask].packet.body = packets[i].packet.body;
+        first_header = packets[i].packet.header;
+      } else {
+        ring[(write + i) & mask] = packets[i];
+      }
+    }
+    if (IsDeviceMemRingBuf() && needsPcieOrdering()) _mm_sfence();
+    // Atomically make the first packet valid.
+    atomic::Store(&ring[write & mask].packet.header, (uint16_t)first_header,
+                  std::memory_order_release);
+    // Advance shadow_wptr_ to make all packets visible to GPU.
+    atomic::Store(shadow_wptr_, write + submitted_count, std::memory_order_release);
+    RingHwDoorbell(write + submitted_count - 1);
+    return submitted_count;
+  }
+}
+
+void AqlQueue::ProcessInterceptedPackets(hsa_signal_value_t value) {
+  if (!intercept_active_.load(std::memory_order_acquire)) return;
+
+  // Prevent recursive invocation — defer to async handler.
+  if (intercept_cursor.queue != nullptr) {
+    if (intercept_signal_) intercept_signal_->StoreRelaxed(value);
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(intercept_lock_);
+
+  // Submit overflow packets from previous invocation.
+  if (!intercept_overflow_.empty()) {
+    uint64_t submitted = SubmitInterceptedPackets(&intercept_overflow_[0],
+                                                  intercept_overflow_.size());
+    if (submitted < intercept_overflow_.size()) {
+      intercept_overflow_.erase(intercept_overflow_.begin(),
+                                intercept_overflow_.begin() + submitted);
+      return;
+    }
+    intercept_overflow_.clear();
+  }
+
+  intercept_cursor.queue = this;
+
+  core::AqlPacket* ring = reinterpret_cast<core::AqlPacket*>(ring_buf_);
+  uint64_t mask = amd_queue_.hsa_queue.size - 1;
+
+  // Find range of valid packets from the application's write_dispatch_id.
+  uint64_t end = LoadWriteIndexAcquire();
+  if (end > intercept_next_packet_ + amd_queue_.hsa_queue.size)
+    end = intercept_next_packet_ + amd_queue_.hsa_queue.size;
+
+  uint64_t i = intercept_next_packet_;
+  while (i < end) {
+    uint16_t header = atomic::Load(&ring[i & mask].packet.header,
+                                   std::memory_order_acquire);
+    if (!core::AqlPacket::IsValid(header)) break;
+    ++i;
+    if (!intercept_overflow_.empty()) break;
+  }
+
+  // Process callbacks.
+  uint64_t packet_count = i - intercept_next_packet_;
+  if (packet_count) {
+    intercept_cursor.interceptor_index = interceptors_.size() - 1;
+    intercept_cursor.pkt_index = intercept_next_packet_;
+    auto& handler = interceptors_[intercept_cursor.interceptor_index];
+
+    // Check for ring buffer wrap-around — callbacks expect contiguous memory.
+    if ((intercept_next_packet_ + packet_count) >
+        ((intercept_next_packet_ & ~mask) + amd_queue_.hsa_queue.size)) {
+      for (uint64_t j = 0; j < packet_count; ++j)
+        intercept_staging_[j] = ring[(intercept_next_packet_ + j) & mask];
+      handler.first(intercept_staging_.data(), packet_count, intercept_next_packet_,
+                    handler.second, InterceptPacketWriter);
+    } else {
+      handler.first(&ring[intercept_next_packet_ & mask], packet_count,
+                    intercept_next_packet_, handler.second, InterceptPacketWriter);
+    }
+  }
+
+  intercept_next_packet_ = i;
+  intercept_cursor.queue = nullptr;
 }
 
 void AqlQueue::GetInfoProperties(uint8_t value[8]) const {
@@ -646,6 +978,12 @@ void AqlQueue::FreeQueueMemory() {
 
   ring_buf_metadata_ = nullptr;
   ring_buf_metadata_alloc_bytes_ = 0;
+
+  if (shadow_wptr_) {
+    core::Runtime::runtime_singleton_->system_deallocator()(
+        const_cast<uint64_t*>(shadow_wptr_));
+    shadow_wptr_ = nullptr;
+  }
 }
 
 void AqlQueue::CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const {

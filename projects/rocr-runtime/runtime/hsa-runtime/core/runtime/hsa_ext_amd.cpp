@@ -57,7 +57,7 @@
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/default_signal.h"
 #include "core/inc/exceptions.h"
-#include "core/inc/intercept_queue.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/ipc_signal.h"
 #include "core/inc/runtime.h"
@@ -1375,21 +1375,11 @@ hsa_status_t hsa_amd_queue_intercept_create(
   IS_OPEN();
   IS_BAD_PTR(queue);
 
-  // A wrapped queue for the intercept queue must have at least 3 slots so
-  // there is space for a packet, a new retry barrier packet, and an existing
-  // retry packet that is in the process of being processed.
   if (size < 3) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  hsa_queue_t* lower_queue;
-  hsa_status_t err = HSA::hsa_queue_create(agent_handle, size, type, callback, data,
-                                           private_segment_size, group_segment_size, &lower_queue);
-  if (err != HSA_STATUS_SUCCESS) return err;
-  std::unique_ptr<core::Queue> lowerQueue(core::Queue::Convert(lower_queue));
-
-  std::unique_ptr<core::InterceptQueue> upperQueue(new core::InterceptQueue(std::move(lowerQueue)));
-
-  *queue = core::Queue::Convert(upperQueue.release());
-  return HSA_STATUS_SUCCESS;
+  // Every AqlQueue now has interception built in — just create a normal queue.
+  return HSA::hsa_queue_create(agent_handle, size, type, callback, data,
+                               private_segment_size, group_segment_size, queue);
   CATCH;
 }
 
@@ -1402,9 +1392,13 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
   IS_BAD_PTR(callback);
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
-  if (!core::InterceptQueue::IsType(cmd_queue)) return HSA_STATUS_ERROR_INVALID_QUEUE;
-  core::InterceptQueue* iQueue = static_cast<core::InterceptQueue*>(cmd_queue);
-  iQueue->AddInterceptor(callback, user_data);
+  if (!AMD::AqlQueue::IsType(cmd_queue)) return HSA_STATUS_ERROR_INVALID_QUEUE;
+  AMD::AqlQueue* aql = static_cast<AMD::AqlQueue*>(cmd_queue);
+  aql->AddInterceptor(callback, user_data);
+  if (!aql->IsInterceptActive()) {
+    hsa_status_t err = aql->AttachIntercept();
+    if (err != HSA_STATUS_SUCCESS) return err;
+  }
   return HSA_STATUS_SUCCESS;
   CATCH;
 }

@@ -236,7 +236,6 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/hsa_ext_amd.cpp
            core/runtime/hsa_ext_interface.cpp
            core/runtime/interrupt_signal.cpp
-           core/runtime/intercept_queue.cpp
            core/runtime/ipc_signal.cpp
            core/runtime/isa.cpp
            core/runtime/runtime.cpp

@@ -43,11 +43,15 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_HW_AQL_COMMAND_PROCESSOR_H_
 #define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_COMMAND_PROCESSOR_H_
 
+#include <vector>
+#include <utility>
+
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/queue.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/util/locks.h"
+#include "inc/hsa_api_trace.h"
 
 namespace rocr {
 namespace AMD {
@@ -70,6 +74,20 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
            bool metadata_prefetch, uint64_t flags);
 
   ~AqlQueue();
+
+  /// @brief Register a packet interceptor callback.
+  void AddInterceptor(hsa_amd_queue_intercept_handler callback, void* data);
+
+  /// @brief Activate interception on this queue.
+  hsa_status_t AttachIntercept();
+
+  /// @brief Deactivate interception and drain pending packets.
+  hsa_status_t DetachIntercept();
+
+  /// @brief Returns true if interception is active.
+  bool IsInterceptActive() const {
+    return intercept_active_.load(std::memory_order_relaxed);
+  }
 
   /// @brief Queue interfaces
   hsa_status_t Inactivate() override;
@@ -278,6 +296,9 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   void HandleInsufficientScratch(hsa_signal_value_t& error_code, hsa_signal_value_t& waitVal,
                                  bool& changeWait);
 
+  /// @brief Write directly to the HW doorbell MMIO register.
+  void RingHwDoorbell(hsa_signal_value_t value);
+
   /// @brief Handler for hardware queue events.
   template <bool HandleExceptions>
   static bool DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* arg);
@@ -334,6 +355,58 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   // Exception notification signal
   Signal* exception_signal_;
+
+  // Shadow write pointer — GPU polls this instead of write_dispatch_id.
+  // Allocated in GPU-visible system memory.
+  volatile uint64_t* shadow_wptr_ = nullptr;
+
+  // When true, write index ops stop advancing shadow_wptr_ and doorbell
+  // rings are redirected to the interceptor signal.
+  std::atomic<bool> intercept_active_{false};
+
+  // Signal used to wake the interceptor thread when packets arrive.
+  core::Signal* intercept_signal_ = nullptr;
+
+  // Next packet index the interceptor should process.
+  uint64_t intercept_next_packet_ = 0;
+
+  // Index at which async intercept retry was scheduled.
+  uint64_t intercept_retry_index_ = 0;
+
+  // Post-interception packet overflow buffer.
+  std::vector<core::AqlPacket> intercept_overflow_;
+
+  // Pre-allocated staging buffer for ring wrap-around cases.
+  std::vector<core::AqlPacket> intercept_staging_;
+
+  // Serialize packet interception processing.
+  std::mutex intercept_lock_;
+
+  // Packet interceptor callbacks.
+  std::vector<std::pair<AMD::callback_t<hsa_amd_queue_intercept_handler>, void*>> interceptors_;
+
+  // Quit flag for async interceptor handler.
+  std::atomic<bool> intercept_quit_{false};
+
+  /// @brief Process intercepted packets from the ring buffer.
+  void ProcessInterceptedPackets(hsa_signal_value_t value);
+
+  /// @brief Async doorbell handler for device-side dispatches.
+  static bool HandleInterceptDoorbell(hsa_signal_value_t value, void* arg);
+
+  /// @brief Callback chain writer for interceptors.
+  static void InterceptPacketWriter(const void* pkts, uint64_t pkt_count);
+
+  /// @brief Final submit handler — advances shadow_wptr_.
+  static void InterceptSubmit(const void* pkts, uint64_t pkt_count,
+                              uint64_t user_pkt_index, void* data,
+                              hsa_amd_queue_intercept_packet_writer writer);
+
+  /// @brief Submit packets to the HW ring and return count submitted.
+  uint64_t SubmitInterceptedPackets(const core::AqlPacket* packets, uint64_t count);
+
+  /// @brief Check if a retry barrier is still pending.
+  bool IsInterceptRetryPending(uint64_t current_read_index) const;
 
   // CU mask lock
   std::mutex mask_lock_;
