@@ -44,6 +44,7 @@
 #include <cstring>
 #include <regex>
 #include <string>
+#include <thread>
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
@@ -375,6 +376,14 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     }
 
     allocation_map_.erase(it);
+  }
+
+  // Remove IPC socket server bookkeeping for this allocation.
+  // This prevents stale ipc_sock_server_conns_ entries if exported memory is freed
+  // before a later import/ack cleanup path occurs.
+  {
+    std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+    ipc_sock_server_conns_.erase(reinterpret_cast<uint64_t>(ptr));
   }
 
   // Notifiers can't run while holding the lock or the callback won't be able to manage memory.
@@ -1419,28 +1428,58 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   runtime_singleton_->DmaBufClose(dmabuf_fd);
 
-  std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-  if (!ipc_sock_server_conns_.size()) {
+  std::unique_lock<std::mutex> lock(ipc_sock_server_lock_);
+
+  // If another thread is already shutting down the old IPC socket server,
+  // wait for that transition to complete before proceeding.
+  while (ipc_sock_server_shutdown_in_progress_) {
+    lock.unlock();
+    std::this_thread::yield();
+    lock.lock();
+  }
+
+  if (ipc_sock_server_conns_.empty()) {
+    os::Thread old_thread = nullptr;
+
+    // If all prior IPC exports were freed, the map can be empty while the
+    // old server thread is still blocked in accept(). Transition shutdown
+    // state under the lock so only one creator tears it down.
     if (ipc_sock_server_thread_) {
-      os::WaitForThread(ipc_sock_server_thread_);
-      os::CloseThread(ipc_sock_server_thread_);
-      ipc_sock_server_thread_ = nullptr;
+      old_thread = ipc_sock_server_thread_;
+      ipc_sock_server_shutdown_in_progress_ = true;
     }
 
-    char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
-    snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", handle->handle[2]);
+    if (old_thread) {
+      lock.unlock();
+      IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
+                      0, nullptr, nullptr, nullptr, false, 0);
+      os::WaitForThread(old_thread);
+      os::CloseThread(old_thread);
+      lock.lock();
 
-    ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
-    assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE && "DMA buffer could not"
-      "be exported for IPC!");
-    if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
-
-    ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
-    if (!ipc_sock_server_thread_) {
-      ipc_sock_server_conns_.clear();
-      os::CloseIPCSocket(ipc_sock_server_fd_);
+      ipc_sock_server_thread_ = nullptr;
       ipc_sock_server_fd_ = os::INVALID_SOCKET_VALUE;
-      return HSA_STATUS_ERROR;
+      ipc_sock_server_shutdown_in_progress_ = false;
+    }
+
+    // Re-check after unlock/relock because another thread could have created
+    // the server while we were waiting for the old thread to exit.
+    if (ipc_sock_server_conns_.empty() && !ipc_sock_server_thread_) {
+      char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
+      snprintf(socketName, sizeof(socketName), "xhsa%i", handle->handle[2]);
+
+      ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
+      assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE && "DMA buffer could not"
+        "be exported for IPC!");
+      if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
+
+      ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
+      if (!ipc_sock_server_thread_) {
+        ipc_sock_server_conns_.clear();
+        os::CloseIPCSocket(ipc_sock_server_fd_);
+        ipc_sock_server_fd_ = os::INVALID_SOCKET_VALUE;
+        return HSA_STATUS_ERROR;
+      }
     }
   }
   ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
@@ -2343,7 +2382,8 @@ Runtime::Runtime()
       thunkLoader_(nullptr),
       kfd_version{},
       ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
-      ipc_sock_server_thread_(nullptr) {
+      ipc_sock_server_thread_(nullptr),
+      ipc_sock_server_shutdown_in_progress_(false) {
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
   xnack_enabled_ = false;
@@ -2434,15 +2474,20 @@ hsa_status_t Runtime::Load() {
 }
 
 void Runtime::Unload() {
-  // Close IPC socket server
-  if (ipc_sock_server_conns_.size())
+  // Close IPC socket server. Capture thread handle under lock to avoid race
+  // with IPCCreate which may be restarting the server concurrently.
+  os::Thread thread_to_close = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
+    thread_to_close = ipc_sock_server_thread_;
+    ipc_sock_server_thread_ = nullptr;
+  }
+
+  if (thread_to_close) {
     IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
                     0, nullptr, nullptr, nullptr, false, 0);
-
-  if (ipc_sock_server_thread_) {
-    os::WaitForThread(ipc_sock_server_thread_);
-    os::CloseThread(ipc_sock_server_thread_);
-    ipc_sock_server_thread_ = nullptr;
+    os::WaitForThread(thread_to_close);
+    os::CloseThread(thread_to_close);
   }
 
   svm_profile_.reset(nullptr);
