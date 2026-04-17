@@ -167,6 +167,17 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
 
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
 {
+    constexpr uint64_t kernel_id_0           = 10;
+    constexpr uint64_t kernel_id_1           = 20;
+    const std::string  target_kernel_name    = m_filtering_params.mangled_kernel_name;
+    const std ::string nontarget_kernel_name = "non_matching";
+
+    m_tool_data->kernel_filter_include_regex = m_filtering_params.kernel_regex;
+    invoke_tool_tracing_callback(kernel_id_0, target_kernel_name);
+    invoke_tool_tracing_callback(kernel_id_1, nontarget_kernel_name);
+
+    EXPECT_EQ(m_tool_data->target_kernel_ids.size(), 1);
+    EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id_0);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -235,7 +246,7 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
               dispatch_data.dispatch_info.group_segment_size);
 }
 
-void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id)
+void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const std::string& kernel_name)
 {
     rocprofiler_callback_tracing_record_t                                  record  = {};
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
@@ -244,7 +255,8 @@ void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id)
     record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
     record.payload   = &payload;
 
-    payload.kernel_id = kernel_id;
+    payload.kernel_id   = kernel_id;
+    payload.kernel_name = kernel_name.c_str();
     m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
 }
 
