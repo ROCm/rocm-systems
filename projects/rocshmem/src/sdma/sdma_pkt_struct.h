@@ -31,21 +31,7 @@
 #ifndef LIBRARY_SRC_SDMA_SDMA_PKT_STRUCT_H_
 #define LIBRARY_SRC_SDMA_SDMA_PKT_STRUCT_H_
 
-const unsigned int SDMA_OP_NOP = 0;
-const unsigned int SDMA_OP_COPY = 1;
-const unsigned int SDMA_OP_WRITE = 2;
-
-const unsigned int SDMA_OP_FENCE = 5;
-const unsigned int SDMA_OP_TRAP = 6;
-const unsigned int SDMA_OP_POLL_REGMEM = 8;
-const unsigned int SDMA_OP_TIMESTAMP = 13;
-const unsigned int SDMA_OP_ATOMIC = 10;
-const unsigned int SDMA_OP_CONST_FILL = 11;
-
-const unsigned int SDMA_SUBOP_COPY_LINEAR = 0;
-
-const unsigned int SDMA_SUBOP_WRITE_LINEAR = 0;
-const unsigned int SDMA_ATOMIC_ADD64 = 47;
+#include "sdma_opcodes.h"
 
 typedef struct SDMA_PKT_COPY_LINEAR_TAG {
   union {
