@@ -389,7 +389,34 @@ void HipFunctorTests::TestForFunctorContainInStructObj(void) {
  *    - HIP_VERSION >= 5.5
  */
 
-HIP_TEST_CASE(Unit_hipLaunchParmFunctor) {
+#ifdef KERNEL_ARG_PREFETCH
+/*
+ * Ony kernel args of built-in types can be prefetched. The related cases include,
+ *   TestForClassObjPtrFunctor
+ *   TestForStructObjPtrFunctor
+ * The kernel args of classes, structures cannot be prefetched due to a compiler limitation.
+ * The related cases include,
+ *   TestForSimpleClassFunctor
+ *   TestForClassTemplateFunctor
+ *   TestForSimpleStructFunctor
+ *   TestForStructTemplateFunctor
+ *   TestForFunctorContainInClassObj
+ *   TestForFunctorContainInStructObj
+ * Note:
+ *   1. Built-in blit kernels' arg won't be prefetched by default,
+ *      will if we set ENV DEBUG_CLR_BLIT_KERNARG_OPT=true.
+ *   2. Above compiler limitation will be possibly fixed later.
+ *   3. To verify whether prefetch does work for an aql packet,
+ *      check "prefetch: SetHeader" keyword in AMD log.
+ */
+TEST_CASE("Unit_hipLaunchParmFunctor_kernel_arg_prefetch") {
+  if (!HipTest::isKernelArgPrefetchSupported()) {
+    HipTest::HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
+    return;
+  }
+#else
+TEST_CASE("Unit_hipLaunchParmFunctor") {
+#endif  // KERNEL_ARG_PREFETCH
   HipFunctorTests FunctorTests;
 
   SECTION("test for simple class functor") { FunctorTests.TestForSimpleClassFunctor(); }

@@ -214,16 +214,3 @@ private:
 };
 }  // namespace component
 }  // namespace rocprofsys
-
-#if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                            \
-    (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
-
-#    include <timemory/components/base.hpp>
-#    include <timemory/components/data_tracker/components.hpp>
-#    include <timemory/operations.hpp>
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<float, tim::project::rocprofsys>), true, float)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(comm_data, false, void)
-#endif

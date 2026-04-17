@@ -6345,7 +6345,7 @@ def test_noise_clamp_clamping_behavior():
     """Core behavior: positives unchanged, negatives clamped to 0."""
     import numpy as np
 
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     # Scalar: positive unchanged
     assert to_noise_clamp(1000.0, 100000.0) == 1000.0
@@ -6368,7 +6368,7 @@ def test_noise_clamp_clamping_behavior():
 @pytest.mark.noise_clamp
 def test_noise_clamp_zero_reference():
     """Edge case: zero reference should not cause division by zero."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     assert to_noise_clamp(-100.0, 0.0) == 0.0
     result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
@@ -6378,7 +6378,7 @@ def test_noise_clamp_zero_reference():
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6397,7 +6397,7 @@ def test_noise_clamp_warning_above_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6414,7 +6414,7 @@ def test_noise_clamp_no_warning_below_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_empty_input():
     """Empty inputs should return empty without error."""
-    from utils.parser import to_noise_clamp
+    from utils.metrics.noise_clamper import to_noise_clamp
 
     result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
     assert len(result) == 0
@@ -6423,7 +6423,7 @@ def test_noise_clamp_empty_input():
 @pytest.mark.noise_clamp
 def test_noise_clamp_threshold_boundary():
     """Exactly 1% error should trigger warning (>= not >)."""
-    from utils.parser import (
+    from utils.metrics.noise_clamper import (
         clear_noise_clamp_warnings,
         get_noise_clamp_warnings,
         to_noise_clamp,
@@ -6441,7 +6441,7 @@ def test_noise_clamper_instance_isolation():
     """Separate NoiseClamper instances should have independent state."""
     import numpy as np
 
-    from utils.parser import NoiseClamper
+    from utils.metrics.noise_clamper import NoiseClamper
 
     clamper1 = NoiseClamper()
     clamper2 = NoiseClamper()
