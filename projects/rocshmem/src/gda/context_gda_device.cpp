@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_gda.hpp"
+#include "log.hpp"
 #include "context_gda_device.hpp"
 #include "context_gda_tmpl_device.hpp"
 
@@ -43,15 +44,15 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
 
   ctx_id_ = ctx_id;
   num_qps_per_pe = ctx_id_?
-      envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
-      envvar::gda::num_qps_per_pe_default_ctx.get_value();
+      backend->qps_per_pe_usr_ctx_ :
+      backend->qps_per_pe_default_ctx_;
 
   num_qps = num_qps_per_pe * num_pes;
 
   // Calculate offset into the backend's GPU QP array
   int offset = (ctx_id_ > 0) *
-    (envvar::gda::num_qps_per_pe_default_ctx.get_value() +
-     envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id_ - 1));
+    (backend->qps_per_pe_default_ctx_ +
+     backend->qps_per_pe_usr_ctx_ * (ctx_id_ - 1));
   offset *= num_pes;
 
   CHECK_HIP(hipMalloc(&qp_counter, sizeof(uint32_t) * num_pes));
@@ -341,7 +342,7 @@ __device__ void GDAContext::putmem_signal(void *dest, const void *source,
       qp_index, wf_info);
     break;
   default:
-    DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+    LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
     break;
   }
   //TODO: missing quiet_pe?
@@ -364,7 +365,7 @@ __device__ void GDAContext::putmem_signal_wg(void *dest, const void *source,
         qp_index, wf_info);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
     //TODO: missing quiet_pe?
@@ -388,7 +389,7 @@ __device__ void GDAContext::putmem_signal_wave(void *dest, const void *source,
         qp_index, wf_info);
       break;
     default:
-      DPRINTF("[%s] Invalid sig_op value (%d)\n", __func__, sig_op);
+      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
       break;
     }
     //TODO: missing quiet_pe?

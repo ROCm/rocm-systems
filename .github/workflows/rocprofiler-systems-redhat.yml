@@ -126,7 +126,7 @@ jobs:
         TAG="${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-${{ matrix.compiler }}-python-mpip-rocm-${{ matrix.rocm-version }}" &&
         python3 ./scripts/run-ci.py -B build
           --name ${TAG}
-          --build-jobs 2
+          --build-jobs $(nproc)
           --site GitHub
           --
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
@@ -179,7 +179,7 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run:
-        cmake --build build --target install --parallel 2
+        cmake --build build --target install --parallel $(nproc)
 
     - name: Test Install
       timeout-minutes: 10

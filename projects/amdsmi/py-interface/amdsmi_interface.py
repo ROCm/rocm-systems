@@ -1376,11 +1376,11 @@ def amdsmi_get_cpu_core_energy(processor_handle: processor_handle_t) -> str:
     return f"{float(penergy.value * pow(10, -6))} J"
 
 
-def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> float:
+def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    power = ctypes.c_double()
+    power = ctypes.c_uint32()
 
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_core_ccd_power(processor_handle, ctypes.byref(power)))
 
@@ -1499,7 +1499,7 @@ def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    ppower = ctypes.c_double()
+    ppower = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power(processor_handle, ctypes.byref(ppower)))
 
     return f"{ppower.value} Watts"
@@ -1509,7 +1509,7 @@ def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> str
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    pcap = ctypes.c_double()
+    pcap = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap(processor_handle, ctypes.byref(pcap)))
 
     return f"{pcap.value} Watts"
@@ -1519,7 +1519,7 @@ def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) ->
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    pmax = ctypes.c_double()
+    pmax = ctypes.c_uint32()
     _check_res(
         amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap_max(processor_handle, ctypes.byref(pmax))
     )
@@ -1586,7 +1586,7 @@ def amdsmi_get_cpu_pwr_efficiency_mode(processor_handle: processor_handle_t) -> 
 
     mode = ctypes.c_uint32()
     util = ctypes.c_uint32()
-    ppt_limit = ctypes.c_double()
+    ppt_limit = ctypes.c_uint32()
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_cpu_pwr_efficiency_mode(
@@ -2356,7 +2356,7 @@ def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    sdps_limit = ctypes.c_double()
+    sdps_limit = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_sdps_limit(processor_handle, ctypes.byref(sdps_limit)))
 
     # In Watt
@@ -5148,7 +5148,7 @@ def amdsmi_set_gpu_clk_limit(
         clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_DF
     else:
         raise AmdSmiParameterException(f"Unsupported clock type: {clk_type}", str)
-    
+
     if limit_type.lower() == "min":
         limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MIN
     elif limit_type.lower() == "max":

@@ -2,7 +2,7 @@
 name: amdsmi-review-style
 description: "Style review subagent. Checks formatting, naming, pre-commit compliance. Use when: style review, formatting check, naming conventions."
 tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 4"
+model: "Claude Sonnet 4.6"
 user-invocable: false
 ---
 

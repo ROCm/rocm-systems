@@ -175,7 +175,7 @@ __device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, ui
   }
 }
 
-__device__ uint64_t QueuePair::post_wqe_amo(int32_t size, uintptr_t raddr,
+__device__ uint64_t QueuePair::post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, ActiveWFInfo &wf_info) {
   switch (gda_provider_) {

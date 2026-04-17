@@ -140,12 +140,6 @@ class InstEncoding(InstBase):
     """An encoding in the ISA specification.
 
     Attributes:
-        is_alt: True if this is an alternate (special-case) encoding. Set
-            by the parser using the ISA profile's ``is_alt_encoding()``
-            method rather than derived from naming conventions.
-        has_unique_ops: True if this alternate encoding defines opcode
-            ranges distinct from its parent. Derived during parsing by
-            checking for opcode collisions with the parent encoding.
         is_primary_decode: True if decoded from the primary decode table.
         primary_dt_ptrs: Pointers to entries in the primary decode table.
         order: Decoding order for this encoding.
@@ -169,8 +163,6 @@ class InstEncoding(InstBase):
         enc_conds: list[tuple[str, str]],
     ) -> None:
         super().__init__(name)
-        self.is_alt = False
-        self.has_unique_ops = False
         self.is_primary_decode = True
         self.primary_dt_ptrs: list[int] | None = None
         self.order = order
@@ -182,28 +174,11 @@ class InstEncoding(InstBase):
         self.enc_conds = enc_conds
         self.insts: list[Instruction] = []
         self.implied_literal_ops: list[str] = []
-        self._parent_enc: InstEncoding | None = None
 
     @cached_property
     def has_implied_literal_ops(self) -> bool:
         """True if this encoding has any implied literal opcodes."""
         return len(self.implied_literal_ops) > 0
-
-    @property
-    def parent_enc(self) -> InstEncoding:
-        """Parent encoding instance, or self if not alternate."""
-        if self.is_alt and self._parent_enc is not None:
-            return self._parent_enc
-        return self
-
-    @parent_enc.setter
-    def parent_enc(self, parent: InstEncoding) -> None:
-        if not self.is_alt:
-            raise AttributeError(
-                f'Cannot set parent encoding for non-alternate encoding: '
-                f'{self.enc_name}'
-            )
-        self._parent_enc = parent
 
 
 class Instruction(InstBase):
@@ -283,13 +258,6 @@ class IsaSpec:
         opnd_selectors: All operand selectors.
         primary_decode_table: The primary decode table (indexed by the top
             ``profile.max_enc_bits`` bits of the instruction word).
-        alt_encs_with_unique_ops: Alternate encoding names that define
-            opcode ranges distinct from their parent. Populated during
-            parsing by detecting opcode collisions.
-        alt_encs_primary_decode: Alternate encoding names that reuse the
-            parent's primary decode table entries. Populated during
-            parsing when the alternate's encoding identifiers collide
-            with existing primary table entries.
         alt_encs_with_implied_literal: Alternate encoding names whose
             encoding conditions indicate an implied literal DWORD.
             Populated during parsing using the profile's
@@ -309,8 +277,6 @@ class IsaSpec:
         self.primary_decode_table: list[DecodeTableEntry | None] = [
             None
         ] * pow(2, profile.max_enc_bits)
-        self.alt_encs_with_unique_ops: set[str] = set()
-        self.alt_encs_primary_decode: set[str] = set()
         self.alt_encs_with_implied_literal: set[str] = set()
         if self.version not in profile.supported_versions:
             raise ValueError(

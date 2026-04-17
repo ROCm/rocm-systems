@@ -67,6 +67,26 @@ def pytest_addoption(parser):
         action="store",
         help="Path to summary markdown file.",
     )
+    parser.addoption(
+        "--summary-kernel-dir",
+        action="store",
+        help="Path to KERNEL category summary output directory.",
+    )
+    parser.addoption(
+        "--summary-hip-dir",
+        action="store",
+        help="Path to HIP category summary output directory.",
+    )
+    parser.addoption(
+        "--summary-multiple-dir",
+        action="store",
+        help="Path to multiple categories summary output directory.",
+    )
+    parser.addoption(
+        "--summary-none-dir",
+        action="store",
+        help="Path to NONE category summary output directory.",
+    )
 
     pd.set_option("display.width", 2000)
     # increase debug display of pandas dataframes
@@ -166,3 +186,24 @@ def summary_data(request):
     process_current_domain(current_name, current_list)
 
     return domains
+
+
+# Fixtures for region category summary tests
+@pytest.fixture
+def summary_kernel_dir(request):
+    return request.config.getoption("--summary-kernel-dir")
+
+
+@pytest.fixture
+def summary_hip_dir(request):
+    return request.config.getoption("--summary-hip-dir")
+
+
+@pytest.fixture
+def summary_multiple_dir(request):
+    return request.config.getoption("--summary-multiple-dir")
+
+
+@pytest.fixture
+def summary_none_dir(request):
+    return request.config.getoption("--summary-none-dir")

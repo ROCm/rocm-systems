@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -185,15 +185,15 @@ private:
 
         // See enabled_metrics definition in common.hpp for bit position documentation
         const std::unordered_map<std::string, uint16_t> mapper{
-            { "temp", make_metric({ 3, 4 }) },        // hotspot, edge
-            { "power", make_metric({ 0, 1 }) },       // current, average
-            { "busy", make_metric({ 5, 6, 7 }) },     // gfx, umc, mm
-            { "mem_usage", make_metric({ 2 }) },      // memory_usage
-            { "vcn_activity", make_metric({ 8 }) },   // vcn_activity
-            { "jpeg_activity", make_metric({ 9 }) },  // jpeg_activity
-            { "xgmi", make_metric({ 12 }) },          // xgmi
-            { "pcie", make_metric({ 13 }) },          // pcie
-            { "sdma_usage", make_metric({ 14 }) },    // sdma_usage
+            { "power", make_metric({ 0, 1 }) },           // current, average
+            { "mem_usage", make_metric({ 2 }) },          // memory_usage
+            { "temp", make_metric({ 3, 4 }) },            // hotspot, edge
+            { "busy", make_metric({ 5, 6, 7 }) },         // gfx, umc, mm
+            { "vcn_activity", make_metric({ 8, 10 }) },   // vcn_activity
+            { "jpeg_activity", make_metric({ 9, 11 }) },  // jpeg_activity
+            { "xgmi", make_metric({ 12 }) },              // xgmi
+            { "pcie", make_metric({ 13 }) },              // pcie
+            { "sdma_usage", make_metric({ 14 }) },        // sdma_usage
         };
 
         gpu::enabled_metrics metrics;

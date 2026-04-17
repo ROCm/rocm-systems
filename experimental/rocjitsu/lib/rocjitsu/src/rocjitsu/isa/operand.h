@@ -31,8 +31,10 @@ public:
   virtual ~Operand() = default;
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
-  /// @returns Operand name string.
   virtual std::string name() const { return std::to_string(encoding_value_); }
+
+  /// @brief Raw encoding value from the instruction binary.
+  int encoding_value() const { return encoding_value_; }
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
@@ -100,6 +102,41 @@ public:
 
   /// @brief ISA-specific operand type tag.
   typename Isa::OperandType opr_type_{};
+};
+
+/// @brief DPP-aware operand proxy that applies lane permutation on read.
+///
+/// Wraps a regular VGPR operand and overrides read_lane() to return
+/// pre-permuted values. Constructed by the VOP1/VOP2 encoding base when
+/// DPP is detected (src0 == 250). The pre-permuted values are computed
+/// once at construction time.
+class DppOperand : public Operand {
+public:
+  static constexpr int MAX_LANES = 64;
+
+  DppOperand() = default;
+
+  /// @brief Construct from a source operand + pre-permuted data.
+  /// @param base The underlying operand (for name/size/scalar reads).
+  /// @param data Pre-permuted lane values (one per lane).
+  /// @param lane_count Number of valid lanes.
+  DppOperand(const Operand &base, const uint32_t *data, int lane_count)
+      : Operand(base.size_bits_, base.encoding_value_), lane_count_(lane_count) {
+    for (int i = 0; i < lane_count && i < MAX_LANES; ++i)
+      data_[i] = data[i];
+  }
+
+  uint32_t read_lane(const amdgpu::Wavefront & /*wf*/, uint32_t lane) const override {
+    return (lane < static_cast<uint32_t>(lane_count_)) ? data_[lane] : 0;
+  }
+
+  uint32_t read_scalar(const amdgpu::Wavefront & /*wf*/) const override { return data_[0]; }
+
+  std::string name() const override { return "dpp_src"; }
+
+private:
+  uint32_t data_[MAX_LANES]{};
+  int lane_count_ = 0;
 };
 
 } // namespace rocjitsu
