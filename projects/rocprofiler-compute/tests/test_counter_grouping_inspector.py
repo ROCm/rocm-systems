@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit test for utils/counter_grouping_inspector.py
+"""Unit test for tools/counter_grouping_inspector.py
 
 Single test that loops through all supported architectures and verifies:
 - Return code of counter_grouping_inspector.py script is 0
@@ -14,10 +14,7 @@ from pathlib import Path
 
 # Path to counter_grouping_inspector.py script
 COUNTER_GROUPING_INSPECTOR_SCRIPT = (
-    Path(__file__).resolve().parent.parent
-    / "src"
-    / "utils"
-    / "counter_grouping_inspector.py"
+    Path(__file__).resolve().parent.parent / "tools" / "counter_grouping_inspector.py"
 )
 
 # Ensure src directory is in Python path for imports
@@ -33,9 +30,9 @@ def test_counter_grouping_inspector_all_supported_archs():
     1. Run counter_grouping_inspector.py --arch <arch> and verify return code is 0
     2. Parse output to verify buckets > 0 and counter assignments > 0
     """
-    from utils.counter_grouping_inspector import get_supported_archs
+    from utils.mi_gpu_spec import mi_gpu_specs
 
-    supported_archs = get_supported_archs()
+    supported_archs = list(mi_gpu_specs.get_gpu_series_dict().keys())
     assert len(supported_archs) > 0, "Should have at least one supported architecture"
 
     failed_archs = []

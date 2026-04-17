@@ -13,11 +13,11 @@ Perfmon bin-packing uses ``OmniSoC_Base._allocate_perfmon_counter_files`` from
 same metric-aware coalesce pass as profiling). This script does not implement a
 parallel grouping algorithm.
 
-Usage:
-    ./src/utils/counter_grouping_inspector.py --arch gfx942
-    ./src/utils/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
-    ./src/utils/counter_grouping_inspector.py --arch gfx942 --output plan.txt
-    ./src/utils/counter_grouping_inspector.py --arch gfx942 --output plan.svg
+Usage (from the ``rocprofiler-compute`` project root):
+    ./tools/counter_grouping_inspector.py --arch gfx942
+    ./tools/counter_grouping_inspector.py --arch gfx942 --block 2 3 4
+    ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.txt
+    ./tools/counter_grouping_inspector.py --arch gfx942 --output plan.svg
 """
 
 from __future__ import annotations
@@ -30,10 +30,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-# Ensure src directory is in Python path for imports
-_src_dir = Path(__file__).resolve().parent.parent
-if str(_src_dir) not in sys.path:
-    sys.path.insert(0, str(_src_dir))
+# This file lives under tools/; add src/ to path for rocprof_compute_* imports.
+_SRC_DIR = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 # Import from existing modules to maintain single source of truth
 from rocprof_compute_soc.soc_base import (  # noqa: E402
@@ -662,7 +662,7 @@ def render_perfmon_plan_svg(
 
 def get_default_config_dir() -> Path:
     """Get the default analysis configs directory."""
-    return Path(__file__).parent.parent / "rocprof_compute_soc" / "analysis_configs"
+    return _SRC_DIR / "rocprof_compute_soc" / "analysis_configs"
 
 
 def get_supported_archs() -> list[str]:
@@ -679,10 +679,10 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m utils.counter_grouping_inspector --arch gfx942
-  python -m utils.counter_grouping_inspector --arch gfx942 --block 0200 0400
-  python -m utils.counter_grouping_inspector --arch gfx942 --output plan.txt
-  python -m utils.counter_grouping_inspector --arch gfx942 --output plan.svg
+  python tools/counter_grouping_inspector.py --arch gfx942
+  python tools/counter_grouping_inspector.py --arch gfx942 --block 0200 0400
+  python tools/counter_grouping_inspector.py --arch gfx942 --output plan.txt
+  python tools/counter_grouping_inspector.py --arch gfx942 --output plan.svg
 """,
     )
     parser.add_argument(
@@ -745,7 +745,7 @@ Examples:
         )
         sys.exit(1)
 
-    counters, filter_blocks = detect_counters(config_dir, arch, args.block)
+    counters, _filter_blocks = detect_counters(config_dir, arch, args.block)
 
     if not counters:
         print("No counters found!", file=sys.stderr)
