@@ -4097,9 +4097,8 @@ amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
 // with '*' (e.g., gfx1151 in auto power management mode), which causes
 // the rocm_smi layer to return RSMI_STATUS_UNEXPECTED_DATA and discard
 // the valid frequency data.
-static amdsmi_status_t read_clk_freq_from_sysfs(
-    amdsmi_processor_handle processor_handle,
-    const char* pp_dpm_file, amdsmi_frequencies_t* f) {
+static amdsmi_status_t read_clk_freq_from_sysfs(amdsmi_processor_handle processor_handle,
+                                                const char* pp_dpm_file, amdsmi_frequencies_t* f) {
   if (f == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
@@ -4224,8 +4223,8 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
   }
 
   auto ret = rsmi_wrapper(rsmi_dev_gpu_clk_freq_get, processor_handle, 0,
-                      static_cast<rsmi_clk_type_t>(clk_type),
-                      reinterpret_cast<rsmi_frequencies_t*>(f));
+                          static_cast<rsmi_clk_type_t>(clk_type),
+                          reinterpret_cast<rsmi_frequencies_t*>(f));
 
   // When the rocm_smi layer returns UNEXPECTED_DATA, the sysfs file was read
   // successfully but had no '*' marker for the current clock level (common on
@@ -4888,18 +4887,16 @@ amdsmi_status_t amdsmi_is_gpu_power_management_enabled(amdsmi_processor_handle p
   return status;
 }
 
-amdsmi_status_t amdsmi_set_gpu_power_management_enabled(
-    amdsmi_processor_handle processor_handle, bool enabled) {
+amdsmi_status_t amdsmi_set_gpu_power_management_enabled(amdsmi_processor_handle processor_handle,
+                                                        bool enabled) {
   AMDSMI_CHECK_INIT();
 
   if (enabled) {
     // Setting to MANUAL forces all pp_dpm_* sysfs files to be available
-    return amdsmi_set_gpu_perf_level(processor_handle,
-                                     AMDSMI_DEV_PERF_LEVEL_MANUAL);
+    return amdsmi_set_gpu_perf_level(processor_handle, AMDSMI_DEV_PERF_LEVEL_MANUAL);
   } else {
     // Setting to AUTO returns to driver-controlled power management
-    return amdsmi_set_gpu_perf_level(processor_handle,
-                                     AMDSMI_DEV_PERF_LEVEL_AUTO);
+    return amdsmi_set_gpu_perf_level(processor_handle, AMDSMI_DEV_PERF_LEVEL_AUTO);
   }
 }
 
