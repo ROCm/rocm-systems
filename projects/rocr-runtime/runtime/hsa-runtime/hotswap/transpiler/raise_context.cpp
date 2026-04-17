@@ -126,7 +126,12 @@ ParsedReg RaiseContext::parseReg(MCRegister reg, int mciOpIdx) const {
   case AMDGPU::EXEC_LO:
   case AMDGPU::EXEC_HI:
     pr.kind = ParsedReg::EXEC;
-    pr.width = isa.isWave32() ? 1 : 2;
+    // baseIdx discriminates between the two 32-bit halves of wave64 EXEC
+    // (0 = EXEC_LO, 1 = EXEC_HI). The full 64-bit pair also resolves here
+    // via `sub0(EXEC) = EXEC_LO`, but `width = 2` tags it distinctly so
+    // storeExec partial-write logic can route correctly.
+    pr.baseIdx = (lane == AMDGPU::EXEC_HI) ? 1 : 0;
+    pr.width = width;
     return pr;
   case AMDGPU::SCC:
     pr.kind = ParsedReg::SCC;
@@ -238,9 +243,13 @@ Value *RaiseContext::readOp32(const DecodedInst &di, unsigned opIdx) {
     }
     if (pr.kind == ParsedReg::EXEC) {
       Value *v = regs.loadExec(B);
-      if (v->getType() != i32Ty)
-        v = B.CreateTrunc(v, i32Ty, "exec_lo");
-      return v;
+      if (v->getType() == i32Ty)
+        return v;
+      if (pr.width < 2 && pr.baseIdx == 1)
+        v = B.CreateLShr(v, 32, "exec_hi_shr");
+      return B.CreateTrunc(v, i32Ty,
+                            (pr.width < 2 && pr.baseIdx == 1) ? "exec_hi"
+                                                               : "exec_lo");
     }
     if (pr.kind == ParsedReg::SCC)
       return B.CreateZExt(regs.loadSCC(B), i32Ty);

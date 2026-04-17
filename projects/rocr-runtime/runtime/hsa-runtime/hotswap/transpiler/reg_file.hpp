@@ -311,9 +311,17 @@ struct AllocaRegFile {
       return readVCCAsWaveMask(B, B.getInt32Ty());
     if (pr.kind == ParsedReg::EXEC) {
       llvm::Value *v = loadExec(B);
-      if (v->getType() != B.getInt32Ty())
-        v = B.CreateTrunc(v, B.getInt32Ty(), "exec_lo");
-      return v;
+      llvm::Type *i32Ty = B.getInt32Ty();
+      if (v->getType() == i32Ty)
+        return v;
+      // wave64 EXEC is i64; pick the correct half when reading a 32-bit
+      // slice. width==2 reads are handled by readReg64 / readExecWidth;
+      // this path is the width==1 case where baseIdx selects LO/HI.
+      if (pr.width >= 2)
+        return B.CreateTrunc(v, i32Ty, "exec_lo");
+      if (pr.baseIdx == 1)
+        v = B.CreateLShr(v, 32, "exec_hi_shr");
+      return B.CreateTrunc(v, i32Ty, pr.baseIdx == 1 ? "exec_hi" : "exec_lo");
     }
     if (pr.kind == ParsedReg::SCC)
       return B.CreateZExt(loadSCC(B), B.getInt32Ty());
@@ -386,7 +394,38 @@ struct AllocaRegFile {
     if (pr.kind == ParsedReg::SGPR) storeSGPR32(B, pr.baseIdx, v);
     else if (pr.kind == ParsedReg::VGPR) storeVGPR32(B, pr.baseIdx, v);
     else if (pr.kind == ParsedReg::AGPR) storeAGPR32(B, pr.baseIdx, v);
-    else if (pr.kind == ParsedReg::EXEC) storeExec(B, v);
+    else if (pr.kind == ParsedReg::EXEC) {
+      llvm::Type *i32Ty = B.getInt32Ty();
+      // Coerce incoming value to i32. storeExec handles width matching to
+      // execTy (i32 on wave32 / i64 on wave64). For wave64, a 32-bit write
+      // addresses only EXEC_LO or EXEC_HI, so merge with the current value.
+      if (v->getType() != i32Ty) {
+        if (v->getType()->isPointerTy())
+          v = B.CreatePtrToInt(v, B.getInt64Ty());
+        if (v->getType() != i32Ty) {
+          unsigned bits = v->getType()->getPrimitiveSizeInBits();
+          v = bits > 32 ? B.CreateTrunc(v, i32Ty)
+                         : B.CreateBitCast(v, i32Ty);
+        }
+      }
+      if (execTy == i32Ty || pr.width >= 2) {
+        storeExec(B, v);
+      } else {
+        llvm::Value *cur = loadExec(B);
+        llvm::Value *v64 = B.CreateZExt(v, execTy);
+        llvm::Value *merged;
+        if (pr.baseIdx == 1) {
+          llvm::Value *mask = llvm::ConstantInt::get(execTy, 0xFFFFFFFFULL);
+          merged = B.CreateOr(B.CreateAnd(cur, mask),
+                               B.CreateShl(v64, 32), "exec_hi_write");
+        } else {
+          llvm::Value *mask = llvm::ConstantInt::get(
+              execTy, 0xFFFFFFFF00000000ULL);
+          merged = B.CreateOr(B.CreateAnd(cur, mask), v64, "exec_lo_write");
+        }
+        storeExec(B, merged);
+      }
+    }
     else if (pr.kind == ParsedReg::VCC) {
       storeVCC(B, extractLaneBitFromWaveMask(B, v));
     }
