@@ -162,6 +162,11 @@ you're comparing kernels that compute different quantities.
 | `swap_b32`        | `V_SWAP_B32` handler.  Pairwise element exchange, forced via inline asm — this is one of the few VALU ops that writes both of its operands, so it's specifically worth stressing. |
 | `mov_b64`         | `V_MOV_B64` handler (gfx11+).  Forced via inline asm under `#ifdef __gfx1250__`; gfx942 native uses a plain 64-bit copy because the opcode didn't exist yet.  Identity output. |
 | `cvt_f32_bf16`    | `V_CVT_F32_BF16` handler (gfx950+).  Forced via inline asm under `#ifdef __gfx1250__`; gfx942 native uses the bit-level upcast `bf16 -> (u32 << 16) reinterpreted as f32`.  Both paths are bit-exact. |
+| `v_add_lshl_u32`  | `V_ADD_LSHL_U32` handler.  Fused `(a+b) << (c & 31)` VOP3 op, forced via inline asm. |
+| `v_bfe_i32`       | `V_BFE_I32` handler.  Signed bit-field extract from a vector src, with low-5-bit masking of offset/width.  Forced via inline asm. |
+| `s_bfe_i32`       | `S_BFE_I32` handler (scalar signed BFE).  One output per block; per-block uniforms are pushed through `readfirstlane` to force SGPR operands. |
+| `s_bitset0_b32`   | `S_BITSET0_B32` handler.  Scalar read-modify-write bit clear; exercises the tied `sdst_in` input path via an inline-asm `+s` constraint. |
+| `s_bitset0_b64`   | `S_BITSET0_B64` handler.  64-bit sibling of `s_bitset0_b32`; dst/tied read are an SReg_64 pair, bit index is a 32-bit SGPR with low 6 bits consumed.  Covers `writeReg64` + tied-def plumbing for the 64-bit scalar path. |
 
 ## Handlers this harness does NOT cover
 

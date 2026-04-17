@@ -21,7 +21,7 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
 
   if (sop == SemOp::S_LOAD_B32 || sop == SemOp::S_LOAD_B64 ||
       sop == SemOp::S_LOAD_B96 || sop == SemOp::S_LOAD_B128 ||
-      sop == SemOp::S_LOAD_B256) {
+      sop == SemOp::S_LOAD_B256 || sop == SemOp::S_LOAD_B512) {
     int loadDwords = 1;
     switch (sop) {
     case SemOp::S_LOAD_B32:
@@ -38,6 +38,9 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
       break;
     case SemOp::S_LOAD_B256:
       loadDwords = 8;
+      break;
+    case SemOp::S_LOAD_B512:
+      loadDwords = 16;
       break;
     default:
       break;

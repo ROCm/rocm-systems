@@ -766,6 +766,48 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // v_bfe_i32: signed Bit Field Extract.
+  //   D.i = signext(bits [off+width-1 : off] of src), treating src as if
+  //         it had been sign-extended past bit 31 first.
+  // Implementation: arithmetic right shift by off (fills high bits with
+  // src's sign), then mask to `width` low bits and sign-extend from bit
+  // (width-1).  Using LShr instead of AShr here would give mask-and-sx
+  // only when off+width <= 32; hardware diverges in the wraparound case,
+  // so we must use AShr to stay bit-identical to native v_bfe_i32.
+  //
+  // Note: this is NOT the same formula as s_bfe_i32 — the scalar form
+  // uses a shift-trick (`(src << (32-off-w)) >> (32-w)`), the vector
+  // form uses mask-and-sign-extend.  The two hardware blocks differ on
+  // the wraparound case; do not "unify" them.
+  if (sop == SemOp::V_BFE_I32) {
+    Value *base = op.src(0), *offset = op.src(1), *width = op.src(2);
+    Value *c31 = ConstantInt::get(ctx.i32Ty, 0x1F);
+    offset = ctx.B.CreateAnd(offset, c31);
+    width = ctx.B.CreateAnd(width, c31);
+    Value *shifted = ctx.B.CreateAShr(base, offset);
+    // Build a mask of `width` low bits.  For width == 0 the result is 0
+    // (nothing to extract), so we special-case that below and use a
+    // safe shift amount (1) here to avoid UB in the mask computation.
+    Value *widthNonZero = ctx.B.CreateICmpNE(width,
+                                             ConstantInt::get(ctx.i32Ty, 0));
+    Value *maskShift = ctx.B.CreateSelect(widthNonZero, width,
+                                          ConstantInt::get(ctx.i32Ty, 1));
+    Value *mask = ctx.B.CreateSub(
+        ctx.B.CreateShl(ConstantInt::get(ctx.i32Ty, 1), maskShift),
+        ConstantInt::get(ctx.i32Ty, 1));
+    Value *field = ctx.B.CreateAnd(shifted, mask);
+    Value *widthMinus1 = ctx.B.CreateSub(maskShift,
+                                         ConstantInt::get(ctx.i32Ty, 1));
+    Value *signBit = ctx.B.CreateShl(ConstantInt::get(ctx.i32Ty, 1),
+                                     widthMinus1);
+    Value *sx = ctx.B.CreateSub(ctx.B.CreateXor(field, signBit), signBit,
+                                "vbfe_i");
+    Value *result = ctx.B.CreateSelect(widthNonZero, sx,
+                                       ConstantInt::get(ctx.i32Ty, 0));
+    ctx.writeReg32(op.dst(), result);
+    hr.handled = true;
+    return hr;
+  }
   // v_mbcnt_lo_u32_b32: Count bits set in src0 below the current lane
   if (sop == SemOp::V_MBCNT_LO_U32_B32) {
     Function *mbcnt = Intrinsic::getOrInsertDeclaration(&ctx.M,
@@ -1031,6 +1073,22 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
   }
   if (sop == SemOp::V_LSHL_ADD_U32) {
     ctx.writeReg32(op.dst(), ctx.B.CreateAdd(ctx.B.CreateShl(op.src(0), op.src(1)), op.src(2), "vlshl_add"));
+    hr.handled = true;
+    return hr;
+  }
+  // v_add_lshl_u32: fused three-input "add then shift".
+  //   D.u = (S0.u + S1.u) << S2.u[4:0]
+  // Unsigned wrap on the add is well-defined (CreateAdd defaults to
+  // "may wrap"), matching hardware.  The shift amount must be masked to
+  // 5 bits up front — AMDGPU shifts only consume S2[4:0], but LLVM's
+  // `shl` with a shift >= bit-width is poison, so an un-masked `op.src(2)`
+  // containing any high bits would silently corrupt the IR.  V_ADD_LSHL
+  // has no carry-out and writes no SCC/VCC, so this is the whole op.
+  if (sop == SemOp::V_ADD_LSHL_U32) {
+    Value *sum = ctx.B.CreateAdd(op.src(0), op.src(1));
+    Value *shamt = ctx.B.CreateAnd(op.src(2),
+                                   ConstantInt::get(ctx.i32Ty, 0x1F));
+    ctx.writeReg32(op.dst(), ctx.B.CreateShl(sum, shamt, "vadd_lshl"));
     hr.handled = true;
     return hr;
   }

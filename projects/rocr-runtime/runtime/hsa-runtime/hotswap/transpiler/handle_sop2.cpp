@@ -271,6 +271,54 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // s_bfe_i32: signed scalar Bit Field Extract.
+  //   shift  = ctrl[4:0]
+  //   length = ctrl[22:16]
+  //   if length == 0: D = 0
+  //   elif shift + length < 32:
+  //       D = sign_ext((src << (32 - shift - length)) >> (32 - length))
+  //   else:
+  //       D = (int32)src >> shift   (length saturates to full width)
+  // Matches native s_bfe_i32 exactly, including the shift-trick behavior
+  // that diverges from a naive "mask and sign-extend from bit (length-1)"
+  // implementation when shift + length >= 32.
+  //
+  // The `shl` / `ashr` amounts can legitimately be out-of-range on the
+  // "wrong" side of the isShortEnough select (e.g. `32 - sum` wraps to a
+  // huge value when sum >= 32, and `32 - length` is 32 when length == 0).
+  // LLVM's select doesn't propagate poison from the unselected branch so
+  // it's observationally safe, but we still mask every shift amount to 5
+  // bits up front to remove the poison source entirely and keep future
+  // optimizer passes from having to prove the guards are sound.
+  if (sop == SemOp::S_BFE_I32) {
+    Value *src = op.src(0), *ctrl = op.src(1);
+    Value *c31 = ConstantInt::get(ctx.i32Ty, 0x1F);
+    Value *c32 = ConstantInt::get(ctx.i32Ty, 32);
+    Value *shift = ctx.B.CreateAnd(ctrl, c31);
+    Value *length = ctx.B.CreateAnd(ctx.B.CreateLShr(ctrl, 16),
+                                    ConstantInt::get(ctx.i32Ty, 0x7F));
+    Value *sum = ctx.B.CreateAdd(shift, length);
+    Value *isShortEnough = ctx.B.CreateICmpULT(sum, c32);
+    Value *shlAmt = ctx.B.CreateAnd(ctx.B.CreateSub(c32, sum), c31);
+    Value *shiftedLeft = ctx.B.CreateShl(src, shlAmt);
+    Value *shrAmt = ctx.B.CreateAnd(ctx.B.CreateSub(c32, length), c31);
+    Value *sx = ctx.B.CreateAShr(shiftedLeft, shrAmt, "sbfe_i");
+    // Fall-through branch (length saturates): arithmetic right shift by
+    // `shift` gives "sign-extended src[31:shift]" in a single op.
+    Value *fallthrough = ctx.B.CreateAShr(src, shift, "sbfe_i_sat");
+    Value *computed = ctx.B.CreateSelect(isShortEnough, sx, fallthrough);
+    Value *isZero = ctx.B.CreateICmpEQ(length,
+                                       ConstantInt::get(ctx.i32Ty, 0));
+    Value *result = ctx.B.CreateSelect(isZero,
+                                       ConstantInt::get(ctx.i32Ty, 0),
+                                       computed);
+    // sccResult is an i32; downstream code derives SCC as (sccResult != 0),
+    // matching the ISA's "SCC = D != 0" for s_bfe_*.
+    hr.sccResult = result;
+    ctx.regs.writeReg32(ctx.B, op.dst(), result);
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::S_PACK_LL_B32_B16) {
     Value *lo = ctx.B.CreateAnd(op.src(0), ConstantInt::get(ctx.i32Ty, 0xFFFF));
     Value *hi = ctx.B.CreateShl(

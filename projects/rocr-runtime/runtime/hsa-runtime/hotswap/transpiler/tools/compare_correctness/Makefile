@@ -27,7 +27,9 @@ BUNDLER        := $(ROCM)/lib/llvm/bin/clang-offload-bundler
 INTERCEPT_SRC  := ../../tests/salmon_intercept.cpp
 
 KERNELS        := vecadd block_sum_shfl lane_swap \
-                  cvt_pkrtz cvt_pk_f16 bfm_b32 swap_b32 mov_b64 cvt_f32_bf16
+                  cvt_pkrtz cvt_pk_f16 bfm_b32 swap_b32 mov_b64 cvt_f32_bf16 \
+                  v_add_lshl_u32 v_bfe_i32 s_bfe_i32 s_bitset0_b32 \
+                  s_bitset0_b64
 ISAS           := gfx942 gfx1250
 KERNEL_BUILD   := kernels/build
 

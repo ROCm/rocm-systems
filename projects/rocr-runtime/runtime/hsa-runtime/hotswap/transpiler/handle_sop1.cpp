@@ -186,6 +186,43 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // s_bitset{0,1}_b{32,64}: clear or set a single bit in sdst.
+  //   B32: bit index = src0[4:0], dst and tied read are 32-bit.
+  //   B64: bit index = src0[5:0], dst and tied read are 64-bit (src0 is
+  //        still an SReg_32 per LLVM's `SOP1_64_32` class).
+  // These are read-modify-write: the destination's prior value arrives
+  // as the tied `sdst_in` operand at src index 1 (see `kKnownTiedIn` in
+  // raiser.cpp, which explicitly keeps `sdst_in` in srcMap), and the
+  // bit index arrives in `src0` at src index 0.  SCC is not updated.
+  if (sop == SemOp::S_BITSET0_B32 || sop == SemOp::S_BITSET1_B32 ||
+      sop == SemOp::S_BITSET0_B64 || sop == SemOp::S_BITSET1_B64) {
+    // Enforce the tied-operand invariant at runtime so that a future
+    // raiser change (e.g. dropping `sdst_in` from the srcMap) fails
+    // loudly rather than silently computing garbage from an undefined
+    // `op.src(1)`.
+    assert(op.nSrcs() >= 2 &&
+           "s_bitset*: expected src0 and tied sdst_in in srcMap");
+    bool is64 = (sop == SemOp::S_BITSET0_B64 || sop == SemOp::S_BITSET1_B64);
+    bool isSet = (sop == SemOp::S_BITSET1_B32 || sop == SemOp::S_BITSET1_B64);
+    llvm::Type *ty = is64 ? ctx.i64Ty : ctx.i32Ty;
+    // Hardware only consumes low log2(width) bits of the bit-index src;
+    // mask explicitly so `shl 1, N` never becomes poison for N >= width.
+    Value *bitIdx = ctx.B.CreateAnd(op.src(0),
+                                    ConstantInt::get(ctx.i32Ty,
+                                                     is64 ? 0x3F : 0x1F));
+    if (is64) bitIdx = ctx.B.CreateZExt(bitIdx, ctx.i64Ty);
+    Value *mask = ctx.B.CreateShl(ConstantInt::get(ty, 1), bitIdx);
+    Value *old = is64 ? op.src64(1) : op.src(1);
+    Value *res = isSet
+                     ? ctx.B.CreateOr(old, mask, "bitset1")
+                     : ctx.B.CreateAnd(old, ctx.B.CreateNot(mask), "bitset0");
+    if (is64)
+      ctx.regs.writeReg64(ctx.B, op.dst(), res);
+    else
+      ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
   // S_SET_VGPR_MSB is SOPP format — handled in handleSOPP, not here.
   // GFX12+ `s_barrier_signal` appears in SOP1 encoding; model it as a no-op
   // (the paired SOPP `s_barrier_wait` does the actual rendezvous).

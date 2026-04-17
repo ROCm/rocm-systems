@@ -983,6 +983,445 @@ Recipe makeCvtF32Bf16Recipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recipe: v_add_lshl_u32 — V_ADD_LSHL_U32 handler
+// Inputs: a[N], b[N], c[N] (u32).  Output per lane: ((a+b) << (c & 31)).
+// Only the low 5 bits of c matter, matching the hardware.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeVAddLshlU32Recipe() {
+  Recipe r;
+  r.name = "v_add_lshl_u32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(3 * N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    std::mt19937 rng(0xADD1u + N);
+    for (int i = 0; i < 3 * N; ++i) u[i] = rng();
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint32_t *a = reinterpret_cast<const uint32_t *>(input.data());
+    const uint32_t *b = a + N;
+    const uint32_t *c = b + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *o = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i < N; ++i) {
+      uint32_t sum = a[i] + b[i];
+      o[i] = sum << (c[i] & 31u);
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "v_add_lshl_u32"));
+    uint32_t *dA, *dB, *dC, *dO;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dA, bytes));
+    HIP_ASSERT(hipMalloc(&dB, bytes));
+    HIP_ASSERT(hipMalloc(&dC, bytes));
+    HIP_ASSERT(hipMalloc(&dO, bytes));
+    HIP_ASSERT(hipMemset(dO, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dA, input.data(),             bytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dB, input.data() + bytes,     bytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dC, input.data() + 2 * bytes, bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint32_t *a; const uint32_t *b; const uint32_t *c;
+                             uint32_t *o; int n; }
+        args = {dA, dB, dC, dO, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dO, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dA)); HIP_ASSERT(hipFree(dB));
+    HIP_ASSERT(hipFree(dC)); HIP_ASSERT(hipFree(dO));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: v_bfe_i32 — V_BFE_I32 handler
+// Inputs: src[N] (u32 bit pattern, interpreted signed by the extract),
+// off[N], w[N].  Only the low 5 bits of off/w matter.  Output per lane
+// is the sign-extended bit-field.  Zero-width is defined to produce 0.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeVBfeI32Recipe() {
+  Recipe r;
+  r.name = "v_bfe_i32";
+  r.defaultNs     = {16, 64, 256, 1024, 4096};
+  r.defaultBlocks = {64, 128, 256};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(3 * N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    std::mt19937 rng(0xBFE1u + N);
+    for (int i = 0; i < N; ++i) u[i] = rng();
+    // Uniformly sweep 0..31 for both offset and width so every
+    // interesting low-5-bits case (including width=0 and
+    // offset+width > 32) is covered per shape.
+    for (int i = 0; i < N; ++i) u[N + i]     = rng() & 31u;
+    for (int i = 0; i < N; ++i) u[2 * N + i] = rng() & 31u;
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint32_t *s = reinterpret_cast<const uint32_t *>(input.data());
+    const uint32_t *o = s + N;
+    const uint32_t *w = o + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *c = reinterpret_cast<uint32_t *>(out.data());
+    // Hardware v_bfe_i32:
+    //   D = sign_ext(bits [off+width-1:off] of src, where src is treated
+    //       as a signed 32-bit value extended past bit 31 by its sign).
+    // Equivalent formula: ashr by off (so high bits carry src's sign),
+    // then mask to width bits and sign-extend from bit (width-1).
+    // Logical right shift would match hardware only for off+width <= 32;
+    // ashr handles the wraparound case where off+width > 32 by letting
+    // the extracted field inherit src[31].
+    for (int i = 0; i < N; ++i) {
+      uint32_t off = o[i] & 31u;
+      uint32_t width = w[i] & 31u;
+      if (width == 0) { c[i] = 0u; continue; }
+      int32_t sshifted = static_cast<int32_t>(s[i]) >> off;
+      uint32_t mask = (1u << width) - 1u;
+      uint32_t field = static_cast<uint32_t>(sshifted) & mask;
+      uint32_t signBit = 1u << (width - 1);
+      int32_t sx = static_cast<int32_t>((field ^ signBit) - signBit);
+      c[i] = static_cast<uint32_t>(sx);
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "v_bfe_i32"));
+    uint32_t *dS, *dO, *dW, *dOut;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dS, bytes));
+    HIP_ASSERT(hipMalloc(&dO, bytes));
+    HIP_ASSERT(hipMalloc(&dW, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dS, input.data(),             bytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dO, input.data() + bytes,     bytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dW, input.data() + 2 * bytes, bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint32_t *s; const uint32_t *o; const uint32_t *w;
+                             uint32_t *out; int n; }
+        args = {dS, dO, dW, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dS)); HIP_ASSERT(hipFree(dO));
+    HIP_ASSERT(hipFree(dW)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: s_bfe_i32 — S_BFE_I32 handler (scalar signed BFE)
+// One output per block (lane 0 writes).  The kernel reads a per-block
+// src and ctrl via readfirstlane so the inline asm sees SGPR inputs.
+// ctrl packs offset in bits [4:0] and width in [22:16].
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeSBfeI32Recipe() {
+  Recipe r;
+  r.name = "s_bfe_i32";
+  // Use moderate Ns — N here counts blocks (one output per block), so
+  // this stresses grid dimensions rather than per-block work.
+  r.defaultNs     = {16, 64, 256, 1024};
+  r.defaultBlocks = {64, 128};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(2 * N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    std::mt19937 rng(0x5BFE1u + N);
+    for (int i = 0; i < N; ++i) u[i] = rng();
+    // ctrl[i]: pack off in [4:0] and width in [22:16].  Sweep 0..31 for
+    // off and 0..32 for width to exercise width>=32 (which hardware
+    // treats as "full 32 bits, sign-extend from bit 31"), plus zero
+    // width.
+    for (int i = 0; i < N; ++i) {
+      uint32_t off = rng() & 31u;
+      uint32_t w = rng() % 33u; // 0..32 inclusive
+      u[N + i] = off | (w << 16);
+    }
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint32_t *src = reinterpret_cast<const uint32_t *>(input.data());
+    const uint32_t *ctrl = src + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *c = reinterpret_cast<uint32_t *>(out.data());
+    // Hardware s_bfe_i32 matches:
+    //   if length == 0: D = 0
+    //   elif shift + length < 32:
+    //       D = sign_ext((src << (32 - shift - length)) >> (32 - length))
+    //   else: D = (int32)src >> shift   (length saturates, full width)
+    // Using the shift-trick rather than "mask & sign-extend" so we stay
+    // bit-identical to native when shift + length >= 32.
+    for (int i = 0; i < N; ++i) {
+      uint32_t shift = ctrl[i] & 0x1Fu;
+      uint32_t length = (ctrl[i] >> 16) & 0x7Fu;
+      if (length == 0) { c[i] = 0u; continue; }
+      uint32_t sum = shift + length;
+      int32_t sx;
+      if (sum < 32u) {
+        uint32_t shlAmt = 32u - sum;
+        uint32_t shlVal = src[i] << shlAmt;
+        uint32_t shrAmt = 32u - length;
+        sx = static_cast<int32_t>(shlVal) >> shrAmt;
+      } else {
+        sx = static_cast<int32_t>(src[i]) >> shift;
+      }
+      c[i] = static_cast<uint32_t>(sx);
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "s_bfe_i32"));
+    uint32_t *dSrc, *dCtrl, *dOut;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dSrc, bytes));
+    HIP_ASSERT(hipMalloc(&dCtrl, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dSrc,  input.data(),         bytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dCtrl, input.data() + bytes, bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint32_t *s; const uint32_t *ctrl; uint32_t *o; int n; }
+        args = {dSrc, dCtrl, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    // One block per output element; only lane 0 does the scalar op.
+    HIP_ASSERT(hipModuleLaunchKernel(fn, N, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dSrc)); HIP_ASSERT(hipFree(dCtrl)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: s_bitset0_b32 — S_BITSET0_B32 handler (scalar RMW bit-clear)
+// Per block, clear bit `pos[block] & 31` in a scalar loaded from
+// `initial[block]` and write the post-RMW value to `out[block]`.
+// Exercises the tied `sdst_in` input path in the raiser.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeSBitset0B32Recipe() {
+  Recipe r;
+  r.name = "s_bitset0_b32";
+  r.defaultNs     = {16, 64, 256, 1024};
+  r.defaultBlocks = {64, 128};
+  r.outputElemBytes = sizeof(uint32_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    std::vector<uint8_t> buf(2 * N * sizeof(uint32_t));
+    auto *u = reinterpret_cast<uint32_t *>(buf.data());
+    std::mt19937 rng(0x5B170u + N);
+    for (int i = 0; i < N; ++i) u[i] = rng();
+    for (int i = 0; i < N; ++i) u[N + i] = rng();
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint32_t *ini = reinterpret_cast<const uint32_t *>(input.data());
+    const uint32_t *pos = ini + N;
+    std::vector<uint8_t> out(N * sizeof(uint32_t));
+    auto *o = reinterpret_cast<uint32_t *>(out.data());
+    for (int i = 0; i < N; ++i) {
+      o[i] = ini[i] & ~(1u << (pos[i] & 31u));
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "s_bitset0_b32"));
+    uint32_t *dIni, *dPos, *dOut;
+    size_t bytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dIni, bytes));
+    HIP_ASSERT(hipMalloc(&dPos, bytes));
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, bytes));
+    HIP_ASSERT(hipMemcpy(dIni, input.data(),         bytes, hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dPos, input.data() + bytes, bytes, hipMemcpyHostToDevice));
+    struct alignas(8) Args { const uint32_t *ini; const uint32_t *pos; uint32_t *o; int n; }
+        args = {dIni, dPos, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    HIP_ASSERT(hipModuleLaunchKernel(fn, N, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIni)); HIP_ASSERT(hipFree(dPos)); HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    return compareU32Exact(gold, actual, n);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recipe: s_bitset0_b64 — S_BITSET0_B64 handler (scalar 64-bit RMW bit clear)
+// One output per block (lane 0 writes).  Bit index is a 32-bit SGPR, but
+// only [5:0] are consumed by hardware; sdst and tied sdst_in are SReg_64.
+// Exercises the 64-bit sibling of the B32 variant, including the extra
+// SGPR pair write-back.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeSBitset0B64Recipe() {
+  Recipe r;
+  r.name = "s_bitset0_b64";
+  r.defaultNs     = {16, 64, 256, 1024};
+  r.defaultBlocks = {64, 128};
+  r.outputElemBytes = sizeof(uint64_t);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    // Layout: N × uint64_t initial, then N × uint32_t bit-positions.
+    std::vector<uint8_t> buf(N * sizeof(uint64_t) + N * sizeof(uint32_t));
+    auto *u64 = reinterpret_cast<uint64_t *>(buf.data());
+    std::mt19937_64 rng64(0x5B170ULL + N);
+    for (int i = 0; i < N; ++i) u64[i] = rng64();
+    auto *u32 =
+        reinterpret_cast<uint32_t *>(buf.data() + N * sizeof(uint64_t));
+    std::mt19937 rng32(0x5B171u + N);
+    for (int i = 0; i < N; ++i) u32[i] = rng32();
+    return buf;
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> &input, int N, int) {
+    const uint64_t *ini = reinterpret_cast<const uint64_t *>(input.data());
+    const uint32_t *pos = reinterpret_cast<const uint32_t *>(
+        input.data() + N * sizeof(uint64_t));
+    std::vector<uint8_t> out(N * sizeof(uint64_t));
+    auto *o = reinterpret_cast<uint64_t *>(out.data());
+    for (int i = 0; i < N; ++i) {
+      o[i] = ini[i] & ~(uint64_t(1) << (pos[i] & 0x3Fu));
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> &input,
+                  int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "s_bitset0_b64"));
+    uint64_t *dIni, *dOut;
+    uint32_t *dPos;
+    size_t initialBytes = N * sizeof(uint64_t);
+    size_t posBytes = N * sizeof(uint32_t);
+    HIP_ASSERT(hipMalloc(&dIni, initialBytes));
+    HIP_ASSERT(hipMalloc(&dPos, posBytes));
+    HIP_ASSERT(hipMalloc(&dOut, initialBytes));
+    HIP_ASSERT(hipMemset(dOut, 0xA5, initialBytes));
+    HIP_ASSERT(hipMemcpy(dIni, input.data(), initialBytes,
+                         hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemcpy(dPos, input.data() + initialBytes, posBytes,
+                         hipMemcpyHostToDevice));
+    struct alignas(8) Args {
+      const uint64_t *ini;
+      const uint32_t *pos;
+      uint64_t *o;
+      int n;
+    } args = {dIni, dPos, dOut, N};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    HIP_ASSERT(hipModuleLaunchKernel(fn, N, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(initialBytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, initialBytes,
+                         hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dIni));
+    HIP_ASSERT(hipFree(dPos));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                 const std::vector<uint8_t> &actual, int n) {
+    // Elementwise 64-bit exact compare.  Mirrors compareU32Exact shape.
+    const uint64_t *g = reinterpret_cast<const uint64_t *>(gold.data());
+    const uint64_t *a = reinterpret_cast<const uint64_t *>(actual.data());
+    int mismatches = 0, firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    for (int i = 0; i < n; ++i) {
+      if (g[i] != a[i]) {
+        if (mismatches++ == 0) {
+          firstIdx = i;
+          firstG = static_cast<double>(g[i]);
+          firstA = static_cast<double>(a[i]);
+        }
+      }
+    }
+    double maxAbs = (mismatches == 0) ? 0.0 : 1.0;
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recipe registry
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -997,6 +1436,11 @@ const std::vector<Recipe> &allRecipes() {
       makeSwapB32Recipe(),
       makeMovB64Recipe(),
       makeCvtF32Bf16Recipe(),
+      makeVAddLshlU32Recipe(),
+      makeVBfeI32Recipe(),
+      makeSBfeI32Recipe(),
+      makeSBitset0B32Recipe(),
+      makeSBitset0B64Recipe(),
   };
   return v;
 }
@@ -1195,8 +1639,12 @@ struct RunResult {
 };
 
 std::string tempPath(const std::string &tag) {
-  std::string t = "/tmp/cmp_correct_" + std::to_string(getpid()) + "_" + tag + ".bin";
-  return t;
+  // Honor $TMPDIR so we can redirect the harness's per-run tempfiles off
+  // a full /tmp. Each `(parent, child)` pair shares these paths by PID+tag,
+  // so we pick the directory once here and apply it uniformly.
+  const char *td = std::getenv("TMPDIR");
+  std::string dir = (td && *td) ? td : "/tmp";
+  return dir + "/cmp_correct_" + std::to_string(getpid()) + "_" + tag + ".bin";
 }
 
 RunResult runOne(const std::string &exe, const Recipe &r, int N, int blockSize) {
