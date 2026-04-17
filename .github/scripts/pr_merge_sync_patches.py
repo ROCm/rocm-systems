@@ -318,6 +318,9 @@ def generate_patch(
     Only commits that actually touch files under the prefix are included, so every
     generated patch has at least one diff hunk and can be applied to the subrepo.
 
+    Only commits that actually touch files under the prefix are included, so every
+    generated patch has at least one diff hunk and can be applied to the subrepo.
+
     Args:
         prefix: The subtree prefix (e.g., "projects/rocBLAS/")
         patch_path: Path where patch file(s) should be written
@@ -518,6 +521,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     # (squash: merge^1..merge; merge commit: merge^1..merge^2)
     base_sha, range_end = _get_patch_range(merge_sha)
     logger.debug(f"Patch range for PR #{args.pr}: {base_sha}..{range_end}")
+
+    if args.keep_clone_dir:
+        args.no_push = True
+
+    # In dry-run do not write to keep_clone_dir (use temp clone only for logging)
+    keep_clone_path = (
+        Path(args.keep_clone_dir) if args.keep_clone_dir and not args.dry_run else None
+    )
 
     if args.keep_clone_dir:
         args.no_push = True
