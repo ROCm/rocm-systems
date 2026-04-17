@@ -186,12 +186,12 @@ def test_mpi_ranks_feature(output_dir, test_mode):
         json_files = []
         for rank_dir in glob.glob(os.path.join(output_dir, "rank.*")):
             json_files.extend(
-                glob.glob(os.path.join(rank_dir, "**/out_results.json"), recursive=True)
+                glob.glob(os.path.join(rank_dir, "**/out_*_results.json"), recursive=True)
             )
     else:
         # Non-MPI test - look everywhere
         json_files = glob.glob(
-            os.path.join(output_dir, "**/out_results.json"), recursive=True
+            os.path.join(output_dir, "**/out_*_results.json"), recursive=True
         )
 
     if test_mode == "with-mpi-single":
@@ -251,13 +251,13 @@ def test_csv_output_consistency(output_dir, test_mode):
         for rank_dir in glob.glob(os.path.join(output_dir, "rank.*")):
             csv_files.extend(
                 glob.glob(
-                    os.path.join(rank_dir, "**/out_kernel_trace.csv"), recursive=True
+                    os.path.join(rank_dir, "**/out_*_kernel_trace.csv"), recursive=True
                 )
             )
     else:
         # Non-MPI test - look everywhere
         csv_files = glob.glob(
-            os.path.join(output_dir, "**/out_kernel_trace.csv"), recursive=True
+            os.path.join(output_dir, "**/out_*_kernel_trace.csv"), recursive=True
         )
 
     if test_mode == "with-mpi-single":
@@ -297,7 +297,7 @@ def test_no_output_for_filtered_ranks(output_dir, test_mode):
     if os.path.exists(rank_2_dir):
         # Directory exists - check if it has any JSON files
         json_files_in_rank_2 = glob.glob(
-            os.path.join(rank_2_dir, "**/out_results.json"), recursive=True
+            os.path.join(rank_2_dir, "**/out_*_results.json"), recursive=True
         )
         assert (
             len(json_files_in_rank_2) == 0
@@ -310,7 +310,7 @@ def test_no_output_for_filtered_ranks(output_dir, test_mode):
             rank_dir
         ), f"Expected directory for rank {rank} at {rank_dir}"
         json_files = glob.glob(
-            os.path.join(rank_dir, "**/out_results.json"), recursive=True
+            os.path.join(rank_dir, "**/out_*_results.json"), recursive=True
         )
         assert (
             len(json_files) >= 1

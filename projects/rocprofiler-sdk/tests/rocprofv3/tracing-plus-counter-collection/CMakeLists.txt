@@ -34,15 +34,15 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
         COPY conftest.py input.txt
         CONFIG pytest.ini
         ARGS --json-input
-             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_results.json
+             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_*_results.json
              --pftrace-input
-             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_results.pftrace
+             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_*_results.pftrace
              --hsa-input
-             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_hsa_api_trace.csv
+             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_*_hsa_api_trace.csv
              --agent-input
-             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_agent_info.csv
+             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_*_agent_info.csv
              --counter-input
-             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_counter_collection.csv
+             ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_*_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests;application-replay"
         FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection)
@@ -74,15 +74,15 @@ foreach(_GROUP "single" "multiple")
         COPY conftest.py input.txt
         CONFIG pytest.ini
         ARGS --json-input
-             ${_TEST_OUTPUT_PREFIX}_results.json
+             ${_TEST_OUTPUT_PREFIX}_*_results.json
              --pftrace-input
-             ${_TEST_OUTPUT_PREFIX}_results.pftrace
+             ${_TEST_OUTPUT_PREFIX}_*_results.pftrace
              --hsa-input
-             ${_TEST_OUTPUT_PREFIX}_hsa_api_trace.csv
+             ${_TEST_OUTPUT_PREFIX}_*_hsa_api_trace.csv
              --agent-input
-             ${_TEST_OUTPUT_PREFIX}_agent_info.csv
+             ${_TEST_OUTPUT_PREFIX}_*_agent_info.csv
              --counter-input
-             ${_TEST_OUTPUT_PREFIX}_counter_collection.csv
+             ${_TEST_OUTPUT_PREFIX}_*_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests"
         FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})

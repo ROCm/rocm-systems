@@ -44,13 +44,13 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py marker.py
     CONFIG pytest.ini
     ARGS --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_*_agent_info.csv
          --marker-input
-         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_marker_api_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_*_marker_api_trace.csv
          --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.json
+         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_*_results.json
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_*_results.pftrace
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-trace-roctx-python-bindings

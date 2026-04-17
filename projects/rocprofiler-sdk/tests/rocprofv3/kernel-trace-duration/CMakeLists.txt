@@ -49,9 +49,9 @@ add_test(
     NAME rocprofv3-test-kernel-trace-duration-validation
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-trace-duration/out_combined_results.json
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-trace-duration/out_combined_*_results.json
         --db-input
-        ${CMAKE_CURRENT_BINARY_DIR}/kernel-trace-duration/out_combined_results.db)
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-trace-duration/out_combined_*_results.db)
 
 set_tests_properties(
     rocprofv3-test-kernel-trace-duration-validation

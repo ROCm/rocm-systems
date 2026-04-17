@@ -26,6 +26,8 @@ import os
 
 import pytest
 
+from rocprofiler_sdk.pytest_utils import find_single_file
+
 
 def pytest_addoption(parser):
     parser.addoption("--json-input", action="store", required=True, help="Input JSON")
@@ -34,7 +36,8 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def json_data(request):
-    path = request.config.getoption("--json-input")
+    path_pattern = request.config.getoption("--json-input")
+    path = find_single_file(path_pattern, "JSON input")
     assert os.path.isfile(path), f"missing JSON input: {path}"
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -42,6 +45,7 @@ def json_data(request):
 
 @pytest.fixture
 def db_path(request):
-    path = request.config.getoption("--db-input")
+    path_pattern = request.config.getoption("--db-input")
+    path = find_single_file(path_pattern, "rocpd DB input")
     assert os.path.isfile(path), f"missing rocpd DB input: {path}"
     return path
