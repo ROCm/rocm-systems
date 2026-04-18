@@ -67,11 +67,12 @@ an [RFC](docs/rfcs/README.md).
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `PERFXPERT_USE_AGENTS=1` | noop (kept for back-compat) | Was the Phase-4 opt-in; agentic is now default |
 | `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; must point to an existing file or launcher raises immediately |
 
-`PERFXPERT_LEGACY` is unrecognized as of Phase 7.1 — the legacy `ai_analysis`
-module has been removed. Setting it has no effect.
+The agentic runtime is the sole execution path; no feature flag toggles
+it. `PERFXPERT_USE_AGENTS` and `PERFXPERT_LEGACY` were removed in
+Phase 7.1 and are now unrecognized — setting them has no effect. See
+[CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 ## Supported GPUs
 
