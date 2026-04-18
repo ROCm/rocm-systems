@@ -13,3 +13,7 @@
 	url = https://github.com/ROCm/KernelBench.git
 	# SHA from Phase 5: known-good on MI300X; update via PR after validation
 	branch = main
+[submodule "opencode"]
+	path = opencode
+	url = https://github.com/sst/opencode.git
+	tag = v1.4.11
