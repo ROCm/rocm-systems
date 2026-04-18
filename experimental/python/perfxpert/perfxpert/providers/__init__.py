@@ -32,6 +32,7 @@ from perfxpert.providers._exceptions import (
     RateLimitError,
     TimeoutError,
 )
+from perfxpert.providers.registry import get_provider, list_providers, register
 
 __all__ = [
     "AuthError",
@@ -41,4 +42,7 @@ __all__ = [
     "ProviderResponse",
     "RateLimitError",
     "TimeoutError",
+    "get_provider",
+    "list_providers",
+    "register",
 ]
