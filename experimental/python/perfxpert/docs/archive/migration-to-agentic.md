@@ -1,4 +1,4 @@
-# Migrating from Legacy perfxpert to the Agentic Path
+# Migrating to the Agentic Path
 
 > **Historical — the legacy path has been removed.** This document
 > is retained for reference only. New users can disregard `PERFXPERT_LEGACY`
@@ -6,24 +6,22 @@
 
 ---
 
-
-As of v0.2.0, perfxpert's execution path is the **agentic runtime** (OpenAI
-Agents SDK + ~45 deterministic tools + split fence). The former opt-in flag
-`PERFXPERT_USE_AGENTS=1` has become a no-op (the behavior is now default).
-The old legacy path used to be gated behind `PERFXPERT_LEGACY=1` for one
-minor release; that path is now deleted and the env var is unrecognized.
+As of v0.2.0, perfxpert's execution path is the **agentic runtime**
+(OpenAI Agents SDK + ~45 deterministic tools + split fence). This is now
+the only runtime — the pre-v0.2.0 execution path and its opt-in toggle
+were removed during the agentic refactor, so nothing here is optional.
 
 ## What changed
 
-| Concern | Legacy (pre-v0.2.0) | Agentic (v0.2.0+) |
-|---------|---------------------|--------------------|
-| Interactive TUI | legacy `perfxpert analyze` conversational mode | `perfxpert-code` (bundled AMD-themed opencode) |
-| Session resume | legacy resume-session flag on `perfxpert analyze` | opencode sessions (persistent by default) |
-| LLM "fence" | Monolithic reference guide under the legacy `ai_analysis/` tree | Per-agent `agents/fence/*.md` + knowledge YAMLs |
-| Recommendation engine | Rule-based in `analyze.py::generate_recommendations` | Multi-agent (Analysis → Recommendation → Specialists) |
-| Correctness checks | Inline in the legacy interactive-session module's revert helper | 5-gate cascade in `runtime/gate_cascade.py` |
-| Code edits | Legacy `WorkflowSession._llm_rewrite_file()` | opencode-native edit + MCP verify |
-| Library API (`analyze_database()`) | Direct LLM call via the legacy analyzer class | Routes into agent runtime; same return type |
+| Concern | Pre-v0.2.0 | Agentic (v0.2.0+) |
+|---------|------------|--------------------|
+| Interactive TUI | Inline conversational mode on `perfxpert analyze` | `perfxpert-code` (bundled AMD-themed opencode) |
+| Session resume | Resume-session flag on `perfxpert analyze` | opencode sessions (persistent by default) |
+| LLM "fence" | Monolithic reference guide | Per-agent `agents/fence/*.md` + knowledge YAMLs |
+| Recommendation engine | Rule-based function in `analyze.py` | Multi-agent (Analysis → Recommendation → Specialists) |
+| Correctness checks | Inline in the interactive-session revert helper | 5-gate cascade in `runtime/gate_cascade.py` |
+| Code edits | `WorkflowSession._llm_rewrite_file()` | opencode-native edit + MCP verify |
+| Library API | Single-shot LLM call | `perfxpert.agents.runtime.build_session()` + `session.run_root(...)` |
 
 ## What stays the same
 
@@ -36,26 +34,40 @@ minor release; that path is now deleted and the env var is unrecognized.
 
 ## If your workflow was...
 
-### Legacy conversational mode on `perfxpert analyze`
+### Conversational mode on `perfxpert analyze`
 
 → **Switch to `perfxpert-code`**, which is the AMD-themed bundled opencode TUI.
 Calls into the same agent runtime as batch mode, just wrapped in a conversational UI.
 
-### Legacy conversational mode with session resume
+### Conversational mode with session resume
 
 → **Use opencode sessions.** `perfxpert-code` persists sessions in `.perfxpert/`
 by default; see `perfxpert-code --list-sessions` and `perfxpert-code --resume <id>`.
 
-### Calling the legacy conversation class from `perfxpert.ai_analysis`
+### Calling the pre-v0.2.0 conversation class
 
-→ **Use `from perfxpert.agents.runtime import build_session`.** The new API is
-typed (Pydantic), streams via the SDK, and supports all 5 providers uniformly.
+→ **Use the current library API:**
 
-### Calling `from perfxpert.ai_analysis import load_reference_guide`
+```python
+from perfxpert.agents.runtime import build_session
+from perfxpert.agents.schemas import RootInput
 
-→ **Use `from perfxpert.agents.fence import load_fence_slice`.** Pass the agent
-name (`"root"`, `"analysis"`, etc.) to get the per-agent fence slice. The
-legacy monolithic guide is deleted in v0.2.0.
+session = build_session(airgap=True)  # or provider='anthropic'
+output = session.run_root(RootInput(
+    user_query="Summarize the primary bottleneck.",
+    airgap=True,
+))
+print(output.primary_bottleneck)
+```
+
+The new API is typed (Pydantic), streams via the SDK, and supports all
+5 providers uniformly.
+
+### Loading the monolithic reference guide
+
+→ **Use `from perfxpert.agents.fence import load_fence_slice`.** Pass the
+agent name (`"root"`, `"analysis"`, etc.) to get the per-agent fence slice.
+The monolithic guide was removed during the agentic refactor.
 
 ### Modifying `llm-reference-guide.md` to change LLM behavior
 
@@ -63,21 +75,23 @@ legacy monolithic guide is deleted in v0.2.0.
 narrow-scope fence (≤ 400 lines enforced by CI). See CONTRIBUTING.md for
 which file controls which behavior.
 
-## Emergency: I need the old behavior back
+## I need the old behavior back
 
-Historical: setting `PERFXPERT_LEGACY=1` used to route analyze_database()
-through the pre-v0.2.0 path. That safety net, and the accompanying
-pre-rename reference-guide override env var (from the old project
-name), were both removed — `PERFXPERT_LEGACY=1` is now a
-no-op and no pre-rename env vars are honored. Migrate to the agentic
-runtime directly.
+There is no runtime toggle. `PERFXPERT_LEGACY` was removed during the
+agentic refactor, along with the pre-v0.2.0 code paths it used to gate.
+To run the old pipeline you must check out a release tag ≤ v0.2.x (see
+`git tag`); the pre-rename reference-guide override env var is no longer
+honored either.
 
-If you run into a behavioral difference between legacy and agentic that you
-believe is a regression, please file an issue with:
+If you hit a behavioral difference between the new runtime and what you
+expected from the earlier code path, file an issue with:
 
-1. `perfxpert doctor` output from both modes
+1. `perfxpert doctor` output
 2. A reproducer DB (minimal fixture preferred)
 3. Expected vs actual output
+
+We treat regressions versus documented v0.2.x behavior as bugs in the
+agentic runtime and aim to close them quickly.
 
 ## Questions?
 
