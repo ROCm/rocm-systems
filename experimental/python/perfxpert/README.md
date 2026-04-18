@@ -10,7 +10,7 @@ pip install perfxpert
 # One-shot analysis (batch mode)
 perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 
-# Interactive agentic TUI (AMD-themed opencode, replaces the old --interactive flag)
+# Interactive agentic TUI (AMD-themed opencode, replaces the old conversational mode)
 perfxpert-code
 
 # Multi-backend dispatch (PR 1 — claude + gemini; codex ships in PR 2):
