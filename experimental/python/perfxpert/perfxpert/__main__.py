@@ -289,6 +289,23 @@ def _check_opencode_bundled() -> tuple[bool, str]:
         return False, str(e)
 
 
+def _check_opencode_bundled_config() -> tuple[bool, str]:
+    """Check that the bundled _bundled/opencode_config dir can be resolved.
+
+    Dev builds that ship without the bundled config dir would otherwise
+    fail at `perfxpert-code` startup (launcher calls `resolve_config_dir`
+    eagerly). Previously the doctor did not surface this, so operators
+    saw a confusing runtime failure instead of a doctor diagnostic
+    (cycle-2 nitpick 3).
+    """
+    from perfxpert.cli.opencode_launcher import resolve_config_dir
+    try:
+        p = resolve_config_dir()
+        return True, f"Bundled opencode config dir present at {p}"
+    except FileNotFoundError as e:
+        return False, str(e)
+
+
 def _check_llm_providers() -> tuple[list[str], list[str]]:
     """Check which LLM providers are configured."""
     import os
@@ -336,6 +353,7 @@ def _run_doctor():
         ("MCP server", _check_mcp_server()),
         ("task store", _check_task_store()),
         ("opencode binary", _check_opencode_bundled()),
+        ("opencode config dir", _check_opencode_bundled_config()),
     ]
 
     all_ok = True
