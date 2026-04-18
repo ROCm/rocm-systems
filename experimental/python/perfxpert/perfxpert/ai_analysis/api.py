@@ -915,7 +915,6 @@ def _route_to_legacy(
         )
         if verbose:
             print("[Analysis] LLM enhancement skipped (legacy mode does not support LLM)")
-
     return result
 
 
@@ -1031,7 +1030,10 @@ def _wrap_agentic_result(
     }
 
     if verbose:
-        print(f"[Analysis] Agentic analysis complete. Bottleneck: {analysis_output.primary_bottleneck}")
+        print(
+            f"[Analysis] Agentic analysis complete. Bottleneck: "
+            f"{analysis_output.primary_bottleneck}"
+        )
 
     return result
 
