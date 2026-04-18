@@ -1107,13 +1107,17 @@ def _execute_agentic(
     config: Optional[output_config.output_config] = None,
     **kwargs: Any,
 ) -> Optional[RocpdImportData]:
-    """Agentic path: delegates to Phase 3 runtime if available."""
+    """Agentic path: delegates to Phase 3 session API.
+
+    Builds an AnalysisSession, invokes run_root with a RootInput,
+    and formats the output according to the requested format.
+    """
     try:
         from perfxpert.agents import runtime
     except ImportError as e:
         raise RuntimeError(
-            "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
-            "This is a Phase 3 dependency. Unset the env var to use the legacy path."
+            "Agent runtime is not available. "
+            "This is a Phase 3 dependency. Set PERFXPERT_LEGACY=1 to use the legacy path."
         ) from e
     run_cli = getattr(runtime, "run_cli", None)
     if run_cli is None:
@@ -1122,6 +1126,100 @@ def _execute_agentic(
             "This is a Phase 3 dependency. Unset the env var to use the legacy path."
         )
     return run_cli(input=input, config=config, **kwargs)
+
+    # Update config if provided
+    if config is not None:
+        config = config.update(**kwargs)
+    else:
+        config = output_config.output_config(**kwargs)
+
+    # Get database path for display
+    database_path = ""
+    if input is not None and hasattr(input, "_paths") and input._paths:
+        database_path = str(
+            input._paths[0] if isinstance(input._paths, list) else input._paths
+        )
+
+    # Get source_dir if provided (for Tier 0 analysis)
+    source_dir = kwargs.get("source_dir")
+
+    # Get custom prompt if provided
+    custom_prompt = kwargs.get("custom_prompt")
+
+    # Build session
+    enable_llm = kwargs.get("enable_llm", False)
+    llm_provider = kwargs.get("llm_provider")
+    session = runtime.build_session(
+        provider=llm_provider if enable_llm else None,
+        airgap=(not enable_llm),
+    )
+
+    # Build RootInput payload
+    try:
+        root_input = schemas.RootInput(
+            user_query=custom_prompt or "Analyze this GPU performance trace.",
+            database_path=database_path if input else None,
+            source_dir=source_dir,
+            provider=llm_provider if enable_llm else None,
+            airgap=(not enable_llm),
+            session_id=session.session_id,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to build RootInput: {e}") from e
+
+    # Run root analysis via Phase 3 session API
+    try:
+        root_output = session.run_root(root_input)
+    except Exception as e:
+        raise RuntimeError(f"Agentic root analysis failed: {e}") from e
+
+    # Format output according to requested format
+    output_format = kwargs.get("output_format", "text")
+    if output_format == "json":
+        import json
+        output = json.dumps(
+            {
+                "narrative": root_output.narrative,
+                "recommendations": root_output.recommendations,
+                "primary_bottleneck": root_output.primary_bottleneck,
+                "warnings": root_output.warnings,
+                "metadata": root_output.metadata,
+            },
+            indent=2,
+        )
+    else:
+        # text, markdown, webview — for now, just use the narrative
+        output = root_output.narrative
+
+    # Handle output writing
+    _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
+    _ext = _ext_map.get(output_format, ".txt")
+
+    if config and config.output_path and not config.output_file:
+        if database_path:
+            config.output_file = os.path.splitext(os.path.basename(database_path))[0]
+        else:
+            config.output_file = "analysis"
+
+    if config and config.output_file and config.output_path:
+        base = config.output_file
+        if not base.endswith(_ext):
+            base = base + _ext
+        output_file = os.path.join(config.output_path, base)
+        os.makedirs(config.output_path, exist_ok=True)
+        with open(output_file, "w") as f:
+            f.write(output)
+        print(f"Analysis written to: {output_file}")
+        if output_format == "text":
+            print(
+                "Tip: use --format webview for an interactive HTML report, "
+                "--format json for machine-readable output, "
+                "or --format markdown for Markdown."
+            )
+    else:
+        print(output)
+
+    return input
 
 
 def _execute_legacy(

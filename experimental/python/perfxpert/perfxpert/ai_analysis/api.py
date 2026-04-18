@@ -1038,6 +1038,118 @@ def _wrap_agentic_result(
     return result
 
 
+def _wrap_agentic_result(
+    analysis_output: "schemas.AnalysisOutput",
+    database_path: Union[str, Path],
+    custom_prompt: Optional[str] = None,
+    enable_llm: bool = False,
+    llm_provider: Optional[str] = None,
+    verbose: bool = False,
+) -> AnalysisResult:
+    """Convert agentic AnalysisOutput back to legacy AnalysisResult shape.
+
+    This allows existing callers and output formatters to work unchanged.
+    The AnalysisOutput schema (§4.3) provides:
+      - primary_bottleneck: str (compute | memory_transfer | latency | api_overhead | mixed)
+      - confidence: float (0.0 – 1.0)
+      - time_breakdown: Dict[str, float] (kernel_pct | memcpy_pct | api_pct | idle_pct)
+      - hot_kernels: List[Dict] ({name, pct, duration_ns, ...})
+      - counter_data_available: bool
+
+    We map this back to the legacy AnalysisResult structure with minimal fields
+    filled — enough for existing output formatters and callers to function.
+    """
+    from datetime import datetime
+
+    # Extract data from AnalysisOutput
+    time_breakdown_dict = analysis_output.time_breakdown
+    hot_kernels = analysis_output.hot_kernels or []
+    has_counters = analysis_output.counter_data_available
+
+    # Build metadata
+    metadata = AnalysisMetadata(
+        rocpd_version=_PERFXPERT_VERSION,
+        analysis_version="0.1.0",
+        database_file=str(database_path),
+        analysis_timestamp=datetime.now().isoformat(),
+        custom_prompt=custom_prompt,
+    )
+
+    # Build profiling info
+    profiling_mode = "sys_trace_with_counters" if has_counters else "sys_trace_only"
+    analysis_tier = 2 if has_counters else 1
+    profiling_info = ProfilingInfo(
+        total_duration_ns=0,  # Not available in agentic output
+        profiling_mode=profiling_mode,
+        analysis_tier=analysis_tier,
+        gpus=[],
+    )
+
+    # Build summary
+    kernel_pct = time_breakdown_dict.get("kernel_pct", 0.0)
+    memcpy_pct = time_breakdown_dict.get("memcpy_pct", 0.0)
+    api_pct = time_breakdown_dict.get("api_pct", 0.0)
+
+    summary = AnalysisSummary(
+        overall_assessment=f"Analysis complete. {len(hot_kernels)} kernels analyzed.",
+        primary_bottleneck=analysis_output.primary_bottleneck,
+        confidence=analysis_output.confidence,
+        key_findings=[
+            f"Total kernel execution time: {kernel_pct:.1f}%",
+            f"Memory copy overhead: {memcpy_pct:.1f}%",
+            f"Top kernel: {hot_kernels[0]['name'] if hot_kernels else 'N/A'}",
+        ],
+    )
+
+    # Build execution breakdown
+    execution_breakdown = ExecutionBreakdown(
+        kernel_time_ns=0,  # Not available in agentic output
+        kernel_time_pct=kernel_pct,
+        memcpy_time_ns=0,  # Not available in agentic output
+        memcpy_time_pct=memcpy_pct,
+        api_overhead_pct=api_pct,
+        idle_time_pct=time_breakdown_dict.get("idle_pct", 0.0),
+    )
+
+    # Build recommendations — empty since agentic path handles this in Recommendation agent
+    rec_set = RecommendationSet()
+
+    # Build warnings
+    warnings = []
+    if not has_counters:
+        warnings.append(
+            AnalysisWarning(
+                severity="warning",
+                message="No hardware counters collected. Analysis limited to Tier 1 (trace data only).",
+                recommendation="Collect counters with: rocprofv3 --pmc GRBM_COUNT SQ_WAVES -- ./app",
+            )
+        )
+
+    result = AnalysisResult(
+        metadata=metadata,
+        profiling_info=profiling_info,
+        summary=summary,
+        execution_breakdown=execution_breakdown,
+        recommendations=rec_set,
+        warnings=warnings,
+    )
+
+    # Minimal raw data cache for to_json()/to_webview() compatibility
+    result._raw = {
+        "time_breakdown": time_breakdown_dict,
+        "hotspots": hot_kernels,
+        "memory_analysis": {},  # Not available in agentic output
+        "recommendations_raw": [],  # Handled by Recommendation agent
+        "hardware_counters": {"has_counters": has_counters, "metrics": {}},
+        "database_path": str(database_path),
+    }
+
+    if verbose:
+        print(f"[Analysis] Agentic analysis complete. Bottleneck: {analysis_output.primary_bottleneck}")
+
+    return result
+
+
 def _build_analysis_result(
     time_breakdown: Dict[str, Any],
     hotspots: List[Dict[str, Any]],
