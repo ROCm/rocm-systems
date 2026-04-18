@@ -89,8 +89,8 @@ Why fence-slicing:
    that grows past the cap is a signal to split agents or move facts
    into `perfxpert/knowledge/*.yaml`.
 3. **Reviewability** — every slice change shows as a small diff. The
-   legacy monolithic reference guide (deleted in v0.2.0) made cross-agent
-   behavior hard to reason about.
+   prior monolithic reference guide (removed in Phase 7.1) made
+   cross-agent behavior hard to reason about in a single review pass.
 
 ## Invoking the hierarchy
 
