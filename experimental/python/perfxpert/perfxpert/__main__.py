@@ -105,6 +105,16 @@ def main(argv=None):
     set_p.add_argument("key", help="Field name (e.g. provider, airgap, max_tokens)")
     set_p.add_argument("value", help="New value")
 
+    # ------------------------------------------------------------------
+    # providers subcommand
+    # ------------------------------------------------------------------
+    providers_parser = subparsers.add_parser(
+        "providers",
+        help="LLM provider management",
+    )
+    providers_sub = providers_parser.add_subparsers(dest="providers_action", required=True)
+    providers_sub.add_parser("list", help="List available LLM providers + configuration status")
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -154,6 +164,23 @@ def main(argv=None):
         if args.config_action == "set":
             run_config_set(args.key, args.value)
             sys.exit(0)
+    elif args.subcommand == "providers":
+        if args.providers_action == "list":
+            # Import providers eagerly so the registry is populated
+            import perfxpert.providers.anthropic_provider  # noqa: F401
+            import perfxpert.providers.openai_provider  # noqa: F401
+            import perfxpert.providers.ollama_provider  # noqa: F401
+            import perfxpert.providers.private_provider  # noqa: F401
+            import perfxpert.providers.opencode_provider  # noqa: F401
+            from perfxpert.cli.branding import get_provider_status_table
+            from perfxpert.providers.registry import list_providers
+
+            print(get_provider_status_table())
+            print()
+            print("Registered providers (name — description):")
+            for name, desc in sorted(list_providers().items()):
+                print(f"  {name}: {desc}")
+            return 0
     else:
         parser.print_help()
         sys.exit(1)
