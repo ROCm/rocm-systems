@@ -9,6 +9,7 @@
 
 // IONICDV Library versioning
 #define IONIC_VERSION "IONIC_1.0"
+#define IONIC_EX_VERSION "IONIC_1.3"
 
 ncclResult_t buildIonicdvSymbols(struct ncclIonicdvSymbols* ionicdvSymbols) {
   static void* ionicdvhandle = NULL;
@@ -47,7 +48,7 @@ ncclResult_t buildIonicdvSymbols(struct ncclIonicdvSymbols* ionicdvSymbols) {
 
   LOAD_SYM(ionicdvhandle, "ionic_dv_qp_set_gda", ionicdvSymbols->ionicdv_internal_qp_set_gda);
   LOAD_SYM(ionicdvhandle, "ionic_dv_pd_set_udma_mask", ionicdvSymbols->ionicdv_internal_pd_set_udma_mask);
-  LOAD_SYM_VERSION(ionicdvhandle, "ionic_dv_create_qp_ex", ionicdvSymbols->ionicdv_internal_create_qp_ex, IONIC_VERSION);
+  LOAD_SYM_VERSION(ionicdvhandle, "ionic_dv_create_qp_ex", ionicdvSymbols->ionicdv_internal_create_qp_ex, IONIC_EX_VERSION);
   INFO(NCCL_INIT, "Loaded dlvsym from libionic.so[.1]");
 
   return ncclSuccess;

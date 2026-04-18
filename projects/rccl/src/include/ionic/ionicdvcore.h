@@ -13,19 +13,27 @@
 #include "ibvwrap.h"
 
 enum ionicdv_reg_udma_mask {
-    IONIC_UDMA_MASK_LOW    = 1,
-    IONIC_UDMA_MASK_HIGH   = 2
+  IONIC_UDMA_MASK_LOW    = 1,
+  IONIC_UDMA_MASK_HIGH   = 2
 };
 
-enum ionic_qp_init_attr_mask {
-  IONIC_QP_INIT_ATTR_MASK_FLAGS   = 1 << 0,
+enum ionic_dv_qp_init_attr_mask {
+  IONIC_DV_QP_INIT_ATTR_MASK_FLAGS            = 1 << 0,
+  IONIC_DV_QP_INIT_ATTR_MASK_TRANSPORT_MODE   = 1 << 1,
+  IONIC_DV_QP_INIT_ATTR_MASK_NUM_RCQ_PATHS    = 1 << 2
 };
 
-enum ionic_qp_init_attr_flags {
-  IONIC_CREATE_QP_TYPE_RCCL       = 1 << 16,
-  IONIC_CREATE_QP_RCCL_DATA       = 1 << 17,
-  IONIC_CREATE_QP_RCCL_RDFENCE    = 1 << 18,
-  IONIC_CREATE_QP_RCCL_RX_OFFLOAD = 1 << 19,
+enum ionic_dv_qp_init_attr_flags {
+  IONIC_DV_CREATE_QP_TYPE_RCCL        = 1 << 16,
+  IONIC_DV_CREATE_QP_RCCL_DATA        = 1 << 17,
+  IONIC_DV_CREATE_QP_RCCL_RDFENCE     = 1 << 18,
+  IONIC_DV_CREATE_QP_RCCL_RX_OFFLOAD  = 1 << 19
+};
+
+enum ionic_dv_qp_transport_mode {
+  IONIC_DV_QPT_TRANSPORT_DEFAULT,
+  IONIC_DV_QPT_TRANSPORT_ROCE_V2,
+  IONIC_DV_QPT_TRANSPORT_MRC
 };
 
 struct ionic_qp_init_attr_ex {
