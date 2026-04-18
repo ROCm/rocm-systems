@@ -640,6 +640,38 @@ static const Entry kCanonTable[] = {
     MUBUF4(BUFFER_ATOMIC_ADD_F32, BUFFER_ATOMIC_ADD_F32),
     MUBUF4(BUFFER_ATOMIC_PK_ADD_BF16, BUFFER_ATOMIC_PK_ADD_BF16),
     MUBUF4(BUFFER_ATOMIC_PK_ADD_F16, BUFFER_ATOMIC_PK_ADD_F16),
+    // gfx11+/gfx12 VBUFFER fork for the buffer atomics. The asm
+    // spelling on gfx11+/gfx1250 renames `BUFFER_ATOMIC_ADD` to
+    // `buffer_atomic_add_u32` (BUFInstructions.td:2789 declares
+    // `defm BUFFER_ATOMIC_ADD : MUBUF_Real_Atomic_gfx11_gfx12<0x035,
+    // "buffer_atomic_add_u32">`); LLVM MC keeps the legacy
+    // `BUFFER_ATOMIC_*` pseudo names but suffixes them with
+    // `_VBUFFER_<addressing>` to distinguish the gfx12 buffer-
+    // descriptor encoding from the legacy MUBUF one. The decoder in
+    // mubuf_addr.cpp explicitly recognises both encodings (keys on
+    // ParsedReg::Kind rather than operand position) so the existing
+    // BUFFER_ATOMIC_* SemOps and the AtomicRMW lowering in
+    // handle_mubuf.cpp's `sop >= BUFFER_ATOMIC_ADD &&
+    // sop <= BUFFER_ATOMIC_PK_ADD_F16` branch work unchanged for
+    // VBUFFER atomics. Without these entries the gfx1250 corpus
+    // (e.g. scope_discovery___sum_bitmatrix_rows refused on
+    // `buffer_atomic_add_u32 v0, v1, s[4:7], null offen`) would
+    // refuse with `unsupportedOpcode` despite the underlying SemOp
+    // being present.
+    //
+    // PK_ADD_BF16 / PK_ADD_F16 are intentionally omitted — they have
+    // no VBUFFER Real form in BUFInstructions.td (the gfx12 buffer
+    // packed-add fork uses a different mnemonic family); a stray
+    // VBUF4 entry would expand to AMDGPU enum values that don't
+    // exist and fail to compile.
+    VBUF4(BUFFER_ATOMIC_ADD, BUFFER_ATOMIC_ADD),
+    VBUF4(BUFFER_ATOMIC_SUB, BUFFER_ATOMIC_SUB),
+    VBUF4(BUFFER_ATOMIC_AND, BUFFER_ATOMIC_AND),
+    VBUF4(BUFFER_ATOMIC_OR, BUFFER_ATOMIC_OR),
+    VBUF4(BUFFER_ATOMIC_XOR, BUFFER_ATOMIC_XOR),
+    VBUF4(BUFFER_ATOMIC_SWAP, BUFFER_ATOMIC_SWAP),
+    VBUF4(BUFFER_ATOMIC_CMPSWAP, BUFFER_ATOMIC_CMPSWAP),
+    VBUF4(BUFFER_ATOMIC_ADD_F32, BUFFER_ATOMIC_ADD_F32),
 
     // ---------------------------------------------------------------------
     // AGPR moves

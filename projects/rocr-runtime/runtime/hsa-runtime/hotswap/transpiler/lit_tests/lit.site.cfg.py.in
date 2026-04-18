@@ -88,6 +88,15 @@ config.fixtures = {
     # in handle_ds.cpp; the fixture pins the generic `<3 x i32>`
     # vector-load/store path the handler routes both ops through.
     "ds_load_b96": r"@LIT_FIXTURE_DS_LOAD_B96_CO@",
+    # buffer_atomic_add_u32 (MUBUF/VBUFFER) — gfx11+/gfx1250 VBUFFER
+    # encoding for what the legacy MUBUF named BUFFER_ATOMIC_ADD.  The
+    # SemOp + handler already existed for the legacy MUBUF addressing
+    # forms; the gap was the missing VBUF4 entries in opcode_map.cpp
+    # for the gfx12 `_VBUFFER_*` opcodes that the disassembler emits
+    # for `buffer_atomic_add_u32`.  See VBUF4(BUFFER_ATOMIC_ADD,
+    # BUFFER_ATOMIC_ADD) in opcode_map.cpp.
+    "buffer_atomic_add_u32":
+        r"@LIT_FIXTURE_BUFFER_ATOMIC_ADD_U32_CO@",
 }
 
 lit_config.load_config(
