@@ -27,9 +27,11 @@ from perfxpert.providers._base import Provider, ProviderResponse
 from perfxpert.providers._exceptions import (
     AuthError,
     DryRunResponse,
+    ProviderChainExhausted,
     ProviderError,
     RateLimitError,
     TimeoutError,
+    UnknownProvider,
 )
 from perfxpert.providers._fallback import (
     ENV_FALLBACK_CHAIN,
@@ -44,11 +46,13 @@ __all__ = [
     "DryRunResponse",
     "ENV_FALLBACK_CHAIN",
     "FallbackProvider",
+    "ProviderChainExhausted",
     "ProviderError",
     "Provider",
     "ProviderResponse",
     "RateLimitError",
     "TimeoutError",
+    "UnknownProvider",
     "get_fallback_provider",
     "get_provider",
     "list_providers",

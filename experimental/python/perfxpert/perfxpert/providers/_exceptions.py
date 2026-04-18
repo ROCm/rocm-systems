@@ -10,6 +10,8 @@ used by air-gap mode + cost estimation.
 
 from __future__ import annotations
 
+from typing import List, Optional, Sequence, Tuple
+
 
 class ProviderError(Exception):
     """Base class for all provider failures."""
@@ -48,6 +50,45 @@ class TimeoutError(ProviderError):
         )
 
 
+class UnknownProvider(ProviderError):
+    """Requested provider name is not in the registry.
+
+    Raised (instead of a bare ``KeyError`` from ``registry.get_provider``)
+    so callers never have to branch on non-taxonomy exceptions.
+    """
+
+    def __init__(self, name: str, known: Optional[List[str]] = None) -> None:
+        self.name = name
+        self.known = list(known) if known else []
+        known_str = ", ".join(self.known) if self.known else "<none>"
+        super().__init__(f"unknown provider {name!r}; known: {known_str}")
+
+
+class ProviderChainExhausted(ProviderError):
+    """All providers in a FallbackProvider chain failed.
+
+    Raised by ``FallbackProvider.complete()`` when every entry in the
+    chain either could not be resolved (``UnknownProvider``) or raised a
+    cascade-worthy error (``RateLimitError``). The per-entry history is
+    preserved on ``.attempts`` and the last exception is chained via
+    ``__cause__`` for full tracebacks.
+    """
+
+    def __init__(
+        self,
+        providers: Sequence[str],
+        attempts: Sequence[Tuple[str, BaseException]],
+    ) -> None:
+        self.providers: List[str] = list(providers)
+        self.attempts: List[Tuple[str, BaseException]] = list(attempts)
+        summary = "; ".join(
+            f"{name}: {type(exc).__name__}: {exc}" for name, exc in self.attempts
+        ) or "<no attempts recorded>"
+        super().__init__(
+            f"FallbackProvider chain exhausted ({len(self.providers)} entries): {summary}"
+        )
+
+
 class _DryRunResponseType:
     """Sentinel response returned when Provider.complete(dry_run=True)."""
 
@@ -73,6 +114,8 @@ __all__ = [
     "AuthError",
     "RateLimitError",
     "TimeoutError",
+    "UnknownProvider",
+    "ProviderChainExhausted",
     "DryRunResponse",
 ]
 
