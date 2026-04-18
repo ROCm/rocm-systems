@@ -64,6 +64,14 @@ class PerfxpertConnection:
         "pmc_events",
     ]
 
+    # SQL views defined inside each rocpd database that analysis code queries
+    # directly (e.g. analysis/core.py uses "kernels", "memory_copies",
+    # "regions").  These live as VIEWs in each shard's sqlite_master, so
+    # ATTACHed multi-DB sessions must create a TEMP VIEW that UNIONs every
+    # shard — otherwise only db0's rows are visible (silent data loss).
+    # Ports rocm-systems#4982.
+    _ANALYSIS_VIEWS = ["kernels", "memory_copies", "regions"]
+
     def __init__(
         self,
         db_paths: Union[str, Path, List[Union[str, Path]]],
@@ -151,6 +159,32 @@ class PerfxpertConnection:
             conn.execute(
                 f"CREATE TEMP VIEW IF NOT EXISTS {table} AS {union_sql}"
             )
+
+        # Union analysis-facing views (kernels, memory_copies, regions) that
+        # are defined as SQL VIEWs inside each rocpd database file.  Without
+        # this, analysis code that queries `SELECT * FROM kernels` against a
+        # multi-DB session would see only the first shard's view.
+        # Ports rocm-systems#4982.
+        for view_name in self._ANALYSIS_VIEWS:
+            parts = []
+            for idx in range(n):
+                alias = f"db{idx}"
+                try:
+                    check = conn.execute(
+                        f"SELECT COUNT(*) FROM {alias}.sqlite_master "
+                        f"WHERE (type='table' OR type='view') "
+                        f"AND name='{view_name}'"
+                    ).fetchone()
+                    if check and check[0] > 0:
+                        parts.append(f"SELECT * FROM {alias}.{view_name}")
+                except sqlite3.OperationalError:
+                    continue
+            if parts:
+                union_sql = " UNION ALL ".join(parts)
+                conn.execute(
+                    f"CREATE TEMP VIEW IF NOT EXISTS [{view_name}] "
+                    f"AS {union_sql}"
+                )
 
 
 # ---------------------------------------------------------------------------
