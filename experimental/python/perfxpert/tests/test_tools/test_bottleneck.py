@@ -148,3 +148,30 @@ def test_amdahl_middle_medium_priority():
 def test_amdahl_below_threshold_low_priority():
     result = bottleneck.prioritize_by_amdahl(execution_time_pct=0.03)
     assert result["priority"] == "low"
+
+
+# -- Trace-only memcpy path (FINDING #22) ------------------------------------
+
+def test_classify_trace_only_memcpy_above_threshold_returns_memory_transfer():
+    """Tier 1 trace only — only memcpy_pct extracted (no PMC counters).
+
+    When memcpy_pct alone is high (> 0.20 fraction, i.e. 20%), the classifier
+    has real evidence and must return 'memory_transfer', NOT 'data_insufficient'.
+    This guards against silently degrading Tier-1-only traces.
+
+    NOTE: the agentic path (run_analysis) currently forces data_insufficient
+    for all no-PMC traces as a Phase 6 design decision. This test validates
+    the pure rule-based classify_from_metrics() tool — which has no such
+    override — so that the tool itself remains correct and Tier-1 signal
+    is not lost at the tool level.
+    """
+    # User has Tier 1 trace only. Only memcpy_pct extracted. No PMC counters.
+    result = bottleneck.classify_from_metrics({"memcpy_pct": 0.25})
+    assert result["type"] == "memory_transfer", (
+        f"Expected 'memory_transfer' for memcpy_pct=0.25 (25% > 20% threshold), "
+        f"got {result['type']!r}. The classifier must not report data_insufficient "
+        "when concrete memcpy evidence is present."
+    )
+    # Not data_insufficient — we have real evidence (memcpy is high)
+    assert result["type"] != "data_insufficient"
+    assert result["confidence"] >= 0.5
