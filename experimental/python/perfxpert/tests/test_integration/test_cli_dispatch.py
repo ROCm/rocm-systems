@@ -1,4 +1,4 @@
-"""Tests for analyze.py CLI feature-flag dispatch."""
+"""Tests for analyze.py CLI feature-flag dispatch (Phase 6: PERFXPERT_LEGACY)."""
 
 from pathlib import Path
 from unittest import mock
@@ -24,21 +24,23 @@ def fake_db(tmp_path):
     return db
 
 
-def test_cli_default_is_legacy(fake_db, monkeypatch):
-    monkeypatch.delenv("PERFXPERT_USE_AGENTS", raising=False)
-    with mock.patch.object(analyze_mod, "_execute_legacy") as legacy:
-        with mock.patch.object(analyze_mod, "_execute_agentic", create=True) as agentic:
-            legacy.return_value = 0
-            analyze_mod.execute(input=mock.MagicMock(), format="text")
-            legacy.assert_called_once()
-            agentic.assert_not_called()
-
-
-def test_cli_flag_on_routes_to_agentic(fake_db, monkeypatch):
-    monkeypatch.setenv("PERFXPERT_USE_AGENTS", "1")
-    with mock.patch.object(analyze_mod, "_execute_agentic", create=True) as agentic:
+def test_cli_default_is_agentic(fake_db, monkeypatch):
+    """Without PERFXPERT_LEGACY, CLI uses agentic path (Phase 6 default)."""
+    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)
+    with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         with mock.patch.object(analyze_mod, "_execute_legacy") as legacy:
             agentic.return_value = 0
             analyze_mod.execute(input=mock.MagicMock(), format="text")
             agentic.assert_called_once()
             legacy.assert_not_called()
+
+
+def test_cli_legacy_flag_on_routes_to_legacy(fake_db, monkeypatch):
+    """With PERFXPERT_LEGACY=1, CLI uses legacy path."""
+    monkeypatch.setenv("PERFXPERT_LEGACY", "1")
+    with mock.patch.object(analyze_mod, "_execute_legacy") as legacy:
+        with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
+            legacy.return_value = 0
+            analyze_mod.execute(input=mock.MagicMock(), format="text")
+            legacy.assert_called_once()
+            agentic.assert_not_called()

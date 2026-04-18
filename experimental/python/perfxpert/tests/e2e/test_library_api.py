@@ -11,10 +11,11 @@ FIXTURE = Path(__file__).parent.parent / "fixtures" / "regression_baseline.db"
 
 
 def test_legacy_path_returns_analysis_result(monkeypatch):
+    """Test that legacy path (PERFXPERT_LEGACY=1) still works."""
     if not FIXTURE.exists():
         pytest.skip(f"Fixture {FIXTURE} not found")
 
-    monkeypatch.delenv("PERFXPERT_USE_AGENTS", raising=False)
+    monkeypatch.setenv("PERFXPERT_LEGACY", "1")
     result = analyze_database(database_path=FIXTURE)
     assert result is not None
     assert hasattr(result, "metadata")
@@ -22,11 +23,11 @@ def test_legacy_path_returns_analysis_result(monkeypatch):
 
 
 def test_agentic_flag_surface_error_is_clean(monkeypatch):
-    """With flag on but agents runtime absent, the error must be clear — not a traceback dump."""
+    """With agentic default, if agents runtime is absent, error must be clear."""
     if not FIXTURE.exists():
         pytest.skip(f"Fixture {FIXTURE} not found")
 
-    monkeypatch.setenv("PERFXPERT_USE_AGENTS", "1")
+    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)
     try:
         result = analyze_database(database_path=FIXTURE)
     except RuntimeError as e:
