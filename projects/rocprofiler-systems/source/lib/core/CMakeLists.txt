@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp
@@ -101,6 +101,15 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
+)
+
+# Preserve frame pointers so that libunwind can reliably unwind through
+# this code when the causal profiling sampling signal fires.  Without this,
+# optimized Clang/amdclang++ builds produce code that libunwind cannot
+# unwind past, causing causal experiments to stall.
+target_compile_options(
+    rocprofiler-systems-core-library
+    PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fno-omit-frame-pointer>
 )
 
 set_target_properties(

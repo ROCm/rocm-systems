@@ -35,6 +35,7 @@
 #include <cstring>
 
 #include "envvar.hpp"
+#include "log.hpp"
 #include "socket.hpp"
 #include "utils.hpp"
 #include "util.hpp"
@@ -50,7 +51,7 @@ namespace rocshmem {
  * Output: "IPv4/IPv6 address<port>"
  */
 const char* SocketToString(union SocketAddress* addr, char* buf,
-			   const int numericHostForm /*= 1*/) {
+                           const int numericHostForm /*= 1*/) {
   if (buf == NULL || addr == NULL) return NULL;
   struct sockaddr* saddr = &addr->sa;
   if (saddr->sa_family != AF_INET && saddr->sa_family != AF_INET6) {
@@ -91,8 +92,8 @@ static int envSocketFamily(void) {
 }
 
 static int findInterfaces(const char* prefixList, char* names, union SocketAddress* addrs,
-			  int sock_family, int maxIfNameSize, int maxIfs) {
-#ifdef DEBUG
+                          int sock_family, int maxIfNameSize, int maxIfs) {
+#ifdef BUILD_DEBUG_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   struct netIf userIfs[MAX_IFS];
@@ -112,7 +113,7 @@ static int findInterfaces(const char* prefixList, char* names, union SocketAddre
     int family = interface->ifa_addr->sa_family;
     if (family != AF_INET && family != AF_INET6) continue;
 
-    DPRINTF("Found interface %s:%s\n", interface->ifa_name,
+    LOG_TRACE("Found interface %s:%s", interface->ifa_name,
           SocketToString((union SocketAddress*)interface->ifa_addr, line));
 
     /* Allow the caller to force the socket family type */
@@ -198,7 +199,7 @@ static bool matchSubnet(struct ifaddrs local_if, union SocketAddress* remote) {
 
 int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, union SocketAddress* remoteAddr,
                              int ifNameMaxSize, int maxIfs) {
-#ifdef DEBUG
+#ifdef BUILD_DEBUG_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   char line_a[SOCKET_NAME_MAXLEN + 1];
@@ -224,7 +225,7 @@ int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, uni
     // Store the interface name
     strncpy(ifNames + found * ifNameMaxSize, interface->ifa_name, ifNameMaxSize);
 
-    DPRINTF("NET : Found interface %s:%s in the same subnet as remote address %s\n",
+    LOG_TRACE("NET : Found interface %s:%s in the same subnet as remote address %s",
           interface->ifa_name, SocketToString(localAddrs + found, line), SocketToString(remoteAddr, line_a));
     found++;
     if (found == maxIfs) break;
@@ -330,11 +331,11 @@ int FindInterfaces(char* ifNames, union SocketAddress* ifAddrs, int ifNameMaxSiz
   // User specified interface
   const std::string& socketIfname = envvar::bootstrap::socket_ifname;
   if (inputIfName) {
-    DPRINTF("using interface %s", inputIfName);
+    LOG_TRACE("using interface %s", inputIfName);
     nIfs = findInterfaces(inputIfName, ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   } else if (socketIfname != "") {
     // Specified by user : find or fail
-    if (shownIfName++ == 0) DPRINTF ("ROCSHMEM_SOCKET_IFNAME set to %s", socketIfname.c_str());
+    if (shownIfName++ == 0) LOG_TRACE("ROCSHMEM_SOCKET_IFNAME set to %s", socketIfname.c_str());
     nIfs = findInterfaces(socketIfname.c_str(), ifNames, ifAddrs, sock_family,
                           ifNameMaxSize, maxIfs);
   } else {
@@ -371,7 +372,7 @@ Socket::Socket(const SocketAddress* addr, uint64_t magic, enum SocketType type, 
     if (family != AF_INET && family != AF_INET6) {
       char line[SOCKET_NAME_MAXLEN + 1];
       ERROR("SocketInit: connecting to address %s with family %d is neither AF_INET(%d) nor AF_INET6(%d)\n",
-	   SocketToString(&addr_, line), family, (int)AF_INET, (int)AF_INET6);
+           SocketToString(&addr_, line), family, (int)AF_INET, (int)AF_INET6);
       return;
     }
     salen_ = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
@@ -436,7 +437,7 @@ void Socket::bind() {
       return;
     }
     if (remainSecs > 0) {
-      DPRINTF("No available ephemeral ports found, will retry after 1 second");
+      LOG_TRACE("No available ephemeral ports found, will retry after 1 second");
       sleep(1);
       remainSecs--;
     } else {
@@ -455,11 +456,11 @@ void Socket::bind() {
 }
 
 void Socket::bindAndListen() {
-#ifdef DEBUG
+#ifdef BUILD_DEBUG_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   bind();
-  DPRINTF("Listening on socket %s\n", SocketToString(&addr_, line));
+  LOG_TRACE("Listening on socket %s", SocketToString(&addr_, line));
 
   /* Put the socket in listen mode
    * NB: The backlog will be silently truncated to the value in /proc/sys/net/core/somaxconn
@@ -472,7 +473,7 @@ void Socket::bindAndListen() {
 }
 
 void Socket::connect(int64_t timeout) {
-#ifdef DEBUG
+#ifdef BUILD_DEBUG_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
   Timer timer;
@@ -487,10 +488,10 @@ void Socket::connect(int64_t timeout) {
     ERROR("wrong socket state %d\n", state_);
     return;
   }
-  DPRINTF("Connecting to socket %s \n", SocketToString(&addr_, line));
+  LOG_TRACE("Connecting to socket %s ", SocketToString(&addr_, line));
 
   if (setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, (char*)&one, sizeof(int)) != 0) {
-    DPRINTF("setsockopt(TCP_NODELAY) failed, errno %d\n", errno);
+    LOG_TRACE("setsockopt(TCP_NODELAY) failed, errno %d", errno);
     return;
   }
 
@@ -637,7 +638,7 @@ void Socket::tryAccept() {
   } else {
     usleep(SLEEP_INT);
     if (++acceptRetries_ % 1000 == 0)
-      DPRINTF("tryAccept: Call to try accept returned %s, retrying", strerror(errno));
+      LOG_TRACE("tryAccept: Call to try accept returned %s, retrying", strerror(errno));
   }
 }
 
@@ -681,7 +682,7 @@ void Socket::startConnect() {
     return;
   } else if (errno == ECONNREFUSED || errno == ETIMEDOUT) {
     usleep(SLEEP_INT);
-    if (++connectRetries_ % 1000 == 0) DPRINTF("Call to connect returned %s, retrying", strerror(errno));
+    if (++connectRetries_ % 1000 == 0) LOG_TRACE("Call to connect returned %s, retrying", strerror(errno));
     return;
   } else {
     char line[SOCKET_NAME_MAXLEN + 1];
@@ -720,7 +721,7 @@ void Socket::pollConnect() {
     state_ = SocketStateConnected;
   } else if (ret == ECONNREFUSED || ret == ETIMEDOUT) {
     if (++connectRetries_ % 1000 == 0) {
-      DPRINTF("Call to connect returned %s, retrying", strerror(errno));
+      LOG_TRACE("Call to connect returned %s, retrying", strerror(errno));
     }
     usleep(SLEEP_INT);
 

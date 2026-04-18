@@ -115,17 +115,17 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
 
   SECTION("gridDimX == 0") {
     HIP_CHECK_ERROR(func(f, 0, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("gridDimY == 0") {
     HIP_CHECK_ERROR(func(f, 1, 0, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("gridDimZ == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 0, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
+                    hipErrorInvalidValue);
   }
 
   SECTION("blockDimX == 0") {

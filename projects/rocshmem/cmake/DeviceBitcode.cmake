@@ -50,6 +50,8 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
+    -Wall
+    -Wextra
     -x hip
     --cuda-device-only
     -std=c++17

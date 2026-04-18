@@ -663,7 +663,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   // access policy
   deviceProps.accessPolicyMaxWindowSize = 0;
   // cluster launch
-  deviceProps.clusterLaunch = 0;
+  deviceProps.clusterLaunch = info.clusterMaxSize_ > 0;
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options

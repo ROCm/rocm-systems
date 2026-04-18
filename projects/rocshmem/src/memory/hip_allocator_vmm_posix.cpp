@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "hip_allocator.hpp"
+#include "log.hpp"
 
 #if HIP_VERSION >= 70000000
 
@@ -169,9 +170,8 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
     int major = 0, minor = 0;
     if (sscanf(kernel_info.release, "%d.%d", &major, &minor) == 2) {
       if (major < 6 || (major == 6 && minor < 8)) {
-        fprintf(stderr, "ROCSHMEM_WARNING: Linux kernel version %d.%d may not work correctly with VMM POSIX allocator. "
-                "Kernel version 6.8 or higher is recommended.\n",
-                major, minor);
+        LOG_WARN("Linux kernel version %d.%d may not work correctly with VMM POSIX allocator. "
+                 "Kernel version 6.8 or higher is recommended.", major, minor);
       }
     }
   }
@@ -179,18 +179,16 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
   // Allow other processes to trace this process for pidfd_getfd syscall
   // This avoids the need for CAP_SYS_PTRACE capability
   if (prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) != 0) {
-    fprintf(stderr, "ROCSHMEM_WARNING: Failed to set PR_SET_PTRACER: %s. "
-            "IPC operations may require CAP_SYS_PTRACE capability.\n",
-            strerror(errno));
+    LOG_WARN("Failed to set PR_SET_PTRACER: %s. "
+             "IPC operations may require CAP_SYS_PTRACE capability.", strerror(errno));
   }
 
   // Check if the device supports VMM
   int device_id;
   hipError_t err = hipGetDevice(&device_id);
   if (err != hipSuccess) {
-    fprintf(stderr, "ROCSHMEM_ERROR: Failed to get current device for VMM support check: %s\n",
-            hipGetErrorString(err));
-    abort();
+    LOG_ERROR_ABORT("Failed to get current device for VMM support check: %s",
+                    hipGetErrorString(err));
   }
 
   int vmm_supported = 0;
@@ -198,17 +196,14 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
                                hipDeviceAttributeVirtualMemoryManagementSupported,
                                device_id);
   if (err != hipSuccess) {
-    fprintf(stderr, "ROCSHMEM_ERROR: Failed to query VMM support attribute: %s\n",
-            hipGetErrorString(err));
-    abort();
+    LOG_ERROR_ABORT("Failed to query VMM support attribute: %s",
+                    hipGetErrorString(err));
   }
 
   if (!vmm_supported) {
-    fprintf(stderr, "ROCSHMEM_ERROR: Virtual Memory Management (VMM) is not supported on device %d. "
-            "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
-            "Please use a different memory allocator.\n",
-            device_id);
-    abort();
+    LOG_ERROR_ABORT("Virtual Memory Management (VMM) is not supported on device %d. "
+                    "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
+                    "Please use a different memory allocator.", device_id);
   }
 }
 
@@ -267,10 +262,10 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
   int pid_fd = static_cast<int>(syscall(__NR_pidfd_open, pid, 0));
   if (pid_fd == -1) {
     int err_code = errno;
-    fprintf(stderr, "pidfd_open failed for pid %d: %s (errno=%d)\n",
-            pid, strerror(err_code), err_code);
-    fprintf(stderr, "A common reason is lacking CAP_SYS_PTRACE capability.\n");
-    fprintf(stderr, "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>` \n");
+    LOG_ERROR("pidfd_open failed for pid %d: %s (errno=%d). "
+              "A common reason is lacking CAP_SYS_PTRACE capability. "
+              "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>`",
+              pid, strerror(err_code), err_code);
     return hipErrorInvalidValue;
   }
 
@@ -278,10 +273,10 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
   int open_fd = static_cast<int>(syscall(__NR_pidfd_getfd, pid_fd, fd, 0));
   if (open_fd == -1) {
     int err_code = errno;
-    fprintf(stderr, "pidfd_getfd failed for pid %d, fd %d: %s (errno=%d)\n",
-            pid, fd, strerror(err_code), err_code);
-    fprintf(stderr, "A common reason is lacking CAP_SYS_PTRACE capability\n");
-    fprintf(stderr, "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>` \n");
+    LOG_ERROR("pidfd_getfd failed for pid %d, fd %d: %s (errno=%d). "
+              "A common reason is lacking CAP_SYS_PTRACE capability. "
+              "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>`",
+              pid, fd, strerror(err_code), err_code);
     close(pid_fd);
     return hipErrorInvalidValue;
   }

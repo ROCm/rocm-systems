@@ -7,8 +7,8 @@ namespace rocjitsu {
 namespace risc_v {
 namespace detail {
 
-FenceIInst::FenceIInst(uint32_t raw) : IType("fence.i", raw) {}
-void FenceIInst::execute(HartState &ctx) {
+FenceIInst::FenceIInst(uint32_t raw) : IType("fence.i", raw, make_exec_fn<FenceIInst>()) {}
+void FenceIInst::execute_impl(HartState &ctx) {
   (void)ctx; // No-op for single-hart simulation with no I-cache.
 }
 

@@ -2289,12 +2289,12 @@ typedef enum {
   /**
    * Queue supports kernel dispatch packets.
    */
-  HSA_QUEUE_FEATURE_KERNEL_DISPATCH = 1,
+  HSA_QUEUE_FEATURE_KERNEL_DISPATCH = (1 << 0),
 
   /**
    * Queue supports agent dispatch packets.
    */
-  HSA_QUEUE_FEATURE_AGENT_DISPATCH = 2
+  HSA_QUEUE_FEATURE_AGENT_DISPATCH = (1 << 1)
 } hsa_queue_feature_t;
 
 /**

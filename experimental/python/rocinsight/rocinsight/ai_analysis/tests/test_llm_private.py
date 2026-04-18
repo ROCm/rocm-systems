@@ -469,3 +469,44 @@ class TestBuildPrivateClientSSL:
 
         mock_httpx.Client.assert_called_once_with(verify=False)
         assert captured_kwargs.get("http_client") is mock_httpx_client
+
+    def test_ssl_disabled_emits_security_warning(self, monkeypatch, recwarn):
+        """Opting out of SSL verification must surface a runtime warning."""
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", "0")
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
+
+        mock_httpx = MagicMock()
+        mock_httpx.Client.return_value = MagicMock()
+        mock_openai_cls = MagicMock()
+        mock_openai_cls.side_effect = lambda **kwargs: MagicMock()
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "openai": MagicMock(OpenAI=mock_openai_cls),
+                "httpx": mock_httpx,
+            },
+        ):
+            _build_private_client("k", None)
+
+        msgs = [str(w.message) for w in recwarn.list]
+        assert any("SSL certificate verification is DISABLED" in m for m in msgs), (
+            f"Expected an SSL-disabled warning; got: {msgs}"
+        )
+
+    def test_ssl_enabled_no_warning(self, monkeypatch, recwarn):
+        """Default (SSL enabled) must not emit the SSL-disabled warning."""
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", raising=False)
+
+        mock_openai_cls = MagicMock()
+        mock_openai_cls.side_effect = lambda **kwargs: MagicMock()
+        with patch.dict("sys.modules", {"openai": MagicMock(OpenAI=mock_openai_cls)}):
+            _build_private_client("k", None)
+
+        msgs = [str(w.message) for w in recwarn.list]
+        assert not any("SSL certificate verification is DISABLED" in m for m in msgs), (
+            f"Did not expect an SSL-disabled warning; got: {msgs}"
+        )
