@@ -27,7 +27,7 @@ rich = ["rich>=13.0"]
 # claude-agent-sdk enables --llm claude-code using Claude Code's stored credentials
 # (falls back to ANTHROPIC_API_KEY if CLI not found)
 all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0", "claude-agent-sdk>=0.1"]
-dev  = ["pytest>=8.0", "pytest-asyncio>=0.21", "flake8", "black"]
+dev  = ["pytest>=8.0", "pytest-asyncio>=0.21", "flake8", "black", "pexpect>=4.8"]
 
 [project.scripts]
 perfxpert = "perfxpert.__main__:main"
