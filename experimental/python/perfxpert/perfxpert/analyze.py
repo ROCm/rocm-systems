@@ -1020,34 +1020,6 @@ def add_args(parser: argparse.ArgumentParser):
         ),
     )
 
-    analysis_options.add_argument(
-        "--interactive",
-        "-I",
-        metavar="RUN_COMMAND",
-        type=str,
-        default=None,
-        dest="interactive",
-        help=(
-            "Launch the 7-phase interactive profiling + optimization workflow. "
-            "RUN_COMMAND is the full command used to run your GPU application. "
-            'Example: --interactive "./my_gpu_app --batch-size 64". '
-            "The workflow automatically wraps your command with rocprofv3, collects "
-            "a trace, analyzes bottlenecks with AI, and offers to apply optimizations."
-        ),
-    )
-
-    analysis_options.add_argument(
-        "--resume-session",
-        nargs="?",
-        const="latest",
-        default=None,
-        dest="resume_session",
-        help=(
-            "Resume a previous workflow session. Accepts a session ID, an absolute "
-            "path to a workflow_*.json file, or 'latest' (default when flag has no argument). "
-            "Example: --resume-session  OR  --resume-session workflow_2026-03-10_14-23_myapp"
-        ),
-    )
 
     llm_options.add_argument(
         "--llm-thinking",
@@ -1104,8 +1076,6 @@ def add_args(parser: argparse.ArgumentParser):
             "llm_model",
             "llm_thinking",
             "verbose",
-            "interactive",
-            "resume_session",
             "llm_local",
             "llm_local_model",
         ]
@@ -1137,9 +1107,8 @@ def execute(
     """
     Public CLI entry point — dispatches to legacy or agentic implementation.
 
-    Default behavior: LEGACY (backward compatible). Set PERFXPERT_USE_AGENTS=1
-    to enable the new hierarchical-agent path. This env-flag is a Phase 4/5/6
-    transition switch; Phase 6 flips the default.
+    Default behavior (Phase 6+): AGENTIC. Set PERFXPERT_LEGACY=1
+    to opt into the legacy path (removed in vX.Y+1).
 
     Args:
         input: RocpdImportData object with database connection, or None for source-only mode
@@ -1149,9 +1118,11 @@ def execute(
     Returns:
         The input RocpdImportData object (for chaining), or None in source-only mode
     """
-    if _is_agentic_enabled():
-        return _execute_agentic(input, config=config, **kwargs)
-    return _execute_legacy(input, config=config, **kwargs)
+    from .ai_analysis.api import _is_legacy_mode, _emit_legacy_deprecation_once
+    if _is_legacy_mode():
+        _emit_legacy_deprecation_once()
+        return _execute_legacy(input, config=config, **kwargs)
+    return _execute_agentic(input, config=config, **kwargs)
 
 
 def _execute_agentic(
@@ -1205,45 +1176,9 @@ def _execute_legacy(
             input._paths[0] if isinstance(input._paths, list) else input._paths
         )
 
-    # Pop interactive before passing to analyze_performance (it doesn't accept it)
-    interactive = kwargs.pop("interactive", None)
-
-    # 7-phase workflow mode: triggered when --interactive is provided with a RUN_COMMAND
-    if interactive and isinstance(interactive, str):
-        from perfxpert.ai_analysis.interactive import WorkflowSession  # type: ignore[import]
-
-        source_paths: list = []
-        source_dir = kwargs.get("source_dir")
-        if source_dir:
-            source_paths.append(source_dir)
-        ws = WorkflowSession(
-            app_command=interactive,
-            source_paths=source_paths,
-            llm_provider=kwargs.get("llm"),
-            llm_api_key=_resolve_api_key(kwargs.get("llm"), kwargs.get("llm_api_key")),
-            llm_model=kwargs.get("llm_model"),
-            resume_session=kwargs.get("resume_session"),
-        )
-        ws.run()
-        return input
-
     # Map 'format' CLI key -> 'output_format' parameter expected by analyze_performance
     if "format" in kwargs:
         kwargs["output_format"] = kwargs.pop("format")
-
-    # In interactive mode: skip the upfront LLM call entirely — the user will
-    # trigger LLM requests explicitly via [p] and [o] inside the session.
-    # Save credentials first so _run_interactive_session can still use them.
-    _interactive_llm_provider = kwargs.get("llm")
-    _interactive_llm_api_key = _resolve_api_key(
-        _interactive_llm_provider, kwargs.get("llm_api_key")
-    )
-    _interactive_llm_model = kwargs.get("llm_model")
-    if interactive:
-        kwargs.pop("llm", None)
-        kwargs.pop("llm_model", None)
-        kwargs.pop("llm_api_key", None)
-        kwargs.pop("llm_thinking", None)
 
     # Collect structured results so interactive mode can build its command menu
     result_store: Dict[str, Any] = {}
@@ -1287,21 +1222,6 @@ def _execute_legacy(
             )
     else:
         print(output)
-
-    # -- Interactive mode -----------------------------------------------------
-    if interactive:
-        _run_interactive_session(
-            recommendations=result_store.get("recommendations", []),
-            tier0_result=result_store.get("tier0_result"),
-            database_path=result_store.get("database_path", database_path),
-            source_dir=kwargs.get("source_dir", ""),
-            llm_provider=_interactive_llm_provider,
-            llm_api_key=_interactive_llm_api_key,
-            llm_model=_interactive_llm_model,
-            llm_local=kwargs.get("llm_local"),
-            llm_local_model=kwargs.get("llm_local_model"),
-            resume_session=kwargs.get("resume_session"),
-        )
 
     return input
 
