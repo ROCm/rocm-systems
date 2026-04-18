@@ -115,6 +115,12 @@ enum class SemOp : uint16_t {
   V_MBCNT_LO_U32_B32, V_MBCNT_HI_U32_B32,
   V_READLANE_B32, V_WRITELANE_B32,
   V_MED3_F32, V_MAX3_F32, V_MIN3_F32, V_MAX3_NUM_F32,
+  // VOP3 integer 3-way max/min/median. The .td uses
+  // AMDGPU{u,s}{max,min,med}3 SDAG nodes which the backend pattern-
+  // matches; we lift them as the natural 2-step ICmp+Select chain
+  // (no LLVM `*3` IR intrinsic exists). gfx11/gfx12 keep these
+  // (VOP3Instructions.td:1792-1798).
+  V_MAX3_U32,
   V_MAX_NUM_F32, V_MIN_NUM_F32,
   // IEEE-754 2019 maximum/minimum: propagate NaN (distinct from maxnum/minnum).
   V_MAXIMUM_F32, V_MINIMUM_F32,

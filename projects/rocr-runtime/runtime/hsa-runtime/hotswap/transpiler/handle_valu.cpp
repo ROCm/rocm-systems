@@ -733,6 +733,22 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 v_max3_u32: 3-way unsigned max, ternary. The .td pattern
+  // is `AMDGPUumax3` = `umax(umax(a,b), c)`; we lift it as the
+  // direct ICmp+Select chain (matches the V_MAX_U32 idiom one
+  // block above so the intermediate pair `vmax3_lo` reuses the
+  // same shape and a future refactor that switches V_MAX_U32 to
+  // an llvm.umax intrinsic can lift this in lockstep).
+  if (sop == SemOp::V_MAX3_U32) {
+    Value *s0 = op.src(0), *s1 = op.src(1), *s2 = op.src(2);
+    Value *m01 =
+        ctx.B.CreateSelect(ctx.B.CreateICmpUGT(s0, s1), s0, s1, "vmax3_lo");
+    ctx.writeReg32(
+        op.dst(),
+        ctx.B.CreateSelect(ctx.B.CreateICmpUGT(m01, s2), m01, s2, "vmax3"));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_MAX3_F32 || sop == SemOp::V_MAX3_NUM_F32) {
     Value *s0 = op.srcF(0), *s1 = op.srcF(1), *s2 = op.srcF(2);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
