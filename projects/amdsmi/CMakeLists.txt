@@ -83,8 +83,11 @@ set(PKG_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(PKG_VERSION_NUM_COMMIT 0)
 
-project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries"
-        HOMEPAGE_URL "https://github.com/ROCm/amdsmi")
+project(
+    ${AMD_SMI_LIBS_TARGET}
+    DESCRIPTION "AMD System Management libraries"
+    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/amdsmi"
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
