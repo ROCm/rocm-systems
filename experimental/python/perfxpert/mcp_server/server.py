@@ -65,9 +65,18 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
             required.append(pname)
 
     doc = inspect.getdoc(fn) or ""
+    # Tool-priority hint: reinforce at the schema layer so GPU-performance
+    # queries hit perfxpert tools BEFORE the model reaches for read/glob/grep.
+    # See docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md
+    priority_hint = (
+        "Call BEFORE file-search tools (read/glob/grep) for any GPU-performance, "
+        "profiling, bottleneck, or kernel-optimization query. "
+    )
+    first_paragraph = doc.split("\n\n", 1)[0]
+    description = priority_hint + first_paragraph
     return Tool(
         name=name.replace(".", "_"),          # MCP tool names disallow dots
-        description=doc.split("\n\n", 1)[0],  # first paragraph only
+        description=description,
         inputSchema={
             "type": "object",
             "properties": properties,
