@@ -194,7 +194,10 @@ void driftCheckSrcN(DecodedInst &di, const MCInstrDesc &desc) {
   // this layout because OpName::src1 lives at MCInst index 3, not
   // srcMap[1] = 2. The drift is INTENTIONAL: handlers index by
   // MCInst order, not OpName order, and MADMK is a known stable
-  // form. Skip the strict srcN-position check for this signature.
+  // form. Skip the strict srcN-position check at the AFFECTED
+  // index (k=1, the src1 slot) for this signature; k=0 (src0)
+  // still passes naturally and k=2 returns -1 (no src2) so the
+  // outer loop breaks before reaching it.
   //
   // Detection: the opcode exposes both `OpName::imm` and
   // `OpName::src0` / `OpName::src1`, with the imm operand index
@@ -217,7 +220,12 @@ void driftCheckSrcN(DecodedInst &di, const MCInstrDesc &desc) {
     if (namedSrc < 0)
       break;
     int ourSrc = (k < di.numSrcs) ? (int)di.srcMap[k] : -1;
-    if (!isMADMK && ourSrc != namedSrc)
+    // Skip ONLY the genuinely-affected index (k=1) for MADMK. k=0
+    // (src0) still receives the strict check, so a hypothetical
+    // future drift in src0's MCInst position is still caught even
+    // for MADMK opcodes.
+    bool skipThis = isMADMK && k == 1;
+    if (!skipThis && ourSrc != namedSrc)
       reportErr("transpiler: srcMap disagrees with OpName::srcN table",
                 (int)k, ourSrc, namedSrc);
     int namedMod = AMDGPU::getNamedOperandIdx(opc, kModNames[k]);

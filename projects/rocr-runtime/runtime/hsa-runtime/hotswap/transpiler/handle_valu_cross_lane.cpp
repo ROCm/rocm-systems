@@ -230,6 +230,34 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // the same exchange independently in each half, the textbook
   // modulo-replication match.
   //
+  // Empirical verification of the EMULATION on gfx942 (CDNA3) wave64
+  // — directly probing the IR pattern this handler emits, with
+  // vdst_in[L]=L and src0_in[L]=1000+L:
+  //
+  //   lane | new_vdst | new_src0_out
+  //   -----+----------+--------------
+  //      0 |     1016 |     16     (← swapped with lane 16)
+  //     15 |     1031 |     31     (← swapped with lane 31)
+  //     16 |     1000 |      0     (← swapped with lane  0)
+  //     31 |     1015 |     15     (← swapped with lane 15)
+  //     32 |     1048 |     48     (← swapped with lane 48, upper half)
+  //     47 |     1063 |     63     (← swapped with lane 63, upper half)
+  //     48 |     1032 |     32     (← swapped with lane 32, upper half)
+  //     63 |     1047 |     47     (← swapped with lane 47, upper half)
+  //
+  // Every lane's result matches `(L XOR 16)`'s value, with the
+  // upper half (32..63) confined to its own 32-lane partition.
+  // Native gfx942 isel for `llvm.amdgcn.permlane16.swap` would fail
+  // (per upstream LLVM's permlane16.swap.ll ERR-SDAG assertion), so
+  // we cannot directly compare emulation-vs-native on this target;
+  // probing other targets (e.g. gfx950 which has the native
+  // instruction) is left for hardware-availability work and is the
+  // P4.b sub-item in CROSS_LANE_SURVEY.md. The emulation
+  // independently maps onto the published .td swap semantics
+  // (VOP_PERMLANE_SWAP profile), so per-target hardware-vs-
+  // emulation parity follows from emulation-correctness +
+  // .td-semantics.
+  //
   // EXEC / fi / bc handling: the MCInst surfaces `fi` and
   // `bound_ctrl` as named immediate operands ONLY in the e64 form
   // (VOP3OpSel encoding); the e32 form (VOP1 encoding, which the
@@ -251,9 +279,21 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   //
   // The corpus pattern (e32 form, EXEC=full at the swap site) is
   // bit-exact correct under this emulation. We accept all four
-  // fi/bc combinations and document the EXEC=full assumption; a
-  // future "true fi=0 emulation" would zero inactive lanes' VGPRs
-  // before the bpermute, but no corpus kernel needs it today.
+  // fi/bc combinations and document the EXEC=full assumption.
+  //
+  // P4.b future-hardening (CROSS_LANE_SURVEY.md): a "true fi=0
+  // emulation" would zero inactive lanes' VGPR contribution before
+  // the bpermute, e.g. by `select EXEC[L], src0_in[L], 0` and
+  // `select EXEC[L], vdst_in[L], 0` immediately before the
+  // intrinsic calls. That delivers bit-exact `fi=0` semantics at
+  // the cost of two extra selects per swap. A *static* alternative
+  // would be a classifier check that proves EXEC=full at the swap
+  // site (e.g. via flow analysis from the most recent
+  // s_mov_b32_e64 EXEC, -1) and refuses otherwise — sound-not-
+  // complete but principled. Today's corpus invariant
+  // (Triton-style butterfly reductions with full EXEC at swap
+  // sites) makes both approaches deferrable; revisit when a
+  // corpus kernel surfaces partial EXEC at a swap site.
   //
   // V_PERMLANE32_SWAP_B32 (the wider variant) stays refused: it is
   // a wave64-native instruction and would never appear in a wave32
@@ -281,6 +321,15 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
     ParsedReg vdstReg = op.dst();
     ParsedReg src0OutReg =
         ctx.parseReg(di.getReg((unsigned)src0OutIdx), (unsigned)src0OutIdx);
+
+    // Snapshot BOTH input values up-front, before any other
+    // operations that could (now or in a future refactor) clobber
+    // the destination registers. The handler's correctness depends
+    // on the read-before-write ordering: vdst_in is the SAME VGPR
+    // as the vdst output, so any writeReg32 to vdstReg below would
+    // shadow this read if it happened first. Mirroring this for
+    // src0_in keeps both snapshots paired structurally rather than
+    // relying on the implicit ordering of the rest of the handler.
     Value *vdstIn = ctx.regs.readReg32(ctx.B, vdstReg);
     Value *src0In = op.src(0);
 

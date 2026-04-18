@@ -38,6 +38,8 @@ config.fixtures = {
     "c2_ds_swizzle_unsafe": r"@LIT_FIXTURE_C2_DS_SWIZZLE_UNSAFE_CO@",
     "c2_ds_swizzle_fft_reserved":
         r"@LIT_FIXTURE_C2_DS_SWIZZLE_FFT_RESERVED_CO@",
+    "decoder_madmk_v_fmamk_f32":
+        r"@LIT_FIXTURE_DECODER_MADMK_V_FMAMK_F32_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
 }
