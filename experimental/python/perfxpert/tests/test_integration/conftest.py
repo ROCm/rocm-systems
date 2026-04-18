@@ -29,6 +29,15 @@ def compute_bound_db():
 
 
 @pytest.fixture
+def trace_only_elementwise_db():
+    """Trace-only DB (no --pmc counters) — expected to yield data_insufficient verdict."""
+    p = _find_fixture("trace_only_elementwise.db")
+    if p is None:
+        pytest.skip("trace_only_elementwise.db fixture not present")
+    return p
+
+
+@pytest.fixture
 def memory_bound_db():
     p = _find_fixture("memory_bound.db")
     if p is None:
