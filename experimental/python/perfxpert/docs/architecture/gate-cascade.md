@@ -140,6 +140,7 @@ Design-review C1 in the spec: if the Correctness agent *ran* the
 gates, it could re-order or skip them. Keeping gates in middleware
 means the verdict is structurally incapable of being tampered with by
 any agent — the adversarial model includes the LLM itself. This
-invariant is test-enforced: `test_correctness_does_not_have_execution_tools`
-asserts Correctness's `AgentSpec.tools` allowlist contains zero
-EXECUTION tools.
+invariant is test-enforced in
+`tests/test_agents/test_correctness.py` (see
+`test_correctness_has_no_gate_tools`), which asserts Correctness's
+`AgentSpec.tools` allowlist contains zero EXECUTION tools.
