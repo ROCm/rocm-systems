@@ -54,9 +54,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, MPI_Comm comm) {
   numChannels = static_cast<int>(envvar::sdma::num_channels);
   minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
 
-  // fprintf(stdout, "PE %d: SDMA init with threshold=%zu, channels=%d, "
-  //         "min_chunk=%zu, local_size=%d\n",
-  //         pe, sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
+  LOG_INFO("SDMA init with threshold=%zu, channels=%d, "
+           "min_chunk=%zu, local_size=%d",
+           sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
 
   // Initialize the Anvil library
   anvil::anvil.init();
@@ -114,9 +114,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstra
   numChannels = static_cast<int>(envvar::sdma::num_channels);
   minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
 
-  // fprintf(stdout, "PE %d: SDMA init with threshold=%zu, channels=%d, "
-  //         "min_chunk=%zu, local_size=%d\n",
-  //         pe, sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
+  LOG_INFO("SDMA init with threshold=%zu, channels=%d, "
+           "min_chunk=%zu, local_size=%d",
+           sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
 
   // Initialize the Anvil library
   anvil::anvil.init();
@@ -164,7 +164,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, TcpBootstrap* bootstra
 
 
 __host__ void SdmaImpl::sdmaHostStop() {
-  // fprintf(stdout, "PE %d: SDMA stop\n", my_pe);
+  LOG_TRACE("SDMA stop");
   if (deviceHandles_d != nullptr) {
     CHECK_HIP(hipFree(deviceHandles_d));
     deviceHandles_d = nullptr;

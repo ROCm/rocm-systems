@@ -23,10 +23,7 @@
  *****************************************************************************/
 /**
  * @acknowledgements:
- * - Original implementation by: Sidler, David
- * - Source: https://github.com/AARInternal/shader_sdma
- *
- * @note: This code is adapted/modified from the implementation by Sidler, David
+ * - Original implementation by: Sidler, David, AMD RAD
  */
 #ifndef LIBRARY_SRC_SDMA_ANVIL_HPP_
 #define LIBRARY_SRC_SDMA_ANVIL_HPP_

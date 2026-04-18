@@ -21,15 +21,9 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *****************************************************************************/
-/**
- * @acknowledgements:
- * - Original implementation by: Sidler, David
- * - Source: https://github.com/AARInternal/shader_sdma
- *
- * @note: This code is adapted/modified from the implementation by Sidler, David
- */
 
 #include "anvil.hpp"
+#include "log.hpp"
 
 #include <fstream>
 #include <cstring>
@@ -40,25 +34,10 @@
 namespace rocshmem {
 namespace anvil {
 
-auto checkHsaError = [](hsa_status_t s, const char* msg, const char* file, int line) {
-  if (s != HSA_STATUS_SUCCESS) {
-    const char* hsa_err_msg;
-    hsa_status_string(s, &hsa_err_msg);
-    throw(std::runtime_error{std::string("HSA error at ") + file + std::string(":") +
-                             std::to_string(line) + std::string(" - ") + hsa_err_msg});
-  }
-};
-
-#define CHECK_HSA_ERROR(cmd) checkHsaError((cmd), #cmd, __FILE__, __LINE__)
-
-#define CHECK_HSAKMT_SUCCESS(call, msg)                                                  \
-  do {                                                                                   \
-    if ((call) != HSAKMT_STATUS_SUCCESS) {                                               \
-      fprintf(stderr, "ERROR code: %d %s (File: %s, Line: %d)\n", call, msg, __FILE__,   \
-              __LINE__);                                                                 \
-      exit(EXIT_FAILURE);                                                                \
-    }                                                                                    \
-  } while (0)
+#define CHECK_HSAKMT_SUCCESS(call, msg) do {                                  \
+  if ((call) != HSAKMT_STATUS_SUCCESS)                                        \
+    LOG_ERROR_EXIT("%s", #call);                                              \
+} while (0)
 
 // HSA agents
 std::vector<hsa_agent_t> cpuAgents_;
@@ -70,7 +49,7 @@ hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent, hsa_device_type_t target
   hsa_device_type_t device_type{};
   hsa_status_t status{hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type)};
   if (status != HSA_STATUS_SUCCESS) {
-    fprintf(stderr, "Failure to get device type: %#x\n", status);
+    LOG_TRACE("Failure to get device type: %#x", status);
     return status;
   }
   if (device_type == target_device_type) {
@@ -121,7 +100,7 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAg
   uint32_t localNodeId;
   hsa_status_t status = hsa_agent_get_info(localAgent, HSA_AGENT_INFO_NODE, &localNodeId);
   if (status != HSA_STATUS_SUCCESS) {
-    fprintf(stderr, "Failure to get device info: %#x\n", status);
+    LOG_TRACE("Failure to get device info: %#x", status);
   }
 
   // Allocate SDMA queue buffer on device side, requires ExecuteAccess
@@ -133,8 +112,8 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAg
   memFlags.ui32.ExecuteAccess = 1;
   memFlags.ui32.Uncached = 1;
 
-  // fprintf(stdout, "SDMA: Allocating Queue Buffer for device: %d remote device: %d engineId: %d\n",
-  //         localDeviceId, remoteDeviceId, engineId);
+  LOG_TRACE("SDMA: Allocating Queue Buffer for device: %d remote device: %d engineId: %d\n",
+            localDeviceId, remoteDeviceId, engineId);
 
   CHECK_HSAKMT_SUCCESS(hsaKmtAllocMemory(localNodeId, SDMA_QUEUE_SIZE, memFlags, &queueBuffer_),
                        "Failed");
@@ -310,15 +289,15 @@ void AnvilLib::init() {
     // HSA
     hsa_status_t status{hsa_init()};
     if (status != HSA_STATUS_SUCCESS) {
-      fprintf(stderr, "Failure to open HSA connection: %#x\n", status);
+      LOG_TRACE("Failure to open HSA connection: %#x", status);
     }
     status = hsa_iterate_agents(&rocm_hsa_gpu_agent_callback, &gpuAgents_);
     if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
-      fprintf(stderr, "Failure to iterate HSA GPU agents: %#x\n", status);
+      LOG_TRACE("Failure to iterate HSA GPU agents: %#x", status);
     }
     status = hsa_iterate_agents(&rocm_hsa_cpu_agent_callback, &cpuAgents_);
     if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
-      fprintf(stderr, "Failure to iterate HSA CPU agents: %#x\n", status);
+      LOG_TRACE("Failure to iterate HSA CPU agents: %#x", status);
     }
 
     SetUpKFD();
@@ -339,15 +318,16 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 
 bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   uint32_t engineId = getSdmaEngineId(srcDeviceId, dstDeviceId);
-  // fprintf(stdout, "SDMA: Connect from %d to %d with %d channels using engine %d\n",
-  //         srcDeviceId, dstDeviceId, numChannels, engineId);
+  LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
+            srcDeviceId, dstDeviceId, numChannels, engineId);
   for (int c = 0; c < numChannels; ++c) {
     createSdmaQueue(srcDeviceId, dstDeviceId, engineId);
   }
   return true;
 }
 
-SdmaQueue* AnvilLib::getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx) {
+SdmaQueue* AnvilLib::getSdmaQueue([[maybe_unused]] int srcDeviceId, int dstDeviceId,
+                                  int channel_idx) {
   if (sdma_channels_.find(dstDeviceId) == sdma_channels_.end()) {
     return nullptr;
   }
@@ -401,7 +381,7 @@ bool initEndpoint() {
     anvil.init();
     return true;
   } catch (const std::exception& e) {
-    fprintf(stderr, "anvil::initEndpoint: %s\n", e.what());
+    LOG_WARN("anvil::initEndpoint: %s", e.what());
     return false;
   }
 }

@@ -60,20 +60,20 @@ class SdmaImpl {
   __host__ void sdmaHostStop();
 
   // Check SDMA availability for target PE
-  __host__ __device__ bool isSdmaAvailable(int src_pe, int target_pe) {
+  __device__ bool isSdmaAvailable([[maybe_unused]] int src_pe,
+                                  [[maybe_unused]] int target_pe) {
     // SDMA is only available for local (same-node) PEs
     // and when device handles have been initialized
     if (deviceHandles_d == nullptr) {
-      // printf("[SDMA] isSdmaAvailable: src=%d target=%d -> false (no handles)\n",
-      //        src_pe, target_pe);
+      LOGD_TRACE("anvil::isSdmaAvailable: src=%d target=%d -> false (no handles)\n",
+                 src_pe, target_pe);
       return false;
     }
-    // printf("[SDMA] isSdmaAvailable: src=%d target=%d -> true\n", src_pe, target_pe);
+    LOGD_TRACE("anvil::isSdmaAvailable: src=%d target=%d -> true\n", src_pe, target_pe);
     // For now, assume all local PEs can use SDMA
     return true;
   }
 
-#if defined(__HIPCC__) || defined(__CUDACC__)
   // Device-side copy using a single channel (for single-thread operations)
   __device__ void sdmaCopy(void* dst, void* src, size_t size, int pe) {
     int local_pe = pe % shm_size;
@@ -176,7 +176,6 @@ class SdmaImpl {
       }
     }
   }
-#endif  // __HIPCC__ || __CUDACC__
 };
 #endif  // USE_SDMA
 

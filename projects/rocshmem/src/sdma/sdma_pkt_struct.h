@@ -21,13 +21,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *****************************************************************************/
-/**
- * @acknowledgements:
- * - Original implementation by: Sidler, David
- * - Source: https://github.com/AARInternal/shader_sdma
- *
- * @note: This code is adapted/modified from the implementation by Sidler, David
- */
 #ifndef LIBRARY_SRC_SDMA_SDMA_PKT_STRUCT_H_
 #define LIBRARY_SRC_SDMA_SDMA_PKT_STRUCT_H_
 
