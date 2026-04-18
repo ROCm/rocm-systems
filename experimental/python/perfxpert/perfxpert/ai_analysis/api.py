@@ -27,6 +27,9 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
+import os
+import sys
+import warnings
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -511,10 +514,32 @@ class AnalysisResult:
         return "\n".join(lines)
 
 
-def _is_agentic_enabled() -> bool:
-    """Feature flag: PERFXPERT_USE_AGENTS truthy values opt into the new path."""
-    import os
-    return os.environ.get("PERFXPERT_USE_AGENTS", "").strip().lower() in {"1", "true", "yes"}
+_LEGACY_WARNING = (
+    "\n"
+    "⚠️  DEPRECATED: You are running perfxpert in LEGACY mode via PERFXPERT_LEGACY=1.\n"
+    "   The legacy Python TUI will be removed in the next minor release (vX.Y+1).\n"
+    "   Migrate to the agentic path (the default) before upgrading.\n"
+    "   See: docs/migration-to-agentic.md\n"
+)
+
+
+def _is_legacy_mode() -> bool:
+    """Phase 6 feature-flag gate.
+
+    Legacy mode is now strictly opt-in via PERFXPERT_LEGACY=1.
+    The Phase-4 PERFXPERT_USE_AGENTS flag is preserved as a no-op for
+    backward compatibility — users who had it set before Phase 6 experience
+    no change. PERFXPERT_LEGACY takes precedence if both are set.
+    """
+    return os.environ.get("PERFXPERT_LEGACY") == "1"
+
+
+def _emit_legacy_deprecation_once():
+    """Print deprecation warning to stderr once per process."""
+    if getattr(_emit_legacy_deprecation_once, "_emitted", False):
+        return
+    print(_LEGACY_WARNING, file=sys.stderr)
+    _emit_legacy_deprecation_once._emitted = True
 
 
 def analyze_database(
@@ -533,9 +558,9 @@ def analyze_database(
     """
     Public entry point — dispatches to legacy or agentic implementation.
 
-    Default behavior: LEGACY (backward compatible). Set PERFXPERT_USE_AGENTS=1
-    to enable the new hierarchical-agent path. This env-flag is a Phase 4/5/6
-    transition switch; Phase 6 flips the default.
+    Default behavior (Phase 6+): AGENTIC. Set PERFXPERT_LEGACY=1
+    to opt into the legacy path (removed in vX.Y+1). The Phase-4 PERFXPERT_USE_AGENTS
+    flag is preserved as a no-op for backward compatibility.
 
     Args and semantics are identical in both branches. The agentic branch
     delegates to perfxpert.agents.runtime.
@@ -573,8 +598,9 @@ def analyze_database(
         >>> for rec in result.recommendations.high_priority:
         ...     print(f"- {rec.title}")
     """
-    if _is_agentic_enabled():
-        return _analyze_database_agentic(
+    if _is_legacy_mode():
+        _emit_legacy_deprecation_once()
+        return _route_to_legacy(
             database_path,
             custom_prompt=custom_prompt,
             enable_llm=enable_llm,
@@ -586,7 +612,7 @@ def analyze_database(
             top_kernels=top_kernels,
             att_dir=att_dir,
         )
-    return _analyze_database_legacy(
+    return _route_to_agents(
         database_path,
         custom_prompt=custom_prompt,
         enable_llm=enable_llm,
@@ -600,7 +626,7 @@ def analyze_database(
     )
 
 
-def _analyze_database_agentic(
+def _route_to_agents(
     database_path: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
@@ -630,12 +656,12 @@ def _analyze_database_agentic(
         )
     except (ImportError, AttributeError) as e:
         raise RuntimeError(
-            "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
-            "This is a Phase 3 dependency. Unset the env var to use the legacy path."
+            "Agent runtime is not available. "
+            "This is a Phase 3 dependency. Set PERFXPERT_LEGACY=1 to use the legacy path."
         ) from e
 
 
-def _analyze_database_legacy(
+def _route_to_legacy(
     database_path: Union[str, Path],
     *,
     custom_prompt: Optional[str] = None,
@@ -651,7 +677,7 @@ def _analyze_database_legacy(
     """
     Analyze a rocpd database file and return AI-powered insights.
 
-    This is the legacy (default) implementation.
+    This is the legacy (deprecated) implementation, opt-in via PERFXPERT_LEGACY=1.
     Performs local analysis (always) and optional LLM enhancement.
 
     Args:
