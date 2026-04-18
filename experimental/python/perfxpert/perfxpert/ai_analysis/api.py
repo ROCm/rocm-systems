@@ -111,7 +111,7 @@ class AnalysisSummary:
     """High-level summary of analysis"""
 
     overall_assessment: str
-    primary_bottleneck: str  # "compute", "memory", "latency", "mixed", "unknown"
+    primary_bottleneck: str  # BottleneckType: compute | memory_transfer | latency | api_overhead | mixed | data_insufficient
     confidence: float  # 0.0 to 1.0
     key_findings: List[str] = field(default_factory=list)
 
