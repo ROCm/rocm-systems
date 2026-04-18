@@ -81,7 +81,8 @@ Every PR must stay green on Levels 0-4. Nightly runs Level 5.
 
 ## Code of conduct
 
-perfxpert inherits ROCm Systems' [Code of Conduct](../../../../CODE_OF_CONDUCT.md).
+perfxpert inherits ROCm Systems' Code of Conduct — see the top-level
+`rocm-systems` repository for the canonical text.
 
 ## Licensing
 
