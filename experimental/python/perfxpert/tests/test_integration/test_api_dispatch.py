@@ -6,9 +6,9 @@ from unittest import mock
 
 import pytest
 
+from perfxpert.agents import runtime, schemas
 from perfxpert.ai_analysis import api
-from perfxpert.ai_analysis.exceptions import DatabaseNotFoundError
-from perfxpert.agents import schemas
+from perfxpert.providers._exceptions import AuthError, RateLimitError
 
 
 @pytest.fixture
@@ -60,122 +60,73 @@ def test_legacy_flag_off_values_route_to_agentic(value, fake_db, monkeypatch):
     """Explicit falsy values for PERFXPERT_LEGACY route to agentic."""
     monkeypatch.setenv("PERFXPERT_LEGACY", value)
     with mock.patch.object(api, "_route_to_agents") as agentic:
-        with mock.patch.object(api, "_route_to_legacy") as legacy:
-            agentic.return_value = mock.MagicMock()
-            api.analyze_database(database_path=fake_db)
-            agentic.assert_called_once()
-            legacy.assert_not_called()
+        agentic.return_value = mock.MagicMock()
+        api.analyze_database(database_path=fake_db)
+        agentic.assert_called_once()
 
 
-def _make_legacy_result(database_path: Path) -> api.AnalysisResult:
-    recommendation = api.Recommendation(
-        id="rec_001",
-        priority="high",
-        category="compute",
-        title="Use MFMA intrinsics",
-        description="Legacy recommendation payload",
-        estimated_impact="High",
-    )
-    result = api.AnalysisResult(
-        metadata=api.AnalysisMetadata(rocpd_version="0.1.0", database_file=str(database_path)),
-        profiling_info=api.ProfilingInfo(
-            total_duration_ns=123,
-            profiling_mode="thread_trace",
-            analysis_tier=3,
-            gpus=[],
-        ),
-        summary=api.AnalysisSummary(
-            overall_assessment="legacy",
-            primary_bottleneck="latency",
-            confidence=0.42,
-            key_findings=["legacy finding"],
-        ),
-        execution_breakdown=api.ExecutionBreakdown(
-            kernel_time_ns=60,
-            kernel_time_pct=60.0,
-            memcpy_time_ns=20,
-            memcpy_time_pct=20.0,
-            api_overhead_pct=10.0,
-            idle_time_pct=10.0,
-        ),
-        recommendations=api.RecommendationSet(high_priority=[recommendation]),
-        warnings=[],
-    )
-    result._raw = {
-        "time_breakdown": {
-            "total_runtime": 100,
-            "total_kernel_time": 60,
-            "total_memcpy_time": 20,
-            "kernel_percent": 60.0,
-            "memcpy_percent": 20.0,
-            "overhead_percent": 10.0,
-            "kernel_pct": 0.6,
-            "memcpy_pct": 0.2,
-            "api_pct": 0.1,
-            "idle_pct": 0.1,
-        },
-        "hotspots": [{"name": "legacy_kernel", "calls": 3, "total_duration": 60}],
-        "memory_analysis": {},
-        "recommendations_raw": [{"category": "compute", "issue": "legacy payload"}],
-        "hardware_counters": {
-            "has_counters": True,
-            "metrics": {},
-            "counters": {
-                "SQ_WAVES": {
-                    "sample_count": 1,
-                    "avg_value": 1.0,
-                    "min_value": 1.0,
-                    "max_value": 1.0,
-                    "total_value": 1.0,
-                }
-            },
-        },
-        "database_path": str(database_path),
-        "att_trace": {"has_att_data": True, "summary": {"kernel_count": 1}},
-        "att_analysis": {"has_att_data": True, "summary": {"kernel_count": 1}},
-    }
-    return result
-
-
-def test_agentic_route_preserves_legacy_recommendations_and_att(fake_db, monkeypatch):
-    legacy_result = _make_legacy_result(fake_db)
-    session = mock.MagicMock()
+def test_route_to_agents_wraps_output_for_existing_serializers(fake_db):
+    """Agentic API results must still round-trip through the legacy JSON serializer."""
+    session = mock.Mock()
     session.run_analysis.return_value = schemas.AnalysisOutput(
         primary_bottleneck="compute",
-        confidence=0.91,
+        confidence=0.8,
         time_breakdown={
-            "kernel_pct": 0.82,
-            "memcpy_pct": 0.08,
-            "api_pct": 0.05,
-            "idle_pct": 0.05,
+            "kernel_pct": 0.90,
+            "memcpy_pct": 0.05,
+            "api_pct": 0.03,
+            "idle_pct": 0.02,
         },
-        hot_kernels=[{"name": "agentic_kernel", "pct": 0.82, "duration_ns": 1200}],
-        counter_data_available=True,
+        hot_kernels=[{"name": "matmul", "pct": 0.90, "duration_ns": 1000, "calls": 2}],
+        counter_data_available=False,
+    )
+    session.run_recommendation.return_value = schemas.RecommendationOutput(
+        recommendations=[
+            {
+                "name": "launch_bounds",
+                "rationale": "Reduce VGPR pressure.",
+                "expected_impact": 0.25,
+                "risk": "low",
+            }
+        ],
+        specialist_used="compute",
+        plateau_detected=False,
     )
 
-    monkeypatch.setattr("perfxpert.agents.runtime.build_session", lambda **_: session)
-    monkeypatch.setattr(api, "_route_to_legacy", lambda *args, **kwargs: legacy_result)
+    with mock.patch.object(runtime, "build_session", return_value=session):
+        result = api._route_to_agents(fake_db)
 
-    result = api._route_to_agents(database_path=fake_db, att_dir="/tmp/att")
-
-    assert result.summary.primary_bottleneck == "compute"
-    assert result.summary.confidence == 0.91
-    assert result.recommendations.high_priority[0].id == "rec_001"
-    assert result._raw["recommendations_raw"][0]["category"] == "compute"
-    assert result.profiling_info.analysis_tier == 3
-    assert result.profiling_info.profiling_mode == "thread_trace"
-    assert result._raw["att_trace"]["has_att_data"] is True
-    assert result.execution_breakdown.kernel_time_ns == 82
-    doc = json.loads(result.to_json())
-    assert doc["summary"]["primary_bottleneck"] == "compute"
-    assert doc["execution_breakdown"]["kernel_time_pct"] == 82.0
+    payload = json.loads(result.to_json())
+    assert payload["summary"]["primary_bottleneck"] == "compute"
+    assert payload["hotspots"][0]["name"] == "matmul"
+    assert payload["recommendations"][0]["issue"] == "launch_bounds"
 
 
-def test_agentic_route_maps_missing_database_to_public_error(fake_db, monkeypatch):
-    session = mock.MagicMock()
-    session.run_analysis.side_effect = FileNotFoundError("missing db")
+def test_route_to_agents_preserves_auth_errors(fake_db):
+    """Provider auth failures must keep the library's auth exception contract."""
+    session = mock.Mock()
+    session.run_analysis.side_effect = AuthError("openai", "bad key")
 
-    monkeypatch.setattr("perfxpert.agents.runtime.build_session", lambda **_: session)
+    with mock.patch.object(runtime, "build_session", return_value=session):
+        with pytest.raises(api.LLMAuthenticationError):
+            api._route_to_agents(fake_db, enable_llm=True, llm_provider="openai")
 
-    with pytest.raises(DatabaseNotFoundError, match="Database file not found"):
-        api._route_to_agents(database_path=fake_db)
+
+def test_route_to_agents_preserves_rate_limit_errors(fake_db):
+    """Provider rate-limit failures must keep the library's rate-limit contract."""
+    session = mock.Mock()
+    session.run_analysis.side_effect = RateLimitError("openai", retry_after=30.0)
+
+    with mock.patch.object(runtime, "build_session", return_value=session):
+        with pytest.raises(api.LLMRateLimitError):
+            api._route_to_agents(fake_db, enable_llm=True, llm_provider="openai")
+
+
+def test_route_to_agents_wraps_non_provider_failures(fake_db):
+    """Unrelated agentic failures should no longer masquerade as database corruption."""
+    session = mock.Mock()
+    session.run_analysis.side_effect = ValueError("boom")
+
+    with mock.patch.object(runtime, "build_session", return_value=session):
+        with pytest.raises(RuntimeError, match="Agentic analysis failed"):
+            api._route_to_agents(fake_db)
