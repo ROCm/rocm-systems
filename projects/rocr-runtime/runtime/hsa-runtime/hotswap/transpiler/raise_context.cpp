@@ -328,6 +328,16 @@ Value *RaiseContext::emitUpdateDpp(Value *oldVal, Value *src, uint16_t ctrl,
   // VOP1/VOP2/VOP3 classes whose operands are always 32-bit or 64-bit
   // in AMDGPU's ISA, so any other width is a decoder/tblgen drift
   // situation worth surfacing loudly rather than silently downgrading.
+  //
+  // CI regression gate: `Gfx1250Gpu.DppQuadPerm` (in
+  // tests/gfx1250_gpu_test.cpp) lifts the committed
+  // `test_data/gfx1250/dpp_quad_perm_gfx1250.hsaco` (a wave32
+  // source kernel using `v_mov_b32_dpp ... quad_perm:[1,0,3,2]`)
+  // and runs it on gfx942 wave64, verifying the per-lane XOR-1
+  // quad swap pattern across all 64 lanes. A future change that
+  // breaks the dpp_ctrl/row_mask/bank_mask/bound_ctrl plumbing
+  // through this helper, or the OpResolver `wrapDppIfNeeded` hook
+  // that calls it, would fail this test.
   assert(oldVal->getType() == src->getType() &&
          "emitUpdateDpp: old and src must have matching types");
   Type *origTy = src->getType();

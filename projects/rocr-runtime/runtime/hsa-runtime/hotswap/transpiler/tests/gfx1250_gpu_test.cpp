@@ -314,34 +314,34 @@ static void doTestSoftmax() {
 }
 
 // ============================================================================
-// Permlane16 swap: end-to-end regression for CROSS_LANE_SURVEY P4
+// Cross-lane regression tests (CROSS_LANE_SURVEY P4 / P5 / P6)
 // ============================================================================
 //
-// The pre-built `.hsaco` is sourced from
-// `test_data/gfx1250/permlane16_swap_kernel.hip` (committed alongside
-// the .hsaco for reproducibility). Per-lane setup:
+// CI-resident hardware regression gates for the cross-lane
+// emulation/lift handlers. Each test:
 //
-//   vdst_in[L]  = L
-//   src0_in[L]  = 1000 + L
+//   1. Reads a pre-built gfx1250 (wave32) `.hsaco` (committed
+//      alongside its `.hip` source for reproducibility).
+//   2. Lifts through the transpiler pipeline to gfx942 (wave64).
+//   3. Runs the lifted kernel on gfx942 hardware.
+//   4. Verifies per-lane output matches the source-intended pattern.
 //
-// After v_permlane16_swap_b32 (per the VOP_PERMLANE_SWAP profile in
-// VOP1Instructions.td):
+// Each test enforces the contract documented in the corresponding
+// handler comment block — a back-reference is included in each
+// per-test docstring so the contract is auditable from either
+// direction.
+
+// ----- P4: v_permlane16_swap_b32 → paired ds_bpermute emulation -----
 //
-//   new_vdst[L]      = src0_in[L XOR 16]  = 1000 + (L XOR 16)
-//   new_src0_out[L]  = vdst_in[L XOR 16]  = (L XOR 16)
+// Spec: handle_valu_cross_lane.cpp::V_PERMLANE16_SWAP_B32 MODREP
+// block. The handler reads vdst_in (tied to vdst output) and src0_in
+// (tied to src0_out output), then emits two ds_bpermute calls with
+// `partner = lane_id XOR 16` and `byte_addr = partner << 2` —
+// per-32-lane-half independent swap on wave64 by the bit-5
+// preservation hardware contract.
 //
-// The lifted gfx942 wave64 kernel runs each 32-lane half
-// independently under modulo-replication, so the expected output
-// for every L in [0, 64) is the per-half XOR-16 partner. The test
-// verifies all 64 entries — direct empirical check that the
-// emulation produces the source-intended swap.
-//
-// Without this test, the only check that the lifted ds_bpermute
-// chain actually swaps correctly is the embedded probe results in
-// the handler comment block. This test gives the P4 emulation a
-// CI-resident regression gate; a future change that breaks the
-// XOR-16 partner pattern OR the per-32-lane-half independence
-// would fail here.
+// Per-lane setup: vdst_in[L]=L, src0_in[L]=1000+L.
+// Expected: new_vdst[L]=1000+(L^16), new_src0_out[L]=(L^16).
 static void doTestPermlane16Swap() {
   printf("--- permlane16_swap_kernel (P4 end-to-end) ---\n");
   std::string path =
@@ -356,6 +356,17 @@ static void doTestPermlane16Swap() {
          result.liftedCount, result.totalCount, result.hsaco.size());
 
   constexpr int N = 64; // wave64 = 1 wave on gfx942; full block of 64 lanes.
+  auto meta = transpiler::extractKernelMeta(data, "permlane16_swap_kernel");
+
+  // Defensive: the .hip declares __launch_bounds__(64). If someone
+  // edits the .hip without rebuilding the .hsaco AND this test, drift
+  // between the binary's max-flat and the test's hard-coded N would
+  // silently happen; surface it loudly here.
+  ASSERT_GE(meta.maxFlatWorkgroupSize, (uint32_t)N)
+      << "Binary's max_flat_workgroup_size (" << meta.maxFlatWorkgroupSize
+      << ") < test's N (" << N << "). The .hip's __launch_bounds__ and the "
+         "test's N have drifted.";
+
   std::vector<int> hVdst(N, -1), hSrc0(N, -1);
 
   int *dVdst, *dSrc0;
@@ -368,8 +379,6 @@ static void doTestPermlane16Swap() {
   HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
   hipFunction_t func;
   HIP_ASSERT(hipModuleGetFunction(&func, mod, "permlane16_swap_kernel"));
-
-  auto meta = transpiler::extractKernelMeta(data, "permlane16_swap_kernel");
 
   std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
   memcpy(argBuf.data() + 0, &dVdst, 8);
@@ -411,15 +420,178 @@ static void doTestPermlane16Swap() {
                    "XOR-16 partner pattern)";
 }
 
+// ----- P5: DPP modifier → llvm.amdgcn.update.dpp lift -----
+//
+// Spec: raise_context.cpp::emitUpdateDpp + the OpResolver
+// `wrapDppIfNeeded` hook in raise_context.hpp. The handler
+// transparently wraps src0 reads through `update.dpp` whenever
+// `di.hasDpp == true`, populated at decode time by
+// `decodeDppModifiers` from the original (pre-canonicalisation)
+// MCInstrDesc's named operands (dpp_ctrl, row_mask, bank_mask,
+// bound_ctrl).
+//
+// This test's kernel uses `v_mov_b32_dpp ... quad_perm:[1,0,3,2]
+// row_mask:0xf bank_mask:0xf` — within each 4-lane quad, swap
+// adjacent pairs. Equivalently: lane L reads input[L XOR 1].
+// Per-quad-independent by construction (DPP quad_perm operates on
+// 4-lane groups), so wave64 modulo-replication is trivially correct.
+//
+// Per-lane setup: input[L] = L.  Expected: output[L] = L XOR 1.
+static void doTestDppQuadPerm() {
+  printf("--- dpp_quad_perm_kernel (P5 end-to-end) ---\n");
+  std::string path =
+      std::string(GFX1250_DATA_DIR) + "/dpp_quad_perm_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
+                                         "dpp_quad_perm_kernel");
+  ASSERT_TRUE(result.success) << "Pipeline failed for dpp_quad_perm";
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  constexpr int N = 64;
+  auto meta = transpiler::extractKernelMeta(data, "dpp_quad_perm_kernel");
+  ASSERT_GE(meta.maxFlatWorkgroupSize, (uint32_t)N)
+      << "Binary's max_flat (" << meta.maxFlatWorkgroupSize << ") < N (" << N
+      << "); .hip / .cpp drift";
+
+  std::vector<int> hOut(N, -1);
+  int *dOut;
+  HIP_ASSERT(hipMalloc(&dOut, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dOut, 0xff, N * sizeof(int)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod, "dpp_quad_perm_kernel"));
+
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dOut, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  HIP_ASSERT(hipModuleLaunchKernel(func, 1, 1, 1, N, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hOut.data(), dOut, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+
+  int errors = 0;
+  for (int L = 0; L < N; L++) {
+    int expected = L ^ 1;
+    if (hOut[L] != expected) {
+      if (errors < 4)
+        fprintf(stderr, "  lane %2d: got=%d exp=%d\n", L, hOut[L], expected);
+      errors++;
+    }
+  }
+  (void)hipFree(dOut);
+  (void)hipModuleUnload(mod);
+  printf("  Result: %d errors over %d lanes\n", errors, N);
+  EXPECT_EQ(errors, 0) << errors
+                       << " lane mismatches in dpp_quad_perm (expected "
+                          "per-quad XOR-1 swap)";
+}
+
+// ----- P6: ds_swizzle_b32 → llvm.amdgcn.ds.swizzle lift -----
+//
+// Spec: handle_ds.cpp::DS_SWIZZLE_B32 MODREP block. The handler
+// reads `di.dsSwizzleImm` (extracted at decode time by
+// `decodeDsSwizzleImm` in decode.cpp) and emits `ds.swizzle(value,
+// imm)`. The classifier accepts QUAD_PERM, BITMASK_PERM, valid
+// FFT_MODE, and valid ROTATE_MODE encodings (with strict reserved-
+// bit validation); per-32-lane-half independence on wave64 follows
+// from the bit-5-preservation hardware contract documented in the
+// MODREP block.
+//
+// This test's kernel uses `ds_swizzle_b32 offset:0x081f` =
+// BITMASK_PERM with and=0x1F, or=0, xor=2 (a SWAP-2 pattern).
+// Distinct from the GPT-OSS `sum_bitmatrix_rows` corpus pattern
+// (offset:0x041F = SWAP-1) — exercises a different bit of the
+// XOR mask, catching imm-extraction bugs that happen to round-trip
+// SWAP-1.
+//
+// Per-lane setup: input[L] = L.  Expected: output[L] = L XOR 2 (per
+// 32-lane half on wave64).
+static void doTestDsSwizzle() {
+  printf("--- ds_swizzle_kernel (P6 end-to-end) ---\n");
+  std::string path =
+      std::string(GFX1250_DATA_DIR) + "/ds_swizzle_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
+                                         "ds_swizzle_kernel");
+  ASSERT_TRUE(result.success) << "Pipeline failed for ds_swizzle";
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  constexpr int N = 64;
+  auto meta = transpiler::extractKernelMeta(data, "ds_swizzle_kernel");
+  ASSERT_GE(meta.maxFlatWorkgroupSize, (uint32_t)N)
+      << "Binary's max_flat (" << meta.maxFlatWorkgroupSize << ") < N (" << N
+      << "); .hip / .cpp drift";
+
+  std::vector<int> hOut(N, -1);
+  int *dOut;
+  HIP_ASSERT(hipMalloc(&dOut, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dOut, 0xff, N * sizeof(int)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod, "ds_swizzle_kernel"));
+
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dOut, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  HIP_ASSERT(hipModuleLaunchKernel(func, 1, 1, 1, N, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hOut.data(), dOut, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+
+  int errors = 0;
+  for (int L = 0; L < N; L++) {
+    int expected = L ^ 2;
+    if (hOut[L] != expected) {
+      if (errors < 4)
+        fprintf(stderr, "  lane %2d: got=%d exp=%d\n", L, hOut[L], expected);
+      errors++;
+    }
+  }
+  (void)hipFree(dOut);
+  (void)hipModuleUnload(mod);
+  printf("  Result: %d errors over %d lanes\n", errors, N);
+  EXPECT_EQ(errors, 0) << errors
+                       << " lane mismatches in ds_swizzle (expected "
+                          "per-half XOR-2 BITMASK_PERM pattern)";
+}
+
 // ============================================================================
-// TEST registrations
+// TEST registrations — grouped by category for readability.
+// Cross-lane regression block runs first (smallest, highest signal); then
+// elementwise; then matmul (XFAIL block in xfail.cmake).
 // ============================================================================
 class Gfx1250Gpu : public GpuTest {};
 
-TEST_F(Gfx1250Gpu, Softmax) { doTestSoftmax(); }
-TEST_F(Gfx1250Gpu, Vecadd)  { doTestVecadd(); }
-TEST_F(Gfx1250Gpu, Permlane16Swap) { doTestPermlane16Swap(); }
+// Cross-lane regression block (CROSS_LANE_SURVEY P2/P4/P5/P6 + Triton corpus).
+TEST_F(Gfx1250Gpu, Softmax)        { doTestSoftmax(); }        // P2 (permlanex16) implicit
+TEST_F(Gfx1250Gpu, Permlane16Swap) { doTestPermlane16Swap(); } // P4 explicit
+TEST_F(Gfx1250Gpu, DppQuadPerm)    { doTestDppQuadPerm(); }    // P5 explicit
+TEST_F(Gfx1250Gpu, DsSwizzle)      { doTestDsSwizzle(); }      // P6 explicit
 
+// Elementwise.
+TEST_F(Gfx1250Gpu, Vecadd)         { doTestVecadd(); }
+
+// Matmul (XFAIL block, see tests/xfail.cmake).
 TEST_F(Gfx1250Gpu, Matmul64x64) {
   doTestMatmul("matmul_f16_gfx1250.hsaco", 128, 128, 64, "64x64 tile");
 }

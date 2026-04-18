@@ -406,6 +406,17 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     // lane's destination. Every probe confirms the upper-half
     // independence the modulo-replication argument requires.
     //
+    // CI regression gate: `Gfx1250Gpu.DsSwizzle` (in
+    // tests/gfx1250_gpu_test.cpp) lifts the committed
+    // `test_data/gfx1250/ds_swizzle_gfx1250.hsaco` (a wave32
+    // source kernel using `ds_swizzle_b32 offset:swizzle(SWAP,2)`)
+    // and runs it on gfx942 wave64, verifying the per-32-lane-half
+    // XOR-2 BITMASK_PERM swizzle pattern across all 64 lanes. The
+    // SWAP-2 pattern is intentionally distinct from the GPT-OSS
+    // `sum_bitmatrix_rows` corpus pattern (SWAP-1) so the test
+    // catches imm-extraction bugs that happen to round-trip
+    // SWAP-1.
+    //
     // The classifier (`dsSwizzleSafeForModRep`) accepts all four
     // valid envelopes and refuses only the RESERVED top-nibble
     // region, where hardware semantics are undefined and a silent

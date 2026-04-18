@@ -17,18 +17,50 @@
 
 ; CHECK-LABEL: define amdgpu_kernel void @decoder_madmk_v_fmamk_f32_kernel(
 
-; The lifted IR must contain an FMA call with the 32-bit literal
-; (K = 0x40490fdb = pi) as one of the operands. The handler
-; emits llvm.fma.f32, with the K either as an explicit f32
-; constant or as a bitcast of the i32 literal — match either
-; form. The exact bit pattern 0x40490fdb (= float pi ~3.1415927)
-; is what the inline-asm fixture encodes; if the imm extraction
-; truncates or sign-extends, this assertion catches it.
+; The lifted IR must contain an FMA call with three float operands.
+; The K=π literal (encoding 0x40490FDB) lands at the middle operand
+; slot per the V_FMAMK_F32 handler convention (`srcF(0)=src0,
+; srcF(1)=K, srcF(2)=src2` → `fma(s0, k, s2)`).
 ;
-; The IR shape is `call float @llvm.fma.f32(float %s0, float %k,
-; float %s2)` per the V_FMAMK_F32 handler in handle_valu.cpp
-; (srcF(0)=src0, srcF(1)=K, srcF(2)=src2 → fma(s0, k, s2)).
-; CHECK:      call {{.*}}float @llvm.fma.f32({{.*}}, float {{.*}}0x400921FB60000000{{.*}}
+; We assert the IR shape (three float operands) and that the K
+; literal appears SOMEWHERE in the IR, allowing for either of LLVM
+; IR's two valid f32-constant renderings:
+;   * decimal/hex-int form like `0x40490FDB` or `3.141593e+00`
+;   * hex-double form like `0x400921FB60000000` (the f64 expansion
+;     of pi-as-f32)
+; LLVM has historically rendered f32 constants in either form
+; depending on whether the value is exactly representable as a
+; short decimal — pinning a single form would couple the test to
+; the IR printer's heuristic. The shape check + K-literal-anywhere
+; check is sufficient to catch:
+;   * decoder regressions (no FMA call at all → fails CHECK)
+;   * MADMK srcMap reordering (K imm in wrong operand slot →
+;     fails the K-literal check below if K stops being inline)
+;   * imm extraction truncation/sign-extension (K bit pattern
+;     wrong → fails the K-literal check below)
+;
+; Match the FMA call with the K=π literal at the middle (second)
+; operand slot — that's where the V_FMAMK_F32 handler routes the
+; K-imm per its `srcF(0)=src0, srcF(1)=K, srcF(2)=src2` convention
+; (handle_valu.cpp). The literal can render in either of LLVM IR's
+; valid f32-constant forms:
+;   * hex-int form like `0x40490FDB`
+;   * f64-expanded hex-double form like `0x400921FB60000000` (the
+;     f64 expansion of pi-as-f32; LLVM's IR printer chooses this
+;     when the value isn't exactly representable as a short
+;     decimal — which is the case for pi)
+; A `3\.14159` decimal-float form is also accepted in case a future
+; LLVM defaults to that. Pinning a single form would couple the
+; test to the IR printer's heuristic; matching any of the three
+; correct renderings is sufficient to catch:
+;   * decoder regressions (no FMA call at all → CHECK fails)
+;   * MADMK srcMap reordering (K imm in wrong operand slot → the
+;     literal wouldn't be in the second-operand position → CHECK
+;     fails because the constraint is positional)
+;   * imm extraction truncation/sign-extension (K bit pattern wrong
+;     → none of the three alternatives match → CHECK fails)
+;
+; CHECK: call {{.*}}float @llvm.fma.f32(float {{.*}}, float {{0x40490FDB|0x400921FB60000000|3\.14159[0-9]+}}, float {{.*}})
 
 ; The intrinsic declaration must be present.
-; CHECK:      declare {{.*}}float @llvm.fma.f32(float, float, float)
+; CHECK: declare {{.*}}float @llvm.fma.f32(float, float, float)

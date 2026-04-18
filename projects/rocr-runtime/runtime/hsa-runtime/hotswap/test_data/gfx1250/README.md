@@ -2,21 +2,21 @@
 
 ## Provenance
 
-These `.hsaco` code objects were generated via **AOT (Ahead-Of-Time)
-compilation** using Triton 3.7.0 targeting `gfx1250` (RDNA4), on a machine
-**without** a gfx1250 GPU.
+The `.hsaco` files in this directory have **two different
+provenances** depending on the kernel category:
 
-They are **standard `triton.jit` kernels**, not the gluon kernels from
-`triton/third_party/amd/python/examples/gluon/` (which require TDM, warp
-specialization, and full gluon runtime context for compilation).
+### Triton AOT kernels (workload coverage)
 
-### Generation script
+`vecadd_gfx1250.hsaco`, `matmul_*_gfx1250.hsaco`,
+`softmax_gfx1250.hsaco` are generated via **AOT (Ahead-Of-Time)
+compilation** using Triton 3.7.0 targeting `gfx1250` (RDNA4), on a
+machine **without** a gfx1250 GPU. They are **standard `triton.jit`
+kernels**, not the gluon kernels from
+`triton/third_party/amd/python/examples/gluon/` (which require TDM,
+warp specialization, and full gluon runtime context for
+compilation).
 
-```
-triton/aot_compile_gfx1250.py
-```
-
-### How to regenerate
+To regenerate:
 
 ```bash
 source triton/.venv/bin/activate
@@ -25,6 +25,41 @@ PYTHONPATH=triton/python:triton/third_party/amd/python \
 cp triton/gfx1250_kernels/*.hsaco \
   projects/rocr-runtime/runtime/hsa-runtime/hotswap/test_data/gfx1250/
 ```
+
+### Hand-crafted hipcc fixtures (per-handler regression coverage)
+
+`permlane16_swap_gfx1250.hsaco`, `dpp_quad_perm_gfx1250.hsaco`,
+`ds_swizzle_gfx1250.hsaco` are minimal HIP kernels using inline
+asm to encode a specific cross-lane primitive. They give the
+CROSS_LANE_SURVEY P4 / P5 / P6 handlers CI-resident hardware
+regression gates — see `tests/gfx1250_gpu_test.cpp::doTestPermlane16Swap
+/ doTestDppQuadPerm / doTestDsSwizzle` for the GTest pattern.
+
+Each kernel's `.hip` source is committed alongside its `.hsaco`
+(e.g. `permlane16_swap_kernel.hip` next to
+`permlane16_swap_gfx1250.hsaco`). The `.hip` file's header comment
+documents the exact `hipcc` + `clang-offload-bundler` invocation
+used to regenerate the binary.
+
+To regenerate (example for permlane16_swap):
+
+```bash
+DD=projects/rocr-runtime/runtime/hsa-runtime/hotswap/test_data/gfx1250
+hipcc --offload-arch=gfx1250 --genco \
+  "$DD/permlane16_swap_kernel.hip" \
+  -o "$DD/permlane16_swap_gfx1250.hsaco.bundle"
+/opt/rocm-7.2.1/lib/llvm/bin/clang-offload-bundler --type=o \
+  --targets=hipv4-amdgcn-amd-amdhsa--gfx1250 \
+  --input="$DD/permlane16_swap_gfx1250.hsaco.bundle" \
+  --output="$DD/permlane16_swap_gfx1250.hsaco" --unbundle
+rm -f "$DD/permlane16_swap_gfx1250.hsaco.bundle"
+```
+
+Substitute `dpp_quad_perm_kernel` or `ds_swizzle_kernel` for the
+other two fixtures. Verify with `llvm-objdump -d --mcpu=gfx1250
+"$DD/<stem>.hsaco"` that the expected mnemonic
+(`v_permlane16_swap_b32` / `v_mov_b32_dpp ... quad_perm:[1,0,3,2]` /
+`ds_swizzle_b32 offset:swizzle(SWAP,2)`) appears.
 
 ### Build environment
 
@@ -39,27 +74,15 @@ cp triton/gfx1250_kernels/*.hsaco \
 
 ## Kernels
 
-| File | Kernel | Type | WMMA | Key instructions |
-|------|--------|------|------|------------------|
-| `vecadd_gfx1250.hsaco` | fp16 vector add | elementwise | No | `global_load_u16`, `v_add_f16`, `global_store_b16` |
-| `matmul_f16_gfx1250.hsaco` | fp16 GEMM 64×64×32, 4 warps | matmul | **Yes** | `v_wmma_f32_16x16x32_f16`, `ds_load_tr16_b128` |
-| `matmul_f16_large_gfx1250.hsaco` | fp16 GEMM 128×128×32, 8 warps | matmul | **Yes** | `v_wmma_f32_16x16x32_f16`, `v_bitop3_b32`, `s_set_vgpr_msb` |
-| `softmax_gfx1250.hsaco` | fused row softmax 1024 cols | reduction | No | `v_pk_add_f32`, `v_permlanex16_b32`, `v_exp_f32` |
-| `permlane16_swap_gfx1250.hsaco` | per-lane swap regression for CROSS_LANE_SURVEY P4 | unit test | No | `v_permlane16_swap_b32_e32` |
-
-### Per-kernel build provenance
-
-The Triton-built `.hsaco` files (vecadd, matmul, softmax) are
-regenerated via `triton/aot_compile_gfx1250.py` per the recipe above.
-
-The hipcc-built `.hsaco` (`permlane16_swap_gfx1250.hsaco`) is built
-directly from the committed source `permlane16_swap_kernel.hip` —
-the `.hip`'s comment block documents the exact `hipcc` +
-`clang-offload-bundler` invocation. It exists to give the P4
-end-to-end test (`Gfx1250Gpu.Permlane16Swap` in
-`tests/gfx1250_gpu_test.cpp`) a reproducible source, so any future
-maintainer can re-derive the binary from the .hip without consulting
-external tooling state.
+| File | Kernel | Source | Type | WMMA | Key instructions | GTest |
+|------|--------|--------|------|------|------------------|-------|
+| `vecadd_gfx1250.hsaco` | fp16 vector add | Triton | elementwise | No | `global_load_u16`, `v_add_f16`, `global_store_b16` | `Gfx1250Gpu.Vecadd` |
+| `matmul_f16_gfx1250.hsaco` | fp16 GEMM 64×64×32, 4 warps | Triton | matmul | **Yes** | `v_wmma_f32_16x16x32_f16`, `ds_load_tr16_b128` | `Gfx1250Gpu.Matmul64x64` |
+| `matmul_f16_large_gfx1250.hsaco` | fp16 GEMM 128×128×32, 8 warps | Triton | matmul | **Yes** | `v_wmma_f32_16x16x32_f16`, `v_bitop3_b32`, `s_set_vgpr_msb` | `Gfx1250Gpu.Matmul128x128*` (XFAIL) |
+| `softmax_gfx1250.hsaco` | fused row softmax 1024 cols | Triton | reduction | No | `v_pk_add_f32`, `v_permlanex16_b32`, `v_exp_f32` | `Gfx1250Gpu.Softmax` |
+| `permlane16_swap_gfx1250.hsaco` | P4 hand-crafted regression (XOR-16 swap) | hipcc inline-asm | cross-lane unit | No | `v_permlane16_swap_b32_e32` | `Gfx1250Gpu.Permlane16Swap` |
+| `dpp_quad_perm_gfx1250.hsaco` | P5 hand-crafted regression (XOR-1 quad swap) | hipcc inline-asm | cross-lane unit | No | `v_mov_b32_dpp ... quad_perm:[1,0,3,2]` | `Gfx1250Gpu.DppQuadPerm` |
+| `ds_swizzle_gfx1250.hsaco` | P6 hand-crafted regression (XOR-2 BITMASK_PERM swizzle) | hipcc inline-asm | cross-lane unit | No | `ds_swizzle_b32 offset:swizzle(SWAP,2)` | `Gfx1250Gpu.DsSwizzle` |
 
 ## What these exercise (and what they don't)
 
