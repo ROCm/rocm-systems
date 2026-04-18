@@ -254,6 +254,7 @@ def _check_task_store() -> tuple[bool, str]:
 
 def _check_opencode_bundled() -> tuple[bool, str]:
     """Check that bundled opencode binary can be resolved with version."""
+    from pathlib import Path
     from perfxpert.cli.opencode_launcher import resolve_opencode_binary
     try:
         p = resolve_opencode_binary()
@@ -300,6 +301,19 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
     return sorted(configured), sorted(unconfigured)
 
 
+def _report_active_mode() -> str:
+    """Return one of 'Mode: agentic' | 'Mode: legacy (DEPRECATED)'."""
+    import os
+    if os.getenv("PERFXPERT_LEGACY"):
+        return (
+            "Mode: legacy (DEPRECATED)\n"
+            "  PERFXPERT_LEGACY=1 is set.\n"
+            "  This path will be removed in the next minor release.\n"
+            "  Migrate to the agentic path by unsetting PERFXPERT_LEGACY."
+        )
+    return "Mode: agentic (default, Phase 6+)"
+
+
 def _run_doctor():
     """Run all health checks and print results in canonical format."""
     import sys
@@ -328,6 +342,10 @@ def _run_doctor():
     print(f"✓ {len(configured)}/5 LLM providers configured ({configured_str})")
     if unconfigured:
         print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
+
+    # Report active mode
+    print()
+    print(_report_active_mode())
 
     # Final status
     print()
