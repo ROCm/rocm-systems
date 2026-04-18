@@ -20,7 +20,7 @@ output; CI verifies this via `tests/test_patches/test_apply.py`
 | 0001 | `0001-banner-amd-rebrand.patch` | `cli/logo.ts` — AMD ROCm PerfXpert attribution comment + exports `perfxpertBanner` tagline. |
 | 0002 | `0002-prompt-system-perfxpert.patch` | `session/prompt/anthropic.txt` — prepends the 7-agent PerfXpert hierarchy (intent / workflow / bottleneck / roofline / counters / sol / regression). |
 | 0003 | `0003-help-text-amd.patch` | `cli/cmd/tui/feature-plugins/home/tips-view.tsx` — adds three PerfXpert tips (how to phrase queries, list of MCP tools, fallback-chain env var). |
-| 0004 | `0004-color-palette-amd.patch` | `cli/ui.ts` — shifts `TEXT_HIGHLIGHT` from cyan (`\x1b[96m`) to xterm-256 index 196 (AMD red ≈ `#ED1C24`); WCAG AA contrast preserved on light+dark terminal bg. |
+| 0004 | `0004-color-palette-amd.patch` | `cli/ui.ts` — shifts `TEXT_HIGHLIGHT` from cyan (`\x1b[96m`) to 24-bit truecolor `\x1b[38;2;237;28;36m` for the exact AMD red `#ED1C24`; WCAG AA contrast preserved on light+dark terminal bg. Modern terminals render the brand colour exactly; legacy xterm-256 terminals approximate to index 160. |
 | 0005 | `0005-footer-attribution.patch` | `cli/ui.ts` — exports `PERFXPERT_ATTRIBUTION = "AMD ROCm PerfXpert · opencode v1.4.11 (MIT)"` for the status-bar renderer. Applies after 0004 in the same file. |
 
 ### User-Issue Patches (Phase 8 PR 2a, 2c)
