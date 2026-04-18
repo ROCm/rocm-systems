@@ -155,3 +155,42 @@ def test_recommendation_mixed_bottleneck_yields_no_specialist(monkeypatch):
         airgap=True,
     )
     assert result.specialist_used == "none"
+
+
+def test_recommendation_mixed_bottleneck_emits_triage():
+    """'mixed' bottleneck must produce a non-empty triage recommendation, not silent empty."""
+    result = rec_module.run_recommendation(
+        schemas.RecommendationInput(findings=_findings("mixed")),
+        airgap=True,
+    )
+    assert result.specialist_used == "none"
+    # Must have at least one triage technique — not silently empty
+    assert len(result.recommendations) >= 1, (
+        "Expected at least one triage recommendation for 'mixed' bottleneck, got none."
+    )
+    triage = result.recommendations[0]
+    assert triage.get("name") == "mixed_bottleneck_triage", (
+        f"Expected 'mixed_bottleneck_triage', got {triage.get('name')!r}"
+    )
+    assert "ATT" in triage.get("description", ""), (
+        "Triage recommendation must mention ATT as the next step."
+    )
+
+
+def test_recommendation_raises_on_unknown_bottleneck(monkeypatch):
+    """An unhandled bottleneck type must raise ValueError, not silently return empty.
+
+    The Pydantic schema validates known types, so we bypass it by patching
+    the findings object's primary_bottleneck attribute to inject a rogue value.
+    This verifies the else-branch in run_recommendation raises ValueError.
+    """
+    findings = _findings("compute")
+    # Bypass schema validation by replacing the frozen field via object.__setattr__
+    object.__setattr__(findings, "primary_bottleneck", "totally_unknown_type")
+
+    payload = schemas.RecommendationInput(findings=_findings("compute"))
+    # Patch findings on the payload to inject the unknown type
+    object.__setattr__(payload.findings, "primary_bottleneck", "totally_unknown_type")
+
+    with pytest.raises(ValueError, match="unhandled bottleneck type"):
+        rec_module.run_recommendation(payload, airgap=True)

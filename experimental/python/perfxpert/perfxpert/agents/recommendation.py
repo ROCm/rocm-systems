@@ -168,9 +168,39 @@ def run_recommendation(
         )
         spec_out = _run_specialist_latency(spec_input, provider=provider, airgap=airgap)
         techniques = list(spec_out.techniques)
-    else:
+    elif bottleneck == "mixed":
+        # "mixed" is a valid classifier output — not an error.  Emit a triage
+        # recommendation directing the user to ATT or doctor for more detail.
         specialist_used = "none"
-        techniques = []
+        techniques = [
+            {
+                "name": "mixed_bottleneck_triage",
+                "category": "triage",
+                "priority": "medium",
+                "title": "Mixed bottleneck — no single dominant stall source",
+                "description": (
+                    "The classifier did not find one dominant bottleneck. "
+                    "Multiple subsystems are contributing roughly equally. "
+                    "Re-profile with ATT (--att) to identify the dominant stall "
+                    "source at instruction level, or run `perfxpert doctor` to "
+                    "verify counter coverage and ensure all required --pmc passes "
+                    "were collected."
+                ),
+                "rationale": (
+                    "Bottleneck classification is mixed. "
+                    "ATT or broader counter coverage needed to isolate root cause."
+                ),
+                "estimated_impact": "Unknown until dominant stall source is identified",
+            }
+        ]
+    else:
+        # Truly unrecognised bottleneck type — this is a programmer error, not a
+        # user-facing data condition. Raise immediately so it surfaces in tests.
+        raise ValueError(
+            f"unhandled bottleneck type {bottleneck!r}. "
+            "Known types: compute | memory_transfer | latency | api_overhead | "
+            "mixed | data_insufficient. Add a branch or fix the classifier."
+        )
 
     # Dedup against seen hashes
     techniques = _dedup(techniques, payload.seen_recommendation_hashes)
