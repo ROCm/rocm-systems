@@ -178,6 +178,7 @@ def add_args(parser: argparse.ArgumentParser):
     analysis_options.add_argument(
         "--format",
         type=str,
+        dest="output_format",
         choices=["text", "json", "markdown", "webview"],
         default="text",
         help="Output format: text, json, markdown, or webview (default: text). "
@@ -201,6 +202,7 @@ def add_args(parser: argparse.ArgumentParser):
     llm_options.add_argument(
         "--llm",
         type=str,
+        dest="llm_provider",
         choices=["anthropic", "openai", "claude-code"],
         default=None,
         help=(
@@ -297,15 +299,23 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     def process_args(input: RocpdImportData, args: argparse.Namespace):
-        """Process and return valid arguments as dictionary."""
+        """Process and return valid arguments as dictionary.
+
+        Arg names are chosen to match `_execute_agentic`'s kwarg
+        expectations directly (review E2E bug 1): ``output_format`` and
+        ``llm_provider`` are wired via argparse ``dest=`` overrides on the
+        `--format` / `--llm` flags. ``enable_llm`` is derived from
+        ``llm_provider`` being truthy so the agentic path activates the
+        live LLM session without a separate boolean flag.
+        """
         valid_args = [
             "source_dir",
             "att_dir",
             "prompt",
             "top_kernels",
-            "format",
+            "output_format",
             "min_duration",
-            "llm",
+            "llm_provider",
             "llm_api_key",
             "llm_model",
             "llm_thinking",
@@ -322,6 +332,9 @@ def add_args(parser: argparse.ArgumentParser):
         # Convert min_duration from microseconds to nanoseconds
         if "min_duration" in ret:
             ret["min_duration"] = ret["min_duration"] * 1000
+        # Derive enable_llm: non-None llm_provider means the user asked for LLM
+        if ret.get("llm_provider"):
+            ret["enable_llm"] = True
         return ret
 
     return process_args
