@@ -237,22 +237,32 @@ def evaluate(
             per_kernel_deltas=r.get("per_kernel_deltas", []),
         )
 
-    # Gate 5: Test anchors
-    if candidate_binary is not None:
+    # Gate 5: Test anchors (optional — only runs when candidate_binary is provided)
+    gate5_ran = candidate_binary is not None
+    if gate5_ran:
         r = _run_anchors_gate(candidate_binary)
         if not r.get("ok", False):
             return GateVerdict(
                 status="reject", failing_gate="anchors",
                 detail=f"anchor tests failed: {r.get('failed', [])}",
-                metrics={"anchors": r},
+                metrics={"anchors": r, "gates_run": 5},
                 rejected_patch_sha=patch_sha,
             )
 
-    # All gates passed
+    # Build accurate pass verdict — distinguish between 4-gate and 5-gate runs
+    gates_run = 5 if gate5_ran else 4
+    if gate5_ran:
+        detail = "all 5 gates passed"
+    else:
+        detail = (
+            "4 gates passed; Gate 5 (anchors) skipped"
+            " — no candidate_binary provided"
+        )
+
     return GateVerdict(
         status="pass", failing_gate=None,
-        detail="all 5 gates passed",
-        metrics={"claimed_speedup": claimed_speedup},
+        detail=detail,
+        metrics={"claimed_speedup": claimed_speedup, "gates_run": gates_run},
         delta_pct=total_delta,
     )
 

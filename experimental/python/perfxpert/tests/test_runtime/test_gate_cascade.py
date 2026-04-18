@@ -453,3 +453,125 @@ class TestRegressionGateRealSchema:
             "regression_tail_hurt.db has conv2d (hot kernel) regressing 15%; "
             f"Gate 4 must catch this. Got: {v.status!r}, detail: {v.detail!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Finding #11 — Gate 5 silent skip with misleading verdict
+# ---------------------------------------------------------------------------
+
+class TestGate5SkipVerdict:
+    """Tests for Finding #11: when candidate_binary is None, Gate 5 is skipped
+    but the verdict used to falsely claim 'all 5 gates passed'.
+
+    Requirements:
+      1. Detail string must NOT say 'all 5 gates passed' when Gate 5 was skipped.
+      2. metrics['gates_run'] must reflect the actual number of gates that ran.
+      3. When candidate_binary IS supplied and Gate 5 runs, the detail IS correct.
+    """
+
+    @staticmethod
+    def _make_all_pass_stubs(monkeypatch):
+        """Stub gates 1-5 as all passing."""
+        monkeypatch.setattr(
+            gate_cascade, "_run_compile_gate",
+            MagicMock(return_value={"ok": True, "stderr": ""}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_sol_gate",
+            MagicMock(return_value={"ok": True, "peak_ratio": 1.5}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_bitwise_gate",
+            MagicMock(return_value={"ok": True, "diff": None}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_regression_gate",
+            MagicMock(return_value={
+                "ok": True,
+                "verdict": "improved",
+                "total_delta_pct": -0.05,
+                "weighted_geomean_delta_pct": -0.05,
+                "per_kernel_deltas": [],
+                "threshold_pct": 0.03,
+            }),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_anchors_gate",
+            MagicMock(return_value={"ok": True, "failed": []}),
+        )
+
+    def test_no_candidate_binary_detail_not_all_5_passed(self, monkeypatch):
+        """When candidate_binary=None, detail must NOT claim 'all 5 gates passed'."""
+        self._make_all_pass_stubs(monkeypatch)
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.2,
+            candidate_binary=None,   # Gate 5 skipped
+        )
+        assert v.status == "pass"
+        assert v.detail != "all 5 gates passed", (
+            "Gate 5 was skipped (no candidate_binary); detail must not claim "
+            f"'all 5 gates passed'. Got: {v.detail!r}"
+        )
+
+    def test_no_candidate_binary_detail_mentions_skipped(self, monkeypatch):
+        """Skipped Gate 5 verdict detail must mention the skip reason."""
+        self._make_all_pass_stubs(monkeypatch)
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.2,
+            candidate_binary=None,
+        )
+        assert "skipped" in v.detail.lower(), (
+            f"Detail should mention that Gate 5 was skipped. Got: {v.detail!r}"
+        )
+        assert "candidate_binary" in v.detail.lower() or "anchors" in v.detail.lower(), (
+            f"Detail should explain WHY Gate 5 was skipped. Got: {v.detail!r}"
+        )
+
+    def test_no_candidate_binary_gates_run_is_4(self, monkeypatch):
+        """metrics['gates_run'] must be 4 when Gate 5 was skipped."""
+        self._make_all_pass_stubs(monkeypatch)
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.2,
+            candidate_binary=None,
+        )
+        assert v.metrics.get("gates_run") == 4, (
+            f"Expected gates_run=4 when Gate 5 skipped, got: {v.metrics.get('gates_run')!r}"
+        )
+
+    def test_with_candidate_binary_detail_is_all_5_passed(self, monkeypatch):
+        """When candidate_binary is provided and Gate 5 passes, detail IS 'all 5 gates passed'."""
+        self._make_all_pass_stubs(monkeypatch)
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.2,
+            candidate_binary="./my_binary",  # Gate 5 runs
+        )
+        assert v.status == "pass"
+        assert v.detail == "all 5 gates passed", (
+            f"With candidate_binary supplied and all passing, detail must be "
+            f"'all 5 gates passed'. Got: {v.detail!r}"
+        )
+        assert v.metrics.get("gates_run") == 5
+
+    def test_with_candidate_binary_gates_run_is_5(self, monkeypatch):
+        """metrics['gates_run'] must be 5 when Gate 5 ran."""
+        self._make_all_pass_stubs(monkeypatch)
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.2,
+            candidate_binary="./my_binary",
+        )
+        assert v.metrics.get("gates_run") == 5
