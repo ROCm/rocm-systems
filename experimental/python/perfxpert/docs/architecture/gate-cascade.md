@@ -87,17 +87,20 @@ inside a tolerance band that the bitwise gate accepted).
 `GateVerdict`:
 
 ```python
-# SKIP-SAMPLE — requires real compile/profile artifacts
 from perfxpert.runtime.gate_cascade import run_gate_cascade, GateInput
 
+# Minimum required fields — everything else is optional and defaults to
+# None. In this shape the cascade runs gates 2 (SOL) + 4 (regression)
+# only; gates 1/3/5 short-circuit when their optional inputs are absent.
+# For a full 5-gate run, supply source_file + diff_payload (compile),
+# verify_output_baseline/new (bitwise), and test_anchor_baseline/new.
 verdict = run_gate_cascade(GateInput(
-    patch_file="/tmp/patch.diff",
-    compile_flags=["-O3"],
-    claimed_speedup=1.23,
-    gfx_id="gfx942",
-    baseline_kernel_runtimes=[...],
-    optimized_kernel_runtimes=[...],
-    test_anchors=["tests/test_kernel_numeric.py"],
+    kernel_name="my_kernel",
+    claimed_speedup=1.15,
+    arch="gfx942",
+    baseline_runtime_ns=1_000_000,
+    achieved_runtime_ns=870_000,
+    patch_sha="abc123",
 ))
 
 print(verdict.status)         # 'pass' | 'reject' | 'regressed'
