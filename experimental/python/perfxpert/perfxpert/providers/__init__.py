@@ -22,8 +22,8 @@ Env var conventions (canonical):
 Back-compat env-var aliases (honored with DeprecationWarning; active
 contract for API credentials — unrelated to the `ai_analysis` module
 removed in Phase 7.1):
-    ROCINSIGHT_LLM_*  → PERFXPERT_LLM_*
-    ROCPD_LLM_*       → PERFXPERT_LLM_*
+    ROCINSIGHT_LLM_*  → PERFXPERT_LLM_*   (pre-rename alias; removed in Phase 7.1 was the ai_analysis module, not this env var)
+    ROCPD_LLM_*       → PERFXPERT_LLM_*   (pre-rename alias)
 """
 
 from perfxpert.providers._base import Provider, ProviderResponse
