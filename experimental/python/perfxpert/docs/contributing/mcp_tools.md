@@ -20,6 +20,7 @@ in-process only. CI enforces this via `tests/test_integration/test_mcp_exposure.
 ## Template
 
 ```python
+# SKIP-SAMPLE — template: <name> is a placeholder
 """<name> MCP tool wrapper."""
 
 from typing import Any, Dict
@@ -30,7 +31,7 @@ from mcp.server import RequestContext
 from perfxpert.tools import my_read_only_tool
 
 
-async def handle_<name>(
+async def handle_name(
     context: RequestContext,
     **kwargs: Any
 ) -> list[types.TextContent | types.ImageContent]:
@@ -47,6 +48,7 @@ async def handle_<name>(
 Add to MCP server tool list:
 
 ```python
+# SKIP-SAMPLE — template: `server` and `handle_tool_call` are placeholders
 server.set_request_handler(
     types.messages.CallToolRequest,
     lambda ctx, req: handle_tool_call(ctx, req)
