@@ -10,3 +10,5 @@ __pycache__/
 /projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/scope_discovery/
 /projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/SPE_DESIGN.md
 /projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/CROSS_LANE_SURVEY.md
+/projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/RAISING_CHALLENGES_REVIEW.md
+/projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/.agent-prompts/
