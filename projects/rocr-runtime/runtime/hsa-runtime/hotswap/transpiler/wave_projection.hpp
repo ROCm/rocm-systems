@@ -130,6 +130,55 @@ public:
 };
 
 // ============================================================================
+// ThreadLoopProjection — placeholder subclass for the SPE_DESIGN.md §7
+// coverage ladder's second rung.
+//
+// The thread-loop rung wraps the raised IR body in `for iter in 0..R:`
+// with R = W_tgt / W_src, using only the lower W_src target lanes per
+// iteration. It naturally handles SPE_DESIGN.md §3 Class 3 (no
+// replicas, no inter-replica races) and Class 4 (per-iteration EXEC),
+// trading full-wave throughput for expanded coverage. It does NOT
+// dissolve Class 2 cross-lane obstructions (see §7 "The hard wall that
+// no projection crosses").
+//
+// Today no corpus kernel reaches this rung (gpt-oss-derisking.md §9.1
+// reports every GPT-OSS / hipBLASLt / Gluon kernel is outcome (a) or
+// (b) under modulo-replication). The class is declared here so §7's
+// type hierarchy is visible in code; constructing it today is a
+// principled `report_fatal_error` rather than silent acceptance,
+// because the projection's emission semantics require a structural
+// rewrite of the raiser's main loop that has not been implemented.
+//
+// MAINTENANCE. When implementing thread-loop (expected trigger: a
+// corpus kernel in outcome (c) under modulo-replication that would be
+// outcome (a) under thread-loop), the steps are:
+//   1. Populate the overridden emitters with thread-loop semantics
+//      (see SPE_DESIGN.md §7 "Projection 4").
+//   2. Add the additional correctness obligations the thread-loop
+//      projection introduces — barrier hoisting, LDS-aliasing — as
+//      extra checks in `buildObstructionReport` gated on the current
+//      projection choice.
+//   3. Extend `decideProjection` to try thread-loop after modulo-
+//      replication refuses, per the ladder in SPE_DESIGN.md §7.
+class ThreadLoopProjection final : public WaveProjection {
+public:
+  // Placeholder ctor: aborts loudly so a typo that instantiates this
+  // subclass before the implementation lands surfaces at raise time
+  // rather than as a silent miscompile.
+  ThreadLoopProjection(const ISAProfile &srcIsa, const ISAProfile &tgtIsa,
+                       llvm::Type *i32Ty, llvm::Type *i64Ty);
+
+  llvm::Value *emitLaneActiveBit(llvm::IRBuilder<> &B,
+                                  llvm::Value *execVal) const override;
+  llvm::Value *ballotI1ToWidth(llvm::IRBuilder<> &B, llvm::Value *pred,
+                                llvm::Type *resultTy,
+                                const llvm::Twine &name = "ballot")
+      const override;
+  llvm::Value *extractLaneBitFromWaveMask(llvm::IRBuilder<> &B,
+                                           llvm::Value *v) const override;
+};
+
+// ============================================================================
 // EXEC-writer detection — architecture-neutral, authoritative.
 //
 // Derivation strategy (no string matching, no per-opcode allow-lists):
@@ -158,18 +207,16 @@ public:
 bool instructionWritesEXEC(const DecodedInst &di, const MCState &mc);
 
 // ============================================================================
-// Cross-wave safety warning (Phase 1.4).
+// Cross-wave safety warning (Phase 1.4) — legacy warn-only surface.
 //
-// Emits a warning to `errs()` when the source and target wave widths
-// differ AND the kernel contains at least one EXEC-writing instruction.
-// Today's policy is warning-only — modulo-replication is accepted for
-// EXEC-manipulating kernels on the assumption that the EXEC writers are
-// lane-position-independent. See SPE_DESIGN.md §4 for the principled
-// 3-outcome strategy that tightens this into an abort-unless-proven-safe
-// gate.
+// Kept for the `lit_tests/cross_wave_warn` regression test, which
+// validates the principle that a cross-wave translation with only
+// lane-position-INDEPENDENT EXEC writers continues to raise under the
+// new classifier gate. In production the structured decider
+// `decideProjection` below is the primary surface and this function
+// becomes a diagnostic logger only (routed through LLVM_DEBUG).
 //
-// Does not fail the raise; returns true iff a warning was emitted so
-// callers can, e.g., log it to a different surface.
+// Returns true iff a diagnostic was emitted.
 bool emitCrossWaveWarning(const WaveProjection &proj, const MCState &mc,
                           llvm::ArrayRef<DecodedInst> insts,
                           llvm::StringRef sourceISA,

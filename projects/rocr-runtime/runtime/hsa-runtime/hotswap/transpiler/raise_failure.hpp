@@ -36,6 +36,20 @@ enum class RaiseFailureReason : uint16_t {
   TargetMachineCreationFailed,
   // Phase 7: `verifyModule` rejected the emitted IR.
   IRVerificationFailed,
+  // Phase 1.4.5 wave-size-obstruction classifier (SPE_DESIGN.md §4).
+  // One reason per refusal *decision* so `batch_raise_test` and
+  // `corpus_test` can bucket failures without parsing the failure
+  // text. See `wave_size_obstruction.hpp` for the classifier
+  // taxonomy and the mapping between these reasons and the more
+  // specific `ObstructionKind` values.
+  //
+  // The §3 Class 1..4 grouping is preserved as cross-references in
+  // the comments below; it is not part of the enum-value identity.
+  CrossWaveLaneIdLeak,             // §3 Class 1: MbcntHiLaneIdLeak / OutOfRangeLaneOperand.
+  CrossWaveUnrewritableShuffle,    // §3 Class 2: FullWaveRotate (no §4 rewrite available).
+  CrossWaveShuffleRewritePending,  // §3 Class 2: shuffle with CROSS_LANE_SURVEY P-item, handler not landed.
+  CrossWaveReplicaRace,            // §3 Class 3: NonCommutativeAtomic.
+  CrossWaveLanePredicatedExec,     // §3 Class 4: CmpxFromLaneId / SaveExecFromLaneId.
 };
 
 // Human-readable name for a `RaiseFailureReason`. Stable enough for
@@ -99,6 +113,25 @@ struct RaiseFailure {
   // Phase 7: `verifyModule` rejected the emitted IR.
   // `err` carries the verifier's diagnostic text for the `detail` field.
   static RaiseFailure irVerificationFailed(const llvm::Twine &err);
+
+  // Phase 1.4.5 wave-size-obstruction classifier (SPE_DESIGN.md §4).
+  // `di` supplies the offending mnemonic + offset. `kindDetail`
+  // should carry the human-readable `ObstructionKind` name (from
+  // `obstructionKindName`), the CROSS_LANE_SURVEY.md P-item (where
+  // applicable), and any operand-level context the classifier
+  // extracted (e.g. "operand value N >= W_s=M"). The resulting
+  // failure is renderable by `reasonString` for batch-test bucketing
+  // without parsing `detail`.
+  static RaiseFailure crossWaveLaneIdLeak(const DecodedInst &di,
+                                           const llvm::Twine &kindDetail);
+  static RaiseFailure crossWaveUnrewritableShuffle(const DecodedInst &di,
+                                                    const llvm::Twine &kindDetail);
+  static RaiseFailure crossWaveShuffleRewritePending(const DecodedInst &di,
+                                                      const llvm::Twine &kindDetail);
+  static RaiseFailure crossWaveReplicaRace(const DecodedInst &di,
+                                            const llvm::Twine &kindDetail);
+  static RaiseFailure crossWaveLanePredicatedExec(const DecodedInst &di,
+                                                   const llvm::Twine &kindDetail);
 };
 
 } // namespace transpiler

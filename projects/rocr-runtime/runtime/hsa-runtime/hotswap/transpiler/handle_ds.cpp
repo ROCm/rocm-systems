@@ -327,6 +327,20 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  if (sop == SemOp::DS_SWIZZLE_B32) {
+    // CROSS_LANE_SURVEY.md item P6 (pending). Refuse the lift until
+    // the handler emits `llvm.amdgcn.ds.swizzle` with the offset
+    // immediate plumbed through. The wave-size classifier (Phase
+    // 1.4.5) catches this earlier in the cross-wave case and reports
+    // the more specific `cross-wave-shuffle-rewrite-pending`
+    // diagnostic; this same-wave fallback exists so that a same-wave
+    // raise also fails loudly rather than silently same-laning the
+    // cross-lane shuffle.
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "DS",
+        "ds_swizzle_b32 — CROSS_LANE_SURVEY.md P6 lift not implemented");
+    return hr;
+  }
   return hr;
 }
 

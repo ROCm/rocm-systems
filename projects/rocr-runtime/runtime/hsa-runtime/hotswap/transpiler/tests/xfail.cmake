@@ -22,6 +22,25 @@ set_tests_properties(Gfx1250Gpu.Matmul128x128 PROPERTIES
   LABELS "transpiler;xfail"
 )
 
+# Softmax: the legacy transpiler's own gfx1250 softmax fixture uses
+# v_mov_b32_dpp (DppCrossLane / SPE_DESIGN.md §3 Class 2) and
+# v_permlanex16_b32 (LaneGroupShuffle / §3 Class 2) per
+# gpt-oss-derisking.md §7.2/§7.3. Under the new wave-size classifier
+# gate (SPE_DESIGN.md §4, wave_size_obstruction.{hpp,cpp}) these are
+# correctly flagged as outcome (c) shuffle-rewrite-pending — the
+# pre-classifier raiser accepted them and emitted same-lane fallback
+# IR (accidentally correct on the specific all-1.0f softmax input,
+# see CROSS_LANE_SURVEY.md for why). Graduating this XFAIL back to
+# expected-pass requires CROSS_LANE_SURVEY.md items P5 (DPP intrinsic
+# lift) and P2/P3/P4 (permlane16 intrinsic lift) to land; at that
+# point the corresponding ObstructionKind sites' `rewriteImplemented`
+# bit in wave_size_obstruction.cpp flips to true and the classifier
+# accepts the kernel as outcome (b).
+set_tests_properties(Gfx1250Gpu.Softmax PROPERTIES
+  WILL_FAIL TRUE
+  LABELS "transpiler;xfail;wave-size-rewrite-pending"
+)
+
 # Integration vecadd via runPipelineAllKernels: hipError 719 (unspecified
 # launch failure).  Single-kernel path (Gfx1250Gpu.Vecadd) works; the
 # merged-HSACO linker path has a bug.

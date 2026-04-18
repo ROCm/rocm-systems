@@ -1,36 +1,36 @@
 ; RUN: %raise_cli %cross_wave_warn_co --isa=gfx1250 --target-isa=gfx942 \
-; RUN:     --emit-ir=cross_wave_writer_kernel 2>&1 >/dev/null \
-; RUN:   | %FileCheck %s --check-prefix=STDERR
+; RUN:     --emit-ir=cross_wave_writer_kernel 2>/dev/null \
+; RUN:   | %FileCheck %s
 ;
 ; Cross-wave translation (wave32 source → wave64 target) of a kernel
-; that manipulates EXEC must emit the modulo-replication warning from
-; raiser.cpp's Phase-1.4 gate. Today the policy is warn-only, so the
-; raise still succeeds; downstream CI is free to escalate by grepping
-; stderr.
+; whose only EXEC writer is lane-position-INDEPENDENT — here, a
+; `v_cmpx_lt_u32_e64 threadIdx.x, 8` bounds check where the LHS is
+; workitem_id_x (uniform-across-replicas, not derived from mbcnt).
+; The Phase 1.4.5 classifier in `wave_size_obstruction.cpp` should
+; classify this as outcome (a) oblivious: the v_cmpx is an EXEC
+; writer, but with no v_mbcnt_* in the kernel the syntactic
+; co-occurrence heuristic does not flag it, and no refusal fires.
 ;
-; We assert the diagnostic contains the stable substrings that make
-; the warning actionable:
+; This is the regression-fence counterpart to the c4_lane_dep_cmpx
+; lit test, which uses exactly the same v_cmpx shape but adds an
+; `v_mbcnt_lo_u32_b32` to the body so the co-occurrence heuristic
+; catches it. The pair of fixtures pins both directions of the
+; classifier's decision.
 ;
-;   * `cross-wave translation` — identifies the class of issue.
-;   * `modulo-replication`     — names the policy the warning is about.
-;   * the concrete wave sizes on each side, so the operator can see
-;     the cross-family delta at a glance.
-;   * the offending instruction mnemonic (v_cmpx_lt_u32_e64) and the
-;     offset — both useful for triage.
+; Historical note. Before Phase 1.4.5 landed, the raiser's warn-
+; only Phase 1.4 gate printed a stderr banner (`transpiler:
+; WARNING: cross-wave translation of an EXEC-manipulating kernel
+; relies on modulo-replication, which is not provably correct in
+; general...`). That banner is now routed through LLVM_DEBUG under
+; DEBUG_TYPE="wave-projection" — it surfaces only with
+; `-debug-only=wave-projection`. The classifier's per-site trace,
+; emitted via the same DEBUG_TYPE, subsumes the banner's content.
+; See `wave_projection.cpp:emitCrossWaveWarning` for the shim and
+; `wave_size_obstruction.cpp:renderObstructionTrace` for the new
+; format.
 ;
-; The warning is NOT expected to abort; a separate companion lit
-; test (abort_gate.ll) guards the different — allow-list — abort
-; path. A cross-wave lit test that asserts an ABORT would be the
-; right thing to add if we ever tighten the policy in the future.
+; We assert structurally: the raise succeeds and the emitted IR
+; contains the kernel body — not a particular SSA name, which is
+; not stable across LLVM versions.
 
-; STDERR: transpiler: WARNING: cross-wave translation
-; STDERR-SAME: EXEC-manipulating kernel
-; STDERR-SAME: modulo-replication
-
-; Wave sizes reported explicitly so the operator sees the cross-family
-; delta. Source is gfx1250 (wave32), target is gfx942 (wave64).
-; STDERR:      source ISA wave size: 32 (gfx1250)
-; STDERR-NEXT: target ISA wave size: 64 (gfx942)
-
-; First EXEC-writer in the fixture is our `v_cmpx_lt_u32_e64`.
-; STDERR: first EXEC-writer: v_cmpx_lt_u32_e64
+; CHECK-LABEL: define amdgpu_kernel void @cross_wave_writer_kernel(

@@ -15,6 +15,7 @@
 #include "raise_context.hpp"
 #include "sem_op_attrs.hpp"
 #include "wave_projection.hpp"
+#include "wave_size_obstruction.hpp"
 #include "handlers.hpp"
 
 #include "llvm/IR/Constants.h"
@@ -39,8 +40,11 @@
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/Support/Debug.h"
 
 #include <map>
+
+#define DEBUG_TYPE "wave-projection"
 
 using namespace llvm;
 
@@ -125,16 +129,67 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     }
   }
 
-  // ==== Phase 1.4: Cross-wave-size safety check (warning-only) ====
+  // ==== Phase 1.4: Cross-wave legacy diagnostic (LLVM_DEBUG) ====
   //
-  // See wave_projection.hpp for the full policy rationale. The check is
-  // warning-only today — SPE_DESIGN.md §4 describes the principled
-  // 3-outcome decision procedure that would tighten this to an
-  // abort-unless-proven-safe gate. The warning emission is intentionally
-  // NOT a failure: `result.failFormat` is not set, so the success path
-  // continues and existing kernels still raise.
+  // Kept as a fallback diagnostic under `-debug-only=wave-projection`;
+  // the structured classifier in Phase 1.4.5 below is the primary
+  // decision surface. See wave_projection.cpp for the text of the
+  // legacy diagnostic.
   emitCrossWaveWarning(projection, mc, insts, sourceISA,
                        compilationTargetISA);
+
+  // ==== Phase 1.4.5: Wave-size obstruction classifier (SPE_DESIGN.md §4) ====
+  //
+  // The classifier walks the decoded instruction stream and tags every
+  // site that violates the wave-size-obliviousness theorem (§2). The
+  // decider then applies the 3-outcome procedure:
+  //   (a) no obstructions, or every obstruction is covered by an
+  //       implemented rewrite → emit modulo-replication.
+  //   (b) at least one obstruction has a rewrite pending in
+  //       CROSS_LANE_SURVEY.md but not yet implemented → refuse with a
+  //       `CrossWaveShuffleRewritePending` diagnostic naming the P-item.
+  //   (c) at least one obstruction has no rewrite in §4's table →
+  //       refuse with the kind-specific CrossWave* diagnostic
+  //       (`CrossWaveLaneIdLeak`, `CrossWaveUnrewritableShuffle`,
+  //       `CrossWaveReplicaRace`, `CrossWaveLanePredicatedExec`).
+  //
+  // Refusal diagnostics are written to `errs()` (user-visible) AND the
+  // full per-site trace is routed through LLVM_DEBUG so operators can
+  // inspect the oblivious/pass path under `-debug-only=wave-projection`
+  // without recompiling.
+  {
+    ObstructionReport report =
+        buildObstructionReport(insts, mc, isa, targetIsa);
+    std::string trace = renderObstructionTrace(
+        report, kernelName, sourceISA,
+        compilationTargetISA.empty() ? sourceISA : compilationTargetISA,
+        isa.waveSize, targetIsa.waveSize);
+    LLVM_DEBUG(dbgs() << trace);
+    if (report.hasUnrewritable() || report.hasPendingRewrite()) {
+      RaiseFailure f = selectFailureFromReport(report);
+      // The factory names the class in `format`; surface the full
+      // trace in `detail` so raise_cli / batch_raise_test can carry
+      // the per-site context forward without re-invoking the
+      // classifier.
+      if (!f.detail.empty())
+        f.detail += "\n";
+      f.detail += trace;
+      // `format_hex(value, width)` prepends "0x" itself; do NOT add a
+      // literal "0x" here or the output will read "0x0x...". Use
+      // `format_hex_no_prefix` if a manual prefix is desired (the
+      // trace-renderer below uses that variant).
+      errs() << "transpiler: pre-translation abort: " << f.format
+             << " on '" << f.mnemonic << "' at offset "
+             << format_hex(f.offset, 1) << " \u2014 "
+             << (report.firstUnrewritable()
+                     ? "no rewrite in SPE_DESIGN.md \u00a74"
+                     : "rewrite pending (CROSS_LANE_SURVEY.md)")
+             << "\n"
+             << trace;
+      result.failure = std::move(f);
+      return result;
+    }
+  }
 
   // ==== Phase 1.5: SPE A-level gate (EXEC-writer attribute check) ====
   //

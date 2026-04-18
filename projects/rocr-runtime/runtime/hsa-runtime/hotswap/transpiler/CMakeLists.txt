@@ -64,6 +64,7 @@ add_library(hotswap-transpiler STATIC
   reg_file.cpp
   decode.cpp
   wave_projection.cpp
+  wave_size_obstruction.cpp
   sem_op_attrs.cpp
   raise_failure.cpp
   mc_state.cpp

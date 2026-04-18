@@ -15,9 +15,12 @@
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegister.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
+
+#define DEBUG_TYPE "wave-projection"
 
 using namespace llvm;
 
@@ -126,6 +129,42 @@ Value *ModuloReplicationProjection::extractLaneBitFromWaveMask(
 }
 
 // ----------------------------------------------------------------------------
+// ThreadLoopProjection — SPE_DESIGN.md §7 second rung, not yet
+// implemented. Every virtual override report_fatal_errors so a build
+// that silently instantiates it (e.g. a bad decider branch) surfaces
+// as a loud runtime abort rather than wrong code.
+// ----------------------------------------------------------------------------
+
+ThreadLoopProjection::ThreadLoopProjection(const ISAProfile &srcIsa,
+                                            const ISAProfile &tgtIsa,
+                                            Type *i32Ty, Type *i64Ty)
+    : WaveProjection(srcIsa, tgtIsa, i32Ty, i64Ty) {
+  report_fatal_error(
+      "ThreadLoopProjection is a placeholder for SPE_DESIGN.md \u00a77's "
+      "coverage-ladder second rung; its emission semantics are not yet "
+      "implemented. See ThreadLoopProjection's header comment for the "
+      "MAINTENANCE protocol that lands the implementation.");
+}
+
+Value *ThreadLoopProjection::emitLaneActiveBit(IRBuilder<> & /*B*/,
+                                                Value * /*execVal*/) const {
+  report_fatal_error("ThreadLoopProjection::emitLaneActiveBit unimplemented");
+}
+
+Value *ThreadLoopProjection::ballotI1ToWidth(IRBuilder<> & /*B*/,
+                                              Value * /*pred*/,
+                                              Type * /*resultTy*/,
+                                              const Twine & /*name*/) const {
+  report_fatal_error("ThreadLoopProjection::ballotI1ToWidth unimplemented");
+}
+
+Value *ThreadLoopProjection::extractLaneBitFromWaveMask(
+    IRBuilder<> & /*B*/, Value * /*v*/) const {
+  report_fatal_error(
+      "ThreadLoopProjection::extractLaneBitFromWaveMask unimplemented");
+}
+
+// ----------------------------------------------------------------------------
 // EXEC-writer detection.
 // ----------------------------------------------------------------------------
 
@@ -166,23 +205,35 @@ bool emitCrossWaveWarning(const WaveProjection &proj, const MCState &mc,
   if (!firstEXECWriter)
     return false;
 
-  errs() << "transpiler: WARNING: cross-wave translation of an "
-            "EXEC-manipulating kernel relies on modulo-replication, "
-            "which is not provably correct in general.\n"
-         << "  source ISA wave size: " << proj.sourceIsa().waveSize << " ("
-         << sourceISA << ")\n"
-         << "  target ISA wave size: " << proj.targetIsa().waveSize << " ("
-         << (targetISA.empty() ? sourceISA : targetISA) << ")\n"
-         << "  first EXEC-writer: " << firstEXECWriter->rawMnemonic
-         << " at offset 0x"
-         << format_hex_no_prefix(firstEXECWriter->offset, 4) << "\n"
-         << "  rationale: the kernel manipulates EXEC; replicating it "
-            "across wave halves will double per-lane side effects in a "
-            "way the source author did not specify. Empirically this is "
-            "correct for kernels whose EXEC writers are lane-position-"
-            "independent (pointwise ops with bounds checks against a "
-            "uniform >= target_wave_bits). Same-wave translation is the "
-            "principled path for any other EXEC-divergent kernel.\n";
+  // Route the legacy warn-only diagnostic through LLVM_DEBUG now that
+  // the Phase 1.4.5 classifier (see `wave_size_obstruction.{hpp,cpp}`)
+  // owns the gate decision. The structured decider in raiser.cpp emits
+  // a precise per-obstruction trace via the same DEBUG_TYPE; this
+  // legacy diagnostic remains only as a fallback that surfaces under
+  // `-debug-only=wave-projection` when the classifier's trace is not
+  // enough context. Enable via `raise_cli -debug-only=wave-projection`
+  // or `llvm-opt -debug-only=wave-projection`.
+  LLVM_DEBUG({
+    dbgs() << "transpiler: WARNING: cross-wave translation of an "
+              "EXEC-manipulating kernel relies on modulo-replication, "
+              "which is not provably correct in general.\n"
+           << "  source ISA wave size: " << proj.sourceIsa().waveSize << " ("
+           << sourceISA << ")\n"
+           << "  target ISA wave size: " << proj.targetIsa().waveSize << " ("
+           << (targetISA.empty() ? sourceISA : targetISA) << ")\n"
+           << "  first EXEC-writer: " << firstEXECWriter->rawMnemonic
+           << " at offset 0x"
+           << format_hex_no_prefix(firstEXECWriter->offset, 4) << "\n"
+           << "  rationale: the kernel manipulates EXEC; replicating it "
+              "across wave halves will double per-lane side effects in a "
+              "way the source author did not specify. Empirically this is "
+              "correct for kernels whose EXEC writers are lane-position-"
+              "independent (pointwise ops with bounds checks against a "
+              "uniform >= target_wave_bits). The Phase 1.4.5 classifier "
+              "(wave_size_obstruction.cpp) is the principled path for "
+              "deciding between outcome (a)/(b)/(c) per SPE_DESIGN.md "
+              "\u00a74.\n";
+  });
   return true;
 }
 

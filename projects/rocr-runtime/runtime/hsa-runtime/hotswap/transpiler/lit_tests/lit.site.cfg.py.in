@@ -28,6 +28,14 @@ config.fixtures = {
     "v_cmpx_ballot": r"@LIT_FIXTURE_V_CMPX_BALLOT_CO@",
     "global_load_ushort_saddr": r"@LIT_FIXTURE_GLOBAL_LOAD_USHORT_SADDR_CO@",
     "ds_bpermute_b32": r"@LIT_FIXTURE_DS_BPERMUTE_B32_CO@",
+    # Wave-size obstruction classifier fixtures — one per SPE_DESIGN.md §3
+    # class. See wave_size_obstruction.{hpp,cpp} for the classifier.
+    "c1_lane_id_leak": r"@LIT_FIXTURE_C1_LANE_ID_LEAK_CO@",
+    "c2_permlane_swap": r"@LIT_FIXTURE_C2_PERMLANE_SWAP_CO@",
+    "c2_dpp_quad_perm": r"@LIT_FIXTURE_C2_DPP_QUAD_PERM_CO@",
+    "c2_ds_swizzle": r"@LIT_FIXTURE_C2_DS_SWIZZLE_CO@",
+    "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
+    "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
 }
 
 lit_config.load_config(

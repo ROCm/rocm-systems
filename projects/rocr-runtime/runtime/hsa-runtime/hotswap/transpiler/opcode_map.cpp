@@ -494,6 +494,11 @@ static const Entry kCanonTable[] = {
     E(DS_WRITE2_B32, DS_WRITE2_B32), E(DS_WRITE2_B64, DS_WRITE2_B64),
     E(DS_WRITE_B16, DS_WRITE_B16), E(DS_WRITE_B8, DS_WRITE_B8),
     E(DS_BPERMUTE_B32, DS_BPERMUTE_B32),
+    // ds_swizzle_b32 — wave-width-specific cross-lane shuffle. The
+    // handler refuses with `unsupportedShape` until CROSS_LANE_SURVEY
+    // P6 lands; the wave-size classifier (Phase 1.4.5) flags it as
+    // SPE_DESIGN.md §3 Class 2 in the cross-wave case.
+    E(DS_SWIZZLE_B32, DS_SWIZZLE_B32),
 
     // ---------------------------------------------------------------------
     // MUBUF direct-to-LDS loads (distinct semantics from VGPR-dest loads)
@@ -539,6 +544,13 @@ static const Entry kCanonTable[] = {
     MUBUF4(BUFFER_ATOMIC_AND, BUFFER_ATOMIC_AND),
     MUBUF4(BUFFER_ATOMIC_OR, BUFFER_ATOMIC_OR),
     MUBUF4(BUFFER_ATOMIC_XOR, BUFFER_ATOMIC_XOR),
+    // SPE_DESIGN.md §3 Class 3 non-commutative atomics. The
+    // wave-size classifier flags them in the cross-wave case before
+    // dispatch ever reaches handle_mubuf.cpp's switch (which would
+    // otherwise refuse them via the default branch since they don't
+    // fit the AtomicRMW commutative model).
+    MUBUF4(BUFFER_ATOMIC_SWAP, BUFFER_ATOMIC_SWAP),
+    MUBUF4(BUFFER_ATOMIC_CMPSWAP, BUFFER_ATOMIC_CMPSWAP),
     MUBUF4(BUFFER_ATOMIC_ADD_F32, BUFFER_ATOMIC_ADD_F32),
     MUBUF4(BUFFER_ATOMIC_PK_ADD_BF16, BUFFER_ATOMIC_PK_ADD_BF16),
     MUBUF4(BUFFER_ATOMIC_PK_ADD_F16, BUFFER_ATOMIC_PK_ADD_F16),

@@ -1422,6 +1422,122 @@ Recipe makeSBitset0B64Recipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recipe: c4_lane_dep_cmpx — runtime evidence for SPE_DESIGN.md §3
+// Class 4 (lane-position-dependent EXEC writes).
+//
+// Companion to lit_tests/c4_lane_dep_cmpx (offline classifier pin).
+// The harness runs the same kernel under native / legacy / salmon:
+//
+//   - native  : gfx942 direct. CPU reference matches it exactly.
+//   - legacy  : gfx1250 CO via byte-level translator. Upper 32 target
+//               lanes are dead under half-wave masking, so positions
+//               32..63 of each wave stay at sentinel. DIVERGES from
+//               native at those positions.
+//   - salmon  : gfx1250 CO via IR raiser. Under the new classifier
+//               gate (wave_size_obstruction.{hpp,cpp}) the raise
+//               refuses with `cross-wave-Class-4-*`; the harness
+//               observes salmon as "EXIT=<nonzero>" rather than a
+//               silent wrong output.
+//
+// Shape. One kernel launch per (N, block). Kernel writes one int per
+// thread; observable output is N ints. CPU reference computes the
+// expected native gfx942 wave64 behaviour: out[tid] = 1 iff the
+// wave-relative lane id (clamped by mbcnt_lo's 32-bit mask on
+// wave64) is >= 16.
+// ─────────────────────────────────────────────────────────────────────────────
+
+Recipe makeC4LaneDepCmpxRecipe() {
+  Recipe r;
+  r.name = "c4_lane_dep_cmpx";
+  // Pick block sizes > warpSize=64 so both target waves of a block
+  // exercise the EXEC-write divergence; N values chosen to cover
+  // single-block and multi-block sweeps.
+  r.defaultNs     = {64, 128, 256, 1024};
+  r.defaultBlocks = {64, 128};
+  r.outputElemBytes = sizeof(int);
+  r.outputElems = [](int N, int) { return N; };
+
+  r.makeInput = [](int N) {
+    // Kernel takes no input buffer (just the output); deterministic
+    // input is the empty byte sequence sized to N for harness
+    // bookkeeping.
+    return std::vector<uint8_t>(N * sizeof(int), 0);
+  };
+
+  r.cpuReference = [](const std::vector<uint8_t> & /*input*/, int N,
+                       int blockSize) {
+    // Reference matches native gfx942 (wave64). On wave64,
+    // v_mbcnt_lo(-1, 0) gives `min(lane_in_wave64, 32)` because
+    // exec_lo only counts the lower 32 lanes. v_cmpx_ge_u32 v10, 16
+    // then enables wave-relative lanes 16..63. Lane 0..15 stay at
+    // sentinel (0 — we hipMemset to 0 before dispatch).
+    constexpr int kWaveSize = 64;
+    std::vector<uint8_t> out(N * sizeof(int));
+    int *o = reinterpret_cast<int *>(out.data());
+    for (int tid = 0; tid < N; ++tid) {
+      int waveRelative = tid % kWaveSize;
+      int mbcnt = (waveRelative < 32) ? waveRelative : 32;
+      o[tid] = (mbcnt >= 16) ? 1 : 0;
+      (void)blockSize; // compute is wave-relative, not block-relative
+    }
+    return out;
+  };
+
+  r.dispatch = [](hipModule_t mod, const std::vector<uint8_t> & /*input*/,
+                   int N, int blockSize) {
+    hipFunction_t fn;
+    HIP_ASSERT(hipModuleGetFunction(&fn, mod, "c4_lane_dep_cmpx"));
+    int *dOut;
+    size_t bytes = N * sizeof(int);
+    HIP_ASSERT(hipMalloc(&dOut, bytes));
+    // hipMemset to 0x00 so untouched lanes read back 0 — matches
+    // the CPU reference's "sentinel = 0" convention.
+    HIP_ASSERT(hipMemset(dOut, 0x00, bytes));
+    struct alignas(8) Args { int *o; } args = {dOut};
+    size_t argSize = sizeof(args);
+    void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
+                   HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSize,
+                   HIP_LAUNCH_PARAM_END};
+    int grd = (N + blockSize - 1) / blockSize;
+    HIP_ASSERT(hipModuleLaunchKernel(fn, grd, 1, 1, blockSize, 1, 1, 0,
+                                     nullptr, nullptr, cfg));
+    HIP_ASSERT(hipDeviceSynchronize());
+    std::vector<uint8_t> out(bytes);
+    HIP_ASSERT(hipMemcpy(out.data(), dOut, bytes, hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dOut));
+    return out;
+  };
+
+  r.compare = [](const std::vector<uint8_t> &gold,
+                  const std::vector<uint8_t> &actual, int outElems) {
+    const int *g = reinterpret_cast<const int *>(gold.data());
+    const int *a = reinterpret_cast<const int *>(actual.data());
+    int mismatches = 0, firstIdx = -1;
+    double firstG = 0.0, firstA = 0.0;
+    for (int i = 0; i < outElems; ++i) {
+      if (g[i] != a[i]) {
+        if (mismatches++ == 0) {
+          firstIdx = i;
+          firstG = static_cast<double>(g[i]);
+          firstA = static_cast<double>(a[i]);
+        }
+      }
+    }
+    double maxAbs = (mismatches == 0) ? 0.0 : 1.0;
+    return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  };
+
+  r.validate = [](int /*N*/, int blockSize) -> std::optional<std::string> {
+    if (blockSize < 64)
+      return std::string(
+          "block<64: fewer than one full wave64 makes the probe's "
+          "wave-relative lane comparison degenerate on native gfx942");
+    return std::nullopt;
+  };
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recipe registry
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1441,6 +1557,7 @@ const std::vector<Recipe> &allRecipes() {
       makeSBfeI32Recipe(),
       makeSBitset0B32Recipe(),
       makeSBitset0B64Recipe(),
+      makeC4LaneDepCmpxRecipe(),
   };
   return v;
 }
