@@ -22,8 +22,10 @@
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <sstream>
@@ -428,42 +430,96 @@ split_our_comment(std::string_view comment)
     return out;
 }
 
+struct SymbolizerResult
+{
+    std::vector<std::vector<std::string>> records;  // one entry per requested address
+    std::string                           error;    // non-empty == hard failure
+};
+
 // Run llvm-symbolizer once with all addresses fed on stdin via a tmp file, and
 // return its parsed output: outer vector is one entry per address (in order),
 // inner vector is the inline-chain frames as "file:line" (innermost first),
 // already normalized for "no info" lines.
-std::vector<std::vector<std::string>>
+//
+// The address list is written via mkstemp() into the system tmp dir
+// (TMPDIR / std::filesystem::temp_directory_path(), falling back to /tmp).
+// The test's binary dir is read-only in CI builds that run tests from the
+// install tree.  On any failure, fills `error` so the caller fails the test
+// loudly rather than silently treating every address as a mismatch.
+SymbolizerResult
 run_llvm_symbolizer(const std::string&           symbolizer,
                     const std::string&           obj_path,
-                    const std::vector<uint64_t>& addrs,
-                    const std::string&           tmp_dir)
+                    const std::vector<uint64_t>& addrs)
 {
-    std::vector<std::vector<std::string>> result(addrs.size());
-    if(addrs.empty()) return result;
+    SymbolizerResult out;
+    out.records.resize(addrs.size());
+    if(addrs.empty()) return out;
 
-    std::string addrs_path = tmp_dir + "/codeobj_dwarf_addrs.txt";
+    namespace fs = rocprofiler::common::filesystem;
+    std::string tmp_dir;
     {
-        std::ofstream addrs_file(addrs_path);
-        if(!addrs_file) return result;
-        for(auto a : addrs)
-            addrs_file << "0x" << std::hex << a << '\n';
+        std::error_code ec;
+        auto            p = fs::temp_directory_path(ec);
+        if(!ec && !p.empty())
+            tmp_dir = p.string();
+        else if(const char* env = std::getenv("TMPDIR"); env && *env)
+            tmp_dir = env;
+        else
+            tmp_dir = "/tmp";
     }
 
-    // --inlines:        emit the inline chain (innermost first)
-    // --output-style=LLVM: default; "func\nfile:line:col\n\n" per address
-    // --demangle=1:     default; we ignore function names anyway
+    std::string       tmpl_str = tmp_dir + "/codeobj_dwarf_addrs.XXXXXX";
+    std::vector<char> tmpl(tmpl_str.begin(), tmpl_str.end());
+    tmpl.push_back('\0');
+    int fd = ::mkstemp(tmpl.data());
+    if(fd < 0)
+    {
+        out.error = std::string{"mkstemp("} + tmpl.data() + ") failed: " + ::strerror(errno);
+        return out;
+    }
+    std::string addrs_path = tmpl.data();
+    {
+        FILE* fp = ::fdopen(fd, "w");
+        if(!fp)
+        {
+            out.error = std::string{"fdopen failed: "} + ::strerror(errno);
+            ::close(fd);
+            ::unlink(addrs_path.c_str());
+            return out;
+        }
+        for(auto a : addrs)
+            std::fprintf(fp, "0x%lx\n", static_cast<unsigned long>(a));
+        std::fclose(fp);  // also closes fd
+    }
+
+    // --inlines: emit the inline chain (innermost first)
+    // --output-style=LLVM: "func\nfile:line:col\n\n" per address
+    // 2>&1 so symbolizer-side errors land in our captured output for diagnosis
     std::ostringstream cmd;
     cmd << '"' << symbolizer << "\" --obj=\"" << obj_path << "\" --inlines --output-style=LLVM < \""
-        << addrs_path << '"';
+        << addrs_path << "\" 2>&1";
 
-    std::unique_ptr<FILE, int (*)(FILE*)> pipe(::popen(cmd.str().c_str(), "r"), &::pclose);
-    if(!pipe) return result;
-
+    FILE*       raw_pipe = ::popen(cmd.str().c_str(), "r");
     std::string raw;
+    if(raw_pipe)
     {
         char buf[4096];
-        while(size_t n = std::fread(buf, 1, sizeof(buf), pipe.get()))
+        while(size_t n = std::fread(buf, 1, sizeof(buf), raw_pipe))
             raw.append(buf, n);
+    }
+    int rc = raw_pipe ? ::pclose(raw_pipe) : -1;
+    ::unlink(addrs_path.c_str());
+
+    if(!raw_pipe || rc != 0)
+    {
+        out.error = "llvm-symbolizer invocation failed (rc=" + std::to_string(rc) +
+                    ", cmd=" + cmd.str() + ", output:\n" + raw + ")";
+        return out;
+    }
+    if(raw.empty())
+    {
+        out.error = "llvm-symbolizer produced no output (cmd=" + cmd.str() + ")";
+        return out;
     }
 
     // Parse: per-address record terminated by an empty line; each record is a
@@ -486,11 +542,17 @@ run_llvm_symbolizer(const std::string&           symbolizer,
             expect_func = false;  // skip function name line
         else
         {
-            result[addr_idx].emplace_back(normalize_fileline(line));
+            out.records[addr_idx].emplace_back(normalize_fileline(line));
             expect_func = true;
         }
     }
-    return result;
+
+    // If we never crossed a single record terminator, the output didn't match
+    // the expected --output-style=LLVM shape; fail loudly rather than mismatch-spam.
+    if(addr_idx == 0)
+        out.error = "llvm-symbolizer output did not parse as LLVM-style records:\n" + raw;
+
+    return out;
 }
 }  // namespace
 
@@ -556,15 +618,16 @@ TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
     }
     ASSERT_FALSE(addrs.empty());
 
-    auto theirs = run_llvm_symbolizer(symbolizer, obj_path, addrs, CODEOBJ_BINARY_DIR);
-    ASSERT_EQ(theirs.size(), addrs.size())
+    auto theirs = run_llvm_symbolizer(symbolizer, obj_path, addrs);
+    ASSERT_TRUE(theirs.error.empty()) << theirs.error;
+    ASSERT_EQ(theirs.records.size(), addrs.size())
         << "llvm-symbolizer returned a different number of address records";
 
     size_t mismatches = 0;
     for(size_t i = 0; i < addrs.size(); ++i)
     {
         auto  our_frames   = split_our_comment(ours[i]);
-        auto& their_frames = theirs[i];
+        auto& their_frames = theirs.records[i];
 
         // Both empty == both report "no info" for this address. OK.
         if(our_frames.empty() && their_frames.empty()) continue;
