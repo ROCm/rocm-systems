@@ -16,15 +16,27 @@ def field_level_diffs(dual: DualResult) -> List[str]:
             f"bottleneck: old={dual.old.primary_bottleneck!r} "
             f"new={dual.new.primary_bottleneck!r}"
         )
-    if not dual.agree_rec_type():
+    rt = dual.agree_rec_type()
+    if rt is False:  # explicitly False, not None (skip)
         diffs.append(
             f"rec_type: old={dual.old.primary_rec_type!r} "
             f"new={dual.new.primary_rec_type!r}"
         )
-    if not dual.agree_rec_technique():
+    elif rt is None:
+        diffs.append(
+            f"rec_type: SKIPPED (asymmetric: old={dual.old.primary_rec_type!r}, "
+            f"new={dual.new.primary_rec_type!r})"
+        )
+    rtech = dual.agree_rec_technique()
+    if rtech is False:  # explicitly False, not None (skip)
         diffs.append(
             f"rec_technique: old={dual.old.primary_rec_technique!r} "
             f"new={dual.new.primary_rec_technique!r}"
+        )
+    elif rtech is None:
+        diffs.append(
+            f"rec_technique: SKIPPED (asymmetric: old={dual.old.primary_rec_technique!r}, "
+            f"new={dual.new.primary_rec_technique!r})"
         )
     return diffs
 

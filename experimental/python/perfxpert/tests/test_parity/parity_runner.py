@@ -56,18 +56,51 @@ class DualResult:
         return self.old.primary_bottleneck == self.new.primary_bottleneck
 
     def agree_rec_type(self) -> bool:
-        return self.old.primary_rec_type == self.new.primary_rec_type
+        """True if both paths agree on rec type, or if both return None.
+
+        If one path returns None and the other doesn't, treat as "skip" (None)
+        rather than disagreement — the agentic path by design returns no
+        recommendations in the non-LLM wrapper, so this signal is only
+        meaningful when both paths produce recommendations.
+        """
+        # Both None → agree (e.g. data_insufficient on both sides)
+        if self.old.primary_rec_type is None and self.new.primary_rec_type is None:
+            return True
+        # Both non-None → compare
+        if self.old.primary_rec_type is not None and self.new.primary_rec_type is not None:
+            return self.old.primary_rec_type == self.new.primary_rec_type
+        # Asymmetric: one has recs, other doesn't.
+        # Agentic path (new) never populates recommendations without LLM — skip
+        # this signal (return None = "not evaluated") rather than failing.
+        return None  # type: ignore[return-value]  # caller must handle None
 
     def agree_rec_technique(self) -> bool:
-        # Null-safe; treat both-None as agreement (e.g. mixed/INFO fixtures)
-        return self.old.primary_rec_technique == self.new.primary_rec_technique
+        """True if both paths agree on rec technique, or if both return None.
+
+        Same null-safety as agree_rec_type: asymmetric None is skipped.
+        """
+        if self.old.primary_rec_technique is None and self.new.primary_rec_technique is None:
+            return True
+        if self.old.primary_rec_technique is not None and self.new.primary_rec_technique is not None:
+            return self.old.primary_rec_technique == self.new.primary_rec_technique
+        return None  # type: ignore[return-value]
 
     def agreements(self) -> dict:
-        return {
-            "bottleneck": self.agree_bottleneck(),
-            "rec_type": self.agree_rec_type(),
-            "rec_technique": self.agree_rec_technique(),
-        }
+        """Return dict of {signal: agree} for signals that can be evaluated.
+
+        Signals where one path returns None and the other doesn't (asymmetric
+        None) are excluded from the dict — the aggregate must not count
+        unevaluable signals toward either agreements or total_signals.
+        """
+        result: dict = {}
+        result["bottleneck"] = self.agree_bottleneck()
+        rt = self.agree_rec_type()
+        if rt is not None:
+            result["rec_type"] = rt
+        rtech = self.agree_rec_technique()
+        if rtech is not None:
+            result["rec_technique"] = rtech
+        return result
 
 
 @contextmanager
