@@ -30,7 +30,7 @@ def fake_db(tmp_path):
 
 def test_cli_always_runs_agentic(fake_db, monkeypatch):
     """CLI always uses the agentic path; no feature-flag branching remains."""
-    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)
+    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)  # regression guard
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         agentic.return_value = 0
         analyze_mod.execute(input=mock.MagicMock(), format="text")
@@ -39,7 +39,7 @@ def test_cli_always_runs_agentic(fake_db, monkeypatch):
 
 def test_cli_legacy_flag_is_no_op(fake_db, monkeypatch):
     """Regression guard: env var removed in Phase 7.1 must still route agentic."""
-    monkeypatch.setenv("PERFXPERT_LEGACY", "1")
+    monkeypatch.setenv("PERFXPERT_LEGACY", "1")  # regression guard
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         agentic.return_value = 0
         analyze_mod.execute(input=mock.MagicMock(), format="text")
@@ -48,7 +48,7 @@ def test_cli_legacy_flag_is_no_op(fake_db, monkeypatch):
 
 def test_legacy_symbols_are_absent():
     """Regression guard: symbols removed in Phase 7.1 must stay gone."""
-    assert not hasattr(analyze_mod, "_execute_legacy"), (
+    assert not hasattr(analyze_mod, "_execute_legacy"), (  # regression guard
         "_execute_legacy was removed in Phase 7.1 and must stay gone"
     )
     import importlib

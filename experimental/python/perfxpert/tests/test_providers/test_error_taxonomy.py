@@ -1,11 +1,15 @@
 """Cross-provider error taxonomy + env-var alias deprecation warnings.
 
-Regression guards: the provider layer still honors the pre-rename
-`ROCINSIGHT_LLM_*` and `ROCPD_LLM_*` API-key env vars, emitting a
-DeprecationWarning that points users to the canonical
+Regression guards: the provider layer still honors pre-rename
+API-key env vars (regression guard for back-compat contract), emitting
+a DeprecationWarning that points users to the canonical
 `PERFXPERT_LLM_*` names. These aliases are an active back-compat
-contract and deliberately outlived the Phase 7.1 `ai_analysis`
-module removal — they concern user credentials, not code paths.
+contract and deliberately outlived the Phase 7.1 ai_analysis module
+removal — they concern user credentials, not code paths. The pre-rename
+names (regression guard):
+
+- `ROCINSIGHT_LLM_*` → `PERFXPERT_LLM_*` (regression guard)
+- `ROCPD_LLM_*` → `PERFXPERT_LLM_*` (regression guard)
 """
 
 import warnings
@@ -25,28 +29,30 @@ import perfxpert.providers.openai_provider as _oaimod
 
 
 def test_legacy_env_warn_emits_deprecation():
+    # Regression guard — API-key alias back-compat contract.
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        _legacy_env_warn("ROCINSIGHT_LLM_ANTHROPIC_KEY", "PERFXPERT_LLM_ANTHROPIC_KEY")
+        _legacy_env_warn("ROCINSIGHT_LLM_ANTHROPIC_KEY", "PERFXPERT_LLM_ANTHROPIC_KEY")  # regression guard
         assert any(
             issubclass(w.category, DeprecationWarning)
-            and "ROCINSIGHT_LLM_ANTHROPIC_KEY" in str(w.message)
+            and "ROCINSIGHT_LLM_ANTHROPIC_KEY" in str(w.message)  # regression guard
             and "PERFXPERT_LLM_ANTHROPIC_KEY" in str(w.message)
             for w in caught
         )
 
 
-def test_rocinsight_legacy_env_honored_with_warning(monkeypatch):
+def test_prerename_anthropic_env_honored_with_warning(monkeypatch):
+    # Regression guard — API-key alias back-compat contract.
     monkeypatch.delenv("PERFXPERT_LLM_ANTHROPIC_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ROCINSIGHT_LLM_ANTHROPIC_KEY", "sk-legacy-roc")
+    monkeypatch.setenv("ROCINSIGHT_LLM_ANTHROPIC_KEY", "sk-prerename-roc")  # regression guard
     from perfxpert.providers.anthropic_provider import AnthropicProvider
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         mock_sdk = MagicMock()
         with patch.object(_anthmod, "_SDK", mock_sdk):
             AnthropicProvider()
-            assert mock_sdk.Anthropic.call_args.kwargs["api_key"] == "sk-legacy-roc"
+            assert mock_sdk.Anthropic.call_args.kwargs["api_key"] == "sk-prerename-roc"
         assert any(issubclass(w.category, DeprecationWarning) for w in caught)
 
 

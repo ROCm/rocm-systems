@@ -26,7 +26,7 @@ def test_agentic_runtime_runs_airgap(monkeypatch):
         pytest.skip(f"Fixture {FIXTURE} not found")
 
     # Regression guard — ensure env var removed in Phase 7.1 stays inert.
-    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)
+    monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)  # regression guard
     try:
         from perfxpert.agents import runtime, schemas
     except ImportError:

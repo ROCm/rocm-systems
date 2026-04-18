@@ -1,9 +1,11 @@
 """Regression guards for flags removed in Phase 7.1 and Phase 6.
 
-The `ai_analysis` module and its `PERFXPERT_LEGACY` opt-out were
-removed in Phase 7.1; `--interactive` / `--resume-session` were
-removed in Phase 6. These tests ensure help output and doctor
-output reflect the agentic-only world.
+These tests ensure help output and doctor output reflect the
+agentic-only world by asserting:
+
+- `ai_analysis` module — removed in Phase 7.1 (must not be importable).
+- `PERFXPERT_LEGACY` env var — removed in Phase 7.1 (must not alter doctor output).
+- `--interactive` / `--resume-session` CLI flags — removed in Phase 6 (must not appear in --help).
 """
 
 import os
@@ -29,9 +31,9 @@ def test_perfxpert_analyze_help_does_not_mention_removed_flags():
 
 
 def test_doctor_reports_agentic_mode():
-    """`perfxpert doctor` always prints 'Mode: agentic' after Phase 7.1."""
+    """Regression guard: `perfxpert doctor` always prints 'Mode: agentic' after Phase 7.1."""
     env = os.environ.copy()
-    env.pop("PERFXPERT_LEGACY", None)
+    env.pop("PERFXPERT_LEGACY", None)  # regression guard
 
     result = subprocess.run(
         _perfxpert_cli() + ["doctor"],
