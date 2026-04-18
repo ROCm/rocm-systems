@@ -57,29 +57,12 @@ from .exceptions import (
     SourceAnalysisError,
 )
 
-from .llm_analyzer import LLMAnalyzer, AnalysisContext, load_reference_guide, PROVIDER_REGISTRY
-from .llm_conversation import LLMConversation
+from .llm_analyzer import LLMAnalyzer  # deprecated stub
 from .source_analyzer import SourceAnalyzer
 
-
-def _get_interactive():
-    from .interactive import InteractiveSession, SessionStore, SessionData
-
-    return InteractiveSession, SessionStore, SessionData
-
-
-def __getattr__(name):
-    if name in ("InteractiveSession", "SessionStore", "SessionData"):
-        InteractiveSession, SessionStore, SessionData = _get_interactive()
-        # Cache in module globals to avoid repeated import on subsequent accesses
-        import sys
-
-        mod = sys.modules[__name__]
-        mod.InteractiveSession = InteractiveSession
-        mod.SessionStore = SessionStore
-        mod.SessionData = SessionData
-        return getattr(mod, name)
-    raise AttributeError(f"module 'perfxpert.ai_analysis' has no attribute {name!r}")
+# LLMConversation, InteractiveSession, WorkflowSession removed in Phase 6 — use perfxpert.agents.runtime
+# load_reference_guide moved to perfxpert.providers._reference_guide
+# PROVIDER_REGISTRY moved to agents.runtime (fallback in place)
 
 
 __all__ = [
@@ -106,16 +89,8 @@ __all__ = [
     "ReferenceGuideNotFoundError",
     "SourceDirectoryNotFoundError",
     "SourceAnalysisError",
-    # Interactive session
-    "InteractiveSession",
-    "SessionStore",
-    "SessionData",
     # LLM integration
-    "LLMAnalyzer",
-    "AnalysisContext",
-    "LLMConversation",
-    "load_reference_guide",
-    "PROVIDER_REGISTRY",
+    "LLMAnalyzer",  # deprecated, retained for back-compat imports
     # Source analysis
     "SourceAnalyzer",
 ]
