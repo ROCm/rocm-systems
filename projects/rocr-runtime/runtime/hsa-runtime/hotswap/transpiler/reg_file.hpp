@@ -42,9 +42,19 @@ class WaveProjection;
 //     MSB replay, not just the indices the assembler names directly.
 //     Keeping the cap explicit documents the extra storage as
 //     intentional.
+//
+//     Sized to match gfx1250's `1024-addressable-vgprs` subtarget
+//     feature (LLVM AMDGPU.td:1120 `def 1024AddressableVGPRs`):
+//     S_SET_VGPR_MSB encodes a 2-bit MSB pair per operand slot, each
+//     contributing `value * 256` to that slot's VGPR index, so the
+//     maximum reachable index is `255 (8-bit base) + 3*256 = 1023`.
+//     A smaller cap (the previous 512) crashed legitimate gfx1250
+//     tensilelite kernels that issue `s_set_vgpr_msb 0x80` followed
+//     by `v_mov_b32 v72 /*v584*/` (vdst MSB=2 → effective index
+//     `72 + 512 = 584`); see `failOOB` in reg_file.cpp.
 struct AllocaRegFile {
   // See class-level comment for rationale.
-  static constexpr unsigned kVGPRCap = 512;
+  static constexpr unsigned kVGPRCap = 1024;
 
   llvm::SmallVector<llvm::AllocaInst *> sgpr;
   llvm::SmallVector<llvm::AllocaInst *> vgpr;
