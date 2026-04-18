@@ -1,7 +1,8 @@
 """opencode_launcher — `perfxpert-code` entry point.
 
-Launches opencode (from PERFXPERT_OPENCODE_PATH / bundled wheel / system PATH
-in that order) with the AMD-themed config directory.
+Launches opencode (from PERFXPERT_OPENCODE_PATH / bundled wheel /
+well-known paths / system PATH in that order) with the AMD-themed
+config directory.
 
 opencode is a system dependency — it is NOT bundled inside the perfxpert wheel
 in this release (bundling is tracked as future work). Users must install it
@@ -65,6 +66,16 @@ _OPENCODE_SUBCOMMANDS = frozenset({
     "web",
 })
 
+# Subcommands the perfxpert launcher handles itself (does NOT exec opencode).
+# Kept in sync with `perfxpert/__main__.py`; descriptions are surfaced by
+# `_print_perfxpert_help()` for bare `perfxpert-code --help` discovery.
+_PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
+    "analyze": "Analyze a rocprofiler-sdk trace database for GPU bottlenecks",
+    "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
+    "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
+    "providers": "List LLM providers and configuration status",
+}
+
 # Subcommand names the launcher itself dispatches to `python -m perfxpert`.
 # ``doctor`` is the only one that must short-circuit BEFORE
 # resolve_opencode_binary() (so the health check works on a fresh install
@@ -102,11 +113,12 @@ def _wellknown_opencode_paths() -> "list[Path]":
 def resolve_opencode_binary() -> Path:
     """Locate the opencode binary.
 
-    Priority (E2E bug 3 — doctor must autodiscover):
+    Priority:
     1. ``$PERFXPERT_OPENCODE_PATH`` (user override; must exist or raise)
     2. ``perfxpert/_bundled/opencode`` (per-platform wheel)
     3. ``$HOME/.opencode/bin/opencode`` and other well-known paths
-    4. ``shutil.which("opencode")`` on PATH
+       (upstream installer default)
+    4. ``shutil.which("opencode")`` on PATH (via require_tool install hint)
     5. Final actionable error with install command hint.
     """
     override = os.environ.get("PERFXPERT_OPENCODE_PATH")
@@ -132,11 +144,14 @@ def resolve_opencode_binary() -> Path:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
 
-    # PATH fallback (explicitly `shutil.which` — do NOT use require_tool here
-    # since the install hint is surfaced in the error below).
-    on_path = shutil.which("opencode")
-    if on_path:
-        return Path(on_path)
+    # PATH fallback with install helper
+    try:
+        require_tool("opencode", allow_install=True)
+        on_path = shutil.which("opencode")
+        if on_path:
+            return Path(on_path)
+    except Exception:
+        pass
 
     raise FileNotFoundError(
         "opencode binary not found. Install it with:\n"
@@ -178,18 +193,6 @@ def _handle_version_flag(argv: Iterable[str]) -> bool:
             print(f"{_BRANDING_NAME} {version} (opencode wrapper)")
             return True
     return False
-
-
-# Subcommands owned by perfxpert (dispatched by `perfxpert`, NOT forwarded to
-# opencode). Listed here for help-banner discovery; `perfxpert-code` itself
-# is a thin launcher and does not dispatch these — users run `perfxpert doctor`,
-# `perfxpert stats`, etc. directly. Kept in sync with `perfxpert/__main__.py`.
-_PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
-    "analyze": "Analyze a rocprofiler-sdk trace database for GPU bottlenecks",
-    "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
-    "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
-    "providers": "List LLM providers and configuration status",
-}
 
 
 def _print_perfxpert_help(stream=None) -> None:
@@ -300,7 +303,20 @@ def _exec_perfxpert_subcommand(argv: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for `perfxpert-code`."""
+    """Entry point for `perfxpert-code`.
+
+    Dispatch order:
+    1. ``--version`` / ``-V`` short-circuit (print + exit 0).
+    2. ``--help`` / ``-h`` BEFORE any positional → print perfxpert banner,
+       then fall through to ``opencode --help`` for generic flag details.
+    3. First positional is a perfxpert-dispatch subcommand (``doctor``):
+       exec ``python -m perfxpert`` directly, BEFORE resolving the
+       opencode binary (so health checks work without opencode installed).
+    4. First positional is a known opencode subcommand: forward verbatim
+       to opencode, preserving the user's CWD.
+    5. Otherwise: stage the bundled config dir and launch opencode TUI
+       from there.
+    """
     if argv is None:
         argv = sys.argv[1:]
 
@@ -318,8 +334,6 @@ def main(argv: list[str] | None = None) -> int:
     # resolved so that `perfxpert-code doctor` works even if opencode is not
     # installed yet.
     if kind == "perfxpert":
-        # Strip the leading subcommand token; python -m perfxpert gets it
-        # as its own first positional.
         return _exec_perfxpert_subcommand(argv_out)
 
     try:
