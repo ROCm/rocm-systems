@@ -130,3 +130,23 @@ without being ported.
   hint strongly bias the LLM toward `intent_classify` first, but a
   determined model can still skip. Measurement + feedback is
   tracked as future telemetry work.
+
+## Docs-audit baseline
+
+Tracks docs-audit gaps that cannot be mechanically fixed by the
+scanners but are known and tolerated for now. Each entry has a
+one-line rationale + optional follow-up tracking id.
+
+### Zero-violation baseline
+
+None. All four scanners (`docs/lint.sh`, `docs/link-checker.py`,
+`docs/test-samples.py`, `docs/inventory.py`) report zero violations
+at the baseline snapshot. See `docs/inventory-baseline.json`.
+
+### Out-of-scope follow-ups
+
+- `tests/test_docs_tooling/test_secret_scanner.py` — three tests fail
+  locally because they cd into a fresh `tempfile.TemporaryDirectory()`
+  without symlinking `tools/_secret_scanner.py` first. Pre-existing
+  bug (commit c2c419ff9e). Fix is a one-line tmpdir setup change;
+  tracked separately and out of scope for this PR set.

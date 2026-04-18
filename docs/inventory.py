@@ -22,16 +22,16 @@ def run_lint_check():
 
 
 def run_link_check():
-    """Run link-checker.py and count broken links."""
+    """Run link-checker.py --strict and count broken links (CSV rows only)."""
     result = subprocess.run(
-        ["python3", "docs/link-checker.py", "experimental/python/perfxpert"],
+        ["python3", "docs/link-checker.py", "--strict", "experimental/python/perfxpert"],
         capture_output=True,
         text=True,
     )
-    # Parse CSV output
+    # --strict emits only CSV data rows (no preamble, no "all validated" line).
     broken = 0
     for line in result.stdout.split('\n'):
-        if line and not line.startswith('Found') and not line.startswith('file,'):
+        if line.strip() and not line.startswith('file,'):
             broken += 1
     return broken
 
@@ -43,10 +43,18 @@ def run_sample_check():
         capture_output=True,
         text=True,
     )
+    # Default output interleaves per-FAIL lines with the JSON summary at the end.
+    # Locate the JSON block by finding the first '{' at column 0.
+    stdout = result.stdout
+    idx = stdout.find('\n{')
+    if idx == -1:
+        idx = 0 if stdout.lstrip().startswith('{') else -1
+    if idx == -1:
+        return 0
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(stdout[idx:].lstrip())
         return data.get('failed', 0)
-    except:
+    except Exception:
         return 0
 
 
@@ -92,7 +100,7 @@ def generate_inventory():
                 "failed": failed_samples,
             },
         },
-        "baseline": "PR1 initial scan",
+        "baseline": "PR4 zero-violation snapshot",
     }
 
     print(json.dumps(inventory, indent=2))
