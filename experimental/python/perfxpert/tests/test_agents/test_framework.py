@@ -11,8 +11,8 @@ from perfxpert.agents.framework import (
     run_agent,
 )
 
-
 # -- AgentSpec / Agent construction ----------------------------------------
+
 
 def test_agent_construction_enforces_tool_cap():
     """Spec §2: ≤ 5 tools per agent."""
@@ -71,6 +71,7 @@ def test_agent_construction_accepts_400_line_fence(tmp_path):
 
 # -- Handoff whitelist -----------------------------------------------------
 
+
 def test_handoff_rejects_layer2_to_layer2():
     """Spec §2 rule: no Layer-2 → Layer-2 handoffs."""
     with pytest.raises(AgentConstructionError, match="layer"):
@@ -89,32 +90,37 @@ def test_handoff_allows_root_to_layer1():
 
 def test_handoff_allows_layer1_to_layer2_from_recommendation():
     h = Handoff(
-        source_layer=1, target_layer=2,
-        source_name="recommendation", target_name="compute_specialist",
+        source_layer=1,
+        target_layer=2,
+        source_name="recommendation",
+        target_name="compute_specialist",
     )
     assert h.source_name == "recommendation"
 
 
 def test_handoff_rejects_upward():
     with pytest.raises(AgentConstructionError, match="downward"):
-        Handoff(source_layer=2, target_layer=1,
-                source_name="compute_specialist", target_name="recommendation")
+        Handoff(source_layer=2, target_layer=1, source_name="compute_specialist", target_name="recommendation")
 
 
 def test_handoff_rejects_skip_root_to_layer2():
     with pytest.raises(AgentConstructionError, match="skip"):
-        Handoff(source_layer=0, target_layer=2,
-                source_name="root", target_name="compute_specialist")
+        Handoff(source_layer=0, target_layer=2, source_name="root", target_name="compute_specialist")
 
 
 # -- Tool dispatch guard ---------------------------------------------------
+
 
 def test_tool_dispatch_blocks_out_of_allowlist(fake_provider):
     """Agent cannot call a tool not in its allowlist."""
     allowed = ToolBinding(name="analysis.time_breakdown", fn=lambda db: {})
     agent = Agent(
-        name="Test", layer=1, fence_path=None,
-        input_schema=dict, output_schema=dict, tools=[allowed],
+        name="Test",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[allowed],
     )
     # Simulate SDK producing a tool call the agent isn't allowed to make
     with pytest.raises(framework.ToolAllowlistViolation):
@@ -123,6 +129,7 @@ def test_tool_dispatch_blocks_out_of_allowlist(fake_provider):
 
 # -- Airgap fallback -------------------------------------------------------
 
+
 def test_run_agent_airgap_uses_template(monkeypatch, tmp_path):
     """With PERFXPERT_AIRGAP=1, no SDK call is made; templates drive output."""
     monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
@@ -130,8 +137,12 @@ def test_run_agent_airgap_uses_template(monkeypatch, tmp_path):
     fence = tmp_path / "x.md"
     fence.write_text("short fence")
     agent = Agent(
-        name="T", layer=1, fence_path=str(fence),
-        input_schema=dict, output_schema=dict, tools=[],
+        name="T",
+        layer=1,
+        fence_path=str(fence),
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
     )
 
     # If run_agent tried to call the SDK we'd get an AttributeError; with
@@ -143,13 +154,18 @@ def test_run_agent_airgap_uses_template(monkeypatch, tmp_path):
 
 # -- Provider selection pass-through --------------------------------------
 
+
 def test_run_agent_passes_provider_to_sdk(fake_provider):
     from perfxpert.agents.framework import FakeProviderResponse  # type: ignore
 
     fence = None
     agent = Agent(
-        name="P", layer=1, fence_path=fence,
-        input_schema=dict, output_schema=dict, tools=[],
+        name="P",
+        layer=1,
+        fence_path=fence,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[],
     )
     fake_provider.return_value = FakeProviderResponse(text="ok", structured_output={"x": 1})
 
@@ -158,3 +174,62 @@ def test_run_agent_passes_provider_to_sdk(fake_provider):
     # Assert the facade forwarded "anthropic" to the SDK call
     called_args = fake_provider.call_args
     assert "anthropic" in str(called_args)
+
+
+# -- Finding #12: Agent layer validation and frozen enforcement ------------
+
+
+def test_agent_rejects_invalid_layer():
+    """Agent with layer=3 must raise AgentConstructionError."""
+    from perfxpert.agents.framework import AgentConstructionError
+
+    with pytest.raises(AgentConstructionError, match="layer=3"):
+        Agent(
+            name="Bad",
+            layer=3,
+            fence_path=None,
+            input_schema=dict,
+            output_schema=dict,
+        )
+
+
+def test_agent_rejects_negative_layer():
+    """Agent with layer=-1 must raise AgentConstructionError."""
+    from perfxpert.agents.framework import AgentConstructionError
+
+    with pytest.raises(AgentConstructionError, match="layer=-1"):
+        Agent(
+            name="Bad",
+            layer=-1,
+            fence_path=None,
+            input_schema=dict,
+            output_schema=dict,
+        )
+
+
+def test_agent_accepts_all_valid_layers():
+    """Layers 0, 1, 2 must all construct without error."""
+    for layer in (0, 1, 2):
+        agent = Agent(
+            name=f"Layer{layer}",
+            layer=layer,
+            fence_path=None,
+            input_schema=dict,
+            output_schema=dict,
+        )
+        assert agent.layer == layer
+
+
+def test_agent_is_frozen():
+    """Agent must be frozen — attribute assignment must raise FrozenInstanceError."""
+    import dataclasses
+
+    agent = Agent(
+        name="Frozen",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+    )
+    with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
+        agent.name = "mutated"
