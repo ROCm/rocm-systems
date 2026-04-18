@@ -202,6 +202,8 @@ enum class SemOp : uint16_t {
 
   // -- 64-bit vector ops --
   V_LSHLREV_B64, V_LSHL_ADD_U64, V_ADD_NC_U64,
+  // gfx1250 VOP2 64-bit unsigned multiply (low 64 bits of s0 * s1).
+  V_MUL_U64,
   V_MAD_U64_U32, V_MAD_CO_U64_U32,
 
   // -- FLAT / GLOBAL / SCRATCH memory --

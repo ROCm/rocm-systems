@@ -456,6 +456,9 @@ static const Entry kCanonTable[] = {
     E(V_LSHL_ADD_U64_e64, V_LSHL_ADD_U64),
     // LLVM's 64-bit no-carry add pseudo is simply `V_ADD_U64_e64`.
     E(V_ADD_U64_e64, V_ADD_NC_U64),
+    // gfx1250 VOP2 V_MUL_U64; canonicalizer collapses `_gfx1250` suffix
+    // onto the bare `V_MUL_U64_e64` pseudo.
+    E(V_MUL_U64_e64, V_MUL_U64),
     E(V_MAD_U64_U32_e64, V_MAD_U64_U32),
     // LLVM no longer exposes a distinct carry-out variant; `V_MAD_CO_U64_U32`
     // SemOp stays unmapped until one reappears.

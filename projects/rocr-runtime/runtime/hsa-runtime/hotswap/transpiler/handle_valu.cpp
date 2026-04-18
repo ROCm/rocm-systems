@@ -1120,6 +1120,16 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // gfx1250 V_MUL_U64: VOP2 64-bit unsigned multiply producing the low
+  // 64 bits of (s0 * s1). Mirrors the V_ADD_NC_U64 shape.
+  if (sop == SemOp::V_MUL_U64) {
+    Value *s0 = op.src64(0), *s1 = op.src64(1);
+    if (s0->getType() != ctx.i64Ty) s0 = ctx.B.CreateBitOrPointerCast(s0, ctx.i64Ty);
+    if (s1->getType() != ctx.i64Ty) s1 = ctx.B.CreateBitOrPointerCast(s1, ctx.i64Ty);
+    ctx.writeReg64(op.dst(), ctx.B.CreateMul(s0, s1, "vmul64"));
+    hr.handled = true;
+    return hr;
+  }
 
   // ---- v_mad_u64_u32 (2 defs: VDST + SDST, firstSrcIdx=2) ----
   if (sop == SemOp::V_MAD_U64_U32) {
