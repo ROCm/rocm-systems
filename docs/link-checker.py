@@ -47,6 +47,9 @@ def find_broken_links(search_root="."):
         # Skip hidden and cache dirs
         if any(part.startswith('.') for part in md_file.parts):
             continue
+        # Skip legacy ai_analysis tree — being deleted by Phase 7.1
+        if 'ai_analysis' in md_file.parts:
+            continue
 
         try:
             content = md_file.read_text(encoding='utf-8')
@@ -102,17 +105,26 @@ def print_csv(broken_links):
 
 def main():
     """Main entry point."""
-    # Accept optional directory argument
-    search_root = sys.argv[1] if len(sys.argv) > 1 else "."
+    # Parse args: optional directory + --strict flag
+    strict = False
+    args = [a for a in sys.argv[1:] if a != '--strict']
+    if '--strict' in sys.argv:
+        strict = True
+    search_root = args[0] if args else "."
 
     broken_links = find_broken_links(search_root)
 
     if broken_links:
-        print(f"Found {len(broken_links)} broken internal links:\n")
-        print_csv(broken_links)
+        if strict:
+            # Strict mode — emit only CSV rows, no preamble
+            print_csv(broken_links)
+        else:
+            print(f"Found {len(broken_links)} broken internal links:\n")
+            print_csv(broken_links)
         return 1
     else:
-        print("✓ All internal links validated")
+        if not strict:
+            print("✓ All internal links validated")
         return 0
 
 

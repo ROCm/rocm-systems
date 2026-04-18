@@ -163,7 +163,10 @@ def run_sample(sample: Dict[str, Any]) -> Dict[str, Any]:
 
 def main():
     """Main entry point."""
-    search_root = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+    # Parse args: optional directory + --strict flag
+    strict = '--strict' in sys.argv
+    args = [a for a in sys.argv[1:] if a != '--strict']
+    search_root = Path(args[0] if args else ".")
 
     all_samples = []
     failed_count = 0
@@ -172,6 +175,9 @@ def main():
         # Skip hidden and cache dirs
         if any(part.startswith('.') for part in md_file.parts):
             continue
+        # Skip legacy ai_analysis tree — being deleted by Phase 7.1
+        if 'ai_analysis' in md_file.parts:
+            continue
 
         samples = extract_samples(md_file)
         for sample in samples:
@@ -179,18 +185,25 @@ def main():
             all_samples.append(sample)
             if sample['status'] == 'FAILED':
                 failed_count += 1
-                print(f"FAIL: {sample['file']}:{sample['line']} ({sample['type']})")
-                if 'result' in sample and 'stderr' in sample['result']:
-                    print(f"  {sample['result']['stderr'][:100]}")
+                if not strict:
+                    print(f"FAIL: {sample['file']}:{sample['line']} ({sample['type']})")
+                    if 'result' in sample and 'stderr' in sample['result']:
+                        print(f"  {sample['result']['stderr'][:100]}")
 
     # Output JSON summary
-    print(json.dumps({
-        'total': len(all_samples),
-        'passed': sum(1 for s in all_samples if s['status'] == 'PASSED'),
-        'failed': failed_count,
-        'skipped': sum(1 for s in all_samples if s['status'] == 'SKIPPED'),
-        'samples': all_samples,
-    }, indent=2))
+    if not strict:
+        print(json.dumps({
+            'total': len(all_samples),
+            'passed': sum(1 for s in all_samples if s['status'] == 'PASSED'),
+            'failed': failed_count,
+            'skipped': sum(1 for s in all_samples if s['status'] == 'SKIPPED'),
+            'samples': all_samples,
+        }, indent=2))
+    else:
+        # Strict mode: only emit FAIL lines (none if zero failures)
+        for s in all_samples:
+            if s['status'] == 'FAILED':
+                print(f"FAIL: {s['file']}:{s['line']} ({s['type']})")
 
     return 1 if failed_count > 0 else 0
 
