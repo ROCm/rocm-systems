@@ -34,7 +34,8 @@ def test_dry_run_returns_singleton_no_network(monkeypatch):
         provider = AnthropicProvider()
         result = provider.complete([{"role": "user", "content": "hi"}], dry_run=True)
         assert result is DryRunResponse
-        mock_sdk.Anthropic.assert_not_called()
+        # dry_run must not perform the network-bearing API call.
+        mock_sdk.Anthropic.return_value.messages.create.assert_not_called()
 
 
 def test_complete_returns_provider_response(monkeypatch):
