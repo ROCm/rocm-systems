@@ -39,24 +39,42 @@ class ProvenOptimizationRunner:
 
         cases = []
         for entry in entries:
+            # Try both subdirectory layout and flat layout
             case_dir = FIXTURES_DIR / entry["id"]
-            if not case_dir.exists():
-                continue  # allow partial corpus in early development
+            baseline_db = case_dir / "baseline.db"
+            optimized_db = case_dir / "optimized.db"
+
+            # Fall back to flat layout if subdirectory doesn't exist
+            if not baseline_db.exists():
+                baseline_db = FIXTURES_DIR / entry["fixture_pair"]["baseline_db"].split("/")[-1]
+                optimized_db = FIXTURES_DIR / entry["fixture_pair"]["optimized_db"].split("/")[-1]
+
+            # Skip if neither layout works
+            if not baseline_db.exists() or not optimized_db.exists():
+                continue
+
+            speedup_range = entry.get("measured_speedup_range", [1.0, 1.0])
             cases.append(
                 ProvenOptimizationCase(
                     case_id=entry["id"],
-                    bottleneck=entry["bottleneck"],
-                    technique=entry["technique"],
-                    measured_impact_min=float(entry["measured_impact"]["min"]),
-                    measured_impact_max=float(entry["measured_impact"]["max"]),
+                    bottleneck=entry.get("bottleneck_type", "unknown"),
+                    technique=entry.get("technique", ""),
+                    measured_impact_min=float(speedup_range[0]),
+                    measured_impact_max=float(speedup_range[1]),
                     fixture_dir=case_dir,
                 )
             )
         return cases
 
     def run_on_case(self, case: ProvenOptimizationCase) -> GateVerdict:
+        # Try subdirectory first, then flat layout
         baseline = case.fixture_dir / "baseline.db"
+        if not baseline.exists():
+            baseline = FIXTURES_DIR / f"{case.case_id}.baseline.db"
+
         optimized = case.fixture_dir / "optimized.db"
+        if not optimized.exists():
+            optimized = FIXTURES_DIR / f"{case.case_id}.optimized.db"
 
         baseline_runs = extract_kernel_runtimes_from_db(str(baseline))
         new_runs = extract_kernel_runtimes_from_db(str(optimized))

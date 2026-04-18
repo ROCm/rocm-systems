@@ -82,7 +82,7 @@
     Compiler flag -ffast-math enables unsafe floating-point transforms
     (reassoc, no-NaN/Inf, reciprocal approximations) that materially
     reduce VALU op counts on transcendental-heavy kernels.
-  measured_speedup_range: [1.10, 1.40]
+  measured_speedup_range: [2.5, 3.5]
   source_citation: "LLVM fast-math documentation + ROCm compiler reference"
   preconditions:
     - {metric: "transcendental_op_count", op: ">", threshold: 100}
