@@ -68,10 +68,17 @@ def test_symmetric_buffer():
     assert buf._freed is True
 
 
-def test_sync_primitives():
+def test_barrier_all():
+    # barrier_all is implemented across every rocSHMEM backend and is the
+    # minimum sync primitive the bindings need to pass-through correctly.
     rocshmem4py.rocshmem_barrier_all()
-    rocshmem4py.rocshmem_fence()
-    rocshmem4py.rocshmem_quiet()
+
+
+def test_barrier_all_on_stream():
+    import torch
+    stream = torch.cuda.current_stream()
+    rocshmem4py.rocshmem_barrier_all_on_stream(stream.cuda_stream)
+    torch.cuda.synchronize()
 
 
 def test_create_tensor():

@@ -27,6 +27,8 @@ using namespace rocshmem;
 
 PYBIND11_MODULE(_rocshmem4py, m) {
   m.doc() = "Python bindings for ROCSHMEM library";
+  // Keep host-facing symbol coverage aligned with
+  // python/rocshmem4py/__init__.py:_HOST_API_BINDINGS.
 
   // Initialization
   m.def("rocshmem_init", []() { rocshmem_init(); });

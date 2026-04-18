@@ -1,10 +1,4 @@
 cmake_minimum_required(VERSION 3.16)
-project(rocshmem4py LANGUAGES CXX)
-
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
-find_program(PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
-
-message(STATUS "Python3_VERSION: ${Python3_VERSION}")
 
 ###############################################################################
 # ROCM/HIP Configuration
@@ -15,7 +9,14 @@ else()
   set(ROCM_PATH "/opt/rocm" CACHE STRING "ROCm install directory")
 endif()
 
-set(CMAKE_CXX_COMPILER ${ROCM_PATH}/bin/hipcc)
+# CMake chooses the compiler during project(), so set it first.
+set(CMAKE_CXX_COMPILER "${ROCM_PATH}/bin/hipcc" CACHE FILEPATH "C++ compiler")
+project(rocshmem4py LANGUAGES CXX)
+
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+find_program(PYTHON_EXECUTABLE NAMES python3 python REQUIRED)
+
+message(STATUS "Python3_VERSION: ${Python3_VERSION}")
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 
 set(CMAKE_CXX_STANDARD 17)

@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rocshmem4py"
 version = "0.1.0"
-description = "Python bindings for ROCm Shared Memory (rocSHMEM) library"
+description = "Python bindings for ROCm OpenSHMEM (rocSHMEM) runtime library"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
@@ -31,6 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: C++",
+    "Topic :: Scientific/Engineering",
     "Topic :: Software Development :: Libraries",
     "Topic :: System :: Distributed Computing",
 ]

@@ -12,6 +12,7 @@ __version__ = "0.1.0"
 __author__ = "Advanced Micro Devices, Inc."
 
 try:
+    # Keep this import list aligned with src/rocshmem4py.cc host bindings.
     from _rocshmem4py import (
         rocshmem_init,
         rocshmem_finalize,
@@ -60,44 +61,17 @@ except ImportError as e:
 ROCSHMEM_TEAM_INVALID = -1
 ROCSHMEM_TEAM_WORLD = 0
 
+_HOST_API_BINDINGS = tuple(
+    sorted(
+        name
+        for name in globals()
+        if name.startswith("rocshmem_") or name.startswith("ROCSHMEM_")
+    )
+)
+
 __all__ = [
     '__version__',
-    'rocshmem_init',
-    'rocshmem_finalize',
-    'rocshmem_hipmodule_init',
-    'rocshmem_my_pe',
-    'rocshmem_n_pes',
-    'rocshmem_team_my_pe',
-    'rocshmem_team_n_pes',
-    'rocshmem_malloc',
-    'rocshmem_free',
-    'rocshmem_ptr',
-    'rocshmem_barrier_all',
-    'rocshmem_barrier_all_on_stream',
-    'rocshmem_fence',
-    'rocshmem_quiet',
-    'rocshmem_get_uniqueid',
-    'rocshmem_init_attr',
-    'rocshmem_putmem',
-    'rocshmem_getmem',
-    'rocshmem_putmem_nbi',
-    'rocshmem_getmem_nbi',
-    'rocshmem_putmem_on_stream',
-    'rocshmem_getmem_on_stream',
-    'rocshmem_putmem_signal_on_stream',
-    'rocshmem_signal_wait_until_on_stream',
-    'rocshmem_int_atomic_fetch_add',
-    'rocshmem_long_atomic_fetch_add',
-    'rocshmem_int_atomic_compare_swap',
-    'ROCSHMEM_SUCCESS',
-    'ROCSHMEM_SIGNAL_SET',
-    'ROCSHMEM_SIGNAL_ADD',
-    'ROCSHMEM_CMP_EQ',
-    'ROCSHMEM_CMP_NE',
-    'ROCSHMEM_CMP_GT',
-    'ROCSHMEM_CMP_GE',
-    'ROCSHMEM_CMP_LT',
-    'ROCSHMEM_CMP_LE',
+    *_HOST_API_BINDINGS,
     'ROCSHMEM_TEAM_INVALID',
     'ROCSHMEM_TEAM_WORLD',
     'SymmetricBuffer',
@@ -125,8 +99,6 @@ def _set_hip_device_from_env():
 class SymmetricBuffer:
     """RAII wrapper for rocshmem_malloc with ``__cuda_array_interface__``
     so the buffer can be used with PyTorch tensors via ``torch.as_tensor``.
-
-    Matches Triton-distributed's ``SymmRocShmemBuffer`` API.
     """
 
     def __init__(self, size: int, *, ptr: Optional[int] = None,
@@ -229,6 +201,8 @@ def rocshmem_create_tensor(shape: Sequence[int], dtype) -> 'torch.Tensor':
     torch.cuda.synchronize()
     ptr = rocshmem_malloc(nbytes)
     buf = SymmetricBuffer(nbytes, ptr=ptr, dtype=dtype, own_data=True)
+    # Dtype reinterpretation via view(dtype) is required to preserve zero-copy
+    # semantics for symmetric memory tensors.
     t = torch.as_tensor(buf, device="cuda").view(dtype).view(shape)
     setattr(t, "__symm_tensor__", True)
     return t
@@ -252,8 +226,7 @@ def symm_rocshmem_tensor(tensor: 'torch.Tensor', peer: int) -> 'torch.Tensor':
             f"rocshmem_ptr returned NULL for peer {peer} — remote direct access "
             "not supported by the current backend"
         )
-    buf = SymmetricBuffer(tensor.nbytes, ptr=ptr, dtype=tensor.dtype,
-                          own_data=False)
+    buf = SymmetricBuffer(tensor.nbytes, ptr=ptr, dtype=tensor.dtype, own_data=False)
     return torch.as_tensor(buf, device="cuda").view(tensor.dtype).view(tensor.shape)
 
 
@@ -352,7 +325,12 @@ def init_with_torch(group: Optional[Any] = None,
 
 
 def _populate_torch_env_from_mpi():
-    """Map OMPI_COMM_WORLD_* env vars to RANK/LOCAL_RANK/WORLD_SIZE."""
+    """Map OMPI_COMM_WORLD_* env vars to RANK/LOCAL_RANK/WORLD_SIZE.
+
+    Rendezvous defaults can be overridden via ROCSHMEM_MASTER_ADDR /
+    ROCSHMEM_MASTER_PORT, or (equivalently) MASTER_ADDR / MASTER_PORT. Users
+    running concurrent jobs should set one of these to avoid port collisions.
+    """
     mapping = {
         "RANK": "OMPI_COMM_WORLD_RANK",
         "LOCAL_RANK": "OMPI_COMM_WORLD_LOCAL_RANK",
@@ -363,8 +341,8 @@ def _populate_torch_env_from_mpi():
         if torch_var not in os.environ and mpi_var in os.environ:
             os.environ[torch_var] = os.environ[mpi_var]
 
-    os.environ.setdefault("MASTER_ADDR", "localhost")
-    os.environ.setdefault("MASTER_PORT", "29500")
+    os.environ.setdefault("MASTER_ADDR", os.environ.get("ROCSHMEM_MASTER_ADDR", "127.0.0.1"))
+    os.environ.setdefault("MASTER_PORT", os.environ.get("ROCSHMEM_MASTER_PORT", "29500"))
 
 
 _rocshmem_initialized = False

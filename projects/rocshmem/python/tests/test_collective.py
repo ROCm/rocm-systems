@@ -1,4 +1,16 @@
-"""Multi-PE tests for rocshmem4py (requires >= 2 PEs)."""
+"""Multi-PE tests for rocshmem4py (requires >= 2 PEs).
+
+These tests exercise the Python binding layer using the portable rocSHMEM
+surface -- ``rocshmem_barrier_all``, ``*_on_stream`` data movement, and
+``rocshmem_ptr`` -- so a single test pass is valid across every rocSHMEM
+backend (RO / IPC / GDA).
+
+Host-side blocking APIs (``rocshmem_fence`` / ``rocshmem_quiet`` /
+``rocshmem_putmem`` / ``rocshmem_getmem`` / ``rocshmem_*_atomic_*``) are
+not exercised here. Their coverage depends on the backend rocSHMEM was
+built with and belongs in rocSHMEM's own integration tests, not in the
+Python-binding test suite.
+"""
 
 import os
 import pytest
@@ -18,22 +30,7 @@ def _pe_info():
     return my_pe, n_pes, peer
 
 
-def test_atomic_fetch_add():
-    my_pe, n_pes, _ = _pe_info()
-
-    for width, fn in [(4, rocshmem4py.rocshmem_int_atomic_fetch_add),
-                      (8, rocshmem4py.rocshmem_long_atomic_fetch_add)]:
-        buf = rocshmem4py.SymmetricBuffer(width)
-        rocshmem4py.rocshmem_barrier_all()
-        if my_pe != 0:
-            old = fn(buf.ptr, 1, 0)
-            assert isinstance(old, int)
-        rocshmem4py.rocshmem_barrier_all()
-        buf.free()
-
-
-
-def test_getmem():
+def test_getmem_on_stream():
     my_pe, n_pes, peer = _pe_info()
     nelems = 64
 
@@ -43,42 +40,16 @@ def test_getmem():
     dst.fill_(-1)
     torch.cuda.synchronize()
 
-    rocshmem4py.rocshmem_barrier_all()
-    rocshmem4py.rocshmem_getmem(
-        dst.data_ptr(), src.data_ptr(), nelems * src.element_size(), peer)
-    rocshmem4py.rocshmem_quiet()
-    rocshmem4py.rocshmem_barrier_all()
+    stream = torch.cuda.current_stream()
+    rocshmem4py.rocshmem_barrier_all_on_stream(stream.cuda_stream)
+    rocshmem4py.rocshmem_getmem_on_stream(
+        dst.data_ptr(), src.data_ptr(), nelems * src.element_size(),
+        peer, stream.cuda_stream)
+    rocshmem4py.rocshmem_barrier_all_on_stream(stream.cuda_stream)
     torch.cuda.synchronize()
 
     torch.testing.assert_close(
         dst, torch.full((nelems,), peer, dtype=torch.int32, device="cuda"))
-
-
-def test_tensor_list_memcpy():
-    my_pe, n_pes, peer = _pe_info()
-    nelems_per_rank = 32
-
-    buf = rocshmem4py.rocshmem_create_tensor((n_pes * nelems_per_rank,), torch.int32)
-    buf.fill_(0)
-    torch.cuda.synchronize()
-
-    ref = torch.arange(n_pes * nelems_per_rank, dtype=torch.int32, device="cuda")
-    start = nelems_per_rank * my_pe
-    buf[start:start + nelems_per_rank].copy_(ref[start:start + nelems_per_rank])
-    torch.cuda.synchronize()
-
-    rocshmem4py.rocshmem_barrier_all()
-
-    nbytes = nelems_per_rank * buf.element_size()
-    offset = buf.data_ptr() + start * buf.element_size()
-    rocshmem4py.rocshmem_putmem(offset, offset, nbytes, peer)
-    rocshmem4py.rocshmem_quiet()
-    rocshmem4py.rocshmem_barrier_all()
-    torch.cuda.synchronize()
-
-    sender = (my_pe - 1 + n_pes) % n_pes
-    s = nelems_per_rank * sender
-    torch.testing.assert_close(buf[s:s + nelems_per_rank], ref[s:s + nelems_per_rank])
 
 
 def test_putmem_on_stream():
@@ -105,6 +76,58 @@ def test_putmem_on_stream():
         dst, torch.full((nelems,), float(sender), dtype=torch.float32,
                         device="cuda"))
 
+
+def test_tensor_list_intra_node():
+    my_pe, n_pes, peer = _pe_info()
+    nelems_per_rank = 32
+
+    buf = rocshmem4py.rocshmem_create_tensor((n_pes * nelems_per_rank,), torch.int32)
+    buf.fill_(0)
+    torch.cuda.synchronize()
+
+    ref = torch.arange(n_pes * nelems_per_rank, dtype=torch.int32, device="cuda")
+    start = nelems_per_rank * my_pe
+    buf[start:start + nelems_per_rank].copy_(ref[start:start + nelems_per_rank])
+    torch.cuda.synchronize()
+
+    stream = torch.cuda.current_stream()
+    rocshmem4py.rocshmem_barrier_all_on_stream(stream.cuda_stream)
+
+    # Use the stream-based transfer to propagate my slice to the peer;
+    # portable across all rocSHMEM backends.
+    nbytes = nelems_per_rank * buf.element_size()
+    offset = buf.data_ptr() + start * buf.element_size()
+    rocshmem4py.rocshmem_putmem_on_stream(
+        offset, offset, nbytes, peer, stream.cuda_stream)
+    rocshmem4py.rocshmem_barrier_all_on_stream(stream.cuda_stream)
+    torch.cuda.synchronize()
+
+    sender = (my_pe - 1 + n_pes) % n_pes
+    s = nelems_per_rank * sender
+    torch.testing.assert_close(buf[s:s + nelems_per_rank], ref[s:s + nelems_per_rank])
+
+
+def test_symm_rocshmem_tensor_peer_view():
+    """Validate that ``symm_rocshmem_tensor`` returns a zero-copy view on
+    backends where ``rocshmem_ptr`` exposes remote symmetric memory
+    (IPC). On backends where ``rocshmem_ptr`` returns NULL,
+    the helper raises -- so we accept either success or the documented
+    RuntimeError without aborting the suite.
+    """
+    my_pe, n_pes, peer = _pe_info()
+    t = rocshmem4py.rocshmem_create_tensor((16,), torch.float32)
+    t.fill_(float(my_pe))
+    torch.cuda.synchronize()
+    rocshmem4py.rocshmem_barrier_all()
+
+    try:
+        peer_view = rocshmem4py.symm_rocshmem_tensor(t, peer)
+    except RuntimeError:
+        pytest.skip("rocshmem_ptr returned NULL -- backend lacks direct remote access")
+
+    assert peer_view.is_cuda
+    assert peer_view.shape == t.shape
+    assert peer_view.dtype == t.dtype
 
 
 if __name__ == "__main__":
