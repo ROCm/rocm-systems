@@ -38,10 +38,14 @@ Behavior:
 
 - No outbound network calls from the agent layer. Provider resolution
   is skipped entirely.
-- `recommendations[].type` is **not populated** in the `RootOutput` —
-  deterministic rules surface a list, but the rich typed metadata
-  (technique id, estimated speedup, code-edit hints) is only
-  generated when an LLM is in the loop.
+- `recommendations[]` entries are dicts (the `RootOutput.recommendations`
+  field is typed `List[Dict[str, Any]]`). Each dict has a `name`
+  (technique identifier), `category`, `priority`, `title`,
+  `description`, `rationale`, and `estimated_impact`. In air-gap
+  mode the values come from deterministic rule lookups against the
+  knowledge YAMLs — titles and descriptions are terse; `rationale`
+  and `estimated_impact` are pulled verbatim from the rule tables
+  rather than LLM-rewritten.
 - `primary_bottleneck` is still set (classifier runs deterministically
   against the knowledge YAMLs).
 - `narrative` is either empty or a terse deterministic summary.
@@ -70,8 +74,9 @@ output = session.run_root(RootInput(
     database_path="/tmp/trace.db",
 ))
 
+# recommendations is a List[Dict[str, Any]] — use dict access, not attribute
 for rec in output.recommendations:
-    print(rec.type, rec.title)   # type is populated in LLM mode
+    print(rec["name"], rec["title"])
 ```
 
 When `airgap=False` (the default), `build_session`:
@@ -87,8 +92,11 @@ When `airgap=False` (the default), `build_session`:
 
 Behavior differences vs air-gap:
 
-- `recommendations[].type` is populated with typed metadata (e.g.
-  `"async_stream_overlap"`, `"vgpr_reduction"`).
+- `recommendations[]["name"]` carries the technique identifier (e.g.
+  `"async_stream_overlap"`, `"vgpr_reduction"`) — same key as
+  air-gap mode, but `title` / `description` / `rationale` are
+  LLM-rewritten for the specific kernel instead of being templated
+  verbatim from the knowledge YAMLs.
 - `narrative` is a full natural-language summary.
 - Each agent's fence slice shapes the LLM's voice + constraints —
   never concatenated with the others.
@@ -97,8 +105,11 @@ Behavior differences vs air-gap:
 
 ## Provider ladder
 
-`PROVIDER_REGISTRY` (from `perfxpert/providers/__init__.py`) lists the
-supported providers in preference order. Current entries:
+`PROVIDER_REGISTRY` is defined in `perfxpert/agents/runtime.py` (with a
+hard-coded fallback there; `build_session` imports the richer copy
+from `perfxpert.providers` when the optional provider package is
+available). It lists the supported providers in preference order.
+Current entries:
 
 | Provider | Source | Typical use |
 |----------|--------|-------------|
