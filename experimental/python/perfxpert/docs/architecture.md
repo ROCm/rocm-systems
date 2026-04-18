@@ -83,8 +83,16 @@ user  →  perfxpert-code  (bundled opencode)
 ### Library API
 
 ```python
-from perfxpert import analyze_database
-result = analyze_database("trace.db", provider="anthropic")
+# Agentic library API — v0.2.0+
+from perfxpert.agents.runtime import build_session
+from perfxpert.agents.schemas import RootInput
+
+session = build_session(airgap=True)  # or provider='anthropic'
+output = session.run_root(RootInput(
+    user_query="Summarize the primary bottleneck.",
+    airgap=True,
+))
+print(output.primary_bottleneck)
 ```
 
 ## Test pyramid (spec §6)
