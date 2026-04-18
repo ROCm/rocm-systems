@@ -23,8 +23,8 @@ sets:
   metric:
   - 2.1.18: Theoretical LDS Bandwidth
   - 2.1.19: LDS Bank Conflicts/Access
-  - 16.1.2: Utilization
-  - 17.1.0: Utilization
+  - 16.1.2: vL1D Cache Utilization
+  - 17.1.0: L2 Cache Utilization
 - title: Launch Stats
   set_option: launch_stats
   description: Placeholder

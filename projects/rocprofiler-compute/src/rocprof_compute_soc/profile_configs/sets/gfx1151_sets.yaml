@@ -1,12 +1,4 @@
 sets:
-- title: Compute Throughput Utilization
-  set_option: compute_thruput_util
-  description: Placeholder
-  metric:
-  - 7.5.2: Instructions - VALU
-  - 7.5.3: Instructions - SALU
-  - 7.5.6: Instructions - VMEM
-  - 8.1.0: TCP Busy
 - title: Compute Throughput FLOPS
   set_option: compute_thruput_flops
   description: Placeholder
@@ -19,7 +11,8 @@ sets:
   metric:
   - 2.1.7: LDS Bank Conflicts
   - 3.4.5: LDS Estimated Bandwidth
-  - 11.1.0: GL1C Busy
+  - 3.6.0: GL1C Utilization
+  - 3.8.0: GL2C Utilization
 - title: Launch Stats
   set_option: launch_stats
   description: Placeholder

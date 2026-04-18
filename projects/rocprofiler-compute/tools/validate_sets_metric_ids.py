@@ -233,7 +233,13 @@ def validate() -> list[str]:
                         continue
 
                     actual = metric_names[idx]
-                    if actual != expected_name:
+                    # Allow the sets file to use a qualified name that
+                    # includes context from the panel/table title
+                    # (e.g. "vL1D Cache Utilization" matches "Utilization"
+                    # when the table is under the vL1D Cache panel).
+                    if actual != expected_name and not expected_name.endswith(
+                        " " + actual
+                    ):
                         errors.append(
                             f"[{arch}] set '{set_option}': metric ID "
                             f"{metric_id} is labeled '{expected_name}' but "
