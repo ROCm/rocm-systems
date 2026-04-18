@@ -31,17 +31,27 @@ from perfxpert.providers._exceptions import (
     RateLimitError,
     TimeoutError,
 )
+from perfxpert.providers._fallback import (
+    ENV_FALLBACK_CHAIN,
+    FallbackProvider,
+    get_fallback_provider,
+    parse_chain_env,
+)
 from perfxpert.providers.registry import get_provider, list_providers, register
 
 __all__ = [
     "AuthError",
     "DryRunResponse",
+    "ENV_FALLBACK_CHAIN",
+    "FallbackProvider",
     "ProviderError",
     "Provider",
     "ProviderResponse",
     "RateLimitError",
     "TimeoutError",
+    "get_fallback_provider",
     "get_provider",
     "list_providers",
+    "parse_chain_env",
     "register",
 ]
