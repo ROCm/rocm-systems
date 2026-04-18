@@ -45,7 +45,16 @@ perfxpert doctor
 └────────────────────────────────────────────────────────────┘
 ```
 
-Everything ships inside one `pip install perfxpert` — including the bundled opencode binary for `perfxpert-code`.
+Core analysis is self-contained — `pip install perfxpert` is sufficient for all
+profiling and recommendation features. `perfxpert-code` (`perfxpert-code`
+sub-command) requires **opencode** as a system dependency (bundling into the
+wheel is a Phase 8 deliverable). Install opencode separately:
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Or point `PERFXPERT_OPENCODE_PATH` at an existing opencode binary.
 
 ## Contributing
 
@@ -61,7 +70,7 @@ an [RFC](docs/rfcs/README.md).
 | `PERFXPERT_USE_AGENTS=1` | noop (kept for back-compat) | Was the Phase-4 opt-in; agentic is now default |
 | `PERFXPERT_LEGACY=1` | unset | One-version safety net — routes through the pre-v0.2.0 path. Removed in vX.Y+1. |
 | `ROCINSIGHT_LLM_REFERENCE_GUIDE` | unset | Legacy-only — path to user-supplied monolithic guide |
-| `PERFXPERT_OPENCODE_PATH` | bundled | Override path to opencode binary |
+| `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; must point to an existing file or launcher raises immediately |
 
 ## Supported GPUs
 
@@ -88,4 +97,4 @@ an [RFC](docs/rfcs/README.md).
 
 ## Licensing
 
-MIT. Bundled opencode binary is also MIT (permissive redistribution).
+MIT. opencode (system dependency, not bundled in this release) is also MIT.

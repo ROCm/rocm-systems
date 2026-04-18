@@ -142,8 +142,7 @@ def main(argv=None):
         has_source = bool(getattr(args, "source_dir", None))
         if not has_input and not has_source:
             analyze_parser.error(
-                "at least one of -i/--input (trace database) or "
-                "--source-dir (source code) is required"
+                "at least one of -i/--input (trace database) or " "--source-dir (source code) is required"
             )
 
         input_data = None
@@ -166,6 +165,7 @@ def main(argv=None):
                 input_data.close()
     elif args.subcommand == "config":
         from perfxpert.config._cli import run_config_show, run_config_set
+
         if args.config_action == "show":
             run_config_show()
             sys.exit(0)
@@ -200,6 +200,7 @@ def _check_version() -> tuple[bool, str]:
     """Check perfxpert version."""
     try:
         from importlib.metadata import version
+
         ver = version("perfxpert")
         return True, f"perfxpert {ver} installed"
     except Exception as e:
@@ -209,6 +210,7 @@ def _check_version() -> tuple[bool, str]:
 def _check_python_version() -> tuple[bool, str]:
     """Check Python version >= 3.10."""
     import sys
+
     major, minor = sys.version_info[:2]
     ver_str = f"Python {major}.{minor}"
     if sys.version_info >= (3, 10):
@@ -220,6 +222,7 @@ def _check_openai_agents() -> tuple[bool, str]:
     """Check openai-agents SDK version."""
     try:
         from importlib.metadata import version
+
         ver = version("openai-agents")
         return True, f"openai-agents {ver}"
     except Exception as e:
@@ -231,6 +234,7 @@ def _check_mcp_server() -> tuple[bool, str]:
     try:
         from mcp_server.server import build_server
         from mcp_server._registry import discover_read_only_tools
+
         server = build_server()  # noqa: F841
         n = len(discover_read_only_tools())
         return True, f"MCP server reachable"
@@ -239,14 +243,26 @@ def _check_mcp_server() -> tuple[bool, str]:
 
 
 def _check_task_store() -> tuple[bool, str]:
-    """Check Python task store (.perfxpert/) readiness."""
+    """Check Python task store readiness."""
     import os
     from pathlib import Path
-    task_store = Path.home() / ".perfxpert"
+
+    task_root_env = os.environ.get("PERFXPERT_TASK_ROOT")
+    if task_root_env:
+        task_store = Path(task_root_env)
+    else:
+        task_store = Path.home() / ".perfxpert"
     try:
         task_store.mkdir(exist_ok=True)
         if task_store.is_dir():
-            return True, f"Python task store (.perfxpert/) ready"
+            msg = f"Python task store at {task_store} ready"
+            if not task_root_env:
+                msg += (
+                    "\n  WARNING: PERFXPERT_TASK_ROOT not set — "
+                    f"defaulting to {task_store}. "
+                    "Set PERFXPERT_TASK_ROOT to use a custom location."
+                )
+            return True, msg
         return False, "task store not a directory"
     except Exception as e:
         return False, f"task store creation failed: {e}"
@@ -256,10 +272,12 @@ def _check_opencode_bundled() -> tuple[bool, str]:
     """Check that bundled opencode binary can be resolved with version."""
     from pathlib import Path
     from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+
     try:
         p = resolve_opencode_binary()
         # Try to get version from the binary
         import subprocess
+
         try:
             result = subprocess.run([str(p), "--version"], capture_output=True, text=True, timeout=2)
             ver = result.stdout.strip().split()[-1] if result.returncode == 0 else "unknown"
@@ -274,6 +292,7 @@ def _check_opencode_bundled() -> tuple[bool, str]:
 def _check_llm_providers() -> tuple[list[str], list[str]]:
     """Check which LLM providers are configured."""
     import os
+
     configured = []
     unconfigured = []
 
@@ -304,6 +323,7 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
 def _report_active_mode() -> str:
     """Return one of 'Mode: agentic' | 'Mode: legacy (DEPRECATED)'."""
     import os
+
     if os.getenv("PERFXPERT_LEGACY"):
         return (
             "Mode: legacy (DEPRECATED)\n"
@@ -360,6 +380,7 @@ def _run_doctor():
 def _get_version():
     try:
         from importlib.metadata import version
+
         return version("perfxpert")
     except (ImportError, ModuleNotFoundError):
         # importlib.metadata not available (Python < 3.8 edge case)
