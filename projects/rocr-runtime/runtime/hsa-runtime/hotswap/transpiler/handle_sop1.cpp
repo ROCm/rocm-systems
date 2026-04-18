@@ -1,5 +1,5 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
+#include "sem_op_attrs.hpp"
 
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Intrinsics.h"
@@ -9,9 +9,28 @@ using namespace llvm;
 
 namespace transpiler {
 
+// SPE attribute registrations. Every SemOp listed here has been audited
+// to route EXEC writes through `regs.storeExec` — directly for the
+// SAVEEXEC family, via `writeReg{32,64,ExecWidth}` → `storeExec` for
+// S_MOV_B{32,64} and S_NOT_B{32,64}. See AGENTS.md's SPE audit note
+// before touching this list.
+ArrayRef<SemOpAttrSpec> getHandlerSOP1Attrs() {
+  static constexpr SemOpAttrSpec kAttrs[] = {
+      {SemOp::S_MOV_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_MOV_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_NOT_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_NOT_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_AND_SAVEEXEC_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_OR_SAVEEXEC_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_XOR_SAVEEXEC_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_ANDN2_SAVEEXEC_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_ORN2_SAVEEXEC_B32, {/*routesExecThroughStoreExec=*/true}},
+  };
+  return kAttrs;
+}
+
 HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
-                         OpResolver &op, RaiseResult &result) {
-  (void)result;
+                         OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 

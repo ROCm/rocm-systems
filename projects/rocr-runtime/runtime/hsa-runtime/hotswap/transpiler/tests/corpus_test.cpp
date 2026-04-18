@@ -111,7 +111,9 @@ static void raiseCorpusToShm(const std::vector<std::string> &files,
         shm->raised++;
       } else {
         shm->failed++;
-        std::string mn = res.failMnemonic.empty() ? "unknown" : res.failMnemonic;
+        std::string mn = res.failure.mnemonic.empty()
+                             ? "unknown"
+                             : res.failure.mnemonic;
         failMap[mn]++;
       }
     }

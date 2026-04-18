@@ -2,15 +2,15 @@
 ; RUN:   | %FileCheck %s --check-prefix=STDERR
 ;
 ; The raiser must refuse to lower a kernel that contains an
-; EXEC-writing instruction whose SemOp is not on the SPE allow-list
-; (`isSPEModeledExecWriter` in raiser.cpp). This prevents us from
-; silently emitting IR for an opcode whose handler has not been
-; audited against the per-lane predication assumption.
+; EXEC-writing instruction whose SemOp is not declared SPE-safe
+; (`routesExecThroughStoreExec` in `sem_op_attrs.cpp`). This prevents
+; us from silently emitting IR for an opcode whose handler has not
+; been audited against the per-lane predication assumption.
 ;
 ; The fixture pins `s_flbit_i32_b32` as the offending instruction:
-; its `S_FLBIT_I32_B32` SemOp is deliberately excluded from the
-; allow-list because no handler has been written for that shape of
-; EXEC write. Routing the dst to `exec_lo` makes the EXEC-writer
+; its `S_FLBIT_I32_B32` SemOp is deliberately absent from the
+; attribute table because no handler has been written for that shape
+; of EXEC write. Routing the dst to `exec_lo` makes the EXEC-writer
 ; detector flag it.
 ;
 ; We assert two things:
@@ -20,11 +20,16 @@
 ;   2. The stderr diagnostic names the instruction and explains why,
 ;      matching on stable substrings. We do not pin to the full
 ;      sentence to keep the test resilient to future rewordings.
+;
+; History: the diagnostic previously mentioned "SPE-modelled
+; allow-list"; that wording was replaced by the attribute-based check
+; ("routesExecThroughStoreExec") when P1.3 moved the allow-list into
+; `sem_op_attrs.cpp`. The attribute name is the new stable substring.
 
 ; STDERR: transpiler: pre-translation abort:
 ; STDERR-SAME: 's_flbit_i32_b32'
 ; STDERR-SAME: writes EXEC
-; STDERR-SAME: not in the SPE-modelled allow-list
+; STDERR-SAME: routesExecThroughStoreExec
 
 ; The raise_cli wrapper reports the failure once more so the kerneldex
 ; coverage format is preserved; the mnemonic must match.

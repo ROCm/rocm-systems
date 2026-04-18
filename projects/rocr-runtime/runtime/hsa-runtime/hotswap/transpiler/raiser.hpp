@@ -2,7 +2,8 @@
 #define HOTSWAP_TRANSPILER_RAISER_HPP
 
 #include "code_object_utils.hpp"
-#include <cstdint>
+#include "raise_failure.hpp"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,8 +22,8 @@ struct RaiseResult {
   int totalCount = 0;
   std::string irText;
   std::string disasmText;
-  std::string failMnemonic;
-  std::string failFormat;
+  // Structured failure description. `failure.reason == None` iff `success`.
+  RaiseFailure failure;
   bool success = false;
   bool hasDivergentExec = false;
 };

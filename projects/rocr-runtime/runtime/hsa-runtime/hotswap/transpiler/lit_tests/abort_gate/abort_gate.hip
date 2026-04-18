@@ -3,19 +3,22 @@
 // Fixture for the SPE allow-list abort gate (lit_tests/abort_gate).
 //
 // The goal is to put an instruction into the decoded stream whose
-// MCInstrDesc advertises an EXEC def but whose SemOp is NOT on the
-// SPE-modelled allow-list in raiser.cpp (`isSPEModeledExecWriter`).
-// `s_flbit_i32_b32` is a real, well-formed gfx942 instruction whose
-// `S_FLBIT_I32_B32` SemOp is excluded from the allow-list (no
-// handler in the SPE audit trail), and assembling it with an
-// explicit `exec_lo` destination gives the EXEC-writer detector in
-// raiser.cpp something concrete to scan for.
+// MCInstrDesc advertises an EXEC def but whose SemOp does NOT have
+// `routesExecThroughStoreExec` declared in any handler's
+// `get*Attrs()` registration (see `sem_op_attrs.hpp` for the
+// per-handler attribute surface). `s_flbit_i32_b32` is a real,
+// well-formed gfx942 instruction whose `S_FLBIT_I32_B32` SemOp is
+// absent from that registration (no handler in the SPE audit trail),
+// and assembling it with an explicit `exec_lo` destination gives the
+// EXEC-writer detector in `wave_projection.cpp` something concrete
+// to scan for.
 //
 // When the raiser sees this instruction it must refuse to lower the
 // kernel with:
 //
 //   transpiler: pre-translation abort: 's_flbit_i32_b32' writes EXEC
-//   but its SemOp (N) is not in the SPE-modelled allow-list. ...
+//   but its SemOp (S_FLBIT_I32_B32) is not marked
+//   routesExecThroughStoreExec. ...
 //
 // The kernel itself is otherwise a no-op — we never read back the
 // clobbered EXEC, so the dispatch would be meaningless. We only care
@@ -26,13 +29,13 @@
 // MAINTENANCE CONTRACT — read before changing the allow-list.
 // ============================================================
 // This fixture is valid only as long as `S_FLBIT_I32_B32` remains
-// OFF the SPE allow-list in raiser.cpp. If you audit the
-// S_FLBIT_I32_B32 handler path against SPE and add it to
-// `isSPEModeledExecWriter` — a legitimate thing to do — this test
-// stops being a negative test (the raise will succeed and the lit
-// test will fail with "expected failure did not occur"). Do NOT
-// delete the test. Instead, pick another EXEC-writing SemOp that
-// is still off the allow-list and update this fixture's inline asm
+// unregistered in every handler's `get*Attrs()`. If you audit the
+// S_FLBIT_I32_B32 handler path against SPE and register it with
+// `routesExecThroughStoreExec = true` — a legitimate thing to do —
+// this test stops being a negative test (the raise will succeed and
+// the lit test will fail with "expected failure did not occur"). Do
+// NOT delete the test. Instead, pick another EXEC-writing SemOp that
+// is still unregistered and update this fixture's inline asm
 // accordingly. Good candidates at the time of writing:
 //
 //   * `s_bitreplicate_b64_b32 exec, s0`  (SemOp::Unknown at time

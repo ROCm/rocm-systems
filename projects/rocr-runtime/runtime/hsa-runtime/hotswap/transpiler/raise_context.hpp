@@ -6,7 +6,9 @@
 #include "kernarg_layout.hpp"
 #include "mc_state.hpp"
 #include "parsed_reg.hpp"
+#include "raise_failure.hpp"
 #include "reg_file.hpp"
+#include "wave_projection.hpp"
 
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/IR/IRBuilder.h"
@@ -17,14 +19,13 @@
 
 namespace transpiler {
 
-struct RaiseResult;
-
 // Shared state threaded through every format handler.
 struct RaiseContext {
   llvm::LLVMContext &C;
   llvm::Module &M;
   llvm::IRBuilder<> &B;
   AllocaRegFile &regs;
+  const WaveProjection &projection;
   const MCState &mc;
   const ISAProfile &isa;       // source ISA (for disassembly / instruction semantics)
   ISAProfile targetIsa;        // compilation target ISA (for code generation decisions)
@@ -167,10 +168,21 @@ struct RaiseContext {
 };
 
 // Return value from every format handler.
+//
+// Handlers communicate back in three ways:
+//   * `handled = true` → the handler fully lowered the instruction.
+//   * `handled = false`, `failure.reason = None` → this handler does
+//     not claim the instruction; the main loop falls through to the
+//     generic `UnsupportedOpcode` diagnostic.
+//   * `handled = false`, `failure.reason != None` → the handler
+//     recognised the instruction but refuses to lower it (e.g. operand
+//     shape unsupported); the main loop records the structured failure
+//     and aborts without consulting other handlers.
 struct HandlerResult {
   bool handled = false;
   llvm::Value *sccResult = nullptr;
   bool sccHandled = false;
+  RaiseFailure failure;
 };
 
 // Reads source operands via srcMap, skipping VOP3 modifiers.

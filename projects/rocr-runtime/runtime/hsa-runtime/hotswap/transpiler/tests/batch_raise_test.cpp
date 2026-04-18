@@ -108,8 +108,12 @@ static void runBatchRaise(const std::string &path, const std::string &isa) {
         anySuccess = true;
       } else {
         failedKernels++;
-        std::string mn = raised.failMnemonic.empty() ? "unknown" : raised.failMnemonic;
-        std::string fmt = raised.failFormat.empty() ? "unknown" : raised.failFormat;
+        std::string mn = raised.failure.mnemonic.empty()
+                             ? "unknown"
+                             : raised.failure.mnemonic;
+        std::string fmt = raised.failure.format.empty()
+                              ? "unknown"
+                              : raised.failure.format;
         failMnemonics[mn]++;
         failFormats[fmt]++;
         EXPECT_TRUE(raised.success)

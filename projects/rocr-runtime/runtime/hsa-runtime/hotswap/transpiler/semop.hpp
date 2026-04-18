@@ -252,6 +252,12 @@ enum class SemOp : uint16_t {
   SemOp_COUNT
 };
 
+// Stable human-readable identifier for a SemOp (the enum's spelling,
+// e.g. `"V_CMPX"` for `SemOp::V_CMPX`). Used in diagnostics — prefer
+// this over `(int)sop` so errors name the instruction class rather
+// than a raw enum position that drifts with enum edits.
+const char *semOpName(SemOp op);
+
 } // namespace transpiler
 
 #endif

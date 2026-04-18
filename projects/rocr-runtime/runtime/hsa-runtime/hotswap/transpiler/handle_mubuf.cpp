@@ -1,5 +1,5 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
+#include "mubuf_addr.hpp"
 
 #include "semop.hpp"
 #include "llvm/ADT/SmallVector.h"
@@ -20,7 +20,7 @@ using namespace llvm;
 
 namespace transpiler {
 HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
-                        OpResolver &op, RaiseResult &result) {
+                        OpResolver &op) {
   HandlerResult hr;
   StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
@@ -49,100 +49,18 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
   };
   auto [isLoad, isStore, dwords, loadBits, isSubDword, isBufSigned] = mubufClassify(sop);
   if (isLoad || isStore) {
-
-    // Scan source operands by register kind to handle both MUBUF and
-    // VBUFFER encodings (where vaddr and srsrc order may differ).
-    ParsedReg vdata = op.dst(0);
-    ParsedReg srsrc{}, vaddrReg{}, soffReg{};
-    bool haveSrsrc = false, haveVaddr = false, haveSoff = false;
-    int64_t immOff = 0;
-    int vgprSrcCount = 0;
-
-    for (unsigned k = 0; k < op.nSrcs(); k++) {
-      unsigned idx = op.srcIdx(k);
-      if (di.isReg(idx)) {
-        ParsedReg pr = op.srcReg(k);
-        if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSrsrc) {
-          srsrc = pr; haveSrsrc = true;
-        } else if (pr.kind == ParsedReg::VGPR) {
-          vgprSrcCount++;
-          // For stores (numDefs==0), the first VGPR source is vdata
-          // (the stored value, already captured via op.dst(0)).
-          // The second VGPR source is the actual buffer offset (vaddr).
-          if (isStore && vgprSrcCount == 1)
-            continue;
-          if (!haveVaddr) {
-            vaddrReg = pr; haveVaddr = true;
-          }
-        } else if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSoff) {
-          soffReg = pr; haveSoff = true;
-        }
-      } else if (di.isImm(idx)) {
-        int64_t v = di.getImm(idx);
-        if (v != 0 && immOff == 0)
-          immOff = v;
-      }
-    }
-
-    if (!haveSrsrc) {
-      llvm::errs() << "transpiler: MUBUF: no SRSRC found for " << mn << "\n";
-      result.failMnemonic = di.mnemonic;
-        result.failFormat = "MUBUF";
-        hr.handled = false;
-        return hr;
-    }
-
-    // Use gfx942 buffer intrinsics directly. The hardware handles
-    // OOB: loads return 0, stores are silently dropped. This avoids
-    // the flat-memory lowering that requires conditional branches
-    // (which break under LLVM -O1+ SIMT optimizations).
-    Value *dw0 = ctx.regs.readReg32(ctx.B, srsrc);
-    ParsedReg srsrc1 = srsrc; srsrc1.baseIdx = srsrc.baseIdx + 1;
-    ParsedReg srsrc2 = srsrc; srsrc2.baseIdx = srsrc.baseIdx + 2;
-    Value *dw1 = ctx.regs.readReg32(ctx.B, srsrc1);
-    Value *dw2 = ctx.regs.readReg32(ctx.B, srsrc2);
-    if (!dw0 || !dw1 || !dw2) {
-      llvm::errs() << "transpiler: MUBUF: cannot read SRSRC for " << mn << "\n";
-      result.failMnemonic = di.mnemonic;
-        result.failFormat = "MUBUF";
-        hr.handled = false;
-        return hr;
-    }
-
-    // Build a gfx942-compatible raw buffer descriptor <4 x i32>.
-    // Word 0: base_lo
-    // Word 1: base_hi (only low 16 bits are address; clear stride/flags)
-    // Word 2: num_records (byte count)
-    // Word 3: 0 (raw buffer, TYPE=0, no format conversion)
-    // Use readfirstlane to force SRD words into SGPRs, avoiding
-    // the costly waterfall loop and incorrect register allocation.
-    Function *readfirstlane = Intrinsic::getOrInsertDeclaration(
-        &ctx.M,
-        Intrinsic::amdgcn_readfirstlane, {ctx.i32Ty});
-    Value *cleanDw1 = ctx.B.CreateAnd(dw1, ConstantInt::get(ctx.i32Ty, 0xFFFF));
-    Value *srdW0 = ctx.B.CreateCall(readfirstlane, {dw0}, "srd_w0");
-    Value *srdW1 = ctx.B.CreateCall(readfirstlane, {cleanDw1}, "srd_w1");
-    Value *srdW2 = ctx.B.CreateCall(readfirstlane, {dw2}, "srd_w2");
-    Value *word3 = ConstantInt::get(ctx.i32Ty, 0);
-    Value *srd = UndefValue::get(FixedVectorType::get(ctx.i32Ty, 4));
-    srd = ctx.B.CreateInsertElement(srd, srdW0, (uint64_t)0);
-    srd = ctx.B.CreateInsertElement(srd, srdW1, (uint64_t)1);
-    srd = ctx.B.CreateInsertElement(srd, srdW2, (uint64_t)2);
-    srd = ctx.B.CreateInsertElement(srd, word3, (uint64_t)3);
-
-    // Compute the per-lane VGPR offset (i32)
-    Value *voffset = ConstantInt::get(ctx.i32Ty, 0);
-    if (haveVaddr)
-      voffset = ctx.B.CreateAdd(voffset, ctx.regs.readReg32(ctx.B, vaddrReg));
-    if (immOff != 0)
-      voffset = ctx.B.CreateAdd(voffset, ConstantInt::get(ctx.i32Ty, (int32_t)immOff));
-
-    // SGPR offset
-    Value *soffset = ConstantInt::get(ctx.i32Ty, 0);
-    if (haveSoff)
-      soffset = ctx.regs.readReg32(ctx.B, soffReg);
-
-    Value *auxFlags = ConstantInt::get(ctx.i32Ty, 0);
+    // Use gfx942 buffer intrinsics directly. The hardware handles OOB:
+    // loads return 0, stores are silently dropped. This avoids the
+    // flat-memory lowering that requires conditional branches (which
+    // break under LLVM -O1+ SIMT optimizations).
+    MubufAddr mbuf = decodeMubufAddr(ctx, di, op, isStore, "MUBUF");
+    // For loads, vdata is the dst; for stores it's the first VGPR src
+    // (captured into mbuf.stData by the decoder).
+    ParsedReg vdata = isStore ? mbuf.stData : op.dst(0);
+    Value *srd = mbuf.srd;
+    Value *voffset = mbuf.voffset;
+    Value *soffset = mbuf.soffset;
+    Value *auxFlags = mbuf.auxFlags;
 
     if (isLoad) {
       if (isSubDword) {
@@ -191,14 +109,14 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     if (isStore) {
       // Flat store with OOB sink: redirect out-of-bounds writes to
       // private scratch memory to avoid illegal memory access faults.
-      Value *lo = ctx.B.CreateZExt(dw0, ctx.i64Ty);
-      Value *hi = ctx.B.CreateAnd(ctx.B.CreateZExt(dw1, ctx.i64Ty),
+      Value *lo = ctx.B.CreateZExt(mbuf.dw0, ctx.i64Ty);
+      Value *hi = ctx.B.CreateAnd(ctx.B.CreateZExt(mbuf.dw1, ctx.i64Ty),
                                ConstantInt::get(ctx.i64Ty, 0xFFFF));
       Value *basePtr = ctx.B.CreateOr(lo, ctx.B.CreateShl(hi, 32), "buf_base");
       Value *totalOff = ctx.B.CreateZExt(voffset, ctx.i64Ty);
-      if (haveSoff)
+      if (mbuf.haveSoffset)
         totalOff = ctx.B.CreateAdd(totalOff, ctx.B.CreateZExt(soffset, ctx.i64Ty));
-      Value *numRec = ctx.B.CreateZExt(dw2, ctx.i64Ty);
+      Value *numRec = ctx.B.CreateZExt(mbuf.dw2, ctx.i64Ty);
       Value *oob = ctx.B.CreateICmpUGE(totalOff, numRec, "buf_oob");
 
       Value *realAddr = ctx.B.CreateAdd(basePtr, totalOff, "buf_addr");
@@ -214,17 +132,16 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
       Value *storePtr = ctx.B.CreateSelect(oob, sinkFlat, realPtr,
                                         "store_ptr");
 
-      ParsedReg storeData = op.dst(0);
       if (isSubDword) {
         Type *memTy = Type::getIntNTy(ctx.C, loadBits);
-        Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, storeData), memTy);
+        Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, vdata), memTy);
         ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
       } else if (dwords == 1) {
-        Value *val = ctx.regs.readReg32(ctx.B, storeData);
+        Value *val = ctx.regs.readReg32(ctx.B, vdata);
         ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
       } else {
         auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
-        Value *val = ctx.regs.readRegVec(ctx.B, storeData, vecTy);
+        Value *val = ctx.regs.readRegVec(ctx.B, vdata, vecTy);
         ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
       }
       hr.handled = true;
@@ -241,69 +158,19 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     int dwords = (sop == SemOp::BUFFER_LOAD_DWORDX4_LDS) ? 4
                : (sop == SemOp::BUFFER_LOAD_DWORDX2_LDS) ? 2 : 1;
 
-    ParsedReg srsrcReg{}, vaddrReg{};
-    bool haveSrsrc = false, haveVaddr = false, haveSoff = false;
-    ParsedReg soffReg{};
-    int64_t immOff = 0;
+    MubufAddr mbuf = decodeMubufAddr(ctx, di, op, /*isStore=*/false,
+                                      "MUBUF_LDS");
 
-    for (unsigned k = 0; k < op.nSrcs(); k++) {
-      unsigned idx = op.srcIdx(k);
-      if (di.isReg(idx)) {
-        ParsedReg pr = op.srcReg(k);
-        if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSrsrc) {
-          srsrcReg = pr; haveSrsrc = true;
-        } else if (pr.kind == ParsedReg::VGPR && !haveVaddr) {
-          vaddrReg = pr; haveVaddr = true;
-        } else if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !haveSoff) {
-          soffReg = pr; haveSoff = true;
-        }
-      } else if (di.isImm(idx)) {
-        int64_t v = di.getImm(idx);
-        if (v != 0 && immOff == 0)
-          immOff = v;
-      }
-    }
-
-    if (!haveSrsrc) {
-      llvm::errs() << "transpiler: MUBUF_LDS: no SRSRC for " << mn << "\n";
-      result.failMnemonic = di.mnemonic;
-      result.failFormat = "MUBUF";
-      hr.handled = false;
-      return hr;
-    }
-
-    // Build SRD <4 x i32>
-    Value *dw0 = ctx.regs.readReg32(ctx.B, srsrcReg);
-    ParsedReg s1 = srsrcReg; s1.baseIdx = srsrcReg.baseIdx + 1;
-    ParsedReg s2 = srsrcReg; s2.baseIdx = srsrcReg.baseIdx + 2;
-    Value *dw1 = ctx.regs.readReg32(ctx.B, s1);
-    Value *dw2 = ctx.regs.readReg32(ctx.B, s2);
-    Function *readfirstlane = Intrinsic::getOrInsertDeclaration(
-        &ctx.M, Intrinsic::amdgcn_readfirstlane, {ctx.i32Ty});
-    Value *cleanDw1 = ctx.B.CreateAnd(dw1, ConstantInt::get(ctx.i32Ty, 0xFFFF));
-    Value *srd = UndefValue::get(FixedVectorType::get(ctx.i32Ty, 4));
-    srd = ctx.B.CreateInsertElement(srd, ctx.B.CreateCall(readfirstlane, {dw0}), (uint64_t)0);
-    srd = ctx.B.CreateInsertElement(srd, ctx.B.CreateCall(readfirstlane, {cleanDw1}), (uint64_t)1);
-    srd = ctx.B.CreateInsertElement(srd, ctx.B.CreateCall(readfirstlane, {dw2}), (uint64_t)2);
-    srd = ctx.B.CreateInsertElement(srd, ConstantInt::get(ctx.i32Ty, 0), (uint64_t)3);
-
-    Value *voffset = ConstantInt::get(ctx.i32Ty, 0);
-    if (haveVaddr)
-      voffset = ctx.B.CreateAdd(voffset, ctx.regs.readReg32(ctx.B, vaddrReg));
-    if (immOff != 0)
-      voffset = ctx.B.CreateAdd(voffset, ConstantInt::get(ctx.i32Ty, (int32_t)immOff));
-    Value *soffset = haveSoff ? ctx.regs.readReg32(ctx.B, soffReg)
-                              : ConstantInt::get(ctx.i32Ty, 0);
-    Value *auxFlags = ConstantInt::get(ctx.i32Ty, 0);
-
-    // Load from buffer into temp value(s)
+    // Load from buffer into a temp value.
     Type *ldTy = (dwords == 1) ? (Type *)ctx.i32Ty
                                : (Type *)FixedVectorType::get(ctx.i32Ty, dwords);
     Function *bufLd = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_raw_buffer_load, {ldTy});
-    Value *loaded = ctx.B.CreateCall(bufLd, {srd, voffset, soffset, auxFlags}, "lds_buf_ld");
+    Value *loaded = ctx.B.CreateCall(
+        bufLd, {mbuf.srd, mbuf.voffset, mbuf.soffset, mbuf.auxFlags},
+        "lds_buf_ld");
 
-    // Store to LDS at address from M0
+    // Store to LDS at address from M0.
     ParsedReg m0Reg; m0Reg.kind = ParsedReg::M0; m0Reg.baseIdx = 0;
     Value *ldsAddr = ctx.regs.readReg32(ctx.B, m0Reg);
     auto *ldsPtrTy = PointerType::get(ctx.C, 3);
@@ -318,21 +185,9 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
   if (sop >= SemOp::BUFFER_ATOMIC_ADD && sop <= SemOp::BUFFER_ATOMIC_PK_ADD_F16) {
     assert(((di.tsFlags & SIInstrFlags::IsAtomicRet) != 0) == (di.numDefs > 0) &&
            "buffer atomic: IsAtomicRet disagrees with numDefs");
-    ParsedReg srsrc = op.srcReg(0);
-    Value *dw0 = ctx.regs.readReg32(ctx.B, srsrc);
-    ParsedReg srsrc1 = srsrc; srsrc1.baseIdx = srsrc.baseIdx + 1;
-    Value *dw1 = ctx.regs.readReg32(ctx.B, srsrc1);
-    if (!dw0 || !dw1) {
-      llvm::errs() << "transpiler: buffer_atomic: cannot read SRSRC\n";
-      result.failMnemonic = di.mnemonic;
-        result.failFormat = "MUBUF";
-        hr.handled = false;
-        return hr;
-    }
-    Value *lo = ctx.B.CreateZExt(dw0, ctx.i64Ty);
-    Value *hi = ctx.B.CreateAnd(ctx.B.CreateZExt(dw1, ctx.i64Ty), ConstantInt::get(ctx.i64Ty, 0xFFFF));
-    Value *ptr = ctx.B.CreateOr(lo, ctx.B.CreateShl(hi, 32), "buf_base");
-    Value *gep = ctx.B.CreateIntToPtr(ptr, PointerType::get(ctx.C, 0));
+    MubufAtomicAddr atomic =
+        decodeMubufAtomicAddr(ctx, di, op, "buffer_atomic");
+    Value *gep = atomic.ptr;
     Value *data = ctx.regs.readReg32(ctx.B, op.dst(0));
 
     AtomicRMWInst::BinOp atomicOp;
@@ -354,10 +209,9 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
       atomicTy = FixedVectorType::get(Type::getHalfTy(ctx.C), 2); isFP = true; break;
     default:
       llvm::errs() << "transpiler: Unsupported buffer atomic: " << mn << "\n";
-      result.failMnemonic = di.mnemonic;
-        result.failFormat = "MUBUF";
-        hr.handled = false;
-        return hr;
+      hr.failure = RaiseFailure::unsupportedShape(di, "MUBUF",
+                                                   "unsupported buffer atomic");
+      return hr;
     }
     if (isFP) data = ctx.B.CreateBitCast(data, atomicTy);
     ctx.emitUnderExec([&] {

@@ -213,10 +213,12 @@ int main(int argc, char **argv) {
       std::fprintf(stderr,
                    "raise_cli: kernel '%s' failed to raise: %s [%s]\n",
                    target.c_str(),
-                   raised.failMnemonic.empty() ? "unknown"
-                                               : raised.failMnemonic.c_str(),
-                   raised.failFormat.empty() ? "unknown"
-                                             : raised.failFormat.c_str());
+                   raised.failure.mnemonic.empty()
+                       ? "unknown"
+                       : raised.failure.mnemonic.c_str(),
+                   raised.failure.format.empty()
+                       ? "unknown"
+                       : raised.failure.format.c_str());
       return 1;
     }
     std::fwrite(raised.irText.data(), 1, raised.irText.size(), stdout);
@@ -254,10 +256,12 @@ int main(int argc, char **argv) {
       shm->lifted = raised.liftedCount;
       shm->total = raised.totalCount;
       if (!raised.success) {
-        const char *mn =
-            raised.failMnemonic.empty() ? "unknown" : raised.failMnemonic.c_str();
-        const char *fmt =
-            raised.failFormat.empty() ? "unknown" : raised.failFormat.c_str();
+        const char *mn = raised.failure.mnemonic.empty()
+                             ? "unknown"
+                             : raised.failure.mnemonic.c_str();
+        const char *fmt = raised.failure.format.empty()
+                              ? "unknown"
+                              : raised.failure.format.c_str();
         std::strncpy(shm->failMnemonic, mn, sizeof(shm->failMnemonic) - 1);
         std::strncpy(shm->failFormat, fmt, sizeof(shm->failFormat) - 1);
       }

@@ -1,5 +1,4 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
 
 #include "llvm/IR/DerivedTypes.h"
 
@@ -8,8 +7,7 @@ using namespace llvm;
 namespace transpiler {
 
 HandlerResult handleSOPC(RaiseContext &ctx, const DecodedInst &di,
-                         OpResolver &op, RaiseResult &result) {
-  (void)result;
+                         OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 

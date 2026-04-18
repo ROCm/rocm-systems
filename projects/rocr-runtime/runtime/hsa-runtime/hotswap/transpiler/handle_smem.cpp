@@ -1,5 +1,4 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
 
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/Debug.h"
@@ -15,7 +14,7 @@ using namespace llvm;
 namespace transpiler {
 
 HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
-                       OpResolver &op, RaiseResult &result) {
+                       OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 
@@ -67,9 +66,7 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
       if (resolved.empty()) {
         llvm::errs() << "transpiler: Cannot resolve kernarg at offset "
                      << byteOffset << "\n";
-        result.failMnemonic = di.mnemonic;
-        result.failFormat = "SMEM";
-        hr.handled = false;
+        hr.failure = RaiseFailure::smemKernargMiss(di);
         return hr;
       }
       int regOff = 0;
@@ -129,9 +126,8 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     if (data.kind != ParsedReg::SGPR || base.kind != ParsedReg::SGPR) {
       llvm::errs() << "transpiler: " << di.mnemonic
                    << ": S_STORE expects SGPR data and base\n";
-      result.failMnemonic = di.mnemonic;
-      result.failFormat = "SMEM";
-      hr.handled = false;
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "SMEM", "S_STORE expects SGPR data and base");
       return hr;
     }
     Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);

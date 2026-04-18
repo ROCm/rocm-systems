@@ -1,5 +1,4 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
 
 #include "SIDefines.h" // AMDGPU::Hwreg::Id
 #include "llvm/IR/Intrinsics.h"
@@ -145,8 +144,7 @@ static unsigned extractHwregId(int64_t simm16) {
 }
 
 HandlerResult handleSOPK(RaiseContext &ctx, const DecodedInst &di,
-                         OpResolver &op, RaiseResult &result) {
-  (void)result;
+                         OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 

@@ -347,60 +347,9 @@ Value *RaiseContext::emitLaneActiveBit() {
   if (cachedLaneActive)
     return cachedLaneActive;
 
-  // Derive lane id 0..waveSize-1 from mbcnt with an all-ones mask. mbcnt_lo
-  // counts set bits in mask[0..31] below the current lane, and we pass -1
-  // so every bit is set; the result is therefore the lane id for wave32
-  // and the low-half lane id for wave64. mbcnt_hi then folds in the upper
-  // half for wave64. The wave-size check is on the *target* ISA because
-  // lane_id is a runtime property of the hardware the raised IR runs on.
-  Function *mbcntLo = Intrinsic::getOrInsertDeclaration(
-      &M, Intrinsic::amdgcn_mbcnt_lo);
-  Value *allOnes = ConstantInt::getSigned(i32Ty, -1);
-  Value *zero32 = ConstantInt::get(i32Ty, 0);
-  Value *laneId = B.CreateCall(mbcntLo, {allOnes, zero32}, "spe_lane_lo");
-  if (!targetIsa.isWave32()) {
-    Function *mbcntHi = Intrinsic::getOrInsertDeclaration(
-        &M, Intrinsic::amdgcn_mbcnt_hi);
-    laneId = B.CreateCall(mbcntHi, {allOnes, laneId}, "spe_lane_id");
-  }
-
-  // Project the target-lane id onto the source EXEC mask. The model is:
-  //
-  //   target wave (waveMaskTy wide) is partitioned into
-  //   `waveMaskBits / execBits` sub-waves of source-width lanes, each
-  //   running an independent "source-wave replica". A target lane is
-  //   active iff bit `(lane_id MOD source_wave_bits)` of the source EXEC
-  //   mask is set.
-  //
-  // Why modulo: on wave32-source → wave64-target, the target hardware
-  // dispatches 64 independent threads per wave even though the source was
-  // authored for 32. The source EXEC mask logically applies to each half
-  // identically (a source-level `s_and_b32 exec_lo, ..., mask` masks the
-  // same source thread positions in both halves). This matches the
-  // behaviour of the AMDGPU runtime when a wave32 kernel is lifted onto
-  // wave64 hardware — upper-half lanes are *not* disabled, they are
-  // additional source-threads of the same kernel.
-  //
-  // Same-wave (wave32→wave32 or wave64→wave64) and narrowing
-  // (wave64→wave32) cases are the identity: lane_id < source_wave_bits
-  // already, so the modulo is a no-op, and the shift happens at source
-  // width which is where the source ISA's EXEC encoding naturally lives.
-  //
-  // Shifting at source width also sidesteps the LLVM-IR poison rule that
-  // `lshr iN, M` is poison for M >= N: the pre-modulo clamps the shift
-  // into [0, execBits).
-  Value *execVal = regs.loadExec(B);
-  Type *execTy = execVal->getType();
-  unsigned execBits = execTy->getPrimitiveSizeInBits();
-  Value *laneIdInExec = B.CreateZExtOrTrunc(laneId, execTy, "spe_lane_idx");
-  // execBits is a power of two (32 or 64), so modulo is bitwise AND.
-  Value *laneMod = B.CreateAnd(
-      laneIdInExec, ConstantInt::get(execTy, execBits - 1),
-      "spe_lane_mod");
-  Value *shifted = B.CreateLShr(execVal, laneMod, "spe_exec_at_lane");
-  Value *bit = B.CreateAnd(shifted, ConstantInt::get(execTy, 1), "spe_exec_bit");
-  Value *active =
-      B.CreateICmpNE(bit, ConstantInt::get(execTy, 0), "spe_lane_active");
+  // The projection owns the modulo-replication math; this context only
+  // handles the cache + EXEC load.
+  Value *active = projection.emitLaneActiveBit(B, regs.loadExec(B));
   cachedLaneActive = active;
   cachedLaneActiveBB = B.GetInsertBlock();
   return active;

@@ -1,5 +1,4 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
 
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 
@@ -8,9 +7,8 @@ using namespace llvm;
 namespace transpiler {
 
 HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
-                         OpResolver &op, RaiseResult &result) {
+                         OpResolver &op) {
   (void)op;
-  (void)result;
   HandlerResult hr;
   SemOp sop = di.semOp;
 

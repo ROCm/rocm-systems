@@ -142,22 +142,47 @@ A `[Draft]` title prefix changes nothing.
 
 ### Why GPU binary lifting is tractable here
 
-See `WHY_GPU_RAISING_IS_EASIER.md` for the full argument. Short version:
-CFG is recoverable by linear scan (no indirect branches), SSA is delegated
-to `PromoteMemToReg`, types come from mnemonics and kernarg metadata, there
-is no stack frame and no cross-function calls. The raised IR is a
-**waypoint**, not a destination — everything lost during original
-compilation (instruction selection, register allocation, scheduling, wait
-counters) is re-derived by the backend for the new target.
+Binary lifting (raising machine code to compiler IR) is notoriously hard on
+general-purpose CPUs. GPU compute kernels sidestep nearly all of those
+problems:
+
+1. **CFG recovery is trivial.** AMDGPU branches use PC-relative immediate
+   offsets — no indirect jumps, no jump tables. A single linear scan
+   recovers the full CFG.
+2. **SSA construction is delegated.** The entire physical register file is
+   modelled as LLVM allocas; `PromoteMemToReg` yields proper SSA with phis.
+   Works cleanly because GPU registers have no aliasing (unlike x86
+   rax/eax/ax/al).
+3. **Type recovery is free.** Types are encoded in instruction mnemonics
+   (`v_add_f32` = float, `v_add_u32` = unsigned int). Kernel argument types
+   come from `.amdgpu_metadata`.
+4. **Flag forwarding is structural.** SCC/VCC are modelled as `i1` allocas
+   that participate in normal SSA promotion. Auto-SCC writeback uses
+   hardware `implicit_defs()` metadata.
+5. **No stack frame recovery.** GPU kernels have no traditional stack.
+   Memory accesses use well-defined address spaces encoded in the opcode.
+   Kernel arguments arrive via a known ABI with ELF metadata declaring
+   every argument's offset, size, and type.
+6. **No function boundary recovery.** Kernels are self-contained:
+   single-entry, terminated by `s_endpgm`, no calls. The boundary comes
+   from ELF symbol metadata.
+7. **Information loss is a non-issue.** The information destroyed during
+   original compilation (instruction selection, register allocation,
+   scheduling, wait counters) is exactly what the LLVM backend re-derives
+   from first principles for the new target.
+
+The raised IR is a **waypoint**, not a destination. The one open problem
+is EXEC-mask divergence; that is the SPE model's domain (see SPE design
+docs for the details).
 
 ## Naming note
 
 `raiser.{hpp,cpp}` will be renamed to `translation.{hpp,cpp}` (and the
 `raiseToIR` entry point renamed accordingly). The current name leans too
 hard on the academic "raising" literature, which addresses a much harder
-problem than what we do (see `WHY_GPU_RAISING_IS_EASIER.md`). Do not
-introduce new symbols or docs that entrench the `raiser` name; if you touch
-these files, prefer the new name.
+problem than what we do. Do not introduce new symbols or docs that
+entrench the `raiser` name; if you touch these files, prefer the new
+name.
 
 ## Tests
 
@@ -216,6 +241,34 @@ source pointing to `xfail.cmake` with the reason.
 - `batch_raise_test` is the no-GPU smoke test.  Any change must keep its
   raise rate on the AITER corpus stable or improve it.
 
+### Missing targeted tests (follow-up)
+
+The current suite exercises the APIs below end-to-end via BatchRaise /
+corpus / GPU tests. Unit tests that hit them directly do not yet exist;
+an agent landing changes to these surfaces should consider adding
+targeted tests alongside. Not a blocker — the existing end-to-end
+coverage catches regressions — but closing these gaps would let a
+reviewer trust the APIs in isolation.
+
+- **`WaveProjection` / `ModuloReplicationProjection`** — no unit test
+  for `ballotI1ToWidth` wave32→wave64 truncation, or the
+  wave64→wave32 `report_fatal_error` path. Cover by synthesising a
+  tiny IR function, running each projection primitive, and asserting
+  the emitted IR shape.
+- **`verifyExecAttrCoverage`** — no negative test (add a manufactured
+  MC opcode that declares EXEC as an implicit def but whose SemOp
+  isn't in any handler's attribute registration, assert the
+  `report_fatal_error`).
+- **`decodeGlobalLoadAddr` / `decodeGlobalStoreAddr`** — no targeted
+  test for the SADDR-vs-plain discriminator or the `scale_offset` mul.
+- **`decodeMubufAddr` / `decodeMubufAtomicAddr`** — same; the SRSRC
+  dword routing through `readfirstlane` is only exercised indirectly.
+- **`decodeKernel`** — only exercised via `raiseToIR`. Targeted tests
+  against a synthetic byte buffer would isolate the drift-check paths
+  from IR emission.
+- **`RaiseFailure` routing** — no test asserting that a specific
+  `reason` value bubbles up to the caller as expected.
+
 ## Coding standards
 
 ### LLVM style (mandatory)
@@ -248,8 +301,6 @@ no-RTTI default that LLVM itself uses are expected.
 This project is a long-lived consumer of LLVM's AMDGPU target. Every time
 we hand-roll a table that LLVM already generates from TableGen, it drifts
 and breaks when a new subtarget, instruction, or register lands upstream.
-The `REFACTOR_PLAN.md` in this directory is the running inventory of those
-surfaces and how we are replacing them with LLVM-native lookups.
 
 Concrete rules for any new code:
 
@@ -294,6 +345,32 @@ This is a project-wide rule, not a style preference:
   source ISA and kernel name, so a failure in `batch_raise_test`'s summary
   points straight at the offending case.
 
+## Known limitations
+
+Items that are not bugs but that an incoming agent should be aware of:
+
+- **M0 register handling is ad-hoc across handler files.** M0 is used as
+  an implicit address operand by several instruction families and the
+  current handling has gaps:
+  - `handle_mubuf.cpp`: `buffer_load_*_lds` stores to LDS at M0, but
+    does not advance M0 afterwards. If multiple `buffer_load_*_lds` fire
+    in sequence the raiser relies on the kernel having explicit
+    `s_mov_b32 m0` instructions between them. Verify against real
+    kernels before relying on this.
+  - `handle_sopc.cpp`: `s_set_gpr_idx_on` writes M0 but the GPR dynamic
+    indexing effect is not modelled. Known limitation; revisit if AITER
+    kernels start using GPR indexing.
+  - `reg_file.cpp`: `LDS_DIRECT` reads from LDS at M0. GFX9 does not
+    auto-increment M0 (unlike GFX11+ DSDIR `lds_direct_load`), so the
+    current implementation is correct for GFX9. Raising GFX11+ kernels
+    that use DSDIR will require explicit modelling of the increment.
+  - `handle_ds.cpp`: `ds_bpermute` uses M0 for byte-lane control and
+    passes it through correctly. No known issue.
+  - General concern: M0 is a single 32-bit alloca shared by all these
+    uses. Interleaved M0 uses (e.g. `buffer_load_lds` followed by
+    `ds_bpermute`) rely on the alloca preserving M0's value across the
+    entire instruction stream; there is no dedicated test for this.
+
 ## Before you commit
 
 - Build `hotswap-transpiler` and `transpiler_tests` cleanly with the
@@ -302,9 +379,6 @@ This is a project-wide rule, not a style preference:
   report "Passed" when they fail as expected).
 - Run `batch_raise_test` against the AITER corpus (or whatever corpus you
   have locally) and confirm the raise rate does not drop.
-- If the change touches opcode mapping, register classification, or any
-  TableGen-adjacent code, read `REFACTOR_PLAN.md` first — the plan has
-  already decided how the next step of that refactor should look.
 - If you renamed or added files, update `CMakeLists.txt`'s
   `hotswap-transpiler` source list (or `TRANSPILER_TEST_SOURCES` for test
   files). Do not add new source files to top-level `hotswap/`; everything

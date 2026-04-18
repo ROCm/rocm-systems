@@ -5,10 +5,11 @@
 //
 // Compiled as a wave32 (gfx1250) kernel and lifted to wave64 (gfx942)
 // by the companion .ll test. This triggers the cross-wave EXEC write
-// path in `handle_valu.cpp`, which MUST materialise the new EXEC mask
-// through `amdgcn.ballot` + truncation rather than the pre-fix
-// `sext i1 to i32`. See the MODREP markers in `handle_valu.cpp` and
-// `reg_file.hpp::ballotI1ToWidth` for the contract.
+// path in `handle_valu_vcmp.cpp`, which MUST materialise the new EXEC
+// mask through `amdgcn.ballot` + truncation rather than the pre-fix
+// `sext i1 to i32`. See the MODREP markers in `handle_valu_vcmp.cpp`
+// and `ModuloReplicationProjection::ballotI1ToWidth` in
+// `wave_projection.cpp` for the contract.
 //
 // Two EXEC writers share the kernel so one fixture exercises both code
 // paths:

@@ -165,9 +165,9 @@ static bool raiseAndCompileKernel(const TextSection &text,
                            targetISA);
   if (!raised.success) {
     llvm::errs() << "transpiler: Raising '" << kernelName << "' to LLVM IR failed";
-    if (!raised.failMnemonic.empty()) {
-      llvm::errs() << " (unsupported: " << raised.failMnemonic << ")";
-      result.failMnemonic = raised.failMnemonic;
+    if (!raised.failure.mnemonic.empty()) {
+      llvm::errs() << " (unsupported: " << raised.failure.mnemonic << ")";
+      result.failMnemonic = raised.failure.mnemonic;
     }
     llvm::errs() << "\n";
     return false;

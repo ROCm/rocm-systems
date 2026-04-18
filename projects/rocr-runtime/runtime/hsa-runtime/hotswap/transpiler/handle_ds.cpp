@@ -1,5 +1,4 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
 
 #include "semop.hpp"
 #include "llvm/ADT/SmallVector.h"
@@ -20,7 +19,7 @@ using namespace llvm;
 
 namespace transpiler {
 HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
-                        OpResolver &op, RaiseResult &result) {
+                        OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 

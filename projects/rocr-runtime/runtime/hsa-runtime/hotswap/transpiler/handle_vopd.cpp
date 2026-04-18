@@ -1,5 +1,4 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
 
 #include "semop.hpp"
 #include "llvm/ADT/SmallVector.h"
@@ -21,7 +20,7 @@ using namespace llvm;
 
 namespace transpiler {
 HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
-                        OpResolver &op, RaiseResult &result) {
+                        OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 
@@ -32,10 +31,9 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
   auto [xPart, yPart] = text.split(" :: ");
   if (yPart.empty()) {
     llvm::errs() << "transpiler: VOPD: cannot split dual instruction: " << text << "\n";
-    result.failMnemonic = di.mnemonic;
-        result.failFormat = "VOPD";
-        hr.handled = false;
-        return hr;
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "VOPD", "cannot split dual instruction");
+    return hr;
   }
 
   // Parse "v_dual_<op> vDST, vSRC0, vSRC1" for each half.
@@ -309,11 +307,10 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
   bool xOk = parseVOPDHalf(xPart);
   bool yOk = xOk && parseVOPDHalf(yPart);
   if (!xOk || !yOk) {
-    result.failMnemonic = di.mnemonic;
-    result.failFormat = "VOPD";
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "VOPD", "VOPD decomposition failed");
     llvm::errs() << "transpiler: VOPD decomposition failed: " << text << "\n";
-    hr.handled = false;
-        return hr;
+    return hr;
   }
   hr.handled = true;
   return hr;

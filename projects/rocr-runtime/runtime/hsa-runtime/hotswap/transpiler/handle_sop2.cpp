@@ -1,5 +1,5 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
+#include "sem_op_attrs.hpp"
 
 #include "llvm/IR/Intrinsics.h"
 
@@ -7,9 +7,35 @@ using namespace llvm;
 
 namespace transpiler {
 
+// SPE attribute registrations. All of these route through
+// `writeReg{32,64,ExecWidth}` which dispatch EXEC writes to
+// `regs.storeExec`. Audit any addition before landing — see
+// AGENTS.md's SPE section.
+ArrayRef<SemOpAttrSpec> getHandlerSOP2Attrs() {
+  static constexpr SemOpAttrSpec kAttrs[] = {
+      {SemOp::S_AND_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_AND_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_OR_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_OR_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_XOR_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_XOR_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_ANDN2_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_ANDN2_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_ORN2_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_ORN2_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_LSHL_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_LSHL_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_LSHR_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_BFM_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_BFM_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_CSELECT_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_CSELECT_B64, {/*routesExecThroughStoreExec=*/true}},
+  };
+  return kAttrs;
+}
+
 HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
-                         OpResolver &op, RaiseResult &result) {
-  (void)result;
+                         OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 

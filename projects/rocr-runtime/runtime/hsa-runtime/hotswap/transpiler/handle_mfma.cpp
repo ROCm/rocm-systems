@@ -1,5 +1,4 @@
 #include "handlers.hpp"
-#include "raiser.hpp"
 
 #include "amdgpu_formats.hpp" // SIInstrFlags
 #include "opcode_map.hpp"
@@ -104,7 +103,7 @@ static Value *readNamedReg32(RaiseContext &ctx, const DecodedInst &di,
 }
 
 HandlerResult handleMFMA(RaiseContext &ctx, const DecodedInst &di,
-                        OpResolver &op, RaiseResult &result) {
+                        OpResolver &op) {
   HandlerResult hr;
   SemOp sop = di.semOp;
 
@@ -119,10 +118,9 @@ HandlerResult handleMFMA(RaiseContext &ctx, const DecodedInst &di,
   const auto &table = mfmaIntrinsicTable();
   auto it = table.find(sop);
   if (it == table.end()) {
-    result.failMnemonic = di.mnemonic;
-    result.failFormat = "MFMA";
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "MFMA", "no intrinsic mapping for this MFMA SemOp");
     errs() << "transpiler: Unknown MFMA: " << di.mnemonic << "\n";
-    hr.handled = false;
     return hr;
   }
   const Intrinsic::ID intrId = it->second;
@@ -160,11 +158,10 @@ HandlerResult handleMFMA(RaiseContext &ctx, const DecodedInst &di,
   // The accumulator (src2) may be tied to the destination in some encodings.
   ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
   if (srcA.kind == ParsedReg::OTHER || srcB.kind == ParsedReg::OTHER) {
-    result.failMnemonic = di.mnemonic;
-    result.failFormat = "MFMA";
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "MFMA", "cannot classify MFMA source registers");
     errs() << "transpiler: MFMA " << di.mnemonic
            << ": cannot read source registers\n";
-    hr.handled = false;
     return hr;
   }
 
