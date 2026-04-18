@@ -13,6 +13,34 @@ Every patch must pass `git apply --check` against its predecessor's
 output; CI verifies this via `tests/test_patches/test_apply.py`
 (pending) and by running the shell script.
 
+### Naming convention
+
+All patches follow a single naming rule:
+
+```
+<NNNN>-<lowercase-hyphenated-slug>.patch
+```
+
+- **`NNNN`** — 4-digit, zero-padded numeric prefix. Gaps are allowed
+  so thematically-grouped patches can be numbered together (the
+  current series uses `0001-0005` for AMD rebrand, `0010-0011` for
+  user-issue patches, and `0012-0017` for per-prompt coverage).
+- **slug** — lowercase, hyphenated, brief description. No
+  underscores or uppercase letters. Example: `rate-limit-retry-override`.
+- **extension** — always `.patch`.
+
+**Why 4 digits?** Because `ls` / glob expansion in bash sorts
+lexicographically, not numerically. A 4-digit zero-padded prefix
+guarantees *lexicographic sort == numeric sort* for the current
+range (`0001` through `9999`). Without padding,
+`10-foo.patch` would sort BEFORE `2-foo.patch`, breaking apply order.
+
+**Warning — 10,000th patch:** if the series ever approaches a
+5-digit prefix, rename the whole catalogue to 5-digit prefixes at
+once (`00001-...` etc.). Do **not** mix 4-digit and 5-digit
+prefixes — mixing breaks the lexicographic-equals-numeric invariant
+(`10000-foo.patch` would sort before `9999-foo.patch`).
+
 ### AMD Rebrand (Phase 8 PR 2d)
 
 | # | File | What it does |
