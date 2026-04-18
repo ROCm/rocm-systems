@@ -196,13 +196,14 @@ def test_root_lambdas_for_tasks_never_invoked_during_routing(monkeypatch, fake_p
     )
 
 
-def test_root_tasks_bindings_are_real_or_marked_unused():
-    """Flag Root's lambda stubs for replacement.
+def test_root_tasks_bindings_are_real():
+    """Phase 7.1 wired real tasks.* wrappers — no lambda stubs must remain.
 
-    Phase 7 delivered real tasks.* module-level wrappers. Root should use them
-    or explicitly document why the stubs are intentional (Finding #24).
+    Regression guard for Finding #24.
     """
     import inspect
+
+    from perfxpert.tools import tasks as tasks_mod
 
     agent = root_module.build_root_agent()
     tasks_tools = [tb for tb in agent.tools if tb.name.startswith("tasks.")]
@@ -211,21 +212,30 @@ def test_root_tasks_bindings_are_real_or_marked_unused():
         "Root should declare at least one tasks.* tool per fence spec"
     )
 
+    expected = {
+        "tasks.next": tasks_mod.next_task,
+        "tasks.create": tasks_mod.create,
+        "tasks.update": tasks_mod.update,
+        "tasks.close": tasks_mod.close,
+    }
+
     lambda_stubs = []
     for tb in tasks_tools:
         try:
             src = inspect.getsource(tb.fn).strip()
         except (OSError, TypeError):
             src = ""
-        # Heuristic: a lambda that returns None is a stub.
         if "lambda" in src and ("None" in src or ": None" in src):
             lambda_stubs.append(tb.name)
+        if tb.name in expected:
+            assert tb.fn is expected[tb.name], (
+                f"{tb.name} should be wired to perfxpert.tools.tasks.{expected[tb.name].__name__}"
+            )
 
-    if lambda_stubs:
-        pytest.skip(
-            f"Root still uses lambda stub(s) for: {lambda_stubs}. "
-            "Consider wiring real tasks.* wrappers from the Phase 7 tasks module."
-        )
+    assert not lambda_stubs, (
+        f"Root still uses lambda stub(s) for: {lambda_stubs}. "
+        "Phase 7.1 replaced these with real perfxpert.tools.tasks wrappers."
+    )
 
 
 # -- Fence allowlist helper -----------------------------------------------

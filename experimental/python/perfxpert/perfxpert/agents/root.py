@@ -27,19 +27,26 @@ from perfxpert.agents.framework import (
 )
 from perfxpert.runtime import classify_intent
 from perfxpert.tools import intent as intent_tool
+from perfxpert.tools import tasks as _tasks
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "root.md"
 
 
 def build_root_agent() -> Agent:
-    """Construct the Root agent with its fixed tool allowlist + handoffs."""
+    """Construct the Root agent with its fixed tool allowlist + handoffs.
+
+    tasks.* bindings are EXECUTION-class tools: they mutate the local
+    ``.perfxpert/`` task store (via ``perfxpert.tools.tasks``). They are
+    intentionally NOT exposed to external MCP clients — the read-only
+    invariant for MCP lives in ``mcp_server`` (§5.8).
+    """
     tools = [
         ToolBinding(name="intent.classify", fn=intent_tool.classify),
-        ToolBinding(name="tasks.next", fn=lambda *a, **k: None),
-        ToolBinding(name="tasks.create", fn=lambda *a, **k: None),
-        ToolBinding(name="tasks.update", fn=lambda *a, **k: None),
-        ToolBinding(name="tasks.close", fn=lambda *a, **k: None),
+        ToolBinding(name="tasks.next", fn=_tasks.next_task),
+        ToolBinding(name="tasks.create", fn=_tasks.create),
+        ToolBinding(name="tasks.update", fn=_tasks.update),
+        ToolBinding(name="tasks.close", fn=_tasks.close),
     ]
     return Agent(
         name="Root",
