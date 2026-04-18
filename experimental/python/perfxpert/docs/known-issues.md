@@ -143,6 +143,22 @@ None. All four scanners (`docs/lint.sh`, `docs/link-checker.py`,
 `docs/test-samples.py`, `docs/inventory.py`) report zero violations
 at the baseline snapshot. See `docs/inventory-baseline.json`.
 
+### `inventory-baseline.json` — source of truth
+
+Two copies exist on disk and are byte-identical except for the ISO-8601
+`timestamp` field (they are written in the same `docs/inventory.py`
+run, a few seconds apart):
+
+- `docs/inventory-baseline.json` (repo root) — **authoritative**. This
+  is the copy scanned/compared against by CI and by
+  `docs/inventory.py` itself; the tooling under `docs/` lives at repo
+  root.
+- `experimental/python/perfxpert/docs/inventory-baseline.json` —
+  convenience mirror so the perfxpert docs tree is self-contained for
+  users reading it in-place. If the two diverge, the repo-root copy
+  wins; regenerate the mirror with `python docs/inventory.py` from the
+  repo root.
+
 ### Scanner scope limitations
 
 Documented here so users reading "zero violations" know what is and
