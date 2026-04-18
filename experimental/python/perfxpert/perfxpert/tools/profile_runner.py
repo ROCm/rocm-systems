@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Set
 
 from perfxpert.tools._class import ToolClass, tool_class
 from perfxpert.tools._safety import build_safe_env, reject_shell_metachars
+from perfxpert.tools._tooldep import require_tool
 
 
 _ROCPROFV3_TIMEOUT_SEC = 600
@@ -102,6 +103,9 @@ def run(
         ShellMetacharError on metachar-bearing token.
         subprocess.TimeoutExpired on timeout.
     """
+    # Check external dependencies
+    require_tool("rocprofv3")
+
     _validate_argv(argv)
     proc = subprocess.run(
         argv,
