@@ -1,6 +1,10 @@
 .cline_storage
 /projects/hip/_build
 triton/
+# Re-include the in-tree compare_correctness Triton recipes; the global
+# `triton/` rule above otherwise swallows them along with the top-level
+# Triton checkout.
+!/projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/tools/compare_correctness/kernels/triton/
 __pycache__/
 *.pyc
 /projects/rocr-runtime/runtime/hsa-runtime/hotswap/transpiler/scope_discovery/
