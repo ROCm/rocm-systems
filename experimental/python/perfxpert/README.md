@@ -1110,6 +1110,44 @@ connection layer differs.
 
 ---
 
+## Interactive TUI: `perfxpert-code`
+
+```bash
+perfxpert-code          # launches AMD-themed opencode TUI with perfxpert MCP pre-wired
+perfxpert-code --version  # prints "AMD ROCm PerfXpert X.Y.Z (opencode wrapper)"
+```
+
+The TUI speaks to the Python brain via an MCP stdio server (`perfxpert-mcp`).
+Only READ_ONLY tools are exposed; code modifications and subprocess calls
+stay in-process (see [design spec §5.8](../../docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md)).
+
+## Feature flag (Phase 4-5)
+
+The new hierarchical-agent path is opt-in during Phase 4:
+
+```bash
+export PERFXPERT_USE_AGENTS=1     # opt in (Phase 4/5)
+perfxpert analyze -i trace.db     # now routes through the agent runtime
+```
+
+Default behavior (`PERFXPERT_USE_AGENTS` unset or `0`) is the legacy path.
+Phase 6 flips the default; `PERFXPERT_LEGACY=1` becomes the one-minor-version
+safety net for the legacy path.
+
+## MCP server
+
+```bash
+perfxpert-mcp    # stdio MCP server; intended to be spawned by MCP clients
+```
+
+External MCP clients (opencode, Claude Desktop, Cursor) can register it via:
+
+```json
+{"mcpServers": {"perfxpert": {"command": "perfxpert-mcp"}}}
+```
+
+---
+
 ## Contributing
 
 ### Code style
