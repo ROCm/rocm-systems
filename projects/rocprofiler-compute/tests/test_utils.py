@@ -291,6 +291,21 @@ def gpu_soc():
     return gpu_model
 
 
+def gpu_arch() -> str:
+    """Return the gfx architecture string (e.g. 'gfx942') from rocminfo."""
+    rocminfo = str(
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
+    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
+    devices = list(filter(soc_regex.match, rocminfo.split("\n")))
+    if not devices:
+        return ""
+    arch = devices[0].split()[1]
+    return arch if arch in SUPPORTED_ARCHS else ""
+
+
 # =============================================================================
 # VERSION UTILITIES TESTS
 # =============================================================================

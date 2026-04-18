@@ -17,7 +17,6 @@ Metric ID format X.Y.Z:
 
 from __future__ import annotations
 
-import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -29,43 +28,12 @@ SETS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "profile_configs" / "s
 ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
-# Matches the regex in soc_base.py parse_counters_text()
-_BLK = (
-    r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|"
-    r"CPC|CPF|SPI|GCEA|GRBM)"
+# Make src/ importable so we can reuse the canonical counter definitions.
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from utils.utils_counter_defs import (  # noqa: E402
+    counter_to_block,
+    extract_counters,
 )
-_SFX = r"_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
-_HW_COUNTER_RE = re.compile(_BLK + _SFX)
-_VARIABLE_RE = re.compile(r"\$([0-9A-Za-z_]*[0-9A-Za-z])")
-
-# Mirrors BUILD_IN_VARS from src/utils/utils_common.py
-BUILD_IN_VARS: dict[str, str] = {
-    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs": (
-        "TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-        "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + "
-        "MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) / "
-        "SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))"
-    ),
-    "kernelBusyCycles": (
-        "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)"
-    ),
-    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
-}
-
-# Mirrors SUPPORTED_DENOM from src/utils/utils_common.py
-SUPPORTED_DENOM: dict[str, str] = {
-    "per_wave": "SQ_WAVES",
-    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
-    "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    "per_kernel": "1",
-}
-
-# Block remapping as in CounterFile.add()
-_BLOCK_REMAP = {"SQC": "SQ", "SP": "SQ"}
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -104,48 +72,6 @@ def load_analysis_configs(arch: str) -> dict[int, dict[str, dict]]:
             if metrics:
                 result[table_id] = dict(metrics)
     return result
-
-
-def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
-    """Extract HW counter names and $variable names from formula text."""
-    hw = set(_HW_COUNTER_RE.findall(text))
-    variables = set(_VARIABLE_RE.findall(text))
-    hw -= variables
-    return hw, variables
-
-
-def extract_counters(text: str) -> set[str]:
-    """Extract all HW counters from text, resolving $variables recursively."""
-    hw, variables = parse_counters_text(text)
-
-    # Also include counters from supported denominators
-    for formula in SUPPORTED_DENOM.values():
-        hw_d, var_d = parse_counters_text(formula)
-        hw.update(hw_d)
-        variables.update(var_d)
-
-    # Recursively resolve variables
-    seen: set[str] = set()
-    while variables - seen:
-        new_vars: set[str] = set()
-        for var in variables - seen:
-            seen.add(var)
-            if var in BUILD_IN_VARS:
-                hw_v, var_v = parse_counters_text(BUILD_IN_VARS[var])
-                hw.update(hw_v)
-                new_vars.update(var_v)
-        variables.update(new_vars)
-
-    # SQ_ACCUM_PREV_HIRES is injected separately for level counters
-    hw.discard("SQ_ACCUM_PREV_HIRES")
-
-    return hw
-
-
-def counter_to_block(counter: str) -> str:
-    """Map a counter name to its IP block (matches CounterFile.add logic)."""
-    block = counter.split("_")[0]
-    return _BLOCK_REMAP.get(block, block)
 
 
 def load_perfmon_configs() -> dict[str, dict[str, int]]:
@@ -262,6 +188,8 @@ def validate() -> list[str]:
                 continue
 
             counters = extract_counters("\n".join(formula_texts))
+            # SQ_ACCUM_PREV_HIRES is injected separately for level counters
+            counters.discard("SQ_ACCUM_PREV_HIRES")
             block_counters: dict[str, set[str]] = defaultdict(set)
             for c in counters:
                 block_counters[counter_to_block(c)].add(c)

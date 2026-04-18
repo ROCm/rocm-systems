@@ -20,7 +20,8 @@ from utils.metrics.noise_clamper import (
     get_noise_clamp_warnings,
     print_noise_clamp_summary,
 )
-from utils.utils_common import BUILD_IN_VARS, SUPPORTED_FIELD, calc_builtin_var
+from utils.utils_common import SUPPORTED_FIELD, calc_builtin_var
+from utils.utils_counter_defs import BUILD_IN_VARS
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:

@@ -2184,18 +2184,73 @@ def test_live_attach_detach_pc_sampling(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+def _discover_set_options() -> list[str]:
+    """Read valid set_option names from the sets YAML for the current GPU arch."""
+    arch = test_utils.gpu_arch()
+    if not arch:
+        return []
+    sets_file = (
+        Path(__file__).resolve().parent.parent
+        / "src"
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+        / f"{arch}_sets.yaml"
+    )
+    if not sets_file.exists():
+        return []
+    import yaml
+
+    data = yaml.safe_load(sets_file.read_text())
+    return [s["set_option"] for s in data.get("sets", []) if s.get("set_option")]
+
+
+_AVAILABLE_SETS = _discover_set_options()
+
+
 @pytest.mark.sets_func
 class TestSetsIntegration:
-    def test_invalid_set_error_handling(self, binary_handler_profile_rocprof_compute):
-        options = ["--set", "nonexistent_set"]
-        workload_dir = test_utils.get_output_dir()
+    # Auto-discovered from the sets YAML for the current GPU arch.
+    # This integration test complements pre-commit validator
+    # (tools/validate_sets_metric_ids.py) by exercising the end-to-end
+    # runtime path: CLI arg parsing -> YAML loading -> counter file
+    # generation -> profiler invocation. It catches wiring bugs that
+    # static validation cannot.
+    @pytest.mark.parametrize("set_name", _AVAILABLE_SETS, ids=lambda s: s)
+    def test_set_profiling(
+        self, binary_handler_profile_rocprof_compute, set_name, request
+    ):
+        """Each set_option runs successfully and produces a single PMC file."""
+        options = ["--set", set_name]
+        workload_dir = test_utils.get_output_dir(param_id=set_name)
 
         returncode = binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir,
-            options,
-            check_success=False,
-            roof=False,
+            config, workload_dir, options, check_success=True, roof=False
+        )
+
+        assert returncode == 0
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    @pytest.mark.parametrize(
+        "set_name",
+        [
+            pytest.param("nonexistent_set", id="nonexistent"),
+            pytest.param("x" * 1024, id="very_long_name"),
+            pytest.param("mem_thruput; rm -rf /", id="shell_metachar"),
+        ],
+    )
+    def test_invalid_set_rejected(
+        self, binary_handler_profile_rocprof_compute, set_name, request
+    ):
+        """Invalid or adversarial set names are rejected with exit code 1."""
+        options = ["--set", set_name]
+        workload_dir = test_utils.get_output_dir(
+            param_id=f"invalid_{request.node.callspec.id}"
+        )
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=False
         )
 
         assert returncode == 1
