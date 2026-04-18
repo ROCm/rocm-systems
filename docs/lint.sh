@@ -33,7 +33,16 @@ SEARCH_DIRS=(
 
 VIOLATION_COUNT=0
 
-# Scan all .md files (excluding phase specs/plans and git directories)
+# Scan all .md files (excluding phase specs/plans and git directories).
+# Exclusion list is documented in experimental/python/perfxpert/docs/
+# known-issues.md under "Scanner scope limitations → docs/lint.sh".
+# Rationale for each path:
+#   - docs/superpowers/specs: phase specs (historical reference)
+#   - docs/superpowers/plans: phase plans (historical reference)
+#   - .git: internals
+#   - .pytest_cache: test runner artifacts
+#   - perfxpert/ai_analysis: legacy module being deleted by Phase 7.1;
+#     banned terms inside it are historical, not live
 for dir in "${SEARCH_DIRS[@]}"; do
   if [ ! -d "$dir" ]; then
     continue
