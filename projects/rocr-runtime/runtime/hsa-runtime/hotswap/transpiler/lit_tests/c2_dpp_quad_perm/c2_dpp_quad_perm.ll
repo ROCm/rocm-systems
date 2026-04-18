@@ -1,34 +1,33 @@
-; RUN: %not %raise_cli %c2_dpp_quad_perm_co --isa=gfx1250 --target-isa=gfx942 \
-; RUN:     --emit-ir=c2_dpp_quad_perm_kernel 2>&1 \
-; RUN:   | %FileCheck %s --check-prefix=STDERR
+; RUN: %raise_cli %c2_dpp_quad_perm_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --emit-ir=c2_dpp_quad_perm_kernel 2>/dev/null \
+; RUN:   | %FileCheck %s
 ;
-; SPE_DESIGN.md §3 Class 2 (DPP sub-category) — the single largest
-; outstanding correctness hazard for GPT-OSS per
-; gpt-oss-derisking.md §7.3 (5/15 kernels affected). The classifier
-; must refuse any kernel with DPP modifiers until
-; CROSS_LANE_SURVEY.md P5 lands an update.dpp intrinsic lift.
+; CROSS_LANE_SURVEY.md item P5 (DPP modifier intrinsic lift) has
+; landed; this test was originally a refuse-loud fixture asserting
+; `cross-wave-shuffle-rewrite-pending`. Per its MAINTENANCE block we
+; flipped it to a positive test that asserts:
 ;
-; Detection note. The raiser canonicalises DPP modifiers away in
-; opcode_map.cpp:buildDppToBaseMap BEFORE any SemOp-level handler
-; sees the DPP variant, so the classifier cannot key on a
-; SemOp. Instead it must match on the raw mnemonic containing
-; `_dpp` (the disassembler's text output preserves the modifier
-; even though the decoded MCInst has been canonicalised to the
-; base opcode). This is a known syntactic limitation documented in
-; wave_size_obstruction.cpp; the dataflow follow-up will extend the
-; DecodedInst to retain the DPP modifier bits.
+;   1. The raise now succeeds (no `%not`; the classifier accepts
+;      `DppCrossLane` sites as outcome (b) rewrite-implemented, see
+;      `wave_size_obstruction.cpp`'s DPP case).
+;   2. The emitted IR contains a call to `llvm.amdgcn.update.dpp.i32`
+;      with the DPP16 operand set from the source instruction.
+;   3. The intrinsic is overloaded on i32 (the corpus-wide 32-bit
+;      DPP assumption documented in `raise_context.cpp:emitUpdateDpp`
+;      — 64-bit DPP `report_fatal_error`s pending a future lift).
 ;
-; MAINTENANCE. Same flip protocol as c2_permlane_swap.ll once P5
-; lands.
+; The DPP modifier values in the fixture are
+; `quad_perm:[1,0,3,2] row_mask:0xf bank_mask:0xf bound_ctrl:1` —
+; which encode to `dpp_ctrl = 0xB1 = 177`, `row_mask = 0xF = 15`,
+; `bank_mask = 0xF = 15`, `bound_ctrl = true`.
 
-; STDERR: transpiler: pre-translation abort:
-; STDERR-SAME: cross-wave-shuffle-rewrite-pending
+; CHECK-LABEL: define amdgpu_kernel void @c2_dpp_quad_perm_kernel(
 
-; STDERR: DppCrossLane
-; STDERR-SAME: Class 2
-; STDERR: rewrite: P5
-; STDERR-SAME: pending
-; STDERR: outcome: (c) refuse
+; The update.dpp call: 6 args — %old, %src, ctrl, row_mask, bank_mask,
+; bound_ctrl. %old and %src reference the same SSA value here because
+; the inline-asm fixture uses an in/out `+v` constraint on the only
+; operand.
+; CHECK: call i32 @llvm.amdgcn.update.dpp.i32(i32 %{{[^,]+}}, i32 %{{[^,]+}}, i32 177, i32 15, i32 15, i1 true)
 
-; STDERR: raise_cli: kernel 'c2_dpp_quad_perm_kernel' failed to raise:
-; STDERR-SAME: dpp
+; Declaration of the intrinsic with the correct overload signature.
+; CHECK: declare i32 @llvm.amdgcn.update.dpp.i32(i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)

@@ -40,6 +40,36 @@ struct DecodedInst {
   // `AMDGPU::CPol::SCAL` at disassembly time so handlers can branch
   // on a decoded bit instead of scanning `fullText`.
   bool hasScaleOffset = false;
+
+  // ── DPP modifier state (SPE_DESIGN.md §3 Class 2: DppCrossLane) ──
+  //
+  // DPP is a src0-pathway cross-lane shuffle modifier. The original
+  // `inst.getOpcode()` retains the `_dpp` suffix and its MCInstrDesc
+  // advertises the DPP bit via `TSFlags & SIInstrFlags::DPP`; the
+  // opcode_map canonicalises the SemOp down to the base op, so handlers
+  // dispatched by SemOp do not see the DPP variant directly.
+  //
+  // `hasDpp` is set in decode.cpp exactly when `tsFlags & SIInstrFlags::DPP`
+  // is true; the modifier-operand fields below are populated by looking
+  // up their named-operand indices in the original (non-canonicalised)
+  // MCInstrDesc.
+  //
+  // Handler contract: `OpResolver::src(0)` / `srcF(0)` / `src64(0)`
+  // transparently wrap their result through `emitUpdateDpp` when
+  // `hasDpp` is true, using these fields as the intrinsic's
+  // `dpp_ctrl` / `row_mask` / `bank_mask` / `bound_ctrl` immediates.
+  // Handlers therefore need no per-op DPP awareness.
+  //
+  // `fi` (fetch-invalid) is an encoding-level flag on DPP8 (not DPP16);
+  // `llvm.amdgcn.update.dpp` exposes only the DPP16 operand set, so we
+  // do not surface `fi` here. A future DPP8 lift would extend this
+  // block.
+  bool hasDpp = false;
+  uint16_t dppCtrl = 0;
+  uint8_t dppRowMask = 0xF;
+  uint8_t dppBankMask = 0xF;
+  bool dppBoundCtrl = false;
+
   unsigned firstSrcIdx = 0;
 
   // Upper bound on the logical-source count the raiser's walk can produce.

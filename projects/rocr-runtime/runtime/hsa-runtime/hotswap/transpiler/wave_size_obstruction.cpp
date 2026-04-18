@@ -302,10 +302,14 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       site.inst = &di;
       site.kind = ObstructionKind::DppCrossLane;
       site.rewrite = RewriteId::P5_DppModifier;
-      // TODO(CROSS_LANE_SURVEY P5): flip to true once DPP modifiers
-      // survive opcode_map.cpp canonicalisation and handlers lift
-      // through llvm.amdgcn.update.dpp.
-      site.rewriteImplemented = false;
+      // P5 landed: DPP modifier bits are preserved in
+      // `DecodedInst::dppCtrl/dppRowMask/dppBankMask/dppBoundCtrl`
+      // by `decodeDppModifiers` (decode.cpp), and `OpResolver::src(0)`
+      // / `srcF(0)` / `src64(0)` transparently wrap the src0 value
+      // through `RaiseContext::emitUpdateDpp` so handlers dispatched
+      // on the canonicalised SemOp emit correct
+      // `llvm.amdgcn.update.dpp` intrinsic calls.
+      site.rewriteImplemented = true;
       report.sites.push_back(std::move(site));
       continue;
     }

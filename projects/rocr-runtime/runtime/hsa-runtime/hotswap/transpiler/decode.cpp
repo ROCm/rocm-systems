@@ -24,6 +24,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <climits>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -249,6 +250,63 @@ void decodeScaleOffset(DecodedInst &di) {
   di.hasScaleOffset = (cpol & AMDGPU::CPol::SCAL) != 0;
 }
 
+// Decode the DPP modifier operands (dpp_ctrl / row_mask / bank_mask /
+// bound_ctrl) once, so the raiser can lift DPP-modified VALU ops
+// through `llvm.amdgcn.update.dpp` without each handler having to
+// re-inspect the MCInst operand list. Triggered for every instruction
+// whose original (pre-canonicalisation) MCInstrDesc carries
+// `TSFlags & SIInstrFlags::DPP`. For non-DPP instructions `hasDpp`
+// stays false and the modifier fields retain their default values.
+//
+// `fi` is intentionally NOT surfaced: the supported LLVM intrinsic
+// `llvm.amdgcn.update.dpp` has no fi argument (it encodes DPP16;
+// DPP8's fi control is a separate intrinsic family not covered here).
+// If a future corpus kernel uses DPP8 we will extend this to emit
+// `llvm.amdgcn.mov.dpp8` + an additional field.
+//
+// Precondition: `di.tsFlags` is already populated from the ORIGINAL
+// MCInstrDesc (i.e. before any SemOp-level canonicalisation), so
+// testing the DPP bit here is the authoritative source of truth.
+void decodeDppModifiers(DecodedInst &di) {
+  if (!(di.tsFlags & SIInstrFlags::DPP))
+    return;
+  const MCInst &inst = di.inst;
+  const unsigned opc = inst.getOpcode();
+  auto immOpt = [&](AMDGPU::OpName name) -> std::optional<int64_t> {
+    int idx = AMDGPU::getNamedOperandIdx(opc, name);
+    if (idx < 0 || static_cast<unsigned>(idx) >= inst.getNumOperands())
+      return std::nullopt;
+    const MCOperand &mop = inst.getOperand(static_cast<unsigned>(idx));
+    if (!mop.isImm())
+      return std::nullopt;
+    return mop.getImm();
+  };
+  auto ctrl = immOpt(AMDGPU::OpName::dpp_ctrl);
+  auto rowMask = immOpt(AMDGPU::OpName::row_mask);
+  auto bankMask = immOpt(AMDGPU::OpName::bank_mask);
+  auto boundCtrl = immOpt(AMDGPU::OpName::bound_ctrl);
+  if (!ctrl || !rowMask || !bankMask || !boundCtrl) {
+    // MCInstrDesc declared DPP but the MCInst operand list is missing
+    // one of the four DPP16 modifier fields. This is a decoder-vs-
+    // tblgen drift situation — fail loudly rather than emit IR with
+    // default (possibly wrong) values.
+    std::string msg;
+    raw_string_ostream os(msg);
+    os << "decodeDppModifiers: TSFlags::DPP is set for '" << di.rawMnemonic
+       << "' (opcode=" << opc
+       << ") but at least one of {dpp_ctrl, row_mask, bank_mask, "
+          "bound_ctrl} is missing or not an immediate. LLVM likely "
+          "added a new DPP variant whose operand layout this decoder "
+          "does not yet recognise; extend decodeDppModifiers.";
+    report_fatal_error(os.str().c_str());
+  }
+  di.hasDpp = true;
+  di.dppCtrl = static_cast<uint16_t>(*ctrl & 0xFFFF);
+  di.dppRowMask = static_cast<uint8_t>(*rowMask & 0xF);
+  di.dppBankMask = static_cast<uint8_t>(*bankMask & 0xF);
+  di.dppBoundCtrl = (*boundCtrl) != 0;
+}
+
 // Pull every branch-target offset out of a branch instruction's
 // immediates and insert the resulting byte offsets into `blockStarts`.
 // Signed 16-bit PC-relative offset * 4 bytes, relative to the
@@ -317,6 +375,7 @@ DecodeResult decodeKernel(const MCState &mc,
     di.firstSrcIdx = desc.getNumDefs();
 
     decodeScaleOffset(di);
+    decodeDppModifiers(di);
     buildSrcMap(di, desc);
     driftCheckTiedIn(di, desc);
     driftCheckSrcN(di, desc);

@@ -312,6 +312,47 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
   return UndefValue::get(i64Ty);
 }
 
+Value *RaiseContext::emitUpdateDpp(Value *oldVal, Value *src, uint16_t ctrl,
+                                    uint8_t rowMask, uint8_t bankMask,
+                                    bool boundCtrl) {
+  // CROSS_LANE_SURVEY.md P5: lift DPP src-pathway modifier through
+  // `llvm.amdgcn.update.dpp`. The intrinsic is type-overloaded (any type);
+  // for correctness-first the implementation here accepts any 32-bit type,
+  // bitcasting through i32 on call so the single intrinsic overload
+  // covers i32 / f32 / <N x iK> of total 32-bit width. 64-bit DPP
+  // widening is intentionally unsupported today — no corpus kernel emits
+  // `_e64_dpp` on 64-bit-width operands, and `report_fatal_error` on
+  // drift keeps that invariant enforceable rather than silently emitting
+  // an invalid intrinsic overload.
+  assert(oldVal->getType() == src->getType() &&
+         "emitUpdateDpp: old and src must have matching types");
+  Type *origTy = src->getType();
+  const unsigned bits = origTy->getPrimitiveSizeInBits();
+  if (bits != 32)
+    report_fatal_error(
+        "emitUpdateDpp: non-32-bit DPP sources are not yet lowered (see "
+        "CROSS_LANE_SURVEY.md P5 — extend here when the corpus needs it)");
+  // The overload type we pass as the intrinsic's result / matched-operand
+  // type. Keep it at i32 so codegen picks up the common DPP lowering
+  // path; we round-trip through bitcasts on f32/<2 x i16>/etc. inputs.
+  Type *intTy = i32Ty;
+  auto toIntTy = [&](Value *v) {
+    return v->getType() == intTy ? v : B.CreateBitCast(v, intTy);
+  };
+  Value *oldInt = toIntTy(oldVal);
+  Value *srcInt = toIntTy(src);
+  Function *fn = Intrinsic::getOrInsertDeclaration(
+      &M, Intrinsic::amdgcn_update_dpp, {intTy});
+  Value *result =
+      B.CreateCall(fn, {oldInt, srcInt, B.getInt32(ctrl),
+                         B.getInt32(rowMask), B.getInt32(bankMask),
+                         B.getInt1(boundCtrl)},
+                   "dpp");
+  if (result->getType() != origTy)
+    result = B.CreateBitCast(result, origTy);
+  return result;
+}
+
 Value *RaiseContext::emitLaneActiveBit() {
   // Memoisation (see RaiseContext::resetLaneActiveCache docs).
   //

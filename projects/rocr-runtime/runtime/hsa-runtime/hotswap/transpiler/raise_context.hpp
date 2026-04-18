@@ -80,6 +80,22 @@ struct RaiseContext {
   llvm::Value *readOp64(const DecodedInst &di, unsigned opIdx);
   llvm::Value *readOpExecWidth(const DecodedInst &di, unsigned opIdx);
 
+  // Emit `llvm.amdgcn.update.dpp.<i32>(old, src, ctrl, row_mask, bank_mask,
+  // bound_ctrl)` — the CROSS_LANE_SURVEY.md P5 lowering for src0-path DPP
+  // modifiers. `src` and `old` must be 32-bit (i32 or f32/bitcastable); a
+  // future 64-bit lift would extend the intrinsic overload set and the
+  // bitcast-bridge below. The return type matches `src->getType()` so
+  // callers can feed the result back into the original instruction's
+  // ALU path without reshuffling.
+  //
+  // `OpResolver::src(0)` / `srcF(0)` wrap their return through this helper
+  // when `DecodedInst::hasDpp` is true, so handlers dispatched by SemOp
+  // stay DPP-agnostic. See `decoded_inst.hpp`'s DPP-state block for how
+  // the modifier operand values reach us.
+  llvm::Value *emitUpdateDpp(llvm::Value *oldVal, llvm::Value *src,
+                              uint16_t ctrl, uint8_t rowMask,
+                              uint8_t bankMask, bool boundCtrl);
+
   // ==== SIMT Predicated Execution (SPE) helpers (see SPE_DESIGN.md). =====
   //
   // emitLaneActiveBit() returns an i1 true iff the current lane's bit in the
@@ -185,7 +201,13 @@ struct HandlerResult {
   RaiseFailure failure;
 };
 
-// Reads source operands via srcMap, skipping VOP3 modifiers.
+// Reads source operands via srcMap, skipping VOP3 modifiers. If the
+// decoded instruction carries a DPP modifier (`DecodedInst::hasDpp`),
+// `src(0)` / `srcF(0)` / `src64(0)` transparently wrap their result
+// through `RaiseContext::emitUpdateDpp` using the modifier operand
+// values from `di`, so handlers dispatched on the canonicalised
+// SemOp stay DPP-agnostic. See `decoded_inst.hpp`'s DPP-state block
+// for the data-flow contract.
 struct OpResolver {
   RaiseContext &ctx;
   const DecodedInst &di;
@@ -216,9 +238,46 @@ struct OpResolver {
     return v;
   }
 
-  llvm::Value *src(unsigned i) { return ctx.readOp32(di, srcIdx(i)); }
-  llvm::Value *srcF(unsigned i) { return applyMods(i, ctx.readOp32(di, srcIdx(i))); }
-  llvm::Value *src64(unsigned i) { return ctx.readOp64(di, srcIdx(i)); }
+  // DPP src-path wrapping. DPP is a src0-only data-pathway modifier: on
+  // hardware, src0 is shuffled across lanes per the DPP control bits
+  // *before* any fmods (neg/abs) and before the ALU op consumes it.
+  // Callers apply ordering: DPP wrap → applyMods → ALU.
+  //
+  // `%old` — the intrinsic's "inactive-lane value" operand — is the
+  // current VGPR value of the instruction's vdst (MCInst operand 0);
+  // we read it lazily and cache within this OpResolver because
+  // handlers that emit multiple side effects for a single source
+  // instruction may call `src(0)` more than once (e.g. VOPD's two
+  // halves). `OpResolver` instances are short-lived so the cache is
+  // strictly scoped.
+  llvm::Value *wrapDppIfNeeded(unsigned logicalSrc, llvm::Value *raw) {
+    if (!di.hasDpp || logicalSrc != 0) return raw;
+    if (!cachedDppOld32)
+      cachedDppOld32 = ctx.readOp32(di, 0);
+    return ctx.emitUpdateDpp(cachedDppOld32, raw, di.dppCtrl, di.dppRowMask,
+                              di.dppBankMask, di.dppBoundCtrl);
+  }
+
+  llvm::Value *src(unsigned i) {
+    return wrapDppIfNeeded(i, ctx.readOp32(di, srcIdx(i)));
+  }
+  llvm::Value *srcF(unsigned i) {
+    return applyMods(i, wrapDppIfNeeded(i, ctx.readOp32(di, srcIdx(i))));
+  }
+  llvm::Value *src64(unsigned i) {
+    // 64-bit DPP variants exist at the encoding level but no corpus
+    // kernel exercises them today (derisking §7.3 logs only 32-bit
+    // DPP patterns). `emitUpdateDpp` `report_fatal_error`s on 64-bit
+    // input so a future corpus kernel will surface here loudly
+    // rather than silently miscompiling.
+    llvm::Value *raw = ctx.readOp64(di, srcIdx(i));
+    if (di.hasDpp && i == 0) {
+      llvm::Value *old64 = ctx.readOp64(di, 0);
+      return ctx.emitUpdateDpp(old64, raw, di.dppCtrl, di.dppRowMask,
+                                di.dppBankMask, di.dppBoundCtrl);
+    }
+    return raw;
+  }
   llvm::Value *srcExecWidth(unsigned i) { return ctx.readOpExecWidth(di, srcIdx(i)); }
   int64_t srcImm(unsigned i) { return di.getImm(srcIdx(i)); }
 
@@ -234,6 +293,13 @@ struct OpResolver {
     }
     return ctx.parseReg(di.getReg(idx), idx);
   }
+
+  // Memoised src-0 %old for DPP wrapping (see `wrapDppIfNeeded`). Kept
+  // public so `OpResolver` remains an aggregate and can be brace-
+  // initialised from the raiser (`OpResolver op{ctx, di};`). Mutate only
+  // through `wrapDppIfNeeded`. Mirrors the `cachedLaneActive` public-
+  // field convention on `RaiseContext` above.
+  llvm::Value *cachedDppOld32 = nullptr;
 };
 
 } // namespace transpiler
