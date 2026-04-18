@@ -6,6 +6,15 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## vNEXT — Phase 7.1
 
 ### Removed
+- **BREAKING**: pre-rename API-key env vars from the old project name are
+  no longer honored. Any environment variable prefixed with the old
+  project name (including the reference-guide override previously
+  referenced in migration docs) must be re-exported under the
+  `PERFXPERT_*` namespace. The canonical names are
+  `PERFXPERT_LLM_ANTHROPIC_KEY`, `PERFXPERT_LLM_OPENAI_KEY`, and the
+  standard vendor `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` continue to be
+  honored. A single `ROCPD_LLM_*` alias remains with a
+  `DeprecationWarning` as a migration ramp.
 - Legacy `ai_analysis` module (`perfxpert/ai_analysis/`) fully removed,
   along with all parity and feature-flag dispatch tests. The
   `PERFXPERT_LEGACY` environment variable is now unrecognized — setting it
@@ -84,7 +93,8 @@ See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
 - `LLMAnalyzer` class still importable, emits DeprecationWarning.
 - `PERFXPERT_USE_AGENTS` env var still recognized (no-op).
 - `PERFXPERT_LEGACY=1` reroutes to the pre-v0.2.0 path with a stderr warning
-  (requires user-supplied `ROCINSIGHT_LLM_REFERENCE_GUIDE`).
+  (required a user-supplied reference-guide override env var under the
+  old pre-rename name — no longer honored in Phase 7.1; see Removed above).
 
 ---
 

@@ -30,11 +30,11 @@ provisioned.
 
 **Status: obsolete. No fix required on perfxpert.**
 
-In the pre-refactor `rocinsight` codebase (Phases 1–6), the bridge
-function `rocinsight/ai_analysis/api.py::_convert_result_to_llm_format()`
+In the pre-refactor codebase (Phases 1–6), the now-deleted bridge
+function `ai_analysis/api.py::_convert_result_to_llm_format()`
 emitted kernel dictionaries with the keys `calls` and `percent_of_total`,
 but the consumer
-`rocinsight/ai_analysis/llm_analyzer.py::_sanitize_data()` expected
+`ai_analysis/llm_analyzer.py::_sanitize_data()` expected
 `dispatch_count` and `pct_total_time`. Memory directions also leaked as
 verbose labels (`Host-to-Device`) instead of compact IDs (`h2d`, `d2h`,
 `d2d`). The effect was that the LLM received `None` for every kernel

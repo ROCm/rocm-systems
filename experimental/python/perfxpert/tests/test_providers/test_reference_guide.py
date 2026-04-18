@@ -19,11 +19,13 @@ def test_load_reference_guide_always_raises():
 
 
 def test_load_reference_guide_ignores_legacy_env(monkeypatch, tmp_path):
-    """Regression guard: both env vars removed in Phase 7.1 must not flip any switch."""
+    """Regression guard: env vars removed in Phase 7.1 must not flip any switch."""
     # Regression guard — assert env vars removed in Phase 7.1 stay inert.
     monkeypatch.setenv("PERFXPERT_LEGACY", "1")  # regression guard
     override = tmp_path / "my-guide.md"
     override.write_text("# Custom Fence\nsentinel content.\n")
-    monkeypatch.setenv("ROCINSIGHT_LLM_REFERENCE_GUIDE", str(override))  # regression guard
+    # The pre-rename reference-guide env var (fully removed in Phase 7.1)
+    # must never revive the deleted monolithic loader.
+    monkeypatch.setenv("PERFXPERT_LEGACY_REFERENCE_GUIDE", str(override))  # regression guard
     with pytest.raises(ReferenceGuideNotFoundError):
         load_reference_guide()

@@ -64,12 +64,12 @@ which file controls which behavior.
 
 ## Emergency: I need the old behavior back
 
-Set `PERFXPERT_LEGACY=1`. This routes analyze_database() through the pre-v0.2.0
-path. You must also supply your own copy of the legacy monolithic guide via
-`ROCINSIGHT_LLM_REFERENCE_GUIDE=/path/to/your/copy.md` (the in-tree copy is
-deleted in v0.2.0).
-
-**This safety net will be removed in vX.Y+1.** Migrate before then.
+Historical: setting `PERFXPERT_LEGACY=1` used to route analyze_database()
+through the pre-v0.2.0 path. That safety net, and the accompanying
+pre-rename reference-guide override env var (from the old project
+name), were both removed in Phase 7.1 — `PERFXPERT_LEGACY=1` is now a
+no-op and no pre-rename env vars are honored. Migrate to the agentic
+runtime directly.
 
 If you run into a behavioral difference between legacy and agentic that you
 believe is a regression, please file an issue with:

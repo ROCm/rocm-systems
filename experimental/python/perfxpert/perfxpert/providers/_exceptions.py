@@ -82,10 +82,9 @@ import warnings as _warnings
 def _legacy_env_warn(legacy_name: str, canonical_name: str) -> None:
     """Emit a DeprecationWarning when a pre-rename env var alias is used.
 
-    Back-compat shim for API-key env vars (not related to the
-    `ai_analysis` module removed in Phase 7.1). Providers call this
-    when they fall through to the pre-rename aliases so users get a
-    clear migration signal toward the canonical PERFXPERT_LLM_* name.
+    Providers call this when they fall through to a pre-rename alias so
+    users get a clear migration signal toward the canonical
+    PERFXPERT_LLM_* name.
     """
     _warnings.warn(
         (

@@ -22,11 +22,9 @@ def _resolve_api_key(explicit: Optional[str]) -> str:
         val = os.environ.get(var)
         if val:
             return val
-    # Pre-rename API-key env vars; kept as an active back-compat contract
-    # (unrelated to the `ai_analysis` module removed in Phase 7.1). Each
-    # fallthrough emits a DeprecationWarning via `_legacy_env_warn`.
+    # Pre-rename API-key env var alias. Each fallthrough emits a
+    # DeprecationWarning via `_legacy_env_warn`.
     for legacy, canonical in (
-        ("ROCINSIGHT_LLM_ANTHROPIC_KEY", "PERFXPERT_LLM_ANTHROPIC_KEY"),  # back-compat (removed in Phase 7.1 was the ai_analysis module, not this env var)
         ("ROCPD_LLM_ANTHROPIC_KEY", "PERFXPERT_LLM_ANTHROPIC_KEY"),
     ):
         val = os.environ.get(legacy)
