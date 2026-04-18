@@ -110,9 +110,13 @@ def build_recommendation_agent() -> Agent:
 # -- Dispatch + dedup -----------------------------------------------------
 
 def _hash_technique(t: Dict[str, Any]) -> str:
-    """Stable hash for dedup."""
-    # Use only the "name" field as the key to avoid over-specifying; matches
-    # the existing _hash_recommendation pattern in interactive.py.
+    """Stable hash for dedup.
+
+    Uses only the ``name`` field as the key to avoid over-specifying.
+    This keeps the hash stable even when non-identity fields like ``rationale``
+    or ``estimated_impact`` are updated — matching the dedup contract used by
+    the Phase 3 session history tracker in agents/runtime.py.
+    """
     key = {"name": t.get("name", "")}
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
 
