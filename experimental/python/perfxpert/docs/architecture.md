@@ -23,6 +23,8 @@ Root (intent router)
 
 7 agents total. Each has ≤ 400 lines of fence + ≤ 5 tools + ≤ 10 input / ≤ 5 output fields. Narrow scope is CI-enforced.
 
+See [architecture/agent-hierarchy.md](architecture/agent-hierarchy.md) for the tier-by-tier map, fence-slice pattern, and source-tree locations.
+
 ## Tools (spec §3 + Appendix A)
 
 ~45 deterministic Python functions split into two MCP-exposure classes:
