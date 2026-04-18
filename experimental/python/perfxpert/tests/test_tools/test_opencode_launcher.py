@@ -38,15 +38,30 @@ def test_resolve_binary_uses_override(tmp_path: Path, monkeypatch):
     assert opencode_launcher.resolve_opencode_binary() == fake_bin
 
 
-def test_resolve_binary_falls_back_when_override_missing(tmp_path: Path, monkeypatch, capsys):
+def test_resolve_binary_raises_when_override_missing(tmp_path: Path, monkeypatch):
+    """PERFXPERT_OPENCODE_PATH pointing to a nonexistent file must raise immediately."""
     monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(tmp_path / "nonexistent"))
-    # Should print a warning and try bundled / PATH. If neither present, raises.
-    try:
+    with pytest.raises(FileNotFoundError, match="does not exist"):
         opencode_launcher.resolve_opencode_binary()
-    except FileNotFoundError:
-        pass  # acceptable when no bundled/PATH opencode
-    captured = capsys.readouterr()
-    assert "WARNING" in captured.err or "not found" in captured.err.lower()
+
+
+def test_prepare_runtime_config_dir_skips_subdirectories(tmp_path: Path):
+    """_prepare_runtime_config_dir must not crash on subdirectories in src_config_dir."""
+    src = tmp_path / "src_config"
+    src.mkdir()
+    (src / "opencode.json").write_text('{"config": true}')
+    # Add a subdirectory — should be silently skipped
+    subdir = src / "subdir"
+    subdir.mkdir()
+    (subdir / "nested.json").write_text("{}")
+
+    from perfxpert.cli.opencode_launcher import _prepare_runtime_config_dir
+
+    # Should not raise; only files are copied
+    out = _prepare_runtime_config_dir(src)
+    assert (out / "opencode.json").exists()
+    # subdirectory itself must NOT be copied as a file
+    assert not (out / "subdir").is_file()
 
 
 def test_banner_is_printed_to_stderr(monkeypatch):
@@ -66,8 +81,10 @@ def test_banner_is_printed_to_stderr(monkeypatch):
     banner_called = []
 
     original_print_banner = opencode_launcher.print_banner
+
     def track_banner(stream=None):
         import sys
+
         if stream is None:
             stream = sys.stderr
         banner_called.append(True)
@@ -117,6 +134,7 @@ def test_amd_red_in_banner(monkeypatch):
     """Banner includes AMD red ANSI color code."""
     # Verify the function itself contains the AMD red color code
     import inspect
+
     source = inspect.getsource(opencode_launcher.print_banner)
     # The source will have the escaped form \\033 when inspected
     assert "38;5;196m" in source  # AMD red color code in the function

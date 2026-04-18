@@ -1,8 +1,15 @@
 """opencode_launcher — `perfxpert-code` entry point.
 
-Launches the bundled opencode binary with the AMD-themed config directory.
-Respects PERFXPERT_OPENCODE_PATH override.
-Prints an AMD banner before handing control over.
+Launches opencode (from PERFXPERT_OPENCODE_PATH / bundled wheel / system PATH
+in that order) with the AMD-themed config directory.
+
+opencode is a system dependency — it is NOT bundled inside the perfxpert wheel
+in this release (bundling is a Phase 8 deliverable). Users must install it
+separately: ``curl -fsSL https://opencode.ai/install | bash``.
+
+PERFXPERT_OPENCODE_PATH, if set, must point to an existing executable file;
+the launcher raises FileNotFoundError immediately rather than silently
+falling back to bundled/PATH lookup.
 """
 
 from __future__ import annotations
@@ -17,7 +24,6 @@ from typing import Iterable
 
 from perfxpert.tools._tooldep import require_tool
 
-
 __all__ = ["main", "resolve_opencode_binary", "resolve_config_dir", "print_banner"]
 
 
@@ -28,6 +34,7 @@ _BRANDING_VERSION = "0.2.0"
 def _perfxpert_version() -> str:
     try:
         import perfxpert
+
         return getattr(perfxpert, "__version__", _BRANDING_VERSION)
     except ImportError:
         return _BRANDING_VERSION
@@ -45,10 +52,12 @@ def resolve_opencode_binary() -> Path:
     override = os.environ.get("PERFXPERT_OPENCODE_PATH")
     if override:
         p = Path(override)
-        if p.is_file():
-            return p
-        print(f"perfxpert-code: WARNING — PERFXPERT_OPENCODE_PATH={override} not found; "
-              "falling back to bundled", file=sys.stderr)
+        if not p.is_file():
+            raise FileNotFoundError(
+                f"PERFXPERT_OPENCODE_PATH={override!r} does not exist. "
+                "Correct the path or unset the variable to use bundled/PATH lookup."
+            )
+        return p
 
     # Bundled binary
     try:
@@ -79,10 +88,7 @@ def resolve_config_dir() -> Path:
         with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode_config") as p:
             return Path(p)
     except (ModuleNotFoundError, FileNotFoundError) as e:
-        raise FileNotFoundError(
-            "perfxpert/_bundled/opencode_config not found. "
-            "Reinstall perfxpert."
-        ) from e
+        raise FileNotFoundError("perfxpert/_bundled/opencode_config not found. " "Reinstall perfxpert.") from e
 
 
 def print_banner(stream=sys.stderr) -> None:
@@ -160,9 +166,12 @@ def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
     directory or clobber their own `opencode.json`.
     """
     import shutil
+
     runtime_dir = Path.home() / ".cache" / "perfxpert" / "opencode"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     for f in src_config_dir.iterdir():
+        if not f.is_file():
+            continue
         target = runtime_dir / f.name
         if not target.exists() or target.read_bytes() != f.read_bytes():
             shutil.copy2(f, target)

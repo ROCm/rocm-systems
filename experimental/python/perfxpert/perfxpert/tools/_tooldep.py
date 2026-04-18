@@ -45,10 +45,11 @@ class ExternalToolMissing(RuntimeError):
 
 @dataclass(frozen=True)
 class _Dep:
-    kind: str                    # "binary" | "pylib" | "shared_lib"
+    kind: str  # "binary" | "pylib" | "shared_lib"
     install_hint: str
     install_cmd: Optional[List[str]] = None
     shared_lib_filename: Optional[str] = None
+    smoke_test: Optional[List[str]] = None  # args to run after binary is found; non-zero → unavailable
 
 
 # Canonical registry of every external dependency perfxpert touches.
@@ -57,6 +58,7 @@ _TOOL_REGISTRY: Dict[str, _Dep] = {
         kind="binary",
         install_hint="curl -fsSL https://opencode.ai/install | bash",
         install_cmd=["bash", "-c", "curl -fsSL https://opencode.ai/install | bash"],
+        smoke_test=["--version"],
     ),
     "rocprofv3": _Dep(
         kind="binary",
@@ -139,9 +141,27 @@ def check_tool_available(name: str) -> Tuple[bool, str]:
 
     if dep.kind == "binary":
         path = shutil.which(name)
-        if path:
-            return True, f"{name} at {path}"
-        return False, f"{name} not found on PATH. Install: {dep.install_hint}"
+        if not path:
+            return False, f"{name} not found on PATH. Install: {dep.install_hint}"
+        if dep.smoke_test is not None:
+            cmd = [path] + list(dep.smoke_test)
+            try:
+                result = subprocess.run(
+                    cmd,
+                    timeout=2,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if result.returncode != 0:
+                    return (
+                        False,
+                        f"binary at {path} but smoke-test {dep.smoke_test!r} " f"exited {result.returncode}",
+                    )
+            except OSError as e:
+                return False, f"binary at {path} but smoke-test failed: {e}"
+            except subprocess.TimeoutExpired:
+                return False, f"binary at {path} but smoke-test timed out after 2 s"
+        return True, f"{name} at {path}"
 
     if dep.kind == "pylib":
         spec = importlib.util.find_spec(name)
@@ -168,8 +188,10 @@ def offer_install(name: str) -> bool:
     """
     dep = _TOOL_REGISTRY.get(name)
     if dep is None or dep.install_cmd is None:
-        print(f"No install command registered for {name}. Install manually: "
-              f"{dep.install_hint if dep else 'unknown tool'}")
+        print(
+            f"No install command registered for {name}. Install manually: "
+            f"{dep.install_hint if dep else 'unknown tool'}"
+        )
         return False
 
     print(f"\nperfxpert would like to install {name} via:")
