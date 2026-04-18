@@ -105,6 +105,20 @@ class FallbackProvider(Provider):
         max_tokens: Optional[int] = None,
         dry_run: bool = False,
     ) -> Union[ProviderResponse, _DryRunResponseT]:
+        # Defensive airgap guard — a session built wrong (e.g. airgap=True
+        # but someone still passed this FallbackProvider to complete())
+        # MUST NOT make network calls. build_session() already prevents
+        # FallbackProvider construction in airgap mode, but if a caller
+        # invokes complete() directly with PERFXPERT_AIRGAP=1 we refuse.
+        # dry_run short-circuits BEFORE this guard so deterministic
+        # cost-estimation paths still work inside airgap.
+        if not dry_run and os.environ.get("PERFXPERT_AIRGAP", "0") == "1":
+            raise RuntimeError(
+                "FallbackProvider.complete() called while PERFXPERT_AIRGAP=1 "
+                "(non-dry-run). Airgap mode forbids LLM calls; build the "
+                "session with airgap=True and use dry_run=True or skip LLM "
+                "invocation entirely."
+            )
         attempts: List[Tuple[str, BaseException]] = []
         chain_names: List[str] = [
             entry if isinstance(entry, str) else type(entry).__name__

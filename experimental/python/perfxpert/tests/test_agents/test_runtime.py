@@ -53,3 +53,70 @@ def test_session_run_root_returns_root_output(monkeypatch):
     s = runtime_module.build_session(airgap=True)
     result = s.run_root(schemas.RootInput(user_query="why slow?", database_path=None))
     assert isinstance(result, schemas.RootOutput)
+
+
+def test_build_session_uses_fallback_chain_when_env_set(monkeypatch):
+    """Cycle-2 I8: PERFXPERT_LLM_FALLBACK_CHAIN must wire into build_session.
+
+    With the env chain set to ``openai,anthropic`` and the primary provider
+    arg defaulting to anthropic, the session's ``fallback_provider`` must
+    be a FallbackProvider whose primary entry is ``openai`` (from the env
+    chain). The ``provider`` string still reflects the primary name used
+    by run_* dispatchers.
+    """
+    from perfxpert.providers._fallback import FallbackProvider
+
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai,anthropic")
+    s = runtime_module.build_session(provider="anthropic")
+
+    assert s.fallback_provider is not None
+    assert isinstance(s.fallback_provider, FallbackProvider)
+    # Primary == first entry in the env chain (openai).
+    first_entry = s.fallback_provider._providers[0]
+    assert first_entry == "openai"
+    # And anthropic is present as the second entry (explicit primary was
+    # already in the chain so no dedup-prepend happened).
+    assert "anthropic" in s.fallback_provider._providers
+
+
+def test_build_session_prepends_explicit_primary_when_not_in_chain(monkeypatch):
+    """If ``provider=`` is set AND differs from every chain entry, prepend
+    it so the explicit choice is tried first."""
+    from perfxpert.providers._fallback import FallbackProvider
+
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai,ollama")
+    s = runtime_module.build_session(provider="anthropic")
+    assert isinstance(s.fallback_provider, FallbackProvider)
+    assert s.fallback_provider._providers[0] == "anthropic"
+    assert list(s.fallback_provider._providers) == ["anthropic", "openai", "ollama"]
+
+
+def test_build_session_airgap_ignores_fallback_chain(monkeypatch):
+    """Airgap short-circuits provider resolution — chain must be ignored."""
+    monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "openai,anthropic")
+    s = runtime_module.build_session(airgap=True)
+    assert s.airgap is True
+    assert s.provider is None
+    assert s.fallback_provider is None
+
+
+def test_build_session_no_chain_env_leaves_fallback_unset(monkeypatch):
+    """Default path: no chain env → no FallbackProvider built."""
+    monkeypatch.delenv("PERFXPERT_LLM_FALLBACK_CHAIN", raising=False)
+    s = runtime_module.build_session(provider="anthropic")
+    assert s.fallback_provider is None
+    assert s.provider == "anthropic"
+
+
+def test_fallback_provider_complete_refuses_airgap(monkeypatch):
+    """Defensive guard: FallbackProvider.complete() MUST NOT run live
+    calls under PERFXPERT_AIRGAP=1 (regardless of how the chain was
+    built). dry_run=True stays allowed for deterministic cost paths.
+    """
+    from perfxpert.providers._fallback import FallbackProvider
+
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    fp = FallbackProvider(["anthropic"])
+
+    with pytest.raises(RuntimeError, match="PERFXPERT_AIRGAP"):
+        fp.complete([{"role": "user", "content": "hi"}])
