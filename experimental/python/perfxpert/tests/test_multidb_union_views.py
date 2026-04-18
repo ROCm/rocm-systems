@@ -139,6 +139,122 @@ class TestMultiFileUnionViews:
         assert len(rows) == 1
         assert rows[0][0] == "kernel_only"
 
+    def test_mixed_schema_shards_use_column_intersection(self, tmp_path):
+        """Cycle-2 I-2 regression: shard[1] with an extra column must not
+        raise at query time. The unified view must SELECT only the
+        intersection of columns, and a RuntimeWarning must be emitted so
+        the caller knows a column was dropped."""
+        import sqlite3
+        import warnings
+
+        db0 = tmp_path / "shard0.db"
+        db1 = tmp_path / "shard1.db"
+
+        # shard0: baseline schema (no "extra_col")
+        _create_test_db(db0, "kernel_A", 1000)
+
+        # shard1: identical table but with an extra "extra_col" column
+        conn1 = sqlite3.connect(str(db1))
+        conn1.execute(
+            "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, "
+            "duration INTEGER, extra_col TEXT)"
+        )
+        conn1.execute(
+            "INSERT INTO kernels VALUES ('kernel_B', 100, 200, 100, 'x')"
+        )
+        conn1.execute(
+            "CREATE TABLE pmc_events "
+            "(id INTEGER PRIMARY KEY, dispatch_id INTEGER, "
+            "counter_name TEXT, counter_value REAL)"
+        )
+        conn1.commit()
+        conn1.close()
+
+        from perfxpert.connection import (
+            PerfxpertConnection,
+            execute_statement,
+        )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            conn = PerfxpertConnection([str(db0), str(db1)])
+
+        # Rows from both shards must be visible — no OperationalError at
+        # query time.
+        rows = execute_statement(
+            conn, "SELECT name FROM kernels ORDER BY name"
+        ).fetchall()
+        assert {r[0] for r in rows} == {"kernel_A", "kernel_B"}
+
+        # The dropped "extra_col" must NOT be addressable through the
+        # unified view (confirming intersection semantics).
+        with __import__("pytest").raises(sqlite3.OperationalError):
+            execute_statement(conn, "SELECT extra_col FROM kernels").fetchall()
+
+        # A RuntimeWarning must have surfaced, naming the dropped column.
+        matches = [
+            w for w in caught
+            if issubclass(w.category, RuntimeWarning)
+            and "extra_col" in str(w.message)
+        ]
+        assert matches, (
+            f"expected RuntimeWarning mentioning 'extra_col'; got: "
+            f"{[str(w.message) for w in caught]}"
+        )
+
+    def test_mixed_schema_shards_extra_col_on_shard0(self, tmp_path):
+        """Symmetric case: extra column on shard[0] instead of shard[1]
+        must not leak through the unified view (intersection is
+        order-independent)."""
+        import sqlite3
+        import warnings
+
+        db0 = tmp_path / "shard0.db"
+        db1 = tmp_path / "shard1.db"
+
+        # shard0: extra column
+        conn0 = sqlite3.connect(str(db0))
+        conn0.execute(
+            "CREATE TABLE kernels (name TEXT, start INTEGER, end INTEGER, "
+            "duration INTEGER, extra_col TEXT)"
+        )
+        conn0.execute(
+            "INSERT INTO kernels VALUES ('kernel_A', 0, 100, 100, 'y')"
+        )
+        conn0.execute(
+            "CREATE TABLE pmc_events "
+            "(id INTEGER PRIMARY KEY, dispatch_id INTEGER, "
+            "counter_name TEXT, counter_value REAL)"
+        )
+        conn0.commit()
+        conn0.close()
+
+        # shard1: baseline schema
+        _create_test_db(db1, "kernel_B", 2000)
+
+        from perfxpert.connection import (
+            PerfxpertConnection,
+            execute_statement,
+        )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            conn = PerfxpertConnection([str(db0), str(db1)])
+
+        rows = execute_statement(
+            conn, "SELECT name FROM kernels ORDER BY name"
+        ).fetchall()
+        assert {r[0] for r in rows} == {"kernel_A", "kernel_B"}
+
+        with __import__("pytest").raises(sqlite3.OperationalError):
+            execute_statement(conn, "SELECT extra_col FROM kernels").fetchall()
+
+        assert any(
+            issubclass(w.category, RuntimeWarning)
+            and "extra_col" in str(w.message)
+            for w in caught
+        )
+
     def test_view_missing_from_one_shard_does_not_break(self, tmp_path):
         """If a shard lacks one of the analysis views, union the rest."""
         db0 = tmp_path / "shard0.db"
