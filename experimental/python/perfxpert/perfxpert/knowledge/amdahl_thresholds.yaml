@@ -1,0 +1,6 @@
+# Amdahl's Law prioritization thresholds — kernels below low_threshold
+# are not worth optimizing (low expected-value); above high_threshold
+# are first-priority.
+
+high_threshold: 0.10    # kernels > 10% of total runtime → high priority
+low_threshold: 0.05     # kernels < 5% of total runtime → low priority; else medium
