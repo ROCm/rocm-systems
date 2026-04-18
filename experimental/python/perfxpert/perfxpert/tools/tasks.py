@@ -7,15 +7,21 @@ can read/write the same .beads/ dir — format is compatible.
 Operations: create, next (topological ready-queue), update, close,
 query_by_kernel (for Revert-Advisor avoidance).
 
-Tool class: READ_ONLY (modifies task store, not user code).
+Tool class: side-effecting on the local ``.perfxpert/`` task store.
+Does NOT modify user source or GPU traces. The MCP exposure registry omits
+these module-level wrappers to maintain the §5.8 read-only invariant for
+external MCP clients.
 """
 
 import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 
 SCHEMA_SQL = """
@@ -118,13 +124,11 @@ class TaskStore:
         """Return the highest-priority ready task whose deps are all closed."""
         exclude_ids = set(exclude_ids or [])
         conn = self._get()
-        rows = conn.execute(
-            """SELECT t.id, t.title, t.priority, t.status, t.assignee, t.description,
+        rows = conn.execute("""SELECT t.id, t.title, t.priority, t.status, t.assignee, t.description,
                       t.meta_json, t.created_at
                FROM tasks t
                WHERE t.status = 'ready'
-               ORDER BY t.priority ASC, t.created_at ASC"""
-        ).fetchall()
+               ORDER BY t.priority ASC, t.created_at ASC""").fetchall()
 
         for row in rows:
             if row["id"] in exclude_ids:
@@ -158,9 +162,7 @@ class TaskStore:
             values.append(assignee)
         if meta is not None:
             # Merge, don't replace
-            current_row = conn.execute(
-                "SELECT meta_json FROM tasks WHERE id = ?", (task_id,)
-            ).fetchone()
+            current_row = conn.execute("SELECT meta_json FROM tasks WHERE id = ?", (task_id,)).fetchone()
             current = json.loads(current_row["meta_json"] or "{}") if current_row else {}
             current.update(meta)
             updates.append("meta_json = ?")
@@ -168,9 +170,7 @@ class TaskStore:
 
         if updates:
             values.append(task_id)
-            conn.execute(
-                f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", values
-            )
+            conn.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", values)
             conn.commit()
 
     def query_by_kernel(self, kernel_name: str) -> List[Dict[str, Any]]:
@@ -231,9 +231,15 @@ def _default_store() -> TaskStore:
     global _DEFAULT_STORE
     if _DEFAULT_STORE is None:
         import os
-        root = Path(os.environ.get("PERFXPERT_TASK_ROOT", str(Path.home() / ".perfxpert")))
+
+        task_root_env = os.environ.get("PERFXPERT_TASK_ROOT")
+        root = Path(task_root_env) if task_root_env else Path.home() / ".perfxpert"
         _DEFAULT_STORE = TaskStore(root)
         _DEFAULT_STORE.init()
+        logger.info(
+            "PerfXpert task store initialized at: %s " "(set PERFXPERT_TASK_ROOT to override)",
+            root,
+        )
     return _DEFAULT_STORE
 
 

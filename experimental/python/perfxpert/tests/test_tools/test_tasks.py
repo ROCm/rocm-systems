@@ -36,8 +36,7 @@ def test_dependencies_respected(store):
     assert first["id"] == parent
 
     # Child is still blocked
-    assert store.next(exclude_ids=[parent]) is None or \
-           store.next(exclude_ids=[parent])["id"] != child
+    assert store.next(exclude_ids=[parent]) is None or store.next(exclude_ids=[parent])["id"] != child
 
 
 def test_next_returns_none_when_all_blocked(store):
@@ -92,6 +91,7 @@ def test_json_output_format(store):
     result = store.show(task_id)
     # Must be JSON-serializable dict
     import json
+
     json.dumps(result)
     assert "id" in result
     assert "title" in result
@@ -106,3 +106,35 @@ def test_is_read_only_class():
     # that they don't modify user source or run processes. They're MCP-safe.
     # This is a design choice documented in the spec.
     assert True  # placeholder — actual class markers on TaskStore methods
+
+
+# -- Finding #10: _default_store logs resolved path -------------------------
+
+
+def test_default_store_logs_path_on_first_init(tmp_path, monkeypatch, caplog):
+    """_default_store() must emit an INFO log with the resolved path."""
+    import logging
+    from perfxpert.tools import tasks as tasks_mod
+
+    monkeypatch.setenv("PERFXPERT_TASK_ROOT", str(tmp_path / "pfx-tasks"))
+    # Reset global so _default_store re-initializes
+    monkeypatch.setattr(tasks_mod, "_DEFAULT_STORE", None)
+
+    with caplog.at_level(logging.INFO, logger="perfxpert.tools.tasks"):
+        tasks_mod._default_store()
+
+    assert any(
+        str(tmp_path / "pfx-tasks") in r.message for r in caplog.records
+    ), "Expected INFO log with resolved task store path"
+
+
+def test_default_store_uses_perfxpert_task_root_env(tmp_path, monkeypatch):
+    """PERFXPERT_TASK_ROOT must override the default ~/.perfxpert location."""
+    from perfxpert.tools import tasks as tasks_mod
+
+    custom_root = tmp_path / "my-custom-root"
+    monkeypatch.setenv("PERFXPERT_TASK_ROOT", str(custom_root))
+    monkeypatch.setattr(tasks_mod, "_DEFAULT_STORE", None)
+
+    store = tasks_mod._default_store()
+    assert store.root == custom_root
