@@ -2,9 +2,9 @@ name: "PerfXpert CI"
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [develop]
   pull_request:
-    branches: [main, master, develop]
+    branches: [develop, work/*]
 
 jobs:
   unit-and-agent:
@@ -51,6 +51,7 @@ jobs:
 
   phase5-gate:
     name: "Phase 5 Go/No-Go (parity + red-team + false-positive)"
+    if: github.event.pull_request.draft == false
     needs: [unit-and-agent, integration, opencode-wrapper]
     runs-on: ubuntu-latest
     steps:
