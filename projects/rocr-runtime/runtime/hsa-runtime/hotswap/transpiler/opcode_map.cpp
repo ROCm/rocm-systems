@@ -338,6 +338,12 @@ static const Entry kCanonTable[] = {
     // gfx10+ ternary xor (VOP3Instructions.td:1348). VOP3
     // ternaries only have the e64 form.
     E(V_XOR3_B32_e64, V_XOR3_B32),
+    // gfx10+ VOP3 16-bit no-carry add (VOP3Instructions.td:1362,
+    // real opcode 0x303 at :1852/2016). The opcode_map's
+    // sameSemanticShape canonicalizer collapses
+    // V_ADD_NC_U16_t16_e64 and V_ADD_NC_U16_fake16_e64 onto this
+    // base entry automatically, so a single mapping suffices.
+    E(V_ADD_NC_U16_e64, V_ADD_NC_U16),
     E(V_BFE_U32_e64, V_BFE_U32),
     E(V_BFE_I32_e64, V_BFE_I32),
     E(V_PERM_B32_e64, V_PERM_B32),

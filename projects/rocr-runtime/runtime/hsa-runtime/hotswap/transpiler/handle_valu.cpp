@@ -703,6 +703,67 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 v_add_nc_u16: 16-bit no-carry add with op_sel half
+  // selection on src0/src1/dst. Defined at
+  // VOP3Instructions.td:1362; gfx10/gfx11/gfx12 share the same
+  // 0x303 opcode (lines :1852, :2016).
+  //
+  // op_sel layout in the disassembly is `op_sel:[s0,s1,dst]`
+  // where each entry picks the lo (0) or hi (1) 16-bit half of
+  // the corresponding 32-bit VGPR. The unselected half of the
+  // destination register is preserved per the RDNA3+ ISA — that
+  // is the *only* reason this handler reads the prior dst value
+  // and merges, distinguishing it from the existing V_MAX_U16 /
+  // V_MIN_U16 family which assume default op_sel and
+  // zero-extend.
+  if (sop == SemOp::V_ADD_NC_U16) {
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    int opSel[3] = {0, 0, 0};
+    StringRef text(di.fullText);
+    auto pos = text.find("op_sel:");
+    if (pos != StringRef::npos) {
+      auto brk = text.find('[', pos);
+      auto end = text.find(']', brk);
+      if (brk != StringRef::npos && end != StringRef::npos) {
+        StringRef inner = text.slice(brk + 1, end);
+        SmallVector<StringRef, 3> parts;
+        inner.split(parts, ',');
+        for (unsigned i = 0; i < parts.size() && i < 3; i++) {
+          int val = 0;
+          if (!parts[i].trim().getAsInteger(10, val))
+            opSel[i] = val;
+        }
+      }
+    }
+    auto half = [&](Value *v, int sel) -> Value * {
+      if (sel) v = ctx.B.CreateLShr(v, 16);
+      return ctx.B.CreateTrunc(v, i16Ty);
+    };
+    Value *a = half(op.src(0), opSel[0]);
+    Value *b = half(op.src(1), opSel[1]);
+    Value *sum = ctx.B.CreateAdd(a, b, "vadd_nc_u16");
+    Value *sumZ = ctx.B.CreateZExt(sum, ctx.i32Ty);
+    if (opSel[2] == 0) {
+      // Write low half, preserve high half. The default-opsel
+      // case is the dominant one (matches the corpus instances
+      // we've seen) and would lift identically to a plain
+      // trunc+add+zext if the prior dst high bits were known to
+      // be zero — the explicit OR with the masked old value
+      // makes the merge semantics observable in the IR shape.
+      Value *old = ctx.regs.readReg32(ctx.B, op.dst());
+      Value *high = ctx.B.CreateAnd(old,
+          ConstantInt::get(ctx.i32Ty, 0xFFFF0000u));
+      ctx.writeReg32(op.dst(), ctx.B.CreateOr(high, sumZ, "vadd_u16_merge_lo"));
+    } else {
+      Value *old = ctx.regs.readReg32(ctx.B, op.dst());
+      Value *low = ctx.B.CreateAnd(old,
+          ConstantInt::get(ctx.i32Ty, 0x0000FFFFu));
+      Value *shifted = ctx.B.CreateShl(sumZ, 16);
+      ctx.writeReg32(op.dst(), ctx.B.CreateOr(low, shifted, "vadd_u16_merge_hi"));
+    }
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_BITOP3_B32 || sop == SemOp::V_BITOP3_B16) {
     // v_bitop3 dst, src0, src1, src2, imm8
     // For each bit position i, dst[i] = LUT[4*src0[i] + 2*src1[i] + src2[i]]

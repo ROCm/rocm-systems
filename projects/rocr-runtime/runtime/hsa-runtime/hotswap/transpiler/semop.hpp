@@ -116,6 +116,14 @@ enum class SemOp : uint16_t {
   // line 1350 directly matches `(xor (xor a, b), c)`. Lift is the
   // same shape as V_OR3_B32 above.
   V_XOR3_B32,
+  // VOP3 16-bit no-carry add — gfx10+ (VOP3Instructions.td:1362).
+  // Op_sel routes 16-bit halves of src0/src1 (lo or hi) and
+  // selects which half of the 32-bit dst register receives the
+  // result; the unselected half of dst is preserved per the
+  // RDNA3+ ISA. The handler must read the prior dst value when
+  // dst op_sel is set so the preserved half survives the
+  // read-modify-write.
+  V_ADD_NC_U16,
   V_BFE_U32, V_BFE_I32, V_PERM_B32,
   V_MBCNT_LO_U32_B32, V_MBCNT_HI_U32_B32,
   V_READLANE_B32, V_WRITELANE_B32,
