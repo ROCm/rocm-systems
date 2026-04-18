@@ -98,38 +98,9 @@ def test_mcp_server_accepts_a_call_from_shell(opencode_available):
     # (exact protocol handling depends on MCP SDK version; deeper testing in test_mcp_server.py)
 
 
-@pytest.mark.skipif(
-    not os.environ.get("PERFXPERT_E2E_INTERACTIVE"),
-    reason="Full interactive E2E requires PERFXPERT_E2E_INTERACTIVE=1 and a configured LLM",
-)
-def test_end_to_end_interactive_session(opencode_available, tmp_path):
-    """Full round-trip: perfxpert-code -> opencode master.md -> MCP -> Python brain.
-
-    Only runs when PERFXPERT_E2E_INTERACTIVE=1 because it requires:
-    - opencode bundled / installed
-    - An LLM provider configured (ANTHROPIC_API_KEY or OPENAI_API_KEY)
-    - Real stdio interaction
-    """
-    if not opencode_available:
-        pytest.skip("opencode not available")
-
-    import pexpect
-    env = {**os.environ, "PERFXPERT_CODE_NO_BANNER": "0"}
-    child = pexpect.spawn(
-        "perfxpert-code",
-        env=env,
-        encoding="utf-8",
-        timeout=60,
-    )
-    try:
-        child.expect("ROCm PerfXpert")
-        child.sendline("What are the FP64 peaks for MI300X?")
-        # Expect a streamed response that mentions either the number 81.7 or the
-        # phrase "TFLOPS". The LLM may phrase this many ways, but SOMETHING
-        # grounded in the arch.lookup_peaks tool output must appear.
-        child.expect(r"(81\.7|TFLOPS)", timeout=60)
-        child.sendline("/exit")
-        child.expect(pexpect.EOF, timeout=10)
-    finally:
-        if child.isalive():
-            child.terminate(force=True)
+# NOTE: The test_end_to_end_interactive_session was a flaky pexpect-based TUI test.
+# It has been replaced by test_perfxpert_code_live_mcp.py::test_perfxpert_code_calls_mcp_and_returns_expected_value
+# which uses the non-interactive `perfxpert-code run` path and is more robust.
+# Both tests verify the same contract:
+#   launcher → opencode → MCP → Python brain → response
+# but the live-MCP version avoids pexpect's alternate-screen fragility.
