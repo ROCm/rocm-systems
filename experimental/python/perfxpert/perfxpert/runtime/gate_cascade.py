@@ -233,6 +233,11 @@ class GateInput:
     test_anchor_baseline: Optional[Dict[str, str]] = None
     test_anchor_new: Optional[Dict[str, str]] = None
 
+    # Optional: gate skipping for proven-optimization runner
+    skip_compile: bool = False
+    skip_bitwise: bool = False
+    skip_anchors: bool = False
+
     # Optional: debug loop tracking
     loop_counter: int = 0
 
@@ -258,6 +263,15 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
     # Get this module to patch internal functions
     current_module = sys.modules[__name__]
 
+    # Check for plateau (5+ consecutive failures)
+    if gate_input.loop_counter >= 5:
+        return GateVerdict(
+            status="reject", failing_gate="regression",
+            detail="5 consecutive failures detected; deeper-tier debugging required (plateau)",
+            metrics={"loop_counter": gate_input.loop_counter},
+            rejected_patch_sha=gate_input.patch_sha,
+        )
+
     # Map gate names to their indices
     GATE_ORDER = ["compile", "sol", "bitwise", "regression", "anchors"]
     stop_index = len(GATE_ORDER)
@@ -270,7 +284,7 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
         tmpdir = Path(tmpdir)
 
         # Gate 1: Compile
-        if stop_index >= 1:
+        if stop_index >= 1 and not gate_input.skip_compile:
             if gate_input.diff_payload:
                 # Malformed patch detection: would fail to apply/compile
                 stubs_compile = MagicMock(return_value={"ok": False, "stderr": "compilation failed"})
@@ -314,7 +328,7 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                     )
 
         # Gate 3: Bitwise
-        if stop_index >= 3:
+        if stop_index >= 3 and not gate_input.skip_bitwise:
             bitwise_stub = MagicMock()
             ok_bitwise = True
             if gate_input.verify_output_baseline is not None and gate_input.verify_output_new is not None:
@@ -345,6 +359,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
             if gate_input.baseline_kernel_runtimes and gate_input.new_kernel_runtimes:
                 # Compute per-kernel deltas
                 hot_kernels = []
+                import math
+                regression_ratios = []  # Only include regressions in geomean
                 for new_rt in gate_input.new_kernel_runtimes:
                     baseline_rt = next((b for b in gate_input.baseline_kernel_runtimes
                                       if b.kernel_name == new_rt.kernel_name), None)
@@ -355,14 +371,22 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                             "kernel_name": new_rt.kernel_name,
                             "delta_pct": delta_pct,
                         })
+                        # For geomean: only include regressions (delta_pct > 0)
+                        if delta_pct > 0:
+                            ratio = new_rt.total_runtime_ns / baseline_rt.total_runtime_ns if baseline_rt.total_runtime_ns > 0 else 1.0
+                            regression_ratios.append(ratio)
 
-                # Compute weighted geomean
+                # Compute weighted geomean: geometric mean of regression ratios only
+                if regression_ratios:
+                    geomean = math.exp(sum(math.log(r) for r in regression_ratios) / len(regression_ratios))
+                    weighted_geomean_delta = (geomean - 1.0) * 100.0  # convert to percentage
+                else:
+                    weighted_geomean_delta = 0.0
+
+                # Compute overall total delta
                 baseline_total = sum(b.total_runtime_ns for b in gate_input.baseline_kernel_runtimes)
                 new_total = sum(n.total_runtime_ns for n in gate_input.new_kernel_runtimes)
                 total_delta_pct = (new_total - baseline_total) / baseline_total * 100.0 if baseline_total > 0 else 0.0
-
-                # For weighted geomean, simulate: small regressions across many kernels
-                weighted_geomean_delta = total_delta_pct  # simplified
 
                 regression_stub.return_value = {
                     "ok": False,  # Will be determined by threshold checks
@@ -408,7 +432,7 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                     )
 
         # Gate 5: Anchors
-        if stop_index >= 5:
+        if stop_index >= 5 and not gate_input.skip_anchors:
             anchors_stub = MagicMock()
             ok_anchors = True
             removed_tests = []
@@ -429,15 +453,6 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                         metrics={"anchors": anchors_stub.return_value},
                         rejected_patch_sha=gate_input.patch_sha,
                     )
-
-    # Handle loop counter plateau detection
-    if gate_input.loop_counter >= 5:
-        return GateVerdict(
-            status="reject", failing_gate="regression",
-            detail="5 consecutive failures detected; deeper-tier debugging required",
-            metrics={"loop_counter": gate_input.loop_counter},
-            rejected_patch_sha=gate_input.patch_sha,
-        )
 
     # Check airgap mode (PERFXPERT_AIRGAP env var)
     if os.environ.get("PERFXPERT_AIRGAP") == "1":
