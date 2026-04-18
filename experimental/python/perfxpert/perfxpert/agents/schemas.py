@@ -23,7 +23,7 @@ class _FrozenModel(BaseModel):
 
 
 BottleneckType = Literal[
-    "compute", "memory_transfer", "latency", "api_overhead", "mixed"
+    "compute", "memory_transfer", "latency", "api_overhead", "mixed", "data_insufficient"
 ]
 
 

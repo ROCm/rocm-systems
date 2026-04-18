@@ -59,20 +59,28 @@ except ImportError:
             return hotspots or []
 
     def _check_counters_available(db_path: str) -> bool:
-        """Check if hardware counters (pmc_events) are available in the database."""
+        """Check if hardware counters (pmc_events) are available in the database.
+
+        pmc_events is a VIEW in rocpd databases (not a TABLE), so we check
+        sqlite_master for both 'table' and 'view' types.
+        """
         try:
             from perfxpert.connection import PerfxpertConnection, execute_statement
 
             conn = PerfxpertConnection(db_path)
-            tables_query = "SELECT name FROM sqlite_master WHERE type='table' AND name='pmc_events'"
+            # pmc_events is a VIEW in rocpd databases — check both table and view
+            tables_query = (
+                "SELECT name FROM sqlite_master "
+                "WHERE (type='table' OR type='view') AND name='pmc_events'"
+            )
             result = execute_statement(conn, tables_query).fetchone()
-            has_table = result is not None
+            has_pmc = result is not None
 
-            if has_table:
-                # Check if table has any data
+            if has_pmc:
+                # Check if pmc_events has any rows with actual counter data
                 count_query = "SELECT COUNT(*) FROM pmc_events LIMIT 1"
                 count_result = execute_statement(conn, count_query).fetchone()
-                return count_result and count_result[0] > 0
+                return bool(count_result and count_result[0] > 0)
             return False
         except Exception:
             return False
@@ -103,11 +111,165 @@ def build_analysis_agent() -> Agent:
     )
 
 
+def _extract_hw_metrics(db: str) -> Dict[str, Any]:
+    """Extract hardware counter-derived metrics from the database.
+
+    Returns a dict with keys matching YAML signature metric names.
+    All values are None when counter data is unavailable — the classifier
+    must treat None as "unknown", never as 0.0.
+    """
+    try:
+        from perfxpert.connection import PerfxpertConnection, execute_statement
+
+        conn = PerfxpertConnection(db)
+
+        # Check if pmc_events has any rows
+        check = execute_statement(conn, "SELECT COUNT(*) FROM pmc_events LIMIT 1").fetchone()
+        if not check or check[0] == 0:
+            return {}  # Empty dict — no counter data at all
+
+        # Pull aggregate counter values
+        counter_query = """
+        SELECT counter_name, AVG(counter_value) as avg_val, SUM(counter_value) as total_val
+        FROM pmc_events
+        GROUP BY counter_name
+        """
+        rows = execute_statement(conn, counter_query).fetchall()
+        counters = {r[0]: {"avg": r[1], "total": r[2]} for r in rows}
+
+        hw: Dict[str, Any] = {}
+
+        # --- valu_util_pct: SQ_INSTS_VALU / (SQ_WAVES * wavefront_size * cycles_per_instr)
+        # Approximation: SQ_INSTS_VALU / GRBM_GUI_ACTIVE as fraction of peak VALU issue slots.
+        if "SQ_INSTS_VALU" in counters and "GRBM_GUI_ACTIVE" in counters:
+            sq_valu = counters["SQ_INSTS_VALU"]["avg"]
+            grbm_active = counters["GRBM_GUI_ACTIVE"]["avg"]
+            if grbm_active and grbm_active > 0:
+                # Each active cycle can issue up to 4 VALU instructions (4 SIMDs/CU)
+                hw["valu_util_pct"] = min(1.0, sq_valu / (grbm_active * 4.0))
+            else:
+                hw["valu_util_pct"] = None
+        else:
+            hw["valu_util_pct"] = None
+
+        # --- mfma_util_pct: SQ_INSTS_VALU_MFMA / GRBM_GUI_ACTIVE
+        if "SQ_INSTS_VALU_MFMA" in counters and "GRBM_GUI_ACTIVE" in counters:
+            sq_mfma = counters["SQ_INSTS_VALU_MFMA"]["avg"]
+            grbm_active = counters["GRBM_GUI_ACTIVE"]["avg"]
+            if grbm_active and grbm_active > 0:
+                hw["mfma_util_pct"] = min(1.0, sq_mfma / grbm_active)
+            else:
+                hw["mfma_util_pct"] = None
+        else:
+            hw["mfma_util_pct"] = None
+
+        # --- gpu_util_pct: GRBM_GUI_ACTIVE / GRBM_COUNT
+        if "GRBM_GUI_ACTIVE" in counters and "GRBM_COUNT" in counters:
+            grbm_active = counters["GRBM_GUI_ACTIVE"]["avg"]
+            grbm_count = counters["GRBM_COUNT"]["avg"]
+            if grbm_count and grbm_count > 0:
+                hw["gpu_util_pct"] = min(1.0, grbm_active / grbm_count)
+            else:
+                hw["gpu_util_pct"] = None
+        else:
+            hw["gpu_util_pct"] = None
+
+        # --- occupancy_pct + avg_waves_per_cu
+        # SQ_WAVES is the total wavefronts dispatched per kernel invocation, not
+        # the in-flight concurrency. Accurate occupancy requires SQ_BUSY_CYCLES or
+        # per-cycle active-wave sampling which is not available from basic --pmc runs.
+        #
+        # Without a dedicated occupancy counter, we set both to None so the
+        # latency signature (avg_waves_per_cu < 16) does not fire incorrectly on
+        # compute-bound kernels that simply have low wavefront count.
+        hw["avg_waves_per_cu"] = None
+        hw["occupancy_pct"] = None
+
+        # --- hbm_bw_utilization: (FETCH_SIZE + WRITE_SIZE) / (peak_BW * duration)
+        # MI300X peak HBM BW ~ 5.2 TB/s (3.2 TB/s practical sustained)
+        _MI300X_PEAK_BW_BYTES_PER_NS = 5.2e12 / 1e9  # bytes/ns
+        if "FETCH_SIZE" in counters and "WRITE_SIZE" in counters:
+            fetch = counters["FETCH_SIZE"]["total"]
+            write = counters["WRITE_SIZE"]["total"]
+            # Get total trace duration from kernels table
+            try:
+                dur_row = execute_statement(
+                    conn, "SELECT MAX(end) - MIN(start) FROM kernels"
+                ).fetchone()
+                trace_dur_ns = dur_row[0] if dur_row and dur_row[0] else 1
+                total_bytes = (fetch or 0) + (write or 0)
+                peak_bytes = _MI300X_PEAK_BW_BYTES_PER_NS * trace_dur_ns
+                hw["hbm_bw_utilization"] = min(1.0, total_bytes / peak_bytes) if peak_bytes > 0 else None
+            except Exception:
+                hw["hbm_bw_utilization"] = None
+        else:
+            hw["hbm_bw_utilization"] = None
+
+        # --- arithmetic_intensity_above_ridge / arithmetic_intensity_below_ridge
+        # MI300X ridge point ≈ 15.4 FLOPS/Byte (gfx942)
+        _RIDGE = 15.4
+        if "FETCH_SIZE" in counters and "WRITE_SIZE" in counters and (
+            "SQ_INSTS_VALU" in counters or "SQ_INSTS_VALU_MFMA" in counters
+        ):
+            fetch_t = counters["FETCH_SIZE"]["total"] or 0
+            write_t = counters["WRITE_SIZE"]["total"] or 0
+            total_bytes_ai = fetch_t + write_t
+            # Rough FLOPs: SQ_INSTS_VALU * 64 (wavefront_size) * 2 (FMA) + MFMA ops
+            valu_t = counters.get("SQ_INSTS_VALU", {}).get("total", 0) or 0
+            mfma_t = counters.get("SQ_INSTS_VALU_MFMA", {}).get("total", 0) or 0
+            total_flops = valu_t * 64 * 2 + mfma_t * 512  # MFMA f32_32x32x8 = 512 FP ops
+            if total_bytes_ai > 0:
+                ai = total_flops / total_bytes_ai
+                hw["arithmetic_intensity_above_ridge"] = 1 if ai > _RIDGE else 0
+                hw["arithmetic_intensity_below_ridge"] = 1 if ai <= _RIDGE else 0
+            else:
+                hw["arithmetic_intensity_above_ridge"] = None
+                hw["arithmetic_intensity_below_ridge"] = None
+        else:
+            hw["arithmetic_intensity_above_ridge"] = None
+            hw["arithmetic_intensity_below_ridge"] = None
+
+        return hw
+
+    except Exception:
+        return {}  # Any DB error → no counter data
+
+
+def _extract_dispatch_metrics(db: str, hotspots: list) -> Dict[str, Any]:
+    """Extract kernel dispatch count + average duration metrics.
+
+    Returns keys: total_kernel_calls, avg_kernel_duration_us.
+    Values are None when data is unavailable.
+    """
+    try:
+        from perfxpert.connection import PerfxpertConnection, execute_statement
+
+        conn = PerfxpertConnection(db)
+        row = execute_statement(
+            conn, "SELECT COUNT(*), AVG(duration) FROM kernels"
+        ).fetchone()
+        if row:
+            total_calls = row[0] or 0
+            avg_dur_ns = row[1] or 0
+            return {
+                "total_kernel_calls": total_calls,
+                "avg_kernel_duration_us": avg_dur_ns / 1000.0 if avg_dur_ns else None,
+            }
+    except Exception:
+        pass
+    return {"total_kernel_calls": None, "avg_kernel_duration_us": None}
+
+
 def _collect_deterministic_metrics(db: str, top_n: int = 10) -> Dict[str, Any]:
     """Collect the rule-based metrics needed by the classifier.
 
     Exposed at module level for test injection. Tests can monkeypatch this function
     to stub out database access.
+
+    The returned ``metrics_for_classifier`` dict uses None (not 0.0) for every key
+    that cannot be computed due to missing counter data.  The downstream classifier
+    treats None as "unknown / neutral" — it will NOT silently score a missing metric
+    as 0.0 and return a misleading verdict.
     """
     try:
         breakdown = trace_analysis.time_breakdown(db)
@@ -124,16 +286,53 @@ def _collect_deterministic_metrics(db: str, top_n: int = 10) -> Dict[str, Any]:
         }
         hotspots = []
 
-    # Flatten signals for bottleneck.classify_from_metrics
-    m = {
-        "memcpy_pct": breakdown.get("memcpy_pct", 0.0),
-        "api_overhead_pct": breakdown.get("api_pct", 0.0),
+    counter_data_available = breakdown.get("counter_data_available", False)
+
+    # Always populate the trace-derived metrics (available from any --sys-trace DB).
+    # time_breakdown values are in 0–100 (percentage) scale; YAML thresholds use
+    # 0.0–1.0 (fraction) scale.  Divide by 100 to normalize.
+    raw_memcpy_pct = breakdown.get("memcpy_pct", 0.0) or 0.0
+    raw_api_pct = breakdown.get("api_pct", 0.0) or 0.0
+    m: Dict[str, Any] = {
+        "memcpy_pct": raw_memcpy_pct / 100.0,
+        "api_overhead_pct": raw_api_pct / 100.0,
     }
+
+    # Dispatch-level metrics (from kernels table — available without --pmc)
+    dispatch_metrics = _extract_dispatch_metrics(db, hotspots)
+    m.update(dispatch_metrics)
+
+    if counter_data_available:
+        # Populate hardware-counter derived metrics; each may still be None
+        # if the specific counter was not collected in this run.
+        hw = _extract_hw_metrics(db)
+        m["valu_util_pct"] = hw.get("valu_util_pct")
+        m["mfma_util_pct"] = hw.get("mfma_util_pct")
+        m["arithmetic_intensity_above_ridge"] = hw.get("arithmetic_intensity_above_ridge")
+        m["arithmetic_intensity_below_ridge"] = hw.get("arithmetic_intensity_below_ridge")
+        m["occupancy_pct"] = hw.get("occupancy_pct")
+        m["avg_waves_per_cu"] = hw.get("avg_waves_per_cu")
+        m["gpu_util_pct"] = hw.get("gpu_util_pct")
+        m["hbm_bw_utilization"] = hw.get("hbm_bw_utilization")
+        m["no_dominant_bottleneck"] = None  # only set if classifier decides "mixed"
+    else:
+        # No PMC data: set all counter-derived keys to None so classifier
+        # can distinguish "not measured" from "measured zero".
+        m["valu_util_pct"] = None
+        m["mfma_util_pct"] = None
+        m["arithmetic_intensity_above_ridge"] = None
+        m["arithmetic_intensity_below_ridge"] = None
+        m["occupancy_pct"] = None
+        m["avg_waves_per_cu"] = None
+        m["gpu_util_pct"] = None
+        m["hbm_bw_utilization"] = None
+        m["no_dominant_bottleneck"] = None
+
     return {
         "time_breakdown": breakdown,
         "hot_kernels": hotspots,
         "metrics_for_classifier": m,
-        "counter_data_available": breakdown.get("counter_data_available", False),
+        "counter_data_available": counter_data_available,
     }
 
 
@@ -148,7 +347,25 @@ def run_analysis(
     facts = _collect_deterministic_metrics(payload.database_path, top_n=payload.top_kernels)
 
     # Step 2: deterministic classifier verdict (always).
-    rule_verdict = bottleneck.classify_from_metrics(facts["metrics_for_classifier"])
+    #
+    # Override rule: if no hardware counter data is available at all, force
+    # data_insufficient regardless of what trace-derived metrics (memcpy_pct,
+    # api_overhead_pct) might suggest. The classifier should only produce
+    # bottleneck verdicts when it has counter evidence — otherwise it's guessing.
+    if not facts["counter_data_available"]:
+        rule_verdict = {
+            "type": "data_insufficient",
+            "confidence": 0.0,
+            "reasoning": (
+                "No hardware counter data in this trace (profiled without --pmc). "
+                "Re-capture with PMC counters to get a reliable bottleneck classification. "
+                "Trace-only metrics (memcpy_pct, api_overhead_pct) are insufficient for "
+                "deterministic bottleneck classification."
+            ),
+            "all_scores": {},
+        }
+    else:
+        rule_verdict = bottleneck.classify_from_metrics(facts["metrics_for_classifier"])
 
     # Step 3: LLM refinement (optional).
     agent = build_analysis_agent()

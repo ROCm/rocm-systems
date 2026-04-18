@@ -62,6 +62,53 @@ def test_classify_mixed_when_no_dominant():
     assert result["type"] == "mixed"
 
 
+def test_data_insufficient_when_no_counters():
+    """Empty metrics dict (all None / missing) must return data_insufficient, not mixed@0.5."""
+    # All hardware-counter keys set to None — exactly what _collect_deterministic_metrics
+    # produces when counter_data_available=False.
+    metrics = {
+        "valu_util_pct": None,
+        "mfma_util_pct": None,
+        "arithmetic_intensity_above_ridge": None,
+        "arithmetic_intensity_below_ridge": None,
+        "occupancy_pct": None,
+        "avg_waves_per_cu": None,
+        "gpu_util_pct": None,
+        "hbm_bw_utilization": None,
+        "no_dominant_bottleneck": None,
+        "total_kernel_calls": None,
+        "avg_kernel_duration_us": None,
+    }
+    result = bottleneck.classify_from_metrics(metrics)
+    assert result["type"] == "data_insufficient", (
+        f"Expected 'data_insufficient' but got '{result['type']}'; "
+        "classifier must not produce silent mixed@0.5 when flying blind."
+    )
+    assert result["confidence"] == 0.0
+    assert "data_insufficient" in result["type"]
+
+
+def test_data_insufficient_empty_dict():
+    """Completely empty dict must also return data_insufficient."""
+    result = bottleneck.classify_from_metrics({})
+    assert result["type"] == "data_insufficient"
+    assert result["confidence"] == 0.0
+
+
+def test_mixed_returned_when_data_available_but_no_dominant():
+    """With some data present but no dominant bottleneck, mixed is still returned (not data_insufficient)."""
+    metrics = {
+        "valu_util_pct": 0.40,      # present but fails compute threshold
+        "memcpy_pct": 0.10,          # present but fails memory threshold
+        "gpu_util_pct": 0.65,        # present but fails latency threshold
+        "api_overhead_pct": 0.05,    # present but fails api threshold
+    }
+    result = bottleneck.classify_from_metrics(metrics)
+    # Must be mixed, not data_insufficient, because metrics ARE available
+    assert result["type"] == "mixed"
+    assert result["confidence"] == 0.5
+
+
 def test_classification_is_deterministic():
     metrics = {"valu_util_pct": 0.85, "mfma_util_pct": 0.60, "arithmetic_intensity_above_ridge": 1}
     r1 = bottleneck.classify_from_metrics(metrics)

@@ -71,10 +71,14 @@ def classify_from_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         metrics: dict with keys like valu_util_pct, memcpy_pct, etc.
-                 Missing keys default to "rule not applicable" (not "rule failed").
+                 Missing keys (None or absent) default to "rule not applicable"
+                 (neutral — not counted in denominator).
 
     Returns:
         {"type": str, "confidence": float, "reasoning": str, "all_scores": dict}
+
+    Special return when all metrics are None/missing:
+        {"type": "data_insufficient", "confidence": 0.0, "reasoning": "..."}
 
     Example:
         >>> classify_from_metrics({"valu_util_pct": 0.85, "arithmetic_intensity_above_ridge": 1})
@@ -82,15 +86,35 @@ def classify_from_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
     types = load_yaml("bottleneck_types")
     scores = {}
+    any_evaluated = False
     for entry in types:
         if entry["name"] == "mixed":
             continue  # "mixed" is the fallback, not a direct match
-        scores[entry["name"]] = _signature_match(entry["signatures"], metrics)
+        score = _signature_match(entry["signatures"], metrics)
+        scores[entry["name"]] = score
+        # Track whether at least one rule was evaluated (i.e. had non-None metric)
+        for rule in entry["signatures"]:
+            if metrics.get(rule["metric"]) is not None:
+                any_evaluated = True
+
+    # If no signature could be evaluated at all — every metric is None/absent —
+    # return data_insufficient rather than the silent mixed-at-0.5 fallback.
+    if not any_evaluated:
+        return {
+            "type": "data_insufficient",
+            "confidence": 0.0,
+            "reasoning": (
+                "No hardware counter data available — all classifier inputs are None. "
+                "Re-capture the trace with hardware counters enabled to get a meaningful "
+                "bottleneck classification."
+            ),
+            "all_scores": scores,
+        }
 
     best = max(scores, key=scores.get)
     best_score = scores[best]
 
-    # If no type scores above 0.5, classify as mixed
+    # If no type scores above 0.5 (but we did have some data), classify as mixed
     if best_score < 0.5:
         return {
             "type": "mixed",

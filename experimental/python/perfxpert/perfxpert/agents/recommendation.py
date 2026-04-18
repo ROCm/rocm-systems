@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,6 +29,42 @@ from perfxpert.tools import plateau, trace_fingerprint
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "recommendation.md"
+
+
+# -- Data-insufficient warning -------------------------------------------
+
+_DATA_INSUFFICIENT_WARNING = """\
+╔══════════════════════════════════════════════════════════════════════════╗
+║  WARNING: Bottleneck classifier returned data_insufficient              ║
+║                                                                          ║
+║  The trace database contains no hardware counter data (--pmc was not    ║
+║  used when profiling). PerfXpert cannot classify the bottleneck type     ║
+║  without counter evidence, and will NOT generate recommendations that   ║
+║  might be wrong.                                                         ║
+║                                                                          ║
+║  ACTION: Re-profile your workload with hardware counters enabled.        ║
+║  Run three separate passes (TCC isolation rule — FETCH_SIZE and          ║
+║  WRITE_SIZE must each be in their own --pmc pass):                      ║
+║                                                                          ║
+║    Pass 1 (compute utilization):                                        ║
+║      rocprofv3 --sys-trace \\                                            ║
+║        --pmc SQ_WAVES,SQ_INSTS_VALU,SQ_INSTS_VALU_MFMA,GRBM_GUI_ACTIVE,GRBM_COUNT \\
+║        -- ./your_app                                                    ║
+║                                                                          ║
+║    Pass 2 (HBM fetch bandwidth — isolated):                             ║
+║      rocprofv3 --sys-trace --pmc FETCH_SIZE -- ./your_app              ║
+║                                                                          ║
+║    Pass 3 (HBM write bandwidth — isolated):                             ║
+║      rocprofv3 --sys-trace --pmc WRITE_SIZE -- ./your_app              ║
+║                                                                          ║
+║  Then merge the output databases before re-running analysis.            ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
+
+def _warn_data_insufficient() -> None:
+    """Print the data_insufficient warning to stderr. Extracted for test injection."""
+    print(_DATA_INSUFFICIENT_WARNING, file=sys.stderr, flush=True)
 
 
 # -- Thin delegators (module-level for test injection) --------------------
@@ -99,7 +136,13 @@ def run_recommendation(
     plateau_detected = bool(plateau_info.get("plateau_detected", False))
 
     # Dispatch
-    if bottleneck == "compute":
+    if bottleneck == "data_insufficient":
+        # No hardware counters were collected — classifier was flying blind.
+        # Print a loud, actionable warning and return without recommendations.
+        _warn_data_insufficient()
+        specialist_used = "none"
+        techniques = []
+    elif bottleneck == "compute":
         specialist_used = "compute"
         spec_input = schemas.ComputeSpecialistInput(
             gfx_id="gfx942",   # inferred upstream; placeholder-safe
