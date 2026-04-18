@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
 """
-docs/link-checker.py — Validate internal and external links in Markdown docs
-Part of Phase 9 docs audit tooling
+docs/link-checker.py — Validate internal Markdown links across docs.
+Part of Phase 9 docs audit tooling.
+
+Scope (what IS checked):
+  - Relative file-existence of every `[text](path)` link in .md files
+    under the search root (excluding dotfiles and ai_analysis/).
+  - Skips links inside destructive-ignored paths (ai_analysis/, hidden).
+
+Out of scope (what is NOT checked):
+  - External HTTP/HTTPS URLs — skipped entirely (see is_external_url).
+  - Anchor fragments (`#section-id`) — stripped before file-existence
+    check. A broken anchor inside a valid file will NOT be flagged.
+  See docs/known-issues.md for the rationale.
+
+`--strict` flag:
+  - Changes OUTPUT FORMAT only: in strict mode no human-readable
+    preamble is printed; only CSV rows are emitted. The set of checks
+    performed is identical in both modes.
 """
 
 import re
