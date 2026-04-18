@@ -314,12 +314,111 @@ static void doTestSoftmax() {
 }
 
 // ============================================================================
+// Permlane16 swap: end-to-end regression for CROSS_LANE_SURVEY P4
+// ============================================================================
+//
+// The pre-built `.hsaco` is sourced from
+// `test_data/gfx1250/permlane16_swap_kernel.hip` (committed alongside
+// the .hsaco for reproducibility). Per-lane setup:
+//
+//   vdst_in[L]  = L
+//   src0_in[L]  = 1000 + L
+//
+// After v_permlane16_swap_b32 (per the VOP_PERMLANE_SWAP profile in
+// VOP1Instructions.td):
+//
+//   new_vdst[L]      = src0_in[L XOR 16]  = 1000 + (L XOR 16)
+//   new_src0_out[L]  = vdst_in[L XOR 16]  = (L XOR 16)
+//
+// The lifted gfx942 wave64 kernel runs each 32-lane half
+// independently under modulo-replication, so the expected output
+// for every L in [0, 64) is the per-half XOR-16 partner. The test
+// verifies all 64 entries — direct empirical check that the
+// emulation produces the source-intended swap.
+//
+// Without this test, the only check that the lifted ds_bpermute
+// chain actually swaps correctly is the embedded probe results in
+// the handler comment block. This test gives the P4 emulation a
+// CI-resident regression gate; a future change that breaks the
+// XOR-16 partner pattern OR the per-32-lane-half independence
+// would fail here.
+static void doTestPermlane16Swap() {
+  printf("--- permlane16_swap_kernel (P4 end-to-end) ---\n");
+  std::string path =
+      std::string(GFX1250_DATA_DIR) + "/permlane16_swap_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942",
+                                         "permlane16_swap_kernel");
+  ASSERT_TRUE(result.success) << "Pipeline failed for permlane16_swap";
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  constexpr int N = 64; // wave64 = 1 wave on gfx942; full block of 64 lanes.
+  std::vector<int> hVdst(N, -1), hSrc0(N, -1);
+
+  int *dVdst, *dSrc0;
+  HIP_ASSERT(hipMalloc(&dVdst, N * sizeof(int)));
+  HIP_ASSERT(hipMalloc(&dSrc0, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dVdst, 0xff, N * sizeof(int)));
+  HIP_ASSERT(hipMemset(dSrc0, 0xff, N * sizeof(int)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod, "permlane16_swap_kernel"));
+
+  auto meta = transpiler::extractKernelMeta(data, "permlane16_swap_kernel");
+
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0, &dVdst, 8);
+  memcpy(argBuf.data() + 8, &dSrc0, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+  HIP_ASSERT(hipModuleLaunchKernel(func, /*grid*/ 1, 1, 1,
+                                   /*block*/ N, 1, 1,
+                                   meta.groupSegmentFixedSize, nullptr,
+                                   nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipMemcpy(hVdst.data(), dVdst, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(hSrc0.data(), dSrc0, N * sizeof(int),
+                       hipMemcpyDeviceToHost));
+
+  int errors = 0;
+  for (int L = 0; L < N; L++) {
+    int partner = L ^ 16;
+    int expVdst = 1000 + partner;
+    int expSrc0 = partner;
+    if (hVdst[L] != expVdst || hSrc0[L] != expSrc0) {
+      if (errors < 4)
+        fprintf(stderr,
+                "  lane %2d: vdst got=%d exp=%d, src0 got=%d exp=%d\n",
+                L, hVdst[L], expVdst, hSrc0[L], expSrc0);
+      errors++;
+    }
+  }
+
+  (void)hipFree(dVdst);
+  (void)hipFree(dSrc0);
+  (void)hipModuleUnload(mod);
+  printf("  Result: %d errors over %d lanes\n", errors, N);
+  EXPECT_EQ(errors, 0)
+      << errors << " lane mismatches in permlane16_swap (expected per-half "
+                   "XOR-16 partner pattern)";
+}
+
+// ============================================================================
 // TEST registrations
 // ============================================================================
 class Gfx1250Gpu : public GpuTest {};
 
 TEST_F(Gfx1250Gpu, Softmax) { doTestSoftmax(); }
 TEST_F(Gfx1250Gpu, Vecadd)  { doTestVecadd(); }
+TEST_F(Gfx1250Gpu, Permlane16Swap) { doTestPermlane16Swap(); }
 
 TEST_F(Gfx1250Gpu, Matmul64x64) {
   doTestMatmul("matmul_f16_gfx1250.hsaco", 128, 128, 64, "64x64 tile");

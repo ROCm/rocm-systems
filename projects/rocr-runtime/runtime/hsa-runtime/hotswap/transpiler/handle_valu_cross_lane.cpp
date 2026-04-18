@@ -230,23 +230,24 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // the same exchange independently in each half, the textbook
   // modulo-replication match.
   //
-  // Empirical verification of the EMULATION on gfx942 (CDNA3) wave64
-  // — directly probing the IR pattern this handler emits, with
-  // vdst_in[L]=L and src0_in[L]=1000+L:
+  // CI regression gate: the `Gfx1250Gpu.Permlane16Swap` GTest
+  // (tests/gfx1250_gpu_test.cpp) lifts the committed
+  // `test_data/gfx1250/permlane16_swap_gfx1250.hsaco` (built from
+  // `permlane16_swap_kernel.hip` — a wave32 source kernel using
+  // `v_permlane16_swap_b32_e32` via inline asm) and runs it on
+  // gfx942 wave64 hardware, verifying per-lane outputs match the
+  // expected XOR-16 partner pattern across all 64 lanes:
   //
-  //   lane | new_vdst | new_src0_out
-  //   -----+----------+--------------
-  //      0 |     1016 |     16     (← swapped with lane 16)
-  //     15 |     1031 |     31     (← swapped with lane 31)
-  //     16 |     1000 |      0     (← swapped with lane  0)
-  //     31 |     1015 |     15     (← swapped with lane 15)
-  //     32 |     1048 |     48     (← swapped with lane 48, upper half)
-  //     47 |     1063 |     63     (← swapped with lane 63, upper half)
-  //     48 |     1032 |     32     (← swapped with lane 32, upper half)
-  //     63 |     1047 |     47     (← swapped with lane 47, upper half)
+  //   For every L in [0, 64): new_vdst[L]      == 1000 + (L XOR 16)
+  //                           new_src0_out[L]  == (L XOR 16)
   //
-  // Every lane's result matches `(L XOR 16)`'s value, with the
-  // upper half (32..63) confined to its own 32-lane partition.
+  // (vdst_in seeded with L, src0_in with 1000+L.) The test verifies
+  // BOTH the per-lane swap pattern AND per-32-lane-half
+  // independence (lanes 32..63 produce the lower-half result + 32
+  // for both VGPRs). A future change that breaks the XOR-16
+  // partner, the byte-address shift, the convergence semantics, or
+  // the per-half independence would fail this test.
+  //
   // Native gfx942 isel for `llvm.amdgcn.permlane16.swap` would fail
   // (per upstream LLVM's permlane16.swap.ll ERR-SDAG assertion), so
   // we cannot directly compare emulation-vs-native on this target;

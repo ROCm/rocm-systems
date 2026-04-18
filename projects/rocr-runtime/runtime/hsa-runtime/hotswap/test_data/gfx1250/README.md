@@ -45,6 +45,21 @@ cp triton/gfx1250_kernels/*.hsaco \
 | `matmul_f16_gfx1250.hsaco` | fp16 GEMM 64×64×32, 4 warps | matmul | **Yes** | `v_wmma_f32_16x16x32_f16`, `ds_load_tr16_b128` |
 | `matmul_f16_large_gfx1250.hsaco` | fp16 GEMM 128×128×32, 8 warps | matmul | **Yes** | `v_wmma_f32_16x16x32_f16`, `v_bitop3_b32`, `s_set_vgpr_msb` |
 | `softmax_gfx1250.hsaco` | fused row softmax 1024 cols | reduction | No | `v_pk_add_f32`, `v_permlanex16_b32`, `v_exp_f32` |
+| `permlane16_swap_gfx1250.hsaco` | per-lane swap regression for CROSS_LANE_SURVEY P4 | unit test | No | `v_permlane16_swap_b32_e32` |
+
+### Per-kernel build provenance
+
+The Triton-built `.hsaco` files (vecadd, matmul, softmax) are
+regenerated via `triton/aot_compile_gfx1250.py` per the recipe above.
+
+The hipcc-built `.hsaco` (`permlane16_swap_gfx1250.hsaco`) is built
+directly from the committed source `permlane16_swap_kernel.hip` —
+the `.hip`'s comment block documents the exact `hipcc` +
+`clang-offload-bundler` invocation. It exists to give the P4
+end-to-end test (`Gfx1250Gpu.Permlane16Swap` in
+`tests/gfx1250_gpu_test.cpp`) a reproducible source, so any future
+maintainer can re-derive the binary from the .hip without consulting
+external tooling state.
 
 ## What these exercise (and what they don't)
 
