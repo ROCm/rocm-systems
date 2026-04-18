@@ -13,6 +13,8 @@ T = TypeVar("T", bound=Callable)
 
 
 class ToolClass(Enum):
+    """MCP exposure class for tools. See spec §5.8."""
+
     READ_ONLY = "read_only"     # lookups, analysis, classification — safe for MCP
     EXECUTION = "execution"     # modifies filesystem/processes — in-process only
 

@@ -9,12 +9,16 @@ Phase 3: full implementation.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
 class AgentSpec:
-    """Placeholder — full definition in Phase 3."""
+    """Placeholder — full definition in Phase 3.
+
+    TODO(phase3): expand to include handoff whitelist, tool allowlist, model config,
+    and fence slice path per design spec §3.
+    """
     name: str
 
 

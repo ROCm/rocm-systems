@@ -7,6 +7,6 @@ Phase 1: scaffolding + first 25 tools.
 Phase 4: MCP server wraps READ_ONLY tools for external clients.
 """
 
-from perfxpert.tools._class import ToolClass, tool_class
+from ._class import ToolClass, tool_class
 
 __all__ = ["ToolClass", "tool_class"]
