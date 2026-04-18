@@ -15,10 +15,14 @@ Tool allowlist (exactly 5 per spec §2 cap):
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from perfxpert.agents import schemas
+
+_log = logging.getLogger(__name__)
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import bottleneck, counters, roofline
 
@@ -231,8 +235,16 @@ def _extract_hw_metrics(db: str) -> Dict[str, Any]:
 
         return hw
 
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+        _log.exception(
+            "_extract_hw_metrics: DB error reading pmc_events — user will see "
+            "'data_insufficient'; real cause: %s", e
+        )
+        return {"_error": str(e)}  # marker so callers can surface the real reason
     except Exception:
-        return {}  # Any DB error → no counter data
+        # Non-DB exceptions (e.g. import errors, attribute errors) are programmer
+        # bugs — let them propagate so they are not silently swallowed.
+        raise
 
 
 def _extract_dispatch_metrics(db: str, hotspots: list) -> Dict[str, Any]:
@@ -240,6 +252,8 @@ def _extract_dispatch_metrics(db: str, hotspots: list) -> Dict[str, Any]:
 
     Returns keys: total_kernel_calls, avg_kernel_duration_us.
     Values are None when data is unavailable.
+    On DB error the dict also includes ``_error`` so the caller can propagate
+    the cause to the user instead of silently reporting data_insufficient.
     """
     try:
         from perfxpert.connection import PerfxpertConnection, execute_statement
@@ -255,8 +269,21 @@ def _extract_dispatch_metrics(db: str, hotspots: list) -> Dict[str, Any]:
                 "total_kernel_calls": total_calls,
                 "avg_kernel_duration_us": avg_dur_ns / 1000.0 if avg_dur_ns else None,
             }
+    except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+        _log.exception(
+            "_extract_dispatch_metrics: DB error reading kernels table — "
+            "dispatch metrics unavailable; real cause: %s", e
+        )
+        return {
+            "total_kernel_calls": None,
+            "avg_kernel_duration_us": None,
+            "_error": str(e),
+        }
+    except FileNotFoundError:
+        # DB file missing — tolerated (e.g. unit tests using fake.db path).
+        return {"total_kernel_calls": None, "avg_kernel_duration_us": None}
     except Exception:
-        pass
+        raise
     return {"total_kernel_calls": None, "avg_kernel_duration_us": None}
 
 
@@ -300,12 +327,16 @@ def _collect_deterministic_metrics(db: str, top_n: int = 10) -> Dict[str, Any]:
 
     # Dispatch-level metrics (from kernels table — available without --pmc)
     dispatch_metrics = _extract_dispatch_metrics(db, hotspots)
+    # Surface any DB error from dispatch extraction — keep the _error key so
+    # _collect_deterministic_metrics can propagate it to the caller.
+    dispatch_error = dispatch_metrics.pop("_error", None)
     m.update(dispatch_metrics)
 
     if counter_data_available:
         # Populate hardware-counter derived metrics; each may still be None
         # if the specific counter was not collected in this run.
         hw = _extract_hw_metrics(db)
+        hw_error = hw.pop("_error", None)
         m["valu_util_pct"] = hw.get("valu_util_pct")
         m["mfma_util_pct"] = hw.get("mfma_util_pct")
         m["arithmetic_intensity_above_ridge"] = hw.get("arithmetic_intensity_above_ridge")
@@ -316,6 +347,7 @@ def _collect_deterministic_metrics(db: str, top_n: int = 10) -> Dict[str, Any]:
         m["hbm_bw_utilization"] = hw.get("hbm_bw_utilization")
         m["no_dominant_bottleneck"] = None  # only set if classifier decides "mixed"
     else:
+        hw_error = None
         # No PMC data: set all counter-derived keys to None so classifier
         # can distinguish "not measured" from "measured zero".
         m["valu_util_pct"] = None
@@ -328,11 +360,15 @@ def _collect_deterministic_metrics(db: str, top_n: int = 10) -> Dict[str, Any]:
         m["hbm_bw_utilization"] = None
         m["no_dominant_bottleneck"] = None
 
+    # Aggregate any DB errors so run_analysis can surface them to the user.
+    db_error: Optional[str] = hw_error or dispatch_error or None
+
     return {
         "time_breakdown": breakdown,
         "hot_kernels": hotspots,
         "metrics_for_classifier": m,
         "counter_data_available": counter_data_available,
+        "db_error": db_error,
     }
 
 
@@ -352,16 +388,35 @@ def run_analysis(
     # data_insufficient regardless of what trace-derived metrics (memcpy_pct,
     # api_overhead_pct) might suggest. The classifier should only produce
     # bottleneck verdicts when it has counter evidence — otherwise it's guessing.
+    #
+    # If a DB error was recorded during metric extraction, surface it here so the
+    # user sees WHY data is insufficient instead of just being told to re-profile.
+    db_error = facts.get("db_error")
+    if db_error:
+        import sys
+        print(
+            f"\nERROR: Database query failed during metric extraction:\n  {db_error}\n"
+            "PerfXpert cannot classify the bottleneck because the database could not be read.\n"
+            "Check for schema mismatches, corrupt databases, or renamed tables.\n",
+            file=sys.stderr,
+            flush=True,
+        )
     if not facts["counter_data_available"]:
+        _no_counter_reason = (
+            "No hardware counter data in this trace (profiled without --pmc). "
+            "Re-capture with PMC counters to get a reliable bottleneck classification. "
+            "Trace-only metrics (memcpy_pct, api_overhead_pct) are insufficient for "
+            "deterministic bottleneck classification."
+        )
+        if db_error:
+            _no_counter_reason = (
+                f"DB error prevented counter data extraction: {db_error}. "
+                + _no_counter_reason
+            )
         rule_verdict = {
             "type": "data_insufficient",
             "confidence": 0.0,
-            "reasoning": (
-                "No hardware counter data in this trace (profiled without --pmc). "
-                "Re-capture with PMC counters to get a reliable bottleneck classification. "
-                "Trace-only metrics (memcpy_pct, api_overhead_pct) are insufficient for "
-                "deterministic bottleneck classification."
-            ),
+            "reasoning": _no_counter_reason,
             "all_scores": {},
         }
     else:
