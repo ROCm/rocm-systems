@@ -39,9 +39,7 @@ def test_mi300x_fp64_peak_is_corrected():
     """CLAUDE.md correction: MI300X FP64 = 81.7 TFLOPS (NOT 163.4 which is FP32)."""
     specs = load_yaml("gpu_specs")
     mi300x = specs["gfx942"]
-    # Must have either peak_fp64 or peak_fp64_tflops; value 81.7 (within tolerance)
-    fp64 = mi300x.get("peak_fp64_tflops") or mi300x.get("peak_fp64")
-    assert fp64 is not None, "MI300X must declare peak_fp64"
+    fp64 = mi300x["peak_fp64_tflops"]
     assert 80 <= fp64 <= 83, f"MI300X FP64 expected ~81.7 TFLOPS, got {fp64}"
 
 
@@ -49,5 +47,32 @@ def test_cdna4_has_160kb_lds():
     """CDNA4 (gfx950) doubled LDS to 160 KB/CU per CLAUDE.md."""
     specs = load_yaml("gpu_specs")
     mi350 = specs["gfx950"]
-    lds_kb = mi350.get("lds_kb") or mi350.get("lds_per_cu_kb")
-    assert lds_kb == 160, f"CDNA4 LDS expected 160 KB/CU, got {lds_kb}"
+    assert mi350["lds_kb"] == 160, f"CDNA4 LDS expected 160 KB/CU, got {mi350['lds_kb']}"
+
+
+def test_schema_rejects_invalid_arch_id_pattern():
+    """Schema's patternProperties should reject non-gfx identifiers."""
+    schema = json.loads(SCHEMA_PATH.read_text())
+    invalid_data = {
+        "invalid_key_not_gfx": {
+            "name": "X", "codename": "Y",
+            "peak_fp64_tflops": 1, "peak_fp32_tflops": 1,
+            "memory_bandwidth_tbs": 1, "cu_count": 1, "lds_kb": 64,
+            "wave_size": 64, "max_vgprs_per_thread": 256, "ridge_point": 1,
+        }
+    }
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(invalid_data, schema)
+
+
+def test_schema_rejects_missing_required_field():
+    """Schema enforces required fields like peak_fp64_tflops."""
+    schema = json.loads(SCHEMA_PATH.read_text())
+    incomplete_arch = {
+        "name": "fake", "codename": "X",
+        # missing peak_fp64_tflops
+        "peak_fp32_tflops": 1, "memory_bandwidth_tbs": 1, "cu_count": 1,
+        "lds_kb": 64, "wave_size": 64, "max_vgprs_per_thread": 256, "ridge_point": 1,
+    }
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(incomplete_arch, schema["properties"]["arch_entry"])
