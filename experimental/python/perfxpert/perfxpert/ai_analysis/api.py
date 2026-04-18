@@ -527,9 +527,15 @@ def _is_legacy_mode() -> bool:
     """Phase 6 feature-flag gate.
 
     Legacy mode is now strictly opt-in via PERFXPERT_LEGACY=1.
-    The Phase-4 PERFXPERT_USE_AGENTS flag is preserved as a no-op for
-    backward compatibility — users who had it set before Phase 6 experience
-    no change. PERFXPERT_LEGACY takes precedence if both are set.
+
+    Deprecated flags:
+    - PERFXPERT_USE_AGENTS (Phase 4 flag): no longer used. Removed from codebase
+      in Phase 6 PR 2 (the _is_agentic_enabled() function was orphaned and
+      has been deleted). Users with this flag set will experience no change
+      (it is a silent no-op).
+
+    If both PERFXPERT_LEGACY and PERFXPERT_USE_AGENTS are set, PERFXPERT_LEGACY
+    takes precedence.
     """
     return os.environ.get("PERFXPERT_LEGACY") == "1"
 
@@ -1300,30 +1306,17 @@ def analyze_source(
     # Convert ProfilingPlan to SourceAnalysisResult dataclass
     result = _plan_to_source_result(plan)
 
-    # Optional LLM enhancement
+    # LLM enhancement in legacy source-only mode (enable_llm) is not supported in Phase 6+.
+    # LLMAnalyzer has been deprecated (Phase 6 PR 2 deletion). Users who want LLM analysis
+    # should use the agentic path via build_session() or perfxpert-code interactive mode.
     if enable_llm and llm_provider:
-        try:
-            if verbose:
-                print(f"[Tier0] Enhancing with {llm_provider} LLM...")
-
-            analyzer = LLMAnalyzer(
-                provider=llm_provider,
-                api_key=llm_api_key,
-                verbose=verbose,
+        if verbose:
+            print(
+                "[Tier0] LLM enhancement with legacy LLMAnalyzer is deprecated. "
+                "Use the agentic path (build_session) or perfxpert-code for LLM analysis.",
+                file=sys.stderr,
             )
-            context = AnalysisContext(tier=0, custom_prompt=custom_prompt)
-            result.llm_explanation = analyzer.analyze_source_with_llm(
-                result, custom_prompt=custom_prompt, context=context
-            )
-
-            if verbose:
-                print("[Tier0] LLM enhancement complete")
-
-        except (LLMAuthenticationError, LLMRateLimitError):
-            raise
-        except Exception as e:
-            if verbose:
-                print(f"[Tier0] LLM enhancement failed: {e}")
+        # Silently skip LLM enhancement; return unenhanced result
 
     return result
 

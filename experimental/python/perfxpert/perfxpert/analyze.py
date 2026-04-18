@@ -435,16 +435,18 @@ def analyze_performance(
                 ) + "\n"
                 output += "=" * 80 + "\n\n"
             elif output_format == "json":
-                # Parse JSON (no LLM explanation added)
+                # Parse JSON (no LLM explanation added in legacy mode)
+                # LLM enhancement requires agentic path or perfxpert-code
                 import json
 
                 try:
                     output_dict = json.loads(output)
-                    output_dict["llm_enhanced_explanation"] = llm_explanation
+                    # Note: llm_enhanced_explanation key intentionally omitted
+                    # LLM analysis is not available in legacy batch mode
                     output = json.dumps(output_dict, indent=2)
-                except (json.JSONDecodeError, ValueError, KeyError) as _je:
+                except (json.JSONDecodeError, ValueError) as _je:
                     print(
-                        f"Warning: Could not embed LLM explanation in JSON output: {_je}",
+                        f"Warning: Could not finalize JSON output: {_je}",
                         file=sys.stderr,
                     )
 
@@ -1068,12 +1070,6 @@ def add_args(parser: argparse.ArgumentParser):
         return ret
 
     return process_args
-
-
-def _is_agentic_enabled() -> bool:
-    """Feature flag: PERFXPERT_USE_AGENTS truthy values opt into the new path."""
-    import os
-    return os.environ.get("PERFXPERT_USE_AGENTS", "").strip().lower() in {"1", "true", "yes"}
 
 
 def execute(
