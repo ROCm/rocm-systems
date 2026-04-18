@@ -204,6 +204,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
+      common/TestChecks.cpp
     )
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})

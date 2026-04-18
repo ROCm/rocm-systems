@@ -11,6 +11,8 @@
 #include <vector>
 #include <cstring>
 
+#include "../common/TestChecks.hpp"
+
 namespace RcclUnitTesting
 {
 
@@ -23,10 +25,10 @@ public:
   size_t count = 0;
 
   explicit DeviceBuffer(size_t n) : count(n) {
-    hipMalloc(&ptr, n * sizeof(T));
+    HIP_EXPECT(hipMalloc(&ptr, n * sizeof(T)));
   }
 
-  ~DeviceBuffer() { if (ptr) hipFree(ptr); }
+  ~DeviceBuffer() { if (ptr) HIP_EXPECT(hipFree(ptr)); }
 
   DeviceBuffer(const DeviceBuffer&)            = delete;
   DeviceBuffer& operator=(const DeviceBuffer&) = delete;
@@ -36,30 +38,30 @@ public:
   }
 
   void copyFrom(const std::vector<T>& h) {
-    hipMemcpy(ptr, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice);
+    HIP_CHECK(hipMemcpy(ptr, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice));
   }
 
   void copyFrom(const T* src, size_t n) {
-    hipMemcpy(ptr, src, n * sizeof(T), hipMemcpyHostToDevice);
+    HIP_CHECK(hipMemcpy(ptr, src, n * sizeof(T), hipMemcpyHostToDevice));
   }
 
   void upload(const T& val) {
-    hipMemcpy(ptr, &val, sizeof(T), hipMemcpyHostToDevice);
+    HIP_CHECK(hipMemcpy(ptr, &val, sizeof(T), hipMemcpyHostToDevice));
   }
 
   std::vector<T> copyTo() const {
     std::vector<T> h(count);
-    hipMemcpy(h.data(), ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+    HIP_EXPECT(hipMemcpy(h.data(), ptr, count * sizeof(T), hipMemcpyDeviceToHost));
     return h;
   }
 
   T download() const {
     T val;
-    hipMemcpy(&val, ptr, sizeof(T), hipMemcpyDeviceToHost);
+    HIP_EXPECT(hipMemcpy(&val, ptr, sizeof(T), hipMemcpyDeviceToHost));
     return val;
   }
 
-  void zero() { hipMemset(ptr, 0, count * sizeof(T)); }
+  void zero() { HIP_CHECK(hipMemset(ptr, 0, count * sizeof(T))); }
 };
 
 // Base test fixture: selects GPU 0 and provides launch helpers.

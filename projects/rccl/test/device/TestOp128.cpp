@@ -1055,6 +1055,35 @@ TEST_F(PackRoundtripTest, LoadStorePack_Path2_FunnelShift) {
     EXPECT_EQ(h_out[i], h_in[i]) << "at index " << i;
 }
 
+// Path 2 with misaligned source: forces misalign != 0 in loadPack so the
+// funnel-shift actually rotates bits between adjacent words.  Without the
+// fix (initializing extra=0, loop bound Size/4-1, unconditional last
+// shift), the upper bytes of the loaded pack are corrupted.
+TEST_F(PackRoundtripTest, LoadStorePack_Path2_FunnelShift_Misaligned) {
+  const int N = 64;
+  const int pad = 4;
+
+  std::vector<uint8_t> h_in(N + pad);
+  for (int i = 0; i < N + pad; i++)
+    h_in[i] = static_cast<uint8_t>(i + 1);
+
+  DeviceBuffer<uint8_t> d_src(N + pad), d_dst(N);
+  d_src.copyFrom(h_in);
+
+  for (int offset = 1; offset <= 3; offset++) {
+    d_dst.zero();
+
+    int packs = N / 8;
+    kernelLoadStorePack_Path2<<<1, packs>>>(d_src.ptr + offset, d_dst.ptr, N);
+    syncAndCheck();
+
+    auto h_out = d_dst.copyTo();
+    for (int i = 0; i < N; i++)
+      EXPECT_EQ(h_out[i], h_in[i + offset])
+          << "at index " << i << " with misalign offset " << offset;
+  }
+}
+
 // Path 3: loadPack<BytePack<8>, uint32_t> — element-by-element
 // Condition: (8+3)/4+1=3 < 8/4=2, false → path 3
 __global__ void kernelLoadStorePack_Path3(const uint32_t* src, uint32_t* dst, int n) {
