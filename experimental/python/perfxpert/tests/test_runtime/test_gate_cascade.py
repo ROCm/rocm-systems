@@ -154,3 +154,60 @@ def test_debug_loop_caps_exist():
     assert gate_cascade.MAX_OPTIMIZATION_CYCLES_PER_KERNEL == 5
     assert gate_cascade.MAX_CONSECUTIVE_FAILURES == 3
     assert gate_cascade.MAX_SESSION_LLM_TURNS == 100
+
+
+# -- Finding #20: short-circuit coverage for Gates 2 / 3 / 4 ----------------
+
+def test_sol_failure_short_circuits_bitwise_regression_anchors(patches):
+    """Gate 2 (SOL) failing must skip Gates 3, 4, 5 entirely."""
+    patches["sol"].return_value = {"ok": False, "peak_ratio": 9999.0}
+    v = gate_cascade.evaluate(
+        baseline_db="b.db", candidate_db="c.db",
+        patch_file="foo.hip", patch_sha="abc123",
+        gfx_id="gfx942", claimed_speedup=1000.0,
+    )
+    assert v.status == "reject"
+    assert v.failing_gate == "sol"
+    # Downstream gates MUST NOT be invoked
+    assert not patches["bitwise"].called, "Gate 3 (bitwise) must not run after Gate 2 fails"
+    assert not patches["regression"].called, "Gate 4 (regression) must not run after Gate 2 fails"
+    assert not patches["anchors"].called, "Gate 5 (anchors) must not run after Gate 2 fails"
+
+
+def test_bitwise_failure_short_circuits_regression_anchors(patches):
+    """Gate 3 (bitwise) failing must skip Gates 4 and 5 entirely."""
+    patches["bitwise"].return_value = {"ok": False, "diff": "max_abs=0.5"}
+    v = gate_cascade.evaluate(
+        baseline_db="b.db", candidate_db="c.db",
+        patch_file="foo.hip", patch_sha="abc123",
+        gfx_id="gfx942", claimed_speedup=1.5,
+    )
+    assert v.status == "reject"
+    assert v.failing_gate == "bitwise"
+    # Gate 2 must have run (it passed)
+    assert patches["sol"].called, "Gate 2 (SOL) should have been invoked before Gate 3"
+    # Gates 4 and 5 MUST NOT be invoked
+    assert not patches["regression"].called, "Gate 4 (regression) must not run after Gate 3 fails"
+    assert not patches["anchors"].called, "Gate 5 (anchors) must not run after Gate 3 fails"
+
+
+def test_regression_failure_short_circuits_anchors(patches):
+    """Gate 4 (regression) failing must skip Gate 5 entirely."""
+    patches["regression"].return_value = {
+        "ok": False,
+        "total_delta_pct": 25.0,
+        "hot_kernels": [{"name": "[K_slow]", "delta_pct": 25.0}],
+        "weighted_geomean_delta_pct": 20.0,
+    }
+    v = gate_cascade.evaluate(
+        baseline_db="b.db", candidate_db="c.db",
+        patch_file="foo.hip", patch_sha="abc123",
+        gfx_id="gfx942", claimed_speedup=1.5,
+    )
+    assert v.status == "regressed"
+    assert v.failing_gate == "regression"
+    # Gates 2 and 3 must have run (they passed)
+    assert patches["sol"].called, "Gate 2 (SOL) should have been invoked"
+    assert patches["bitwise"].called, "Gate 3 (bitwise) should have been invoked"
+    # Gate 5 MUST NOT be invoked
+    assert not patches["anchors"].called, "Gate 5 (anchors) must not run after Gate 4 fails"
