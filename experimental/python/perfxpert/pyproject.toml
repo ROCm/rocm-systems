@@ -18,6 +18,7 @@ dependencies = [
     "pyyaml>=6.0",
     "jsonschema>=4.0",
     "httpx>=0.25",
+    "mcp>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,7 @@ dev  = ["pytest>=8.0", "pytest-asyncio>=0.21", "flake8", "black"]
 
 [project.scripts]
 perfxpert = "perfxpert.__main__:main"
+perfxpert-mcp = "mcp_server.server:main"
 
 [project.urls]
 Homepage      = "https://github.com/ROCm/rocm-systems"
