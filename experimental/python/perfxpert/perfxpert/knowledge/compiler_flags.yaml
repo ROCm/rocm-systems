@@ -52,6 +52,44 @@
   allowlist: true
   risk: low
 
+- flag: "-fno-unroll-loops"
+  category: loop_control
+  description: "Disable loop unrolling"
+  allowlist: true
+  risk: low
+
+- flag: "-funroll-loops"
+  category: loop_control
+  description: "Enable loop unrolling"
+  allowlist: true
+  risk: low
+
+- flag: "--offload-arch"
+  category: target_arch
+  description: "GPU target architecture (value required)"
+  allowlist: true
+  risk: low
+  value_required: true
+
+- flag: "-mllvm"
+  category: llvm_pass
+  description: "Pass option to LLVM backend"
+  allowlist: true
+  risk: medium
+  value_required: true
+
+- flag: "-save-temps"
+  category: debugging
+  description: "Save temporary compiler outputs"
+  allowlist: true
+  risk: low
+
+- flag: "-g"
+  category: debugging
+  description: "Generate debug symbols"
+  allowlist: true
+  risk: low
+
 # Deny-listed (never auto-apply):
 - flag: "-Xlinker"
   category: linker
