@@ -533,9 +533,9 @@ class TestPathSanitization:
     """Tests for _redact_paths() in llm_analyzer.py."""
 
     def _redact(self, value: str) -> str:
-        from perfxpert.ai_analysis.llm_analyzer import _redact_paths
+        from perfxpert.providers._sanitization import redact_paths
 
-        return _redact_paths(value)
+        return redact_paths(value)
 
     def test_absolute_home_path_redacted(self):
         """Absolute /home/user/... path should be replaced with [REDACTED]."""
