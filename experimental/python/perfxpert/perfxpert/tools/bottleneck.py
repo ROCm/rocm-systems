@@ -28,21 +28,38 @@ _OPS = {
 def _signature_match(signature: List[Dict[str, Any]], metrics: Dict[str, Any]) -> float:
     """Compute fraction of signature rules that pass against metrics.
 
-    Returns 0.0–1.0. Rules referencing missing metrics count as false.
+    Returns 0.0–1.0. Rules referencing missing metrics count as "neutral" (not
+    counted in the denominator), allowing partial evidence to still score well.
+
+    For example, if a 3-rule signature requires (A, B, C) and only A is available
+    and passes, that counts as 1/1 = 1.0 confidence (strong evidence from available data).
+    If A fails, it's 0/1 = 0.0 (contradicts the signature).
     """
     if not signature:
         return 0.0
+
     passed = 0
+    evaluated = 0  # rules where we had data to evaluate
+
     for rule in signature:
         metric = rule["metric"]
         op = _OPS[rule["op"]]
         threshold = rule["threshold"]
         value = metrics.get(metric)
+
         if value is None:
-            continue  # missing metric = can't satisfy rule
+            continue  # missing metric = neutral (don't count toward denominator)
+
+        evaluated += 1
         if op(value, threshold):
             passed += 1
-    return passed / len(signature)
+
+    # If no rules could be evaluated, signature doesn't apply (0 confidence)
+    if evaluated == 0:
+        return 0.0
+
+    # Otherwise, return the fraction of evaluated rules that passed
+    return passed / evaluated
 
 
 @tool_class(ToolClass.READ_ONLY)

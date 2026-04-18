@@ -20,13 +20,29 @@ def test_server_constructs_when_sdk_present():
 
 
 def test_build_server_raises_without_sdk():
-    """build_server() raises clean error if MCP SDK missing."""
-    # This test verifies the adapter pattern works
-    # (normally skipped since MCP is installed)
-    try:
-        import mcp  # noqa: F401
-        pytest.skip("MCP SDK is installed; test only relevant when SDK missing")
-    except ImportError:
+    """build_server() raises clean error if MCP SDK missing.
+
+    Uses unittest.mock to simulate absent SDK without uninstalling it.
+    This test always runs (no skip).
+    """
+    import sys
+    from unittest.mock import patch
+
+    # Patch sys.modules to make MCP imports fail
+    mcp_modules = {
+        'mcp': None,
+        'mcp.server': None,
+        'mcp.server.stdio': None,
+        'mcp.types': None,
+    }
+    with patch.dict(sys.modules, mcp_modules):
+        # Force reimport of mcp_server.server to see the patched modules
+        import importlib
+        if 'mcp_server.server' in sys.modules:
+            del sys.modules['mcp_server.server']
+        if 'mcp_server' in sys.modules:
+            del sys.modules['mcp_server']
+
         from mcp_server.server import build_server
-        with pytest.raises(RuntimeError, match="MCP SDK not installed"):
+        with pytest.raises(RuntimeError, match="MCP SDK not available"):
             build_server()
