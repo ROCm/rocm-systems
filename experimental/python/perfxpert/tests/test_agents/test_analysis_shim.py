@@ -1,8 +1,8 @@
-"""Finding #21 — Tests for the _LegacyTraceAnalysis shim in agents/analysis.py.
+"""Tests for the _TraceAnalysisAdapter shim in agents/analysis.py.
 
-The shim at analysis.py:26-88 is always active in production because
-perfxpert.tools.trace_analysis does not exist. Every agent test mocks the
-tool directly; these tests exercise the shim's delegation to analyze.py.
+The shim is always active in production because perfxpert.tools.trace_analysis
+does not exist. Every agent test mocks the tool directly; these tests exercise
+the shim's delegation to analyze.py.
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ def test_shim_delegates_identify_hotspots_to_analyze_module(monkeypatch):
 
 def test_shim_used_when_trace_analysis_module_absent(monkeypatch):
     """Simulate absent perfxpert.tools.trace_analysis and reload the module;
-    assert that trace_analysis is a _LegacyTraceAnalysis instance (the shim)."""
+    assert that trace_analysis is a _TraceAnalysisAdapter instance (the shim)."""
     # Hide the trace_analysis module so the ImportError branch executes.
     saved = sys.modules.pop("perfxpert.tools.trace_analysis", None)
     # Also hide the key so the try-block import fails rather than finds a cached value.
@@ -103,7 +103,7 @@ def test_shim_used_when_trace_analysis_module_absent(monkeypatch):
         assert hasattr(ta, "time_breakdown"), "shim must expose time_breakdown"
         assert hasattr(ta, "hotspots"), "shim must expose hotspots"
         # And must NOT be a real module (the shim is an instance, not a module)
-        assert not isinstance(ta, type(sys)), "_LegacyTraceAnalysis shim should not be a module"
+        assert not isinstance(ta, type(sys)), "_TraceAnalysisAdapter shim should not be a module"
     finally:
         # Restore original state
         sys.modules.pop("perfxpert.tools.trace_analysis", None)

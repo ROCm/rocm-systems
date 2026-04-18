@@ -26,12 +26,12 @@ _log = logging.getLogger(__name__)
 from perfxpert.agents.framework import Agent, ToolBinding, run_agent
 from perfxpert.tools import bottleneck, counters, roofline
 
-# trace_analysis — delegates to legacy analysis functions
+# trace_analysis — delegates to perfxpert.analyze helper functions
 try:
     from perfxpert.tools import trace_analysis  # type: ignore
 except ImportError:
-    # fallback: delegate to legacy analyze.py functions
-    class _LegacyTraceAnalysis:
+    # fallback: adapter around perfxpert.analyze helper functions
+    class _TraceAnalysisAdapter:
         @staticmethod
         def time_breakdown(db_path: str) -> Dict[str, Any]:
             """Compute time breakdown from database."""
@@ -41,7 +41,7 @@ except ImportError:
             conn = PerfxpertConnection(db_path)
             breakdown = compute_time_breakdown(conn)
 
-            # Map legacy keys to agentic schema
+            # Map analyze.py keys to agentic schema
             return {
                 "kernel_pct": breakdown.get("kernel_percent", 0.0),
                 "memcpy_pct": breakdown.get("memcpy_percent", 0.0),
@@ -89,7 +89,7 @@ except ImportError:
         except Exception:
             return False
 
-    trace_analysis = _LegacyTraceAnalysis()  # type: ignore[misc,assignment]
+    trace_analysis = _TraceAnalysisAdapter()  # type: ignore[misc,assignment]
 
 
 _FENCE_PATH = Path(__file__).parent / "fence" / "analysis.md"

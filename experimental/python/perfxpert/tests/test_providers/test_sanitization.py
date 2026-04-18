@@ -1,7 +1,4 @@
-"""Tests for perfxpert.providers._sanitization.
-
-Previously lived in ai_analysis/llm_analyzer.py; relocated in Phase 6.
-"""
+"""Tests for perfxpert.providers._sanitization."""
 
 import pytest
 

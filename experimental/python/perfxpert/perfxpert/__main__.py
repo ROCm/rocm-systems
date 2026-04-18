@@ -321,17 +321,8 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
 
 
 def _report_active_mode() -> str:
-    """Return one of 'Mode: agentic' | 'Mode: legacy (DEPRECATED)'."""
-    import os
-
-    if os.getenv("PERFXPERT_LEGACY"):
-        return (
-            "Mode: legacy (DEPRECATED)\n"
-            "  PERFXPERT_LEGACY=1 is set.\n"
-            "  This path will be removed in the next minor release.\n"
-            "  Migrate to the agentic path by unsetting PERFXPERT_LEGACY."
-        )
-    return "Mode: agentic (default, Phase 6+)"
+    """Return the active analysis mode string."""
+    return "Mode: agentic"
 
 
 def _run_doctor():

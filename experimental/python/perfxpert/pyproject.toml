@@ -52,8 +52,6 @@ packages = [
     "perfxpert",
     "perfxpert.analysis",
     "perfxpert.formatters",
-    "perfxpert.ai_analysis",
-    "perfxpert.ai_analysis.tests",
     "perfxpert.cli",
     "perfxpert.providers",
     "perfxpert.config",
@@ -63,10 +61,6 @@ packages = [
 
 [tool.setuptools.package-data]
 perfxpert = [
-    "ai_analysis/share/*.md",
-    "ai_analysis/share/*.png",
-    "ai_analysis/docs/*.md",
-    "ai_analysis/docs/*.json",
     "formatters/templates/*.html",
     "_bundled/**/*",
     "_bundled/opencode_config/*",
@@ -78,7 +72,6 @@ perfxpert = [
 
 [tool.pytest.ini_options]
 testpaths = [
-    "perfxpert/ai_analysis/tests",
     "tests",
 ]
 python_files = ["test_*.py"]

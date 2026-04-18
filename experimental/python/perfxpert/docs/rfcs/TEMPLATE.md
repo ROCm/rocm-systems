@@ -29,7 +29,7 @@ File paths, types, data flows.
 
 ### Backward compatibility
 
-Breaking? Deprecation plan? `PERFXPERT_LEGACY` handling?
+Breaking? Deprecation plan?
 
 ## Alternatives considered
 

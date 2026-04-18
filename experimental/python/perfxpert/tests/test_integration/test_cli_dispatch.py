@@ -1,4 +1,4 @@
-"""Tests for analyze.py CLI feature-flag dispatch (Phase 6: PERFXPERT_LEGACY)."""
+"""Tests for analyze.py CLI dispatch (Phase 7.1: agentic is the only path)."""
 
 from pathlib import Path
 from unittest import mock
@@ -24,23 +24,29 @@ def fake_db(tmp_path):
     return db
 
 
-def test_cli_default_is_agentic(fake_db, monkeypatch):
-    """Without PERFXPERT_LEGACY, CLI uses agentic path (Phase 6 default)."""
+def test_cli_always_runs_agentic(fake_db, monkeypatch):
+    """CLI always uses the agentic path; no feature-flag branching remains."""
     monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
-        with mock.patch.object(analyze_mod, "_execute_legacy") as legacy:
-            agentic.return_value = 0
-            analyze_mod.execute(input=mock.MagicMock(), format="text")
-            agentic.assert_called_once()
-            legacy.assert_not_called()
+        agentic.return_value = 0
+        analyze_mod.execute(input=mock.MagicMock(), format="text")
+        agentic.assert_called_once()
 
 
-def test_cli_legacy_flag_on_routes_to_legacy(fake_db, monkeypatch):
-    """With PERFXPERT_LEGACY=1, CLI uses legacy path."""
+def test_cli_legacy_flag_is_no_op(fake_db, monkeypatch):
+    """PERFXPERT_LEGACY=1 is unrecognized post-Phase-7.1 — still routes agentic."""
     monkeypatch.setenv("PERFXPERT_LEGACY", "1")
-    with mock.patch.object(analyze_mod, "_execute_legacy") as legacy:
-        with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
-            legacy.return_value = 0
-            analyze_mod.execute(input=mock.MagicMock(), format="text")
-            legacy.assert_called_once()
-            agentic.assert_not_called()
+    with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
+        agentic.return_value = 0
+        analyze_mod.execute(input=mock.MagicMock(), format="text")
+        agentic.assert_called_once()
+
+
+def test_legacy_symbols_are_absent():
+    """The _execute_legacy function and ai_analysis package must be gone."""
+    assert not hasattr(analyze_mod, "_execute_legacy"), (
+        "_execute_legacy should have been deleted in Phase 7.1"
+    )
+    import importlib
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("perfxpert.ai_analysis")

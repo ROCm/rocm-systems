@@ -1,5 +1,12 @@
 # Migrating from Legacy perfxpert to the Agentic Path
 
+> **Historical — the legacy path has been removed in Phase 7.1.** This document
+> is retained for reference only. New users can disregard `PERFXPERT_LEGACY`
+> entirely; the agentic runtime is the only path.
+
+---
+
+
 As of v0.2.0, perfxpert's execution path is the **agentic runtime** (OpenAI
 Agents SDK + ~45 deterministic tools + split fence). The Phase-4 opt-in flag
 `PERFXPERT_USE_AGENTS=1` has become a no-op (the behavior is now default).

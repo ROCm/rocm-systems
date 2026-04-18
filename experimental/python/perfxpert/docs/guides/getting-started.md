@@ -275,27 +275,25 @@ In interactive mode, when plateau detection triggers, the `[t]` option builds th
 
 ## 9. Python API
 
-Every capability is available as a Python API for programmatic use and CI/CD integration:
+The agentic runtime is available programmatically via `perfxpert.agents`:
 
 ```python
 from pathlib import Path
-from perfxpert.ai_analysis import analyze_database, analyze_source
+from perfxpert.agents import runtime, schemas
 
-# Analyze a trace database
-result = analyze_database(Path("trace.db"))
-print(result.summary.primary_bottleneck)
-print(f"Confidence: {result.summary.confidence:.0%}")
-
-for rec in result.recommendations.high_priority:
-    print(f"[HIGH] {rec.title}: {rec.description}")
-
-# Export to JSON / HTML
-json_output = result.to_json()
-html_output = result.to_webview()
-
-# Source-only analysis (Tier 0)
-src = analyze_source(Path("./my_app"))
-print(src.plan.suggested_first_command)
+session = runtime.build_session(airgap=True)  # or provider="openai"
+out = session.run_root(
+    schemas.RootInput(
+        user_query="Analyze this GPU performance trace.",
+        database_path=str(Path("trace.db")),
+        airgap=True,
+        session_id=session.session_id,
+    )
+)
+print(out.primary_bottleneck)
+print(out.narrative)
+for rec in out.recommendations:
+    print(f"[{rec.get('priority')}] {rec.get('title')}: {rec.get('description')}")
 ```
 
 ![Python API Demo](assets/python-api.gif)

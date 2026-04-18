@@ -68,9 +68,10 @@ an [RFC](docs/rfcs/README.md).
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `PERFXPERT_USE_AGENTS=1` | noop (kept for back-compat) | Was the Phase-4 opt-in; agentic is now default |
-| `PERFXPERT_LEGACY=1` | unset | One-version safety net — routes through the pre-v0.2.0 path. Removed in vX.Y+1. |
-| `ROCINSIGHT_LLM_REFERENCE_GUIDE` | unset | Legacy-only — path to user-supplied monolithic guide |
 | `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; must point to an existing file or launcher raises immediately |
+
+`PERFXPERT_LEGACY` is unrecognized as of Phase 7.1 — the legacy `ai_analysis`
+module has been removed. Setting it has no effect.
 
 ## Supported GPUs
 
@@ -89,10 +90,9 @@ an [RFC](docs/rfcs/README.md).
 
 ## Documentation
 
-- [Python API](perfxpert/ai_analysis/docs/AI_ANALYSIS_API.md)
-- [Analysis output JSON schema](perfxpert/ai_analysis/docs/analysis-output.schema.json)
-- [Migration guide from legacy path](docs/migration-to-agentic.md)
-- [`PERFXPERT_LEGACY` deprecation note](docs/deprecation/PERFXPERT_LEGACY.md)
+- [Architecture](docs/architecture.md)
+- [Getting started](docs/guides/getting-started.md)
+- [Historical migration notes](docs/archive/migration-to-agentic.md) (pre-Phase 7.1)
 - [Contributing](CONTRIBUTING.md)
 
 ## Licensing

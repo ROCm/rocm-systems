@@ -1,8 +1,6 @@
 """Data sanitization helpers for LLM prompts.
 
-Relocated from ai_analysis/llm_analyzer.py in Phase 6. All 5 provider
-adapters import from here. The legacy path (PERFXPERT_LEGACY=1) also
-imports from here so its behavior is unchanged.
+All 5 provider adapters import from here.
 
 These helpers are pure, deterministic, and unit-testable.
 """

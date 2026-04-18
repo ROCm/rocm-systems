@@ -3,6 +3,22 @@
 All notable changes to perfxpert will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## vNEXT — Phase 7.1
+
+### Removed
+- Legacy `ai_analysis` module (`perfxpert/ai_analysis/`) fully removed,
+  along with all parity and feature-flag dispatch tests. The
+  `PERFXPERT_LEGACY` environment variable is now unrecognized — setting it
+  has no effect.
+- `docs/deprecation/PERFXPERT_LEGACY.md` superseded; migration notes moved
+  to `docs/archive/migration-to-agentic.md`.
+
+### Changed
+- `perfxpert.analyze.execute()` unconditionally delegates to the agentic
+  runtime; the `_execute_legacy` fallback is gone.
+- `perfxpert.agents.root` wires the real `tasks.*` tools (create / next /
+  update / close) instead of no-op `lambda` stubs.
+
 ## [0.2.0] — 2026-04-18
 
 ### Added

@@ -11,7 +11,7 @@ Ports interval arithmetic, kernel categorization, and short kernel detection
 from AMD TraceLens (https://github.com/AMD-AGI/TraceLens).
 
 All functions read from an existing RocpdImportData connection and return
-plain dict / list structures. No output formatting. No ai_analysis imports.
+plain dict / list structures. No output formatting.
 
 Call order dependency:
     timeline = compute_interval_timeline(conn)
