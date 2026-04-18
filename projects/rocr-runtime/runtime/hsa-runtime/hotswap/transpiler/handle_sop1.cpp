@@ -335,18 +335,23 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
   //   B32: bit index = src0[4:0], dst and tied read are 32-bit.
   //   B64: bit index = src0[5:0], dst and tied read are 64-bit (src0 is
   //        still an SReg_32 per LLVM's `SOP1_64_32` class).
-  // These are read-modify-write: the destination's prior value arrives
-  // as the tied `sdst_in` operand at src index 1 (see `kKnownTiedIn` in
-  // raiser.cpp, which explicitly keeps `sdst_in` in srcMap), and the
-  // bit index arrives in `src0` at src index 0.  SCC is not updated.
+  // These are read-modify-write: the destination's prior value is the
+  // tied `sdst_in` operand in TableGen (`SOP1_32` / `SOP1_64_32` with
+  // `tied_in=1` and `Constraints = "$sdst = $sdst_in"`), and the bit
+  // index arrives in `src0` at src index 0.  SCC is not updated.
+  //
+  // The MC layer collapses the tied `$sdst_in` slot — the AMDGPU
+  // disassembler emits a 2-operand MCInst (`sdst`, `src0`) and the
+  // tie is reconstituted only at MachineInstr lowering time. This
+  // matches the S_CMOV_B{32,64} pattern below: the prior dst value
+  // must be read explicitly via `regs.readReg{32,64}(op.dst())`, not
+  // pulled from `op.src(1)`. (The `kKnownTiedIn` audit in
+  // decode.cpp keeps `sdst_in` in the *driftCheck* allow-list — i.e.
+  // we declare it semantically a real input — but no actual MCInst
+  // operand survives disassembly to land in srcMap, so the read has
+  // to come from the destination register itself.)
   if (sop == SemOp::S_BITSET0_B32 || sop == SemOp::S_BITSET1_B32 ||
       sop == SemOp::S_BITSET0_B64 || sop == SemOp::S_BITSET1_B64) {
-    // Enforce the tied-operand invariant at runtime so that a future
-    // raiser change (e.g. dropping `sdst_in` from the srcMap) fails
-    // loudly rather than silently computing garbage from an undefined
-    // `op.src(1)`.
-    assert(op.nSrcs() >= 2 &&
-           "s_bitset*: expected src0 and tied sdst_in in srcMap");
     bool is64 = (sop == SemOp::S_BITSET0_B64 || sop == SemOp::S_BITSET1_B64);
     bool isSet = (sop == SemOp::S_BITSET1_B32 || sop == SemOp::S_BITSET1_B64);
     llvm::Type *ty = is64 ? ctx.i64Ty : ctx.i32Ty;
@@ -357,7 +362,8 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
                                                      is64 ? 0x3F : 0x1F));
     if (is64) bitIdx = ctx.B.CreateZExt(bitIdx, ctx.i64Ty);
     Value *mask = ctx.B.CreateShl(ConstantInt::get(ty, 1), bitIdx);
-    Value *old = is64 ? op.src64(1) : op.src(1);
+    Value *old = is64 ? ctx.regs.readReg64(ctx.B, op.dst())
+                      : ctx.regs.readReg32(ctx.B, op.dst());
     Value *res = isSet
                      ? ctx.B.CreateOr(old, mask, "bitset1")
                      : ctx.B.CreateAnd(old, ctx.B.CreateNot(mask), "bitset0");

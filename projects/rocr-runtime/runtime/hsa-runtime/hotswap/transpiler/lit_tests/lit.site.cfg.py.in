@@ -97,6 +97,14 @@ config.fixtures = {
     # BUFFER_ATOMIC_ADD) in opcode_map.cpp.
     "buffer_atomic_add_u32":
         r"@LIT_FIXTURE_BUFFER_ATOMIC_ADD_U32_CO@",
+    # s_bitset0_b32 (SOP1) — bit-clear with tied sdst_in.  Pins the
+    # read-modify-write shape under the AMDGPU disassembler's tied-
+    # operand collapse: the prior dst value must come from
+    # `regs.readReg32(op.dst())`, not srcMap (the disassembler emits
+    # only `(sdst, src0)` even though TableGen declares `$sdst_in`
+    # tied).  See the S_BITSET block in handle_sop1.cpp and the
+    # caveat note appended to `kKnownTiedIn` in decode.cpp.
+    "s_bitset0_b32": r"@LIT_FIXTURE_S_BITSET0_B32_CO@",
 }
 
 lit_config.load_config(

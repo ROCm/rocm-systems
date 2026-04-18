@@ -96,6 +96,19 @@ void buildSrcMap(DecodedInst &di, const MCInstrDesc &desc) {
 //     `src0X`, `src0Y`, `src2X`, `src2Y`,
 //     `vsrc2X`, `vsrc2Y`.
 //
+// CAVEAT: this list reflects whether the *handler* should treat the
+// tied operand as a real read (yes for `sdst_in`/`vdata_in`/etc.; no
+// for `old`/`vdst_in`). It does NOT promise that the AMDGPU
+// disassembler will materialise an MCOperand for that slot — for
+// SOP1 `sdst_in` (S_BITSET0/1_B{32,64}) and SOP1 `S_CMOV_B{32,64}`
+// the disassembler collapses the tied slot and produces only
+// `(sdst, src0)`, so `srcMap` won't contain an entry for the prior-
+// dst read. Handlers in those cases must fetch the prior value
+// directly via `ctx.regs.readReg{32,64}(op.dst())`. For
+// `vdata_in` / `addr_in` / `srcTiedDef` (atomics, MAC accumulators)
+// the disassembler does emit a full MCOperand and the handler reads
+// it through the normal `op.src(N)` path.
+//
 // srcN and VOPD variants all appear here because SOPK `S_ADDK_I32`
 // ties `$src0`, SOP2 `sdst,sdst_in` variants may also surface `$src0`,
 // VALU MAC forms tie `$src2`, and VOPD3 FMAC halves tie `$src2X` /
