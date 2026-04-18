@@ -137,3 +137,22 @@ def test_anthropic_api_timeout_normalized_to_provider_timeout_error(monkeypatch)
     assert exc_info.value.provider == "anthropic", (
         f"TimeoutError.provider must be 'anthropic', got {exc_info.value.provider!r}"
     )
+
+
+def test_missing_sdk_raises_external_tool_missing(monkeypatch):
+    """N28: absent anthropic SDK raises ExternalToolMissing, not ImportError."""
+    from unittest.mock import patch as _patch
+    from perfxpert.providers.anthropic_provider import AnthropicProvider
+    from perfxpert.tools._tooldep import ExternalToolMissing
+
+    with _patch("perfxpert.providers.anthropic_provider.require_tool") as mock_rt:
+        mock_rt.side_effect = ExternalToolMissing(
+            name="anthropic",
+            install_hint="pip install anthropic",
+        )
+        monkeypatch.setenv("PERFXPERT_LLM_ANTHROPIC_KEY", "sk-test")
+        import pytest
+        with pytest.raises(ExternalToolMissing) as exc_info:
+            AnthropicProvider()
+        assert exc_info.value.name == "anthropic"
+        assert "pip install anthropic" in exc_info.value.install_hint
