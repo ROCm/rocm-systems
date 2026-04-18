@@ -15,6 +15,7 @@ request/response formatting, and error recovery.
 ## Template
 
 ```python
+# SKIP-SAMPLE — template: <name>/<Name>/<ENV_VAR> are placeholders
 """<name> — <description>.
 
 Implements the OpenAI Agents SDK Model protocol.
@@ -26,7 +27,7 @@ from typing import Optional
 from openai_agents.models import Model
 
 
-class <Name>Model(Model):
+class NameModel(Model):
     """LLM provider adapter for <name>."""
 
     def __init__(self, api_key: Optional[str] = None):
