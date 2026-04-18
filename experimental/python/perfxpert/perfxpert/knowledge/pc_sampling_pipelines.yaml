@@ -1,0 +1,32 @@
+# PC sampling execution pipelines (GFX9Pipelines).
+# Source: llm-reference-guide.md §"Seven Execution Pipelines" (lines 959-974).
+
+- name: VALU
+  instructions: "Floating-point and integer arithmetic on all 64 lanes"
+  description: "The workhorse pipeline; VALU-bound samples indicate compute-bound kernels"
+
+- name: MATRIX
+  instructions: "Matrix FMA instructions (v_mfma_*)"
+  description: "MI300X has 4 MFMA units per CU; high MATRIX samples indicate matrix-math workloads"
+  notes: "Also referred to as MFMA pipeline"
+
+- name: SCALAR
+  instructions: "Scalar ALU, scalar memory, branch instructions"
+  description: "Control flow and index computation"
+
+- name: VMEM_TEX
+  instructions: "Vector memory reads/writes, buffer, texture"
+  description: "Accesses go to HBM via L2/L1 (TEX pipeline); dominant VMEM_TEX samples indicate memory-bound kernels"
+
+- name: LDS
+  instructions: "Local Data Share reads/writes (ds_read*, ds_write*)"
+  description: "Shared memory within a workgroup"
+
+- name: FLAT
+  instructions: "Flat-addressing memory (flat_load*, flat_store*)"
+  description: "Generic pointer — slower than typed VMEM or LDS; compiler could not prove pointer targets"
+  notes: "Mitigation: add __restrict__ qualifiers or use typed pointer arguments"
+
+- name: MISC
+  instructions: "Barriers (s_barrier), messages (s_sendmsg), exports"
+  description: "Control/synchronization instructions"
