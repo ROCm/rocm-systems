@@ -559,11 +559,23 @@ static const Entry kCanonTable[] = {
     // raise_cli operator sees.
     E(DS_LOAD_TR8_B64, DS_LOAD_TR8_B64),
     E(DS_READ_B32, DS_READ_B32), E(DS_READ_B64, DS_READ_B64),
+    // 96-bit LDS load. LLVM MC keeps the legacy `DS_READ_B96`
+    // pseudo name for what gfx11+ disassembles as `ds_load_b96`
+    // (DSInstructions.td:1578); we canonicalise on the gfx11+
+    // spelling, mirroring the s_set_pc_i64 / DS_LOAD_TR8_B64
+    // precedent. The handler dispatches via the existing generic
+    // DS read range — see dsClassify in handle_ds.cpp for the
+    // {dwords=3, loadBits=96} entry.
+    E(DS_READ_B96, DS_READ_B96),
     E(DS_READ_B128, DS_READ_B128),
     E(DS_READ2_B32, DS_READ2_B32), E(DS_READ2_B64, DS_READ2_B64),
     E(DS_READ_U16, DS_READ_U16), E(DS_READ_I16, DS_READ_I16),
     E(DS_READ_U8, DS_READ_U8), E(DS_READ_I8, DS_READ_I8),
     E(DS_WRITE_B32, DS_WRITE_B32), E(DS_WRITE_B64, DS_WRITE_B64),
+    // Symmetric 96-bit LDS store. gfx11+ asm spelling is
+    // `ds_store_b96` (DSInstructions.td:1576); the LLVM MC opcode
+    // remains `DS_WRITE_B96`.
+    E(DS_WRITE_B96, DS_WRITE_B96),
     E(DS_WRITE_B128, DS_WRITE_B128),
     E(DS_WRITE2_B32, DS_WRITE2_B32), E(DS_WRITE2_B64, DS_WRITE2_B64),
     E(DS_WRITE_B16, DS_WRITE_B16), E(DS_WRITE_B8, DS_WRITE_B8),

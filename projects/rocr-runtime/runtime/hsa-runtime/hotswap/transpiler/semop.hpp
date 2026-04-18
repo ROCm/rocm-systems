@@ -309,10 +309,33 @@ enum class SemOp : uint16_t {
   // handle_ds.cpp because gfx942 (the transpiler's target ISA) has
   // neither isel pattern and no in-tree pre-isel emulation.
   DS_LOAD_TR8_B64,
-  DS_READ_B32, DS_READ_B64, DS_READ_B128,
+  DS_READ_B32, DS_READ_B64,
+  // 96-bit (3 x i32) LDS load. LLVM MC opcode `DS_READ_B96`; gfx11+
+  // (gfx1100/gfx1200/gfx1250) renames the asm spelling to
+  // `ds_load_b96` (DSInstructions.td:1578 declares
+  // `defm DS_READ_B96 : DS_Real_gfx11_gfx12_gfx13<0x0fe,
+  // "ds_load_b96">`). Hardware reads 96 bits from the lane's LDS
+  // base; the lift is `load <3 x i32>` from addrspace(3). The
+  // gfx942 backend lowers the 3-dword vector load to either a
+  // native `ds_read_b96` (gfx9 inherits the `_vi` Real form) or
+  // splits it into 3x `ds_read_b32` with the appropriate
+  // increments — both are correct in-place lowerings.
+  // Inserted between DS_READ_B64 and DS_READ_B128 deliberately so
+  // the existing range checks (`sop >= DS_READ_B32 &&
+  // sop <= DS_READ_I8` for reads, parallel for writes) continue to
+  // cover it without a special case.
+  DS_READ_B96,
+  DS_READ_B128,
   DS_READ2_B32, DS_READ2_B64,
   DS_READ_U16, DS_READ_I16, DS_READ_U8, DS_READ_I8,
-  DS_WRITE_B32, DS_WRITE_B64, DS_WRITE_B128,
+  DS_WRITE_B32, DS_WRITE_B64,
+  // Symmetric write-side for `ds_load_b96`: gfx11+ asm spelling is
+  // `ds_store_b96` (DSInstructions.td:1576); the LLVM MC opcode
+  // remains `DS_WRITE_B96`. Lift is `store <3 x i32>` to
+  // addrspace(3). Inserted between DS_WRITE_B64 and DS_WRITE_B128
+  // for the same range-check reason as DS_READ_B96 above.
+  DS_WRITE_B96,
+  DS_WRITE_B128,
   DS_WRITE2_B32, DS_WRITE2_B64,
   DS_WRITE_B16, DS_WRITE_B8,
   DS_BPERMUTE_B32,

@@ -30,6 +30,16 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     case SemOp::DS_READ_B128:  case SemOp::DS_WRITE_B128:
     case SemOp::DS_READ2_B64:  case SemOp::DS_WRITE2_B64:
       return {4, 128, false};
+    // 96-bit (3 x i32) LDS load/store. gfx11+ asm spellings are
+    // `ds_load_b96` / `ds_store_b96`; LLVM MC keeps the legacy
+    // `DS_READ_B96` / `DS_WRITE_B96` pseudo names. The generic
+    // `vecTy = <3 x i32>` path below handles the lift; the gfx942
+    // backend lowers the resulting `load <3 x i32>` /
+    // `store <3 x i32>` to either a native ds_read_b96/ds_write_b96
+    // (gfx9 inherits the `_vi` Real form from DSInstructions.td) or
+    // splits into 3x ds_read_b32/ds_write_b32 — both correct.
+    case SemOp::DS_READ_B96:   case SemOp::DS_WRITE_B96:
+      return {3, 96, false};
     case SemOp::DS_READ_B64:   case SemOp::DS_WRITE_B64:
     case SemOp::DS_READ2_B32:  case SemOp::DS_WRITE2_B32:
       return {2, 64, false};

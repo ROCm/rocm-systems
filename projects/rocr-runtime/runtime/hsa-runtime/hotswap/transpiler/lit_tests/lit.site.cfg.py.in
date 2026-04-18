@@ -82,6 +82,12 @@ config.fixtures = {
     # emulation that gfx942 needs because neither HasGFX950Insts nor
     # isGFX1250Plus isel patterns fire on gfx942.
     "ds_load_tr8_b64": r"@LIT_FIXTURE_DS_LOAD_TR8_B64_CO@",
+    # ds_load_b96 / ds_store_b96 (DS) — gfx1250 96-bit (3 x i32) LDS
+    # load+store pair.  See SemOp::DS_READ_B96 / DS_WRITE_B96 in
+    # semop.hpp and the {dwords=3, loadBits=96} entry in dsClassify
+    # in handle_ds.cpp; the fixture pins the generic `<3 x i32>`
+    # vector-load/store path the handler routes both ops through.
+    "ds_load_b96": r"@LIT_FIXTURE_DS_LOAD_B96_CO@",
 }
 
 lit_config.load_config(
