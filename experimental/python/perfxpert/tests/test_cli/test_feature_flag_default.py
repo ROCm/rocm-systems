@@ -87,6 +87,8 @@ def test_PERFXPERT_LEGACY_1_emits_deprecation_warning(monkeypatch, tmp_path, cap
     monkeypatch.setenv("PERFXPERT_LEGACY", "1")
 
     from perfxpert.ai_analysis import api
+    # Reset the deprecation flag so it emits again in this test
+    api._emit_legacy_deprecation_once._emitted = False
     db = tmp_path / "fake.db"
     db.touch()
 

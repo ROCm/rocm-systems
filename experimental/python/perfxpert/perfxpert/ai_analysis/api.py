@@ -764,8 +764,6 @@ def _apply_agentic_overlay(
             ]
         result._raw = raw
     return result
-
-
 def _route_to_legacy(
     database_path: Union[str, Path],
     *,
