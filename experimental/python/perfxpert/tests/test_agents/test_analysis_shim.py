@@ -33,7 +33,7 @@ def test_shim_delegates_compute_time_breakdown_to_analyze_module(monkeypatch):
     assert the returned dict is derived from that patched function's output."""
     import perfxpert.agents.analysis as analysis_mod
 
-    # The shim is a _LegacyTraceAnalysis instance bound to `trace_analysis`.
+    # The shim is a _TraceAnalysisAdapter instance bound to `trace_analysis`.
     # We need to confirm it uses analyze.compute_time_breakdown internally.
     # Patch the analyze module function AND PerfxpertConnection constructor.
     fake_breakdown_result = {
