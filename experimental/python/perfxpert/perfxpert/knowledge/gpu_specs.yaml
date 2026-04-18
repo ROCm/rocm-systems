@@ -1,5 +1,5 @@
 # AMD GPU hardware specifications per architecture.
-# Extracted from rocinsight/ai_analysis/share/llm-reference-guide.md
+# Extracted from perfxpert/ai_analysis/share/llm-reference-guide.md
 # during the agentic refactor (Phase 1). Source of truth for arch.lookup_peaks().
 #
 # CRITICAL CORRECTIONS (per CLAUDE.md):
