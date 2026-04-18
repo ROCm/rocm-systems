@@ -415,7 +415,30 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
           "operand — decoder rejected the 16-bit imm");
       return hr;
     }
-    Value *src = op.src(0);
+    // Read the data input via `OpName::addr` rather than positional
+    // `op.src(0)`. ds_swizzle_b32's MCInst layout per
+    // DSInstructions.td's DS_1A_RET base class is `(outs vdst), (ins
+    // VGPR_32:$addr, Offset:$offset, gds)`; `buildSrcMap` (decode.cpp)
+    // walks all non-modifier post-vdst operands, so srcMap[0] = $addr,
+    // srcMap[1] = $offset, srcMap[2] = $gds. Using `op.src(0)` would
+    // therefore work, but the named lookup is more explicit about
+    // which operand is the data and is robust to future srcMap
+    // refactors. (The other DS handlers in this file still use
+    // positional `op.src(0)` for consistency with their existing
+    // patterns; the named-lookup audit there is a system-wide cleanup
+    // outside the scope of P6.)
+    int addrIdx = AMDGPU::getNamedOperandIdx(di.inst.getOpcode(),
+                                              AMDGPU::OpName::addr);
+    if (addrIdx < 0 ||
+        (unsigned)addrIdx >= di.inst.getNumOperands() ||
+        !di.inst.getOperand((unsigned)addrIdx).isReg()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "DS",
+          "ds_swizzle_b32 missing OpName::addr VGPR operand — operand "
+          "table mismatch");
+      return hr;
+    }
+    Value *src = ctx.readOp32(di, (unsigned)addrIdx);
     Function *swiz = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_ds_swizzle);
     Value *result = ctx.B.CreateCall(
