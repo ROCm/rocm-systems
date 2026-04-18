@@ -690,6 +690,19 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 v_xor3_b32: 3-way xor. Direct mirror of V_OR3_B32 above
+  // — the .td iselect pattern is `(xor (xor a, b), c)` (see
+  // VOP3Instructions.td:1350); both nested and outer xor lift to
+  // plain CreateXor with no source modifiers (B32 ops carry only
+  // ABS/NEG-style modifiers on the FP forms, not the bitwise
+  // ones).
+  if (sop == SemOp::V_XOR3_B32) {
+    ctx.writeReg32(op.dst(),
+                   ctx.B.CreateXor(ctx.B.CreateXor(op.src(0), op.src(1)),
+                                   op.src(2), "vxor3"));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_BITOP3_B32 || sop == SemOp::V_BITOP3_B16) {
     // v_bitop3 dst, src0, src1, src2, imm8
     // For each bit position i, dst[i] = LUT[4*src0[i] + 2*src1[i] + src2[i]]

@@ -111,6 +111,11 @@ enum class SemOp : uint16_t {
   V_MUL_I32_I24, V_MUL_U32_U24, V_MUL_HI_U32_U24, V_MUL_HI_I32_I24,
   V_MAD_U32_U24, V_MAD_U32,
   V_ADD3_U32, V_LSHL_ADD_U32, V_ADD_LSHL_U32, V_LSHL_OR_B32, V_AND_OR_B32, V_OR3_B32,
+  // VOP3 ternary xor — gfx10+ only (VOP3Instructions.td:1348),
+  // .td has no SDAG `umin3`-style node, the iselect pattern at
+  // line 1350 directly matches `(xor (xor a, b), c)`. Lift is the
+  // same shape as V_OR3_B32 above.
+  V_XOR3_B32,
   V_BFE_U32, V_BFE_I32, V_PERM_B32,
   V_MBCNT_LO_U32_B32, V_MBCNT_HI_U32_B32,
   V_READLANE_B32, V_WRITELANE_B32,
