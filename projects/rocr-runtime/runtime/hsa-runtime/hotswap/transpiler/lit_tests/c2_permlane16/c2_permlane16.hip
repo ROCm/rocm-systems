@@ -38,9 +38,18 @@ extern "C" __global__ void c2_permlane16_kernel(int *a) {
   // not load-bearing for the structural lit check, which asserts on
   // the emitted `llvm.amdgcn.ds.bpermute` emulation, not on the
   // selector values themselves.
+  //
+  // `op_sel:[1, 0]` encodes fi=1, bc=0 — the only op_sel combination
+  // the emulation in `handle_valu_cross_lane.cpp` supports today
+  // (per the comment there, every GPT-OSS / softmax / bitmatrix
+  // disassembly uses this encoding, and the other three
+  // combinations refuse with `unsupportedShape` so a future corpus
+  // kernel relying on fi=0 or bc=1 surfaces loudly). Omitting
+  // `op_sel:` defaults to `[0, 0]`, which would trigger the refusal
+  // path.
   asm volatile(
-      "v_permlane16_b32  %[out16],  %[v], 0x76543210, 0x76543210\n\t"
-      "v_permlanex16_b32 %[outx16], %[v], 0x76543210, 0x76543210\n\t"
+      "v_permlane16_b32  %[out16],  %[v], 0x76543210, 0x76543210 op_sel:[1,0]\n\t"
+      "v_permlanex16_b32 %[outx16], %[v], 0x76543210, 0x76543210 op_sel:[1,0]\n\t"
       : [out16] "=v"(out16), [outx16] "=v"(outx16)
       : [v] "v"(v));
   a[tid] = out16 + outx16;

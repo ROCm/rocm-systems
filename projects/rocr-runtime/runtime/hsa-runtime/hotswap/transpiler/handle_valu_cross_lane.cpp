@@ -9,6 +9,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -85,22 +86,29 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // preserved for permlanex16. permlane16 keeps every lane within
   // its own group, trivially within-replica.
   //
-  // Handling of `fi` (fetch-invalid) and `bc` (bound_ctrl):
-  //   - `bc=0`: inactive lanes keep %old. Under SPE, `writeReg32`
-  //     predicates the vdst store via `emitUnderExec`, so lanes
-  //     masked by EXEC retain their prior VGPR value. This matches
-  //     `bc=0` semantics WITHOUT explicit intrinsic handling.
-  //   - `bc=1`: inactive lanes get 0. For permlane16 every 4-bit
-  //     nibble is in [0, 16), so the source lane is always "in
-  //     range" for the kernel's definition; `bc=1` therefore rarely
-  //     affects observable output. We still report via LLVM_DEBUG
-  //     below so a future corpus kernel that relies on the `bc=1`
-  //     zero-fill surfaces during verification.
-  //   - `fi`: controls whether ds_bpermute from an EXEC-inactive
-  //     source lane stalls or fetches the possibly-stale VGPR value.
-  //     ds_bpermute's hardware behaviour naturally matches the
-  //     common Triton usage; `fi=1` is again reported via
-  //     LLVM_DEBUG for audit.
+  // Handling of `fi` (fetch-invalid) and `bc` (bound_ctrl) — the two
+  // i1 immediates encoded via `opsel_i1timm` in PermlanePat
+  // (`SISrcMods::OP_SEL_0` bit of src0_modifiers / src1_modifiers):
+  //
+  //   - `fi=1`: on an EXEC-inactive source lane, the kernel still
+  //     fetches that lane's VGPR value (possibly stale). This is
+  //     exactly how `llvm.amdgcn.ds.bpermute` behaves naturally
+  //     (the LDS-backed path reads the VGPR alloca regardless of
+  //     EXEC), so `fi=1` is supported directly.
+  //   - `bc=0`: on an "out-of-range" source lane, the target lane
+  //     retains %old. For permlane16 the 4-bit selector nibble is
+  //     always in [0, 16) so the source lane is always in-group;
+  //     `bc=0` is the only case the emulation needs to support.
+  //     Under SPE, `writeReg32`'s `emitUnderExec` already retains
+  //     prior VDST values on EXEC-masked target lanes, covering the
+  //     "target lane inactive" direction of `bc=0`.
+  //   - `fi=0` and `bc=1` diverge from the above in ways the
+  //     emulation does not model. Every GPT-OSS / softmax /
+  //     bitmatrix disassembly we have examined uses `op_sel:[1, 0]`
+  //     (fi=1, bc=0); refusing the other combinations keeps the
+  //     classifier-gate's "no silent miscompile" invariant intact
+  //     rather than emitting ds_bpermute with fi=0 semantics it
+  //     does not provide.
   //
   // Future optimisation: on targets that DO support native
   // permlane16 (gfx10+), emit the intrinsic directly for lower
@@ -111,6 +119,21 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
     const bool isPermlaneX16 = (sop == SemOp::V_PERMLANEX16_B32);
     const bool fi = (op.srcMod(0) & SISrcMods::OP_SEL_0) != 0;
     const bool bc = (op.srcMod(1) & SISrcMods::OP_SEL_0) != 0;
+    if (!fi || bc) {
+      // Empirically the GPT-OSS / softmax / bitmatrix corpora emit
+      // `op_sel:[1, 0]` exclusively (fi=1, bc=0). Refuse any other
+      // encoding loudly so a future corpus kernel's extended
+      // fi/bc use surfaces during classifier verification rather
+      // than producing an approximation silently. Re-narrowing this
+      // gate is the right place to extend the emulation.
+      std::string detail;
+      raw_string_ostream os(detail);
+      os << "permlane16 / permlanex16 emulation supports only "
+            "op_sel:[1,0] (fi=1, bc=0); saw fi="
+         << (fi ? 1 : 0) << ", bc=" << (bc ? 1 : 0);
+      hr.failure = RaiseFailure::unsupportedShape(di, "VALU", detail);
+      return hr;
+    }
     Value *src0 = op.src(0);
     Value *sel1 = op.src(1);
     Value *sel2 = op.src(2);
@@ -148,8 +171,6 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
         bperm, {byteAddr, src0},
         isPermlaneX16 ? "permlanex16_emu" : "permlane16_emu");
     ctx.writeReg32(op.dst(), result);
-    (void)fi;
-    (void)bc;
     hr.handled = true;
     return hr;
   }

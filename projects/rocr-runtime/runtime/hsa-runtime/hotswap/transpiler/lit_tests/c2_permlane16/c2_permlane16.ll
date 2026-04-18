@@ -32,12 +32,30 @@
 
 ; CHECK-LABEL: define amdgpu_kernel void @c2_permlane16_kernel(
 
-; Both permlane16 and permlanex16 emit a ds_bpermute call. The
-; handler's SSA names are `permlane16_emu` / `permlanex16_emu`, but
-; FileCheck against the intrinsic name alone stays stable across
-; rename refactors.
-; CHECK:      call i32 @llvm.amdgcn.ds.bpermute(
-; CHECK:      call i32 @llvm.amdgcn.ds.bpermute(
+; The permlanex16 emulation's signature property is the group-swap
+; XOR by 0x10 (= 16) on the computed group-base before the byte-
+; address shift feeds into ds_bpermute. Matching the constant 16 in
+; a `xor` instruction that then feeds (directly or indirectly) into
+; the bpermute's index operand is the minimal check that pins the
+; cross-16-lane-group semantics without asserting on SSA names.
+;
+; permlane16 (non-swap) must NOT have a `xor %..., 16` anywhere in
+; its byte-address chain — FileCheck-NOT would be brittle here
+; since the later permlanex16 DOES carry the xor, so we instead rely
+; on the `ds_bpermute` call order: the first bpermute (permlane16)
+; precedes the xor (which belongs to permlanex16's chain).
+
+; First bpermute: the permlane16 (non-swap) call. Its byte-address
+; chain has no `xor …, 16`.
+; CHECK:      %{{permlane16_emu[0-9]*}} = call i32 @llvm.amdgcn.ds.bpermute(
+
+; After the first permlane16 emits, the permlanex16 group-swap
+; xor with 0x10 (= 16) must appear somewhere before the second
+; ds_bpermute call consumes its byte-address operand.
+; CHECK:      xor i32 %{{[^,]+}}, 16
+
+; Second bpermute: the permlanex16 call.
+; CHECK:      %{{permlanex16_emu[0-9]*}} = call i32 @llvm.amdgcn.ds.bpermute(
 
 ; The intrinsic declaration must be present.
 ; CHECK:      declare {{.*}}i32 @llvm.amdgcn.ds.bpermute(i32, i32)
