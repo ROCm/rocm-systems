@@ -144,6 +144,23 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // s_mul_hi_i32: signed mul-high. Same widening pattern as
+  // S_MUL_HI_U32 above, but sign-extend both operands so the wide
+  // multiply produces a signed product. SOPInstructions.td .td
+  // pattern is `mulhs SSrc_b32, SSrc_b32` (line ~849); the only
+  // operational difference vs S_MUL_HI_U32 (`mulhu`) is the
+  // extension semantics on the inputs.
+  if (sop == SemOp::S_MUL_HI_I32) {
+    Value *a = ctx.B.CreateSExt(op.src(0), ctx.i64Ty),
+          *b = ctx.B.CreateSExt(op.src(1), ctx.i64Ty);
+    ctx.regs.writeReg32(
+        ctx.B, op.dst(),
+        ctx.B.CreateTrunc(
+            ctx.B.CreateLShr(ctx.B.CreateMul(a, b, "mulhi_i_wide"), 32),
+            ctx.i32Ty, "mulhi_i"));
+    hr.handled = true;
+    return hr;
+  }
   // GFX12 scalar FP multiply
   if (sop == SemOp::S_MUL_F32) {
     Value *s0 = ctx.B.CreateBitCast(op.src(0), ctx.f32Ty);
