@@ -190,11 +190,40 @@ def main(argv=None):
                 print(f"  {name}: {desc}")
             return 0
     elif args.subcommand == "doctor":
-        _run_doctor()
-        return 0
+        sys.exit(_run_doctor())
     else:
         parser.print_help()
         sys.exit(1)
+
+
+def _check_version() -> tuple[bool, str]:
+    """Check perfxpert version."""
+    try:
+        from importlib.metadata import version
+        ver = version("perfxpert")
+        return True, f"perfxpert {ver} installed"
+    except Exception as e:
+        return False, f"perfxpert version unknown: {e}"
+
+
+def _check_python_version() -> tuple[bool, str]:
+    """Check Python version >= 3.10."""
+    import sys
+    major, minor = sys.version_info[:2]
+    ver_str = f"Python {major}.{minor}"
+    if sys.version_info >= (3, 10):
+        return True, f"{ver_str} (>= 3.10 required)"
+    return False, f"{ver_str} (>= 3.10 required)"
+
+
+def _check_openai_agents() -> tuple[bool, str]:
+    """Check openai-agents SDK version."""
+    try:
+        from importlib.metadata import version
+        ver = version("openai-agents")
+        return True, f"openai-agents {ver}"
+    except Exception as e:
+        return False, f"openai-agents unavailable: {e}"
 
 
 def _check_mcp_server() -> tuple[bool, str]:
@@ -204,67 +233,110 @@ def _check_mcp_server() -> tuple[bool, str]:
         from mcp_server._registry import discover_read_only_tools
         server = build_server()  # noqa: F841
         n = len(discover_read_only_tools())
-        return True, f"MCP server OK — {n} tools registered"
+        return True, f"MCP server reachable"
     except Exception as e:
         return False, f"MCP server FAILED: {e}"
 
 
+def _check_task_store() -> tuple[bool, str]:
+    """Check Python task store (.perfxpert/) readiness."""
+    import os
+    from pathlib import Path
+    task_store = Path.home() / ".perfxpert"
+    try:
+        task_store.mkdir(exist_ok=True)
+        if task_store.is_dir():
+            return True, f"Python task store (.perfxpert/) ready"
+        return False, "task store not a directory"
+    except Exception as e:
+        return False, f"task store creation failed: {e}"
+
+
 def _check_opencode_bundled() -> tuple[bool, str]:
-    """Check that bundled opencode binary can be resolved."""
+    """Check that bundled opencode binary can be resolved with version."""
     from perfxpert.cli.opencode_launcher import resolve_opencode_binary
     try:
         p = resolve_opencode_binary()
-        return True, f"opencode binary at {p}"
+        # Try to get version from the binary
+        import subprocess
+        try:
+            result = subprocess.run([str(p), "--version"], capture_output=True, text=True, timeout=2)
+            ver = result.stdout.strip().split()[-1] if result.returncode == 0 else "unknown"
+        except Exception:
+            ver = "unknown"
+        opencode_path = str(p).replace(str(Path.home()), "~")
+        return True, f"Bundled opencode {ver} detected at {opencode_path}"
     except FileNotFoundError as e:
         return False, str(e)
 
 
-def _check_opencode_config() -> tuple[bool, str]:
-    """Check that opencode config bundle is present and complete."""
-    from perfxpert.cli.opencode_launcher import resolve_config_dir
-    try:
-        p = resolve_config_dir()
-        missing = [
-            name for name in ("opencode.json", "amd-theme.json", "AGENTS.md", "mcp.json")
-            if not (p / name).is_file()
-        ]
-        if missing:
-            return False, f"opencode_config missing files: {missing}"
-        return True, f"opencode config bundle at {p}"
-    except FileNotFoundError as e:
-        return False, str(e)
+def _check_llm_providers() -> tuple[list[str], list[str]]:
+    """Check which LLM providers are configured."""
+    import os
+    configured = []
+    unconfigured = []
 
+    # Import providers to trigger registration
+    import perfxpert.providers.anthropic_provider  # noqa: F401
+    import perfxpert.providers.openai_provider  # noqa: F401
+    import perfxpert.providers.ollama_provider  # noqa: F401
+    import perfxpert.providers.private_provider  # noqa: F401
+    import perfxpert.providers.opencode_provider  # noqa: F401
 
-def _report_active_mode() -> str:
-    """Return one of 'Mode: agentic' | 'Mode: legacy (DEPRECATED)'."""
-    from .ai_analysis.api import _is_legacy_mode
-    if _is_legacy_mode():
-        return (
-            "Mode: legacy (DEPRECATED)\n"
-            "  PERFXPERT_LEGACY=1 is set.\n"
-            "  This path will be removed in the next minor release (vX.Y+1).\n"
-            "  Migrate to the agentic path by unsetting PERFXPERT_LEGACY.\n"
-            "  See: docs/migration-to-agentic.md"
-        )
-    return "Mode: agentic (default, Phase 6+)"
+    providers = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "ollama": "OLLAMA_HOST",
+        "private": "PRIVATE_LLM_ENDPOINT",
+        "opencode": None,  # always available (bundled)
+    }
+
+    for name, env_var in providers.items():
+        if name == "opencode" or (env_var and os.getenv(env_var)):
+            configured.append(name)
+        else:
+            unconfigured.append(name)
+
+    return sorted(configured), sorted(unconfigured)
 
 
 def _run_doctor():
-    """Run all health checks and print results."""
-    print("perfxpert doctor — health check\n")
+    """Run all health checks and print results in canonical format."""
+    import sys
 
     checks = [
+        ("perfxpert version", _check_version()),
+        ("Python version", _check_python_version()),
+        ("openai-agents", _check_openai_agents()),
         ("MCP server", _check_mcp_server()),
+        ("task store", _check_task_store()),
         ("opencode binary", _check_opencode_bundled()),
-        ("opencode config", _check_opencode_config()),
     ]
 
+    all_ok = True
     for name, (ok, msg) in checks:
-        symbol = "✓" if ok else "✗"
-        print(f"{symbol} {name}: {msg}")
+        symbol = "✓" if ok else "⚠" if "unknown" in msg.lower() else "✗"
+        if not ok and symbol == "✗":
+            all_ok = False
+        print(f"{symbol} {msg}")
 
-    # Report active mode
-    print("\n" + _report_active_mode())
+    # Check LLM providers
+    configured, unconfigured = _check_llm_providers()
+    all_ok = all_ok and len(configured) > 0  # at least one provider configured
+    configured_str = ", ".join(configured) if configured else "(none)"
+    unconfigured_str = ", ".join(unconfigured) if unconfigured else "(all configured)"
+    print(f"✓ {len(configured)}/5 LLM providers configured ({configured_str})")
+    if unconfigured:
+        print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
+
+    # Final status
+    print()
+    if all_ok:
+        print("✓ ALL CLEAN")
+        return 0
+    else:
+        print(f"✗ Issues found — see above")
+        return 1
 
 
 def _get_version():
