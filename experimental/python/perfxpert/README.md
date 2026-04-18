@@ -47,6 +47,13 @@ perfxpert doctor
 
 Everything ships inside one `pip install perfxpert` — including the bundled opencode binary for `perfxpert-code`.
 
+## Contributing
+
+perfxpert welcomes contributions. Start with [CONTRIBUTING.md](CONTRIBUTING.md)
+for the extension-surface matrix + governance. Per-surface guides under
+[docs/contributing/](docs/contributing/). Architectural changes go through
+an [RFC](docs/rfcs/README.md).
+
 ## Feature flags
 
 | Flag | Default | Purpose |
