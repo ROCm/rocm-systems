@@ -180,12 +180,44 @@ void driftCheckSrcN(DecodedInst &di, const MCInstrDesc &desc) {
   };
 
   unsigned opc = di.inst.getOpcode();
+
+  // VOP2 MADMK exception: `v_fmamk_f32` and friends use VOP_MADMK
+  // (VOP2Instructions.td), whose Ins32 is `(src0, K-imm, src1)` —
+  // i.e., the 32-bit literal sits at MCInst index 2 BETWEEN src0
+  // (index 1) and src1 (index 3). The natural positional walk in
+  // `buildSrcMap` produces srcMap = [src0, K-imm, src1], which
+  // matches what the V_FMAMK_F32 handler in handle_valu.cpp
+  // expects (`srcF(0)=src0, srcF(1)=K, srcF(2)=src2` per its own
+  // documentation block).
+  //
+  // The strict `srcMap[k] == OpName::srcN` invariant breaks for
+  // this layout because OpName::src1 lives at MCInst index 3, not
+  // srcMap[1] = 2. The drift is INTENTIONAL: handlers index by
+  // MCInst order, not OpName order, and MADMK is a known stable
+  // form. Skip the strict srcN-position check for this signature.
+  //
+  // Detection: the opcode exposes both `OpName::imm` and
+  // `OpName::src0` / `OpName::src1`, with the imm operand index
+  // strictly between src0 and src1. (Compare to MADAK forms like
+  // `v_fmaak_f32`, whose Ins32 is `(src0, src1, K-imm)` — K
+  // trailing — where the positional walk happens to coincide with
+  // OpName order and the drift check passes naturally.)
+  //
+  // The modifier-map check below remains in force; MADMK has no
+  // src{0,1,2}_modifiers operands, so the loop's modMap branch
+  // simply finds expected=-1 and our=-1, agreement.
+  int immIdx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::imm);
+  int src0Idx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::src0);
+  int src1Idx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::src1);
+  bool isMADMK = immIdx >= 0 && src0Idx >= 0 && src1Idx >= 0 &&
+                 src0Idx < immIdx && immIdx < src1Idx;
+
   for (unsigned k = 0; k < 3; ++k) {
     int namedSrc = AMDGPU::getNamedOperandIdx(opc, kSrcNames[k]);
     if (namedSrc < 0)
       break;
     int ourSrc = (k < di.numSrcs) ? (int)di.srcMap[k] : -1;
-    if (ourSrc != namedSrc)
+    if (!isMADMK && ourSrc != namedSrc)
       reportErr("transpiler: srcMap disagrees with OpName::srcN table",
                 (int)k, ourSrc, namedSrc);
     int namedMod = AMDGPU::getNamedOperandIdx(opc, kModNames[k]);
