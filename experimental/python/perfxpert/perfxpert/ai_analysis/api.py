@@ -1010,7 +1010,10 @@ def _build_analysis_result(
         primary_bottleneck = "memory_transfer"
         confidence = 0.70
     elif overhead_pct > 25:
-        primary_bottleneck = "latency"
+        # LEGACY-BUG-FIX: old heuristic returned "latency" here.
+        # PMC truth (Part C re-profile) shows this is "api_overhead".
+        # Aligning legacy path with agentic path and PMC verdict.
+        primary_bottleneck = "api_overhead"
         confidence = 0.75
     elif kernel_pct > 70 and has_counters:
         primary_bottleneck = "compute"
