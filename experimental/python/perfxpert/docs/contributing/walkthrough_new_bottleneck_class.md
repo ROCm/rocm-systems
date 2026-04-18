@@ -8,7 +8,7 @@ knowledge + tool + agent addition under the narrow-scope model.
 
 ## Prerequisites
 
-- Your development environment set up (see [CONTRIBUTING.md](../CONTRIBUTING.md) TL;DR)
+- Your development environment set up (see [CONTRIBUTING.md](../../CONTRIBUTING.md) TL;DR)
 - Familiarity with the three agents (Analysis, Recommendation, and Correctness)
 
 ## Step 1: Extend bottleneck types
