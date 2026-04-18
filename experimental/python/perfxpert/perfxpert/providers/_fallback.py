@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from perfxpert.providers._base import Provider, ProviderResponse
 from perfxpert.providers._exceptions import (
     DryRunResponse as _DryRunResponseT,
+    ProviderChainExhausted,
     RateLimitError,
+    UnknownProvider,
 )
 from perfxpert.providers.registry import get_provider
 
@@ -74,9 +76,25 @@ class FallbackProvider(Provider):
         self._stop_on_auth_error = stop_on_auth_error
 
     def _resolve(self, entry: Union[Provider, str]) -> Provider:
+        """Resolve a chain entry to a live Provider.
+
+        Raises ``UnknownProvider`` (never a bare ``KeyError``) so callers
+        and the cascade loop see only provider-taxonomy exceptions.
+        """
         if isinstance(entry, Provider):
             return entry
-        return get_provider(entry)
+        try:
+            return get_provider(entry)
+        except KeyError as exc:
+            # Pull the known-list out of the message for richer telemetry.
+            # registry.get_provider formats: "Unknown provider 'x'; known: a, b"
+            known: List[str] = []
+            msg = str(exc)
+            if "known:" in msg:
+                known_part = msg.rsplit("known:", 1)[1].strip().rstrip("'\"")
+                if known_part and known_part != "<none registered>":
+                    known = [k.strip() for k in known_part.split(",") if k.strip()]
+            raise UnknownProvider(entry, known=known) from exc
 
     def complete(
         self,
@@ -87,14 +105,21 @@ class FallbackProvider(Provider):
         max_tokens: Optional[int] = None,
         dry_run: bool = False,
     ) -> Union[ProviderResponse, _DryRunResponseT]:
-        last_error: Optional[Exception] = None
+        attempts: List[Tuple[str, BaseException]] = []
+        chain_names: List[str] = [
+            entry if isinstance(entry, str) else type(entry).__name__
+            for entry in self._providers
+        ]
         for idx, entry in enumerate(self._providers):
+            entry_name = entry if isinstance(entry, str) else type(entry).__name__
             try:
                 provider = self._resolve(entry)
-            except KeyError as e:
-                # Unknown provider name — skip but remember.
-                _LOG.warning("fallback: provider entry %r unresolvable: %s", entry, e)
-                last_error = e
+            except UnknownProvider as e:
+                # Unknown provider name — record and move on.
+                _LOG.warning(
+                    "fallback: provider entry %r unresolvable: %s", entry, e
+                )
+                attempts.append((entry_name, e))
                 continue
 
             try:
@@ -112,10 +137,14 @@ class FallbackProvider(Provider):
                     len(self._providers),
                     entry,
                 )
-                last_error = e
+                attempts.append((entry_name, e))
                 continue
-        assert last_error is not None  # loop must have run at least once
-        raise last_error
+        # Chain exhausted — surface a typed error. Never leak KeyError.
+        last_exc: Optional[BaseException] = attempts[-1][1] if attempts else None
+        err = ProviderChainExhausted(providers=chain_names, attempts=attempts)
+        if last_exc is not None:
+            raise err from last_exc
+        raise err
 
 
 def get_fallback_provider(

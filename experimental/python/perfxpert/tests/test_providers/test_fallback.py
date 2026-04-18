@@ -19,8 +19,11 @@ from perfxpert.providers import (
     ENV_FALLBACK_CHAIN,
     FallbackProvider,
     Provider,
+    ProviderChainExhausted,
+    ProviderError,
     ProviderResponse,
     RateLimitError,
+    UnknownProvider,
     get_fallback_provider,
     parse_chain_env,
 )
@@ -129,7 +132,7 @@ def test_rate_limit_falls_over_to_secondary() -> None:
     assert len(secondary.calls) == 1
 
 
-def test_all_rate_limited_raises_last_error() -> None:
+def test_all_rate_limited_raises_chain_exhausted() -> None:
     primary = _StubProvider(
         name="primary", raises=RateLimitError("primary", retry_after=0.0)
     )
@@ -138,9 +141,18 @@ def test_all_rate_limited_raises_last_error() -> None:
     )
 
     fp = FallbackProvider([primary, secondary])
-    with pytest.raises(RateLimitError) as exc:
+    with pytest.raises(ProviderChainExhausted) as exc:
         fp.complete([{"role": "user", "content": "hi"}])
-    assert "secondary" in str(exc.value)
+    # The last attempt's RateLimitError is preserved as __cause__.
+    assert isinstance(exc.value.__cause__, RateLimitError)
+    # ProviderChainExhausted is a ProviderError subclass — taxonomy honoured.
+    assert isinstance(exc.value, ProviderError)
+    # Exhaustion records every attempt in order.
+    assert [name for name, _ in exc.value.attempts] == [
+        "_StubProvider",
+        "_StubProvider",
+    ]
+    assert all(isinstance(e, RateLimitError) for _, e in exc.value.attempts)
 
 
 def test_auth_error_in_primary_propagates_immediately() -> None:
@@ -211,3 +223,81 @@ def test_get_fallback_provider_explicit_chain_overrides_env(
     fp = get_fallback_provider(chain=["anthropic", "private"])
     assert isinstance(fp, FallbackProvider)
     assert fp._providers == ["anthropic", "private"]  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Error taxonomy — I5: unknown provider + chain exhaustion never leak KeyError
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_provider_raises_typed_error() -> None:
+    """An unresolvable name must surface as UnknownProvider, never KeyError."""
+    fp = FallbackProvider(["__definitely_unregistered_provider__"])
+    with pytest.raises(ProviderChainExhausted) as exc:
+        fp.complete([{"role": "user", "content": "hi"}])
+    # Cause chain must include the UnknownProvider error, not KeyError.
+    assert isinstance(exc.value.__cause__, UnknownProvider)
+    assert not isinstance(exc.value.__cause__, KeyError)
+    # Taxonomy sanity.
+    assert isinstance(exc.value.__cause__, ProviderError)
+
+
+def test_chain_exhaustion_raises_typed_error_with_history() -> None:
+    """Every provider entry fails — all attempts are recorded in order."""
+    fp = FallbackProvider(
+        ["__missing_alpha__", "__missing_beta__", "__missing_gamma__"]
+    )
+    with pytest.raises(ProviderChainExhausted) as exc:
+        fp.complete([{"role": "user", "content": "hi"}])
+    assert len(exc.value.attempts) == 3
+    assert [name for name, _ in exc.value.attempts] == [
+        "__missing_alpha__",
+        "__missing_beta__",
+        "__missing_gamma__",
+    ]
+    assert all(isinstance(e, UnknownProvider) for _, e in exc.value.attempts)
+    assert exc.value.providers == [
+        "__missing_alpha__",
+        "__missing_beta__",
+        "__missing_gamma__",
+    ]
+
+
+def test_original_exceptions_preserved_in_attempts_list() -> None:
+    """Mixed chain (rate-limited stub + unresolvable name) preserves each original."""
+    primary = _StubProvider(
+        name="primary", raises=RateLimitError("primary", retry_after=0.0)
+    )
+    fp = FallbackProvider([primary, "__unresolvable_xyz__"])
+    with pytest.raises(ProviderChainExhausted) as exc:
+        fp.complete([{"role": "user", "content": "hi"}])
+
+    assert len(exc.value.attempts) == 2
+    name_a, err_a = exc.value.attempts[0]
+    name_b, err_b = exc.value.attempts[1]
+    # First attempt: the _StubProvider instance hit RateLimitError.
+    assert name_a == "_StubProvider"
+    assert isinstance(err_a, RateLimitError)
+    assert err_a.provider == "primary"
+    # Second attempt: name-string failed to resolve.
+    assert name_b == "__unresolvable_xyz__"
+    assert isinstance(err_b, UnknownProvider)
+    # __cause__ is set to the most recent exception (UnknownProvider).
+    assert exc.value.__cause__ is err_b
+
+
+def test_env_var_chain_of_unknown_names_raises_typed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: PERFXPERT_LLM_FALLBACK_CHAIN=nonexistent1,nonexistent2 path."""
+    monkeypatch.setenv(ENV_FALLBACK_CHAIN, "nonexistent1,nonexistent2")
+    fp = get_fallback_provider()
+    assert fp is not None
+    with pytest.raises(ProviderChainExhausted) as exc:
+        fp.complete([{"role": "user", "content": "hi"}])
+    # Never bare KeyError.
+    assert not isinstance(exc.value, KeyError)
+    assert [name for name, _ in exc.value.attempts] == [
+        "nonexistent1",
+        "nonexistent2",
+    ]
