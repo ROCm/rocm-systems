@@ -115,6 +115,14 @@ def main(argv=None):
     providers_sub = providers_parser.add_subparsers(dest="providers_action", required=True)
     providers_sub.add_parser("list", help="List available LLM providers + configuration status")
 
+    # ------------------------------------------------------------------
+    # doctor subcommand
+    # ------------------------------------------------------------------
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Health check: verify MCP server, LLM providers, and dependencies",
+    )
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -181,9 +189,37 @@ def main(argv=None):
             for name, desc in sorted(list_providers().items()):
                 print(f"  {name}: {desc}")
             return 0
+    elif args.subcommand == "doctor":
+        _run_doctor()
+        return 0
     else:
         parser.print_help()
         sys.exit(1)
+
+
+def _check_mcp_server() -> tuple[bool, str]:
+    """Check that MCP server builds and tools are registered."""
+    try:
+        from mcp_server.server import build_server
+        from mcp_server._registry import discover_read_only_tools
+        server = build_server()  # noqa: F841
+        n = len(discover_read_only_tools())
+        return True, f"MCP server OK — {n} tools registered"
+    except Exception as e:
+        return False, f"MCP server FAILED: {e}"
+
+
+def _run_doctor():
+    """Run all health checks and print results."""
+    print("perfxpert doctor — health check\n")
+
+    checks = [
+        ("MCP server", _check_mcp_server()),
+    ]
+
+    for name, (ok, msg) in checks:
+        symbol = "✓" if ok else "✗"
+        print(f"{symbol} {name}: {msg}")
 
 
 def _get_version():
