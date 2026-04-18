@@ -17,17 +17,18 @@ minor release; that path is now deleted and the env var is unrecognized.
 
 | Concern | Legacy (pre-v0.2.0) | Agentic (v0.2.0+) |
 |---------|---------------------|--------------------|
-| Interactive TUI | `perfxpert analyze --interactive` | `perfxpert-code` (bundled AMD-themed opencode) |
-| Session resume | `perfxpert analyze --resume-session file.json` | opencode sessions (persistent by default) |
-| LLM "fence" | Monolithic `ai_analysis/share/llm-reference-guide.md` | Per-agent `agents/fence/*.md` + knowledge YAMLs |
+| Interactive TUI | legacy `perfxpert analyze` conversational mode | `perfxpert-code` (bundled AMD-themed opencode) |
+| Session resume | legacy resume-session flag on `perfxpert analyze` | opencode sessions (persistent by default) |
+| LLM "fence" | Monolithic reference guide under the legacy `ai_analysis/` tree | Per-agent `agents/fence/*.md` + knowledge YAMLs |
 | Recommendation engine | Rule-based in `analyze.py::generate_recommendations` | Multi-agent (Analysis → Recommendation → Specialists) |
-| Correctness checks | Inline in `interactive.py::_revert_last_edit` | 5-gate cascade in `runtime/gate_cascade.py` |
-| Code edits | `WorkflowSession._llm_rewrite_file()` | opencode-native edit + MCP verify |
-| Library API (`analyze_database()`) | Direct LLM call via `LLMAnalyzer.analyze_with_llm` | Routes into agent runtime; same return type |
+| Correctness checks | Inline in the legacy interactive-session module's revert helper | 5-gate cascade in `runtime/gate_cascade.py` |
+| Code edits | Legacy `WorkflowSession._llm_rewrite_file()` | opencode-native edit + MCP verify |
+| Library API (`analyze_database()`) | Direct LLM call via the legacy analyzer class | Routes into agent runtime; same return type |
 
 ## What stays the same
 
-- `perfxpert analyze` CLI command (minus `--interactive` / `--resume-session`)
+- `perfxpert analyze` CLI command (the conversational flags are removed —
+  see below)
 - `AnalysisResult` dataclass and its `to_json/markdown/webview` methods
 - JSON schema (`analysis-output.schema.json`)
 - All `--format`, `--llm`, `--prompt`, `--source-dir`, `-d`, `-o` flags
@@ -35,19 +36,19 @@ minor release; that path is now deleted and the env var is unrecognized.
 
 ## If your workflow was...
 
-### `perfxpert analyze --interactive`
+### Legacy conversational mode on `perfxpert analyze`
 
 → **Switch to `perfxpert-code`**, which is the AMD-themed bundled opencode TUI.
 Calls into the same agent runtime as batch mode, just wrapped in a conversational UI.
 
-### `perfxpert analyze --interactive --resume-session file.json`
+### Legacy conversational mode with session resume
 
 → **Use opencode sessions.** `perfxpert-code` persists sessions in `.perfxpert/`
 by default; see `perfxpert-code --list-sessions` and `perfxpert-code --resume <id>`.
 
-### Calling `from perfxpert.ai_analysis import LLMConversation`
+### Calling the legacy conversation class from `perfxpert.ai_analysis`
 
-→ **Use `from perfxpert.agents.runtime import create_session`.** The new API is
+→ **Use `from perfxpert.agents.runtime import build_session`.** The new API is
 typed (Pydantic), streams via the SDK, and supports all 5 providers uniformly.
 
 ### Calling `from perfxpert.ai_analysis import load_reference_guide`
