@@ -1,1 +1,1 @@
-"""Integration tests — full-flow + cross-cutting CI guardrails."""
+"""Integration tests — feature-flag dispatch + MCP exposure CI guard."""
