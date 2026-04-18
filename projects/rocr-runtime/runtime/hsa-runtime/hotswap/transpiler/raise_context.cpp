@@ -315,27 +315,33 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
 Value *RaiseContext::emitUpdateDpp(Value *oldVal, Value *src, uint16_t ctrl,
                                     uint8_t rowMask, uint8_t bankMask,
                                     bool boundCtrl) {
-  // CROSS_LANE_SURVEY.md P5: lift DPP src-pathway modifier through
-  // `llvm.amdgcn.update.dpp`. The intrinsic is type-overloaded (any type);
-  // for correctness-first the implementation here accepts any 32-bit type,
-  // bitcasting through i32 on call so the single intrinsic overload
-  // covers i32 / f32 / <N x iK> of total 32-bit width. 64-bit DPP
-  // widening is intentionally unsupported today — no corpus kernel emits
-  // `_e64_dpp` on 64-bit-width operands, and `report_fatal_error` on
-  // drift keeps that invariant enforceable rather than silently emitting
-  // an invalid intrinsic overload.
+  // CROSS_LANE_SURVEY.md P5: lift the DPP src-pathway modifier through
+  // `llvm.amdgcn.update.dpp`. The intrinsic is type-overloaded
+  // (`llvm_any_ty`). We route through integer overloads sized to match
+  // the input's bit-width and bitcast through when the input is a
+  // same-width non-integer type (f32 / <2 x i16> / etc.); codegen
+  // picks the same DPP lowering for all same-width overloads.
+  //
+  // Widths supported today: 32-bit and 64-bit, matching the hardware
+  // DPP encoding families (VOP_DPP and VOP_DPP_64). Other widths
+  // `report_fatal_error` — the tsFlags DPP bit can only be set on
+  // VOP1/VOP2/VOP3 classes whose operands are always 32-bit or 64-bit
+  // in AMDGPU's ISA, so any other width is a decoder/tblgen drift
+  // situation worth surfacing loudly rather than silently downgrading.
   assert(oldVal->getType() == src->getType() &&
          "emitUpdateDpp: old and src must have matching types");
   Type *origTy = src->getType();
   const unsigned bits = origTy->getPrimitiveSizeInBits();
-  if (bits != 32)
+  Type *intTy = nullptr;
+  if (bits == 32)
+    intTy = i32Ty;
+  else if (bits == 64)
+    intTy = i64Ty;
+  else
     report_fatal_error(
-        "emitUpdateDpp: non-32-bit DPP sources are not yet lowered (see "
-        "CROSS_LANE_SURVEY.md P5 — extend here when the corpus needs it)");
-  // The overload type we pass as the intrinsic's result / matched-operand
-  // type. Keep it at i32 so codegen picks up the common DPP lowering
-  // path; we round-trip through bitcasts on f32/<2 x i16>/etc. inputs.
-  Type *intTy = i32Ty;
+        "emitUpdateDpp: unsupported DPP operand width (expected 32 or 64 "
+        "bits). Extend the bit-width dispatch below when a new DPP "
+        "operand width lands in AMDGPU's ISA.");
   auto toIntTy = [&](Value *v) {
     return v->getType() == intTy ? v : B.CreateBitCast(v, intTy);
   };

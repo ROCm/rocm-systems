@@ -302,14 +302,25 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       site.inst = &di;
       site.kind = ObstructionKind::DppCrossLane;
       site.rewrite = RewriteId::P5_DppModifier;
-      // P5 landed: DPP modifier bits are preserved in
-      // `DecodedInst::dppCtrl/dppRowMask/dppBankMask/dppBoundCtrl`
-      // by `decodeDppModifiers` (decode.cpp), and `OpResolver::src(0)`
-      // / `srcF(0)` / `src64(0)` transparently wrap the src0 value
-      // through `RaiseContext::emitUpdateDpp` so handlers dispatched
-      // on the canonicalised SemOp emit correct
-      // `llvm.amdgcn.update.dpp` intrinsic calls.
-      site.rewriteImplemented = true;
+      // P5 (DPP16 lift via `llvm.amdgcn.update.dpp`) landed for the
+      // DPP16 encoding family. `decodeDppModifiers` sets
+      // `di.hasDpp = true` only after successfully extracting every
+      // DPP16 modifier operand (dpp_ctrl / row_mask / bank_mask /
+      // bound_ctrl); for DPP8 instructions it early-returns and leaves
+      // `hasDpp` false. Gate `rewriteImplemented` on `hasDpp` so DPP16
+      // accepts (outcome b) while DPP8 refuses loudly (outcome c
+      // pending a P5 extension to `llvm.amdgcn.mov.dpp8`). The
+      // `tsFlags & SIInstrFlags::DPP` check still fires for both
+      // forms — both are a Class-2 cross-lane site by SPE_DESIGN.md
+      // taxonomy; the flipped-by-form `rewriteImplemented` bit is
+      // what separates "handled" from "pending" without mucking with
+      // the taxonomy.
+      site.rewriteImplemented = di.hasDpp;
+      if (!di.hasDpp)
+        site.detail =
+            "DPP8 lane-permutation form — P5 currently covers only the "
+            "DPP16 encoding family via llvm.amdgcn.update.dpp; extending "
+            "to DPP8 requires an llvm.amdgcn.mov.dpp8 lift path.";
       report.sites.push_back(std::move(site));
       continue;
     }

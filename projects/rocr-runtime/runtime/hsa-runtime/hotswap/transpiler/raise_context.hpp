@@ -250,11 +250,19 @@ struct OpResolver {
   // instruction may call `src(0)` more than once (e.g. VOPD's two
   // halves). `OpResolver` instances are short-lived so the cache is
   // strictly scoped.
+  //
+  // Width dispatch: `src(0)` / `srcF(0)` go through the 32-bit read
+  // path and cache `cachedDppOldVdst32`; `src64(0)` goes through the
+  // 64-bit read path and caches `cachedDppOldVdst64`. Handlers that
+  // mix widths on the same instruction (which would be unusual — a
+  // VALU op reads its src0 at a single width) would hit both caches
+  // but each lookup stays coherent. `emitUpdateDpp` supports both
+  // widths; other widths abort loudly.
   llvm::Value *wrapDppIfNeeded(unsigned logicalSrc, llvm::Value *raw) {
     if (!di.hasDpp || logicalSrc != 0) return raw;
-    if (!cachedDppOld32)
-      cachedDppOld32 = ctx.readOp32(di, 0);
-    return ctx.emitUpdateDpp(cachedDppOld32, raw, di.dppCtrl, di.dppRowMask,
+    if (!cachedDppOldVdst32)
+      cachedDppOldVdst32 = ctx.readOp32(di, 0);
+    return ctx.emitUpdateDpp(cachedDppOldVdst32, raw, di.dppCtrl, di.dppRowMask,
                               di.dppBankMask, di.dppBoundCtrl);
   }
 
@@ -265,18 +273,13 @@ struct OpResolver {
     return applyMods(i, wrapDppIfNeeded(i, ctx.readOp32(di, srcIdx(i))));
   }
   llvm::Value *src64(unsigned i) {
-    // 64-bit DPP variants exist at the encoding level but no corpus
-    // kernel exercises them today (derisking §7.3 logs only 32-bit
-    // DPP patterns). `emitUpdateDpp` `report_fatal_error`s on 64-bit
-    // input so a future corpus kernel will surface here loudly
-    // rather than silently miscompiling.
     llvm::Value *raw = ctx.readOp64(di, srcIdx(i));
-    if (di.hasDpp && i == 0) {
-      llvm::Value *old64 = ctx.readOp64(di, 0);
-      return ctx.emitUpdateDpp(old64, raw, di.dppCtrl, di.dppRowMask,
-                                di.dppBankMask, di.dppBoundCtrl);
-    }
-    return raw;
+    if (!di.hasDpp || i != 0)
+      return raw;
+    if (!cachedDppOldVdst64)
+      cachedDppOldVdst64 = ctx.readOp64(di, 0);
+    return ctx.emitUpdateDpp(cachedDppOldVdst64, raw, di.dppCtrl, di.dppRowMask,
+                              di.dppBankMask, di.dppBoundCtrl);
   }
   llvm::Value *srcExecWidth(unsigned i) { return ctx.readOpExecWidth(di, srcIdx(i)); }
   int64_t srcImm(unsigned i) { return di.getImm(srcIdx(i)); }
@@ -294,12 +297,16 @@ struct OpResolver {
     return ctx.parseReg(di.getReg(idx), idx);
   }
 
-  // Memoised src-0 %old for DPP wrapping (see `wrapDppIfNeeded`). Kept
-  // public so `OpResolver` remains an aggregate and can be brace-
-  // initialised from the raiser (`OpResolver op{ctx, di};`). Mutate only
-  // through `wrapDppIfNeeded`. Mirrors the `cachedLaneActive` public-
-  // field convention on `RaiseContext` above.
-  llvm::Value *cachedDppOld32 = nullptr;
+  // Memoised src-0 %old values for DPP wrapping, one per supported
+  // bit-width (32 / 64). Each is populated lazily on the first
+  // `src(0)` / `srcF(0)` / `src64(0)` call for a DPP-flagged
+  // instruction. Kept public so `OpResolver` remains an aggregate and
+  // can be brace-initialised from the raiser
+  // (`OpResolver op{ctx, di};`). Mutate only through the src*
+  // wrappers. Mirrors the `cachedLaneActive` public-field convention
+  // on `RaiseContext` above.
+  llvm::Value *cachedDppOldVdst32 = nullptr;
+  llvm::Value *cachedDppOldVdst64 = nullptr;
 };
 
 } // namespace transpiler

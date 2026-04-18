@@ -250,28 +250,40 @@ void decodeScaleOffset(DecodedInst &di) {
   di.hasScaleOffset = (cpol & AMDGPU::CPol::SCAL) != 0;
 }
 
-// Decode the DPP modifier operands (dpp_ctrl / row_mask / bank_mask /
-// bound_ctrl) once, so the raiser can lift DPP-modified VALU ops
-// through `llvm.amdgcn.update.dpp` without each handler having to
-// re-inspect the MCInst operand list. Triggered for every instruction
-// whose original (pre-canonicalisation) MCInstrDesc carries
-// `TSFlags & SIInstrFlags::DPP`. For non-DPP instructions `hasDpp`
-// stays false and the modifier fields retain their default values.
+// Decode DPP16 modifier operands (dpp_ctrl / row_mask / bank_mask /
+// bound_ctrl) so the raiser can lift DPP-modified VALU ops through
+// `llvm.amdgcn.update.dpp`. Sets `di.hasDpp = true` only when every
+// DPP16 operand is present and immediate-typed.
 //
-// `fi` is intentionally NOT surfaced: the supported LLVM intrinsic
-// `llvm.amdgcn.update.dpp` has no fi argument (it encodes DPP16;
-// DPP8's fi control is a separate intrinsic family not covered here).
-// If a future corpus kernel uses DPP8 we will extend this to emit
-// `llvm.amdgcn.mov.dpp8` + an additional field.
+// Preconditions:
+//   - `di.tsFlags` is populated from the ORIGINAL (pre-canonicalisation)
+//     MCInstrDesc — the DPP bit here is the authoritative signal that
+//     SOME DPP form is in play, but it does NOT distinguish DPP16 from
+//     DPP8 (both `VOP_DPP8_Base` and VOP_DPP set `let DPP = 1`, see
+//     VOPInstructions.td).
 //
-// Precondition: `di.tsFlags` is already populated from the ORIGINAL
-// MCInstrDesc (i.e. before any SemOp-level canonicalisation), so
-// testing the DPP bit here is the authoritative source of truth.
+// DPP8 handling (present corpus: 0 instances, but architecturally
+// possible): DPP8 encodes an 8-lane permutation as a single `OpName::
+// dpp8` operand and has NO `dpp_ctrl` / `row_mask` / `bank_mask` /
+// `bound_ctrl`. When we detect DPP8 (named operand `dpp8` exists) we
+// leave `di.hasDpp` false; the classifier's DppCrossLane site will
+// then mark the kernel as `rewriteImplemented = false` (pending P5
+// extension to `llvm.amdgcn.mov.dpp8`), so the raiser refuses loudly
+// rather than crashing on a partially-populated DPP modifier set.
+//
+// `fi` (fetch-invalid) is not surfaced for DPP16 — `llvm.amdgcn.
+// update.dpp` does not take it. A future DPP8 lift would route
+// through `llvm.amdgcn.mov.dpp8` which also does not take `fi`.
 void decodeDppModifiers(DecodedInst &di) {
   if (!(di.tsFlags & SIInstrFlags::DPP))
     return;
   const MCInst &inst = di.inst;
   const unsigned opc = inst.getOpcode();
+  // Detect DPP8 form by presence of the `dpp8` named operand. If this
+  // is a DPP8 instruction, leave `hasDpp` false — see the header
+  // comment for the classifier-refusal contract.
+  if (AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::dpp8) >= 0)
+    return;
   auto immOpt = [&](AMDGPU::OpName name) -> std::optional<int64_t> {
     int idx = AMDGPU::getNamedOperandIdx(opc, name);
     if (idx < 0 || static_cast<unsigned>(idx) >= inst.getNumOperands())
@@ -286,18 +298,21 @@ void decodeDppModifiers(DecodedInst &di) {
   auto bankMask = immOpt(AMDGPU::OpName::bank_mask);
   auto boundCtrl = immOpt(AMDGPU::OpName::bound_ctrl);
   if (!ctrl || !rowMask || !bankMask || !boundCtrl) {
-    // MCInstrDesc declared DPP but the MCInst operand list is missing
-    // one of the four DPP16 modifier fields. This is a decoder-vs-
-    // tblgen drift situation — fail loudly rather than emit IR with
-    // default (possibly wrong) values.
+    // MCInstrDesc declared DPP and it is not a DPP8 variant, yet the
+    // MCInst operand list is missing one of the four DPP16 modifier
+    // fields. This is a decoder-vs-tblgen drift situation — fail
+    // loudly rather than emit IR with default (possibly wrong)
+    // values. DPP8 was already filtered above, so we only reach here
+    // on a genuinely unrecognised DPP form.
     std::string msg;
     raw_string_ostream os(msg);
     os << "decodeDppModifiers: TSFlags::DPP is set for '" << di.rawMnemonic
        << "' (opcode=" << opc
-       << ") but at least one of {dpp_ctrl, row_mask, bank_mask, "
-          "bound_ctrl} is missing or not an immediate. LLVM likely "
-          "added a new DPP variant whose operand layout this decoder "
-          "does not yet recognise; extend decodeDppModifiers.";
+       << ") with no OpName::dpp8 operand, yet at least one of "
+          "{dpp_ctrl, row_mask, bank_mask, bound_ctrl} is missing or "
+          "not an immediate. LLVM likely added a new DPP variant "
+          "whose operand layout this decoder does not yet recognise; "
+          "extend decodeDppModifiers.";
     report_fatal_error(os.str().c_str());
   }
   di.hasDpp = true;
