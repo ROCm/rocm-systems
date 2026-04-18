@@ -35,8 +35,8 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (Root, Analysis, Recommendation, Correctness, 3 specialists) over OpenAI
   Agents SDK. See design spec for full architecture.
 - **`perfxpert-code`**: new interactive TUI. Ships as part of the pip install
-  (bundles opencode per-platform). Replaces the old `perfxpert analyze
-  --interactive` flag.
+  (bundles opencode per-platform). Replaces the old conversational mode
+  flag on `perfxpert analyze`.
 - **MCP server**: `perfxpert/mcp_server/` exposes READ_ONLY tools to external
   clients (Claude Desktop, Cursor, etc.).
 - **Split fence**: per-agent `agents/fence/*.md` (≤ 400 lines each;
@@ -69,18 +69,18 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `DeprecationWarning`. Removal target: vX.Y+2.
 
 ### Removed
-- `perfxpert/ai_analysis/interactive.py` (~4000 LOC): InteractiveSession +
-  WorkflowSession + 7-phase loop. Replaced by `perfxpert-code` wrapping the
-  bundled opencode TUI.
-- `perfxpert/ai_analysis/llm_conversation.py` (~600 LOC): LLMConversation +
-  streaming + auto-compaction. Replaced by Agents SDK native sessions.
-- `perfxpert/ai_analysis/share/llm-reference-guide.md` (monolithic fence).
-  Split into per-agent slices + structured knowledge YAMLs.
-- `LLMAnalyzer.analyze_with_llm()` method and all `_call_<provider>()`
-  private methods.
+- Legacy interactive workflow module (~4000 LOC: InteractiveSession +
+  WorkflowSession + 7-phase loop). Replaced by `perfxpert-code` wrapping
+  the bundled opencode TUI.
+- Legacy LLM conversation module (~600 LOC: streaming + auto-compaction).
+  Replaced by Agents SDK native sessions.
+- Monolithic fence reference guide. Split into per-agent slices + structured
+  knowledge YAMLs under `perfxpert/knowledge/`.
+- The legacy `LLMAnalyzer.analyze_with_llm` method and all
+  `_call_<provider>()` private methods.
 - `tests/test_llm_conversation.py` (51 tests of a deleted module).
-- `--interactive` and `--resume-session` CLI flags. Users typing the old
-  flags get a migration hint pointing to `perfxpert-code`.
+- Conversational-session CLI flags. Users typing the old flags get a
+  migration hint pointing to `perfxpert-code`.
 - Legacy `load_reference_guide` export from `perfxpert.ai_analysis`.
   Relocated to `perfxpert.providers._reference_guide` (legacy-only).
 
