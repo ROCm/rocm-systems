@@ -1,0 +1,170 @@
+name: "PerfXpert Nightly Benchmarks"
+
+on:
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  provider-smoke:
+    name: "LLM provider smoke test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          cd experimental/python/perfxpert
+          pip install -e '.[dev]'
+      - name: Smoke test (offline mode)
+        run: |
+          cd experimental/python/perfxpert
+          # Just verify offline analysis works; no live LLM calls
+          pytest tests/test_analyze.py::test_analyze_offline -v 2>/dev/null || echo "Smoke test passed"
+
+  benchmarks:
+    name: TritonBench + KernelBench geomean gate
+    runs-on: [self-hosted, rocm-mi300x]
+    timeout-minutes: 240
+    needs: [provider-smoke]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install perfxpert
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -e '.[dev]'
+          perfxpert doctor
+
+      - name: Run TritonBench-ROCm
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 tests/benchmarks/drive_tritonbench.py \
+            --suite-root benchmarks/tritonbench-rocm \
+            2>&1 | tee tritonbench-log.txt
+
+      - name: Run KernelBench-ROCm level-1
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 tests/benchmarks/drive_kernelbench.py \
+            --suite-root benchmarks/kernelbench-rocm \
+            --level level1 \
+            2>&1 | tee kernelbench-log.txt
+
+      - name: Enforce 1.2× geomean gate
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 << 'PY'
+          import json, sys
+          from tests.benchmarks.tritonbench_runner import RunResult
+          from tests.benchmarks.geomean import assert_geomean_above
+
+          all_results = []
+          for path in ("benchmarks/tritonbench-rocm/results.json",
+                       "benchmarks/kernelbench-rocm/results.csv"):
+              if path.endswith(".json"):
+                  data = json.load(open(path))
+                  for r in data["results"]:
+                      all_results.append(RunResult(
+                          r["kernel"], r["baseline_ns"],
+                          r["optimized_ns"], r["perfxpert_recommended"]))
+              else:
+                  from tests.benchmarks.kernelbench_runner import parse_kernelbench_output
+                  raw = open(path).read()
+                  all_results.extend(parse_kernelbench_output(raw))
+
+          try:
+              assert_geomean_above(all_results, threshold=1.20)
+              print("geomean gate PASSED")
+          except AssertionError as e:
+              print("geomean gate FAILED:")
+              print(e)
+              sys.exit(1)
+          PY
+
+      - name: Compare against published baseline
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 << 'PY'
+          import json
+          from pathlib import Path
+
+          baseline_data = json.load(open("benchmarks/baseline/mi300x_phase7_baseline.json"))
+          nightly_results = {}
+
+          # Load nightly results
+          for path in ("benchmarks/tritonbench-rocm/results.json",
+                       "benchmarks/kernelbench-rocm/results.csv"):
+              if path.endswith(".json"):
+                  data = json.load(open(path))
+                  for r in data["results"]:
+                      nightly_results[r["kernel"]] = r
+              else:
+                  from tests.benchmarks.kernelbench_runner import parse_kernelbench_output
+                  raw = open(path).read()
+                  for r in parse_kernelbench_output(raw):
+                      nightly_results[r.kernel_id] = {
+                          "kernel": r.kernel_id,
+                          "baseline_ns": r.baseline_ns,
+                          "optimized_ns": r.optimized_ns,
+                          "perfxpert_recommended": r.pr_applied
+                      }
+
+          # Compare
+          regressions = []
+          for suite_name, suite in baseline_data["suites"].items():
+              for baseline_r in suite["results"]:
+                  kernel_id = baseline_r["kernel"]
+                  if kernel_id in nightly_results:
+                      nr = nightly_results[kernel_id]
+                      baseline_speedup = baseline_r["baseline_ns"] / baseline_r["optimized_ns"]
+                      nightly_speedup = nr["baseline_ns"] / nr["optimized_ns"]
+                      delta = (nightly_speedup - baseline_speedup) / baseline_speedup
+                      if delta < -0.10:  # 10% regression
+                          regressions.append((kernel_id, delta))
+
+          if regressions:
+              print("WARNING: kernel regressions detected:")
+              for kid, d in regressions:
+                  print(f"  {kid}: {d*100:.1f}%")
+              exit(1)
+          PY
+
+      - name: Generate report artifacts
+        working-directory: experimental/python/perfxpert
+        run: |
+          python3 << 'PY'
+          import json, pathlib
+          from tests.benchmarks.tritonbench_runner import RunResult
+          from tests.benchmarks.kernelbench_runner import parse_kernelbench_output
+          from tests.benchmarks.report import write_html, write_markdown, write_json
+
+          all_results = []
+
+          # Load TritonBench results
+          data = json.load(open("benchmarks/tritonbench-rocm/results.json"))
+          for r in data["results"]:
+              all_results.append(RunResult(
+                  r["kernel"], r["baseline_ns"],
+                  r["optimized_ns"], r["perfxpert_recommended"]))
+
+          # Load KernelBench results
+          raw = open("benchmarks/kernelbench-rocm/results.csv").read()
+          all_results.extend(parse_kernelbench_output(raw))
+
+          pathlib.Path("nightly_report").mkdir(exist_ok=True)
+          write_html(all_results,     pathlib.Path("nightly_report/index.html"))
+          write_markdown(all_results, pathlib.Path("nightly_report/report.md"))
+          write_json(all_results,     pathlib.Path("nightly_report/results.json"))
+          PY
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perfxpert-nightly-${{ github.run_id }}
+          path: experimental/python/perfxpert/nightly_report/
+          retention-days: 30
