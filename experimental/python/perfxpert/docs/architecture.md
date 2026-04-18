@@ -108,11 +108,17 @@ Level 0 — Knowledge YAML (PR)         pytest tests/test_knowledge
 
 ## What's NOT in this diagram
 
-Deleted in Phase 6: `interactive.py`, `llm_conversation.py`, the bespoke
-LLM-session state machine. The remaining `perfxpert/ai_analysis/` module
-was removed in Phase 7.1, along with the `PERFXPERT_LEGACY` and
-`PERFXPERT_USE_AGENTS` env vars. Consult the git history or
-[CHANGELOG.md](../CHANGELOG.md) if you need to look at the old code.
+Deleted in Phase 6: `interactive.py`, `llm_conversation.py`, the
+bespoke LLM-session state machine.
+
+The following symbols were all removed in Phase 7.1:
+
+- `perfxpert/ai_analysis/` module — removed in Phase 7.1.
+- `PERFXPERT_LEGACY` env var — removed in Phase 7.1.
+- `PERFXPERT_USE_AGENTS` env var — removed in Phase 7.1.
+
+Consult the git history or [CHANGELOG.md](../CHANGELOG.md) for the
+old code.
 
 ## Pointers
 

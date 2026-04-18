@@ -69,10 +69,13 @@ an [RFC](docs/rfcs/README.md).
 |------|---------|---------|
 | `PERFXPERT_OPENCODE_PATH` | system PATH | Override path to opencode binary; must point to an existing file or launcher raises immediately |
 
-The agentic runtime is the sole execution path; no feature flag toggles
-it. `PERFXPERT_USE_AGENTS` and `PERFXPERT_LEGACY` were removed in
-Phase 7.1 and are now unrecognized — setting them has no effect. See
-[CHANGELOG.md](CHANGELOG.md) for the removal history.
+The agentic runtime is the sole execution path; no feature flag
+toggles it. Setting any of the following has no effect:
+
+- `PERFXPERT_USE_AGENTS` — removed in Phase 7.1.
+- `PERFXPERT_LEGACY` — removed in Phase 7.1.
+
+See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 ## Supported GPUs
 
