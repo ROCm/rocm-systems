@@ -44,8 +44,13 @@ Cross-links:
   - **Analysis** — reads trace/source artifacts via READ_ONLY tools,
     emits a structured finding (primary bottleneck, metrics,
     kernel_runtimes).
-  - **Correctness** — narrates the 5-gate verdict produced by the
-    deterministic middleware (never runs gates itself).
+  - **Correctness** — receives a `GateVerdict` from the gate-cascade
+    middleware and narrates it (never runs gates itself). The tier-0
+    diagram above shows Correctness as a sibling of the other two
+    tier-1 agents, but the data flow is: Recommendation proposes an
+    edit → middleware runs the gate cascade → the resulting
+    `GateVerdict` is handed to Correctness. See
+    [gate-cascade.md](gate-cascade.md).
   - **Recommendation** — converts findings into proposed code changes,
     delegates to specialists when needed.
 - **Tier 2 (Specialists)** — three narrow experts invoked by
@@ -120,7 +125,7 @@ integrations that already know the routing decision.
 | Fence slices (system prompts) | `perfxpert/agents/fence/*.md` |
 | Agent framework + framework-level helpers | `perfxpert/agents/framework.py` |
 | Gate cascade (middleware between agents) | `perfxpert/runtime/gate_cascade.py` |
-| Recursion guard (prevents opencode→opencode loops) | `perfxpert/runtime/recursion_guard.py` |
+| Recursion guard (prevents opencode→opencode loops) | `perfxpert/runtime/recursion_guard.py` — `ensure_not_recursive` is also re-exported from `perfxpert.runtime` and imported from there by `agents/runtime.py` |
 | Intent classifier (deterministic pre-route) | `perfxpert/runtime/intent_classifier.py` |
 
 ## Adding a new agent

@@ -58,8 +58,12 @@ with pytest.raises(Exception):
 
 1. Looks up the registry entry for `name`.
 2. Dispatches to one of three detectors:
-   - `binary` — `shutil.which(name)` + optional smoke-test
-     (`<binary> --version` must exit 0)
+   - `binary` — `shutil.which(name)` + optional smoke-test. The
+     smoke-test is a configurable `Optional[List[str]]` on the `_Dep`
+     entry (see `_tooldep.py:52`); the helper runs `<binary> <args>`
+     and treats a non-zero exit as a failed smoke-test. At present
+     only `opencode` registers a smoke-test (`["--version"]`); other
+     registered binaries rely on `shutil.which` alone.
    - `pylib` — `importlib.import_module(name)`
    - `shared_lib` — ROCm-aware search across `${ROCM_PATH}/lib*`,
      `${PERFXPERT_<NAME>_PATH}`, `~/.local/opt/<name>/opt/rocm/lib*`,
