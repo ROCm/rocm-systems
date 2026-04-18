@@ -335,6 +335,9 @@ static const Entry kCanonTable[] = {
     E(V_LSHL_OR_B32_e64, V_LSHL_OR_B32),
     E(V_AND_OR_B32_e64, V_AND_OR_B32),
     E(V_OR3_B32_e64, V_OR3_B32),
+    // gfx9+ ternary xor+add (VOP3Instructions.td:684, iselect
+    // pattern at :831 — `add(xor(a, b), c)`).
+    E(V_XAD_U32_e64, V_XAD_U32),
     // gfx10+ ternary xor (VOP3Instructions.td:1348). VOP3
     // ternaries only have the e64 form.
     E(V_XOR3_B32_e64, V_XOR3_B32),

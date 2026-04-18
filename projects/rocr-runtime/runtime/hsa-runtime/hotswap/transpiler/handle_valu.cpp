@@ -690,6 +690,18 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 v_xad_u32: dst = (src0 ^ src1) + src2. The .td iselect
+  // pattern (VOP3Instructions.td:831) is
+  // `ThreeOp_i32_Pats<xor, add, V_XAD_U32_e64>`. Same skeleton
+  // as V_AND_OR_B32 / V_LSHL_OR_B32 above with xor+add in place
+  // of the inner+outer ops.
+  if (sop == SemOp::V_XAD_U32) {
+    ctx.writeReg32(op.dst(),
+                   ctx.B.CreateAdd(ctx.B.CreateXor(op.src(0), op.src(1)),
+                                   op.src(2), "vxad"));
+    hr.handled = true;
+    return hr;
+  }
   // VOP3 v_xor3_b32: 3-way xor. Direct mirror of V_OR3_B32 above
   // — the .td iselect pattern is `(xor (xor a, b), c)` (see
   // VOP3Instructions.td:1350); both nested and outer xor lift to
