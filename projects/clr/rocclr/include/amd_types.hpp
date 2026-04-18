@@ -316,6 +316,7 @@ enum class CommandType : uint32_t {
   SvmMemfill         = 0x120B, // CL_COMMAND_SVM_MEMFILL
   SvmMap             = 0x120C, // CL_COMMAND_SVM_MAP
   SvmUnmap           = 0x120D, // CL_COMMAND_SVM_UNMAP
+  AcquireGlFenceSyncObjectKHR = 0x200D, // CL_COMMAND_GL_FENCE_SYNC_OBJECT_KHR
 };
 
 // Replaces cl_device_topology_amd (AMD extension struct)

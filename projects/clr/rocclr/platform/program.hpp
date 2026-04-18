@@ -76,7 +76,7 @@ class Program : public RuntimeObject {
 
   enum Language { Binary = 0, OpenCL_C, SPIRV, Assembly, HIP };
 
-  typedef bool(CL_CALLBACK* VarInfoCallback)(cl_program, std::string, void**, size_t*);
+  typedef bool(*VarInfoCallback)(void* program_handle, std::string, void**, size_t*);
   VarInfoCallback varcallback;
 
  private:
@@ -184,18 +184,18 @@ class Program : public RuntimeObject {
   int32_t compile(const std::vector<Device*>& devices, size_t numHeaders,
                   const std::vector<const Program*>& headerPrograms,
                   const char** headerIncludeNames, const char* options = NULL,
-                  void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
+                  void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
                   bool optionChangable = true);
 
   //! Link the programs for the given devices.
   int32_t link(const std::vector<Device*>& devices, size_t numInputs,
                const std::vector<Program*>& inputPrograms, const char* options = NULL,
-               void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
+               void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
                bool optionChangable = true);
 
   //! Build the program for the given devices.
   int32_t build(const std::vector<Device*>& devices, const char* options = NULL,
-                void(CL_CALLBACK* notifyFptr)(cl_program, void*) = NULL, void* data = NULL,
+                void(*notifyFptr)(void* program_handle, void*) = NULL, void* data = NULL,
                 bool optionChangable = true, bool newDevProg = true);
 
   //! Load the program. If devices is not specified, then load program for all devices.
@@ -216,7 +216,7 @@ class Program : public RuntimeObject {
 
   //! Returns the program built status
   bool IsProgramBuilt(const Device& device) {
-    return CL_BUILD_SUCCESS == devicePrograms_[&device]->buildStatus();
+    return 0 == devicePrograms_[&device]->buildStatus();  // CL_BUILD_SUCCESS == 0
   }
 };
 

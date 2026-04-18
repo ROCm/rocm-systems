@@ -71,8 +71,8 @@ Context::~Context() {
   delete glenv_;
 }
 
-int Context::checkProperties(const cl_context_properties* properties, Context::Info* info) {
-  cl_platform_id pfmId = 0;
+int Context::checkProperties(const intptr_t* properties, Context::Info* info) {
+  void* pfmId = nullptr;
   uint count = 0;
 
   const struct Element {
@@ -83,7 +83,7 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
   // Clear the context infor structure
   ::memset(info, 0, sizeof(Context::Info));
 
-  if (properties == NULL) {
+  if (properties == nullptr) {
     return CL_SUCCESS;
   }
 
@@ -165,8 +165,8 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
         info->flags_ |= GLDeviceKhr;
         break;
       case CL_CONTEXT_PLATFORM:
-        pfmId = reinterpret_cast<cl_platform_id>(p->ptr);
-        if ((NULL != pfmId) && (AMD_PLATFORM != pfmId)) {
+        pfmId = p->ptr;
+        if ((nullptr != pfmId) && (AMD_PLATFORM != pfmId)) {
           return CL_INVALID_VALUE;
         }
         break;
@@ -193,7 +193,7 @@ int Context::create(const intptr_t* properties) {
   int result = CL_SUCCESS;
 
   if (properties != NULL) {
-    properties_ = new cl_context_properties[info().propertiesSize_ / sizeof(cl_context_properties)];
+    properties_ = new intptr_t[info().propertiesSize_ / sizeof(intptr_t)];
     if (properties_ == NULL) {
       return CL_OUT_OF_HOST_MEMORY;
     }

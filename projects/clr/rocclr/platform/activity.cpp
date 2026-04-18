@@ -62,7 +62,7 @@ void ReportActivity(const amd::Command& command) {
   assert(queue != nullptr);
   activity_record_t record{
       ACTIVITY_DOMAIN_HIP_OPS,                  // activity domain
-      command.type(),                           // activity kind
+      static_cast<activity_kind_t>(command.type()),  // activity kind
       operation_id,                             // operation id
       command.profilingInfo().correlation_id_,  // activity correlation id
       command.profilingInfo().start_,           // begin timestamp, ns
@@ -75,30 +75,30 @@ void ReportActivity(const amd::Command& command) {
   };
 
   switch (command.type()) {
-    case CL_COMMAND_NDRANGE_KERNEL:
+    case amd::CommandType::NdRangeKernel:
       record.kernel_name =
           static_cast<const amd::NDRangeKernelCommand&>(command).kernel().name().c_str();
       break;
-    case CL_COMMAND_READ_BUFFER:
-    case CL_COMMAND_READ_BUFFER_RECT:
+    case amd::CommandType::ReadBuffer:
+    case amd::CommandType::ReadBufferRect:
       record.bytes = linearSize(static_cast<const amd::ReadMemoryCommand&>(command).size());
       break;
-    case CL_COMMAND_WRITE_BUFFER:
-    case CL_COMMAND_WRITE_BUFFER_RECT:
+    case amd::CommandType::WriteBuffer:
+    case amd::CommandType::WriteBufferRect:
       record.bytes = linearSize(static_cast<const amd::WriteMemoryCommand&>(command).size());
       break;
-    case CL_COMMAND_COPY_BUFFER:
-    case CL_COMMAND_COPY_BUFFER_RECT:
+    case amd::CommandType::CopyBuffer:
+    case amd::CommandType::CopyBufferRect:
       record.bytes = linearSize(static_cast<const amd::CopyMemoryCommand&>(command).size());
       break;
-    case CL_COMMAND_FILL_BUFFER:
+    case amd::CommandType::FillBuffer:
       record.bytes = linearSize(static_cast<const amd::FillMemoryCommand&>(command).size());
       break;
     default:
       break;
   }
 
-  if (command.type() == CL_COMMAND_TASK) {
+  if (command.type() == amd::CommandType::Task) {
     auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
     const auto& kernel_names =
         static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
@@ -121,41 +121,41 @@ void ReportActivity(const amd::Command& command) {
   case X:                                                                                          \
     return #C
 
-const char* getOclCommandKindString(cl_command_type commandType) {
+const char* getOclCommandKindString(amd::CommandType commandType) {
   switch (commandType) {
-    CASE_STRING(0, InternalMarker);
-    CASE_STRING(CL_COMMAND_MARKER, Marker);
-    CASE_STRING(CL_COMMAND_NDRANGE_KERNEL, KernelExecution);
-    CASE_STRING(CL_COMMAND_READ_BUFFER, CopyDeviceToHost);
-    CASE_STRING(CL_COMMAND_WRITE_BUFFER, CopyHostToDevice);
-    CASE_STRING(CL_COMMAND_COPY_BUFFER, CopyDeviceToDevice);
-    CASE_STRING(CL_COMMAND_READ_BUFFER_RECT, CopyDeviceToHost2D);
-    CASE_STRING(CL_COMMAND_WRITE_BUFFER_RECT, CopyHostToDevice2D);
-    CASE_STRING(CL_COMMAND_COPY_BUFFER_RECT, CopyDeviceToDevice2D);
-    CASE_STRING(CL_COMMAND_FILL_BUFFER, FillBuffer);
-    CASE_STRING(CL_COMMAND_TASK, Task);
-    CASE_STRING(CL_COMMAND_NATIVE_KERNEL, NativeKernel);
-    CASE_STRING(CL_COMMAND_READ_IMAGE, ReadImage);
-    CASE_STRING(CL_COMMAND_WRITE_IMAGE, WriteImage);
-    CASE_STRING(CL_COMMAND_COPY_IMAGE, CopyImage);
-    CASE_STRING(CL_COMMAND_COPY_IMAGE_TO_BUFFER, CopyImageToBuffer);
-    CASE_STRING(CL_COMMAND_COPY_BUFFER_TO_IMAGE, CopyBufferToImage);
-    CASE_STRING(CL_COMMAND_MAP_BUFFER, MapBuffer);
-    CASE_STRING(CL_COMMAND_MAP_IMAGE, MapImage);
-    CASE_STRING(CL_COMMAND_UNMAP_MEM_OBJECT, UnmapMemObject);
-    CASE_STRING(CL_COMMAND_ACQUIRE_GL_OBJECTS, AcquireGLObjects);
-    CASE_STRING(CL_COMMAND_RELEASE_GL_OBJECTS, ReleaseGLObjects);
-    CASE_STRING(CL_COMMAND_USER, User);
-    CASE_STRING(CL_COMMAND_BARRIER, Barrier);
-    CASE_STRING(CL_COMMAND_MIGRATE_MEM_OBJECTS, MigrateMemObjects);
-    CASE_STRING(CL_COMMAND_FILL_IMAGE, FillImage);
-    CASE_STRING(CL_COMMAND_SVM_FREE, SvmFree);
-    CASE_STRING(CL_COMMAND_SVM_MEMCPY, SvmMemcpy);
-    CASE_STRING(CL_COMMAND_SVM_MEMFILL, SvmMemFill);
-    CASE_STRING(CL_COMMAND_SVM_MAP, SvmMap);
-    CASE_STRING(CL_COMMAND_SVM_UNMAP, SvmUnmap);
-    CASE_STRING(ROCCLR_COMMAND_STREAM_WAIT_VALUE, StreamWait);
-    CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
+    CASE_STRING(static_cast<amd::CommandType>(0), InternalMarker);
+    CASE_STRING(amd::CommandType::Marker, Marker);
+    CASE_STRING(amd::CommandType::NdRangeKernel, KernelExecution);
+    CASE_STRING(amd::CommandType::ReadBuffer, CopyDeviceToHost);
+    CASE_STRING(amd::CommandType::WriteBuffer, CopyHostToDevice);
+    CASE_STRING(amd::CommandType::CopyBuffer, CopyDeviceToDevice);
+    CASE_STRING(amd::CommandType::ReadBufferRect, CopyDeviceToHost2D);
+    CASE_STRING(amd::CommandType::WriteBufferRect, CopyHostToDevice2D);
+    CASE_STRING(amd::CommandType::CopyBufferRect, CopyDeviceToDevice2D);
+    CASE_STRING(amd::CommandType::FillBuffer, FillBuffer);
+    CASE_STRING(amd::CommandType::Task, Task);
+    CASE_STRING(amd::CommandType::NativeKernel, NativeKernel);
+    CASE_STRING(amd::CommandType::ReadImage, ReadImage);
+    CASE_STRING(amd::CommandType::WriteImage, WriteImage);
+    CASE_STRING(amd::CommandType::CopyImage, CopyImage);
+    CASE_STRING(amd::CommandType::CopyImageToBuffer, CopyImageToBuffer);
+    CASE_STRING(amd::CommandType::CopyBufferToImage, CopyBufferToImage);
+    CASE_STRING(amd::CommandType::MapBuffer, MapBuffer);
+    CASE_STRING(amd::CommandType::MapImage, MapImage);
+    CASE_STRING(amd::CommandType::UnmapMemObject, UnmapMemObject);
+    CASE_STRING(amd::CommandType::AcquireGlObjects, AcquireGLObjects);
+    CASE_STRING(amd::CommandType::ReleaseGlObjects, ReleaseGLObjects);
+    CASE_STRING(amd::CommandType::User, User);
+    CASE_STRING(amd::CommandType::Barrier, Barrier);
+    CASE_STRING(amd::CommandType::MigrateMemObjects, MigrateMemObjects);
+    CASE_STRING(amd::CommandType::FillImage, FillImage);
+    CASE_STRING(amd::CommandType::SvmFree, SvmFree);
+    CASE_STRING(amd::CommandType::SvmMemcpy, SvmMemcpy);
+    CASE_STRING(amd::CommandType::SvmMemfill, SvmMemFill);
+    CASE_STRING(amd::CommandType::SvmMap, SvmMap);
+    CASE_STRING(amd::CommandType::SvmUnmap, SvmUnmap);
+    CASE_STRING(static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE), StreamWait);
+    CASE_STRING(static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WRITE_VALUE), StreamWrite);
     default:
       break;
   };

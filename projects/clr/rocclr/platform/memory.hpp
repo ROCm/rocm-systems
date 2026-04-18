@@ -103,7 +103,7 @@ class HostMemoryReference {
 };
 
 class Memory : public amd::RuntimeObject {
-  typedef void(CL_CALLBACK* DestructorCallBackFunction)(cl_mem memobj, void* user_data);
+  typedef void(*DestructorCallBackFunction)(void* mem_handle, void* user_data);
 
   enum AllocState { AllocInit = 0, AllocCreate = 1, AllocComplete = 2, AllocRealloced = 3 };
 

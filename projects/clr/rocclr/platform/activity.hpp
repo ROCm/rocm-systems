@@ -33,26 +33,26 @@ extern __thread activity_correlation_id_t correlation_id __attribute__((tls_mode
 extern __declspec(thread) activity_correlation_id_t correlation_id;
 #endif  // defined(_WIN32)
 
-constexpr OpId OperationId(cl_command_type commandType) {
+constexpr OpId OperationId(amd::CommandType commandType) {
   switch (commandType) {
-    case CL_COMMAND_NDRANGE_KERNEL:
-    case CL_COMMAND_TASK:
+    case amd::CommandType::NdRangeKernel:
+    case amd::CommandType::Task:
       return OP_ID_DISPATCH;
-    case CL_COMMAND_READ_BUFFER:
-    case CL_COMMAND_READ_BUFFER_RECT:
-    case CL_COMMAND_WRITE_BUFFER:
-    case CL_COMMAND_WRITE_BUFFER_RECT:
-    case CL_COMMAND_COPY_BUFFER:
-    case CL_COMMAND_COPY_BUFFER_RECT:
-    case CL_COMMAND_FILL_BUFFER:
-    case CL_COMMAND_READ_IMAGE:
-    case CL_COMMAND_WRITE_IMAGE:
-    case CL_COMMAND_COPY_IMAGE:
-    case CL_COMMAND_FILL_IMAGE:
-    case CL_COMMAND_COPY_BUFFER_TO_IMAGE:
-    case CL_COMMAND_COPY_IMAGE_TO_BUFFER:
+    case amd::CommandType::ReadBuffer:
+    case amd::CommandType::ReadBufferRect:
+    case amd::CommandType::WriteBuffer:
+    case amd::CommandType::WriteBufferRect:
+    case amd::CommandType::CopyBuffer:
+    case amd::CommandType::CopyBufferRect:
+    case amd::CommandType::FillBuffer:
+    case amd::CommandType::ReadImage:
+    case amd::CommandType::WriteImage:
+    case amd::CommandType::CopyImage:
+    case amd::CommandType::FillImage:
+    case amd::CommandType::CopyBufferToImage:
+    case amd::CommandType::CopyImageToBuffer:
       return OP_ID_COPY;
-    case CL_COMMAND_MARKER:
+    case amd::CommandType::Marker:
       return OP_ID_BARRIER;
     default:
       return OP_ID_NUMBER;
@@ -68,5 +68,5 @@ void ReportActivity(const amd::Command& command);
 // via the registered callback using a reserved sentinel (data = 0x1).
 void CommitRecord(OpId operation_id);
 
-const char* getOclCommandKindString(cl_command_type kind);
+const char* getOclCommandKindString(amd::CommandType kind);
 }  // namespace amd::activity_prof

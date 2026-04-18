@@ -18,7 +18,6 @@
 #ifdef _WIN32
 #include <d3d10_1.h>
 #include <dxgi.h>
-#include "CL/cl_d3d10.h"
 #endif  //_WIN32
 
 #if defined(_MSC_VER)  // both Win32 and Win64

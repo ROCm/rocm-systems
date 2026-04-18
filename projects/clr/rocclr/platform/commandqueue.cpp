@@ -20,7 +20,7 @@
 
 namespace amd {
 
-HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
+HostQueue::HostQueue(Context& context, Device& device, amd::QueueProperties props,
                      uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask,
                      bool dedicated_queue)
     : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
@@ -31,7 +31,7 @@ HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properti
       isActive_(false),
       sync_policy_(amd::SyncPolicy::Auto) {
   if (GPU_FORCE_QUEUE_PROFILING) {
-    properties().set(CL_QUEUE_PROFILING_ENABLE);
+    properties().set(amd::QueueProperties::Profiling);
   }
   if (AMD_DIRECT_DISPATCH) {
     // Initialize the queue
@@ -305,7 +305,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     command->submit(*virtualDevice);
 
     // if this is a user invisible marker with a waiting event, then flush
-    if (0 == command->type()) {
+    if (static_cast<amd::CommandType>(0) == command->type()) {
       virtualDevice->flush(head);
       tail = head = NULL;
     }
@@ -385,7 +385,7 @@ DeviceQueue::~DeviceQueue() {
 }
 
 bool DeviceQueue::create() {
-  const bool defaultDeviceQueue = properties().test(CL_QUEUE_ON_DEVICE_DEFAULT);
+  const bool defaultDeviceQueue = properties().test(amd::QueueProperties::OnDeviceDefault);
   bool result = false;
 
   virtualDevice_ = device().createVirtualDevice(this);

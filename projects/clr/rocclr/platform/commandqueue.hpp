@@ -36,7 +36,7 @@ class CommandQueue : public RuntimeObject {
   enum class Priority : uint { Low = 0, Normal, Medium, High };
 
   struct Properties {
-    typedef cl_command_queue_properties value_type;
+    typedef amd::QueueProperties value_type;
     const value_type mask_;
     value_type value_;
 
@@ -108,8 +108,8 @@ class CommandQueue : public RuntimeObject {
   //! to keep the CommandQueue class as a virtual interface
   CommandQueue(Context& context,                         //!< Context object
                Device& device,                           //!< Device object
-               cl_command_queue_properties properties,   //!< Queue properties
-               cl_command_queue_properties propMask,     //!< Queue properties mask
+               amd::QueueProperties properties,          //!< Queue properties
+               amd::QueueProperties propMask,            //!< Queue properties mask
                uint rtCUs = RealTimeDisabled,            //!< Avaialble real time compute units
                Priority priority = Priority::Normal,     //!< Queue priority
                const std::vector<uint32_t>& cuMask = {}, //!< CU mask
@@ -203,7 +203,7 @@ class HostQueue : public CommandQueue {
    * \note A new virtual device instance will be created from the
    * given device.
    */
-  HostQueue(Context& context, Device& device, cl_command_queue_properties properties,
+  HostQueue(Context& context, Device& device, amd::QueueProperties properties,
             uint queueRTCUs = 0, Priority priority = Priority::Normal,
             const std::vector<uint32_t>& cuMask = {}, bool dedicated_queue = false);
 
@@ -259,7 +259,7 @@ class HostQueue : public CommandQueue {
       tail_ = command;
     }
     size_++;
-    command->setStatus(CL_SUBMITTED);
+    command->setStatus(CL_SUBMITTED);  // TODO: replace with amd::Status when event status is refactored
     command->retain();
     // @note: runtime needs double retain in order to maintain the batch,
     // because setStatus(COMPLETE) releases command and batch update may have
@@ -320,12 +320,12 @@ class DeviceQueue : public CommandQueue {
  public:
   DeviceQueue(Context& context,                        //!< Context object
               Device& device,                          //!< Device object
-              cl_command_queue_properties properties,  //!< Queue properties
+              amd::QueueProperties properties,         //!< Queue properties
               uint size                                //!< Device queue size
               )
       : CommandQueue(context, device, properties,
-                     device.info().queueOnDeviceProperties_ | CL_QUEUE_ON_DEVICE |
-                         CL_QUEUE_ON_DEVICE_DEFAULT),
+                     device.info().queueOnDeviceProperties_ | amd::QueueProperties::OnDevice |
+                         amd::QueueProperties::OnDeviceDefault),
         size_(size),
         virtualDevice_(NULL) {}
 

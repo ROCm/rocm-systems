@@ -23,8 +23,6 @@
 #include "platform/activity.hpp"
 #include "platform/command_utils.hpp"
 
-#include "CL/cl_ext.h"
-
 #include <algorithm>
 #include <atomic>
 #include <functional>
@@ -50,8 +48,8 @@ union ComputeCommand;
  *  in a Context.
  */
 class Event : public RuntimeObject {
-  typedef void(CL_CALLBACK* CallBackFunction)(cl_event event, int32_t command_exec_status,
-                                              void* user_data);
+  typedef void(*CallBackFunction)(void* event_handle, int32_t command_exec_status,
+                                  void* user_data);
 
   struct CallBackEntry : public HeapObject {
     struct CallBackEntry* next_;  //!< the next entry in the callback list.
@@ -301,7 +299,7 @@ class Command : public Event {
   HostQueue* queue_;               //!< The command queue this command is enqueue into
   Command* next_;                  //!< Next GPU command in the queue list
   Command* batch_head_ = nullptr;  //!< The head of the batch commands
-  cl_command_type type_;           //!< This command's OpenCL type.
+  amd::CommandType type_;          //!< This command's command type.
   std::vector<void*> data_;
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
@@ -320,12 +318,12 @@ class Command : public Event {
   //! 0x1 - wait before enqueue, 0x2 - wait after, 0x3 - wait both
   uint32_t commandWaitBits_;
 
-  //! Construct a new command of the given OpenCL type.
-  Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList = nullWaitList,
+  //! Construct a new command of the given type.
+  Command(HostQueue& queue, amd::CommandType type, const EventWaitList& eventWaitList = nullWaitList,
           uint32_t commandWaitBits = 0, const Event* waitingEvent = nullptr);
 
-  //! Construct a new command of the given OpenCL type.
-  Command(cl_command_type type)
+  //! Construct a new command of the given type.
+  Command(amd::CommandType type)
       : Event(),
         queue_(nullptr),
         next_(nullptr),
@@ -338,7 +336,7 @@ class Command : public Event {
     if (IS_HIP) {
       releaseResources();
     }
-    if (Agent::shouldPostEventEvents() && type() != 0) {
+    if (Agent::shouldPostEventEvents() && type() != static_cast<amd::CommandType>(0)) {
       Agent::postEventFree(as_cl(static_cast<Event*>(this)));
     }
     return true;
@@ -408,8 +406,8 @@ class Command : public Event {
     }
   }
 
-  //! Return this command's OpenCL type.
-  cl_command_type type() const { return type_; }
+  //! Return this command's type.
+  amd::CommandType type() const { return type_; }
 
   //! Return the opaque, device specific data vector for this command.
   std::vector<void*>& data() { return data_; }
@@ -447,7 +445,7 @@ class Command : public Event {
   //! Get command wait bits
   uint32_t getWaitBits() const { return commandWaitBits_; }
 
-  void OverrrideCommandType(cl_command_type type) { type_ = type; }
+  void OverrrideCommandType(amd::CommandType type) { type_ = type; }
 
   //! Updates the batch head, associated with this command(marker)
   void SetBatchHead(Command* command) { batch_head_ = command; }
@@ -466,7 +464,7 @@ class UserEvent : public Command {
   std::vector<Command*> dependents_;  //!< Commands, which depends on this user event
 
  public:
-  UserEvent(Context& context) : Command(CL_COMMAND_USER), context_(context) {
+  UserEvent(Context& context) : Command(amd::CommandType::User), context_(context) {
     setStatus(CL_SUBMITTED);
   }
 
@@ -508,7 +506,7 @@ class ClGlEvent : public Command {
   bool waitForFence();
 
  public:
-  ClGlEvent(Context& context) : Command(CL_COMMAND_GL_FENCE_SYNC_OBJECT_KHR), context_(context) {
+  ClGlEvent(Context& context) : Command(amd::CommandType::AcquireGlFenceSyncObjectKHR), context_(context) {
     setStatus(CL_SUBMITTED);
   }
 
@@ -534,7 +532,7 @@ class OneMemoryArgCommand : public Command {
   std::vector<Memory*> pinned_memory_;  //!< Pinned memory object
 
  public:
-  OneMemoryArgCommand(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
+  OneMemoryArgCommand(HostQueue& queue, amd::CommandType type, const EventWaitList& eventWaitList,
                       Memory& memory)
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY), memory_(&memory) {
     if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
@@ -574,7 +572,7 @@ class TwoMemoryArgsCommand : public Command {
   Memory* memory2_;
 
  public:
-  TwoMemoryArgsCommand(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
+  TwoMemoryArgsCommand(HostQueue& queue, amd::CommandType type, const EventWaitList& eventWaitList,
                        Memory& memory1, Memory& memory2)
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY),
         memory1_(&memory1),
@@ -622,7 +620,7 @@ class ReadMemoryCommand : public OneMemoryArgCommand {
 
  public:
   //! Construct a new ReadMemoryCommand
-  ReadMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  ReadMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                     Memory& memory, Coord3D origin, Coord3D size, void* hostPtr,
                     size_t rowPitch = 0, size_t slicePitch = 0,
                     amd::CopyMetadata copyMetadata = amd::CopyMetadata())
@@ -639,7 +637,7 @@ class ReadMemoryCommand : public OneMemoryArgCommand {
   }
 
   //! Construct a new ReadMemoryCommand
-  ReadMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  ReadMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                     Memory& memory, Coord3D origin, Coord3D size, void* hostPtr,
                     const BufferRect& bufRect, const BufferRect& hostRect,
                     amd::CopyMetadata copyMetadata = amd::CopyMetadata())
@@ -744,7 +742,7 @@ class WriteMemoryCommand : public OneMemoryArgCommand {
   amd::CopyMetadata copyMetadata_;
 
  public:
-  WriteMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  WriteMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                      Memory& memory, Coord3D origin, Coord3D size, const void* hostPtr,
                      size_t rowPitch = 0, size_t slicePitch = 0,
                      amd::CopyMetadata copyMetadata = amd::CopyMetadata())
@@ -760,7 +758,7 @@ class WriteMemoryCommand : public OneMemoryArgCommand {
     assert(size.c[0] > 0 && "invalid");
   }
 
-  WriteMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  WriteMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                      Memory& memory, Coord3D origin, Coord3D size, const void* hostPtr,
                      const BufferRect& bufRect, const BufferRect& hostRect,
                      amd::CopyMetadata copyMetadata = amd::CopyMetadata())
@@ -864,7 +862,7 @@ class FillMemoryCommand : public OneMemoryArgCommand {
   size_t patternSize_;               //!< Pattern size
 
  public:
-  FillMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  FillMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                     Memory& memory, const void* pattern, size_t patternSize, const Coord3D& origin,
                     const Coord3D& size, const Coord3D& surface)
       : OneMemoryArgCommand(queue, cmdType, eventWaitList, memory),
@@ -949,7 +947,7 @@ class StreamOperationCommand : public OneMemoryArgCommand {
   // offset and sizeBytes are only used for write.
 
  public:
-  StreamOperationCommand(HostQueue& queue, cl_command_type cmdType,
+  StreamOperationCommand(HostQueue& queue, amd::CommandType cmdType,
                          const EventWaitList& eventWaitList, Memory& memory, const uint64_t value,
                          const uint64_t mask, unsigned int flags, size_t offset, size_t sizeBytes)
       : OneMemoryArgCommand(queue, cmdType, eventWaitList, memory),
@@ -994,7 +992,7 @@ class StreamOperationCommand : public OneMemoryArgCommand {
 
 class BatchMemoryOperationCommand : public Command {
  public:
-  BatchMemoryOperationCommand(HostQueue& queue, cl_command_type cmdType, uint32_t count,
+  BatchMemoryOperationCommand(HostQueue& queue, amd::CommandType cmdType, uint32_t count,
                               uint32_t flags, EventWaitList& eventWaitList, const void* paramArray,
                               size_t paramSize)
       : Command(queue, cmdType, eventWaitList),
@@ -1041,7 +1039,7 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   amd::CopyMetadata copyMetadata_;
 
  public:
-  CopyMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  CopyMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                     Memory& srcMemory, Memory& dstMemory, Coord3D srcOrigin, Coord3D dstOrigin,
                     Coord3D size, amd::CopyMetadata copyMetadata = amd::CopyMetadata())
       : TwoMemoryArgsCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory),
@@ -1053,7 +1051,7 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
     assert(size.c[0] > 0 && "invalid");
   }
 
-  CopyMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  CopyMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                     Memory& srcMemory, Memory& dstMemory, Coord3D srcOrigin, Coord3D dstOrigin,
                     Coord3D size, const BufferRect& srcRect, const BufferRect& dstRect,
                     amd::CopyMetadata copyMetadata = amd::CopyMetadata())
@@ -1158,13 +1156,13 @@ class BatchCopyMemoryCommand : public Command {
   std::vector<BatchCopyOp> copyOps_;  //!< Vector of copy operations
 
  public:
-  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+  BatchCopyMemoryCommand(HostQueue& queue, amd::CommandType cmdType,
                          const EventWaitList& eventWaitList,
                          std::vector<BatchCopyOp>&& copyOps)
       : Command(queue, cmdType, eventWaitList),
         copyOps_(std::move(copyOps)) {}
 
-  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+  BatchCopyMemoryCommand(HostQueue& queue, amd::CommandType cmdType,
                          const EventWaitList& eventWaitList,
                          const std::vector<BatchCopyOp>& copyOps)
       : Command(queue, cmdType, eventWaitList),
@@ -1203,7 +1201,7 @@ class MapMemoryCommand : public OneMemoryArgCommand {
 
  public:
   //! Construct a new MapMemoryCommand
-  MapMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  MapMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                    Memory& memory, cl_map_flags mapFlags, bool blocking, Coord3D origin,
                    Coord3D size, size_t* imgRowPitch = nullptr, size_t* imgSlicePitch = nullptr,
                    void* mapPtr = nullptr)
@@ -1249,7 +1247,7 @@ class UnmapMemoryCommand : public OneMemoryArgCommand {
 
  public:
   //! Construct a new MapMemoryCommand
-  UnmapMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  UnmapMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                      Memory& memory, void* mapPtr)
       : OneMemoryArgCommand(queue, cmdType, eventWaitList, memory), mapPtr_(mapPtr) {}
 
@@ -1275,7 +1273,7 @@ class MigrateMemObjectsCommand : public Command {
 
  public:
   //! Construct a new AcquireExtObjectsCommand
-  MigrateMemObjectsCommand(HostQueue& queue, cl_command_type type,
+  MigrateMemObjectsCommand(HostQueue& queue, amd::CommandType type,
                            const EventWaitList& eventWaitList,
                            const std::vector<amd::Memory*>& memObjects,
                            cl_mem_migration_flags flags)
@@ -1418,7 +1416,7 @@ class NDRangeKernelCommand : public Command {
 
 class NativeFnCommand : public Command {
  private:
-  void(CL_CALLBACK* nativeFn_)(void*);
+  void(*nativeFn_)(void*);
 
   char* args_;
   size_t argsSize_;
@@ -1428,8 +1426,8 @@ class NativeFnCommand : public Command {
 
  public:
   NativeFnCommand(HostQueue& queue, const EventWaitList& eventWaitList,
-                  void(CL_CALLBACK* nativeFn)(void*), const void* args, size_t argsSize,
-                  size_t numMemObjs, const cl_mem* memObjs, const void** memLocs);
+                  void(*nativeFn)(void*), const void* args, size_t argsSize,
+                  size_t numMemObjs, const void** memObjs, const void** memLocs);
 
   ~NativeFnCommand() { delete[] args_; }
 
@@ -1458,7 +1456,7 @@ class ExternalSemaphoreCmd : public Command {
  public:
   ExternalSemaphoreCmd(HostQueue& queue, const void* sem_ptr, uint64_t fence,
                        ExternalSemaphoreCmdType cmd_type)
-      : Command::Command(queue, CL_COMMAND_USER),
+      : Command::Command(queue, amd::CommandType::User),
         sem_ptr_(sem_ptr),
         fence_(fence),
         cmd_type_(cmd_type) {}
@@ -1475,7 +1473,7 @@ class Marker : public Command {
   //! Create a new Marker
   Marker(HostQueue& queue, bool userVisible, const EventWaitList& eventWaitList = nullWaitList,
          const Event* waitingEvent = nullptr, bool cpu_wait = false)
-      : Command(queue, userVisible ? CL_COMMAND_MARKER : 0, eventWaitList, 0, waitingEvent) {
+      : Command(queue, userVisible ? amd::CommandType::Marker : static_cast<amd::CommandType>(0), eventWaitList, 0, waitingEvent) {
     cpu_wait_ = cpu_wait;
   }
 
@@ -1496,7 +1494,7 @@ class AccumulateCommand : public Command {
   //! Create a new Marker
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
                     const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+      : Command(queue, amd::CommandType::Task, eventWaitList, 0, waitingEvent) {}
 
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
@@ -1555,7 +1553,7 @@ class ExtObjectsCommand : public Command {
  public:
   //! Construct a new AcquireExtObjectsCommand
   ExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList, uint32_t num_objects,
-                    const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
+                    const std::vector<amd::Memory*>& memoryObjects, amd::CommandType type)
       : Command(queue, type, eventWaitList) {
     memObjects_.reserve(memoryObjects.size());
     for (const auto& it : memoryObjects) {
@@ -1589,7 +1587,7 @@ class AcquireExtObjectsCommand : public ExtObjectsCommand {
   //! Construct a new AcquireExtObjectsCommand
   AcquireExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList,
                            uint32_t num_objects, const std::vector<amd::Memory*>& memoryObjects,
-                           cl_command_type type)
+                           amd::CommandType type)
       : ExtObjectsCommand(queue, eventWaitList, num_objects, memoryObjects, type) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitAcquireExtObjects(*this); }
@@ -1602,7 +1600,7 @@ class ReleaseExtObjectsCommand : public ExtObjectsCommand {
   //! Construct a new ReleaseExtObjectsCommand
   ReleaseExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList,
                            uint32_t num_objects, const std::vector<amd::Memory*>& memoryObjects,
-                           cl_command_type type)
+                           amd::CommandType type)
       : ExtObjectsCommand(queue, eventWaitList, num_objects, memoryObjects, type) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitReleaseExtObjects(*this); }
@@ -1660,15 +1658,15 @@ class ThreadTraceMemObjectsCommand : public Command {
  public:
   //! Construct a new ThreadTraceMemObjectsCommand
   ThreadTraceMemObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList,
-                               size_t numMemoryObjects, const cl_mem* memoryObjects,
+                               size_t numMemoryObjects, const void** memoryObjects,
                                size_t sizeMemoryObject, ThreadTrace& threadTrace,
-                               cl_command_type type)
+                               amd::CommandType type)
       : Command(queue, type, eventWaitList),
         sizeMemObjects_(sizeMemoryObject),
         threadTrace_(threadTrace) {
     memObjects_.resize(numMemoryObjects);
     for (size_t i = 0; i < numMemoryObjects; ++i) {
-      Memory* obj = as_amd(memoryObjects[i]);
+      Memory* obj = static_cast<Memory*>(memoryObjects[i]);
       obj->retain();
       memObjects_[i] = obj;
     }
@@ -1727,7 +1725,7 @@ class ThreadTraceCommand : public Command {
   //! Construct a new ThreadTraceCommand
   ThreadTraceCommand(HostQueue& queue, const EventWaitList& eventWaitList,
                      const void* threadTraceConfig, ThreadTrace& threadTrace, State state,
-                     cl_command_type type)
+                     amd::CommandType type)
       : Command(queue, type, eventWaitList), threadTrace_(threadTrace), state_(state) {
     const unsigned int size = *static_cast<const unsigned int*>(threadTraceConfig);
     threadTraceConfig_ = static_cast<void*>(new char[size]);
@@ -1765,7 +1763,7 @@ class SignalCommand : public OneMemoryArgCommand {
   uint64_t markerOffset_;
 
  public:
-  SignalCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
+  SignalCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
                 Memory& memory, uint32_t value, uint64_t offset = 0)
       : OneMemoryArgCommand(queue, cmdType, eventWaitList, memory),
         markerValue_(value),
@@ -1784,7 +1782,7 @@ class MakeBuffersResidentCommand : public Command {
   cl_bus_address_amd* busAddresses_;
 
  public:
-  MakeBuffersResidentCommand(HostQueue& queue, cl_command_type type,
+  MakeBuffersResidentCommand(HostQueue& queue, amd::CommandType type,
                              const EventWaitList& eventWaitList,
                              const std::vector<amd::Memory*>& memObjects,
                              cl_bus_address_amd* busAddr)
@@ -1817,7 +1815,7 @@ class MakeBuffersResidentCommand : public Command {
 //! A deallocation command used to free SVM or system pointers.
 class SvmFreeMemoryCommand : public Command {
  public:
-  typedef void(CL_CALLBACK* freeCallBack)(cl_command_queue, uint32_t, void**, void*);
+  typedef void(*freeCallBack)(void* queue_handle, uint32_t, void**, void*);
 
  private:
   std::vector<void*> svmPointers_;  //!< List of pointers to deallocate
@@ -1828,7 +1826,7 @@ class SvmFreeMemoryCommand : public Command {
   SvmFreeMemoryCommand(HostQueue& queue, const EventWaitList& eventWaitList,
                        uint32_t numSvmPointers, void** svmPointers, freeCallBack pfnFreeFunc,
                        void* userData)
-      : Command(queue, CL_COMMAND_SVM_FREE, eventWaitList),
+      : Command(queue, amd::CommandType::SvmFree, eventWaitList),
         //! We copy svmPointers since it can be reused/deallocated after
         //  command creation
         svmPointers_(svmPointers, svmPointers + numSvmPointers),
@@ -1855,7 +1853,7 @@ class SvmCopyMemoryCommand : public Command {
  public:
   SvmCopyMemoryCommand(HostQueue& queue, const EventWaitList& eventWaitList, void* dst,
                        const void* src, size_t srcSize)
-      : Command(queue, CL_COMMAND_SVM_MEMCPY, eventWaitList),
+      : Command(queue, amd::CommandType::SvmMemcpy, eventWaitList),
         dst_(dst),
         src_(src),
         srcSize_(srcSize) {}
@@ -1882,7 +1880,7 @@ class SvmFillMemoryCommand : public Command {
  public:
   SvmFillMemoryCommand(HostQueue& queue, const EventWaitList& eventWaitList, void* dst,
                        const void* pattern, size_t patternSize, size_t size)
-      : Command(queue, CL_COMMAND_SVM_MEMFILL, eventWaitList),
+      : Command(queue, amd::CommandType::SvmMemfill, eventWaitList),
         dst_(dst),
         patternSize_(patternSize),
         times_(size / patternSize) {
@@ -1918,7 +1916,7 @@ class SvmMapMemoryCommand : public Command {
  public:
   SvmMapMemoryCommand(HostQueue& queue, const EventWaitList& eventWaitList, Memory* svmMem,
                       const size_t size, const size_t offset, cl_map_flags flags, void* svmPtr)
-      : Command(queue, CL_COMMAND_SVM_MAP, eventWaitList),
+      : Command(queue, amd::CommandType::SvmMap, eventWaitList),
         svmMem_(svmMem),
         size_(size),
         origin_(offset),
@@ -1951,7 +1949,7 @@ class SvmUnmapMemoryCommand : public Command {
  public:
   SvmUnmapMemoryCommand(HostQueue& queue, const EventWaitList& eventWaitList, Memory* svmMem,
                         void* svmPtr)
-      : Command(queue, CL_COMMAND_SVM_UNMAP, eventWaitList), svmMem_(svmMem), svmPtr_(svmPtr) {}
+      : Command(queue, amd::CommandType::SvmUnmap, eventWaitList), svmMem_(svmMem), svmPtr_(svmPtr) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmUnmapMemory(*this); }
 
@@ -1969,13 +1967,13 @@ class SvmUnmapMemoryCommand : public Command {
  */
 class CopyMemoryP2PCommand : public CopyMemoryCommand {
  public:
-  CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
+  CopyMemoryP2PCommand(HostQueue& queue, amd::CommandType cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
                        Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size)
       : CopyMemoryCommand(queue, cmdType, eventWaitList, srcMemory, dstMemory, srcOrigin, dstOrigin,
                           size) {}
 
-  CopyMemoryP2PCommand(HostQueue& queue, cl_command_type cmdType,
+  CopyMemoryP2PCommand(HostQueue& queue, amd::CommandType cmdType,
                        const EventWaitList& eventWaitList, Memory& srcMemory, Memory& dstMemory,
                        Coord3D srcOrigin, Coord3D dstOrigin, Coord3D size,
                        const BufferRect& srcRect, const BufferRect& dstRect,

@@ -419,7 +419,7 @@ Memory::~Memory() {
   DestructorCallBackEntry* entry;
   for (entry = destructorCallbacks_; entry != nullptr; entry = entry->next_) {
     // invoke the callback function.
-    entry->callback_(const_cast<cl_mem>(as_cl(this)), entry->data_);
+    entry->callback_(as_cl(this), entry->data_);  // passed as opaque handle to user callback
   }
 
   // Release the parent.

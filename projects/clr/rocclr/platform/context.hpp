@@ -92,8 +92,8 @@ class Context : public RuntimeObject {
    *
    *  \return An errcode if invalid, CL_SUCCESS if valid
    */
-  static int checkProperties(const cl_context_properties* properties,  //!< Properties
-                             Info* info                                //!< Info structure
+  static int checkProperties(const intptr_t* properties,  //!< Properties
+                             Info* info                   //!< Info structure
   );
 
   //! Default constructor
@@ -166,7 +166,7 @@ class Context : public RuntimeObject {
   }
 
   //! Returns a pointer to the original properties
-  const cl_context_properties* properties() const { return properties_; }
+  const intptr_t* properties() const { return properties_; }
 
   //! Returns a pointer to the OpenGL context
   GLFunctions* glenv() const { return glenv_; }
@@ -201,7 +201,7 @@ class Context : public RuntimeObject {
 
  private:
   Info info_;                            //!< Context info structure
-  cl_context_properties* properties_;    //!< Original properties
+  intptr_t* properties_;                 //!< Original properties
   GLFunctions* glenv_;                   //!< OpenGL context
   Device* customHostAllocDevice_;        //!< Device responsible for host allocations
   std::vector<Device*> svmAllocDevice_;  //!< Devices can support SVM allocations

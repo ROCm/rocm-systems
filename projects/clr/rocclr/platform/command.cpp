@@ -213,7 +213,7 @@ bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* 
 
 // ================================================================================================
 void Event::processCallbacks(int32_t status) const {
-  cl_event event = const_cast<cl_event>(as_cl(this));
+  void* event = as_cl(this);  // passed as opaque handle to user callbacks
   const int32_t mask = (status > CL_COMPLETE) ? status : CL_COMPLETE;
 
   // For_each callback:
@@ -296,7 +296,7 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
 
 const Event::EventWaitList Event::nullWaitList(0);
 
-static bool IsActivityEnabledAndCommit(cl_command_type type) {
+static bool IsActivityEnabledAndCommit(amd::CommandType type) {
   auto op = amd::activity_prof::OperationId(type);
   if (amd::activity_prof::IsEnabled(op)) {
     amd::activity_prof::CommitRecord(op);
@@ -306,10 +306,10 @@ static bool IsActivityEnabledAndCommit(cl_command_type type) {
 }
 
 // ================================================================================================
-Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
+Command::Command(HostQueue& queue, amd::CommandType type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
     : Event(queue, IsActivityEnabledAndCommit(type) ||
-                       queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
+                       queue.properties().test(amd::QueueProperties::Profiling) ||
                        Agent::shouldPostEventEvents()),
       queue_(&queue),
       next_(nullptr),
@@ -356,8 +356,9 @@ void Command::releaseResources() {
 void Command::enqueue() {
   assert(queue_ != NULL && "Cannot be enqueued");
 
-  if (Agent::shouldPostEventEvents() && type_ != 0) {
-    Agent::postEventCreate(as_cl(static_cast<Event*>(this)), type_);
+  if (Agent::shouldPostEventEvents() && type_ != static_cast<amd::CommandType>(0)) {
+    Agent::postEventCreate(as_cl(static_cast<Event*>(this)),
+                           static_cast<cl_command_type>(type_));
   }
 
   ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
@@ -371,7 +372,7 @@ void Command::enqueue() {
     // Notify all commands about the waiter. Barrier will be sent in order to obtain
     // HSA signal for a wait on the current queue
     for (const auto& event : eventWaitList()) {
-      if (!amd::IS_HIP && event->command().type() == CL_COMMAND_USER) {
+      if (!amd::IS_HIP && event->command().type() == amd::CommandType::User) {
         if (event->status() >= CL_COMPLETE) {
           reinterpret_cast<amd::UserEvent*>(event)->AddDependent(this);
         } else {
@@ -389,8 +390,9 @@ void Command::enqueue() {
     queue_->FormSubmissionBatch(this);
 
     // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
-    if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-        (type() == CL_COMMAND_TASK)) {
+    if (((type() == static_cast<amd::CommandType>(0)) && profilingInfo().batch_flush_) ||
+        (type() == amd::CommandType::Marker) ||
+        (type() == amd::CommandType::Task)) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
       EnableProfiling();
       // Update batch head for the current marker. Hence the status of all commands can be
@@ -410,7 +412,7 @@ void Command::enqueue() {
     queue_->flush();
   }
 
-  if ((queue_->device().settings().waitCommand_ && (type_ != 0)) ||
+  if ((queue_->device().settings().waitCommand_ && (type_ != static_cast<amd::CommandType>(0))) ||
       ((commandWaitBits_ & 0x2) != 0)) {
     queue_->finish();
   }
@@ -428,7 +430,7 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
                                            uint32_t gridId, uint32_t numGrids, uint64_t prevGridSum,
                                            uint64_t allGridSum, uint32_t firstDevice,
                                            bool forceProfiling)
-    : Command(queue, CL_COMMAND_NDRANGE_KERNEL, eventWaitList,
+    : Command(queue, amd::CommandType::NdRangeKernel, eventWaitList,
               AMD_SERIALIZE_KERNEL | (HIP_LAUNCH_BLOCKING << 1)),
       kernel_(kernel),
       sizes_(sizes),
@@ -464,10 +466,10 @@ void NDRangeKernelCommand::releaseResources() {
 }
 
 NativeFnCommand::NativeFnCommand(HostQueue& queue, const EventWaitList& eventWaitList,
-                                 void(CL_CALLBACK* nativeFn)(void*), const void* args,
-                                 size_t argsSize, size_t numMemObjs, const cl_mem* memObjs,
+                                 void(*nativeFn)(void*), const void* args,
+                                 size_t argsSize, size_t numMemObjs, const void** memObjs,
                                  const void** memLocs)
-    : Command(queue, CL_COMMAND_NATIVE_KERNEL, eventWaitList),
+    : Command(queue, amd::CommandType::NativeKernel, eventWaitList),
       nativeFn_(nativeFn),
       argsSize_(argsSize) {
   args_ = new char[argsSize_];
@@ -479,7 +481,7 @@ NativeFnCommand::NativeFnCommand(HostQueue& queue, const EventWaitList& eventWai
   memObjects_.resize(numMemObjs);
   memOffsets_.resize(numMemObjs);
   for (size_t i = 0; i < numMemObjs; ++i) {
-    Memory* obj = as_amd(memObjs[i]);
+    Memory* obj = static_cast<Memory*>(memObjs[i]);
 
     obj->retain();
     memObjects_[i] = obj;
@@ -606,19 +608,19 @@ bool CopyMemoryCommand::isEntireMemory() const {
   bool result = false;
 
   switch (type()) {
-    case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
+    case amd::CommandType::CopyImageToBuffer: {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         source().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), size()) &&
                destination().isEntirelyCovered(dstOrigin(), imageSize);
     } break;
-    case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
+    case amd::CommandType::CopyBufferToImage: {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         destination().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), imageSize) &&
                destination().isEntirelyCovered(dstOrigin(), size());
     } break;
-    case CL_COMMAND_COPY_BUFFER_RECT: {
+    case amd::CommandType::CopyBufferRect: {
       Coord3D rectSize(size()[0] * size()[1] * size()[2]);
       Coord3D srcOffs(srcRect().start_);
       Coord3D dstOffs(dstRect().start_);
