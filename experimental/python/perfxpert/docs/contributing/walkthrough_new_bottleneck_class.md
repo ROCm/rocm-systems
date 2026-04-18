@@ -37,6 +37,7 @@ Edit `perfxpert/knowledge/bottleneck_types.yaml` and add a new entry:
 Edit `perfxpert/tools/bottleneck.py` and extend the `classify_from_metrics()` function:
 
 ```python
+# SKIP-SAMPLE — walkthrough snippet (assumes an existing file context)
 def classify_from_metrics(metrics: Dict[str, float]) -> str:
     """Classify bottleneck from raw hardware metrics.
     
@@ -185,6 +186,7 @@ def test_io_techniques_ids_unique():
 Create `perfxpert/agents/io_specialist.py`:
 
 ```python
+# SKIP-SAMPLE — walkthrough snippet (references modules not yet created)
 """IO Specialist — optimizes I/O-bound kernels."""
 
 from typing import Any, Dict
@@ -255,6 +257,7 @@ Output your recommendation as a handoff specifying:
 **Tests:** Add to `tests/test_agents/test_io_specialist.py`:
 
 ```python
+# SKIP-SAMPLE — walkthrough: perfxpert.agents.io_specialist does not yet exist
 import pytest
 from perfxpert.agents.io_specialist import run, AGENT_SPEC
 
@@ -287,6 +290,7 @@ auto-register it.)
 If manual, add:
 
 ```python
+# SKIP-SAMPLE — walkthrough snippet (context has no AGENT_SPEC defined)
 from perfxpert.agents import io_specialist
 
 AGENT_SPEC.tools.append(io_specialist)
@@ -327,6 +331,7 @@ Append to `perfxpert/knowledge/proven_optimizations.yaml`:
 Run the test suite to verify your changes:
 
 ```bash
+# SKIP-SAMPLE — walkthrough: tests don't exist yet in a fresh checkout
 cd experimental/python/perfxpert
 
 # Test the new bottleneck type
