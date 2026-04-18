@@ -83,8 +83,24 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
         - ``summary`` (aggregated stats)
         - ``reason`` (error string when has_att_data=False)
     """
+    from perfxpert.tools._tooldep import require_tool, ExternalToolMissing
     import csv as _csv
     from pathlib import Path as _AttPath
+
+    # Check for rocprof-trace-decoder library (ATT CSV output requires it)
+    try:
+        require_tool("rocprof-trace-decoder")
+    except ExternalToolMissing:
+        # ATT is optional; if library is missing, return graceful no-data response
+        return {
+            "has_att_data": False,
+            "kernels": [],
+            "summary": {},
+            "reason": (
+                "rocprof-trace-decoder library not found. "
+                "ATT parsing skipped. Install rocprof-trace-decoder to enable ATT analysis."
+            ),
+        }
 
     att_dir_path = _AttPath(att_dir)
     if not att_dir_path.is_dir():

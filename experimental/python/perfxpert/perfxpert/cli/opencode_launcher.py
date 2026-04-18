@@ -16,6 +16,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
+from perfxpert.tools._tooldep import require_tool
+
 
 __all__ = ["main", "resolve_opencode_binary", "resolve_config_dir", "print_banner"]
 
@@ -39,6 +41,7 @@ def resolve_opencode_binary() -> Path:
     1. $PERFXPERT_OPENCODE_PATH (user override)
     2. perfxpert/_bundled/opencode (per-platform wheel)
     3. `which opencode` on PATH
+    4. Use require_tool with install hint
     """
     override = os.environ.get("PERFXPERT_OPENCODE_PATH")
     if override:
@@ -59,10 +62,14 @@ def resolve_opencode_binary() -> Path:
     except (ModuleNotFoundError, FileNotFoundError):
         pass
 
-    # PATH fallback
-    on_path = shutil.which("opencode")
-    if on_path:
-        return Path(on_path)
+    # PATH fallback with install helper
+    try:
+        require_tool("opencode", allow_install=True)
+        on_path = shutil.which("opencode")
+        if on_path:
+            return Path(on_path)
+    except Exception:
+        pass
 
     raise FileNotFoundError(
         "opencode binary not found. Set PERFXPERT_OPENCODE_PATH, "

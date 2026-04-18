@@ -24,14 +24,18 @@ import sys
 import types
 from typing import Any, Callable, Dict, Literal, Union, get_args, get_origin
 
+# Check for MCP dependency via require_tool
+from perfxpert.tools._tooldep import require_tool, ExternalToolMissing
+
 # MCP SDK imports wrapped in try/except for graceful degradation
+_MCP_AVAILABLE = False
 try:
+    require_tool("mcp")
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
     from mcp.types import TextContent, Tool
     _MCP_AVAILABLE = True
-except ImportError:
-    _MCP_AVAILABLE = False
+except (ImportError, ExternalToolMissing):
     Server = object  # type: ignore
     TextContent = None  # type: ignore
     Tool = None  # type: ignore
@@ -179,7 +183,10 @@ def _validate_tool_arguments(fn: Callable, arguments: dict | None) -> dict[str, 
 def build_server() -> Server:
     """Construct the Server with all READ_ONLY tools registered."""
     if not _MCP_AVAILABLE:
-        raise RuntimeError("MCP SDK not installed: pip install 'mcp>=1.0'")
+        try:
+            require_tool("mcp")
+        except ExternalToolMissing as e:
+            raise RuntimeError(f"MCP SDK not available: {e.install_hint}") from e
 
     server: Server = Server("perfxpert")
     tools = discover_read_only_tools()
