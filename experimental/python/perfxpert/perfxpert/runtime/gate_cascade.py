@@ -360,7 +360,8 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                 # Compute per-kernel deltas
                 hot_kernels = []
                 import math
-                regression_ratios = []  # Only include regressions in geomean
+                # Compute weighted geomean: baseline-share weighted geomean of regression ratios only
+                log_sum = 0.0
                 for new_rt in gate_input.new_kernel_runtimes:
                     baseline_rt = next((b for b in gate_input.baseline_kernel_runtimes
                                       if b.kernel_name == new_rt.kernel_name), None)
@@ -372,14 +373,14 @@ def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> Ga
                             "delta_pct": delta_pct,
                         })
                         # For geomean: only include regressions (delta_pct > 0)
-                        if delta_pct > 0:
-                            ratio = new_rt.total_runtime_ns / baseline_rt.total_runtime_ns if baseline_rt.total_runtime_ns > 0 else 1.0
-                            regression_ratios.append(ratio)
+                        if delta_pct > 0 and baseline_rt.total_runtime_ns > 0:
+                            ratio = new_rt.total_runtime_ns / baseline_rt.total_runtime_ns
+                            # Weight by baseline share
+                            log_sum += baseline_rt.share * math.log(ratio)
 
-                # Compute weighted geomean: geometric mean of regression ratios only
-                if regression_ratios:
-                    geomean = math.exp(sum(math.log(r) for r in regression_ratios) / len(regression_ratios))
-                    weighted_geomean_delta = (geomean - 1.0) * 100.0  # convert to percentage
+                # Compute weighted geomean from log_sum
+                if log_sum > 0:
+                    weighted_geomean_delta = (math.exp(log_sum) - 1.0) * 100.0  # convert to percentage
                 else:
                     weighted_geomean_delta = 0.0
 
