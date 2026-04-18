@@ -6,10 +6,13 @@ tests/test_red_team/ (Phase 5).
 """
 
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from perfxpert.runtime import gate_cascade
 from perfxpert.runtime.gate_cascade import GateVerdict
+
+FIX = Path(__file__).parent.parent / "fixtures"
 
 
 @pytest.fixture
@@ -20,8 +23,12 @@ def patches(monkeypatch):
         "sol": MagicMock(return_value={"ok": True, "peak_ratio": 0.8}),
         "bitwise": MagicMock(return_value={"ok": True, "diff": None}),
         "regression": MagicMock(return_value={
-            "ok": True, "total_delta_pct": -8.0, "hot_kernels": [],
-            "weighted_geomean_delta_pct": -7.5,
+            "ok": True,
+            "verdict": "improved",
+            "total_delta_pct": -0.08,         # fraction: -8% improvement
+            "weighted_geomean_delta_pct": -0.075,
+            "per_kernel_deltas": [],           # real key (was "hot_kernels")
+            "threshold_pct": 0.03,
         }),
         "anchors": MagicMock(return_value={"ok": True, "failed": []}),
     }
@@ -93,12 +100,20 @@ def test_bitwise_mismatch_rejects(patches):
 
 
 def test_regression_over_threshold_returns_regressed(patches):
-    """Gate 4: total_runtime +15% → 'regressed' (not 'reject')."""
+    """Gate 4: total_runtime +15% → 'regressed' (not 'reject').
+
+    Stub uses real regression.compare_runs schema: total_delta_pct is a fraction
+    (0.15 = 15%), per_kernel_deltas replaces the old 'hot_kernels' key.
+    """
     patches["regression"].return_value = {
         "ok": False,
-        "total_delta_pct": 15.0,
-        "hot_kernels": [{"name": "[K1]", "delta_pct": 15.0}],
-        "weighted_geomean_delta_pct": 12.0,
+        "verdict": "regressed",
+        "total_delta_pct": 0.15,          # fraction: 15%
+        "per_kernel_deltas": [            # real key — was "hot_kernels"
+            {"kernel": "[K1]", "delta_pct": 0.15, "was_hot": True},
+        ],
+        "weighted_geomean_delta_pct": 0.12,
+        "threshold_pct": 0.03,
     }
     v = gate_cascade.evaluate(
         baseline_db="b.db", candidate_db="c.db",
@@ -107,16 +122,21 @@ def test_regression_over_threshold_returns_regressed(patches):
     )
     assert v.status == "regressed"
     assert v.failing_gate == "regression"
-    assert v.delta_pct == 15.0
+    assert v.delta_pct == pytest.approx(0.15)
 
 
 def test_weighted_geomean_catches_tail_regressions(patches):
-    """Gate 4 FMEA fix: many small kernels each < 10% but weighted-geomean down."""
+    """Gate 4 FMEA fix: many small kernels each < 10% but weighted-geomean down.
+
+    Stub uses real schema: fractions throughout, per_kernel_deltas key.
+    """
     patches["regression"].return_value = {
         "ok": False,
-        "total_delta_pct": 2.0,            # total barely noticeable
-        "hot_kernels": [],                 # no single hot kernel > 10%
-        "weighted_geomean_delta_pct": 9.5,  # tail regressions add up
+        "verdict": "regressed",
+        "total_delta_pct": 0.02,            # fraction: 2% total — barely noticeable
+        "per_kernel_deltas": [],            # real key — no single hot kernel > 10%
+        "weighted_geomean_delta_pct": 0.095,  # fraction: 9.5% — tail regressions add up
+        "threshold_pct": 0.03,
     }
     v = gate_cascade.evaluate(
         baseline_db="b.db", candidate_db="c.db",
@@ -307,3 +327,129 @@ class TestRunSolGateUnmocked:
             f"1000× speedup must be rejected at Gate 2, got: {v.status}"
         )
         assert v.failing_gate == "sol"
+
+
+# ---------------------------------------------------------------------------
+# Finding #3 — Gate 4 wrong key + unit mismatch
+# ---------------------------------------------------------------------------
+
+class TestRegressionGateRealSchema:
+    """Tests that pass regression.compare_runs real output schema through evaluate().
+
+    regression.compare_runs returns:
+      - key  "per_kernel_deltas"  (not "hot_kernels")
+      - delta_pct as FRACTION (e.g. 0.15 = 15%), NOT percent
+      - each item: {"kernel": str, "delta_pct": float, "was_hot": bool}
+
+    Before the fix, evaluate() read "hot_kernels" (always empty → list) and
+    compared the fraction 0.15 against 10.0 (a percent), so a hot kernel
+    regressing 15% would NEVER be caught.
+    """
+
+    @staticmethod
+    def _make_stubs_pass_except_regression(monkeypatch, regression_return):
+        """Helper: stub compile/sol/bitwise/anchors as passing; let regression return
+        the supplied dict (real schema from regression.compare_runs)."""
+        monkeypatch.setattr(
+            gate_cascade, "_run_compile_gate",
+            MagicMock(return_value={"ok": True, "stderr": ""}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_sol_gate",
+            MagicMock(return_value={"ok": True, "peak_ratio": 1.5}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_bitwise_gate",
+            MagicMock(return_value={"ok": True, "diff": None}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_regression_gate",
+            MagicMock(return_value=regression_return),
+        )
+
+    def test_hot_kernel_15pct_regressed_is_caught(self, monkeypatch):
+        """A hot kernel regressing 15% (delta_pct=0.15 as fraction) MUST trigger
+        Gate 4 failure.  Before the fix: 0.15 > 10.0 is False → silently passed."""
+        regression_output = {
+            "verdict": "regressed",
+            "total_delta_pct": 0.02,      # 2% total — below 3% noise floor
+            "weighted_geomean_delta_pct": 0.02,
+            "per_kernel_deltas": [
+                {"kernel": "matmul", "delta_pct": 0.15, "was_hot": True},
+                {"kernel": "conv2d", "delta_pct": 0.01, "was_hot": False},
+            ],
+            "threshold_pct": 0.03,
+        }
+        self._make_stubs_pass_except_regression(monkeypatch, regression_output)
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.1,
+        )
+        assert v.status == "regressed", (
+            "matmul is hot and regressed 15% (fraction 0.15 > threshold 0.10) — "
+            f"must be caught by Gate 4, got: {v.status!r}"
+        )
+        assert v.failing_gate == "regression"
+        assert "hot kernel" in v.detail.lower() or "hot" in v.detail.lower()
+
+    def test_non_hot_kernel_regression_does_not_trigger_hot_path(self, monkeypatch):
+        """Only kernels with was_hot=True should trigger the hot-kernel failure path."""
+        regression_output = {
+            "verdict": "neutral",
+            "total_delta_pct": 0.01,    # 1% total — within noise
+            "weighted_geomean_delta_pct": 0.01,
+            "per_kernel_deltas": [
+                # delta_pct=0.15 (15%) but was_hot=False → should NOT trigger hot-kernel gate
+                {"kernel": "tiny_kernel", "delta_pct": 0.15, "was_hot": False},
+            ],
+            "threshold_pct": 0.03,
+        }
+        self._make_stubs_pass_except_regression(monkeypatch, regression_output)
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.1,
+        )
+        # total_delta 0.01 < 0.03 threshold, was_hot=False → pass
+        assert v.status == "pass", (
+            f"Non-hot kernel regression should not trigger Gate 4, got: {v.status!r}"
+        )
+
+    def test_real_regression_db_fixtures_flow_through_gate4(self, monkeypatch):
+        """Use the real regression fixture DBs with _run_regression_gate un-mocked.
+
+        regression.compare_runs(BASELINE, TAIL_HURT) returns a regressed verdict
+        where conv2d (a hot kernel) regressed 15%.  Gate 4 in evaluate() must
+        detect this WITHOUT mocking _run_regression_gate.
+        """
+        BASELINE = str(FIX / "regression_baseline.db")
+        TAIL_HURT = str(FIX / "regression_tail_hurt.db")
+
+        # Mock everything EXCEPT _run_regression_gate
+        monkeypatch.setattr(
+            gate_cascade, "_run_compile_gate",
+            MagicMock(return_value={"ok": True, "stderr": ""}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_sol_gate",
+            MagicMock(return_value={"ok": True, "peak_ratio": 1.0}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_bitwise_gate",
+            MagicMock(return_value={"ok": True, "diff": None}),
+        )
+        # _run_regression_gate is NOT mocked — runs for real
+
+        v = gate_cascade.evaluate(
+            baseline_db=BASELINE,
+            candidate_db=TAIL_HURT,
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942", claimed_speedup=1.0,
+        )
+        assert v.status == "regressed", (
+            "regression_tail_hurt.db has conv2d (hot kernel) regressing 15%; "
+            f"Gate 4 must catch this. Got: {v.status!r}, detail: {v.detail!r}"
+        )

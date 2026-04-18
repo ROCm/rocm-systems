@@ -199,19 +199,33 @@ def evaluate(
         )
 
     # Gate 4: Regression (with hot-kernel + weighted-geomean)
+    #
+    # regression.compare_runs returns:
+    #   "per_kernel_deltas" (not "hot_kernels") — list of
+    #       {"kernel": str, "delta_pct": float, "was_hot": bool}
+    # where delta_pct is a FRACTION (e.g. 0.15 = 15%), NOT a percentage.
+    # HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT (10.0) is expressed as percent, so
+    # we must divide by 100 before comparing.
+    # Similarly, total_delta_pct and weighted_geomean_delta_pct from
+    # regression.compare_runs are fractions; REGRESSION_NOISE_THRESHOLD_PCT
+    # (3.0) and TAIL_GEOMEAN_THRESHOLD_PCT (5.0) are percent — divide by 100.
     r = _run_regression_gate(baseline_db, candidate_db)
-    total_delta = r.get("total_delta_pct", 0.0)
-    tail_delta = r.get("weighted_geomean_delta_pct", 0.0)
-    hot_failures = [k for k in r.get("hot_kernels", [])
-                    if k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT]
-    if (total_delta > REGRESSION_NOISE_THRESHOLD_PCT
-            or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT
+    total_delta = r.get("total_delta_pct", 0.0)          # fraction, e.g. 0.15
+    tail_delta = r.get("weighted_geomean_delta_pct", 0.0)  # fraction
+    # Only flag kernels that are hot AND regressed beyond the threshold
+    hot_failures = [
+        k for k in r.get("per_kernel_deltas", [])
+        if k.get("was_hot", False)
+        and k.get("delta_pct", 0.0) > HOT_KERNEL_INDIVIDUAL_THRESHOLD_PCT / 100.0
+    ]
+    if (total_delta > REGRESSION_NOISE_THRESHOLD_PCT / 100.0
+            or tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT / 100.0
             or hot_failures):
         detail_parts = []
-        if total_delta > REGRESSION_NOISE_THRESHOLD_PCT:
-            detail_parts.append(f"total +{total_delta:.1f}%")
-        if tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT:
-            detail_parts.append(f"weighted-geomean +{tail_delta:.1f}% (tail)")
+        if total_delta > REGRESSION_NOISE_THRESHOLD_PCT / 100.0:
+            detail_parts.append(f"total +{total_delta * 100:.1f}%")
+        if tail_delta > TAIL_GEOMEAN_THRESHOLD_PCT / 100.0:
+            detail_parts.append(f"weighted-geomean +{tail_delta * 100:.1f}% (tail)")
         if hot_failures:
             detail_parts.append(f"{len(hot_failures)} hot kernel(s) regressed >10%")
         return GateVerdict(
@@ -220,7 +234,7 @@ def evaluate(
             metrics={"regression": r},
             rejected_patch_sha=patch_sha,
             delta_pct=total_delta,
-            per_kernel_deltas=r.get("hot_kernels", []),
+            per_kernel_deltas=r.get("per_kernel_deltas", []),
         )
 
     # Gate 5: Test anchors
