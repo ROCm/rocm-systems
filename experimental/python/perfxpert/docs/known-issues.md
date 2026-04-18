@@ -143,10 +143,53 @@ None. All four scanners (`docs/lint.sh`, `docs/link-checker.py`,
 `docs/test-samples.py`, `docs/inventory.py`) report zero violations
 at the baseline snapshot. See `docs/inventory-baseline.json`.
 
+### Scanner scope limitations
+
+Documented here so users reading "zero violations" know what is and
+isn't covered.
+
+#### `docs/link-checker.py`
+- **External URLs not validated.** Any `http://` or `https://` link is
+  skipped (`is_external_url`). Dead external links will not flag.
+- **Anchor fragments not validated.** `#section-id` is stripped before
+  the file-existence check. A link pointing at a missing anchor inside
+  a real file passes.
+- **`--strict` is output-format only.** It suppresses the
+  human-readable preamble and only emits CSV rows; it does NOT enable
+  stricter checks. The set of validated link classes is identical in
+  both modes.
+
+Workaround: rely on Markdown preview in your IDE / GitHub for anchor
+correctness; external URL health is covered nightly by a separate
+link-health workflow (not part of the zero-violation baseline).
+
+#### `docs/lint.sh` — banned-string scanner
+The banned-string scan excludes these paths (`lint.sh:50-54`) so that
+historical context or pre-existing test fixtures don't cause false
+positives:
+
+- `docs/superpowers/specs/**` — superpowers phase specs (reference)
+- `docs/superpowers/plans/**` — superpowers phase plans (reference)
+- `**/.git/**` — git internals
+- `**/.pytest_cache/**` — test runner cache
+- `**/perfxpert/ai_analysis/**` — legacy module removed during the
+  agentic refactor; banned terms inside historical fixtures are not live.
+
+Consequence: banned strings inside those paths will NOT trip the
+scanner. If you're adding a new fixture directory that should be
+ignored for legitimate reasons, add it here with a one-line comment.
+
 ### Out-of-scope follow-ups
 
 - `tests/test_docs_tooling/test_secret_scanner.py` — three tests fail
   locally because they cd into a fresh `tempfile.TemporaryDirectory()`
   without symlinking `tools/_secret_scanner.py` first. Pre-existing
-  bug (commit c2c419ff9e). Fix is a one-line tmpdir setup change;
-  tracked separately and out of scope for this PR set.
+  bug (commit c2c419ff9e).
+  - **Reproducer:** `pytest tests/test_docs_tooling/test_secret_scanner.py -q`
+  - **Owner / tracking:** queued in a follow-up sweep; no
+    issue number assigned yet. Fix is a one-line tmpdir setup (copy
+    or symlink `tools/_secret_scanner.py` into the tmpdir before the
+    subprocess call).
+  - **Workaround for affected devs:** skip the three `test_secret_scanner_*`
+    tests with `-k 'not secret_scanner'` while the fix is queued;
+    they don't gate any other scanner.

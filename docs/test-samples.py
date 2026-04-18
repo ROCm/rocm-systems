@@ -4,12 +4,30 @@ docs/test-samples.py — Extract and execute bash/Python samples from Markdown d
 Part of Phase 9 docs audit tooling
 """
 
+import os
 import re
 import subprocess
 import sys
 import json
 from pathlib import Path
 from typing import List, Dict, Any
+
+# Python samples that import `perfxpert` need the package on sys.path.
+# On a dev box with `pip install -e` this is redundant; in CI / clean
+# checkouts without a pre-installed perfxpert, prepend the source tree.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_PERFXPERT_SRC = _REPO_ROOT / "experimental" / "python" / "perfxpert"
+
+
+def _python_env() -> Dict[str, str]:
+    """Return a subprocess env with PYTHONPATH pointing at perfxpert/."""
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    parts = [str(_PERFXPERT_SRC)]
+    if existing:
+        parts.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    return env
 
 # Regex patterns for code blocks
 BASH_PATTERN = r'```bash\s*\n(.*?)```'
@@ -106,13 +124,19 @@ def run_bash_sample(code: str) -> Dict[str, Any]:
 
 
 def run_python_sample(code: str) -> Dict[str, Any]:
-    """Execute a Python sample."""
+    """Execute a Python sample.
+
+    Runs under a PYTHONPATH that includes the perfxpert source tree
+    so `import perfxpert` works in a clean checkout without requiring
+    `pip install -e .` first. See `_python_env()` for details.
+    """
     try:
         result = subprocess.run(
             ['python3', '-c', code],
             capture_output=True,
             text=True,
             timeout=10,
+            env=_python_env(),
         )
         return {
             'passed': result.returncode == 0,
