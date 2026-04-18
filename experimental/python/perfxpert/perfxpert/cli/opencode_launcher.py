@@ -117,6 +117,78 @@ def _handle_version_flag(argv: Iterable[str]) -> bool:
     return False
 
 
+# Subcommands owned by perfxpert (dispatched by `perfxpert`, NOT forwarded to
+# opencode). Listed here for help-banner discovery; `perfxpert-code` itself
+# is a thin launcher and does not dispatch these — users run `perfxpert doctor`,
+# `perfxpert stats`, etc. directly. Kept in sync with `perfxpert/__main__.py`.
+_PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
+    "analyze": "Analyze a rocprofiler-sdk trace database for GPU bottlenecks",
+    "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
+    "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
+    "providers": "List LLM providers and configuration status",
+}
+
+
+def _print_perfxpert_help(stream=None) -> None:
+    """Print the AMD PerfXpert help banner listing perfxpert-owned subcommands.
+
+    Called when `perfxpert-code --help` (or `-h`) appears BEFORE any
+    recognized opencode subcommand. After this banner, control falls
+    through to `opencode --help` for generic flags.
+
+    ``stream`` resolves to the live ``sys.stdout`` on each call so pytest's
+    capsys captures the banner correctly.
+    """
+    if stream is None:
+        stream = sys.stdout
+    version = _perfxpert_version()
+    lines = [
+        f"{_BRANDING_NAME} {version} — opencode wrapper",
+        "",
+        "Usage:",
+        "  perfxpert-code [opencode-args]      Launch the AMD-branded opencode TUI",
+        "  perfxpert-code --version | -V       Print perfxpert version and exit",
+        "  perfxpert-code --help | -h          Show this banner, then opencode help",
+        "",
+        "perfxpert-owned subcommands (invoke via `perfxpert <subcommand>`):",
+    ]
+    for name, desc in _PERFXPERT_SUBCOMMANDS.items():
+        lines.append(f"  {name:<10s}  {desc}")
+    lines.append("")
+    lines.append("Pass-through subcommands are routed to the bundled opencode binary.")
+    lines.append("For opencode-native flags (stats / run / auth / models / debug), see below:")
+    lines.append("")
+    stream.write("\n".join(lines) + "\n")
+    stream.flush()
+
+
+def _help_flag_precedes_subcommand(argv: Iterable[str]) -> bool:
+    """Return True when `--help` / `-h` appears with no prior positional token.
+
+    A help flag AFTER a positional arg (e.g. `perfxpert-code run --help`) is
+    a request for opencode's subcommand-specific help; we pass it through
+    verbatim. Only the bare `perfxpert-code --help` case should print our
+    banner.
+    """
+    for tok in argv:
+        if tok in {"--help", "-h"}:
+            return True
+        if not tok.startswith("-"):
+            return False
+    return False
+
+
+def _handle_help_flag(argv: Iterable[str]) -> bool:
+    """If `--help` / `-h` is the first non-flag token, print the perfxpert
+    banner. Return True so the caller can decide whether to fall through to
+    `opencode --help` for generic flag details.
+    """
+    if _help_flag_precedes_subcommand(argv):
+        _print_perfxpert_help()
+        return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for `perfxpert-code`."""
     if argv is None:
@@ -125,10 +197,20 @@ def main(argv: list[str] | None = None) -> int:
     if _handle_version_flag(argv):
         return 0
 
+    # Print our banner when `--help`/`-h` precedes any opencode subcommand.
+    # We still fall through to `opencode --help` afterwards so the user sees
+    # the generic opencode flag reference appended to our perfxpert summary.
+    _printed_perfxpert_help = _handle_help_flag(argv)
+
     try:
         binary = resolve_opencode_binary()
         config_dir = resolve_config_dir()
     except FileNotFoundError as e:
+        # If we already printed perfxpert help, it's the user's expected
+        # happy path for discovery; don't surface a red-text error just
+        # because opencode isn't on disk yet.
+        if _printed_perfxpert_help:
+            return 0
         print(f"\033[31mperfxpert-code: {e}\033[0m", file=sys.stderr)
         return 1
 
