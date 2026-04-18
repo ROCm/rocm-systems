@@ -15,11 +15,8 @@ host-side API batching.
 
 ## Tool allowlist (max 5)
 
-- occupancy.lookup_waves_per_eu
-- topdown.classify_overhead
-- att.classify_stall_reason
-- att.classify_stall_ratio
-- trace_analysis.time_breakdown
+- latency_techniques.catalog
+- arch.lookup_peaks
 
 ## Output schema (≤5 fields)
 

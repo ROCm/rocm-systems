@@ -16,11 +16,11 @@ and GPU metadata.
 
 ## Tool allowlist (max 5)
 
-- trace_analysis.hotspots
+- analysis.time_breakdown
+- analysis.hotspots
 - bottleneck.classify_from_metrics
-- bottleneck.prioritize_by_amdahl
-- metrics.compute_gpu_utilization
 - roofline.classify
+- counters.validate_for_gpu
 
 ## Output schema (≤5 fields)
 

@@ -18,10 +18,9 @@ Review Recommendation output through the 5-gate cascade:
 
 ## Tool allowlist (max 5)
 
-- bottleneck.lookup_signatures
-- regression.compare_runs
-- sol.sanity_check
-- arch.lookup_peaks
+- tasks.query_by_kernel
+- tasks.create
+- trace.fingerprint
 
 ## Output schema (≤5 fields)
 

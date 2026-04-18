@@ -15,11 +15,9 @@ kernel fusion.
 
 ## Tool allowlist (max 5)
 
-- memory.classify_cache_performance
-- metrics.compute_l1_miss_rate
-- metrics.compute_l2_hit_rate
-- metrics.compute_hbm_bandwidth
-- trace_analysis.memcpy
+- memory_techniques.catalog
+- arch.lookup_peaks
+- bottleneck.lookup_signatures
 
 ## Output schema (≤5 fields)
 

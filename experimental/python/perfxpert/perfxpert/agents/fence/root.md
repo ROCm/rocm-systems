@@ -20,9 +20,9 @@ yourself.
 
 - intent.classify
 - tasks.next
+- tasks.create
 - tasks.update
 - tasks.close
-- trace_fingerprint.fingerprint
 
 ## Handoff schema
 

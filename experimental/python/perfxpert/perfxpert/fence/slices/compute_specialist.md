@@ -15,11 +15,10 @@ rebalancing, loop unrolling, LDS tiling.
 
 ## Tool allowlist (max 5)
 
-- occupancy.lookup_waves_per_eu
-- occupancy.suggest_vgpr_reduction
+- compute_techniques.catalog
 - arch.lookup_peaks
-- metrics.compute_gpu_utilization
 - roofline.classify
+- compiler.lookup_flags
 
 ## Output schema (≤5 fields)
 
