@@ -1,37 +1,42 @@
-; RUN: %not %raise_cli %c2_permlane_swap_co --isa=gfx1250 --target-isa=gfx942 \
-; RUN:     --emit-ir=c2_permlane_swap_kernel 2>&1 \
-; RUN:   | %FileCheck %s --check-prefix=STDERR
+; RUN: %raise_cli %c2_permlane_swap_co --isa=gfx1250 --target-isa=gfx942 \
+; RUN:     --emit-ir=c2_permlane_swap_kernel 2>/dev/null \
+; RUN:   | %FileCheck %s
 ;
-; SPE_DESIGN.md §3 Class 2 "wave-size-baked cross-lane ops". The
-; v_permlane16_swap_b32 instruction has a clean rewrite on paper
-; (CROSS_LANE_SURVEY.md P2/P3/P4 — lift to llvm.amdgcn.permlane16),
-; but until that handler lands the classifier must refuse the kernel
-; rather than emit the current same-lane-move fallback that
-; CROSS_LANE_SURVEY.md documents as "❌ broken".
+; CROSS_LANE_SURVEY.md item P4 (v_permlane16_swap_b32 lift) has
+; landed. The classifier's LaneGroupShuffle site accepts
+; V_PERMLANE16_SWAP_B32 as outcome (b) because
+; `handle_valu_cross_lane.cpp` emulates the two-VGPR exchange
+; through paired `llvm.amdgcn.ds.bpermute` calls (the same target-
+; independent path the P2 permlane16/permlanex16 emulation uses,
+; for the same reason: gfx942 lacks native isel for
+; `llvm.amdgcn.permlane16.swap`, per upstream LLVM's
+; `test/CodeGen/AMDGPU/llvm.amdgcn.permlane16.swap.ll` ERR-SDAG
+; assertion).
 ;
-; Once the P2/P3/P4 handler lands this test should be updated to
-; assert the kernel raises successfully and the permlane16
-; intrinsic is present in the emitted IR (mirroring
-; lit_tests/ds_bpermute_b32/ for P1's landed handler).
-;
-; MAINTENANCE CONTRACT. When you implement P2/P3/P4 in handle_valu:
-;   1. Flip this test's RUN line from `%not %raise_cli` to
-;      `%raise_cli`.
-;   2. Replace the STDERR CHECK block with a CHECK block asserting
-;      `call {{.*}}@llvm.amdgcn.permlane16` in the raised IR.
-;   3. Update the obstruction table in wave_size_obstruction.cpp so
-;      the V_PERMLANE16_SWAP_B32 SemOp is marked `rewriteImplemented
-;      = true`.
+; This test asserts:
+;   1. The raise succeeds (the classifier marks
+;      V_PERMLANE16_SWAP_B32 [implemented]).
+;   2. The emitted IR contains TWO calls to `llvm.amdgcn.ds.bpermute`
+;      — one per output VGPR (vdst and src0_out). The P4 handler
+;      reuses the partner-lane / byte-address chain across both
+;      calls, so the bpermutes share their first operand under CSE
+;      but each consumes a different second operand (vdst_in vs
+;      src0_in).
+;   3. The signature property is the partner-lane XOR with 0x10
+;      (= 16): each lane's source-lane index is `lane_id XOR 16`.
+;      Matching `xor i32 %{{.*}}, 16` in the byte-address chain
+;      pins the swap-partner semantics without asserting on SSA
+;      names.
+;   4. The intrinsic declaration is present.
 
-; STDERR: transpiler: pre-translation abort:
-; STDERR-SAME: cross-wave-shuffle-rewrite-pending
-; STDERR-SAME: v_permlane16_swap
+; CHECK-LABEL: define amdgpu_kernel void @c2_permlane_swap_kernel(
 
-; STDERR: LaneGroupShuffle
-; STDERR-SAME: Class 2
-; STDERR: rewrite: P4
-; STDERR-SAME: pending
-; STDERR: outcome: (c) refuse
+; The XOR-16 partner computation must precede the bpermutes.
+; CHECK:      xor i32 %{{[^,]+}}, 16
 
-; STDERR: raise_cli: kernel 'c2_permlane_swap_kernel' failed to raise:
-; STDERR-SAME: v_permlane16_swap
+; Two ds_bpermute calls, one per output VGPR.
+; CHECK:      call i32 @llvm.amdgcn.ds.bpermute(
+; CHECK:      call i32 @llvm.amdgcn.ds.bpermute(
+
+; The intrinsic declaration must be present.
+; CHECK:      declare {{.*}}i32 @llvm.amdgcn.ds.bpermute(i32, i32)

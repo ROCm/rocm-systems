@@ -365,16 +365,26 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       // diagnostic for the specific P-item still missing.
       //
       // P2 (base permlane16/permlanex16) landed:
-      // `handle_valu_cross_lane.cpp` emits
-      // `llvm.amdgcn.permlane16` / `permlanex16` with fi / bc
-      // extracted from the VOP3 src{0,1}_modifiers' OP_SEL_0 bit.
-      // P4 (permlane*_swap) is still pending — the swap variants
-      // need an LDS-round-trip lowering or a permlane16-pair
-      // selector, per CROSS_LANE_SURVEY.md P4's design sketch.
-      if (sop == SemOp::V_PERMLANE16_SWAP_B32 ||
-          sop == SemOp::V_PERMLANE32_SWAP_B32) {
+      // `handle_valu_cross_lane.cpp` emits ds_bpermute-emulated
+      // permlane16/permlanex16 with fi / bc extracted from the
+      // VOP3 src{0,1}_modifiers' OP_SEL_0 bit.
+      //
+      // P4 (permlane16_swap_b32) landed: ds_bpermute-emulated
+      // partner = lane_id XOR 16, two bpermutes for the two-VGPR
+      // exchange. The wider permlane32_swap_b32 variant stays
+      // unrewritable — its XOR-32 partner spans wave64's two
+      // 32-lane halves, which has no wave32 analogue, so a wave32
+      // source kernel cannot meaningfully encode it. Seeing it in
+      // a wave32 source binary indicates either a corrupted
+      // disassembly or a wave64 source mis-classified as wave32.
+      if (sop == SemOp::V_PERMLANE32_SWAP_B32) {
         site.rewrite = RewriteId::P4_PermLaneSwap;
         site.rewriteImplemented = false;
+        site.detail = "v_permlane32_swap_b32: XOR-32 partner spans "
+                      "wave64 32-lane halves; no wave32 analogue";
+      } else if (sop == SemOp::V_PERMLANE16_SWAP_B32) {
+        site.rewrite = RewriteId::P4_PermLaneSwap;
+        site.rewriteImplemented = true;
       } else {
         site.rewrite = RewriteId::P2_PermLane16;
         site.rewriteImplemented = true;

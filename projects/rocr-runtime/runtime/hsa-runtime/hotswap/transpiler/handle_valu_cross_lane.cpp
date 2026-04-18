@@ -195,35 +195,133 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // ---- gfx950 lane-swap: v_permlane{16,32}_swap_b32 ----
-  // Exchange vdst and src0 across lanes 0..15 ↔ 16..31 (permlane16
-  // form) or lanes 0..31 ↔ 32..63 (permlane32 form). Two defs
-  // (vdst, src0_out) and two uses (vdst_in, src0).
+  // ---- gfx950 lane-swap: v_permlane16_swap_b32 ----
   //
-  // CROSS_LANE_SURVEY.md P4 lift is pending — there is no direct
-  // ds_bpermute emulation analogous to P2 because the ops are
-  // genuine *swaps*, not gathers, and `ds_bpermute` only models a
-  // gather. The principled lowering is either (a) an LDS round-trip
-  // (store half, barrier, load other half) or (b) a paired
-  // `permlane16` lowering for targets that have it natively. Both
-  // are outside the scope of this commit.
+  // CROSS_LANE_SURVEY.md P4 lowering. Exchanges two VGPRs across
+  // lanes 0..15 ↔ 16..31 within each 32-lane group. Two defs
+  // (vdst, src0_out) and two tied uses (vdst_in tied to vdst,
+  // src0 tied to src0_out). Effect:
   //
-  // Until P4 lands, refuse loudly with `unsupportedShape`. Under
-  // cross-wave the Phase 1.4.5 classifier already refuses via
-  // `cross-wave-shuffle-rewrite-pending`; this `unsupportedShape`
-  // covers the same-wave path so a kernel that uses these
-  // instructions in a same-wave lift also fails loudly rather than
-  // silently emitting a same-lane swap (which collapses the
-  // cross-lane exchange to an identity, exactly the silent-
-  // miscompile failure mode the rest of the cross-lane work is
-  // structured to eliminate).
-  case SemOp::V_PERMLANE16_SWAP_B32:
+  //   new_vdst[L]      = src0_in[L XOR 16]
+  //   new_src0_out[L]  = vdst_in[L XOR 16]
+  //
+  // Target constraint mirrors P2: `v_permlane16_swap_b32` exists
+  // natively only on gfx950 (CDNA4) and gfx12+ (HasPermlane16Swap
+  // subtarget feature). gfx942 (CDNA3) and earlier wave64 targets
+  // lack native isel for `llvm.amdgcn.permlane16.swap` — upstream
+  // LLVM's `test/CodeGen/AMDGPU/llvm.amdgcn.permlane16.swap.ll`
+  // explicitly asserts the gfx942 isel failure ("LLVM ERROR: Cannot
+  // select: intrinsic %llvm.amdgcn.permlane16.swap"). Emulate via
+  // `ds_bpermute_b32`, available on every AMDGPU generation with
+  // LDS (gfx8+), so this lowering is target-independent.
+  //
+  // Per-lane emulation, L = `mbcnt`-derived absolute lane id:
+  //
+  //   partner   = L XOR 16
+  //   bperm_idx = partner << 2          // ds_bpermute byte address
+  //   new_vdst       = ds_bpermute(bperm_idx, src0_in)
+  //   new_src0_out   = ds_bpermute(bperm_idx, vdst_in)
+  //
+  // Wave-width correctness under modulo-replication: lane L XOR 16
+  // is naturally per-32-lane-half-independent on wave64 (lane 0 ↔
+  // lane 16 in lower half, lane 32 ↔ lane 48 in upper half — both
+  // halves swap internally). The wave32 source kernel's two-VGPR
+  // exchange therefore lifts to a wave64 instruction that performs
+  // the same exchange independently in each half, the textbook
+  // modulo-replication match.
+  //
+  // EXEC / fi / bc handling: the MCInst surfaces `fi` and
+  // `bound_ctrl` as named immediate operands ONLY in the e64 form
+  // (VOP3OpSel encoding); the e32 form (VOP1 encoding, which the
+  // GPT-OSS corpus exclusively emits) has no fi/bc operands and
+  // they default to 0. The `ds_bpermute` emulation is observation-
+  // ally equivalent to the source's `fi=0, bc=0` semantics WHEN
+  // EXEC=all-active at the swap site — which is the invariant
+  // Triton-style butterfly-reduction kernels maintain (the kernel
+  // emits `s_setpc` / divergent EXEC writes only at iteration
+  // boundaries, not inside the reduction). For partial-EXEC sites:
+  //
+  //   * fi=0 source semantics: inactive lanes' contribution is 0.
+  //     ds_bpermute returns the stale VGPR value instead.
+  //     Divergence on inactive lanes only.
+  //   * bc=0 source semantics: out-of-range source lane → return
+  //     %old. For our XOR-16 swap, every lane has an in-range
+  //     partner (XOR 16 stays within the 32-lane half), so bc is
+  //     irrelevant.
+  //
+  // The corpus pattern (e32 form, EXEC=full at the swap site) is
+  // bit-exact correct under this emulation. We accept all four
+  // fi/bc combinations and document the EXEC=full assumption; a
+  // future "true fi=0 emulation" would zero inactive lanes' VGPRs
+  // before the bpermute, but no corpus kernel needs it today.
+  //
+  // V_PERMLANE32_SWAP_B32 (the wider variant) stays refused: it is
+  // a wave64-native instruction and would never appear in a wave32
+  // source kernel; the classifier marks it as P4_PermLaneSwap with
+  // rewriteImplemented=false and surfaces a precise pending
+  // diagnostic. Should a wave64-source same-wave lift ever
+  // encounter it, the handler refuses loudly here too.
+  case SemOp::V_PERMLANE16_SWAP_B32: {
+    // Two output registers: vdst (op.dst(), MCInst index 0) and
+    // src0_out (named OpName::src0_out, MCInst index 1). Two
+    // logical inputs: vdst_in (tied to vdst, same VGPR — read via
+    // ctx.regs.readReg32 of the vdst register) and src0 (tied to
+    // src0_out, same VGPR — accessible via op.src(0) since
+    // buildSrcMap skips vdst_in but keeps src0).
+    int src0OutIdx = AMDGPU::getNamedOperandIdx(
+        di.inst.getOpcode(), AMDGPU::OpName::src0_out);
+    if (src0OutIdx < 0 || (unsigned)src0OutIdx >= di.inst.getNumOperands() ||
+        !di.inst.getOperand((unsigned)src0OutIdx).isReg()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VALU",
+          "v_permlane16_swap_b32 missing OpName::src0_out register "
+          "operand — operand-table mismatch");
+      return hr;
+    }
+    ParsedReg vdstReg = op.dst();
+    ParsedReg src0OutReg =
+        ctx.parseReg(di.getReg((unsigned)src0OutIdx), (unsigned)src0OutIdx);
+    Value *vdstIn = ctx.regs.readReg32(ctx.B, vdstReg);
+    Value *src0In = op.src(0);
+
+    // Partner lane: L XOR 16. Computed on the target hardware lane
+    // id (mbcnt-derived), with per-BB memoisation via emitLaneIdx.
+    Value *laneId = ctx.emitLaneIdx();
+    Value *partner = ctx.B.CreateXor(laneId, ctx.B.getInt32(16),
+                                      "pls16_partner");
+    Value *bpermIdx = ctx.B.CreateShl(partner, ctx.B.getInt32(2),
+                                       "pls16_addr");
+
+    // Two convergent ds_bpermute calls — one per output VGPR.
+    // Same convergence reasoning as the P2 permlane16 emulation
+    // above: emitted OUTSIDE emitUnderExec so all hardware lanes
+    // participate; writeReg32 below wraps the stores for EXEC
+    // masking on the target side.
+    Function *bperm = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
+    Value *newVdst = ctx.B.CreateCall(bperm, {bpermIdx, src0In},
+                                       "pls16_new_vdst");
+    Value *newSrc0Out = ctx.B.CreateCall(bperm, {bpermIdx, vdstIn},
+                                          "pls16_new_src0_out");
+    ctx.writeReg32(vdstReg, newVdst);
+    ctx.writeReg32(src0OutReg, newSrc0Out);
+    hr.handled = true;
+    return hr;
+  }
   case SemOp::V_PERMLANE32_SWAP_B32: {
+    // Wave64-native instruction with no wave32 analogue (XOR 32
+    // partner spans the two 32-lane halves of a wave64; on wave32
+    // the partner index would wrap the wave). A wave32 source
+    // kernel cannot encode this op meaningfully, so seeing it means
+    // the source is NOT wave32 (or the disassembly is corrupted).
+    // The cross-wave classifier already refuses via P4 pending; the
+    // same-wave path lands here and refuses loudly too.
     hr.failure = RaiseFailure::unsupportedShape(
         di, "VALU",
-        "permlane*_swap requires a paired LDS-round-trip or "
-        "native-permlane16-pair lowering — CROSS_LANE_SURVEY.md P4 "
-        "lift not implemented");
+        "v_permlane32_swap_b32 has no wave32 analogue (XOR-32 "
+        "partner spans wave64 32-lane halves); source is not "
+        "wave32 — CROSS_LANE_SURVEY.md P4 keeps this variant "
+        "unrewritable");
     return hr;
   }
 
