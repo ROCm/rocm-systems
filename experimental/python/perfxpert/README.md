@@ -100,10 +100,23 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
-- [Getting started](docs/guides/getting-started.md)
-- [Historical migration notes](docs/archive/migration-to-agentic.md)
-- [Contributing](CONTRIBUTING.md)
+- **Getting started**
+  - [Getting started guide](docs/guides/getting-started.md)
+  - [Agentic mode: air-gap vs LLM, provider ladder](docs/guides/agentic-mode.md)
+- **Architecture (v0.2.0+)**
+  - [Architecture overview](docs/architecture.md)
+  - [Architecture index](docs/architecture/README.md)
+    - [Agent hierarchy (Root / Analysis / Recommendation / specialists)](docs/architecture/agent-hierarchy.md)
+    - [Gate cascade (5 correctness gates as middleware)](docs/architecture/gate-cascade.md)
+- **Integration**
+  - [Integration index](docs/integration/README.md)
+    - [MCP server (`perfxpert-mcp`) — 34 READ_ONLY tools](docs/integration/mcp-server.md)
+- **Contributing**
+  - [CONTRIBUTING.md](CONTRIBUTING.md)
+  - [Contributing index](docs/contributing/README.md)
+    - [External-tool dependencies (`require_tool`)](docs/contributing/external-tools.md)
+- **Other**
+  - [Historical migration notes](docs/archive/migration-to-agentic.md)
 
 ## Licensing
 
