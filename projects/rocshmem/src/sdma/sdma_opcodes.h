@@ -9,7 +9,6 @@
  *
  * SDMA_IS_OSS7 is detected at compile time from the HIP architecture
  * macro __gfx950__ (MI350X / CDNA4 and later OSS7 parts).
- * No CMake flag is needed; the compiler selects the right path per arch.
  */
 
 #pragma once

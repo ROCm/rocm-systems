@@ -21,13 +21,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *****************************************************************************/
-/**
- * @acknowledgements:
- * - Original implementation by: Sidler, David
- * - Source: https://github.com/AARInternal/shader_sdma
- *
- * @note: This code is adapted/modified from the implementation by Sidler, David
- */
 #ifndef LIBRARY_SRC_SDMA_ANVIL_DEVICE_HPP_
 #define LIBRARY_SRC_SDMA_ANVIL_DEVICE_HPP_
 
@@ -244,7 +237,7 @@ struct SdmaQueueDeviceHandle {
     uint64_t base_index_in_dwords = WrapIntoRing(pendingWptr) / sizeof(uint32_t);
 
     // First DWORD encodes the NOP count per SDMA spec; remaining DWORDs are zero
-    for (int i = 0; i < numOffsetDwords; i++) {
+    for (uint32_t i = 0; i < numOffsetDwords; i++) {
       uint32_t val = (i == 0) ? (((numOffsetDwords - 1) & 0xFFFF) << 16) : 0;
       __hip_atomic_store(queueBuf + base_index_in_dwords + i, val, __ATOMIC_RELAXED,
                          __HIP_MEMORY_SCOPE_AGENT);
@@ -252,7 +245,7 @@ struct SdmaQueueDeviceHandle {
     pendingWptr += offset;
     base_index_in_dwords = WrapIntoRing(pendingWptr) / sizeof(uint32_t);
 
-    for (int i = 0; i < numDwords; i++) {
+    for (uint32_t i = 0; i < numDwords; i++) {
       __hip_atomic_store(queueBuf + base_index_in_dwords + i, packetPtr[i], __ATOMIC_RELAXED,
                          __HIP_MEMORY_SCOPE_AGENT);
     }
@@ -383,7 +376,8 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
   }
 
   // Single-producer submitPacket: no committedWptr serialization
-  __device__ __forceinline__ void submitPacket(uint64_t base, uint64_t pendingWptr) {
+  __device__ __forceinline__ void submitPacket([[maybe_unused]] uint64_t base,
+                                               uint64_t pendingWptr) {
     *wptr = pendingWptr;
     __builtin_amdgcn_s_waitcnt(0);
     __builtin_amdgcn_wave_barrier();
