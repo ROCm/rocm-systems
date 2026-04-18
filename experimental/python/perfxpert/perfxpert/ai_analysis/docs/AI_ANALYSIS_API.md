@@ -35,9 +35,18 @@ The perfxpert AI Analysis API provides programmatic access to AI-powered GPU per
 - ✅ **Optional LLM enhancement** - Natural language explanations via Anthropic Claude, OpenAI GPT, any OpenAI-compatible private server, or local Ollama
 - ✅ **Multiple output formats** - Python objects, JSON, text, markdown, webview (interactive HTML)
 - ✅ **Privacy-focused** - Data sanitization for LLM mode
-- ✅ **User-modifiable** - Customize LLM behavior via reference guide
-- ✅ **Persistent conversations** - `LLMConversation` class for multi-turn streaming sessions
+- ✅ **User-modifiable** - Customize LLM behavior via split-fence agents
+- ✅ **Agent runtime** - Hierarchical agent execution (Root → Analysis → Recommendation → Specialists)
 - ✅ **Type-safe** - Dataclass-based API with type hints
+
+## Deprecation Notice (v0.2.0+)
+
+As of v0.2.0, the legacy classes `LLMConversation`, `InteractiveSession`, and `WorkflowSession`
+have been moved to the `perfxpert.agents.runtime` module (Agents SDK native) or replaced by the
+bundled `perfxpert-code` TUI. The old `LLMAnalyzer` class remains as a deprecation stub for backward
+compatibility, but new code should use `from perfxpert.agents.runtime import create_session` instead.
+
+For migration details, see [docs/migration-to-agentic.md](../docs/migration-to-agentic.md).
 
 ---
 
