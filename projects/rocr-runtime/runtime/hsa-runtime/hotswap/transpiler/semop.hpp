@@ -111,6 +111,11 @@ enum class SemOp : uint16_t {
   V_MUL_I32_I24, V_MUL_U32_U24, V_MUL_HI_U32_U24, V_MUL_HI_I32_I24,
   V_MAD_U32_U24, V_MAD_U32,
   V_ADD3_U32, V_LSHL_ADD_U32, V_ADD_LSHL_U32, V_LSHL_OR_B32, V_AND_OR_B32, V_OR3_B32, V_XAD_U32,
+  // VOP3 funnel-shift right: dst = ((src0:src1) >> src2[4:0])[31:0].
+  // .td uses the SDAG `fshr` node directly (VOP3Instructions.td:222),
+  // which maps to `llvm.fshr.i32` in IR. src2 is masked to 5 bits
+  // by hardware before the shift.
+  V_ALIGNBIT_B32,
   // VOP3 ternary xor — gfx10+ only (VOP3Instructions.td:1348),
   // .td has no SDAG `umin3`-style node, the iselect pattern at
   // line 1350 directly matches `(xor (xor a, b), c)`. Lift is the

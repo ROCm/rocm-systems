@@ -338,6 +338,11 @@ static const Entry kCanonTable[] = {
     // gfx9+ ternary xor+add (VOP3Instructions.td:684, iselect
     // pattern at :831 — `add(xor(a, b), c)`).
     E(V_XAD_U32_e64, V_XAD_U32),
+    // gfx6+ funnel-shift right (VOP3Instructions.td:218,
+    // gfx11/gfx12 opcode 0x216 at :1787). The `_t16` and
+    // `_fake16` variants collapse onto V_ALIGNBIT_B32_e64 via
+    // sameSemanticShape.
+    E(V_ALIGNBIT_B32_e64, V_ALIGNBIT_B32),
     // gfx10+ ternary xor (VOP3Instructions.td:1348). VOP3
     // ternaries only have the e64 form.
     E(V_XOR3_B32_e64, V_XOR3_B32),

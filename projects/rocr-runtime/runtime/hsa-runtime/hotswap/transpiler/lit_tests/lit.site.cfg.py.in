@@ -49,6 +49,7 @@ config.fixtures = {
     "v_xor3_b32": r"@LIT_FIXTURE_V_XOR3_B32_CO@",
     "v_add_nc_u16": r"@LIT_FIXTURE_V_ADD_NC_U16_CO@",
     "v_xad_u32": r"@LIT_FIXTURE_V_XAD_U32_CO@",
+    "v_alignbit_b32": r"@LIT_FIXTURE_V_ALIGNBIT_B32_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
 }

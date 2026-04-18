@@ -702,6 +702,26 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 v_alignbit_b32: funnel-shift right.
+  //   dst = ((src0 << 32) | src1) >> (src2 & 0x1F))[31:0]
+  // The .td uses the SDAG `fshr` node directly
+  // (VOP3Instructions.td:222), so the lift maps 1:1 to
+  // `llvm.fshr.i32`. The shift amount is masked to 5 bits in
+  // hardware before dispatch — we mirror that explicit mask
+  // here (although LLVM's fshr semantics already implement
+  // modulo-bitwidth shifts, the explicit AND keeps the IR
+  // shape pinnable and makes the bit-width assumption local).
+  if (sop == SemOp::V_ALIGNBIT_B32) {
+    Value *hi = op.src(0);
+    Value *lo = op.src(1);
+    Value *shamt = ctx.B.CreateAnd(op.src(2),
+        ConstantInt::get(ctx.i32Ty, 0x1F), "valign_shamt");
+    Function *fshr = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::fshr, {ctx.i32Ty});
+    ctx.writeReg32(op.dst(), ctx.B.CreateCall(fshr, {hi, lo, shamt}, "valignbit"));
+    hr.handled = true;
+    return hr;
+  }
   // VOP3 v_xor3_b32: 3-way xor. Direct mirror of V_OR3_B32 above
   // — the .td iselect pattern is `(xor (xor a, b), c)` (see
   // VOP3Instructions.td:1350); both nested and outer xor lift to
