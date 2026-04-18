@@ -255,11 +255,19 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code.cpp)
 
 if(UNIX)
-  set(SRC_OS core/util/lnx/os_linux.cpp
-	     libamdhsacode/lnx/amd_core_dump.cpp)
-  set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
-               core/runtime/amd_aie_agent.cpp
-               core/runtime/amd_aie_aql_queue.cpp)
+  if(APPLE)
+    set(SRC_OS core/util/darwin/os_darwin.cpp
+               libamdhsacode/darwin/amd_core_dump.cpp)
+    # XDNA (AMD NPU) is Linux-only: depends on /dev/accel/accel* and
+    # drm uapi that don't exist on Darwin. Skip on macOS.
+    set(SRC_XDNA )
+  else()
+    set(SRC_OS core/util/lnx/os_linux.cpp
+               libamdhsacode/lnx/amd_core_dump.cpp)
+    set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
+                 core/runtime/amd_aie_agent.cpp
+                 core/runtime/amd_aie_aql_queue.cpp)
+  endif()
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
   set(SRC_OS core/util/win/os_win.cpp

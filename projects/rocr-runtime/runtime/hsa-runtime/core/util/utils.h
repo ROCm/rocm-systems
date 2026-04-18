@@ -409,7 +409,15 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
+#if defined(__i386__) || defined(__x86_64__)
     _mm_clflush((const void*)cur);
+#elif defined(__aarch64__) || defined(__arm64__)
+    // Data cache clean and invalidate by virtual address to Point of
+    // Coherency. Matches CLFLUSH semantics for CPU↔DMA coherence flows.
+    __asm__ __volatile__("dc civac, %0" : : "r"(cur) : "memory");
+#else
+#error "FlushCpuCache: unsupported architecture"
+#endif
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
 }
