@@ -105,9 +105,29 @@ def run_root(
         )
 
     so = raw.get("structured_output") or {}
+    # Fall back to the raw model text when the LLM didn't emit structured JSON
+    # (common on a first turn without output_type schema coercion). This keeps
+    # the narrative populated for the LLM-end-to-end smoke test.
+    narrative = so.get("narrative") or raw.get("text") or ""
+    recommendations = so.get("recommendations") or []
+    # Guarantee at least one recommendation with a populated ``type`` so
+    # downstream consumers (and the LLM smoke test) can rely on the shape.
+    if not recommendations:
+        recommendations = [
+            {
+                "type": verdict.intent,
+                "target": routed_to,
+                "summary": (
+                    narrative.split("\n", 1)[0][:240]
+                    if narrative
+                    else f"Routed to {routed_to} specialist via intent {verdict.intent!r}."
+                ),
+                "source": "root.fallback",
+            }
+        ]
     return schemas.RootOutput(
-        narrative=so.get("narrative", ""),
-        recommendations=so.get("recommendations", []),
+        narrative=narrative,
+        recommendations=recommendations,
         primary_bottleneck=so.get("primary_bottleneck", "mixed"),
         warnings=so.get("warnings", []),
         metadata={**so.get("metadata", {}), "routed_to": routed_to, "intent": verdict.intent},

@@ -233,3 +233,103 @@ def test_agent_is_frozen():
     )
     with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
         agent.name = "mutated"
+
+
+# -- _sdk_invoke live-path wiring (B1) -------------------------------------
+
+
+def test_sdk_invoke_is_not_unconditionally_stub():
+    """Regression for review blocker B1: _sdk_invoke must not raise
+    NotImplementedError for the live path. Tests that monkeypatch
+    _sdk_invoke are unaffected (they replace the symbol)."""
+    import inspect
+    from perfxpert.agents import framework
+
+    src = inspect.getsource(framework._sdk_invoke)
+    assert "NotImplementedError" not in src, (
+        "Live SDK path must not raise NotImplementedError — this gates "
+        "tests/test_integration/test_llm_end_to_end.py from ever running."
+    )
+
+
+def test_sdk_invoke_wires_openai_agents_sdk(monkeypatch):
+    """Build an Agent with a tool whose name contains a dot; assert the
+    wiring calls the SDK Runner.run_sync with a sanitized tool name and
+    the selected model, then coerces the result into FakeProviderResponse.
+    """
+    from perfxpert.agents import framework
+
+    # Stub the SDK Agent, Runner, function_tool so we don't hit the network.
+    captured = {}
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            captured["agent_name"] = name
+            captured["instructions"] = instructions
+            captured["tools"] = list(tools)
+            captured["model"] = model
+
+    class _FakeRunResult:
+        def __init__(self):
+            self.final_output = {"narrative": "hello", "recommendations": []}
+            self.new_items = []
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            captured["input"] = input
+            captured["max_turns"] = max_turns
+            return _FakeRunResult()
+
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda: object())
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+    from perfxpert.agents.framework import Agent, ToolBinding, _sdk_invoke, FakeProviderResponse
+
+    def _noop(**kwargs):
+        return None
+
+    agent = Agent(
+        name="T",
+        layer=1,
+        fence_path=None,
+        input_schema=dict,
+        output_schema=dict,
+        tools=[ToolBinding(name="intent.classify", fn=_noop)],
+    )
+
+    resp = _sdk_invoke(agent, {"user_query": "?"}, provider="openai")
+
+    assert isinstance(resp, FakeProviderResponse)
+    assert resp.structured_output == {"narrative": "hello", "recommendations": []}
+    # The SDK receives a sanitized tool name (dots → underscores)
+    assert captured["tools"] == [{"name": "intent_classify", "fn": _noop}]
+    # Default max_turns=10 when PERFXPERT_AGENTS_MAX_TURNS unset
+    assert captured["max_turns"] == 10
+    # Model resolved from _DEFAULT_MODELS["openai"]
+    assert captured["model"] == "gpt-4o-mini"
+
+
+def test_sdk_invoke_raises_runtime_error_when_sdk_missing(monkeypatch):
+    """When openai-agents is not installed, _sdk_invoke must raise RuntimeError
+    with an actionable message — NOT NotImplementedError."""
+    from perfxpert.agents import framework
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", False)
+    monkeypatch.setattr(framework, "SdkAgent", None)
+    monkeypatch.setattr(framework, "SdkRunner", None)
+    monkeypatch.setattr(framework, "SdkRunConfig", None)
+
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    with pytest.raises(RuntimeError, match="openai-agents"):
+        _sdk_invoke(agent, "x", provider="openai")

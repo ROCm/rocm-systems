@@ -21,18 +21,48 @@ Runtime guardrails:
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 # SDK import is lazy + isolated to this file — never in agent modules.
-try:
-    import openai_agents  # type: ignore
+#
+# The live path uses the openai-agents package (imported as `agents`). We
+# try both the legacy `openai_agents` alias and the canonical `agents`
+# module so downstream code can detect availability regardless of the
+# install variant.
+try:  # pragma: no cover - exercised only when the SDK is installed
+    from agents import (  # type: ignore[import-not-found]
+        Agent as SdkAgent,
+        Runner as SdkRunner,
+        RunConfig as SdkRunConfig,
+        function_tool as sdk_function_tool,
+    )
 
     _SDK_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - branch only when SDK absent
+    SdkAgent = None  # type: ignore[assignment]
+    SdkRunner = None  # type: ignore[assignment]
+    SdkRunConfig = None  # type: ignore[assignment]
+    sdk_function_tool = None  # type: ignore[assignment]
     _SDK_AVAILABLE = False
+
+
+_LOG = logging.getLogger(__name__)
+
+
+# Per-provider default models. Can be overridden via PERFXPERT_LLM_MODEL env
+# or the PERFXPERT_AGENTS_MODEL_<PROVIDER> env.
+_DEFAULT_MODELS: Dict[str, str] = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-20250514",
+    "ollama": "ollama/llama3.1",
+    "private": "gpt-4o-mini",
+    "opencode": "gpt-4o-mini",
+}
 
 
 # -- Exceptions -----------------------------------------------------------
@@ -142,19 +172,195 @@ class Handoff:
 # -- SDK abstraction ------------------------------------------------------
 
 
-def _sdk_invoke(agent: Agent, input_payload: Any, provider: str) -> FakeProviderResponse:
-    """Invoke the real SDK. Tests monkeypatch this to return FakeProviderResponse.
+def _resolve_model(provider: str) -> str:
+    """Pick the model string to hand to the openai-agents SDK for ``provider``.
 
-    In non-mocked runs this wraps openai_agents.Runner.run(...) with the right
-    model, tools, and fence. Keep this function tiny so the rest of the facade
-    is decoupled from SDK churn.
+    Precedence:
+      1. ``PERFXPERT_AGENTS_MODEL_<PROVIDER>`` (e.g. ``..._OPENAI``)
+      2. ``PERFXPERT_LLM_MODEL`` (cross-provider override)
+      3. Built-in default from :data:`_DEFAULT_MODELS`
     """
-    if not _SDK_AVAILABLE:
-        raise RuntimeError("OpenAI Agents SDK not installed; run pip install -e '.[dev]' " "or set PERFXPERT_AIRGAP=1")
-    # Real implementation delegates to SDK. See openai-agents docs.
-    # (Deliberately unimplemented in this stub — mocked everywhere in tests;
-    # the live path is exercised in Phase 5 provider-smoke tests.)
-    raise NotImplementedError("Live SDK path — exercised by Phase 5 integration tests")
+    specific = os.environ.get(f"PERFXPERT_AGENTS_MODEL_{provider.upper()}")
+    if specific:
+        return specific
+    generic = os.environ.get("PERFXPERT_LLM_MODEL")
+    if generic:
+        return generic
+    return _DEFAULT_MODELS.get(provider, _DEFAULT_MODELS["openai"])
+
+
+def _serialize_input(input_payload: Any) -> str:
+    """Coerce an arbitrary payload into the string the SDK Runner expects."""
+    if isinstance(input_payload, str):
+        return input_payload
+    try:
+        return json.dumps(input_payload, default=str)
+    except (TypeError, ValueError):
+        return str(input_payload)
+
+
+def _sanitize_tool_name(name: str) -> str:
+    """Translate a perfxpert tool name (``intent.classify``) into the
+    OpenAI-compatible pattern ``^[a-zA-Z0-9_-]+$`` by swapping ``.`` for ``_``.
+    """
+    return name.replace(".", "_")
+
+
+def _translate_tools(tools: List[ToolBinding]) -> List[Any]:
+    """Wrap our ToolBinding list in openai-agents function_tool decorators.
+
+    The SDK expects FunctionTool objects; we wrap each binding's plain
+    callable in ``function_tool`` so the runtime exposes it as a callable
+    tool. Dots in our internal names (``intent.classify``) are rewritten to
+    underscores to satisfy the OpenAI ``^[a-zA-Z0-9_-]+$`` constraint.
+    """
+    if sdk_function_tool is None:
+        return []
+    wrapped: List[Any] = []
+    for tb in tools:
+        try:
+            wrapped.append(
+                sdk_function_tool(
+                    tb.fn,
+                    name_override=_sanitize_tool_name(tb.name),
+                    # The SDK's introspection can be picky about third-party
+                    # callables; relax strict mode so we don't 400 on schema
+                    # shape differences between python-fn and sdk-schema.
+                    strict_mode=False,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            _LOG.warning(
+                "framework: could not translate tool %r for SDK (%s); skipping",
+                tb.name,
+                exc,
+            )
+    return wrapped
+
+
+def _extract_tool_calls(run_result: Any) -> List[Dict[str, Any]]:
+    """Scrape tool-call metadata from the openai-agents RunResult.
+
+    We return a list of ``{"name": str, "arguments": Any}`` dicts so the
+    rest of the facade can stay SDK-agnostic. Best-effort — missing fields
+    are tolerated because the SDK's RunItem shape evolves across releases.
+    """
+    tool_calls: List[Dict[str, Any]] = []
+    items = getattr(run_result, "new_items", None) or []
+    for item in items:
+        item_type = getattr(item, "type", None)
+        if item_type != "tool_call_item":
+            continue
+        raw = getattr(item, "raw_item", None)
+        name = getattr(raw, "name", None) or getattr(item, "title", None) or "<unknown>"
+        args = getattr(raw, "arguments", None)
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except (TypeError, ValueError):
+                pass
+        tool_calls.append({"name": name, "arguments": args})
+    return tool_calls
+
+
+def _final_output_text(run_result: Any) -> str:
+    """Return the final output as a string, whether it's a dict, model, or str."""
+    final = getattr(run_result, "final_output", None)
+    if final is None:
+        return ""
+    if isinstance(final, str):
+        return final
+    # Pydantic / dataclass / dict → best-effort JSON.
+    try:
+        if hasattr(final, "model_dump"):
+            return json.dumps(final.model_dump(), default=str)
+        if hasattr(final, "__dict__"):
+            return json.dumps(final.__dict__, default=str)
+        return json.dumps(final, default=str)
+    except (TypeError, ValueError):
+        return str(final)
+
+
+def _final_output_structured(run_result: Any) -> Optional[Dict[str, Any]]:
+    """If the final output is JSON/structured, return it as a dict."""
+    final = getattr(run_result, "final_output", None)
+    if isinstance(final, dict):
+        return final
+    if hasattr(final, "model_dump"):
+        try:
+            return final.model_dump()
+        except Exception:  # pragma: no cover
+            return None
+    if isinstance(final, str):
+        stripped = final.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProviderResponse:
+    """Invoke the openai-agents SDK Runner and return a FakeProviderResponse.
+
+    Tests monkeypatch this symbol to return a scripted ``FakeProviderResponse``;
+    in production it builds an SDK Agent from our ``Agent`` metadata and calls
+    :meth:`Runner.run_sync` synchronously.
+
+    The return type remains ``FakeProviderResponse`` so agents/runtime wiring
+    is identical across mocked + live paths.
+    """
+    if not _SDK_AVAILABLE or SdkAgent is None or SdkRunner is None or SdkRunConfig is None:
+        raise RuntimeError(
+            "OpenAI Agents SDK not installed; run `pip install openai-agents` "
+            "or set PERFXPERT_AIRGAP=1"
+        )
+
+    model = _resolve_model(provider)
+    tools = _translate_tools(list(agent.tools))
+    instructions = agent.fence_text or (
+        f"You are the {agent.name} agent. "
+        "Follow the JSON payload contract defined in the perfxpert fence."
+    )
+
+    try:
+        sdk_agent = SdkAgent(
+            name=agent.name,
+            instructions=instructions,
+            tools=tools,
+            model=model,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(f"framework: failed to construct SDK Agent: {exc}") from exc
+
+    max_turns_env = os.environ.get("PERFXPERT_AGENTS_MAX_TURNS", "10")
+    try:
+        max_turns = max(1, int(max_turns_env))
+    except ValueError:
+        max_turns = 10
+
+    input_str = _serialize_input(input_payload)
+
+    try:
+        run_config = SdkRunConfig()
+        run_result = SdkRunner.run_sync(
+            starting_agent=sdk_agent,
+            input=input_str,
+            max_turns=max_turns,
+            run_config=run_config,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"framework: SDK Runner.run_sync failed: {exc}") from exc
+
+    return FakeProviderResponse(
+        text=_final_output_text(run_result),
+        tool_calls=_extract_tool_calls(run_result),
+        structured_output=_final_output_structured(run_result),
+        handoff=None,
+    )
 
 
 # -- Runtime --------------------------------------------------------------
