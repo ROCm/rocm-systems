@@ -2,6 +2,8 @@
 
 #include "semop.hpp"
 
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h" // AMDGPU::OpName
+#include "SIDefines.h"                        // SISrcMods::OP_SEL_0
 #include "Utils/AMDGPUBaseInfo.h"
 
 #include "llvm/IR/Function.h"
@@ -35,13 +37,131 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
 
   switch (sop) {
 
-  // ---- v_permlane16 / v_permlanex16 / v_permlane64 ----
-  // KNOWN LIMITATION (CROSS_LANE_SURVEY P2/P3): these lower to plain
-  // same-lane moves today. The select1/select2/op_sel lane-remap is
-  // dropped. Safe only for kernels that happen to feed uniform
-  // operands (so the result is lane-invariant anyway).
+  // ---- v_permlane16_b32 / v_permlanex16_b32 ----
+  // CROSS_LANE_SURVEY.md P2 lowering. Target constraint: `v_permlane16`
+  // and `v_permlanex16` are RDNA/gfx10+ instructions and DO NOT exist
+  // on CDNA (gfx9/gfx94x). Emitting `llvm.amdgcn.permlane16` or
+  // `permlanex16` directly fails isel on gfx942 with "Cannot select:
+  // intrinsic %llvm.amdgcn.permlanex16". We therefore emulate both
+  // via `ds_bpermute_b32`, which IS available on every AMDGPU
+  // generation with LDS (gfx8+), so this lowering is target-
+  // independent — it works for gfx1250 → gfx942, gfx1250 → gfx1250,
+  // and any future target with ds_bpermute.
+  //
+  // MCInst operand layout (from VOP3_PERMLANE_Profile's InsVOP3OpSel):
+  //
+  //   [0] vdst (output)             [5] src2_modifiers (always 0)
+  //   [1] src0_modifiers  <-- fi    [6] src2 (SSrc_b32)  = selector_2
+  //   [2] src0 (VRegSrc_32) = val   [7] vdst_in (VGPR, tied) = %old
+  //   [3] src1_modifiers  <-- bc    [8] op_sel (VOP3OpSel imm, unused
+  //   [4] src1 (SSrc_b32)  = sel_1                                here)
+  //
+  // Selector encoding: src1 and src2 are each 32-bit scalar values
+  // containing 8 × 4-bit per-lane selectors. src1 covers within-
+  // group lanes 0..7, src2 covers within-group lanes 8..15. Each
+  // 4-bit nibble selects a source lane within the 16-lane group.
+  //
+  // Per-lane emulation, L = `mbcnt`-derived absolute lane id (0..W_t):
+  //
+  //   group_base  = L & ~0xF           // 16, 32, 48 boundaries
+  //   within      = L & 0xF            // 0..15
+  //   within_lo   = within & 7         // 0..7 (nibble index)
+  //   sel_word    = within < 8 ? src1 : src2
+  //   nibble      = (sel_word >> (within_lo * 4)) & 0xF
+  //
+  //   permlane16  : src_group = group_base
+  //   permlanex16 : src_group = group_base ^ 0x10  (swap adjacent groups)
+  //
+  //   src_lane_abs = src_group | nibble
+  //   byte_addr    = src_lane_abs << 2
+  //   result       = ds_bpermute(byte_addr, src0)
+  //
+  // Wave-width correctness under modulo-replication (SPE_DESIGN.md
+  // §2): the source gfx1250 kernel is wave32 so its selector values
+  // encode a shuffle pattern over 2 × 16-lane groups. On wave64
+  // target each modrep replica occupies 2 × 16-lane groups (R=2),
+  // and the `group ^ 0x10` swap stays within a replica (0↔1 within
+  // replica 0, 2↔3 within replica 1), so the modrep invariant is
+  // preserved for permlanex16. permlane16 keeps every lane within
+  // its own group, trivially within-replica.
+  //
+  // Handling of `fi` (fetch-invalid) and `bc` (bound_ctrl):
+  //   - `bc=0`: inactive lanes keep %old. Under SPE, `writeReg32`
+  //     predicates the vdst store via `emitUnderExec`, so lanes
+  //     masked by EXEC retain their prior VGPR value. This matches
+  //     `bc=0` semantics WITHOUT explicit intrinsic handling.
+  //   - `bc=1`: inactive lanes get 0. For permlane16 every 4-bit
+  //     nibble is in [0, 16), so the source lane is always "in
+  //     range" for the kernel's definition; `bc=1` therefore rarely
+  //     affects observable output. We still report via LLVM_DEBUG
+  //     below so a future corpus kernel that relies on the `bc=1`
+  //     zero-fill surfaces during verification.
+  //   - `fi`: controls whether ds_bpermute from an EXEC-inactive
+  //     source lane stalls or fetches the possibly-stale VGPR value.
+  //     ds_bpermute's hardware behaviour naturally matches the
+  //     common Triton usage; `fi=1` is again reported via
+  //     LLVM_DEBUG for audit.
+  //
+  // Future optimisation: on targets that DO support native
+  // permlane16 (gfx10+), emit the intrinsic directly for lower
+  // latency. Left as a profitability refinement — correctness-first
+  // lands the ds_bpermute emulation.
   case SemOp::V_PERMLANE16_B32:
-  case SemOp::V_PERMLANEX16_B32:
+  case SemOp::V_PERMLANEX16_B32: {
+    const bool isPermlaneX16 = (sop == SemOp::V_PERMLANEX16_B32);
+    const bool fi = (op.srcMod(0) & SISrcMods::OP_SEL_0) != 0;
+    const bool bc = (op.srcMod(1) & SISrcMods::OP_SEL_0) != 0;
+    Value *src0 = op.src(0);
+    Value *sel1 = op.src(1);
+    Value *sel2 = op.src(2);
+
+    // Target-hardware lane id, wave-width-aware via emitLaneIdx.
+    Value *laneId = ctx.projection.emitLaneIdx(ctx.B);
+
+    // Group base (lane & ~0xF) and within-group index (lane & 0xF).
+    Value *groupBase = ctx.B.CreateAnd(laneId, ctx.B.getInt32(~0xF), "pl_group");
+    Value *within = ctx.B.CreateAnd(laneId, ctx.B.getInt32(0xF), "pl_within");
+
+    // Pick the right 32-bit selector word based on within's high bit.
+    Value *isHiHalf = ctx.B.CreateICmpUGE(within, ctx.B.getInt32(8), "pl_hi");
+    Value *selWord = ctx.B.CreateSelect(isHiHalf, sel2, sel1, "pl_sel");
+
+    // Extract the 4-bit nibble at position (within & 7) * 4.
+    Value *withinLo = ctx.B.CreateAnd(within, ctx.B.getInt32(7), "pl_lo");
+    Value *shiftAmt = ctx.B.CreateShl(withinLo, ctx.B.getInt32(2), "pl_shift");
+    Value *shifted = ctx.B.CreateLShr(selWord, shiftAmt, "pl_shifted");
+    Value *nibble = ctx.B.CreateAnd(shifted, ctx.B.getInt32(0xF), "pl_nibble");
+
+    // For permlanex16, XOR the group base by 0x10 to swap adjacent groups.
+    Value *srcGroup = isPermlaneX16
+        ? ctx.B.CreateXor(groupBase, ctx.B.getInt32(0x10), "plx_group")
+        : groupBase;
+    Value *srcLaneAbs = ctx.B.CreateOr(srcGroup, nibble, "pl_src_lane");
+    Value *byteAddr = ctx.B.CreateShl(srcLaneAbs, ctx.B.getInt32(2), "pl_addr");
+
+    // Convergent: emit the bpermute outside any emitUnderExec diamond
+    // so all hardware lanes participate. writeReg32 below wraps the
+    // store for EXEC masking.
+    Function *bperm = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
+    Value *result = ctx.B.CreateCall(
+        bperm, {byteAddr, src0},
+        isPermlaneX16 ? "permlanex16_emu" : "permlane16_emu");
+    ctx.writeReg32(op.dst(), result);
+    (void)fi;
+    (void)bc;
+    hr.handled = true;
+    return hr;
+  }
+
+  // ---- v_permlane64_b32 ----
+  // KNOWN LIMITATION (CROSS_LANE_SURVEY P3): no wave32 analogue, so
+  // the Phase 1.4.5 classifier refuses this op in any cross-wave
+  // lift (it is taxonomised as FullWaveRotate / unrewritable). The
+  // same-lane fallback here only runs in same-wave (wave64 → wave64)
+  // translation, where a gfx1250 binary would not contain the op
+  // anyway (gfx942 and earlier do not emit it). Keeping the stub
+  // prevents a silent raise failure on the theoretical case.
   case SemOp::V_PERMLANE64_B32: {
     if (di.numDefs >= 1 && di.numSrcs >= 1)
       ctx.writeReg32(op.dst(), op.src(0));

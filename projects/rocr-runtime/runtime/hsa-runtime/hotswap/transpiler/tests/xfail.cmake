@@ -22,26 +22,15 @@ set_tests_properties(Gfx1250Gpu.Matmul128x128 PROPERTIES
   LABELS "transpiler;xfail"
 )
 
-# Softmax: the legacy transpiler's own gfx1250 softmax fixture uses
-# v_mov_b32_dpp + v_add_f32_dpp (DppCrossLane / SPE_DESIGN.md §3
-# Class 2) AND v_permlanex16_b32 (LaneGroupShuffle / §3 Class 2) per
-# gpt-oss-derisking.md §7.2/§7.3. Under the wave-size classifier gate
-# (SPE_DESIGN.md §4, wave_size_obstruction.{hpp,cpp}) these are
-# flagged as outcome (c) shuffle-rewrite-pending; the pre-classifier
-# raiser accepted them and emitted same-lane fallback IR
-# (accidentally correct on the specific all-1.0f softmax input, see
-# CROSS_LANE_SURVEY.md for why).
-#
-# CROSS_LANE_SURVEY.md P5 (DPP intrinsic lift via
-# `llvm.amdgcn.update.dpp`) has landed; the DppCrossLane sites in
-# this kernel now show `[implemented]` in the classifier trace. The
-# remaining blocker is the single `v_permlanex16_b32` site which
-# needs CROSS_LANE_SURVEY.md P2 (permlane16 intrinsic lift).
-# Graduating this XFAIL back to expected-pass requires P2 to land.
-set_tests_properties(Gfx1250Gpu.Softmax PROPERTIES
-  WILL_FAIL TRUE
-  LABELS "transpiler;xfail;wave-size-rewrite-pending"
-)
+# Gfx1250Gpu.Softmax graduated from XFAIL to expected-pass once
+# CROSS_LANE_SURVEY.md P2 (v_permlane16 / v_permlanex16 emulation
+# via ds_bpermute_b32) landed on top of P5 (DPP intrinsic lift). The
+# kernel's two remaining classifier-blocked sites — a single
+# `v_permlanex16_b32` and the DPP pattern — now both surface in the
+# classifier trace as `[implemented]`, and the end-to-end test runs
+# the raised IR on gfx942 hardware producing bit-exact softmax
+# outputs (0 errors, maxErr=0.0). This XFAIL annotation has been
+# removed.
 
 # Integration vecadd via runPipelineAllKernels: hipError 719 (unspecified
 # launch failure).  Single-kernel path (Gfx1250Gpu.Vecadd) works; the

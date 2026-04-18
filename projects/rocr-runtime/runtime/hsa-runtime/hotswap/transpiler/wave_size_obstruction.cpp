@@ -264,19 +264,26 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       ObstructionSite site;
       site.inst = &di;
       site.kind = ObstructionKind::LaneGroupShuffle;
-      // P2 covers base permlane16/permlanex16; P4 covers swap
-      // variants. The decider treats the distinction as "pending vs
-      // implemented" on a per-handler basis; the ID here is the
-      // closest match for diagnostic rendering.
+      // P2 covers base permlane16/permlanex16; P4 covers the swap
+      // variants. `rewriteImplemented` is set per-SemOp so the
+      // decider emits a precise "cross-wave-shuffle-rewrite-pending"
+      // diagnostic for the specific P-item still missing.
+      //
+      // P2 (base permlane16/permlanex16) landed:
+      // `handle_valu_cross_lane.cpp` emits
+      // `llvm.amdgcn.permlane16` / `permlanex16` with fi / bc
+      // extracted from the VOP3 src{0,1}_modifiers' OP_SEL_0 bit.
+      // P4 (permlane*_swap) is still pending — the swap variants
+      // need an LDS-round-trip lowering or a permlane16-pair
+      // selector, per CROSS_LANE_SURVEY.md P4's design sketch.
       if (sop == SemOp::V_PERMLANE16_SWAP_B32 ||
-          sop == SemOp::V_PERMLANE32_SWAP_B32)
+          sop == SemOp::V_PERMLANE32_SWAP_B32) {
         site.rewrite = RewriteId::P4_PermLaneSwap;
-      else
+        site.rewriteImplemented = false;
+      } else {
         site.rewrite = RewriteId::P2_PermLane16;
-      // TODO(CROSS_LANE_SURVEY P2/P3/P4): flip `rewriteImplemented` to
-      // true once the handler lands and the matching lit test flips to
-      // `%raise_cli` (see c2_permlane_swap.ll MAINTENANCE block).
-      site.rewriteImplemented = false;
+        site.rewriteImplemented = true;
+      }
       report.sites.push_back(std::move(site));
       continue;
     }

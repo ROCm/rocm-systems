@@ -32,6 +32,7 @@ config.fixtures = {
     # class. See wave_size_obstruction.{hpp,cpp} for the classifier.
     "c1_lane_id_leak": r"@LIT_FIXTURE_C1_LANE_ID_LEAK_CO@",
     "c2_permlane_swap": r"@LIT_FIXTURE_C2_PERMLANE_SWAP_CO@",
+    "c2_permlane16": r"@LIT_FIXTURE_C2_PERMLANE16_CO@",
     "c2_dpp_quad_perm": r"@LIT_FIXTURE_C2_DPP_QUAD_PERM_CO@",
     "c2_ds_swizzle": r"@LIT_FIXTURE_C2_DS_SWIZZLE_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
