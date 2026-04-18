@@ -40,14 +40,33 @@ def _perfxpert_version() -> str:
         return _BRANDING_VERSION
 
 
+def _wellknown_opencode_paths() -> "list[Path]":
+    """Canonical well-known install locations for the `opencode` binary.
+
+    Covers the upstream installer (`~/.opencode/bin/opencode`) and any
+    common Linux package locations. The list is consulted AFTER the
+    explicit env override and the bundled wheel path, but BEFORE the
+    PATH fallback, so users who ran the upstream installer get a clean
+    `perfxpert doctor` report without having to `export PATH`.
+    """
+    home = Path.home()
+    return [
+        home / ".opencode" / "bin" / "opencode",
+        home / ".local" / "bin" / "opencode",
+        Path("/usr/local/bin/opencode"),
+        Path("/opt/opencode/bin/opencode"),
+    ]
+
+
 def resolve_opencode_binary() -> Path:
     """Locate the opencode binary.
 
-    Priority:
-    1. $PERFXPERT_OPENCODE_PATH (user override)
-    2. perfxpert/_bundled/opencode (per-platform wheel)
-    3. `which opencode` on PATH
-    4. Use require_tool with install hint
+    Priority (E2E bug 3 — doctor must autodiscover):
+    1. ``$PERFXPERT_OPENCODE_PATH`` (user override; must exist or raise)
+    2. ``perfxpert/_bundled/opencode`` (per-platform wheel)
+    3. ``$HOME/.opencode/bin/opencode`` and other well-known paths
+    4. ``shutil.which("opencode")`` on PATH
+    5. Final actionable error with install command hint.
     """
     override = os.environ.get("PERFXPERT_OPENCODE_PATH")
     if override:
@@ -59,7 +78,7 @@ def resolve_opencode_binary() -> Path:
             )
         return p
 
-    # Bundled binary
+    # Bundled binary (per-platform wheel ships this under _bundled/)
     try:
         with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
             if p.is_file():
@@ -67,18 +86,21 @@ def resolve_opencode_binary() -> Path:
     except (ModuleNotFoundError, FileNotFoundError):
         pass
 
-    # PATH fallback with install helper
-    try:
-        require_tool("opencode", allow_install=True)
-        on_path = shutil.which("opencode")
-        if on_path:
-            return Path(on_path)
-    except Exception:
-        pass
+    # Well-known install locations (upstream installer puts it at ~/.opencode/bin/)
+    for candidate in _wellknown_opencode_paths():
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+
+    # PATH fallback (explicitly `shutil.which` — do NOT use require_tool here
+    # since the install hint is surfaced in the error below).
+    on_path = shutil.which("opencode")
+    if on_path:
+        return Path(on_path)
 
     raise FileNotFoundError(
-        "opencode binary not found. Set PERFXPERT_OPENCODE_PATH, "
-        "install a platform wheel that bundles opencode, or add opencode to PATH."
+        "opencode binary not found. Install it with:\n"
+        "  curl -fsSL https://opencode.ai/install.sh | bash\n"
+        "or set PERFXPERT_OPENCODE_PATH / install a platform wheel that bundles opencode."
     )
 
 

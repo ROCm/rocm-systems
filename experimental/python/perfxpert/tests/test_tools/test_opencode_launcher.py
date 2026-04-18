@@ -138,3 +138,99 @@ def test_amd_red_in_banner(monkeypatch):
     source = inspect.getsource(opencode_launcher.print_banner)
     # The source will have the escaped form \\033 when inspected
     assert "38;5;196m" in source  # AMD red color code in the function
+
+
+# -- Fix 4: doctor autodiscovery of well-known opencode paths ---------------
+
+
+def test_resolve_binary_autodiscovers_home_opencode_bin(tmp_path: Path, monkeypatch):
+    """`~/.opencode/bin/opencode` is the upstream installer's default;
+    resolve_opencode_binary() must find it without PATH munging."""
+    fake_home = tmp_path
+    fake_bin_dir = fake_home / ".opencode" / "bin"
+    fake_bin_dir.mkdir(parents=True)
+    fake_bin = fake_bin_dir / "opencode"
+    fake_bin.write_text("#!/bin/sh\necho fake\n")
+    fake_bin.chmod(0o755)
+
+    # Isolate: no override, no bundled binary, no PATH hit.
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
+
+    # Force the bundled-resource branch to miss (no bundled binary in the test wheel).
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_as_file(_):
+        yield tmp_path / "no_such_bundled_path"
+
+    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+
+    resolved = opencode_launcher.resolve_opencode_binary()
+    assert resolved == fake_bin
+
+
+@pytest.mark.parametrize(
+    "subpath",
+    [
+        ".opencode/bin/opencode",
+        ".local/bin/opencode",
+    ],
+)
+def test_resolve_binary_autodiscovers_multiple_wellknown_paths(
+    tmp_path: Path, monkeypatch, subpath
+):
+    """Each of the well-known install locations must be auto-discovered."""
+    fake_home = tmp_path
+    fake_bin = fake_home / subpath
+    fake_bin.parent.mkdir(parents=True, exist_ok=True)
+    fake_bin.write_text("#!/bin/sh\necho fake\n")
+    fake_bin.chmod(0o755)
+
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_as_file(_):
+        yield tmp_path / "no_such_bundled_path"
+
+    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+
+    assert opencode_launcher.resolve_opencode_binary() == fake_bin
+
+
+def test_resolve_binary_missing_suggests_install_command(monkeypatch, tmp_path: Path):
+    """When no opencode binary is found anywhere, the error message must
+    mention the upstream install command so doctor's output is actionable.
+    """
+    monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+    # Ensure no well-known path resolves
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(opencode_launcher.shutil, "which", lambda _: None)
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_as_file(_):
+        yield tmp_path / "no_such_bundled_path"
+
+    monkeypatch.setattr(opencode_launcher.resources, "as_file", _fake_as_file)
+
+    with pytest.raises(FileNotFoundError) as exc:
+        opencode_launcher.resolve_opencode_binary()
+    msg = str(exc.value)
+    assert "opencode.ai/install.sh" in msg, (
+        "install hint must surface the upstream installer URL"
+    )
+
+
+def test_wellknown_paths_list_includes_home_opencode():
+    """Sanity: the well-known paths helper lists `~/.opencode/bin/opencode`."""
+    paths = opencode_launcher._wellknown_opencode_paths()
+    # The upstream installer's default must be listed.
+    home_opencode = Path.home() / ".opencode" / "bin" / "opencode"
+    assert home_opencode in paths
