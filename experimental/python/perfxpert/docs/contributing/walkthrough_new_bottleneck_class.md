@@ -203,7 +203,7 @@ class IOSpecialistHandoff(HandoffSchema):
 
 AGENT_SPEC = AgentSpec(
     name="io_specialist",
-    fence_path="perfxpert/agents/fence/io_specialist.md",
+    fence_path="perfxpert/fence/slices/io_specialist.md",
     tools=[bottleneck, query_knowledge],
     handoff_schema=IOSpecialistHandoff,
     description="Expert on reducing I/O-bound bottlenecks via memory management and overlapping"
@@ -221,7 +221,7 @@ async def run(context: Dict[str, Any]) -> IOSpecialistHandoff:
     )
 ```
 
-Create `perfxpert/agents/fence/io_specialist.md` (≤ 400 lines):
+Create `perfxpert/fence/slices/io_specialist.md` (≤ 400 lines):
 
 ```markdown
 # I/O Specialist Agent
@@ -364,7 +364,7 @@ Before committing:
 3. `perfxpert/knowledge/_schemas/io_techniques.schema.json` — new file
 4. `perfxpert/tools/bottleneck.py` — ~10 lines added
 5. `perfxpert/agents/io_specialist.py` — new file
-6. `perfxpert/agents/fence/io_specialist.md` — new file
+6. `perfxpert/fence/slices/io_specialist.md` — new file
 7. Tests: 3 new test files (bottleneck, knowledge, agent)
 
 **Total:** 7 core files, 3 test files. No architectural review needed.
