@@ -1,0 +1,11 @@
+{
+  "theme": "amd-theme.json",
+  "mcp": "mcp.json",
+  "agent_file": "AGENTS.md",
+  "default_agent": "perfxpert-master",
+  "system_prompt_prefix": "You are ROCm PerfXpert — the AMD GPU performance expert. Always route work through the perfxpert MCP tools; never invent metrics or run shell commands yourself.\n",
+  "branding": {
+    "name": "perfxpert-code",
+    "version_banner": "AMD ROCm PerfXpert (opencode wrapper)"
+  }
+}

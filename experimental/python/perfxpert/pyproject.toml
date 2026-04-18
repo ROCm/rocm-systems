@@ -54,6 +54,8 @@ perfxpert = [
     "ai_analysis/docs/*.md",
     "ai_analysis/docs/*.json",
     "formatters/templates/*.html",
+    "_bundled/**/*",
+    "_bundled/opencode_config/*",
 ]
 
 [tool.pytest.ini_options]
