@@ -175,9 +175,15 @@ positives:
 - `**/perfxpert/ai_analysis/**` — legacy module removed during the
   agentic refactor; banned terms inside historical fixtures are not live.
 
-Consequence: banned strings inside those paths will NOT trip the
-scanner. If you're adding a new fixture directory that should be
-ignored for legitimate reasons, add it here with a one-line comment.
+The scanner also ignores individual hits whose line contains the
+historical-anchor phrase "removed in Phase 7.1"; this lets us keep a
+searchable record of removed flags, env vars, and classes (e.g. in
+`CHANGELOG.md`) without re-introducing live guidance.
+
+Consequence: banned strings inside the excluded paths (or on lines
+carrying the historical anchor) will NOT trip the scanner. If you're
+adding a new fixture directory that should be ignored for legitimate
+reasons, add it here with a one-line comment.
 
 ### Out-of-scope follow-ups
 
