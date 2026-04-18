@@ -572,12 +572,16 @@ def test_mcp_stdin_close_exits_cleanly(mcp_proc):
         # Now close stdin (normal client disconnect)
         client.close()
 
-        # Wait a bit and check that process exited
-        time.sleep(0.5)
-        rc = mcp_proc.poll()
-        assert rc is not None, "Server did not exit after stdin close"
-        assert rc == 0 or rc is None, (
-            f"Server exited with non-zero code: {rc}"
+        # Wait deterministically for the server to exit instead of sleeping.
+        # Finding #27: time.sleep(0.5) is flaky on loaded CI machines.
+        try:
+            exit_code = mcp_proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            mcp_proc.kill()
+            pytest.fail("Server did not exit within 5s after stdin close")
+        # Server exited cleanly
+        assert exit_code == 0 or exit_code is None, (
+            f"Server exited with non-zero code: {exit_code}"
         )
     except AssertionError:
         raise
