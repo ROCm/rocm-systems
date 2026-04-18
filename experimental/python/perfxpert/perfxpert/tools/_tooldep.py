@@ -111,6 +111,22 @@ def _shared_lib_search_paths(name: str) -> List[str]:
     rocm = os.environ.get("ROCM_PATH", "/opt/rocm")
     for sub in ("lib", "lib64", "lib/rocprofiler-sdk"):
         paths.append(os.path.join(rocm, sub))
+
+    # Check for tool-specific environment variable (e.g., PERFXPERT_ROCPROF_TRACE_DECODER_PATH)
+    env_var = f"PERFXPERT_{name.upper().replace('-', '_')}_PATH"
+    if env_var in os.environ:
+        env_path = os.environ[env_var]
+        # If it points to a directory, add it; if it's a file path, add its parent
+        if os.path.isfile(env_path):
+            paths.append(os.path.dirname(env_path))
+        elif os.path.isdir(env_path):
+            paths.append(env_path)
+
+    # Check user home directory installation paths
+    home = os.path.expanduser("~")
+    for sub in ("lib", "lib64"):
+        paths.append(os.path.join(home, ".local/opt", name, "opt/rocm", sub))
+
     paths.extend(os.environ.get("LD_LIBRARY_PATH", "").split(":"))
     return [p for p in paths if p]
 
