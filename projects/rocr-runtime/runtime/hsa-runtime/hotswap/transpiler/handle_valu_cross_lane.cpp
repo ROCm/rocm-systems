@@ -138,8 +138,13 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
     Value *sel1 = op.src(1);
     Value *sel2 = op.src(2);
 
-    // Target-hardware lane id, wave-width-aware via emitLaneIdx.
-    Value *laneId = ctx.projection.emitLaneIdx(ctx.B);
+    // Target-hardware lane id, wave-width-aware via emitLaneIdx, with
+    // per-BB memoisation. Multiple permlane16 sites in the same BB
+    // (e.g. butterfly reductions) reuse the single cached i32 instead
+    // of re-emitting the mbcnt_lo / mbcnt_hi chain at each site —
+    // LLVM's CSE would converge to the same end state, but the
+    // pre-mem2reg IR stays smaller and lit-test-friendlier.
+    Value *laneId = ctx.emitLaneIdx();
 
     // Group base (lane & ~0xF) and within-group index (lane & 0xF).
     Value *groupBase = ctx.B.CreateAnd(laneId, ctx.B.getInt32(~0xF), "pl_group");
@@ -191,23 +196,34 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   }
 
   // ---- gfx950 lane-swap: v_permlane{16,32}_swap_b32 ----
-  // Exchange vdst and src0 across lanes 0..15↔16..31 (or 0..31↔32..63).
-  // Two defs (vdst, src0_out) and two uses (vdst_in, src0). Scalar
-  // model swaps the two VGPR values same-lane — KNOWN LIMITATION
-  // (CROSS_LANE_SURVEY P4): the cross-lane exchange is dropped.
+  // Exchange vdst and src0 across lanes 0..15 ↔ 16..31 (permlane16
+  // form) or lanes 0..31 ↔ 32..63 (permlane32 form). Two defs
+  // (vdst, src0_out) and two uses (vdst_in, src0).
+  //
+  // CROSS_LANE_SURVEY.md P4 lift is pending — there is no direct
+  // ds_bpermute emulation analogous to P2 because the ops are
+  // genuine *swaps*, not gathers, and `ds_bpermute` only models a
+  // gather. The principled lowering is either (a) an LDS round-trip
+  // (store half, barrier, load other half) or (b) a paired
+  // `permlane16` lowering for targets that have it natively. Both
+  // are outside the scope of this commit.
+  //
+  // Until P4 lands, refuse loudly with `unsupportedShape`. Under
+  // cross-wave the Phase 1.4.5 classifier already refuses via
+  // `cross-wave-shuffle-rewrite-pending`; this `unsupportedShape`
+  // covers the same-wave path so a kernel that uses these
+  // instructions in a same-wave lift also fails loudly rather than
+  // silently emitting a same-lane swap (which collapses the
+  // cross-lane exchange to an identity, exactly the silent-
+  // miscompile failure mode the rest of the cross-lane work is
+  // structured to eliminate).
   case SemOp::V_PERMLANE16_SWAP_B32:
   case SemOp::V_PERMLANE32_SWAP_B32: {
-    ParsedReg dstReg = op.dst();
-    Value *oldDst = ctx.regs.readReg32(ctx.B, dstReg);
-    Value *oldSrc = op.src(0);
-    ctx.writeReg32(dstReg, oldSrc);
-    int src0OutIdx = AMDGPU::getNamedOperandIdx(
-        di.inst.getOpcode(), AMDGPU::OpName::src0_out);
-    if (src0OutIdx >= 0 && di.isReg(src0OutIdx)) {
-      ParsedReg src0Out = ctx.parseReg(di.getReg(src0OutIdx), src0OutIdx);
-      ctx.writeReg32(src0Out, oldDst);
-    }
-    hr.handled = true;
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "VALU",
+        "permlane*_swap requires a paired LDS-round-trip or "
+        "native-permlane16-pair lowering — CROSS_LANE_SURVEY.md P4 "
+        "lift not implemented");
     return hr;
   }
 
