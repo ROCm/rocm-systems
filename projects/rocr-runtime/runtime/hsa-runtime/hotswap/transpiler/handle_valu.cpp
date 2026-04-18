@@ -1479,6 +1479,13 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
       // missing on half the wave in cross-wave lifts (gfx1250 wave32 →
       // gfx942 wave64). Routing through `ballotI1ToWidth` matches the
       // VCC read path (`readVCCAsWaveMask`) and keeps EXEC wave-uniform.
+      //
+      // MODREP: cross-wave (wave32 → wave64) takes the truncation path
+      // inside `ballotI1ToWidth`, which picks lanes 0..31 of the
+      // target ballot under modulo-replication. Valid only while the
+      // target-lane-K / target-lane-K+sourceBits predicates agree —
+      // the precondition enforced by the Phase-1.4 cross-wave gate in
+      // `raiser.cpp`. If the gate policy changes, revisit.
       Value *mask = ctx.regs.ballotI1ToWidth(ctx.B, cmp, ctx.regs.execTy,
                                              "cmpx_ballot");
       Value *curExec = ctx.regs.loadExec(ctx.B);
@@ -1495,6 +1502,10 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
           // SGPR pair as a wave mask (`s_and_b64`, `s_mov_b64 exec, …`,
           // `v_cndmask_b32`'s mask input via `readVCCAsWaveMask`) see
           // divergent SSA and silently miscompile.
+          //
+          // MODREP: same modulo-replication contract as the V_CMPX
+          // branch above. See `reg_file.hpp::ballotI1ToWidth` for the
+          // policy; grep for MODREP when revisiting cross-wave.
           Value *mask = ctx.regs.ballotI1ToWidth(
               ctx.B, cmp, ctx.regs.execTy, "vcmp_ballot");
           ctx.writeRegExecWidth(d, mask);

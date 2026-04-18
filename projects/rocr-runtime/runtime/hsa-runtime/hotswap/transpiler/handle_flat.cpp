@@ -33,40 +33,74 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     ParsedReg dest = op.dst();
     bool isByte = sop == SemOp::GLOBAL_LOAD_UBYTE || sop == SemOp::GLOBAL_LOAD_SBYTE;
     Type *loadTy = isByte ? ctx.i8Ty : Type::getInt16Ty(ctx.C);
+    // The ISA only guarantees natural alignment for each sub-dword access:
+    // 1 byte for byte loads, 2 bytes for short loads. Using the ABI default
+    // alignment here was over-promising for buffers legitimately aligned
+    // to the element size.
+    Align loadAlign = Align(isByte ? 1 : 2);
 
     // Two operand shapes share this handler:
     //   plain form: vaddr(VGPR64), offset
-    //   SADDR form: vaddr(VGPR32), saddr(SGPR64), offset, [flags]
-    // The SADDR form can carry `scale_offset`, which multiplies the per-
-    // lane vaddr by the access element size. Without that flag the
-    // vaddr is already a byte offset. Missing this branch made every
-    // lane load from `saddr + 0 + imm_offset`, i.e. a broadcast instead
-    // of a gather, which is how `cvt_f32_bf16`'s `a[i]` fetch silently
-    // collapsed to `a[offset/elemBytes]` for every lane and handed the
-    // bf16→f32 conversion a single sampled value.
+    //   SADDR form: saddr(SGPR64), vaddr(VGPR32), offset, [cpol]
+    // The decoded operand order is imposed by LLVM MC (saddr before
+    // vaddr), NOT the assembler's written order. We key on
+    // `op.srcReg(k).kind` rather than operand position for robustness
+    // against MC refactors — if a future LLVM reorders decoded
+    // operands, the `kind` pair (SGPR,VGPR) still classifies the shape
+    // uniquely.
+    //
+    // The SADDR form may carry `scale_offset` on gfx12+ (decoded once
+    // into `di.hasScaleOffset` from the CPol operand bit
+    // `AMDGPU::CPol::SCAL`). When set, the per-lane vaddr is scaled by
+    // the access element size before being added to the SGPR base;
+    // without it the vaddr is already a byte offset. Missing this
+    // branch made every lane load from `saddr + 0 + imm_offset`, i.e.
+    // a broadcast instead of a gather, which is how `cvt_f32_bf16`'s
+    // `a[i]` fetch silently collapsed to `a[offset/elemBytes]` for
+    // every lane and handed the bf16→f32 conversion a single sampled
+    // value.
     Value *addr = nullptr;
     bool hasSaddr = false;
-    if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1)) {
-      ParsedReg r0 = op.srcReg(0);
-      ParsedReg r1 = op.srcReg(1);
-      // Match the dword-load handler's decoded order (src[0]=SGPR,
-      // src[1]=VGPR), not the assembler's written order.
-      if (r0.kind == ParsedReg::SGPR && r1.kind == ParsedReg::VGPR) {
-        hasSaddr = true;
-        Value *saddr = ctx.regs.readReg64(ctx.B, r0);
-        Value *vaddr = ctx.B.CreateSExt(ctx.regs.readReg32(ctx.B, r1),
-                                        ctx.i64Ty, "voff_sext");
-        if (di.fullText.find("scale_offset") != std::string::npos) {
-          int elemBytes = isByte ? 1 : 2;
-          vaddr = ctx.B.CreateMul(vaddr,
-                                  ConstantInt::get(ctx.i64Ty, elemBytes),
-                                  "scaled_voff");
-        }
-        addr = ctx.B.CreateAdd(saddr, vaddr, "saddr_vaddr");
+    if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1) &&
+        op.srcReg(0).kind == ParsedReg::SGPR &&
+        op.srcReg(1).kind == ParsedReg::VGPR) {
+      hasSaddr = true;
+      Value *saddr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+      Value *vaddr = ctx.B.CreateSExt(ctx.regs.readReg32(ctx.B, op.srcReg(1)),
+                                      ctx.i64Ty, "voff_sext");
+      if (di.hasScaleOffset) {
+        int elemBytes = isByte ? 1 : 2;
+        vaddr = ctx.B.CreateMul(vaddr,
+                                ConstantInt::get(ctx.i64Ty, elemBytes),
+                                "scaled_voff");
       }
+      addr = ctx.B.CreateAdd(saddr, vaddr, "saddr_vaddr");
+    } else if (op.nSrcs() >= 1 && op.isSrcReg(0) &&
+               op.srcReg(0).kind == ParsedReg::VGPR) {
+      // Plain form: VGPR64 holds the full per-lane address. We do NOT
+      // gate on width — parseReg currently reports tuple VGPRs (e.g.
+      // VGPR2_VGPR3) with width=1 on some subtargets; readReg64 walks
+      // the sub0/sub1 graph itself, so trust the SGPR-vs-VGPR
+      // discriminator above and let readReg64 enforce the 64-bit shape.
+      addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+    } else {
+      // Neither recognized shape. "Never hide errors" — bail with the
+      // full instruction text rather than reinterpret-casting whatever
+      // happens to be in op.srcReg(0).
+      std::string msg;
+      raw_string_ostream os(msg);
+      os << "transpiler: unrecognized GLOBAL_LOAD sub-dword operand shape "
+            "(expected plain VGPR64 or SADDR SGPR64+VGPR32): \""
+         << di.fullText << "\" (mnemonic=" << di.rawMnemonic << ")";
+      report_fatal_error(StringRef(os.str()));
     }
-    if (!addr) addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
     if (addr->getType() != ctx.ptrGlobalTy) addr = ctx.B.CreateIntToPtr(addr, ctx.ptrGlobalTy);
+    // Signed 13-bit `offset` immediate (sign-extended by MC already).
+    // First imm after the register operands is the memory offset; any
+    // additional imms are encoding flags (cpol, th, scope). Break once
+    // we've captured the first — they are positional, and reading a
+    // flag as `memOffset` is how we previously computed bogus
+    // byte-offsets.
     int64_t memOffset = 0;
     unsigned immStart = hasSaddr ? 2 : 1;
     for (unsigned k = immStart; k < op.nSrcs(); k++) {
@@ -75,8 +109,12 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
         break;
       }
     }
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
-    Value *loaded = ctx.B.CreateLoad(loadTy, addr, "gload_sub");
+    // NOT `inbounds`: the ISA's signed offset can legitimately leave
+    // the base allocation (e.g. compiler-scheduled prefetches, negative
+    // strides) and `inbounds` would turn that into UB rather than a
+    // correctness-preserving wrap.
+    if (memOffset != 0) addr = ctx.B.CreateGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
+    Value *loaded = ctx.B.CreateAlignedLoad(loadTy, addr, loadAlign, "gload_sub");
     bool isUnsigned = sop == SemOp::GLOBAL_LOAD_UBYTE || sop == SemOp::GLOBAL_LOAD_USHORT;
     Value *ext = isUnsigned ? ctx.B.CreateZExt(loaded, ctx.i32Ty)
                             : ctx.B.CreateSExt(loaded, ctx.i32Ty);
@@ -99,29 +137,40 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
 
     ParsedReg dest = op.dst();
 
-    // Detect SADDR form: operands are saddr(SGPR64), vaddr(VGPR32), offset, [flags]
-    // vs plain form: vaddr(VGPR64), offset
-    // The SADDR form has src[0]=SGPR, src[1]=VGPR.
+    // See the sub-dword GLOBAL_LOAD block above for a full description
+    // of the two operand shapes and the `scale_offset` contract. The
+    // only differences here are the element size (`loadDwords * 4`)
+    // and that the access is naturally dword-aligned.
     Value *addr = nullptr;
     bool hasSaddr = false;
-    if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1)) {
-      ParsedReg r0 = op.srcReg(0);
-      ParsedReg r1 = op.srcReg(1);
-      if (r0.kind == ParsedReg::SGPR && r1.kind == ParsedReg::VGPR) {
-        hasSaddr = true;
-        Value *saddr = ctx.regs.readReg64(ctx.B, r0);
-        Value *vaddr = ctx.B.CreateSExt(ctx.regs.readReg32(ctx.B, r1), ctx.i64Ty, "voff_sext");
-        if (di.fullText.find("scale_offset") != std::string::npos) {
-          int elemBytes = loadDwords * 4;
-          vaddr = ctx.B.CreateMul(vaddr, ConstantInt::get(ctx.i64Ty, elemBytes), "scaled_voff");
-        }
-        addr = ctx.B.CreateAdd(saddr, vaddr, "saddr_vaddr");
+    if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1) &&
+        op.srcReg(0).kind == ParsedReg::SGPR &&
+        op.srcReg(1).kind == ParsedReg::VGPR) {
+      hasSaddr = true;
+      Value *saddr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+      Value *vaddr = ctx.B.CreateSExt(ctx.regs.readReg32(ctx.B, op.srcReg(1)),
+                                      ctx.i64Ty, "voff_sext");
+      if (di.hasScaleOffset) {
+        int elemBytes = loadDwords * 4;
+        vaddr = ctx.B.CreateMul(vaddr, ConstantInt::get(ctx.i64Ty, elemBytes), "scaled_voff");
       }
+      addr = ctx.B.CreateAdd(saddr, vaddr, "saddr_vaddr");
+    } else if (op.nSrcs() >= 1 && op.isSrcReg(0) &&
+               op.srcReg(0).kind == ParsedReg::VGPR) {
+      // Plain form VReg_64 — see sub-dword comment; don't gate on width.
+      addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
+    } else {
+      std::string msg;
+      raw_string_ostream os(msg);
+      os << "transpiler: unrecognized GLOBAL_LOAD dword operand shape "
+            "(expected plain VGPR64 or SADDR SGPR64+VGPR32): \""
+         << di.fullText << "\" (mnemonic=" << di.rawMnemonic << ")";
+      report_fatal_error(StringRef(os.str()));
     }
-    if (!addr) addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
     if (addr->getType() != ctx.ptrGlobalTy) addr = ctx.B.CreateIntToPtr(addr, ctx.ptrGlobalTy);
 
-    // The first immediate operand after the registers is the memory offset.
+    // Signed 13-bit memory offset; break after the first imm — later
+    // imms are encoding flags (cpol/th/scope).
     int64_t memOffset = 0;
     unsigned immStart = hasSaddr ? 2 : 1;
     for (unsigned k = immStart; k < op.nSrcs(); k++) {
@@ -130,7 +179,7 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
         break;
       }
     }
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
+    if (memOffset != 0) addr = ctx.B.CreateGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
 
     if (loadDwords == 1) {
       ctx.writeReg32(dest, ctx.B.CreateBitCast(ctx.B.CreateLoad(ctx.f32Ty, addr, "gload"), ctx.i32Ty));
@@ -167,35 +216,59 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
       storeDwords = 0;
     }
 
-    // global_store SADDR form: vaddr(VGPR32), vdata(VGPR), saddr(SGPR64), offset, [flags]
-    // Plain form: vaddr(VGPR64), vdata(VGPR), offset
+    // global_store decoded operand layouts (MC-imposed order — differs
+    // from what the assembler writes):
+    //   plain form: vaddr(VGPR64), vdata(VGPR*), offset
+    //   SADDR form: vaddr(VGPR32), vdata(VGPR*), saddr(SGPR64), offset, [cpol]
+    //
+    // Note that `scale_offset` on stores scales the per-lane vaddr by
+    // the access element size. For sub-dword stores (byte/short) the
+    // element size is 1 or 2 bytes; for dword/dwordx{2,3,4} it is 4,
+    // 8, 12, or 16 bytes — the compiler emits `global_store_dwordx4
+    // … scale_offset` with a lane-index vaddr to lower
+    // `out[tid] = vec4` patterns.
     Value *addr = nullptr;
     ParsedReg stData;
     bool hasSaddr = false;
 
-    // Check for SADDR form: src[0]=VGPR(vaddr), src[1]=VGPR(data), src[2]=SGPR(saddr)
-    if (op.nSrcs() >= 3 && op.isSrcReg(0) && op.isSrcReg(1) && op.isSrcReg(2)) {
-      ParsedReg r0 = op.srcReg(0);
-      ParsedReg r1 = op.srcReg(1);
-      ParsedReg r2 = op.srcReg(2);
-      if (r0.kind == ParsedReg::VGPR && r2.kind == ParsedReg::SGPR) {
-        hasSaddr = true;
-        Value *saddr = ctx.regs.readReg64(ctx.B, r2);
-        Value *vaddr = ctx.B.CreateSExt(ctx.regs.readReg32(ctx.B, r0), ctx.i64Ty, "st_voff_sext");
-        if (di.fullText.find("scale_offset") != std::string::npos) {
-          int elemBytes = std::max(storeDwords, 1) * 4;
-          if (storeBits < 32) elemBytes = storeBits / 8;
-          vaddr = ctx.B.CreateMul(vaddr, ConstantInt::get(ctx.i64Ty, elemBytes), "st_scaled_voff");
-        }
-        addr = ctx.B.CreateAdd(saddr, vaddr, "st_saddr_vaddr");
-        stData = r1;
+    // Discriminate plain vs SADDR form by looking at src(2):
+    //   plain: [vaddr(VGPR64), vdata(VGPR*), offset(imm), cpol(imm)]
+    //   SADDR: [vaddr(VGPR32), vdata(VGPR*), saddr(SGPR64), offset(imm), cpol(imm)]
+    // We deliberately do NOT gate on the VReg_64 vaddr width — parseReg
+    // currently reports tuple VGPRs (e.g. VGPR2_VGPR3) with width=1 on
+    // some subtargets, so width would spuriously reject the plain form.
+    // readReg64 already handles the tuple via the sub0/sub1 graph.
+    if (op.nSrcs() >= 3 && op.isSrcReg(0) && op.isSrcReg(1) && op.isSrcReg(2) &&
+        op.srcReg(0).kind == ParsedReg::VGPR &&
+        op.srcReg(1).kind == ParsedReg::VGPR &&
+        op.srcReg(2).kind == ParsedReg::SGPR) {
+      hasSaddr = true;
+      Value *saddr = ctx.regs.readReg64(ctx.B, op.srcReg(2));
+      Value *vaddr = ctx.B.CreateSExt(ctx.regs.readReg32(ctx.B, op.srcReg(0)),
+                                      ctx.i64Ty, "st_voff_sext");
+      if (di.hasScaleOffset) {
+        int elemBytes = std::max(storeDwords, 1) * 4;
+        if (storeBits < 32) elemBytes = storeBits / 8;
+        vaddr = ctx.B.CreateMul(vaddr, ConstantInt::get(ctx.i64Ty, elemBytes), "st_scaled_voff");
       }
-    }
-    if (!addr) {
+      addr = ctx.B.CreateAdd(saddr, vaddr, "st_saddr_vaddr");
+      stData = op.srcReg(1);
+    } else if (op.nSrcs() >= 2 && op.isSrcReg(0) && op.isSrcReg(1) &&
+               op.srcReg(0).kind == ParsedReg::VGPR &&
+               op.srcReg(1).kind == ParsedReg::VGPR) {
       addr = ctx.regs.readReg64(ctx.B, op.srcReg(0));
       stData = op.srcReg(1);
+    } else {
+      std::string msg;
+      raw_string_ostream os(msg);
+      os << "transpiler: unrecognized GLOBAL_STORE operand shape "
+            "(expected plain VGPR+VGPR or SADDR VGPR+VGPR+SGPR): \""
+         << di.fullText << "\" (mnemonic=" << di.rawMnemonic << ")";
+      report_fatal_error(StringRef(os.str()));
     }
     if (addr->getType() != ctx.ptrGlobalTy) addr = ctx.B.CreateIntToPtr(addr, ctx.ptrGlobalTy);
+    // Signed 13-bit memory offset; break after the first imm — later
+    // imms are encoding flags (cpol/th/scope).
     int64_t memOffset = 0;
     unsigned immStart = hasSaddr ? 3 : 2;
     for (unsigned k = immStart; k < op.nSrcs(); k++) {
@@ -204,7 +277,7 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
         break;
       }
     }
-    if (memOffset != 0) addr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
+    if (memOffset != 0) addr = ctx.B.CreateGEP(ctx.i8Ty, addr, ctx.B.getInt64(memOffset));
 
     if (storeDwords == 0) {
       Type *memTy = Type::getIntNTy(ctx.C, storeBits);

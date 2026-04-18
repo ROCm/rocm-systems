@@ -278,17 +278,47 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     // `amdgcn.ds_bpermute` intrinsic so the backend emits the real
     // cross-lane gather on the target ISA.
     //
-    // Wave-width note. `amdgcn.ds_bpermute` on the target masks the
-    // selector by `target_wave_bits - 1` in hardware. For gfx1250
-    // wave32 → gfx942 wave64 lifts, a source selector of
+    // MODREP: wave-width projection. `amdgcn.ds_bpermute` on the
+    // target masks the selector by `target_wave_bits - 1` in hardware.
+    // For gfx1250 wave32 → gfx942 wave64 lifts, a source selector of
     // `(lane ^ k) * 4` with `k < 32` stays inside the low 32 lanes,
     // so the natural wave64 behaviour partitions the wave into two
     // independent 32-lane halves that each reproduce the source's
-    // wave32 shuffle. This matches the source kernel's semantics for
-    // `lane_swap` (k=1) and the intra-warp phase of `block_sum_shfl`
-    // (k ∈ {16,8,4,2,1}); kernels that rely on `k ≥ 32` for a wave32
-    // source would need same-wave or SPMDified lowering — out of
-    // scope for this handler.
+    // wave32 shuffle — a clean match under modulo-replication.
+    //
+    //   Selectors this policy covers:
+    //     * `__shfl_xor(x, k)` with `k < sourceWave` — `lane_swap`
+    //       (k=1) and the intra-warp phase of `block_sum_shfl`
+    //       (k ∈ {16,8,4,2,1}).
+    //     * `__shfl_down(x, k)` with `k < sourceWave`.
+    //     * `__shfl(x, srcLane)` with `srcLane < sourceWave`.
+    //
+    //   Selectors this policy does NOT cover:
+    //     * `k ≥ sourceWave` — would step lanes from the "upper" half
+    //       of the target wave into the "lower" half of the source
+    //       replica, which is not what the source kernel meant. A
+    //       proper lift needs SPMDification or same-wave execution.
+    //     * Selectors derived from global thread/lane indices where
+    //       the source's `mbcnt`-based lane ID cannot be re-expressed
+    //       in target-wave terms (see lane_swap / block_sum_shfl
+    //       residual numerical mismatches in RESULTS.md).
+    //
+    // Grep for MODREP when revisiting the cross-wave policy; these
+    // assumptions will need to be either formalised (with a gate that
+    // rejects selectors violating them) or generalised (SPMDification).
+    //
+    // EXEC gating. We emit the intrinsic *outside* `emitUnderExec`.
+    // `amdgcn.ds_bpermute` is convergent — all lanes of the hardware
+    // wave must participate or the result in inactive lanes is
+    // undefined. For lanes that are inactive in the source kernel,
+    // their `src1` input is the ambient VGPR value (possibly the
+    // 0xA5A5… sentinel), but since no lane *reads* from an inactive
+    // lane under a correct selector, the undef propagation does not
+    // affect the active-lane outputs. If a future handler needs to
+    // emit `ds_bpermute` on a value that was written inside an SPE
+    // diamond, it must first broadcast the diamond result through a
+    // `readfirstlane` / explicit VGPR move outside the diamond,
+    // otherwise the cross-lane read will pick up `undef`.
     Value *index = op.src(0);
     Value *src = op.src(1);
     Function *bperm = Intrinsic::getOrInsertDeclaration(

@@ -263,6 +263,22 @@ struct AllocaRegFile {
   // Callers that need per-lane i1 pass-through (e.g. writing a mask back
   // to VCC) should consume the pred directly — this helper's contract is
   // "give me a wave-level iN mask of width resultTy".
+  //
+  // MODREP: this helper encodes the modulo-replication projection for
+  // the `wantedBits < waveBits` case (wave32 source on wave64 target).
+  // If we ever change the cross-wave policy — e.g. to SPMDification,
+  // same-wave-only lifts, or a per-half split — every call site that
+  // reaches the narrow branch becomes a potential miscompile. Grep for
+  // "MODREP:" before touching the policy; all load-bearing sites are
+  // annotated.
+  //
+  // Widening (`wantedBits > waveBits`, e.g. wave64 source on wave32
+  // target) would need a different story entirely — the source's
+  // upper 32 lane bits have no counterpart in the target wave — and we
+  // currently have neither tests nor a kernel corpus exercising that
+  // direction, so it's reported as unimplemented rather than silently
+  // zero-extended. A future `s_and_b64 s[…], exec, s[…]` lift of a
+  // wave64 kernel onto a wave32 target would surface here.
   llvm::Value *ballotI1ToWidth(llvm::IRBuilder<> &B, llvm::Value *pred,
                                llvm::Type *resultTy,
                                const llvm::Twine &name = "ballot") {
@@ -276,9 +292,20 @@ struct AllocaRegFile {
     unsigned waveBits = waveMaskTy->getPrimitiveSizeInBits();
     if (wantedBits == waveBits)
       return waveMask;
-    if (wantedBits > waveBits)
-      return B.CreateZExt(waveMask, resultTy, name + "_ext");
-    return B.CreateTrunc(waveMask, resultTy, name + "_trunc");
+    if (wantedBits < waveBits)
+      // MODREP: trunc is the modulo-replication projection of the
+      // target ballot onto the source wave width. See comment above.
+      return B.CreateTrunc(waveMask, resultTy, name + "_trunc");
+    // `wantedBits > waveBits`: wave64 source on wave32 target. No
+    // correct modulo-replication projection exists (the wider source
+    // wave has lanes that do not exist in the narrower target), so
+    // zero-extending would invent bits. "Never hide errors" — bail so
+    // a future wave64→wave32 lift lands here rather than silently
+    // miscompiles.
+    llvm::report_fatal_error(
+        "ballotI1ToWidth: wantedBits > waveBits (wave64 source on "
+        "wave32 target) has no modulo-replication projection; "
+        "this direction needs an explicit policy decision before use");
   }
 
   // Project a wave-level bit-mask back onto the current lane's VCC bit.

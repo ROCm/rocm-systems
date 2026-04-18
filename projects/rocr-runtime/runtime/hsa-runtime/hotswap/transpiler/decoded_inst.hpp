@@ -33,6 +33,13 @@ struct DecodedInst {
   bool defsSCC = false;
   bool defsVCC = false;
   bool defsEXEC = false;
+  // `scale_offset` flag from the CPol operand (gfx12+ FLAT/GLOBAL). When
+  // set on a global_load/store in SADDR form, the per-lane vaddr is
+  // multiplied by the access element size before being added to the
+  // SGPR base. Decoded from the MCInst's `cpol` operand bit
+  // `AMDGPU::CPol::SCAL` at disassembly time so handlers can branch
+  // on a decoded bit instead of scanning `fullText`.
+  bool hasScaleOffset = false;
   unsigned firstSrcIdx = 0;
 
   // Upper bound on the logical-source count the raiser's walk can produce.

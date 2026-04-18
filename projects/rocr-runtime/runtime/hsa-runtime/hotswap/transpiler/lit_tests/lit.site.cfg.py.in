@@ -25,6 +25,9 @@ config.fixtures = {
     "divergent_vgpr_ir": r"@LIT_FIXTURE_DIVERGENT_VGPR_IR_CO@",
     "scalar_exec_writers": r"@LIT_FIXTURE_SCALAR_EXEC_WRITERS_CO@",
     "saveexec": r"@LIT_FIXTURE_SAVEEXEC_CO@",
+    "v_cmpx_ballot": r"@LIT_FIXTURE_V_CMPX_BALLOT_CO@",
+    "global_load_ushort_saddr": r"@LIT_FIXTURE_GLOBAL_LOAD_USHORT_SADDR_CO@",
+    "ds_bpermute_b32": r"@LIT_FIXTURE_DS_BPERMUTE_B32_CO@",
 }
 
 lit_config.load_config(

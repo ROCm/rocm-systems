@@ -180,6 +180,22 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       di.tsFlags = desc.TSFlags;
       di.firstSrcIdx = desc.getNumDefs();
 
+      // Decode the `scale_offset` bit out of the CPol operand once, so
+      // handlers can consume a typed boolean instead of string-searching
+      // the disassembled `fullText`. gfx12+ FLAT/GLOBAL forms carry the
+      // bit in `cpol`; earlier ISAs have no `cpol` operand and the flag
+      // is inherently absent (hasScaleOffset stays false).
+      {
+        int cpolIdx = AMDGPU::getNamedOperandIdx(inst.getOpcode(),
+                                                 AMDGPU::OpName::cpol);
+        if (cpolIdx >= 0 &&
+            (unsigned)cpolIdx < inst.getNumOperands() &&
+            inst.getOperand((unsigned)cpolIdx).isImm()) {
+          int64_t cpol = inst.getOperand((unsigned)cpolIdx).getImm();
+          di.hasScaleOffset = (cpol & AMDGPU::CPol::SCAL) != 0;
+        }
+      }
+
       // Build the logical-source view of the MCInst. We walk `desc.operands()`
       // and classify each operand using TableGen-generated metadata only:
       //
