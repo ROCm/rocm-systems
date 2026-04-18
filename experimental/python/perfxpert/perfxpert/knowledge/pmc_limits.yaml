@@ -1,0 +1,24 @@
+# Per-block hardware counter limits — AMD GPUs allow only N counters from the
+# same hardware block per rocprofv3 pass. Exceeding a limit yields error code 38.
+# Source: llm-reference-guide.md §"Hardware Counter Per-Block Limits" (lines 10-65).
+
+per_block_limits:
+  SQ:
+    limit: 4
+    gfx942_limit: 8
+    note: "Shader Sequencer — conservative default 4, up to 8 on gfx942 (MI300X)"
+  GRBM:
+    limit: 4
+    note: "Global Register Bus Manager — system-wide cycle counters"
+  TCC:
+    limit: 4
+    note: "Texture Cache Controller (L2) — derived FETCH_SIZE/WRITE_SIZE must isolate; see rocprofv3_counter_limits.yaml"
+  TCP:
+    limit: 4
+    note: "Texture Cache Per-CU (vector L1)"
+  TA:
+    limit: 4
+    note: "Texture Address unit"
+  TD:
+    limit: 4
+    note: "Texture Data unit"
