@@ -39,17 +39,34 @@ def test_perfxpert_code_launches_if_opencode_available(opencode_available):
     if not opencode_available:
         pytest.skip("opencode binary not available on this system")
 
-    # Smoke: send 'exit' immediately. Session should close cleanly.
-    proc = subprocess.run(
+    # Smoke: perfxpert-code must print our AMD banner to stderr BEFORE handing
+    # off to opencode's interactive TUI. opencode is an alternate-screen
+    # renderer that doesn't exit on stdin "exit\n", so we start it with Popen,
+    # wait briefly for the banner, then kill it. We only assert the banner
+    # emerged — proving the launcher ran.
+    import signal
+    proc = subprocess.Popen(
         ["perfxpert-code"],
-        input="exit\n",
-        capture_output=True,
-        text=True,
-        timeout=30,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         env={**os.environ, "PERFXPERT_CODE_NO_BANNER": "0"},
+        start_new_session=True,  # so we can kill the whole process group
     )
-    # Banner is on stderr, always. Opencode session itself may exit non-zero.
-    assert "AMD ROCm PerfXpert" in proc.stderr
+    try:
+        import time as _t
+        _t.sleep(1.5)
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        try:
+            _, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            _, stderr = proc.communicate(timeout=5)
+    assert b"AMD ROCm PerfXpert" in stderr
 
 
 def test_mcp_server_accepts_a_call_from_shell(opencode_available):
