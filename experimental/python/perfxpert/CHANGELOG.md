@@ -53,53 +53,43 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `perfxpert doctor` now reports active mode (`agentic` | `legacy`).
 
 ### Changed
-- **`PERFXPERT_USE_AGENTS=1` is now a no-op** (kept for backward compat).
-  The agentic path is the default.
-- **`analyze_database()` routes into agent runtime** instead of directly
-  into a single LLM call. Signature unchanged.
-- **CI matrix inverted**: agentic is the primary test matrix; legacy is
-  secondary (see below).
-- README, CONTRIBUTING, and AI_ANALYSIS_API.md rewritten for the new
+- `PERFXPERT_USE_AGENTS` was removed in Phase 7.1 along with the toggle code it kept alive.
+- The single-call LLM entrypoint was removed in Phase 7.1; use `perfxpert.agents.runtime.build_session()` + `session.run_root(...)`.
+- **CI matrix inverted**: agentic is the primary test matrix; the
+  pre-v0.2.0 matrix was removed in Phase 7.1.
+- README, CONTRIBUTING, and the Python API docs rewritten for the new
   architecture.
 
 ### Deprecated
-- **`PERFXPERT_LEGACY=1`**: new opt-in to pre-v0.2.0 behavior. One-minor-version
-  safety net; removed in vX.Y+1. See `docs/deprecation/PERFXPERT_LEGACY.md`.
-- **`LLMAnalyzer` class**: kept as a deprecation stub that emits
-  `DeprecationWarning`. Removal target: vX.Y+2.
+- `PERFXPERT_LEGACY` was introduced as a one-minor-version fallback in v0.2.0 and was then removed in Phase 7.1.
+- `LLMAnalyzer` was kept as a deprecation stub in v0.2.0 and was removed in Phase 7.1.
 
 ### Removed
-- Legacy interactive workflow module (~4000 LOC: InteractiveSession +
-  WorkflowSession + 7-phase loop). Replaced by `perfxpert-code` wrapping
-  the bundled opencode TUI.
-- Legacy LLM conversation module (~600 LOC: streaming + auto-compaction).
-  Replaced by Agents SDK native sessions.
-- Monolithic fence reference guide. Split into per-agent slices + structured
-  knowledge YAMLs under `perfxpert/knowledge/`.
-- The legacy `LLMAnalyzer.analyze_with_llm` method and all
-  `_call_<provider>()` private methods.
-- `tests/test_llm_conversation.py` (51 tests of a deleted module).
-- Conversational-session CLI flags. Users typing the old flags get a
-  migration hint pointing to `perfxpert-code`.
-- Legacy `load_reference_guide` export from `perfxpert.ai_analysis`.
-  Relocated to `perfxpert.providers._reference_guide` (legacy-only).
+- Pre-agentic interactive workflow module (~4000 LOC: InteractiveSession + WorkflowSession + 7-phase loop) removed in Phase 7.1. Replaced by `perfxpert-code` wrapping the bundled opencode TUI.
+- Pre-agentic LLM conversation module (~600 LOC: streaming + auto-compaction) removed in Phase 7.1. Replaced by Agents SDK native sessions.
+- Monolithic fence reference guide removed in Phase 7.1. Split into per-agent slices + structured knowledge YAMLs under `perfxpert/knowledge/`.
+- `LLMAnalyzer.analyze_with_llm` and the `_call_<provider>()` private methods were removed in Phase 7.1.
+- `tests/test_llm_conversation.py` (51 tests of a deleted module) removed in Phase 7.1.
+- Conversational-session CLI flags removed in Phase 7.1. Users typing the old flags get a migration hint pointing to `perfxpert-code`.
+- `load_reference_guide` export from the pre-agentic tree was removed in Phase 7.1 (previously relocated to `perfxpert.providers._reference_guide`).
 
 ### Migration
 
 See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
 
-### Backwards-compatible stubs
+### Backwards-compatible stubs (v0.2.0 only, all subsequently removed)
 
-- `LLMAnalyzer` class still importable, emits DeprecationWarning.
-- `PERFXPERT_USE_AGENTS` env var still recognized (no-op).
-- `PERFXPERT_LEGACY=1` reroutes to the pre-v0.2.0 path with a stderr warning
-  (required a user-supplied reference-guide override env var under the
-  old pre-rename name — no longer honored; see Removed above).
+- `LLMAnalyzer` stub class — still importable in v0.2.0, subsequently removed.
+- `PERFXPERT_USE_AGENTS` env var — no-op in v0.2.0, subsequently removed.
+- `PERFXPERT_LEGACY` — fallback toggle in v0.2.0, subsequently removed.
+  A user-supplied reference-guide override env var (pre-rename name)
+  was also required while `PERFXPERT_LEGACY=1` was active; both were
+  removed along with it.
 
 ---
 
 ## [0.1.x] — 2026-0X-XX and earlier
 
-See git history. v0.1.x ran the legacy (pre-agentic) path by default.
-`PERFXPERT_USE_AGENTS=1` was the experimental opt-in in later v0.1.x
-releases (during the agentic refactor).
+See git history. v0.1.x ran the pre-agentic path by default. The
+experimental opt-in `PERFXPERT_USE_AGENTS` was available in later v0.1.x
+releases (during the agentic refactor) and was itself subsequently removed.
