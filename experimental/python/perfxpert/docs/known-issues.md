@@ -1,4 +1,4 @@
-# Known Issues
+# PerfXpert — Known Issues
 
 ## LLM end-to-end smoke test may fail with 429 insufficient_quota
 
@@ -74,3 +74,31 @@ without being ported.
 - **Known ongoing work** (not blocking ship):
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
   - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
+
+## Phase 8
+
+- **`apply-opencode-patches.sh` is not yet wired into the wheel build.**
+  The patch apply step is manual: run
+  `bash experimental/python/perfxpert/scripts/apply-opencode-patches.sh`
+  before bundling the opencode binary. Automating this requires `bun`
+  available on the build host (for opencode's post-patch type-check);
+  that toolchain setup is deferred to the wheel-build PR.
+
+- **The opencode submodule (`.gitmodules` pin `v1.4.11`) is MIT.**
+  All customizations are carried in `.patches/*.patch`. Do NOT commit
+  mutations inside the submodule; the submodule's committed state must
+  stay pristine so that `git submodule update` can fetch upstream
+  fixes.
+
+- **Rate-limit escape hatch is opencode-process-scoped.**
+  Setting `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` kills client-side
+  retries in the opencode process, but the provider's own quota
+  enforcement is external and not affected. Use
+  `PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
+  rate-limited.
+
+- **Forced tool priority is LLM-dependent.**
+  Patch `0010-perfxpert-tool-priority.patch` and the MCP description
+  hint strongly bias the LLM toward `intent_classify` first, but a
+  determined model can still skip. Measurement + feedback will come
+  in Phase 9.
