@@ -1317,13 +1317,15 @@ void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,
     pInfo = &it->second;
   }
 
-  if (mapFlags & (CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION)) {
+  // amd::MapFlags::Write=(1u<<1)=2, WriteInvalidate=(1u<<2)=4, Read=(1u<<0)=1
+  if (mapFlags & (static_cast<uint>(amd::MapFlags::Write) |
+                  static_cast<uint>(amd::MapFlags::WriteInvalidate))) {
     pInfo->origin_ = origin;
     pInfo->region_ = region;
     pInfo->entire_ = entire;
     pInfo->unmapWrite_ = true;
   }
-  if (mapFlags & CL_MAP_READ) {
+  if (mapFlags & static_cast<uint>(amd::MapFlags::Read)) {
     pInfo->unmapRead_ = true;
   }
   pInfo->baseMip_ = baseMip;

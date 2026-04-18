@@ -3094,7 +3094,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
 
   // Allocate a map command for the queue thread
   amd::MapMemoryCommand* command = new amd::MapMemoryCommand(
-      hostQueue, CL_COMMAND_MAP_BUFFER, eventWaitList, *srcBuffer, map_flags,
+      hostQueue, CL_COMMAND_MAP_BUFFER, eventWaitList, *srcBuffer,
+      amd::cl::from_cl_MapFlags(map_flags),
       blocking_map ? true : false, srcOffset, srcSize, nullptr, nullptr, mapPtr);
   if (command == NULL) {
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
@@ -3369,7 +3370,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
 
   // Allocate a map command for the queue thread
   amd::MapMemoryCommand* command = new amd::MapMemoryCommand(
-      hostQueue, CL_COMMAND_MAP_IMAGE, eventWaitList, *srcImage, map_flags,
+      hostQueue, CL_COMMAND_MAP_IMAGE, eventWaitList, *srcImage,
+      amd::cl::from_cl_MapFlags(map_flags),
       blocking_map ? true : false, srcOrigin, srcRegion, nullptr, nullptr, mapPtr);
   if (command == NULL) {
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
@@ -4606,7 +4608,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueMigrateMemObjects,
   }
 
   amd::MigrateMemObjectsCommand* command = new amd::MigrateMemObjectsCommand(
-      hostQueue, CL_COMMAND_MIGRATE_MEM_OBJECTS, eventWaitList, memObjects, flags);
+      hostQueue, CL_COMMAND_MIGRATE_MEM_OBJECTS, eventWaitList, memObjects,
+      amd::cl::from_cl_MemMigrationFlags(flags));
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;

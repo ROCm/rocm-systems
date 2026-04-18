@@ -2171,7 +2171,7 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     if (hw_event != nullptr) {
       Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(hw_event));
     } else if (static_cast<amd::Command*>(*it)->queue() != command.queue() &&
-                ((*it)->status() != CL_COMPLETE)) {
+                ((*it)->status() != 0)) {  // 0 = Complete
       LogPrintfError("Waiting event(%p) doesn't have a HSA signal!\n", *it);
     } else {
       // Assume serialization on the same queue...
@@ -2289,10 +2289,10 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
       }
     }
 
-    if (current->status() == CL_SUBMITTED) {
-      current->setStatus(CL_RUNNING, startTimeStamp);
-      current->setStatus(CL_COMPLETE, endTimeStamp);
-    } else if (current->status() != CL_COMPLETE) {
+    if (current->status() == 2) {  // 2 = Submitted
+      current->setStatus(1, startTimeStamp);  // 1 = Running
+      current->setStatus(0, endTimeStamp);    // 0 = Complete
+    } else if (current->status() != 0) {  // 0 = Complete
       LogPrintfError("Unexpected command status - %d.", current->status());
     }
 
@@ -3057,17 +3057,17 @@ void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) {
     // Make sure we have memory for the command execution
     Memory* memory = dev().getRocMemory(cmd.getSvmMem());
 
-    memory->saveMapInfo(cmd.svmPtr(), cmd.origin(), cmd.size(), cmd.mapFlags(),
-                        cmd.isEntireMemory());
+    memory->saveMapInfo(cmd.svmPtr(), cmd.origin(), cmd.size(),
+                        static_cast<uint>(cmd.mapFlags()), cmd.isEntireMemory());
 
     if (memory->mapMemory() != nullptr) {
-      if (cmd.mapFlags() & (CL_MAP_READ | CL_MAP_WRITE)) {
+      if (!!(cmd.mapFlags() & (amd::MapFlags::Read | amd::MapFlags::Write))) {
         Memory* hsaMapMemory = dev().getRocMemory(memory->mapMemory());
 
         if (!blitMgr().copyBuffer(*memory, *hsaMapMemory, cmd.origin(), cmd.origin(), cmd.size(),
                                   cmd.isEntireMemory())) {
           LogError("submitSVMMapMemory() - copy failed");
-          cmd.setStatus(CL_MAP_FAILURE);
+          cmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
         }
         // Wait on a kernel if one is outstanding
         releaseGpuMemoryFence();
@@ -3140,14 +3140,15 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& cmd) {
   }
 
   // Save map requirement.
-  cl_map_flags mapFlag = cmd.mapFlags();
+  amd::MapFlags mapFlag = cmd.mapFlags();
 
   // Treat no map flag as read-write.
-  if (mapFlag == 0) {
-    mapFlag = CL_MAP_READ | CL_MAP_WRITE;
+  if (!mapFlag) {
+    mapFlag = amd::MapFlags::Read | amd::MapFlags::Write;
   }
 
-  devMemory->saveMapInfo(cmd.mapPtr(), cmd.origin(), cmd.size(), mapFlag, cmd.isEntireMemory());
+  devMemory->saveMapInfo(cmd.mapPtr(), cmd.origin(), cmd.size(),
+                         static_cast<uint>(mapFlag), cmd.isEntireMemory());
 
   // Sync to the map target.
   // If we have host memory, use it
@@ -3162,7 +3163,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& cmd) {
     }
   } else if (devMemory->IsPersistentDirectMap()) {
     // Persistent memory - NOP map
-  } else if (mapFlag & (CL_MAP_READ | CL_MAP_WRITE)) {
+  } else if (!!(mapFlag & (amd::MapFlags::Read | amd::MapFlags::Write))) {
     bool result = false;
     roc::Memory* hsaMemory = static_cast<roc::Memory*>(devMemory);
 
@@ -3631,13 +3632,13 @@ void VirtualGPU::submitMigrateMemObjects(amd::MigrateMemObjectsCommand& vcmd) {
     // Find device memory
     Memory* memory = dev().getRocMemory(&(*itr));
 
-    if (vcmd.migrationFlags() & CL_MIGRATE_MEM_OBJECT_HOST) {
+    if (!!(vcmd.migrationFlags() & amd::MemMigrationFlags::Host)) {
       if (!memory->isHostMemDirectAccess()) {
         // Make sure GPU finished operation before synchronization with the backing store
         releaseGpuMemoryFence();
       }
       memory->mgpuCacheWriteBack(*this);
-    } else if (vcmd.migrationFlags() & CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED) {
+    } else if (!!(vcmd.migrationFlags() & amd::MemMigrationFlags::ContentUndefined)) {
       // Synchronize memory from host if necessary.
       // The sync function will perform memory migration from
       // another device if necessary

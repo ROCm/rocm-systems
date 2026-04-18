@@ -93,7 +93,7 @@ bool amd::ClGlEvent::waitForFence() {
   }
 #endif
   // If we reach this point, fence should have completed
-  setStatus(CL_COMPLETE);
+  setStatus(0);  // Complete
   return true;
 }
 

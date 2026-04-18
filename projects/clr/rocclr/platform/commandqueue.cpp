@@ -98,7 +98,7 @@ bool HostQueue::terminate() {
       }
       if (marker != nullptr) {
         if (marker->notifyCmdQueue()) {
-          while (marker->status() > CL_COMPLETE && Os::isThreadAlive(thread_)) {
+          while (marker->status() > 0 && Os::isThreadAlive(thread_)) {  // > 0 = not complete
             amd::Os::yield();
           }
         }
@@ -273,7 +273,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
       // Only wait if the command is enqueued into another queue.
       if (it->command().queue() != this) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
-        if (it->command().status() != CL_COMPLETE) {
+        if (it->command().status() != 0) {  // 0 = Complete
           ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
                   amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
@@ -299,7 +299,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
             amd::activity_prof::getOclCommandKindString(command->type()), command);
 
-    command->setStatus(CL_SUBMITTED);
+    command->setStatus(2);  // Submitted
 
     // Submit to the device queue.
     command->submit(*virtualDevice);
@@ -319,7 +319,7 @@ void HostQueue::append(Command& command) {
     finish();
   }
   command.retain();
-  command.setStatus(CL_QUEUED);
+  command.setStatus(3);  // Queued
   queue_.enqueue(&command);
   if (!IS_HIP) {
     return;

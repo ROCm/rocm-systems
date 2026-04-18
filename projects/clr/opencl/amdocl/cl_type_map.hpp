@@ -101,6 +101,18 @@ static_assert(static_cast<uint32_t>(amd::CommandType::FillBuffer)     == CL_COMM
 static_assert(static_cast<uint32_t>(amd::CommandType::SvmFree)        == CL_COMMAND_SVM_FREE);
 static_assert(static_cast<uint32_t>(amd::CommandType::SvmUnmap)       == CL_COMMAND_SVM_UNMAP);
 
+static_assert(static_cast<int32_t>(amd::ExecutionStatus::Complete)  == CL_COMPLETE);
+static_assert(static_cast<int32_t>(amd::ExecutionStatus::Running)   == CL_RUNNING);
+static_assert(static_cast<int32_t>(amd::ExecutionStatus::Submitted) == CL_SUBMITTED);
+static_assert(static_cast<int32_t>(amd::ExecutionStatus::Queued)    == CL_QUEUED);
+
+static_assert(static_cast<uint64_t>(amd::MapFlags::Read)            == CL_MAP_READ);
+static_assert(static_cast<uint64_t>(amd::MapFlags::Write)           == CL_MAP_WRITE);
+static_assert(static_cast<uint64_t>(amd::MapFlags::WriteInvalidate) == CL_MAP_WRITE_INVALIDATE_REGION);
+
+static_assert(static_cast<uint64_t>(amd::MemMigrationFlags::Host)             == CL_MIGRATE_MEM_OBJECT_HOST);
+static_assert(static_cast<uint64_t>(amd::MemMigrationFlags::ContentUndefined) == CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED);
+
 // ── Translation functions ─────────────────────────────────────────────────────
 //
 // Note on from_cl() naming: the OpenCL C headers define cl_device_type,
@@ -204,6 +216,27 @@ inline cl_command_type to_cl(amd::CommandType t) {
 }
 inline amd::CommandType from_cl_CommandType(cl_command_type t) {
   return static_cast<amd::CommandType>(t);
+}
+
+inline cl_int to_cl(amd::ExecutionStatus s) {
+  return static_cast<cl_int>(s);
+}
+inline amd::ExecutionStatus from_cl_ExecutionStatus(cl_int s) {
+  return static_cast<amd::ExecutionStatus>(s);
+}
+
+inline cl_map_flags to_cl(amd::MapFlags f) {
+  return static_cast<cl_map_flags>(f);
+}
+inline amd::MapFlags from_cl_MapFlags(cl_map_flags f) {
+  return static_cast<amd::MapFlags>(f);
+}
+
+inline cl_mem_migration_flags to_cl(amd::MemMigrationFlags f) {
+  return static_cast<cl_mem_migration_flags>(f);
+}
+inline amd::MemMigrationFlags from_cl_MemMigrationFlags(cl_mem_migration_flags f) {
+  return static_cast<amd::MemMigrationFlags>(f);
 }
 
 }  // namespace amd::cl

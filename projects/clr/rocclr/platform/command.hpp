@@ -465,7 +465,7 @@ class UserEvent : public Command {
 
  public:
   UserEvent(Context& context) : Command(amd::CommandType::User), context_(context) {
-    setStatus(CL_SUBMITTED);
+    setStatus(2);  // Submitted
   }
 
   //! Creates a user event in the backend layer
@@ -481,7 +481,7 @@ class UserEvent : public Command {
   bool SetExecutionStatus(cl_int status) {
     if (AMD_DIRECT_DISPATCH) {
       // If it's invalid status, then mark dependent commands as invalid
-      if (status < CL_COMPLETE) {
+      if (status < 0) {  // negative status is an error code
         for (auto it : dependents_) {
           it->setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
         }
@@ -507,7 +507,7 @@ class ClGlEvent : public Command {
 
  public:
   ClGlEvent(Context& context) : Command(amd::CommandType::AcquireGlFenceSyncObjectKHR), context_(context) {
-    setStatus(CL_SUBMITTED);
+    setStatus(2);  // Submitted
   }
 
   virtual void submit(device::VirtualDevice& device) { ShouldNotCallThis(); }
@@ -1193,16 +1193,16 @@ class BatchCopyMemoryCommand : public Command {
 
 class MapMemoryCommand : public OneMemoryArgCommand {
  private:
-  cl_map_flags mapFlags_;  //!< Flags controlling the map.
-  bool blocking_;          //!< True for blocking maps
-  Coord3D origin_;         //!< Origin of the region to map.
-  Coord3D size_;           //!< Size of the region to map.
-  const void* mapPtr_;     //!< Host-space pointer that the object is currently mapped at
+  amd::MapFlags mapFlags_;  //!< Flags controlling the map.
+  bool blocking_;           //!< True for blocking maps
+  Coord3D origin_;          //!< Origin of the region to map.
+  Coord3D size_;            //!< Size of the region to map.
+  const void* mapPtr_;      //!< Host-space pointer that the object is currently mapped at
 
  public:
   //! Construct a new MapMemoryCommand
   MapMemoryCommand(HostQueue& queue, amd::CommandType cmdType, const EventWaitList& eventWaitList,
-                   Memory& memory, cl_map_flags mapFlags, bool blocking, Coord3D origin,
+                   Memory& memory, amd::MapFlags mapFlags, bool blocking, Coord3D origin,
                    Coord3D size, size_t* imgRowPitch = nullptr, size_t* imgSlicePitch = nullptr,
                    void* mapPtr = nullptr)
       : OneMemoryArgCommand(queue, cmdType, eventWaitList, memory),
@@ -1220,7 +1220,7 @@ class MapMemoryCommand : public OneMemoryArgCommand {
   //! Read the memory object
   Memory& memory() const { return *memory_; }
   //! Read the map control flags
-  cl_map_flags mapFlags() const { return mapFlags_; }
+  amd::MapFlags mapFlags() const { return mapFlags_; }
   //! Read the origin
   const Coord3D& origin() const { return origin_; }
   //! Read the size
@@ -1268,7 +1268,7 @@ class UnmapMemoryCommand : public OneMemoryArgCommand {
  */
 class MigrateMemObjectsCommand : public Command {
  private:
-  cl_mem_migration_flags migrationFlags_;  //!< Migration flags
+  amd::MemMigrationFlags migrationFlags_;  //!< Migration flags
   std::vector<amd::Memory*> memObjects_;   //!< The list of memory objects
 
  public:
@@ -1276,7 +1276,7 @@ class MigrateMemObjectsCommand : public Command {
   MigrateMemObjectsCommand(HostQueue& queue, amd::CommandType type,
                            const EventWaitList& eventWaitList,
                            const std::vector<amd::Memory*>& memObjects,
-                           cl_mem_migration_flags flags)
+                           amd::MemMigrationFlags flags)
       : Command(queue, type, eventWaitList), migrationFlags_(flags) {
     memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
@@ -1300,7 +1300,7 @@ class MigrateMemObjectsCommand : public Command {
   }
 
   //! Returns the migration flags
-  cl_mem_migration_flags migrationFlags() const { return migrationFlags_; }
+  amd::MemMigrationFlags migrationFlags() const { return migrationFlags_; }
   //! Returns the number of memory objects in the command
   uint32_t numMemObjects() const { return (uint32_t)memObjects_.size(); }
   //! Returns a pointer to the memory objects
@@ -1906,16 +1906,16 @@ class SvmFillMemoryCommand : public Command {
  */
 class SvmMapMemoryCommand : public Command {
  private:
-  Memory* svmMem_;  //!< the pointer to the amd::Memory object corresponding the svm pointer mapped
-  Coord3D size_;    //!< the map size
-  Coord3D origin_;  //!< the origin of the mapped svm pointer shift from the beginning of svm space
-                    //! allocated
-  cl_map_flags flags_;  //!< map flags
+  Memory* svmMem_;       //!< the pointer to the amd::Memory object corresponding the svm pointer mapped
+  Coord3D size_;         //!< the map size
+  Coord3D origin_;       //!< the origin of the mapped svm pointer shift from the beginning of svm space
+                         //! allocated
+  amd::MapFlags flags_;  //!< map flags
   void* svmPtr_;
 
  public:
   SvmMapMemoryCommand(HostQueue& queue, const EventWaitList& eventWaitList, Memory* svmMem,
-                      const size_t size, const size_t offset, cl_map_flags flags, void* svmPtr)
+                      const size_t size, const size_t offset, amd::MapFlags flags, void* svmPtr)
       : Command(queue, amd::CommandType::SvmMap, eventWaitList),
         svmMem_(svmMem),
         size_(size),
@@ -1929,7 +1929,7 @@ class SvmMapMemoryCommand : public Command {
 
   Coord3D size() const { return size_; }
 
-  cl_map_flags mapFlags() const { return flags_; }
+  amd::MapFlags mapFlags() const { return flags_; }
 
   Coord3D origin() const { return origin_; }
 

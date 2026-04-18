@@ -36,7 +36,7 @@ Event::Event(HostQueue& queue, bool profilingEnabled)
 // ================================================================================================
 Event::Event()
     : callbacks_(NULL),
-      status_(CL_SUBMITTED),
+      status_(2),  // Submitted
       hw_event_(nullptr),
       notify_event_(nullptr),
       device_(nullptr) {
@@ -82,13 +82,13 @@ uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
     timeStamp = Os::timeNanos();
   }
   switch (status) {
-    case CL_QUEUED:
+    case 3:  // Queued
       profilingInfo_.queued_ = timeStamp;
       break;
-    case CL_SUBMITTED:
+    case 2:  // Submitted
       profilingInfo_.submitted_ = timeStamp;
       break;
-    case CL_RUNNING:
+    case 1:  // Running
       profilingInfo_.start_ = timeStamp;
       break;
     default:
@@ -103,10 +103,10 @@ uint64_t epoch = 0;
 std::once_flag epoch_init;
 // ================================================================================================
 bool Event::setStatus(int32_t status, uint64_t timeStamp) {
-  assert(status <= CL_QUEUED && "invalid status");
+  assert(status <= 3 && "invalid status");
 
   int32_t currentStatus = this->status();
-  if (currentStatus <= CL_COMPLETE || currentStatus <= status) {
+  if (currentStatus <= 0 || currentStatus <= status) {
     // We can only move forward in the execution status.
     return false;
   }
@@ -142,8 +142,8 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     Agent::postEventStatusChanged(as_cl(this), status, timeStamp + Os::offsetToEpochNanos());
   }
 
-  if (status <= CL_COMPLETE) {
-    // Before we notify the waiters that this event reached the CL_COMPLETE
+  if (status <= 0) {
+    // Before we notify the waiters that this event reached the complete
     // status, we release all the resources associated with this instance.
     if (!IS_HIP) {
       releaseResources();
@@ -175,7 +175,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 // ================================================================================================
 bool Event::resetStatus(int32_t status) {
   int32_t currentStatus = this->status();
-  if (currentStatus != CL_COMPLETE) {
+  if (currentStatus != 0) {  // 0 = Complete
     ClPrint(LOG_ERROR, LOG_CMD, "Command is reset before complete current status :%d",
             currentStatus);
   }
@@ -190,7 +190,7 @@ bool Event::resetStatus(int32_t status) {
 // ================================================================================================
 bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* data,
                         bool blocking) {
-  assert(status >= CL_COMPLETE && status <= CL_QUEUED && "Invalid status");
+  assert(status >= 0 && status <= 3 && "Invalid status");  // 0=Complete .. 3=Queued
 
   CallBackEntry* entry = new CallBackEntry(status, callback, data, blocking);
   if (entry == NULL) {
@@ -214,7 +214,7 @@ bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* 
 // ================================================================================================
 void Event::processCallbacks(int32_t status) const {
   void* event = as_cl(this);  // passed as opaque handle to user callbacks
-  const int32_t mask = (status > CL_COMPLETE) ? status : CL_COMPLETE;
+  const int32_t mask = (status > 0) ? status : 0;  // 0 = Complete
 
   // For_each callback:
   CallBackEntry* entry;
@@ -233,7 +233,7 @@ void Event::processCallbacks(int32_t status) const {
 static constexpr bool kCpuWait = true;
 // ================================================================================================
 bool Event::awaitCompletion() {
-  if (status() > CL_COMPLETE) {
+  if (status() > 0) {  // > Complete(0) means not yet done (1=Running, 2=Submitted, 3=Queued)
     // Notifies the current command queue about waiting
     if (!notifyCmdQueue(kCpuWait)) {
       return false;
@@ -243,21 +243,21 @@ bool Event::awaitCompletion() {
             this, status());
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
-      while (status() > CL_COMPLETE) {
+      while (status() > 0) {
         amd::Os::yield();
       }
     } else {
       ScopedLock lock(lock_);
 
-      // Wait until the status becomes CL_COMPLETE or negative.
-      while (status() > CL_COMPLETE) {
+      // Wait until the status becomes Complete(0) or negative (error).
+      while (status() > 0) {
         lock_.wait();
       }
     }
     ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
   }
 
-  return status() == CL_COMPLETE;
+  return status() == 0;  // 0 = Complete
 }
 
 // ================================================================================================
@@ -265,7 +265,7 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
   HostQueue* queue = command().queue();
   if (AMD_DIRECT_DISPATCH) {
     ScopedLock l(notify_lock_);
-    if ((status() > CL_COMPLETE) && (nullptr != queue) &&
+    if ((status() > 0) && (nullptr != queue) &&  // > 0 means not yet complete
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
         // @note: Force the marker always in OCL for now, since OCL events require precise
         // sequence of the status update
@@ -280,7 +280,7 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
       notify_event_ = command;
     }
   } else {
-    if ((status() > CL_COMPLETE) && (nullptr != queue) && !notified_.test_and_set()) {
+    if ((status() > 0) && (nullptr != queue) && !notified_.test_and_set()) {  // > 0 = not complete
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this);
       if (command == NULL) {
@@ -367,13 +367,13 @@ void Command::enqueue() {
   // Direct dispatch logic below will submit the command immediately, but the command status
   // update will occur later after flush() with a wait
   if (AMD_DIRECT_DISPATCH) {
-    setStatus(CL_QUEUED);
+    setStatus(3);  // Queued
 
     // Notify all commands about the waiter. Barrier will be sent in order to obtain
     // HSA signal for a wait on the current queue
     for (const auto& event : eventWaitList()) {
       if (!amd::IS_HIP && event->command().type() == amd::CommandType::User) {
-        if (event->status() >= CL_COMPLETE) {
+        if (event->status() >= 0) {  // >= Complete(0): complete or error
           reinterpret_cast<amd::UserEvent*>(event)->AddDependent(this);
         } else {
           setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);

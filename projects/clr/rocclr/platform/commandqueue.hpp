@@ -259,7 +259,7 @@ class HostQueue : public CommandQueue {
       tail_ = command;
     }
     size_++;
-    command->setStatus(CL_SUBMITTED);  // TODO: replace with amd::Status when event status is refactored
+    command->setStatus(2);  // Submitted
     command->retain();
     // @note: runtime needs double retain in order to maintain the batch,
     // because setStatus(COMPLETE) releases command and batch update may have

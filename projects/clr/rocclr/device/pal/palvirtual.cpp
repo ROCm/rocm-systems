@@ -1683,13 +1683,13 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
   } else if (memory->mapMemory() != nullptr) {
     // Target is a remote resource, so copy
     assert(memory->mapMemory() != nullptr);
-    if (vcmd.mapFlags() & (CL_MAP_READ | CL_MAP_WRITE)) {
+    if (!!(vcmd.mapFlags() & (amd::MapFlags::Read | amd::MapFlags::Write))) {
       amd::Coord3D dstOrigin(0, 0, 0);
       if (memory->desc().buffer_) {
         if (!blitMgr().copyBuffer(*memory, *memory->mapMemory(), vcmd.origin(), vcmd.origin(),
                                   vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
-          vcmd.setStatus(CL_MAP_FAILURE);
+          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
         }
       } else if ((vcmd.memory().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
         Memory* memoryBuf = memory;
@@ -1708,7 +1708,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
         if (!blitMgr().copyBuffer(*memoryBuf, *memory->mapMemory(), origin, dstOrigin, size,
                                   vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
-          vcmd.setStatus(CL_MAP_FAILURE);
+          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
         }
         if (nullptr != bufferFromImage) {
           bufferFromImage->release();
@@ -1717,7 +1717,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
         if (!blitMgr().copyImageToBuffer(*memory, *memory->mapMemory(), vcmd.origin(), dstOrigin,
                                          vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
-          vcmd.setStatus(CL_MAP_FAILURE);
+          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
         }
       }
     }
@@ -2128,16 +2128,16 @@ void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
     // Make sure we have memory for the command execution
     pal::Memory* memory = dev().getGpuMemory(vcmd.getSvmMem());
 
-    memory->saveMapInfo(vcmd.svmPtr(), vcmd.origin(), vcmd.size(), vcmd.mapFlags(),
-                        vcmd.isEntireMemory());
+    memory->saveMapInfo(vcmd.svmPtr(), vcmd.origin(), vcmd.size(),
+                        static_cast<uint>(vcmd.mapFlags()), vcmd.isEntireMemory());
 
     if (memory->mapMemory() != nullptr) {
-      if (vcmd.mapFlags() & (CL_MAP_READ | CL_MAP_WRITE)) {
+      if (!!(vcmd.mapFlags() & (amd::MapFlags::Read | amd::MapFlags::Write))) {
         assert(memory->desc().buffer_ && "SVM memory can't be an image");
         if (!blitMgr().copyBuffer(*memory, *memory->mapMemory(), vcmd.origin(), vcmd.origin(),
                                   vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitSVMMapMemory() - copy failed");
-          vcmd.setStatus(CL_MAP_FAILURE);
+          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
         }
       }
     } else if ((memory->owner()->getHostMem() != nullptr) && memory->isDirectMap()) {
@@ -2234,9 +2234,9 @@ void VirtualGPU::submitMigrateMemObjects(amd::MigrateMemObjectsCommand& vcmd) {
     // Find device memory
     pal::Memory* memory = dev().getGpuMemory(it);
 
-    if (vcmd.migrationFlags() & CL_MIGRATE_MEM_OBJECT_HOST) {
+    if (!!(vcmd.migrationFlags() & amd::MemMigrationFlags::Host)) {
       memory->mgpuCacheWriteBack(*this);
-    } else if (vcmd.migrationFlags() & CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED) {
+    } else if (!!(vcmd.migrationFlags() & amd::MemMigrationFlags::ContentUndefined)) {
       // Synchronize memory from host if necessary.
       // The sync function will perform memory migration from
       // another device if necessary
@@ -3248,7 +3248,7 @@ bool VirtualGPU::awaitCompletion(CommandBatch* cb, const amd::Event* waitingEven
   }
   // Mark the first command in the batch as running
   if (head != nullptr) {
-    head->setStatus(CL_RUNNING);
+    head->setStatus(1);  // Running
   } else {
     return found;
   }
@@ -3258,12 +3258,12 @@ bool VirtualGPU::awaitCompletion(CommandBatch* cb, const amd::Event* waitingEven
 
   while (nullptr != head) {
     current = head->getNext();
-    if (head->status() == CL_SUBMITTED) {
-      head->setStatus(CL_RUNNING);
-      head->setStatus(CL_COMPLETE);
-    } else if (head->status() == CL_RUNNING) {
-      head->setStatus(CL_COMPLETE);
-    } else if ((head->status() != CL_COMPLETE) && (current != nullptr)) {
+    if (head->status() == 2) {  // Submitted
+      head->setStatus(1);  // Running
+      head->setStatus(0);  // Complete
+    } else if (head->status() == 1) {  // Running
+      head->setStatus(0);  // Complete
+    } else if ((head->status() != 0) && (current != nullptr)) {  // not Complete
       LogPrintfError("Unexpected command status - %d!", head->status());
     }
 
@@ -3572,12 +3572,12 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
     }
 
     // Update the command status with the proper timestamps
-    if (first->status() == CL_SUBMITTED) {
-      first->setStatus(CL_RUNNING, startTimeStamp);
-      first->setStatus(CL_COMPLETE, endTimeStamp);
-    } else if (first->status() == CL_RUNNING) {
-      first->setStatus(CL_COMPLETE, endTimeStamp);
-    } else if ((first->status() != CL_COMPLETE) && (current != nullptr)) {
+    if (first->status() == 2) {  // Submitted
+      first->setStatus(1, startTimeStamp);  // Running
+      first->setStatus(0, endTimeStamp);    // Complete
+    } else if (first->status() == 1) {  // Running
+      first->setStatus(0, endTimeStamp);    // Complete
+    } else if ((first->status() != 0) && (current != nullptr)) {  // not Complete
       LogPrintfError("Unexpected command status - %d!", first->status());
     }
 

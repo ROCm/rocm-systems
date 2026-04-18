@@ -319,6 +319,46 @@ enum class CommandType : uint32_t {
   AcquireGlFenceSyncObjectKHR = 0x200D, // CL_COMMAND_GL_FENCE_SYNC_OBJECT_KHR
 };
 
+// Event/command execution status codes.
+// CL_COMPLETE=0, CL_RUNNING=1, CL_SUBMITTED=2, CL_QUEUED=3
+// Negative values represent error codes (same as cl_int error codes from amd::Status).
+// The status progresses from Queued(3) down to Complete(0); error codes are < 0.
+enum class ExecutionStatus : int32_t {
+  Complete  = 0, // CL_COMPLETE
+  Running   = 1, // CL_RUNNING
+  Submitted = 2, // CL_SUBMITTED
+  Queued    = 3, // CL_QUEUED
+};
+
+// Map flags (replaces cl_map_flags)
+enum class MapFlags : uint64_t {
+  None            = 0,
+  Read            = (1u << 0), // CL_MAP_READ
+  Write           = (1u << 1), // CL_MAP_WRITE
+  WriteInvalidate = (1u << 2), // CL_MAP_WRITE_INVALIDATE_REGION
+};
+inline MapFlags operator|(MapFlags a, MapFlags b) {
+  return static_cast<MapFlags>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
+}
+inline MapFlags operator&(MapFlags a, MapFlags b) {
+  return static_cast<MapFlags>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
+}
+inline bool operator!(MapFlags f) { return static_cast<uint64_t>(f) == 0; }
+
+// Migration flags (replaces cl_mem_migration_flags)
+enum class MemMigrationFlags : uint64_t {
+  None             = 0,         // default: migrate with content
+  Host             = (1u << 0), // CL_MIGRATE_MEM_OBJECT_HOST
+  ContentUndefined = (1u << 1), // CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED
+};
+inline MemMigrationFlags operator|(MemMigrationFlags a, MemMigrationFlags b) {
+  return static_cast<MemMigrationFlags>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
+}
+inline MemMigrationFlags operator&(MemMigrationFlags a, MemMigrationFlags b) {
+  return static_cast<MemMigrationFlags>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
+}
+inline bool operator!(MemMigrationFlags f) { return static_cast<uint64_t>(f) == 0; }
+
 // Replaces cl_device_topology_amd (AMD extension struct)
 struct DeviceTopology {
   uint32_t type;   // topology type (bus/pcie)

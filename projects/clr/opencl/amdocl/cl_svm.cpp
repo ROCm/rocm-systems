@@ -742,7 +742,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMap,
   }
 
   amd::Command* command = new amd::SvmMapMemoryCommand(hostQueue, eventWaitList, svmMem, size,
-                                                       offset, map_flags, svm_ptr);
+                                                       offset, amd::cl::from_cl_MapFlags(map_flags),
+                                                       svm_ptr);
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
   }
@@ -1182,7 +1183,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMigrateMem,
   }
 
   amd::MigrateMemObjectsCommand* command = new amd::MigrateMemObjectsCommand(
-      hostQueue, CL_COMMAND_MIGRATE_MEM_OBJECTS, eventWaitList, memObjects, flags);
+      hostQueue, CL_COMMAND_MIGRATE_MEM_OBJECTS, eventWaitList, memObjects,
+      amd::cl::from_cl_MemMigrationFlags(flags));
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;

@@ -787,7 +787,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
     mapAddress = reinterpret_cast<address>(owner()->getHostMem());
   }
   // If resource is a persistent allocation, we can use it directly
-  else if (((isPersistentDirectMap(mapFlags & CL_MAP_WRITE) && (getMapCount() == 0)) ||
+  else if (((isPersistentDirectMap((mapFlags & static_cast<uint>(amd::MapFlags::Write)) != 0) && (getMapCount() == 0)) ||
             isPersistentMapped()) &&
            (owner()->getSvmPtr() == nullptr)) {
     if (nullptr == map(nullptr)) {
@@ -1065,7 +1065,7 @@ void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& regi
   //! runtime can't use it directly,
   //! because CAL volume map doesn't work properly.
   //! @todo arrays can be added for persistent lock with some CAL changes
-  else if ((isPersistentDirectMap(mapFlags & CL_MAP_WRITE) && (getMapCount() == 0)) ||
+  else if ((isPersistentDirectMap((mapFlags & static_cast<uint>(amd::MapFlags::Write)) != 0) && (getMapCount() == 0)) ||
            isPersistentMapped()) {
     if (nullptr == map(nullptr)) {
       useRemoteResource = true;
