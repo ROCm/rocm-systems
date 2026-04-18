@@ -30,6 +30,10 @@ def collect_parity() -> float | str:
     if not PARITY_SNAPSHOT.exists():
         return "pending"
     data = json.loads(PARITY_SNAPSHOT.read_text())
+    # Phase 7 refactored snapshot: top-level "pmc_subset_agreement" with nested "agreement_rate".
+    # Pre-Phase-7 snapshots had "agreement_rate" at the top level.
+    if "pmc_subset_agreement" in data:
+        return float(data["pmc_subset_agreement"]["agreement_rate"])
     return float(data["agreement_rate"])
 
 

@@ -155,9 +155,13 @@ def test_mcp_coverage_arch_lookup_peaks(mcp_proc):
 
 
 def test_mcp_coverage_bottleneck_classify_compute(mcp_proc):
-    """bottleneck_classify_from_metrics: high VALU util → type 'compute'.
+    """bottleneck_classify_from_metrics: high VALU util + AI above ridge → type 'compute'.
 
-    valu_util_pct=0.85 is clearly above the compute threshold.
+    Part D (Finding #26) introduced evidence-strength weighting: a single rule
+    matching (1/3 = 0.333) now scores "mixed", not "compute".  To get "compute"
+    we need at least 2/3 compute rules to pass (score ≥ 0.5).  Provide both
+    valu_util_pct and arithmetic_intensity_above_ridge so the classifier has
+    sufficient evidence (2/3 rules evaluated and passing → score = 0.667).
     """
     client = MCPClient(mcp_proc)
     try:
@@ -165,13 +169,13 @@ def test_mcp_coverage_bottleneck_classify_compute(mcp_proc):
         result = _call_tool(
             client,
             "bottleneck_classify_from_metrics",
-            {"metrics": {"valu_util_pct": 0.85}},
+            {"metrics": {"valu_util_pct": 0.85, "arithmetic_intensity_above_ridge": 1}},
         )
         assert "type" in result, (
             f"bottleneck_classify_from_metrics missing 'type': {result}"
         )
         assert result["type"] == "compute", (
-            f"valu_util_pct=0.85 should classify as 'compute', got {result['type']!r}"
+            f"valu_util_pct=0.85 + AI above ridge should classify as 'compute', got {result['type']!r}"
         )
     finally:
         client.close()
