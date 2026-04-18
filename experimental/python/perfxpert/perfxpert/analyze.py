@@ -419,40 +419,23 @@ def analyze_performance(
                 "has_pc_sampling": False,
             }
 
-            # Build analysis context for guide filtering
-            from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
+            # LLM enhancement not available in legacy batch mode (Phase 6)
+            # analyzer.analyze_with_llm() was deleted; use agentic mode or perfxpert-code instead
+            if verbose:
+                print(
+                    "[Warning] LLM enhancement not available in legacy batch mode. "
+                    "Switch to agentic mode or use perfxpert-code for LLM features.",
+                    file=sys.stderr,
+                )
 
-            _has_ctr = bool(hardware_counters and hardware_counters.get("has_counters"))
-            _summary = _build_summary(time_breakdown, hotspots, _has_ctr)
-            _llm_ctx = _AnalysisContext(
-                tier=2 if _has_ctr else 1,
-                has_counters=_has_ctr,
-                bottleneck_type=_summary.get("primary_bottleneck"),
-                gpu_arch=None,  # reserved for future per-GPU filtering
-                custom_prompt=prompt,
-            )
-
-            # Get LLM enhancement
-            llm_explanation = analyzer.analyze_with_llm(
-                analysis_data=analysis_data,
-                custom_prompt=prompt,
-                context=_llm_ctx,
-            )
-
-            # Append LLM explanation to output
             if output_format == "text":
                 output += "\n\n" + "=" * 80 + "\n"
-                output += (
-                    "AI-ENHANCED EXPLANATION (powered by {})".format(llm.upper()).center(
-                        80
-                    )
-                    + "\n"
-                )
+                output += "NOTE: LLM enhancement requires agentic mode or perfxpert-code interactive".center(
+                    80
+                ) + "\n"
                 output += "=" * 80 + "\n\n"
-                output += llm_explanation
-                output += "\n\n" + "=" * 80 + "\n"
             elif output_format == "json":
-                # Parse JSON and add LLM explanation
+                # Parse JSON (no LLM explanation added)
                 import json
 
                 try:
@@ -885,22 +868,16 @@ def _run_interactive_session(
     llm_local_model: Optional[str] = None,
     resume_session: Optional[str] = None,
 ) -> None:
-    """Thin shim: delegates to InteractiveSession in ai_analysis/interactive.py."""
-    from perfxpert.ai_analysis.interactive import InteractiveSession, SessionStore
+    """Phase 6 deprecation: Interactive session removed.
 
-    InteractiveSession(
-        source_dir=source_dir,
-        tier0_result=tier0_result,
-        recommendations=recommendations,
-        database_path=database_path,
-        llm_provider=llm_provider,
-        llm_api_key=llm_api_key,
-        llm_model=llm_model,
-        llm_local=llm_local,
-        llm_local_model=llm_local_model,
-        session_store=SessionStore(),
-        resume_session_id=resume_session,
-    ).run()
+    The --interactive flag and legacy InteractiveSession have been deleted in Phase 6.
+    Users should use perfxpert-code instead, which provides an improved interactive TUI.
+    """
+    raise RuntimeError(
+        "The legacy --interactive flag and InteractiveSession have been removed in Phase 6. "
+        "Please use 'perfxpert-code' instead for interactive analysis: "
+        "https://github.com/ROCm/perfxpert#interactive-agentic-tui-perfxpert-code"
+    )
 
 
 def add_args(parser: argparse.ArgumentParser):
