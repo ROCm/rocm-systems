@@ -12,6 +12,8 @@ from perfxpert.providers._exceptions import (
     TimeoutError as PTO,
     _legacy_env_warn,
 )
+import perfxpert.providers.anthropic_provider as _anthmod
+import perfxpert.providers.openai_provider as _oaimod
 
 
 def test_legacy_env_warn_emits_deprecation():
@@ -33,9 +35,10 @@ def test_rocinsight_legacy_env_honored_with_warning(monkeypatch):
     from perfxpert.providers.anthropic_provider import AnthropicProvider
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        with patch("perfxpert.providers.anthropic_provider.anthropic.Anthropic") as ctor:
+        mock_sdk = MagicMock()
+        with patch.object(_anthmod, "_SDK", mock_sdk):
             AnthropicProvider()
-            assert ctor.call_args.kwargs["api_key"] == "sk-legacy-roc"
+            assert mock_sdk.Anthropic.call_args.kwargs["api_key"] == "sk-legacy-roc"
         assert any(issubclass(w.category, DeprecationWarning) for w in caught)
 
 
@@ -46,9 +49,10 @@ def test_rocpd_legacy_env_honored_with_warning(monkeypatch):
     from perfxpert.providers.openai_provider import OpenAIProvider
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        with patch("perfxpert.providers.openai_provider.openai.OpenAI") as ctor:
+        mock_sdk = MagicMock()
+        with patch.object(_oaimod, "_SDK", mock_sdk):
             OpenAIProvider()
-            assert ctor.call_args.kwargs["api_key"] == "sk-legacy-rocpd"
+            assert mock_sdk.OpenAI.call_args.kwargs["api_key"] == "sk-legacy-rocpd"
         assert any(issubclass(w.category, DeprecationWarning) for w in caught)
 
 
@@ -57,16 +61,19 @@ def test_anthropic_auth_error_normalized(monkeypatch):
     import anthropic as real
 
     from perfxpert.providers.anthropic_provider import AnthropicProvider
-    fake = MagicMock()
-    fake.messages.create.side_effect = real.AuthenticationError(
+    fake_client = MagicMock()
+    fake_client.messages.create.side_effect = real.AuthenticationError(
         message="bad key",
         response=MagicMock(status_code=401),
         body={"error": {"message": "bad"}},
     )
-    with patch(
-        "perfxpert.providers.anthropic_provider.anthropic.Anthropic",
-        return_value=fake,
-    ):
+    mock_sdk = MagicMock()
+    mock_sdk.Anthropic.return_value = fake_client
+    mock_sdk.AuthenticationError = real.AuthenticationError
+    mock_sdk.RateLimitError = real.RateLimitError
+    mock_sdk.APITimeoutError = real.APITimeoutError
+    mock_sdk.APIError = real.APIError
+    with patch.object(_anthmod, "_SDK", mock_sdk):
         p = AnthropicProvider()
         with pytest.raises(AuthError):
             p.complete([{"role": "user", "content": "x"}])
@@ -77,15 +84,19 @@ def test_openai_rate_limit_normalized(monkeypatch):
     import openai as real
 
     from perfxpert.providers.openai_provider import OpenAIProvider
-    fake = MagicMock()
-    fake.chat.completions.create.side_effect = real.RateLimitError(
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.side_effect = real.RateLimitError(
         message="slow down",
         response=MagicMock(status_code=429),
         body={"error": {"message": "rl"}},
     )
-    with patch(
-        "perfxpert.providers.openai_provider.openai.OpenAI",
-        return_value=fake,
-    ):
+    mock_sdk = MagicMock()
+    mock_sdk.OpenAI.return_value = fake_client
+    mock_sdk.AuthenticationError = real.AuthenticationError
+    mock_sdk.RateLimitError = real.RateLimitError
+    mock_sdk.APITimeoutError = real.APITimeoutError
+    mock_sdk.APIError = real.APIError
+    mock_sdk.BadRequestError = real.BadRequestError
+    with patch.object(_oaimod, "_SDK", mock_sdk):
         with pytest.raises(RateLimitError):
             OpenAIProvider().complete([{"role": "user", "content": "x"}])
