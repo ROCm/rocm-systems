@@ -235,6 +235,20 @@ def _check_opencode_config() -> tuple[bool, str]:
         return False, str(e)
 
 
+def _report_active_mode() -> str:
+    """Return one of 'Mode: agentic' | 'Mode: legacy (DEPRECATED)'."""
+    from .ai_analysis.api import _is_legacy_mode
+    if _is_legacy_mode():
+        return (
+            "Mode: legacy (DEPRECATED)\n"
+            "  PERFXPERT_LEGACY=1 is set.\n"
+            "  This path will be removed in the next minor release (vX.Y+1).\n"
+            "  Migrate to the agentic path by unsetting PERFXPERT_LEGACY.\n"
+            "  See: docs/migration-to-agentic.md"
+        )
+    return "Mode: agentic (default, Phase 6+)"
+
+
 def _run_doctor():
     """Run all health checks and print results."""
     print("perfxpert doctor — health check\n")
@@ -248,6 +262,9 @@ def _run_doctor():
     for name, (ok, msg) in checks:
         symbol = "✓" if ok else "✗"
         print(f"{symbol} {name}: {msg}")
+
+    # Report active mode
+    print("\n" + _report_active_mode())
 
 
 def _get_version():
