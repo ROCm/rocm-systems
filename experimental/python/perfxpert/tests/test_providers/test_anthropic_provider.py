@@ -103,3 +103,43 @@ def test_explicit_api_key_overrides_env(monkeypatch):
     with patch("perfxpert.providers.anthropic_provider.anthropic.Anthropic") as mock_ctor:
         AnthropicProvider(api_key="sk-explicit")
         assert mock_ctor.call_args.kwargs["api_key"] == "sk-explicit"
+
+
+def test_anthropic_api_timeout_normalized_to_provider_timeout_error(monkeypatch):
+    """anthropic.APITimeoutError must surface as providers._exceptions.TimeoutError.
+
+    Finding #23: the normalization path was never exercised by a test.
+    The except clause in AnthropicProvider.complete catches _SDK.APITimeoutError
+    and re-raises as perfxpert.providers._exceptions.TimeoutError.
+    """
+    import anthropic as _anthropic_sdk
+    from perfxpert.providers._exceptions import TimeoutError as ProviderTimeoutError
+
+    monkeypatch.setenv("PERFXPERT_LLM_ANTHROPIC_KEY", "sk-test")
+    import perfxpert.providers.anthropic_provider as mod
+    from perfxpert.providers.anthropic_provider import AnthropicProvider
+
+    fake_client = MagicMock()
+    # Build a real anthropic.APITimeoutError — it requires a `request` kwarg.
+    req = MagicMock()
+    fake_client.messages.create.side_effect = _anthropic_sdk.APITimeoutError(request=req)
+
+    # Patch _SDK in the module so the `except _SDK.APITimeoutError` clause matches.
+    original_sdk = mod._SDK
+    mock_sdk = MagicMock(wraps=original_sdk)
+    mock_sdk.Anthropic.return_value = fake_client
+    # Preserve the real exception class so the except clause fires correctly.
+    mock_sdk.APITimeoutError = _anthropic_sdk.APITimeoutError
+    mock_sdk.AuthenticationError = _anthropic_sdk.AuthenticationError
+    mock_sdk.RateLimitError = _anthropic_sdk.RateLimitError
+    mock_sdk.APIError = _anthropic_sdk.APIError
+
+    monkeypatch.setattr(mod, "_SDK", mock_sdk)
+
+    provider = AnthropicProvider()
+    with pytest.raises(ProviderTimeoutError) as exc_info:
+        provider.complete([{"role": "user", "content": "hi"}])
+
+    assert exc_info.value.provider == "anthropic", (
+        f"TimeoutError.provider must be 'anthropic', got {exc_info.value.provider!r}"
+    )
