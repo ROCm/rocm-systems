@@ -68,6 +68,8 @@ perfxpert = [
     "knowledge/_schemas/*.json",
     "agents/fence/*.md",
     "agents/templates/*",
+    "../NOTICE",
+    "../opencode/LICENSE",
 ]
 
 [tool.pytest.ini_options]
