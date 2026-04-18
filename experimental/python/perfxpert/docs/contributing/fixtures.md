@@ -33,6 +33,7 @@ Each fixture `.db` must be < 1 MB. Larger traces should be:
 <Step-by-step command or script to rebuild the .db from scratch.>
 
 ```bash
+# SKIP-SAMPLE — template placeholder (<name> not a real path)
 python3 tests/fixtures/_generators/<name>.py
 ```
 
