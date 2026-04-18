@@ -44,6 +44,7 @@ packages = [
     "perfxpert.formatters",
     "perfxpert.ai_analysis",
     "perfxpert.ai_analysis.tests",
+    "mcp_server",
 ]
 
 [tool.setuptools.package-data]
