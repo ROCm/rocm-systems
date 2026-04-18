@@ -66,7 +66,8 @@ All five verified nightly via `.github/workflows/perfxpert-nightly.yml`.
 
 ```
 user  →  perfxpert analyze -i trace.db
-        → api.analyze_database()
+        → perfxpert.agents.runtime.build_session(...)
+        → session.run_root(RootInput(...))
         → agent runtime (Root → Analysis → bottleneck.classify …)
         → Recommendation hands off to specialist
         → Correctness runs 5 gates
