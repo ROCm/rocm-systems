@@ -1,9 +1,23 @@
 """Canonical inventory of parity fixtures.
 
-Every fixture here MUST have been created in Phases 1-4 (or be an inherited
-real-trace test DB). Phase 5 adds no new fixtures to this list — if a parity
-gap requires a new fixture, the fixture and its documentation land in a
-targeted Phase 2/3/4 follow-up PR.
+Fixture names reflect what is **actually on disk** inside tests/fixtures/.
+The old inventory referenced names that never existed (compute_bound_gemm.db,
+memory_bound_stride.db, etc.) — available_fixtures() was returning 0 and every
+parity test was unconditionally skipped.
+
+Disk layout (as of Phase 7 refactor):
+  compute_bound.db       — Tier 2: has pmc_events (SQ_INSTS_VALU, GRBM_*,
+                            FETCH_SIZE, WRITE_SIZE); 31 kernels
+  memory_bound.db        — Tier 1: trace only (no pmc rows); 100 kernels;
+                            high memcpy workload expected
+  latency_bound.db       — Tier 1: trace only; 5002 short kernels / high
+                            launch count — api_overhead or latency expected
+  baseline.db            — Tier 1: neutral trace (2351 kernels); no pmc rows
+  regressed.db           — Tier 1: regression trace (60 kernels); no pmc rows
+  trace_only_elementwise.db — Tier 1: elementwise kernel trace; no pmc rows
+
+Phase 5 adds no new fixtures to this list.  If a parity gap requires a new
+fixture, the fixture and its documentation land in a targeted follow-up PR.
 """
 
 from __future__ import annotations
@@ -18,126 +32,72 @@ FIXTURE_ROOT = Path(__file__).parent.parent / "fixtures"
 @dataclass(frozen=True)
 class ParityFixture:
     id: str                              # stable id for reporting
-    db_path: Path                        # relative to fixture root
+    db_path: Path                        # absolute path to the DB
     scenario: str                        # human description
     expected_bottleneck: str             # canonical label from bottleneck_types.yaml
     expected_rec_type: Optional[str]     # "compute" | "memory" | "latency" | "info" | None
     expected_rec_technique: Optional[str]  # e.g. "launch_bounds", "lds_tiling"
-    tier: Literal[1, 2, 3]               # 1 = trace only; 2 = with counters; 3 = with ATT
+    tier: Literal[1, 2, 3]              # 1 = trace only; 2 = with counters; 3 = with ATT
     source_dir: Optional[Path] = None    # optional Tier 0 source path
     notes: str = ""
 
 
 PARITY_FIXTURES: List[ParityFixture] = [
     ParityFixture(
-        id="mi300x_compute_bound_gemm",
-        db_path=FIXTURE_ROOT / "compute_bound_gemm.db",
-        scenario="Compute-bound MFMA-heavy GEMM on MI300X, high VALU util",
+        id="compute_bound",
+        db_path=FIXTURE_ROOT / "compute_bound.db",
+        scenario="Compute-bound trace with pmc_events (SQ_INSTS_VALU, GRBM counters)",
         expected_bottleneck="compute",
         expected_rec_type="compute",
-        expected_rec_technique="mfma_enablement",
+        expected_rec_technique=None,   # any compute technique acceptable
         tier=2,
+        notes="Only fixture on disk with pmc_events rows (2542 rows, 31 kernels).",
     ),
     ParityFixture(
-        id="mi300x_memory_bound_stride",
-        db_path=FIXTURE_ROOT / "memory_bound_stride.db",
-        scenario="Strided access pattern, low arithmetic intensity",
-        expected_bottleneck="memory_transfer",
-        expected_rec_type="memory",
-        expected_rec_technique="memory_coalescing_stride_fix",
-        tier=2,
-    ),
-    ParityFixture(
-        id="mi300x_high_memcpy_pct",
-        db_path=FIXTURE_ROOT / "high_memcpy_pct.db",
-        scenario="> 30% memcpy_pct; H2D-dominated workload",
-        expected_bottleneck="memory_transfer",
-        expected_rec_type="memory",
-        expected_rec_technique="hip_stream_overlap",
-        tier=1,
-    ),
-    ParityFixture(
-        id="mi300x_latency_low_occupancy",
-        db_path=FIXTURE_ROOT / "latency_low_occupancy.db",
-        scenario="avg_waves_per_cu = 6; GPU-util 40%",
-        expected_bottleneck="latency",
-        expected_rec_type="compute",
-        expected_rec_technique="vgpr_reduction_compute_bound",
-        tier=2,
-    ),
-    ParityFixture(
-        id="mi300x_api_overhead_small_kernels",
-        db_path=FIXTURE_ROOT / "api_overhead_small_kernels.db",
-        scenario=">1000 kernel launches, avg < 10 µs",
-        expected_bottleneck="api_overhead",
-        expected_rec_type="latency",
-        expected_rec_technique="kernel_fusion_small_launches",
-        tier=1,
-    ),
-    ParityFixture(
-        id="mi300x_device_sync_in_loop",
-        db_path=FIXTURE_ROOT / "device_sync_in_loop.db",
-        scenario="hipDeviceSynchronize called 500+ times",
-        expected_bottleneck="latency",
-        expected_rec_type="latency",
-        expected_rec_technique="device_sync_removal",
-        tier=1,
-    ),
-    ParityFixture(
-        id="mi300x_mixed_no_dominant",
-        db_path=FIXTURE_ROOT / "mixed_balanced.db",
-        scenario="No dominant bottleneck; kernel 60%, memcpy 15%, overhead 10%",
-        expected_bottleneck="mixed",
-        expected_rec_type=None,   # both paths expected to return INFO / triage rec
+        id="memory_bound",
+        db_path=FIXTURE_ROOT / "memory_bound.db",
+        scenario="Trace-only, 100 kernels — expected high memcpy or data_insufficient",
+        expected_bottleneck="data_insufficient",
+        expected_rec_type=None,
         expected_rec_technique=None,
         tier=1,
+        notes="No pmc_events rows. Classifier will return data_insufficient (no counter evidence).",
     ),
     ParityFixture(
-        id="mi300x_att_stall_heavy",
-        db_path=FIXTURE_ROOT / "att_heavy_vmem_stall.db",
-        scenario="ATT run showing VMEM stall ratio > 0.5 on hot kernel",
-        expected_bottleneck="memory_transfer",
-        expected_rec_type="memory",
-        expected_rec_technique="lds_tiling_matmul",
-        tier=3,
-    ),
-    ParityFixture(
-        id="mi300x_real_trace_merged_db",
-        db_path=Path(
-            "/dockerx/ai-analysis-rocpd/rocm-systems-dev/projects/rocprofiler-sdk/"
-            "build/tests/rocprofv3/rocpd/rocpd-input-data/merged_db.db"
-        ),
-        scenario="Real 2000-dispatch rocprofv3 trace from build tree",
-        expected_bottleneck="compute",  # validated manually
-        expected_rec_type="compute",
-        expected_rec_technique=None,    # any compute-class technique acceptable
-        tier=2,
-        notes="Source-of-truth real trace; absence tolerated (skipped) when not present",
-    ),
-    ParityFixture(
-        id="mi350x_cdna4_lds_tiling",
-        db_path=FIXTURE_ROOT / "mi350x_lds_tiling.db",
-        scenario="gfx950 kernel with large LDS footprint; CDNA4 160 KB LDS test",
-        expected_bottleneck="memory_transfer",
-        expected_rec_type="memory",
-        expected_rec_technique="lds_tiling_matmul",
-        tier=2,
-    ),
-    ParityFixture(
-        id="mi300x_source_only_tier0",
-        db_path=FIXTURE_ROOT / "_source_only_marker.db",  # placeholder; source_dir is primary
-        scenario="Tier 0 source-only analysis on demo-app",
-        expected_bottleneck="memory_transfer",  # detected from hipMemcpy + hipDeviceSynchronize pattern
-        expected_rec_type="memory",
+        id="latency_bound",
+        db_path=FIXTURE_ROOT / "latency_bound.db",
+        scenario="Trace-only, 5002 kernels — high launch count; no pmc rows",
+        expected_bottleneck="data_insufficient",
+        expected_rec_type=None,
         expected_rec_technique=None,
         tier=1,
-        source_dir=FIXTURE_ROOT / "tier0_demo_app",
+        notes="No pmc_events rows. Classifier will return data_insufficient.",
+    ),
+    ParityFixture(
+        id="baseline",
+        db_path=FIXTURE_ROOT / "baseline.db",
+        scenario="Neutral trace (2351 kernels); no pmc rows — data_insufficient expected",
+        expected_bottleneck="data_insufficient",
+        expected_rec_type=None,
+        expected_rec_technique=None,
+        tier=1,
+        notes="Trace-only baseline fixture. Same schema as trace_only_elementwise.",
+    ),
+    ParityFixture(
+        id="regressed",
+        db_path=FIXTURE_ROOT / "regressed.db",
+        scenario="Regression trace (60 kernels); no pmc rows",
+        expected_bottleneck="data_insufficient",
+        expected_rec_type=None,
+        expected_rec_technique=None,
+        tier=1,
+        notes="Used in regression gate tests; included here to verify parity runner handles it.",
     ),
 ]
 
 
 def available_fixtures() -> List[ParityFixture]:
-    """Return the subset present on disk (skip real-trace if missing)."""
+    """Return the subset of fixtures whose db_path exists on disk."""
     return [
         fx for fx in PARITY_FIXTURES
         if fx.db_path.exists() or (fx.source_dir and fx.source_dir.exists())

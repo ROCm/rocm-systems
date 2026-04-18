@@ -1,13 +1,25 @@
 """Orchestrator that runs BOTH the legacy and new analysis paths on a fixture
 and returns a `DualResult` for comparison.
 
-Legacy path: the pre-refactor call graph via `PERFXPERT_USE_AGENTS=0`.
+Legacy path: the pre-refactor call graph via ``PERFXPERT_LEGACY=1``.
+  Invokes _route_to_legacy() inside analyze_database(), which uses the
+  old analysis.py function chain directly.
 
-New path: the agent pipeline via the feature-flagged `analyze_database()` call
-with `PERFXPERT_USE_AGENTS=1`.
+New path (default Phase 6+): the agentic pipeline.
+  Invokes _route_to_agents() inside analyze_database(), which uses the
+  Phase 3 session API (perfxpert.agents.runtime).
 
-Both paths return an `AnalysisResult` dataclass (same public type) but populate
-it through different call graphs. Parity tests compare structured fields:
+IMPORTANT: The old Phase-4 flag ``PERFXPERT_USE_AGENTS`` was retired in
+Phase 6 and is now a silent no-op (see ai_analysis/api.py:_is_legacy_mode).
+Both sides used to set PERFXPERT_USE_AGENTS=0/1 — which meant BOTH sides
+ran the agentic path, making the parity comparison agentic-vs-agentic
+(zero actual parity signal). This runner now uses the correct flag:
+  PERFXPERT_LEGACY=1  → legacy path (_route_to_legacy)
+  (unset)             → agentic path (_route_to_agents, default)
+
+Both paths return an ``AnalysisResult`` dataclass (same public type) but
+populate it through different call graphs. Parity tests compare structured
+fields:
   * summary.primary_bottleneck
   * recommendations.high_priority[0].category  → "primary rec type"
   * recommendations.high_priority[0].id → extract technique from legacy id pattern
@@ -59,32 +71,39 @@ class DualResult:
 
 
 @contextmanager
-def _force_path(new_path: bool):
-    """Context manager: flip PERFXPERT_USE_AGENTS for one run, restore on exit."""
-    prev = os.environ.get("PERFXPERT_USE_AGENTS")
-    os.environ["PERFXPERT_USE_AGENTS"] = "1" if new_path else "0"
+def _force_path(legacy: bool):
+    """Context manager: set PERFXPERT_LEGACY=1 for the old path, unset for new path.
+
+    This is the correct flag as of Phase 6+. The old PERFXPERT_USE_AGENTS flag
+    is a no-op and must not be used here.
+    """
+    prev = os.environ.get("PERFXPERT_LEGACY")
+    if legacy:
+        os.environ["PERFXPERT_LEGACY"] = "1"
+    else:
+        os.environ.pop("PERFXPERT_LEGACY", None)
     try:
         yield
     finally:
         if prev is None:
-            os.environ.pop("PERFXPERT_USE_AGENTS", None)
+            os.environ.pop("PERFXPERT_LEGACY", None)
         else:
-            os.environ["PERFXPERT_USE_AGENTS"] = prev
+            os.environ["PERFXPERT_LEGACY"] = prev
 
 
 class ParityRunner:
     """Runs both paths on a ParityFixture and returns a DualResult."""
 
     def run_both_paths(self, fx: ParityFixture) -> DualResult:
-        old = self._run_single(fx, new_path=False)
-        new = self._run_single(fx, new_path=True)
+        old = self._run_single(fx, legacy=True)
+        new = self._run_single(fx, legacy=False)
         return DualResult(fixture_id=fx.id, old=old, new=new)
 
-    def _run_single(self, fx: ParityFixture, *, new_path: bool) -> SinglePathResult:
+    def _run_single(self, fx: ParityFixture, *, legacy: bool) -> SinglePathResult:
         import time
         from perfxpert.ai_analysis.api import analyze_database, analyze_source
 
-        with _force_path(new_path=new_path):
+        with _force_path(legacy=legacy):
             start = time.time()
             if fx.source_dir:
                 result = analyze_source(source_dir=str(fx.source_dir))
@@ -93,7 +112,7 @@ class ParityRunner:
             duration = time.time() - start
 
         return SinglePathResult(
-            path_label="new" if new_path else "old",
+            path_label="old" if legacy else "new",
             primary_bottleneck=_extract_bottleneck(result),
             primary_rec_type=_extract_rec_type(result),
             primary_rec_technique=_extract_rec_technique(result),
