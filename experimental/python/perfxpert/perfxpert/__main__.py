@@ -92,6 +92,19 @@ def main(argv=None):
     output_config.add_args(analyze_parser)
     output_config.add_args(parser)
 
+    # ------------------------------------------------------------------
+    # config subcommand
+    # ------------------------------------------------------------------
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
+    )
+    config_sub = config_parser.add_subparsers(dest="config_action", required=True)
+    config_sub.add_parser("show", help="Print current effective config as YAML")
+    set_p = config_sub.add_parser("set", help="Set a field and persist to config.yaml")
+    set_p.add_argument("key", help="Field name (e.g. provider, airgap, max_tokens)")
+    set_p.add_argument("value", help="New value")
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -133,6 +146,14 @@ def main(argv=None):
         finally:
             if input_data is not None:
                 input_data.close()
+    elif args.subcommand == "config":
+        from perfxpert.config._cli import run_config_show, run_config_set
+        if args.config_action == "show":
+            run_config_show()
+            sys.exit(0)
+        if args.config_action == "set":
+            run_config_set(args.key, args.value)
+            sys.exit(0)
     else:
         parser.print_help()
         sys.exit(1)
