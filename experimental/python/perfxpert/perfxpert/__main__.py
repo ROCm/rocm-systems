@@ -15,7 +15,7 @@ Usage
     perfxpert analyze -i trace.db --format json -d ./out -o report
     perfxpert analyze --source-dir ./my_app
     perfxpert analyze -i trace.db --llm anthropic
-    perfxpert analyze -i trace.db --interactive
+    perfxpert-code    (interactive TUI; launches the AMD-branded opencode session)
 """
 
 from __future__ import absolute_import
