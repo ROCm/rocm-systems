@@ -1,7 +1,9 @@
 #include "handlers.hpp"
 #include "sem_op_attrs.hpp"
 
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 
@@ -95,8 +97,71 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   if (sop == SemOp::S_GETPC_B64) {
+    // Stub: the destination's symbolic PC is irrelevant for raised
+    // IR. For Pattern A chains, the chain's binary value is never
+    // read after we emit the `br label %target`. For Pattern B call
+    // sites, the call-site rewrite in raiser.cpp overwrites the
+    // ret-pair with a `blockaddress` after the chain's high-half
+    // terminator runs, so the binary PC the chain would otherwise
+    // produce is also discarded. Writing zero keeps SROA happy and
+    // surfaces any stray downstream read as an obvious-zero use that
+    // would crash the verifier rather than silently miscompile.
     ctx.regs.writeReg64(ctx.B, op.dst(), ConstantInt::get(ctx.i64Ty, 0));
     hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_SET_PC_I64) {
+    // Look up the static analysis classification (Pattern A direct,
+    // Pattern B indirectbr, or Unresolvable). Both patterns emit a
+    // terminator into the current BB; the raiser's BB-layout phase
+    // has already promoted the next linear offset to a leader so
+    // subsequent instructions land in their own BBs.
+    if (!ctx.setpcAnalysis) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "SOP1",
+          "s_set_pc_i64 reached without a SetPcAnalysis "
+          "(raiser pipeline is missing the Phase 1.1 step)");
+      return hr;
+    }
+    auto it = ctx.setpcAnalysis->setpcSites.find(di.offset);
+    if (it == ctx.setpcAnalysis->setpcSites.end()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "SOP1",
+          "s_set_pc_i64 site not classified by SetPcAnalysis");
+      return hr;
+    }
+    const SetPcSiteInfo &info = it->second;
+    switch (info.kind) {
+    case SetPcSiteInfo::Kind::DirectA: {
+      ctx.B.CreateBr(ctx.lookupBB(info.directTarget));
+      hr.handled = true;
+      return hr;
+    }
+    case SetPcSiteInfo::Kind::IndirectB: {
+      // Read the ret-pair as i64, cast to ptr (the blockaddress LLVM
+      // type is `ptr addrspace(0)` for a BasicBlock; the call-site
+      // rewrite stored it via inttoptr → ptrtoint → store, so we mirror
+      // here with an inttoptr).
+      Value *retVal = ctx.regs.loadSGPR64(
+          ctx.B, static_cast<int>(info.indirectRetPairLowReg));
+      Value *retPtr = ctx.B.CreateIntToPtr(
+          retVal, PointerType::get(ctx.C, 0), "ret_pc_ptr");
+      IndirectBrInst *ibr = ctx.B.CreateIndirectBr(
+          retPtr, info.indirectTargets.size());
+      for (uint64_t addr : info.indirectTargets)
+        ibr->addDestination(ctx.lookupBB(addr));
+      hr.handled = true;
+      return hr;
+    }
+    case SetPcSiteInfo::Kind::Unresolvable:
+      hr.failure = RaiseFailure::unsupportedShape(di, "SOP1",
+                                                  info.refusalReason);
+      return hr;
+    }
+    // Defensive: every Kind is handled above; reaching here means a
+    // future enum value was added without updating this switch.
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "SOP1", "s_set_pc_i64 SetPcSiteInfo::Kind not handled");
     return hr;
   }
   if (sop == SemOp::S_NOT_B64) {

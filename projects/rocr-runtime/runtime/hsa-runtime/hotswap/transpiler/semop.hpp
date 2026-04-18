@@ -55,6 +55,29 @@ enum class SemOp : uint16_t {
   S_AND_SAVEEXEC_B32, S_OR_SAVEEXEC_B32, S_XOR_SAVEEXEC_B32,
   S_ANDN2_SAVEEXEC_B32, S_ORN2_SAVEEXEC_B32,
   S_GETPC_B64,
+  // SOP1 indirect set-PC. gfx1250 asm rename for `S_SETPC_B64`
+  // (SOPInstructions.td:323 declares `isBranch + isIndirectBranch`,
+  // line 2208 renames the asm string to `s_set_pc_i64`). The source
+  // SGPR pair holds an absolute 64-bit PC value. In our IR-on-LLVM
+  // setting we model two principled lowerings (see setpc_analysis.{hpp,
+  // cpp} for the static analysis that classifies each site):
+  //   Pattern A — statically resolvable intra-kernel branch (the source
+  //               SGPR pair was produced by a local
+  //               `s_get_pc_i64 + s_add_co_u32 + s_add_co_ci_u32` chain).
+  //               Lowers to `br label %BB_target` since the target is a
+  //               known intra-function label.
+  //   Pattern B — subroutine return via an SGPR pair stashed at the call
+  //               site (the canonical s[30:31] return-PC idiom). Lowers
+  //               to `indirectbr ptr %ret_pc, [list of resolved return
+  //               targets]`. The corresponding call-site
+  //               `s_get_pc_i64 + s_add*` chains are rewritten by the
+  //               raiser to materialise a `blockaddress(@kernel, %ret_BB)`
+  //               into the ret-pair (via a post-handler hook in
+  //               raiser.cpp), so the i64 fed to indirectbr is a real
+  //               LLVM blockaddress constant rather than a binary PC.
+  // Sites the analysis cannot resolve refuse loudly via
+  // RaiseFailure::unsupportedShape — never silently emit a stub.
+  S_SET_PC_I64,
   S_ABS_I32,
   S_SET_VGPR_MSB,
   // Read-modify-write bit set/clear on an SGPR. Tied src keeps the

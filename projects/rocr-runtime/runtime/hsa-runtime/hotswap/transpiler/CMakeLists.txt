@@ -70,6 +70,7 @@ add_library(hotswap-transpiler STATIC
   mc_state.cpp
   opcode_map.cpp
   semop.cpp
+  setpc_analysis.cpp
   handle_sopp.cpp
   handle_smem.cpp
   handle_sopc.cpp

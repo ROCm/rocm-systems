@@ -8,6 +8,7 @@
 #include "parsed_reg.hpp"
 #include "raise_failure.hpp"
 #include "reg_file.hpp"
+#include "setpc_analysis.hpp"
 #include "wave_projection.hpp"
 
 #include "llvm/ADT/STLFunctionalExtras.h"
@@ -41,6 +42,15 @@ struct RaiseContext {
   llvm::Type *ptrGlobalTy;
 
   std::map<uint64_t, llvm::BasicBlock *> &offsetToBB;
+
+  // Result of the static analysis that classifies every s_set_pc_i64
+  // site. Owned by the raiser; the handler reads it to decide
+  // between Pattern A (br) and Pattern B (indirectbr) lowerings, and
+  // the raiser's main loop reads `chainTerminators` to materialise
+  // call-site blockaddress writes into ret-pair SGPRs. See
+  // setpc_analysis.hpp for the full contract; see semop.hpp's
+  // `S_SET_PC_I64` doc for the lowering shapes.
+  const SetPcAnalysis *setpcAnalysis = nullptr;
 
   // gfx1250 s_set_vgpr_msb state: only the LOW 8 bits of the instruction's
   // 16-bit immediate carry runtime meaning.  They encode the MSB bit pair for

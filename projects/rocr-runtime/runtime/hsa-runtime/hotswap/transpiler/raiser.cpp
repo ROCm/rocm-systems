@@ -14,6 +14,7 @@
 #include "kernarg_layout.hpp"
 #include "raise_context.hpp"
 #include "sem_op_attrs.hpp"
+#include "setpc_analysis.hpp"
 #include "wave_projection.hpp"
 #include "wave_size_obstruction.hpp"
 #include "handlers.hpp"
@@ -118,6 +119,23 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
                    kernelOffset);
   auto &insts = decoded.insts;
   auto &blockStarts = decoded.blockStarts;
+
+  // ==== Phase 1.1: s_set_pc_i64 analysis ====
+  //
+  // Classify every s_set_pc_i64 site (Pattern A direct branch /
+  // Pattern B subroutine return / Unresolvable) and discover the
+  // extra basic-block leaders the indirect control-flow implies
+  // (Pattern A targets + Pattern B return targets + the offset
+  // immediately following each set-PC, which is otherwise unreachable
+  // by linear fall-through). Merging the extra leaders into
+  // `blockStarts` here is mandatory: Phase 3 only creates LLVM
+  // BasicBlocks for offsets in this set, and the handler / call-site
+  // rewrite both look up those BBs via `ctx.lookupBB`.
+  // See setpc_analysis.hpp + semop.hpp's `S_SET_PC_I64` doc for the
+  // analysis contract.
+  SetPcAnalysis setpcAnalysis = analyseSetPC(insts, blockStarts, mc);
+  for (uint64_t addr : setpcAnalysis.extraBlockStarts)
+    blockStarts.insert(addr);
 
   result.totalCount = (int)insts.size();
 
@@ -352,6 +370,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   RaiseContext ctx{C, M, B, regs, projection, mc, isa, targetIsa, kernargs, F,
                    i1Ty, i8Ty, i32Ty, i64Ty, f32Ty, f16Ty,
                    ptrGlobalTy, offsetToBB};
+  ctx.setpcAnalysis = &setpcAnalysis;
 
   // Wire the reg-file's EXEC-write invalidation hook to ctx's lane_active
   // memo. This catches every EXEC mutation — ctx.storeExec, the various
@@ -452,6 +471,30 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       }
       if (di.defsEXEC)
         result.hasDivergentExec = true;
+      // Pattern B call-site post-processing: if this s_add_co_ci_u32
+      // is the high-half terminator of a getpc+add chain that feeds a
+      // Pattern B `s_set_pc_i64` indirectbr (i.e. some downstream
+      // s_set_pc_i64 reads the same ret-pair this chain populated),
+      // overwrite the ret-pair SGPR with `blockaddress(@kernel,
+      // %BB_returnAddr)` cast to i64. This makes the i64 the
+      // downstream indirectbr reads a real LLVM BlockAddress
+      // constant, not an opaque binary PC the indirectbr cannot use.
+      // The SOP2 handler has already done its arithmetic above; this
+      // commit happens *after* and clobbers the arithmetic result on
+      // purpose — that result was a binary PC we never want to see.
+      // See setpc_analysis.hpp + semop.hpp's S_SET_PC_I64 doc.
+      if (di.semOp == SemOp::S_ADDC_U32) {
+        auto it = setpcAnalysis.chainTerminators.find(di.offset);
+        if (it != setpcAnalysis.chainTerminators.end()) {
+          BasicBlock *retBB = ctx.lookupBB(it->second.resolvedReturnAddr);
+          Constant *ba = BlockAddress::get(F, retBB);
+          Value *baInt = ctx.B.CreatePtrToInt(ba, ctx.i64Ty,
+                                                "ret_pc_blockaddr");
+          ctx.regs.storeSGPR64(ctx.B,
+                                static_cast<int>(it->second.retPairLowReg),
+                                baInt);
+        }
+      }
       raisedCount++;
       continue;
     }

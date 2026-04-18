@@ -184,6 +184,15 @@ static const Entry kCanonTable[] = {
     E(S_ANDN2_SAVEEXEC_B64, S_ANDN2_SAVEEXEC_B32),
     E(S_ORN2_SAVEEXEC_B64, S_ORN2_SAVEEXEC_B32),
     E(S_GETPC_B64, S_GETPC_B64),
+    // gfx1250 asm renames `S_SETPC_B64` to `s_set_pc_i64`
+    // (SOPInstructions.td:2208 declares the rename via
+    // `SOP1_Real_gfx1250<0x048, "s_set_pc_i64">`); the LLVM MC opcode
+    // remains `S_SETPC_B64`. We canonicalise both names onto
+    // SemOp::S_SET_PC_I64 so the handler dispatches uniformly across
+    // gfx versions; the new name is the SemOp because that is how the
+    // corpus surfaces it (gfx1250 disasm) and what the SemOp enum
+    // comment in semop.hpp documents.
+    E(S_SETPC_B64, S_SET_PC_I64),
     E(S_ABS_I32, S_ABS_I32),
     E(S_SET_VGPR_MSB, S_SET_VGPR_MSB),
     E(S_BITSET0_B32, S_BITSET0_B32),

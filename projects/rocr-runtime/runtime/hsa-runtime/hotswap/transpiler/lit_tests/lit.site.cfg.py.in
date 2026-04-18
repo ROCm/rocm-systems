@@ -54,6 +54,16 @@ config.fixtures = {
     "v_mul_u64": r"@LIT_FIXTURE_V_MUL_U64_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
+    # s_set_pc_i64 (SOP1) — three sibling fixtures, one per analysis
+    # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
+    # Pattern A (br) / Pattern B (indirectbr) / Unresolvable
+    # (refusal) lowering contract documented on SemOp::S_SET_PC_I64.
+    "s_set_pc_i64_pattern_a":
+        r"@LIT_FIXTURE_S_SET_PC_I64_PATTERN_A_CO@",
+    "s_set_pc_i64_pattern_b":
+        r"@LIT_FIXTURE_S_SET_PC_I64_PATTERN_B_CO@",
+    "s_set_pc_i64_unresolvable":
+        r"@LIT_FIXTURE_S_SET_PC_I64_UNRESOLVABLE_CO@",
 }
 
 lit_config.load_config(
