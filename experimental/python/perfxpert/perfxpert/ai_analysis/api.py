@@ -616,23 +616,23 @@ def _analyze_database_agentic(
     """Agentic path: delegates to Phase 3 runtime if available."""
     try:
         from perfxpert.agents import runtime
-    except ImportError as e:
+        return runtime.run_analyze(
+            database_path=database_path,
+            custom_prompt=custom_prompt,
+            enable_llm=enable_llm,
+            llm_provider=llm_provider,
+            llm_api_key=llm_api_key,
+            llm_thinking_tokens=llm_thinking_tokens,
+            output_format=output_format,
+            verbose=verbose,
+            top_kernels=top_kernels,
+            att_dir=att_dir,
+        )
+    except (ImportError, AttributeError) as e:
         raise RuntimeError(
             "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
             "This is a Phase 3 dependency. Unset the env var to use the legacy path."
         ) from e
-    return runtime.run_analyze(
-        database_path=database_path,
-        custom_prompt=custom_prompt,
-        enable_llm=enable_llm,
-        llm_provider=llm_provider,
-        llm_api_key=llm_api_key,
-        llm_thinking_tokens=llm_thinking_tokens,
-        output_format=output_format,
-        verbose=verbose,
-        top_kernels=top_kernels,
-        att_dir=att_dir,
-    )
 
 
 def _analyze_database_legacy(

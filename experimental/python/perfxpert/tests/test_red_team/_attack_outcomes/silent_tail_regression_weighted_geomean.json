@@ -1,0 +1,7 @@
+{
+  "attack_id": "silent_tail_regression_weighted_geomean",
+  "status": "defeated",
+  "details": {
+    "verdict_detail": "weighted-geomean +6.0% (tail)"
+  }
+}
