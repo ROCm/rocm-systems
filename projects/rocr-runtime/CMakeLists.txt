@@ -116,19 +116,23 @@ if (NOT DEFINED BUILD_THUNK_VIRTIO)
   set(BUILD_THUNK_VIRTIO OFF)
 endif()
 
-add_rocm_subdir(libhsakmt "${THUNK_DEFINITIONS}")
-set_target_properties(hsakmt PROPERTIES
-                                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/archive"
-                                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/lib"
-                                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/runtime")
-if (WIN32)
-set_target_properties(hsakmt PROPERTIES
-                      CXX_STANDARD 20
-                      CXX_STANDARD_REQUIRED ON)
-endif()
+if (NOT APPLE)
+  # libhsakmt is the KFD (Kernel Fusion Driver) ioctl wrapper — Linux /dev/kfd
+  # only. Darwin port uses MacOsDriver via DEXT/IOKit instead, so skip.
+  add_rocm_subdir(libhsakmt "${THUNK_DEFINITIONS}")
+  set_target_properties(hsakmt PROPERTIES
+                                  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/archive"
+                                  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/lib"
+                                  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/runtime")
+  if (WIN32)
+  set_target_properties(hsakmt PROPERTIES
+                        CXX_STANDARD 20
+                        CXX_STANDARD_REQUIRED ON)
+  endif()
 
-if (BUILD_THUNK_VIRTIO)
-  add_rocm_subdir(libhsakmt/src/virtio "${THUNK_VIRTIO_DEFINITIONS}")
+  if (BUILD_THUNK_VIRTIO)
+    add_rocm_subdir(libhsakmt/src/virtio "${THUNK_VIRTIO_DEFINITIONS}")
+  endif()
 endif()
 
 if (BUILD_ROCR)
@@ -143,13 +147,15 @@ if (WIN32)
                         CXX_STANDARD_REQUIRED ON)
 endif()
 
-  if (BUILD_SHARED_LIBS)
-    add_dependencies(hsa-runtime64 hsakmt)
-    if (BUILD_THUNK_VIRTIO)
-      add_dependencies(hsa-runtime64 hsakmt_virtio)
+  if (NOT APPLE)
+    if (BUILD_SHARED_LIBS)
+      add_dependencies(hsa-runtime64 hsakmt)
+      if (BUILD_THUNK_VIRTIO)
+        add_dependencies(hsa-runtime64 hsakmt_virtio)
+      endif()
+    else()
+      add_dependencies(hsa-runtime64 hsakmt-staticdrm)
     endif()
-  else()
-    add_dependencies(hsa-runtime64 hsakmt-staticdrm)
   endif()
 endif()
 

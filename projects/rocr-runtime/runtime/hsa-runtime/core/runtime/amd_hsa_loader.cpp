@@ -50,6 +50,13 @@
 #include <linux/limits.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(__APPLE__)
+// mmap / PROT_READ / MAP_PRIVATE / munmap — POSIX but header path differs:
+// Darwin doesn't have <linux/limits.h> or <link.h>. sys/mman.h carries the
+// mmap family; <limits.h> gives PATH_MAX.
+#include <limits.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #else
 #include <cstdint>
 #endif
@@ -105,7 +112,11 @@ std::string GetUriFromMemoryAddress(const void *memory, size_t size) {
 }
 
 std::string GetUriFromMemoryInExecutableFile(const void *memory, size_t size) {
-#if !defined(_WIN32) && !defined(_WIN64)
+  // Linux-only: iterates ELF segments via dl_iterate_phdr / ElfW() and uses
+  // /proc/self/exe. Darwin has Mach-O images + dladdr() but their segment
+  // model differs (no ElfW); implementing an equivalent is possible but
+  // not required for bring-up. Fall through to the plain memory URI.
+#if defined(__linux__)
   uintptr_t address = reinterpret_cast<uintptr_t>(memory);
   struct callback_data_s {
     ElfW(Addr) address;
@@ -166,12 +177,15 @@ std::string GetUriFromMemoryInExecutableFile(const void *memory, size_t size) {
     uri_stream << "&size=" << size;
     return uri_stream.str();
   }
-#endif  // !defined(_WIN32) && !defined(_WIN64)
+#endif  // defined(__linux__)
   return GetUriFromMemoryAddress(memory, size);
 }
 
 std::string GetUriFromMemoryInMmapedFile(const void *memory, size_t size) {
-#if !defined(_WIN32) && !defined(_WIN64)
+  // Linux-only: parses /proc/self/maps. Darwin has mach_vm_region_recurse
+  // but its output doesn't directly carry filesystem pathnames in the same
+  // format; not reimplemented for bring-up.
+#if defined(__linux__)
   std::ifstream proc_maps;
   proc_maps.open("/proc/self/maps", std::ifstream::in);
   if (!proc_maps.is_open() || !proc_maps.good()) {

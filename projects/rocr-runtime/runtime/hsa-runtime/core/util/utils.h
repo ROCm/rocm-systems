@@ -78,6 +78,22 @@ void log_printf(const char* file, int line, const char* format, ...);
 #if defined(__GNUC__)
 #if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#elif defined(__aarch64__) || defined(__arm64__)
+// ARMv8 (Apple Silicon, Graviton) fallbacks for the x86 intrinsics ROCR
+// sprinkles through its code. Map each to the closest-semantics ARM
+// operation so surrounding memory-order / spin-wait logic keeps working.
+//   _mm_pause   → YIELD hint (spin-wait backoff)
+//   _mm_sfence  → DMB ISHST (inner-shareable store barrier)
+//   _mm_mfence  → DMB ISH   (inner-shareable full barrier)
+static __inline__ __attribute__((always_inline)) void _mm_pause(void) {
+  __asm__ __volatile__("yield" ::: "memory");
+}
+static __inline__ __attribute__((always_inline)) void _mm_sfence(void) {
+  __asm__ __volatile__("dmb ishst" ::: "memory");
+}
+static __inline__ __attribute__((always_inline)) void _mm_mfence(void) {
+  __asm__ __volatile__("dmb ish" ::: "memory");
+}
 #endif
 
 #define __forceinline __inline__ __attribute__((always_inline))

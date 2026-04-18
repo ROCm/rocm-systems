@@ -72,7 +72,15 @@ class HybridMutex {
     while (!lock_.compare_exchange_strong(old, 1)) {
       cnt--;
       if (cnt > maxSpinIterPause) {
+#if defined(__i386__) || defined(__x86_64__)
         _mm_pause();
+#elif defined(__aarch64__) || defined(__arm64__)
+        // ARMv8 YIELD hint — same role as x86 PAUSE in spin-wait loops.
+        __asm__ __volatile__("yield" ::: "memory");
+#else
+        // Fall back to a compiler barrier; worse spin perf but correct.
+        __asm__ __volatile__("" ::: "memory");
+#endif
       } else if (cnt-- > maxSpinIterYield) {
         os::YieldThread();
       } else {
