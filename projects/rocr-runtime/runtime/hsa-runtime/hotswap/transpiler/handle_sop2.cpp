@@ -193,6 +193,15 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // s_sub_nc_u64: gfx12 64-bit scalar subtract, no carry. Mirror
+  // of S_ADD_NC_U64 above. SCC is *not* updated (the `nc` suffix);
+  // see SOPInstructions.td 661 (no `Defs = [SCC]`).
+  if (sop == SemOp::S_SUB_NC_U64) {
+    ctx.regs.writeReg64(ctx.B, op.dst(),
+                        ctx.B.CreateSub(op.src64(0), op.src64(1), "ssub64"));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::S_MIN_U32) {
     Value *s0 = op.src(0), *s1 = op.src(1);
     hr.sccResult =

@@ -229,6 +229,12 @@ static const Entry kCanonTable[] = {
     // LLVM's pseudo is `S_ADD_U64`; we still surface it as `SemOp::S_ADD_NC_U64`
     // to keep handler parity with the no-carry mnemonic used downstream.
     E(S_ADD_U64, S_ADD_NC_U64),
+    // gfx12 `s_sub_nc_u64` (renamed from `s_sub_u64` in the
+    // assembler — see SOPInstructions.td 2311
+    // `S_SUB_U64 ... "s_sub_nc_u64"`). LLVM's pseudo is still
+    // `S_SUB_U64`; surface it as `SemOp::S_SUB_NC_U64` to mirror
+    // the S_ADD_NC_U64 convention.
+    E(S_SUB_U64, S_SUB_NC_U64),
 
     // ---------------------------------------------------------------------
     // VOP1 (canonical form is `_e64` after getVOPe64 collapses e32)
