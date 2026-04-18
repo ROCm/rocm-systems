@@ -26,14 +26,27 @@ _OPS = {
 
 
 def _signature_match(signature: List[Dict[str, Any]], metrics: Dict[str, Any]) -> float:
-    """Compute fraction of signature rules that pass against metrics.
+    """Compute evidence-weighted confidence that metrics match a signature.
 
-    Returns 0.0–1.0. Rules referencing missing metrics count as "neutral" (not
-    counted in the denominator), allowing partial evidence to still score well.
+    Returns 0.0–1.0.  Rules referencing missing metrics count as "neutral"
+    (not counted toward denominator), allowing partial evidence to still
+    produce a valid score.  However, partial evidence is penalised relative
+    to full evidence via an evidence-strength factor (finding #26).
 
-    For example, if a 3-rule signature requires (A, B, C) and only A is available
-    and passes, that counts as 1/1 = 1.0 confidence (strong evidence from available data).
-    If A fails, it's 0/1 = 0.0 (contradicts the signature).
+    Formula:
+        match_ratio    = passed / evaluated          (fraction of rules that fire)
+        evidence_factor = evaluated / len(signature)  (fraction of rules testable)
+        score           = match_ratio × evidence_factor
+
+    Examples with a 5-rule signature:
+        5/5 evaluated, all pass  → 1.0 × 1.0 = 1.0   (certain)
+        2/5 evaluated, all pass  → 1.0 × 0.4 = 0.4   (insufficient evidence)
+        1/5 evaluated, all pass  → 1.0 × 0.2 = 0.2   (single weak signal)
+        5/5 evaluated, 3 pass    → 0.6 × 1.0 = 0.6   (partial match, full evidence)
+
+    This is monotonically increasing in both match ratio and evidence strength,
+    and removes the anomaly where a single-rule match returned confidence 1.0
+    equal to a full 5-of-5 match.
     """
     if not signature:
         return 0.0
@@ -58,8 +71,12 @@ def _signature_match(signature: List[Dict[str, Any]], metrics: Dict[str, Any]) -
     if evaluated == 0:
         return 0.0
 
-    # Otherwise, return the fraction of evaluated rules that passed
-    return passed / evaluated
+    # Evidence-weighted confidence (finding #26 fix):
+    # match_ratio × evidence_factor ensures sparse evidence scores lower
+    # than full evidence even when all evaluated rules match.
+    match_ratio = passed / evaluated
+    evidence_factor = evaluated / len(signature)
+    return match_ratio * evidence_factor
 
 
 @tool_class(ToolClass.READ_ONLY)

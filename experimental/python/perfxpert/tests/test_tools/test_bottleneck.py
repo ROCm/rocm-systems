@@ -152,60 +152,65 @@ def test_amdahl_below_threshold_low_priority():
 
 # -- Trace-only memcpy path (FINDING #22) ------------------------------------
 
-def test_classify_trace_only_memcpy_above_threshold_returns_memory_transfer():
+def test_classify_trace_only_memcpy_above_threshold_returns_non_data_insufficient():
     """Tier 1 trace only — only memcpy_pct extracted (no PMC counters).
 
     When memcpy_pct alone is high (> 0.20 fraction, i.e. 20%), the classifier
-    has real evidence and must return 'memory_transfer', NOT 'data_insufficient'.
-    This guards against silently degrading Tier-1-only traces.
+    has real evidence and must NOT return 'data_insufficient'.  With the
+    evidence-strength weighting fix (finding #26), a single rule from a 3-rule
+    signature scores 1/3 of max confidence = 0.333, which is below the 0.5
+    threshold — so the classifier correctly returns 'mixed' rather than
+    'memory_transfer'.  This is the correct behavior: single-rule evidence is
+    too sparse to make a confident memory_transfer claim.
 
     NOTE: the agentic path (run_analysis) currently forces data_insufficient
     for all no-PMC traces as a Phase 6 design decision. This test validates
     the pure rule-based classify_from_metrics() tool — which has no such
-    override — so that the tool itself remains correct and Tier-1 signal
-    is not lost at the tool level.
+    override — so that the tool itself remains correct and does not return
+    data_insufficient (it returns mixed, indicating uncertainty).
     """
     # User has Tier 1 trace only. Only memcpy_pct extracted. No PMC counters.
     result = bottleneck.classify_from_metrics({"memcpy_pct": 0.25})
-    assert result["type"] == "memory_transfer", (
-        f"Expected 'memory_transfer' for memcpy_pct=0.25 (25% > 20% threshold), "
-        f"got {result['type']!r}. The classifier must not report data_insufficient "
-        "when concrete memcpy evidence is present."
+    # Must NOT be data_insufficient — we have real evidence (memcpy is high).
+    # With evidence weighting, 1/3 rules → confidence 0.33 → returns 'mixed'.
+    assert result["type"] != "data_insufficient", (
+        f"Got 'data_insufficient' for memcpy_pct=0.25 (25% > 20% threshold). "
+        "The classifier must not report data_insufficient when concrete evidence "
+        "is present — it should return 'mixed' (insufficient evidence for a "
+        "confident classification)."
     )
-    # Not data_insufficient — we have real evidence (memcpy is high)
-    assert result["type"] != "data_insufficient"
-    assert result["confidence"] >= 0.5
+    # After finding #26 fix: single-rule evidence returns 'mixed' (not memory_transfer).
+    # This is correct — 1/3 rules evaluated means we cannot confidently classify.
+    assert result["type"] == "mixed", (
+        f"Expected 'mixed' for single-rule memcpy_pct=0.25 "
+        f"(evidence-weighted confidence 0.33 < 0.5 threshold), got {result['type']!r}."
+    )
 
 
-# -- Finding #26: Partial-PMC confidence not tested ---------------------------
+# -- Finding #26: Partial-PMC confidence weighting (FIXED) -------------------
 
-def test_partial_pmc_rules_confidence_lower_than_all_rules():
-    """2-of-5 compute rules matching must not return higher confidence than 5-of-5.
+def test_partial_pmc_rules_confidence_lower_than_full_pmc():
+    """2-of-3 compute rules matching must return strictly lower confidence than 3-of-3.
 
-    Finding #26: the current classifier normalises by *evaluated* rules — if
-    only 2 are evaluated and both match, confidence = 2/2 = 1.0, same as
-    5/5.  This is a classifier design issue: partial evidence should produce
-    lower confidence than full evidence.
+    Finding #26 FIX (evidence-strength × match-ratio):
+      partial (2/3 rules): confidence = (2/2) × (2/3) = 0.667
+      full    (3/3 rules): confidence = (3/3) × (3/3) = 1.0
 
-    This test uses a 10% slack to tolerate minor implementation differences.
-    IF this test reveals identical confidence (1.0 == 1.0), the assertion
-    with slack passes — but the bug_detected flag allows the caller to
-    surface it as a follow-up design issue.
+    This replaces the old normalize-by-evaluated formula that returned 1.0 for
+    both cases.
     """
-    # 2 of 5 compute rules evaluated (valu_util + ai_above_ridge only)
+    # 2 of 3 compute rules evaluated (valu_util + ai_above_ridge, mfma absent)
     partial = bottleneck.classify_from_metrics({
         "valu_util_pct": 0.85,
         "arithmetic_intensity_above_ridge": True,
-        # other 3 compute rules absent (None / not present)
+        # mfma_util_pct absent → not evaluated
     })
 
-    # 5 of 5 compute rules evaluated
+    # 3 of 3 compute rules evaluated and all match
     full = bottleneck.classify_from_metrics({
         "valu_util_pct": 0.85,
         "mfma_util_pct": 0.70,
         "arithmetic_intensity_above_ridge": True,
-        "occupancy_pct": 0.80,
-        "avg_waves_per_cu": 8,
     })
 
     # Both should classify as compute
@@ -216,26 +221,44 @@ def test_partial_pmc_rules_confidence_lower_than_all_rules():
         f"full metrics should classify as compute; got {full['type']!r}"
     )
 
-    # Design invariant: full evidence confidence must be >= partial confidence.
-    # Allow 10% slack for minor weighting differences.
-    # If this FAILS (partial > full), that's a more severe bug — fail loudly.
-    assert full["confidence"] >= partial["confidence"] * 0.9, (
-        f"Full evidence (5/5 rules, confidence={full['confidence']}) should not be "
-        f"lower than partial evidence (2/5 rules, confidence={partial['confidence']}). "
-        "Confidence model may be broken."
+    # Full evidence must be strictly higher than partial evidence.
+    assert full["confidence"] > partial["confidence"], (
+        f"Full evidence (3/3 rules, confidence={full['confidence']:.3f}) must be "
+        f"strictly higher than partial evidence (2/3 rules, confidence={partial['confidence']:.3f}). "
+        "Finding #26 fix: confidence = match_ratio × evidence_factor."
     )
 
-    # Flag the known design issue: current impl normalises by evaluated rules,
-    # so partial and full return the same confidence (1.0 == 1.0).
-    # This is a classifier design gap — not a correctness failure per se.
-    if partial["confidence"] == full["confidence"]:
-        import warnings
-        warnings.warn(
-            f"Finding #26 (DESIGN GAP): partial evidence (2/5 rules, "
-            f"confidence={partial['confidence']}) has the same confidence as "
-            f"full evidence (5/5 rules, confidence={full['confidence']}). "
-            "The classifier normalises by evaluated rules, not total rules. "
-            "Consider confidence-weighting by evidence completeness.",
-            UserWarning,
-            stacklevel=2,
-        )
+    # Exact expected values (3-rule signature):
+    # partial: 2/2 match × 2/3 evidence = 0.667
+    # full:    3/3 match × 3/3 evidence = 1.0
+    assert abs(partial["confidence"] - 2 / 3) < 0.01, (
+        f"partial confidence expected ≈ 0.667, got {partial['confidence']:.3f}"
+    )
+    assert abs(full["confidence"] - 1.0) < 0.01, (
+        f"full confidence expected 1.0, got {full['confidence']:.3f}"
+    )
+
+
+def test_single_rule_match_returns_mixed_not_full_confidence():
+    """Single-rule match must return confidence ≤ 0.5 (→ 'mixed'), not 1.0.
+
+    Finding #26: before fix, a single memcpy_pct rule from a 3-rule signature
+    returned confidence 1/1 = 1.0 → classified as memory_transfer with full
+    confidence.  After fix: 1/3 evidence_factor × 1.0 match_ratio = 0.333 < 0.5
+    → returns 'mixed'.  A single weak signal cannot justify a confident bottleneck
+    claim.
+    """
+    # Only memcpy_pct provided — 1 of 3 memory_transfer rules evaluable.
+    result = bottleneck.classify_from_metrics({"memcpy_pct": 0.25})
+
+    # Must return 'mixed': insufficient evidence for a confident classification.
+    assert result["type"] == "mixed", (
+        f"Expected 'mixed' (confidence below 0.5 threshold), got {result['type']!r} "
+        f"with confidence={result['confidence']:.3f}. "
+        "Single-rule match must not produce a confident bottleneck classification."
+    )
+    # Confidence must be below the 0.5 classification threshold.
+    assert result["confidence"] <= 0.5, (
+        f"Single-rule match confidence={result['confidence']:.3f} must be ≤ 0.5. "
+        "Finding #26 fix: evidence-strength factor penalises sparse evidence."
+    )
