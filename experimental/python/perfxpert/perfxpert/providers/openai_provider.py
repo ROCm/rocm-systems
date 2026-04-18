@@ -33,6 +33,15 @@ def _resolve_api_key(explicit: Optional[str]) -> str:
         val = os.environ.get(var)
         if val:
             return val
+    for legacy, canonical in (
+        ("ROCINSIGHT_LLM_OPENAI_KEY", "PERFXPERT_LLM_OPENAI_KEY"),
+        ("ROCPD_LLM_OPENAI_KEY", "PERFXPERT_LLM_OPENAI_KEY"),
+    ):
+        val = os.environ.get(legacy)
+        if val:
+            from perfxpert.providers._exceptions import _legacy_env_warn
+            _legacy_env_warn(legacy, canonical)
+            return val
     raise AuthError(
         "openai",
         "no API key (set PERFXPERT_LLM_OPENAI_KEY or OPENAI_API_KEY)",

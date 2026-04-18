@@ -75,3 +75,25 @@ __all__ = [
     "TimeoutError",
     "DryRunResponse",
 ]
+
+import warnings as _warnings
+
+
+def _legacy_env_warn(legacy_name: str, canonical_name: str) -> None:
+    """Emit a DeprecationWarning when a legacy env var is still used.
+
+    Called by providers when they fall through to ROCINSIGHT_LLM_* or
+    ROCPD_LLM_* variables so users get a clear migration signal.
+    """
+    _warnings.warn(
+        (
+            f"Environment variable {legacy_name!r} is deprecated; "
+            f"rename to {canonical_name!r}. "
+            f"Legacy name will be removed in a future perfxpert release."
+        ),
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+__all__ = list(__all__) + ["_legacy_env_warn"]  # type: ignore[misc]
