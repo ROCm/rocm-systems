@@ -27,6 +27,9 @@ from typing import Any, Callable, Dict, Literal, Union, get_args, get_origin
 # Check for MCP dependency via require_tool
 from perfxpert.tools._tooldep import require_tool, ExternalToolMissing
 
+# Check for MCP dependency via require_tool
+from perfxpert.tools._tooldep import require_tool, ExternalToolMissing
+
 # MCP SDK imports wrapped in try/except for graceful degradation
 _MCP_AVAILABLE = False
 try:
