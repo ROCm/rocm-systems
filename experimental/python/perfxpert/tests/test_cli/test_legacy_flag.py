@@ -1,7 +1,9 @@
-"""PERFXPERT_LEGACY behavior after Phase 7.1.
+"""Regression guards for flags removed in Phase 7.1 and Phase 6.
 
-The legacy `ai_analysis` module has been removed; `PERFXPERT_LEGACY` is
-unrecognized. `--interactive` / `--resume-session` were removed in Phase 6.
+The `ai_analysis` module and its `PERFXPERT_LEGACY` opt-out were
+removed in Phase 7.1; `--interactive` / `--resume-session` were
+removed in Phase 6. These tests ensure help output and doctor
+output reflect the agentic-only world.
 """
 
 import os

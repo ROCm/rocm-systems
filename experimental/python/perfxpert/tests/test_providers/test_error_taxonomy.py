@@ -1,4 +1,12 @@
-"""Cross-provider error taxonomy + legacy env var deprecation warnings."""
+"""Cross-provider error taxonomy + env-var alias deprecation warnings.
+
+Regression guards: the provider layer still honors the pre-rename
+`ROCINSIGHT_LLM_*` and `ROCPD_LLM_*` API-key env vars, emitting a
+DeprecationWarning that points users to the canonical
+`PERFXPERT_LLM_*` names. These aliases are an active back-compat
+contract and deliberately outlived the Phase 7.1 `ai_analysis`
+module removal — they concern user credentials, not code paths.
+"""
 
 import warnings
 from unittest.mock import MagicMock, patch

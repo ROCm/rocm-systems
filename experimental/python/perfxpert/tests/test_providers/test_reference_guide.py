@@ -19,10 +19,11 @@ def test_load_reference_guide_always_raises():
 
 
 def test_load_reference_guide_ignores_legacy_env(monkeypatch, tmp_path):
-    """PERFXPERT_LEGACY / ROCINSIGHT_LLM_REFERENCE_GUIDE no longer flip any switch."""
+    """Regression guard: both env vars removed in Phase 7.1 must not flip any switch."""
+    # Regression guard — assert removed env vars stay inert.
     monkeypatch.setenv("PERFXPERT_LEGACY", "1")
     override = tmp_path / "my-guide.md"
-    override.write_text("# Custom Fence\nHello legacy.\n")
+    override.write_text("# Custom Fence\nsentinel content.\n")
     monkeypatch.setenv("ROCINSIGHT_LLM_REFERENCE_GUIDE", str(override))
     with pytest.raises(ReferenceGuideNotFoundError):
         load_reference_guide()
