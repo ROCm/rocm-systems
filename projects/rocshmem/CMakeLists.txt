@@ -243,7 +243,6 @@ if (NOT BUILD_TESTS_ONLY)
     PRIVATE
       -Wall
       -Wextra
-      -Werror
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
   )
 

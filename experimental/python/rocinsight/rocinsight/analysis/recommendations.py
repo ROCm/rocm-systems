@@ -137,7 +137,7 @@ def _filter_rec_commands(
       are dropped entirely.
     - If after stripping, a rocprofv3 command has no remaining flags AND
       its args contain only output-path or scope-filter entries (-d / -o /
-      --kernel-names / etc.), the command adds no new data and is dropped.
+      --kernel-include-regex / etc.), the command adds no new data and is dropped.
     - ``rocprof-sys --trace`` alone is equivalent to ``rocprofv3 --sys-trace``
       (same HIP/HSA API data, just in Perfetto format instead of rocpd format)
       and is dropped when sys-trace data is already present.  ``rocprof-sys``
@@ -158,7 +158,7 @@ def _filter_rec_commands(
     # data collection on their own.
     _NON_DATA_ARGS = _OUTPUT_ONLY_ARGS | frozenset(
         {
-            "--kernel-names",
+            "--kernel-include-regex",
             "--include-names",
             "--exclude-names",
         }
@@ -221,7 +221,7 @@ def _filter_rec_commands(
             continue
 
         # Meaningful args: anything that isn't an output path or a scope filter.
-        # --kernel-names scopes collection but doesn't collect new data itself.
+        # --kernel-include-regex scopes collection but doesn't collect new data itself.
         meaningful_args = [a for a in new_args if a.get("name", "") not in _NON_DATA_ARGS]
         if not new_flags and not meaningful_args:
             continue  # nothing new to collect -- drop the command entirely
@@ -728,15 +728,15 @@ def generate_recommendations(
                                     "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
                                 },
                                 {
-                                    "name": "--kernel-names",
-                                    "value": kernel_name,
+                                    "name": "--kernel-include-regex",
+                                    "value": f"^{re.escape(kernel_name)}$",
                                 },  # display only; full_command uses shlex.quote
                                 {"name": "-d", "value": "./kernel_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
                             "full_command": (
                                 f"rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"
-                                f" --kernel-names {shlex.quote(kernel_name)}"
+                                f" --kernel-include-regex {shlex.quote(f'^{re.escape(kernel_name)}$')}"
                                 f" -d ./kernel_output -o profile -- ./app"
                             ),
                         },
