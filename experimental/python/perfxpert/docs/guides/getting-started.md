@@ -52,6 +52,7 @@ perfxpert --version
 The simplest workflow is two commands: collect a trace with `rocprofv3`, then analyze it.
 
 ```bash
+# SKIP-SAMPLE — illustrative; requires a real HIP binary and rocprofv3
 # Step 1: Collect a system trace
 rocprofv3 --sys-trace --kernel-trace --memory-copy-trace --stats \
   -d ./out -o results -- ./my_app
@@ -69,6 +70,7 @@ The output shows a time breakdown (kernel / memcpy / overhead / idle), top kerne
 Generate reports in four formats:
 
 ```bash
+# SKIP-SAMPLE — requires a real trace.db
 # Text (default) — for terminals and logs
 perfxpert analyze -i trace.db
 
@@ -95,6 +97,7 @@ The webview generates a self-contained HTML file with the AMD dark theme, SVG ga
 Analyze your source code before profiling — no GPU or trace database needed.
 
 ```bash
+# SKIP-SAMPLE — requires a ./my_app source tree and/or trace.db
 # Scan source directory
 perfxpert analyze --source-dir ./my_app
 
@@ -116,32 +119,44 @@ The output includes a profiling plan with the exact `rocprofv3` command to run, 
 
 ---
 
-## 4. Interactive Workflow (The Star Feature)
+## 4. Agentic TUI Workflow (The Star Feature)
 
-The interactive mode automates the full optimization loop: profile, analyze, AI-edit code, recompile, re-profile, compare.
+The agentic TUI automates the full optimization loop: profile, analyze,
+AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
+`perfxpert-code` command (AMD-themed bundled opencode TUI) — it wraps the
+same agent runtime the batch-mode `analyze` CLI uses.
 
 ```bash
-perfxpert analyze \
-  --source-dir ./my_app \
-  --llm anthropic \
-  --interactive "./my_app"
+# SKIP-SAMPLE — requires bundled opencode binary on PATH
+perfxpert-code
 ```
+
+Inside the TUI you describe your workload in natural language
+(e.g. "profile ./my_app and suggest optimizations"). The Root agent then
+drives the Analysis → Recommendation → Specialist hierarchy behind the
+scenes.
 
 ### What happens:
 
-1. **Phase 1b** — Workload detection: identifies your binary type (HIP, Python ML, MPI) and selects optimal profiling flags
-2. **Phase 2** — Shows the generated `rocprofv3` command for your approval
-3. **Phase 3** — Runs the profiler with real-time output streaming
-4. **Phase 4** — Analyzes the trace, shows findings with AI-refined recommendations
-5. **Phase 5** — Recommendations menu: address with AI, skip, or re-profile
-6. **Phase 6** — AI edits your source files using precise SEARCH/REPLACE blocks
-7. **Phase 7** — Re-profile with the optimized code and compare results
+1. **Workload detection** — identifies your binary type (HIP, Python ML,
+   MPI) and selects optimal profiling flags
+2. **Profiling plan** — shows the generated `rocprofv3` command for your
+   approval
+3. **Profile run** — runs the profiler with real-time output streaming
+4. **Analysis** — analyzes the trace, shows findings with AI-refined
+   recommendations
+5. **Recommendations menu** — address with AI, skip, or re-profile
+6. **AI edit** — AI edits your source files using precise SEARCH/REPLACE
+   blocks (see Gate Cascade doc for correctness guarantees)
+7. **Re-profile** — re-profile with the optimized code and compare
 
-![Interactive Workflow Demo](assets/interactive-workflow.gif)
+![Agentic TUI Demo](assets/interactive-workflow.gif)
 
 ### AI Code Editing
 
-When you select `[a] Address all with AI optimization`, the LLM generates targeted code changes as SEARCH/REPLACE blocks — not full-file rewrites. This prevents truncation on large files and makes the diff easy to review:
+When the agent applies an optimization, the LLM generates targeted code
+changes as SEARCH/REPLACE blocks — not full-file rewrites. This prevents
+truncation on large files and makes the diff easy to review:
 
 ```
 <<<<<<< SEARCH
@@ -155,7 +170,9 @@ When you select `[a] Address all with AI optimization`, the LLM generates target
 >>>>>>> REPLACE
 ```
 
-If the edit causes compilation errors, type `revert` to undo. The LLM analyzes the failure and proposes an alternative fix with full error context.
+If the edit causes compilation errors, the Correctness agent reverts the
+change automatically; see `docs/architecture/gate-cascade.md` for the full
+5-gate correctness/regression contract.
 
 ---
 
@@ -164,11 +181,17 @@ If the edit causes compilation errors, type `revert` to undo. The LLM analyzes t
 PerfXpert auto-detects MPI launchers and restructures the profiling command so each rank gets its own profiler instance.
 
 ```bash
+# SKIP-SAMPLE — requires a built MPI application + openmpi
+# Batch-mode analyze that profiles an MPI workload end-to-end
 perfxpert analyze \
   --llm anthropic \
   --source-dir ./src \
-  --interactive "mpirun -n 8 ./multi_gpu_demo"
+  --run "mpirun -n 8 ./multi_gpu_demo"
 ```
+
+Inside `perfxpert-code` you can describe the same workload in natural
+language ("profile mpirun -n 8 ./multi_gpu_demo") and the Analysis agent
+will drive the same detection logic.
 
 The tool:
 - Detects `mpirun`/`srun`/`jsrun` and wraps each rank: `mpirun -n 8 rocprofv3 <flags> -- ./binary`
@@ -187,6 +210,7 @@ The tool:
 Five LLM providers are supported. LLM is optional — all analysis runs locally without internet.
 
 ```bash
+# SKIP-SAMPLE — requires a real trace.db and LLM credentials
 # Anthropic Claude
 export ANTHROPIC_API_KEY="sk-ant-..."
 perfxpert analyze -i trace.db --llm anthropic
@@ -265,6 +289,7 @@ AI-Refined Analysis (context-aware):
 For the deepest analysis, collect an AMD Thread Trace to see per-instruction stall data:
 
 ```bash
+# SKIP-SAMPLE — requires rocprof-trace-decoder + a real HIP binary
 # Collect ATT trace
 rocprofv3 --att \
   --att-library-path /opt/rocm/lib \
@@ -310,26 +335,25 @@ for rec in out.recommendations:
 
 ---
 
-## 10. The Fence Document (LLM Reference Guide)
+## 10. Fence Slices (Per-Agent System Prompts)
 
-The LLM reference guide controls AI behavior. It ships with the package and contains AMD GPU specs, performance models, and analysis guidelines. Edit it to customize the LLM:
+Agent behavior is shaped by small, single-purpose fence slices under
+`perfxpert/agents/fence/`. There is one slice per agent (Root, Analysis,
+Recommendation, Correctness, Compute/Latency/Memory specialists). Each
+slice is ≤ 400 lines and loaded as that agent's system prompt at runtime.
+
+See `docs/architecture/agent-hierarchy.md` for the full map and
+`docs/contributing/tools.md` + CONTRIBUTING for the editing rules.
 
 ```bash
-# Override with your own version
-export PERFXPERT_LLM_REFERENCE_GUIDE="/path/to/my-guide.md"
+# SKIP-SAMPLE — illustrative
+# View a single fence slice
+cat experimental/python/perfxpert/perfxpert/agents/fence/analysis.md
 ```
 
-Add company-specific guidelines:
-
-```markdown
-## Our Team's Standards
-<!-- perfxpert-context: always -->
-- We use MI300X exclusively — skip non-MI300X advice
-- Flag any kernel launching fewer than 64 wavefronts
-- Target: >80% GPU utilization on inference workloads
-```
-
-No code changes needed — the guide is reloaded on every analysis run.
+Add company-specific guidelines to the relevant slice (Analysis for
+triage rules, Recommendation for advice filters, etc.). Each edit is
+enforced by CI length limits; break slices if they grow beyond 400 lines.
 
 ![Fence Document Demo](assets/fence-document.gif)
 
@@ -337,15 +361,21 @@ No code changes needed — the guide is reloaded on every analysis run.
 
 ## 11. Session Persistence
 
-Sessions auto-save to `~/.perfxpert/sessions/`. Resume any session with full context:
+Sessions auto-save inside `perfxpert-code` (AMD-themed opencode TUI). List
+and resume from the same command:
 
 ```bash
-# Resume a prior session
-perfxpert analyze --source-dir ./src --interactive "./my_app" \
-  --resume-session ~/.perfxpert/sessions/workflow_2026-03-26_14-30-12___my_app.json
+# SKIP-SAMPLE — requires bundled opencode binary on PATH
+# List prior sessions
+perfxpert-code --list-sessions
+
+# Resume by session id
+perfxpert-code --resume <session-id>
 ```
 
-The checkpoint system tracks every code edit. Roll back to any prior state during a session with `[b] Roll back to a checkpoint`.
+The checkpoint system tracks every code edit. Gate cascade (see
+`docs/architecture/gate-cascade.md`) enforces correctness and regression
+bounds automatically on every accepted edit.
 
 ![Session Persistence Demo](assets/session-persistence.gif)
 
@@ -360,9 +390,9 @@ The checkpoint system tracks every code edit. Roll back to any prior state durin
 | Analyze trace | `perfxpert analyze -i trace.db` |
 | HTML report | `perfxpert analyze -i trace.db --format webview -d ./out -o report` |
 | Source scan | `perfxpert analyze --source-dir ./src` |
-| Interactive | `perfxpert analyze --source-dir ./src --llm anthropic --interactive ./my_app` |
-| MPI profiling | `perfxpert analyze --source-dir ./src --interactive "mpirun -n 4 ./my_app"` |
-| Resume session | `perfxpert analyze --source-dir ./src --interactive -- ./my_app --resume-session <path>` |
+| Agentic TUI | `perfxpert-code` |
+| MPI profiling | `perfxpert analyze --source-dir ./src --run "mpirun -n 4 ./my_app"` |
+| Resume session | `perfxpert-code --resume <session-id>` |
 | ATT analysis | `perfxpert analyze -i att_output/trace*.db --att-dir ./att_output` |
 
 ---
