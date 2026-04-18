@@ -112,7 +112,7 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, hsa_agent_t& localAg
   memFlags.ui32.ExecuteAccess = 1;
   memFlags.ui32.Uncached = 1;
 
-  LOG_TRACE("SDMA: Allocating Queue Buffer for device: %d remote device: %d engineId: %d\n",
+  LOG_TRACE("SDMA: Allocating Queue Buffer for device: %d remote device: %d engineId: %d",
             localDeviceId, remoteDeviceId, engineId);
 
   CHECK_HSAKMT_SUCCESS(hsaKmtAllocMemory(localNodeId, SDMA_QUEUE_SIZE, memFlags, &queueBuffer_),
