@@ -126,6 +126,17 @@ enum class SemOp : uint16_t {
 
   // -- VOP2/VOP3 FP64 --
   V_ADD_F64, V_MUL_F64, V_FMA_F64, V_FMAC_F64,
+  // VOP1 FP64. v_rcp_f64 is a TRANS-class transcendental (see
+  // VOP1Instructions.td: `let TRANS = 1, SchedRW = [WriteTrans64]`),
+  // not a true reciprocal — hardware returns a ~26-bit accurate
+  // approximation that the LLVM `int_amdgcn_rcp` intrinsic models
+  // exactly. We deliberately lift to that intrinsic rather than to a
+  // generic `fdiv 1.0, x` because (a) gfx942 isels the intrinsic
+  // straight back to v_rcp_f64 (no Newton-Raphson refinement is
+  // emitted), and (b) `fdiv` would lower to a software divide
+  // sequence on gfx942 unless `arcp`/fast-math flags are set, which
+  // would be a silent semantics change versus the source op.
+  V_RCP_F64,
 
   V_MAX_U32, V_MIN_U32, V_MAX_I32, V_MIN_I32,
   V_PERMLANE16_B32, V_PERMLANEX16_B32, V_PERMLANE64_B32,

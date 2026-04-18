@@ -373,6 +373,10 @@ static const Entry kCanonTable[] = {
     E(V_MUL_F64_e64, V_MUL_F64),
     E(V_FMA_F64_e64, V_FMA_F64),
     E(V_FMAC_F64_e64, V_FMAC_F64),
+    // V_RCP_F64 has no DPP (`VOP1_Real_..._NO_DPP_...`); the e32
+    // form is collapsed to e64 by getVOPe64 before lookup, so a
+    // single e64 entry covers both encodings.
+    E(V_RCP_F64_e64, V_RCP_F64),
 
     // ---------------------------------------------------------------------
     // More VOP3 32-bit int min/max and lane perms

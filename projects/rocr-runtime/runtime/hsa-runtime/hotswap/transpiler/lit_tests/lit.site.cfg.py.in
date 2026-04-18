@@ -40,6 +40,7 @@ config.fixtures = {
         r"@LIT_FIXTURE_C2_DS_SWIZZLE_FFT_RESERVED_CO@",
     "decoder_madmk_v_fmamk_f32":
         r"@LIT_FIXTURE_DECODER_MADMK_V_FMAMK_F32_CO@",
+    "v_rcp_f64": r"@LIT_FIXTURE_V_RCP_F64_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
 }

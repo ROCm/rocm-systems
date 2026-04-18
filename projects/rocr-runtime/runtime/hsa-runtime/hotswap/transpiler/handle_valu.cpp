@@ -404,6 +404,25 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // v_rcp_f64: VOP1 transcendental, single F64 source → F64 result.
+  // The hardware op is a ~26-bit accurate reciprocal approximation
+  // (TRANS-class, WriteTrans64). Lift to `llvm.amdgcn.rcp.f64` so
+  // the AMDGPU backend isels straight back to v_rcp_f64 on gfx942
+  // (no Newton-Raphson refinement is added). A generic `fdiv 1.0,
+  // x` would lower to a software divide sequence here unless `arcp`
+  // / fast-math flags are present, which would be a silent
+  // semantics change versus the source op. See the V_RCP_F64
+  // SemOp comment in semop.hpp for the rationale.
+  if (sop == SemOp::V_RCP_F64) {
+    auto *f64Ty = Type::getDoubleTy(ctx.C);
+    Value *s = ctx.B.CreateBitCast(op.src64(0), f64Ty);
+    Function *rcp = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_rcp, {f64Ty});
+    Value *r = ctx.B.CreateCall(rcp, {s}, "vrcp_f64");
+    ctx.writeReg64(op.dst(), ctx.B.CreateBitCast(r, ctx.i64Ty));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_FMA_F64 || sop == SemOp::V_FMAC_F64) {
     auto *f64Ty = Type::getDoubleTy(ctx.C);
     Value *s0, *s1, *s2;
