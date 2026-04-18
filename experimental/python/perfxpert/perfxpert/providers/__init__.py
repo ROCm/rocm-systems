@@ -19,7 +19,9 @@ Env var conventions (canonical):
     PERFXPERT_OPENCODE_PATH
     PERFXPERT_IN_OPENCODE_SESSION   (recursion guard marker)
 
-Legacy aliases (honored with DeprecationWarning):
+Back-compat env-var aliases (honored with DeprecationWarning; active
+contract for API credentials — unrelated to the `ai_analysis` module
+removed in Phase 7.1):
     ROCINSIGHT_LLM_*  → PERFXPERT_LLM_*
     ROCPD_LLM_*       → PERFXPERT_LLM_*
 """

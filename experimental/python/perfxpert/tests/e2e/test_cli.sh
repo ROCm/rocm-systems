@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # tests/e2e/test_cli.sh — end-to-end CLI smoke (agentic path).
 #
-# Post-Phase 7.1: there is only the agentic path. PERFXPERT_LEGACY is
-# unrecognized and PERFXPERT_USE_AGENTS is a no-op kept for back-compat.
+# The agentic runtime is the sole execution path as of Phase 7.1. No
+# env-var toggles; this script exercises the CLI unconditionally.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
