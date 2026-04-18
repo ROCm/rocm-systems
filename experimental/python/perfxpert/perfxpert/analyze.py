@@ -1123,13 +1123,60 @@ def add_args(parser: argparse.ArgumentParser):
     return process_args
 
 
+def _is_agentic_enabled() -> bool:
+    """Feature flag: PERFXPERT_USE_AGENTS truthy values opt into the new path."""
+    import os
+    return os.environ.get("PERFXPERT_USE_AGENTS", "").strip().lower() in {"1", "true", "yes"}
+
+
 def execute(
     input: Optional[RocpdImportData],
     config: Optional[output_config.output_config] = None,
     **kwargs: Any,
 ) -> Optional[RocpdImportData]:
     """
-    Execute AI analysis on rocpd database and/or source directory.
+    Public CLI entry point — dispatches to legacy or agentic implementation.
+
+    Default behavior: LEGACY (backward compatible). Set PERFXPERT_USE_AGENTS=1
+    to enable the new hierarchical-agent path. This env-flag is a Phase 4/5/6
+    transition switch; Phase 6 flips the default.
+
+    Args:
+        input: RocpdImportData object with database connection, or None for source-only mode
+        config: Optional output configuration
+        **kwargs: Analysis parameters (may include source_dir for Tier 0)
+
+    Returns:
+        The input RocpdImportData object (for chaining), or None in source-only mode
+    """
+    if _is_agentic_enabled():
+        return _execute_agentic(input, config=config, **kwargs)
+    return _execute_legacy(input, config=config, **kwargs)
+
+
+def _execute_agentic(
+    input: Optional[RocpdImportData],
+    config: Optional[output_config.output_config] = None,
+    **kwargs: Any,
+) -> Optional[RocpdImportData]:
+    """Agentic path: delegates to Phase 3 runtime if available."""
+    try:
+        from perfxpert.agents import runtime
+    except ImportError as e:
+        raise RuntimeError(
+            "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
+            "This is a Phase 3 dependency. Unset the env var to use the legacy path."
+        ) from e
+    return runtime.run_cli(input=input, config=config, **kwargs)
+
+
+def _execute_legacy(
+    input: Optional[RocpdImportData],
+    config: Optional[output_config.output_config] = None,
+    **kwargs: Any,
+) -> Optional[RocpdImportData]:
+    """
+    Execute AI analysis on rocpd database and/or source directory (legacy implementation).
 
     Args:
         input: RocpdImportData object with database connection, or None for source-only mode
