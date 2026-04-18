@@ -242,6 +242,41 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // s_cmov_b{32,64}: scalar conditional move on SCC. Hardware
+  // semantics (per the gfx1250 ISA manual; see also
+  // SOPInstructions.td `let Uses = [SCC]`):
+  //   if (SCC) sdst = src; else sdst stays unchanged
+  // SCC is read but not written.
+  //
+  // LLVM's SOP1_32/SOP1_64 pseudo for S_CMOV_B{32,64} declares
+  //   `(outs sdst), (ins src0)`
+  // *without* a tied sdst_in input — the dst-on-SCC=0 read-modify
+  // is implicit in the hardware encoding rather than modeled at
+  // the MachineInstr level. So `op.nSrcs()` is 1 here (just src0)
+  // and the prior dst value must be read explicitly via
+  // `regs.readReg{32,64}(op.dst())`. The companion S_BITSET ops
+  // above are the opposite case: their tied sdst_in is in srcMap
+  // at index 1 because LLVM's `kKnownTiedIn` audit (decode.cpp)
+  // keeps it. This asymmetry is a property of the LLVM .td
+  // definitions, not a transpiler choice.
+  if (sop == SemOp::S_CMOV_B32) {
+    Value *cond = ctx.regs.loadSCC(ctx.B);
+    Value *src = op.src(0);
+    Value *oldDst = ctx.regs.readReg32(ctx.B, op.dst());
+    ctx.regs.writeReg32(ctx.B, op.dst(),
+                        ctx.B.CreateSelect(cond, src, oldDst, "scmov"));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_CMOV_B64) {
+    Value *cond = ctx.regs.loadSCC(ctx.B);
+    Value *src = op.src64(0);
+    Value *oldDst = ctx.regs.readReg64(ctx.B, op.dst());
+    ctx.regs.writeReg64(ctx.B, op.dst(),
+                        ctx.B.CreateSelect(cond, src, oldDst, "scmov64"));
+    hr.handled = true;
+    return hr;
+  }
   // S_SET_VGPR_MSB is SOPP format — handled in handleSOPP, not here.
   // GFX12+ `s_barrier_signal` appears in SOP1 encoding; model it as a no-op
   // (the paired SOPP `s_barrier_wait` does the actual rendezvous).

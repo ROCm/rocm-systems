@@ -190,6 +190,13 @@ static const Entry kCanonTable[] = {
     E(S_BITSET1_B32, S_BITSET1_B32),
     E(S_BITSET0_B64, S_BITSET0_B64),
     E(S_BITSET1_B64, S_BITSET1_B64),
+    // S_CMOV uses [SCC] but does not write SCC, and has no _e64 form
+    // (SOP1 has only one encoding). The B64 alias is included even
+    // though the corpus first surfaced only the B32 form, because
+    // the B64 form ships in the same gfx1250 SOP1 table at adjacent
+    // opcode (.td: 0x002 / 0x003) and the handler is symmetric.
+    E(S_CMOV_B32, S_CMOV_B32),
+    E(S_CMOV_B64, S_CMOV_B64),
 
     // ---------------------------------------------------------------------
     // SOP2

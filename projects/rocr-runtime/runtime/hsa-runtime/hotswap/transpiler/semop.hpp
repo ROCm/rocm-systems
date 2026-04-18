@@ -62,6 +62,14 @@ enum class SemOp : uint16_t {
   // B64 variants index into 64 bits (bit index is still an SReg_32).
   S_BITSET0_B32, S_BITSET1_B32,
   S_BITSET0_B64, S_BITSET1_B64,
+  // Conditional move on SCC. `if (SCC) sdst = src; else sdst stays
+  // unchanged.` The dst-on-SCC=0 read-modify is NOT modeled by LLVM
+  // as a tied sdst_in operand on the MCInst (SOP1_32/SOP1_64 just
+  // declares `(outs sdst), (ins src0)`), so the handler must
+  // explicitly read the prior dst value via
+  // `ctx.regs.readReg{32,64}(op.dst())`. SCC is read but not
+  // written.
+  S_CMOV_B32, S_CMOV_B64,
 
   // -- SOP2 --
   S_ADD_U32, S_ADDC_U32, S_SUB_U32, S_SUBB_U32, S_ADD_U64,
