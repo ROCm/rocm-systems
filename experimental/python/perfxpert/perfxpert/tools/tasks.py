@@ -217,3 +217,46 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "meta": json.loads(row["meta_json"] or "{}"),
         "created_at": row["created_at"],
     }
+
+
+# -- Module-level convenience wrappers ---------------------------------------
+# Agents (see perfxpert/agents/correctness.py) call `tasks.query_by_kernel(name)`
+# as if it were a free function. Provide wrappers that instantiate a default
+# TaskStore so callers don't thread a store through the agent API.
+
+_DEFAULT_STORE: Optional[TaskStore] = None
+
+
+def _default_store() -> TaskStore:
+    global _DEFAULT_STORE
+    if _DEFAULT_STORE is None:
+        import os
+        root = Path(os.environ.get("PERFXPERT_TASK_ROOT", str(Path.home() / ".perfxpert")))
+        _DEFAULT_STORE = TaskStore(root)
+        _DEFAULT_STORE.init()
+    return _DEFAULT_STORE
+
+
+def query_by_kernel(kernel_name: str) -> List[Dict[str, Any]]:
+    """Return task rows whose metadata references `kernel_name`."""
+    return _default_store().query_by_kernel(kernel_name)
+
+
+def create(title: str, **kwargs: Any) -> str:
+    return _default_store().create(title, **kwargs)
+
+
+def next_task(exclude_ids: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    return _default_store().next(exclude_ids=exclude_ids)
+
+
+def update(task_id: str, **kwargs: Any) -> None:
+    _default_store().update(task_id, **kwargs)
+
+
+def close(task_id: str = None, reason: str = "done") -> None:
+    _default_store().close(task_id=task_id, reason=reason)
+
+
+def show(task_id: str) -> Dict[str, Any]:
+    return _default_store().show(task_id)
