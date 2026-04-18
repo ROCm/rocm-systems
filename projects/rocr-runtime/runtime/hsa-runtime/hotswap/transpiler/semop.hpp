@@ -133,6 +133,13 @@ enum class SemOp : uint16_t {
   V_MBCNT_LO_U32_B32, V_MBCNT_HI_U32_B32,
   V_READLANE_B32, V_WRITELANE_B32,
   V_MED3_F32, V_MAX3_F32, V_MIN3_F32, V_MAX3_NUM_F32,
+  // VOP3 IEEE-2019 ternary clamp `minnum(maxnum(s0, s1), s2)`.
+  // gfx12 renamed gfx11's V_MINMAX_F32 (.td:1485, opcode 0x25f)
+  // to V_MINMAX_NUM_F32 (.td:1696, opcode 0x268) when the .NUM
+  // suffix was introduced to disambiguate from the IEEE-754
+  // 2019 V_MINIMUMMAXIMUM_F32 (NaN-propagating, opcode 0x26c).
+  // The opcode_map collapses both real names onto this SemOp.
+  V_MINMAX_NUM_F32,
   // VOP3 integer 3-way max/min/median. The .td uses
   // AMDGPU{u,s}{max,min,med}3 SDAG nodes which the backend pattern-
   // matches; we lift them as the natural 2-step ICmp+Select chain

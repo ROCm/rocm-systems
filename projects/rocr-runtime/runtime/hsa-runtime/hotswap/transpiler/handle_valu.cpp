@@ -866,6 +866,29 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 v_minmax_num_f32: dst = minnum(maxnum(s0, s1), s2).
+  // gfx11 emitted this as v_minmax_f32; gfx12 renamed it to
+  // v_minmax_num_f32 once the IEEE-2019 NaN-propagating
+  // V_MINIMUMMAXIMUM_F32 (opcode 0x26c) needed an unambiguous
+  // namesake. The .NUM suffix is the IEEE-754 2008 minNum
+  // semantic — NaN-pruning, exactly what `llvm.maxnum` /
+  // `llvm.minnum` model. Same shape as V_MAX3_F32 above with
+  // minnum as the outer reduction.
+  if (sop == SemOp::V_MINMAX_NUM_F32) {
+    Value *s0 = op.srcF(0), *s1 = op.srcF(1), *s2 = op.srcF(2);
+    if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+    if (s1->getType() != ctx.f32Ty) s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    if (s2->getType() != ctx.f32Ty) s2 = ctx.B.CreateBitCast(s2, ctx.f32Ty);
+    Function *maxFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::maxnum, {ctx.f32Ty});
+    Function *minFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::minnum, {ctx.f32Ty});
+    Value *mx = ctx.B.CreateCall(maxFn, {s0, s1}, "vminmax_inner");
+    Value *r = ctx.B.CreateCall(minFn, {mx, s2}, "vminmax_num");
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(r, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_MIN3_F32) {
     Value *s0 = op.srcF(0), *s1 = op.srcF(1), *s2 = op.srcF(2);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);

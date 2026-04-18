@@ -362,6 +362,11 @@ static const Entry kCanonTable[] = {
     E(V_MED3_F32_e64, V_MED3_F32),
     E(V_MAX3_F32_e64, V_MAX3_F32),
     E(V_MIN3_F32_e64, V_MIN3_F32),
+    // gfx11 V_MINMAX_F32 (opcode 0x25f) and the gfx12-renamed
+    // V_MINMAX_NUM_F32 (opcode 0x268) share the same minnum-of-
+    // maxnum semantics; both LLVM pseudos canonicalize onto
+    // V_MINMAX_F32_e64 so a single mapping suffices.
+    E(V_MINMAX_F32_e64, V_MINMAX_NUM_F32),
     // gfx11/gfx12 VOP3 integer 3-way max (opcode 0x21e, see
     // VOP3Instructions.td:1795). LLVM only emits the e64 form for
     // VOP3 ternaries; no DPP variant exists for v_max3_*.
