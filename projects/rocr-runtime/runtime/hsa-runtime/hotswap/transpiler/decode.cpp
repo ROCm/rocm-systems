@@ -322,6 +322,41 @@ void decodeDppModifiers(DecodedInst &di) {
   di.dppBoundCtrl = (*boundCtrl) != 0;
 }
 
+// Decode the 16-bit `OpName::offset` immediate of `ds_swizzle_b32`
+// into `di.dsSwizzleImm` so the obstruction classifier and the DS
+// handler share a single canonical extraction point. Mirrors the
+// `decodeDppModifiers` pattern: decode-time field population, no
+// per-call MCInst probing in downstream consumers.
+//
+// Only fires for `SemOp::DS_SWIZZLE_B32`. For every other instruction
+// `hasDsSwizzleImm` stays false and `dsSwizzleImm` is meaningless;
+// consumers MUST gate on `hasDsSwizzleImm`.
+//
+// Soundness: refuses to populate the field if the operand is missing,
+// non-immediate, or outside the unsigned 16-bit range. The classifier
+// treats `!hasDsSwizzleImm` as "rewriteImplemented = false" so the
+// kernel refuses loudly with a malformed-disassembly diagnostic
+// rather than silently truncating a wider value to uint16_t (which
+// could land in either the QUAD_PERM or BITMASK_PERM safe envelope
+// and cause a silent miscompile).
+void decodeDsSwizzleImm(DecodedInst &di) {
+  if (di.semOp != SemOp::DS_SWIZZLE_B32)
+    return;
+  const MCInst &inst = di.inst;
+  int idx = AMDGPU::getNamedOperandIdx(inst.getOpcode(),
+                                        AMDGPU::OpName::offset);
+  if (idx < 0 || static_cast<unsigned>(idx) >= inst.getNumOperands())
+    return;
+  const MCOperand &mop = inst.getOperand(static_cast<unsigned>(idx));
+  if (!mop.isImm())
+    return;
+  int64_t raw = mop.getImm();
+  if (raw < 0 || raw > 0xFFFF)
+    return;
+  di.dsSwizzleImm = static_cast<uint16_t>(raw);
+  di.hasDsSwizzleImm = true;
+}
+
 // Pull every branch-target offset out of a branch instruction's
 // immediates and insert the resulting byte offsets into `blockStarts`.
 // Signed 16-bit PC-relative offset * 4 bytes, relative to the
@@ -391,6 +426,7 @@ DecodeResult decodeKernel(const MCState &mc,
 
     decodeScaleOffset(di);
     decodeDppModifiers(di);
+    decodeDsSwizzleImm(di);
     buildSrcMap(di, desc);
     driftCheckTiedIn(di, desc);
     driftCheckSrcN(di, desc);

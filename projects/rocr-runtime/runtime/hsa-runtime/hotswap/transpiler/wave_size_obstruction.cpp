@@ -146,40 +146,6 @@ std::optional<int64_t> extractLaneOperandImm(const DecodedInst &di) {
   return std::nullopt; // dynamic SGPR operand — cannot statically prove range
 }
 
-// Extract the 16-bit `offset` immediate of a `ds_swizzle_b32`
-// instruction. Used by the §3 Class 2 DsSwizzle gate to decide whether
-// the encoded swizzle pattern is wave-size-oblivious under modulo-
-// replication (see `dsSwizzleSafeForModRep` below).
-//
-// Returns std::nullopt if:
-//   * The operand is missing (LLVM operand-table mismatch).
-//   * The operand is non-immediate (malformed disassembly).
-//   * The operand value is outside the unsigned 16-bit range
-//     (AMDGPU SIDefines.h `Swizzle::EncBits` is a 16-bit envelope;
-//     anything wider would signal a stale operand-encoding contract).
-//
-// Refusing to truncate silently here keeps the safety check in
-// `dsSwizzleSafeForModRep` from silently passing what is actually a
-// corrupted imm — an `imm > 0xFFFF` truncated to uint16_t could
-// accidentally land in either the QUAD_PERM or BITMASK_PERM safe
-// envelope. This also matches the no-fallback contract noted in
-// AGENTS.md.
-std::optional<uint16_t>
-extractDsSwizzleOffsetImm(const DecodedInst &di) {
-  const MCInst &inst = di.inst;
-  int idx =
-      AMDGPU::getNamedOperandIdx(inst.getOpcode(), AMDGPU::OpName::offset);
-  if (idx < 0 || static_cast<unsigned>(idx) >= inst.getNumOperands())
-    return std::nullopt;
-  const MCOperand &op = inst.getOperand(idx);
-  if (!op.isImm())
-    return std::nullopt;
-  int64_t raw = op.getImm();
-  if (raw < 0 || raw > 0xFFFF)
-    return std::nullopt;
-  return static_cast<uint16_t>(raw);
-}
-
 // Decide whether a `ds_swizzle_b32` immediate encodes a swizzle mode
 // that is *structurally* wave-size-oblivious under modulo-replication
 // (SPE_DESIGN.md §7's coverage-ladder rung 1).
@@ -395,21 +361,26 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       // structural argument); FFT_MODE / ROTATE_MODE / unknown-high-
       // nibble imms remain pending and refuse loudly via the same
       // CrossWaveShuffleRewritePending channel as before.
-      auto immOpt = extractDsSwizzleOffsetImm(di);
-      if (!immOpt.has_value()) {
-        // Malformed disassembly: the imm is missing or non-immediate.
-        // Refuse — the handler would otherwise have to invent a
-        // value, which violates the no-fallback contract.
+      //
+      // The 16-bit imm is extracted at decode time into
+      // `di.dsSwizzleImm` (see `decode.cpp::decodeDsSwizzleImm`).
+      // `!di.hasDsSwizzleImm` here means the decoder rejected the
+      // operand (missing, non-immediate, or out of 16-bit range);
+      // we mirror that rejection as a P6-pending refusal with a
+      // malformed-disassembly diagnostic so the kernel fails loudly
+      // rather than the handler inventing a value.
+      if (!di.hasDsSwizzleImm) {
         site.rewriteImplemented = false;
-        site.detail = "ds_swizzle_b32 missing OpName::offset immediate "
-                      "operand — disassembly malformed";
+        site.detail = "ds_swizzle_b32 missing/invalid OpName::offset "
+                      "immediate operand — disassembly malformed or "
+                      "outside 16-bit range";
       } else {
-        site.rewriteImplemented = dsSwizzleSafeForModRep(*immOpt);
+        site.rewriteImplemented = dsSwizzleSafeForModRep(di.dsSwizzleImm);
         if (!site.rewriteImplemented) {
           std::string det;
           raw_string_ostream os(det);
           os << "ds_swizzle_b32 imm 0x"
-             << format_hex_no_prefix(*immOpt, 4)
+             << format_hex_no_prefix(di.dsSwizzleImm, 4)
              << " uses FFT_MODE/ROTATE_MODE/unknown sub-mode — not "
                 "modulo-replication-safe (P6.b pending)";
           site.detail = os.str();

@@ -70,6 +70,30 @@ struct DecodedInst {
   uint8_t dppBankMask = 0xF;
   bool dppBoundCtrl = false;
 
+  // ── ds_swizzle_b32 imm state (SPE_DESIGN.md §3 Class 2: DsSwizzle) ──
+  //
+  // The 16-bit `OpName::offset` immediate of `ds_swizzle_b32` encodes
+  // a swizzle-mode selector + per-mode parameters (SIDefines.h
+  // `Swizzle::EncBits`). Both the Phase 1.4.5 obstruction classifier
+  // and `handle_ds.cpp::DS_SWIZZLE_B32` need this value: the
+  // classifier to gate cross-wave safety via `dsSwizzleSafeForModRep`,
+  // the handler to materialise the `i32 immarg` for
+  // `llvm.amdgcn.ds.swizzle`. We extract once at decode time so both
+  // consumers share a single canonical value (mirrors the
+  // `hasDpp` / `dppCtrl` block above; same `decodeDsSwizzleImm`
+  // pattern as `decodeDppModifiers`).
+  //
+  // Sentinel: when `semOp != DS_SWIZZLE_B32`, `hasDsSwizzleImm`
+  // stays false and `dsSwizzleImm` is meaningless. The decoder
+  // refuses to set the field if the operand is missing,
+  // non-immediate, or outside the unsigned 16-bit range — same
+  // soundness contract as the classifier extractor (an out-of-range
+  // value silently truncated to uint16_t could land in either the
+  // QUAD_PERM or BITMASK_PERM safe envelope and cause a silent
+  // miscompile, so we refuse to populate it instead).
+  bool hasDsSwizzleImm = false;
+  uint16_t dsSwizzleImm = 0;
+
   unsigned firstSrcIdx = 0;
 
   // Upper bound on the logical-source count the raiser's walk can produce.

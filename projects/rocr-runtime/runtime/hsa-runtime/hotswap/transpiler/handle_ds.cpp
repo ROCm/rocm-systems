@@ -399,39 +399,28 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     // `emitUnderExec` so all hardware lanes participate, and trust
     // that inactive-lane reads of the result do not feed any
     // observable side effect under a correct source kernel.
-    int offsetIdx = AMDGPU::getNamedOperandIdx(di.inst.getOpcode(),
-                                                AMDGPU::OpName::offset);
-    if (offsetIdx < 0 ||
-        (unsigned)offsetIdx >= di.inst.getNumOperands() ||
-        !di.inst.getOperand((unsigned)offsetIdx).isImm()) {
+    // The 16-bit imm is extracted once at decode time into
+    // `di.dsSwizzleImm` (see `decode.cpp::decodeDsSwizzleImm`); the
+    // decoder enforces the unsigned 16-bit range and refuses to
+    // populate the field on missing / non-immediate / out-of-range
+    // operands. A `!di.hasDsSwizzleImm` here means the decoder
+    // rejected this exact site, which the cross-wave classifier
+    // already mirrors as a refusal — but a same-wave raise bypasses
+    // the classifier and still reaches us, so refuse loudly here too
+    // for symmetry with the cross-wave path.
+    if (!di.hasDsSwizzleImm) {
       hr.failure = RaiseFailure::unsupportedShape(
           di, "DS",
-          "ds_swizzle_b32 missing or non-immediate offset operand "
-          "(expected OpName::offset)");
+          "ds_swizzle_b32 missing/invalid OpName::offset immediate "
+          "operand — decoder rejected the 16-bit imm");
       return hr;
     }
-    int64_t rawImm = di.inst.getOperand((unsigned)offsetIdx).getImm();
-    // The MC operand stores the 16-bit `offset` field as int64_t.
-    // The encoding is unsigned 16-bit per AMDGPU SIDefines.h
-    // `Swizzle::EncBits`, so the value must fit in [0, 0xFFFF]. A
-    // value outside this range would indicate either a malformed
-    // disassembly or an LLVM-side change to the operand encoding
-    // we have not accounted for; abort loudly rather than silently
-    // truncate via the uint16_t cast below.
-    if (rawImm < 0 || rawImm > 0xFFFF) {
-      hr.failure = RaiseFailure::unsupportedShape(
-          di, "DS",
-          "ds_swizzle_b32 offset imm out of 16-bit range — disassembly "
-          "or LLVM operand-encoding change");
-      return hr;
-    }
-    uint16_t offsetImm = static_cast<uint16_t>(rawImm);
     Value *src = op.src(0);
     Function *swiz = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_ds_swizzle);
     Value *result = ctx.B.CreateCall(
         swiz,
-        {src, ConstantInt::get(ctx.i32Ty, offsetImm)},
+        {src, ConstantInt::get(ctx.i32Ty, di.dsSwizzleImm)},
         "ds_swiz");
     ctx.writeReg32(op.dst(), result);
     hr.handled = true;
