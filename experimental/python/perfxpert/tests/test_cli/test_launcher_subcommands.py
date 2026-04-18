@@ -276,3 +276,94 @@ def test_main_default_invocation_stages_runtime_cfg_dir(
     assert rc == 0
     # Default interactive: should stage into a runtime cache dir, NOT None.
     assert captured["kwargs"].get("cwd") is not None  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# --help / -h routing (cycle-2 N2 coverage).
+# ---------------------------------------------------------------------------
+
+
+class TestHelpFlag:
+    """Help-flag handling composed from Phase 7's `_handle_help_flag`.
+
+    Bare ``--help`` / ``-h`` before any positional must print the AMD
+    PerfXpert banner (via _print_perfxpert_help) and then fall through
+    to ``opencode --help``. A help flag AFTER a positional (e.g.
+    ``run --help``) is subcommand-specific and passes through verbatim.
+    """
+
+    @pytest.mark.parametrize("flag", ["--help", "-h"])
+    def test_bare_help_flag_prints_perfxpert_banner(
+        self, flag: str, capsys, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Ensure opencode is unresolved so main() short-circuits after
+        # printing the banner (per the composed fallback behavior).
+        def _raise(*_args, **_kwargs):
+            raise FileNotFoundError("opencode not installed")
+
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_opencode_binary", _raise,
+        )
+        rc = main([flag])
+        out = capsys.readouterr().out
+        # Banner printed — bubble exit 0 so discovery path is clean.
+        assert rc == 0
+        assert "AMD ROCm PerfXpert" in out
+        assert "perfxpert-owned subcommands" in out
+
+    @pytest.mark.parametrize("flag", ["--help", "-h"])
+    def test_help_after_opencode_subcommand_passes_through(
+        self, flag: str, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """``perfxpert-code run --help`` must forward to opencode verbatim
+        rather than printing our banner — that's opencode's own subcommand
+        help request."""
+        fake_bin = tmp_path / "opencode"
+        fake_bin.write_text("#!/bin/sh\nexit 0\n")
+        fake_bin.chmod(0o755)
+        fake_cfg = tmp_path / "cfg"
+        fake_cfg.mkdir()
+
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+            lambda: fake_bin,
+        )
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_config_dir",
+            lambda: fake_cfg,
+        )
+        monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+        captured: dict[str, object] = {}
+
+        def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured["cmd"] = list(cmd)
+            captured["kwargs"] = kwargs
+            return _FakeProc(0)
+
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run,
+        )
+        rc = main(["run", flag])
+        assert rc == 0
+        # The help flag was forwarded to opencode verbatim (not stripped).
+        assert flag in captured["cmd"]  # type: ignore[operator]
+        # And because `run` is a known opencode subcommand, cwd is None
+        # (user's project CWD preserved).
+        assert captured["kwargs"].get("cwd") is None  # type: ignore[union-attr]
+
+    def test_bare_help_short_circuits_before_opencode_missing_error(
+        self, capsys, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If opencode isn't installed, bare --help MUST still print our
+        banner and return 0 (per the composed Phase 7 behavior).
+        """
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+            lambda: (_ for _ in ()).throw(
+                FileNotFoundError("opencode binary not found.")
+            ),
+        )
+        rc = main(["--help"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "AMD ROCm PerfXpert" in out
