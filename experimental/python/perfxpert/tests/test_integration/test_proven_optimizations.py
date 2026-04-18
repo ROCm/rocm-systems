@@ -31,17 +31,33 @@ def cases():
 
 
 def _get_total_kernel_duration_ns(db_path: str) -> int:
-    """Sum all kernel durations from the DB."""
+    """Sum all kernel durations from the DB.
+
+    Supports two schemas:
+    - Synthetic Phase 7 PR 1 fixtures: table has an explicit `duration_ns` column
+    - Real rocprofv3 fixtures: duration derived from `(end_ns - start_ns)`
+    Both use UUID-suffixed table names (rocpd_kernel_dispatch_<uuid>).
+    """
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch_%'")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_kernel_dispatch_%'"
+        )
         table_names = cur.fetchall()
         if not table_names:
             return 0
         table_name = table_names[0][0]
-        # Query the kernel dispatch table — column order: id, name, duration_ns, ...
-        cur.execute(f"SELECT SUM(duration_ns) FROM {table_name}")
+        # Probe the schema — prefer explicit duration_ns; else derive from end-start.
+        cols = {r[1] for r in cur.execute(f'PRAGMA table_info("{table_name}")').fetchall()}
+        if "duration_ns" in cols:
+            cur.execute(f'SELECT SUM(duration_ns) FROM "{table_name}"')
+        elif "end_ns" in cols and "start_ns" in cols:
+            cur.execute(f'SELECT SUM(end_ns - start_ns) FROM "{table_name}"')
+        elif "end" in cols and "start" in cols:
+            cur.execute(f'SELECT SUM("end" - "start") FROM "{table_name}"')
+        else:
+            return 0
         result = cur.fetchone()
         return int(result[0]) if result and result[0] is not None else 0
     finally:
@@ -101,19 +117,25 @@ def test_case_fixture_dbs_readable(case_id, cases):
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
 
-        # Check for rocpd_metadata table
+        # Check for rocpd_metadata table. Real rocprofv3 output uses a UUID-suffixed
+        # name (rocpd_metadata_<uuid>); synthetic fixtures may use the plain name.
         cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='rocpd_metadata'"
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND (name = 'rocpd_metadata' OR name LIKE 'rocpd_metadata_%')"
         )
-        assert cur.fetchone() is not None, (
-            f"{case_id}/{fixture_key}: missing rocpd_metadata table"
+        meta_tables = cur.fetchall()
+        assert meta_tables, (
+            f"{case_id}/{fixture_key}: missing rocpd_metadata(_<uuid>) table"
         )
 
-        # Check active_uuid is set
-        cur.execute("SELECT value FROM rocpd_metadata WHERE key='active_uuid'")
-        uuid_val = cur.fetchone()
-        assert uuid_val is not None, (
-            f"{case_id}/{fixture_key}: rocpd_metadata missing active_uuid"
+        # Pick whichever variant this DB uses.
+        meta_table = meta_tables[0][0]
+        # Check the metadata row has some content (key/value for synthetic, or any row
+        # for real rocprofv3 — the real schema is different but non-empty).
+        cur.execute(f'SELECT COUNT(*) FROM "{meta_table}"')
+        count = cur.fetchone()[0]
+        assert count and count > 0, (
+            f"{case_id}/{fixture_key}: {meta_table} is empty"
         )
 
         conn.close()
