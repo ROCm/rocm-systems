@@ -25,7 +25,8 @@
 ; STDERR-SAME: ds_swizzle
 
 ; Classifier trace must surface the DsSwizzle site with `[pending]`
-; and a detail line citing the RESERVED top-nibble envelope. The
+; and a detail line citing the RESERVED top-nibble (one of the
+; broader "not a valid swizzle encoding" refusal categories). The
 ; exact imm value (0x9000) is asserted to pin the imm-extraction
 ; path against silent truncation.
 ; STDERR: DsSwizzle
@@ -33,7 +34,8 @@
 ; STDERR: rewrite: P6
 ; STDERR-SAME: pending
 ; STDERR: detail: ds_swizzle_b32 imm 0x9000
-; STDERR-SAME: RESERVED top-nibble envelope
+; STDERR-SAME: not a valid swizzle encoding
+; STDERR-SAME: RESERVED top-nibble
 ; STDERR-SAME: AMDGPU hardware semantics undefined
 ; STDERR: outcome: (c) refuse
 

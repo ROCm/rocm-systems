@@ -153,71 +153,91 @@ std::optional<int64_t> extractLaneOperandImm(const DecodedInst &di) {
 // The 16-bit imm encodes one of seven modes (SIDefines.h
 // `Swizzle::Id`). Per AMDGPU SIDefines.h `Swizzle::EncBits`:
 //
-//   QUAD_PERM_ENC   == 0x8000, QUAD_PERM_ENC_MASK    == 0xFF00
+//   QUAD_PERM_ENC    == 0x8000, QUAD_PERM_ENC_MASK    == 0xFF00
 //   BITMASK_PERM_ENC == 0x0000, BITMASK_PERM_ENC_MASK == 0x8000
-//   FFT_MODE_ENC    == 0xE000  (FFT_ROTATE_MODE_MASK == 0xF000)
-//   ROTATE_MODE_ENC == 0xC000  (FFT_ROTATE_MODE_MASK == 0xF000)
+//   FFT_MODE_ENC     == 0xE000  (FFT_ROTATE_MODE_MASK  == 0xF000)
+//   ROTATE_MODE_ENC  == 0xC000  (FFT_ROTATE_MODE_MASK  == 0xF000)
 //
-// All four valid swizzle-mode envelopes (QUAD_PERM / BITMASK_PERM /
-// FFT_MODE / ROTATE_MODE) are wave-size-oblivious under modulo-
-// replication. The argument is the same for all four: wave64
+// Within each envelope, only specific sub-encodings are *valid*:
+//
+//   QUAD_PERM     — bits 0..7  encode four 2-bit lane selectors.
+//                   All 256 imms in [0x8000, 0x80FF] are valid.
+//
+//   BITMASK_PERM  — bits 0..4  AND mask (0..31)
+//                   bits 5..9  OR mask  (0..31)
+//                   bits 10..14 XOR mask (0..31)
+//                   bit 15      = 0 (envelope discriminator)
+//                   All 32K imms in [0x0000, 0x7FFF] are valid.
+//
+//   FFT_MODE      — bits 0..4   FFT_SWIZZLE_MASK (0..31)
+//                   bits 5..11  reserved, MUST be 0
+//                   bits 12..15 = 0xE (envelope discriminator)
+//                   Valid imms: exactly the 32 in [0xE000, 0xE01F].
+//
+//   ROTATE_MODE   — bits 0..4   reserved, MUST be 0
+//                   bits 5..9   ROTATE_SIZE_MASK (0..31)
+//                   bit  10     ROTATE_DIR_MASK  (0|1)
+//                   bit  11     reserved, MUST be 0
+//                   bits 12..15 = 0xC (envelope discriminator)
+//                   Valid imms: exactly the 64 with bits 0..4=0,
+//                   bit 11=0, top nibble=0xC.
+//
+// All four valid-encoding sub-spaces are wave-size-oblivious under
+// modulo-replication. The argument is the same for all four: wave64
 // ds_swizzle hardware preserves bit 5 of the lane id, so each
-// 32-lane half independently performs the same permutation. The
-// preservation is a hardware contract not documented in
-// IntrinsicsAMDGPU.td or AMDGPUUsage.rst; verified empirically on
-// gfx942 (CDNA3) wave64 across the four envelopes:
+// 32-lane half independently performs the same permutation.
+// Preservation verified empirically on gfx942 (CDNA3) wave64 across
+// the four envelopes (see the MODREP block in handle_ds.cpp for the
+// per-envelope probe results and the LLVM-upstream-test cross-
+// citation that lifts the property to the wave64 GPU family).
 //
-//   * QUAD_PERM (top byte = 0x80) — confined to 4-lane quads by the
-//     2-bit lane selectors per quad. Trivially per-half-independent.
+// REFUSED imms (any of):
+//   * RESERVED top-nibble envelopes (top nibble in
+//     {0x9, 0xA, 0xB, 0xD, 0xF}) — `Swizzle::EncBits` assigns no
+//     semantics; hardware behavior is undefined.
+//   * FFT_MODE imms with reserved bits 5..11 set — within the FFT
+//     envelope but outside the valid sub-encoding space; hardware
+//     behavior likewise undefined.
+//   * ROTATE_MODE imms with reserved bits 0..4 or 11 set — same
+//     argument.
 //
-//   * BITMASK_PERM (top bit = 0)  — 5-bit AND/OR/XOR masks address
-//     only bits 0..4 of lane id at the encoding level. Probed via
-//     BROADCAST(32, 5) → lanes 32..63 read lane 37 (= 32+5) and
-//     SWAP-1 → lane 32↔33, …, 62↔63. Per-half-independent.
+// Refusing these (rather than silently passing them through to
+// `llvm.amdgcn.ds.swizzle`, which would emit `ds_swizzle_b32
+// offset:<imm>` and let the wave64 hardware do whatever it does
+// for an undefined imm) matches the no-fallback contract.
 //
-//   * FFT_MODE (top nibble = 0xE) — 5-bit FFT swizzle selector
-//     drives a butterfly pattern within each 32-lane half. Probed
-//     across sub-modes 0x00 (5-bit-reverse), 0x10 (4-bit-reverse-
-//     in-16-lane-group), 0x1F (identity); upper-half result is
-//     lower-half-result + 32 in every case.
-//
-//   * ROTATE_MODE (top nibble = 0xC) — direction bit (10) +
-//     5-bit size selector (bits 5..9). Probed across ROTATE-LEFT-1
-//     and ROTATE-LEFT-31; each 32-lane half rotates internally
-//     (lane 31 → lane 0, lane 63 → lane 32 for left-1).
-//
-// The BROADCAST/SWAP/REVERSE/raw-bitmask family that wave32 source
-// kernels can encode therefore all map cleanly under modulo-
-// replication. See the MODREP block in handle_ds.cpp for the full
-// reproduction notes (the probe kernels live in inline asm under
-// /tmp during development; if the hardware contract is ever
-// re-questioned, regenerate the probes from the documentation in
-// the handler).
-//
-// RESERVED top-nibble envelopes (0x9, 0xA, 0xB, 0xD, 0xF): the
-// AMDGPU SIDefines.h `Swizzle::EncBits` table assigns no semantics
-// to these. Hardware behavior is undefined; refuse loudly so the
-// kernel does not silently lift to whatever the wave64 backend
-// happens to do.
-//
-// Check ordering note: the four valid-mode checks are pairwise
-// disjoint on bit 15 / top byte / top nibble, so the order between
-// them is irrelevant for correctness. The implicit "no match →
-// return false" branch correctly catches the RESERVED envelopes.
+// Check ordering note: the four valid-encoding checks are pairwise
+// disjoint on the discriminator bits (bit 15 separates QUAD_PERM /
+// BITMASK_PERM; the top nibble separates FFT_MODE / ROTATE_MODE
+// from QUAD_PERM and from each other), so the order between them
+// is irrelevant for correctness. The implicit "no match → return
+// false" branch correctly catches all the REFUSED categories.
 bool dsSwizzleSafeForModRep(uint16_t imm) {
-  if ((imm & AMDGPU::Swizzle::QUAD_PERM_ENC_MASK) ==
-      AMDGPU::Swizzle::QUAD_PERM_ENC)
+  using namespace AMDGPU::Swizzle;
+  if ((imm & QUAD_PERM_ENC_MASK) == QUAD_PERM_ENC)
     return true;
-  if ((imm & AMDGPU::Swizzle::BITMASK_PERM_ENC_MASK) ==
-      AMDGPU::Swizzle::BITMASK_PERM_ENC)
+  if ((imm & BITMASK_PERM_ENC_MASK) == BITMASK_PERM_ENC)
     return true;
-  if ((imm & AMDGPU::Swizzle::FFT_ROTATE_MODE_MASK) ==
-      AMDGPU::Swizzle::FFT_MODE_ENC)
+  // FFT_MODE: discriminator (top nibble = 0xE) AND every reserved
+  // bit (5..11) clear. Equivalent to: imm & ~FFT_SWIZZLE_MASK ==
+  // FFT_MODE_ENC, with the mask cast to uint16_t to keep the
+  // bitwise-not within the 16-bit envelope (otherwise `~uint16_t`
+  // promotes to int and would set bits 16..31 of the comparison
+  // operand).
+  if ((imm & static_cast<uint16_t>(~FFT_SWIZZLE_MASK)) == FFT_MODE_ENC)
     return true;
-  if ((imm & AMDGPU::Swizzle::FFT_ROTATE_MODE_MASK) ==
-      AMDGPU::Swizzle::ROTATE_MODE_ENC)
+  // ROTATE_MODE: discriminator (top nibble = 0xC) AND only the size
+  // (bits 5..9) and direction (bit 10) bits set. Variable-bit mask
+  // is (ROTATE_SIZE_MASK << ROTATE_SIZE_SHIFT) | (ROTATE_DIR_MASK
+  // << ROTATE_DIR_SHIFT) = 0x7E0; everything else (including
+  // reserved bits 0..4 and 11) must match ROTATE_MODE_ENC exactly.
+  constexpr uint16_t ROTATE_VAR_MASK =
+      (ROTATE_SIZE_MASK << ROTATE_SIZE_SHIFT) |
+      (ROTATE_DIR_MASK << ROTATE_DIR_SHIFT);
+  if ((imm & static_cast<uint16_t>(~ROTATE_VAR_MASK)) == ROTATE_MODE_ENC)
     return true;
-  // RESERVED top-nibble envelope (0x9, 0xA, 0xB, 0xD, 0xF): refuse.
+  // RESERVED top-nibble envelope, FFT/ROTATE with reserved bits
+  // set, or any other non-valid encoding: refuse.
   return false;
 }
 
@@ -395,9 +415,10 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
           raw_string_ostream os(det);
           os << "ds_swizzle_b32 imm 0x"
              << format_hex_no_prefix(di.dsSwizzleImm, 4)
-             << " is in the RESERVED top-nibble envelope "
-                "(not QUAD_PERM/BITMASK_PERM/FFT_MODE/ROTATE_MODE) — "
-                "AMDGPU hardware semantics undefined";
+             << " is not a valid swizzle encoding (not QUAD_PERM, "
+                "BITMASK_PERM, valid FFT_MODE, or valid ROTATE_MODE) "
+                "— RESERVED top-nibble or FFT/ROTATE reserved bits "
+                "set; AMDGPU hardware semantics undefined";
           site.detail = os.str();
         }
       }
