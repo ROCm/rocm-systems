@@ -55,7 +55,7 @@ from ..tracelens_port import (
     analyze_kernels_by_category,
     analyze_short_kernels,
 )
-from .llm_analyzer import AnalysisContext, LLMAnalyzer
+from .llm_analyzer import LLMAnalyzer
 from .exceptions import (
     DatabaseNotFoundError,
     DatabaseCorruptedError,
@@ -800,79 +800,18 @@ def _route_to_legacy(
         result.profiling_info.profiling_mode = "thread_trace"
 
     # Optional LLM enhancement
+    # NOTE: Phase 6 deprecation — LLMAnalyzer is a stub in legacy mode
+    # The analyze_with_llm() method is deleted; LLM enhancement not available in legacy path
     if enable_llm and llm_provider:
-        try:
-            if verbose:
-                print(f"[Analysis] Enhancing with {llm_provider} LLM...")
-
-            analyzer = LLMAnalyzer(
-                provider=llm_provider,
-                api_key=llm_api_key,
-                verbose=verbose,
-                thinking_budget_tokens=llm_thinking_tokens,
+        result.warnings.append(
+            AnalysisWarning(
+                severity="warning",
+                message="LLM enhancement is not available in legacy mode (PERFXPERT_LEGACY=1)",
+                recommendation="Switch to agentic mode (unset PERFXPERT_LEGACY) for LLM features, or use perfxpert-code for interactive analysis",
             )
-
-            # Convert result to dict for LLM
-            analysis_data = _convert_result_to_llm_format(result)
-
-            # Build AnalysisContext so _select_tags() gates reference guide sections
-            # (including tracelens_metrics when TraceLens data is present)
-            has_counters = hardware_counters.get("has_counters", False)
-            analysis_tier = 2 if has_counters else 1
-            context = AnalysisContext(
-                tier=analysis_tier,
-                has_counters=has_counters,
-                custom_prompt=custom_prompt,
-                kernel_categories=result.kernel_categories or [],
-                interval_timeline={
-                    k: v
-                    for k, v in result.interval_timeline.items()
-                    if k.endswith("_pct")
-                },
-                short_kernel_summary=(
-                    {
-                        "threshold_us": result.short_kernels.get("threshold_us", 10),
-                        "short_kernel_count": result.short_kernels.get(
-                            "short_kernel_count", 0
-                        ),
-                        "wasted_pct_of_kernel_time": result.short_kernels.get(
-                            "wasted_pct_of_kernel_time", 0
-                        ),
-                    }
-                    if result.short_kernels
-                    else None
-                ),
-            )
-
-            # Get LLM enhancement
-            llm_explanation = analyzer.analyze_with_llm(
-                analysis_data,
-                custom_prompt=custom_prompt,
-                context=context,
-            )
-
-            result.llm_enhanced_explanation = llm_explanation
-
-            if verbose:
-                print("[Analysis] LLM enhancement complete")
-
-        except (LLMAuthenticationError, LLMRateLimitError):
-            # Auth and rate-limit errors must propagate — the caller needs to
-            # know their credentials are invalid or exhausted.
-            raise
-        except Exception as e:
-            # Other LLM errors are non-critical: add a warning and continue
-            # with local-only results.
-            result.warnings.append(
-                AnalysisWarning(
-                    severity="warning",
-                    message=f"LLM enhancement failed: {e}",
-                    recommendation="Analysis continues with local-only results",
-                )
-            )
-
-            if verbose:
-                print(f"[Analysis] LLM enhancement failed: {e}")
+        )
+        if verbose:
+            print("[Analysis] LLM enhancement skipped (legacy mode does not support LLM)")
 
     return result
 
