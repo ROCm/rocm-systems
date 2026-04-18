@@ -337,52 +337,61 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     // operand table and materialise it as `i32 immarg`.
     //
     // MODREP: wave-width projection. The 16-bit swizzle imm encodes
-    // one of seven swizzle modes (SIDefines.h `Swizzle::Id`):
+    // one of seven swizzle modes (SIDefines.h `Swizzle::Id`),
+    // partitioned into four valid top-nibble/byte envelopes plus a
+    // RESERVED region:
     //
-    //   QUAD_PERM   (top byte = 0x80) — independent 4-lane quads.
-    //   BITMASK_PERM (top bit = 0)    — per-lane swizzle via 5-bit
-    //                                    AND/OR/XOR masks; the 5-bit
-    //                                    masks address only bits 0..4
-    //                                    of the lane index by the
-    //                                    encoding itself.
-    //   FFT_MODE    (top nibble = 0xE) — wave-relative FFT pattern.
-    //   ROTATE_MODE (top nibble = 0xC) — wave-relative rotation.
+    //   QUAD_PERM   (top byte = 0x80)   — independent 4-lane quads.
+    //   BITMASK_PERM (top bit = 0)      — per-lane swizzle via three
+    //                                      5-bit AND/OR/XOR masks;
+    //                                      includes BROADCAST / SWAP
+    //                                      / REVERSE sub-encodings.
+    //   FFT_MODE    (top nibble = 0xE)  — 5-bit FFT swizzle selector.
+    //   ROTATE_MODE (top nibble = 0xC)  — 5-bit size + 1-bit dir.
+    //   RESERVED    (top nibble in
+    //                {0x9,0xA,0xB,0xD,0xF}) — undefined semantics.
     //
-    // The wave-size-obliviousness claim for QUAD_PERM and BITMASK_PERM
-    // depends on a hardware property: that wave64 ds_swizzle preserves
-    // bit 5 of the lane id (so each 32-lane half of a wave64 target
-    // independently swizzles using the same pattern). The encoding
-    // alone confines the swizzle masks to bits 0..4; whether the
-    // upper bit survives the hardware permutation is a separate ISA
-    // contract that is documented neither in IntrinsicsAMDGPU.td nor
-    // in AMDGPUUsage.rst. We verified it empirically on gfx942
-    // (CDNA3) wave64:
+    // All four valid envelopes are wave-size-oblivious under modulo-
+    // replication. The argument is the same for all four: wave64
+    // ds_swizzle hardware preserves bit 5 of the lane id, so each
+    // 32-lane half independently performs the same permutation. The
+    // bit-5 preservation is a hardware contract documented neither
+    // in IntrinsicsAMDGPU.td nor in AMDGPUUsage.rst; verified
+    // empirically on gfx942 (CDNA3) wave64 across all four
+    // envelopes:
     //
-    //   * BROADCAST(32, 5) (imm=0x00A0): lanes 0..31 → lane 5,
-    //     lanes 32..63 → lane 37 (= 32+5). Bit 5 preserved.
-    //   * SWAP-1          (imm=0x041F): lane 32↔33, 34↔35, …,
-    //     62↔63. Each 32-lane half pairs internally.
+    //   * BROADCAST(32, 5) (imm=0x00A0, BITMASK_PERM): lanes 0..31
+    //     → lane 5, lanes 32..63 → lane 37 (= 32+5).
+    //   * SWAP-1           (imm=0x041F, BITMASK_PERM): lane 32↔33,
+    //     34↔35, …, 62↔63. Each 32-lane half pairs internally.
+    //   * FFT 0x00         (imm=0xE000): 5-bit-reverse within each
+    //     32-lane half (lanes 32..63 produce lower-half-result + 32).
+    //   * FFT 0x10         (imm=0xE010): 4-bit-reverse within each
+    //     16-lane group, again per-half-independent.
+    //   * FFT 0x1F         (imm=0xE01F): identity within each half.
+    //   * ROTATE-LEFT-1    (imm=0xC020): lane 31 → lane 0 (lower
+    //     half), lane 63 → lane 32 (upper half).
+    //   * ROTATE-LEFT-31   (imm=0xC3E0): lane 0 → lane 31 (lower
+    //     half), lane 32 → lane 63 (upper half).
     //
-    // Reproduction: a small HIP probe that issues `ds_swizzle_b32`
-    // via inline asm against a per-lane lane-id VGPR and prints
-    // each lane's destination. Both probes confirm the upper-half
-    // independence the modulo-replication argument requires; the
-    // BITMASK_PERM check in `dsSwizzleSafeForModRep` is therefore
-    // sound for the BROADCAST/SWAP/REVERSE/raw-bitmask family that
-    // wave32 source kernels can encode.
+    // Reproduction: small HIP probes that issue `ds_swizzle_b32` via
+    // inline asm against per-lane lane-id VGPRs and print each
+    // lane's destination. Every probe confirms the upper-half
+    // independence the modulo-replication argument requires.
     //
-    // FFT_MODE / ROTATE_MODE / unknown-mode imms span the full
-    // source-wave width and are NOT modulo-replication-safe under
-    // the same hardware contract; the Phase 1.4.5 classifier
-    // filters those at the cross-wave boundary
-    // (rewriteImplemented = false → CrossWaveShuffleRewritePending),
-    // so by the time control reaches this handler in a cross-wave
-    // raise we know the imm is in the safe set. Same-wave raises
-    // bypass the classifier (it early-returns when src/tgt wave
-    // sizes match) and reach here unconditionally; for same-wave
-    // every imm is correct by construction (the source and target
-    // hardware execute the same `ds_swizzle_b32` byte-for-byte), so
-    // the same intrinsic emit covers both paths.
+    // The classifier (`dsSwizzleSafeForModRep`) accepts all four
+    // valid envelopes and refuses only the RESERVED top-nibble
+    // region, where hardware semantics are undefined and a silent
+    // lift would map the source kernel's imm onto whatever the
+    // wave64 backend happens to do. Phase 1.4.5 surfaces the
+    // refusal with a `RESERVED top-nibble envelope` detail line so
+    // operators can identify the offending imm at triage time.
+    //
+    // Same-wave raises bypass the classifier (it early-returns when
+    // src/tgt wave sizes match) and reach here unconditionally; for
+    // same-wave every imm is correct by construction (the source and
+    // target hardware execute the same `ds_swizzle_b32`
+    // byte-for-byte), so the same intrinsic emit covers both paths.
     //
     // gfx942 backend support: confirmed via a separate verification
     // run — the lifted IR `call i32 @llvm.amdgcn.ds.swizzle(i32 %v,

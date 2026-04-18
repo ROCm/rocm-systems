@@ -153,49 +153,57 @@ std::optional<int64_t> extractLaneOperandImm(const DecodedInst &di) {
 // The 16-bit imm encodes one of seven modes (SIDefines.h
 // `Swizzle::Id`). Per AMDGPU SIDefines.h `Swizzle::EncBits`:
 //
-//   QUAD_PERM_ENC   == 0x8000, QUAD_PERM_ENC_MASK   == 0xFF00
+//   QUAD_PERM_ENC   == 0x8000, QUAD_PERM_ENC_MASK    == 0xFF00
 //   BITMASK_PERM_ENC == 0x0000, BITMASK_PERM_ENC_MASK == 0x8000
-//   FFT_MODE_ENC    == 0xE000  (FFT_ROTATE_MODE_MASK 0xF000)
-//   ROTATE_MODE_ENC == 0xC000  (FFT_ROTATE_MODE_MASK 0xF000)
+//   FFT_MODE_ENC    == 0xE000  (FFT_ROTATE_MODE_MASK == 0xF000)
+//   ROTATE_MODE_ENC == 0xC000  (FFT_ROTATE_MODE_MASK == 0xF000)
 //
-// QUAD_PERM operates on independent 4-lane quads — wave-relative but
-// 4-lane-bounded, so each 32-lane half of a wave64 target reproduces
-// the source's wave32 quad swizzle independently. Modulo-replication
-// safe.
+// All four valid swizzle-mode envelopes (QUAD_PERM / BITMASK_PERM /
+// FFT_MODE / ROTATE_MODE) are wave-size-oblivious under modulo-
+// replication. The argument is the same for all four: wave64
+// ds_swizzle hardware preserves bit 5 of the lane id, so each
+// 32-lane half independently performs the same permutation. The
+// preservation is a hardware contract not documented in
+// IntrinsicsAMDGPU.td or AMDGPUUsage.rst; verified empirically on
+// gfx942 (CDNA3) wave64 across the four envelopes:
 //
-// BITMASK_PERM uses three 5-bit AND/OR/XOR masks against the lane
-// index. The 5-bit width caps the addressed bits at 0..4 of lane id
-// at the encoding level; the wave64 hardware then preserves bit 5 of
-// the lane id during the permutation, so each 32-lane half swizzles
-// independently using the same pattern. The bit-5 preservation is a
-// hardware contract not documented in IntrinsicsAMDGPU.td or
-// AMDGPUUsage.rst — verified empirically on gfx942 (CDNA3) wave64
-// (BROADCAST(32, 5) → lane 32..63 read lane 37, SWAP-1 → lane 32↔33
-// etc.). See the MODREP block in handle_ds.cpp for the full citation
-// and reproduction notes. Modulo-replication safe.
+//   * QUAD_PERM (top byte = 0x80) — confined to 4-lane quads by the
+//     2-bit lane selectors per quad. Trivially per-half-independent.
 //
-// FFT_MODE and ROTATE_MODE span the full source-wave width by their
-// sub-mode fields (FFT_SWIZZLE_MASK / ROTATE_SIZE_MASK are 5-bit and
-// the rotation/butterfly count is interpreted relative to the
-// hardware wave size). A wave32 source kernel's FFT pattern lifted
-// to wave64 hardware would be re-interpreted as a wave64 FFT and
-// produce different per-lane data movement — NOT modulo-replication-
-// safe. Some sub-encodings within the FFT/ROTATE envelope might
-// happen to be safe (e.g. small-rotation patterns that stay within
-// 32 lanes), but the imm encoding does NOT structurally bound the
-// rotation/butterfly count, and parsing the sub-mode precisely is
-// out of scope for the initial P6 lift. Refuse the entire FFT_MODE
-// / ROTATE_MODE envelope; widening to safe sub-encodings is tracked
-// as P6.b in CROSS_LANE_SURVEY.md.
+//   * BITMASK_PERM (top bit = 0)  — 5-bit AND/OR/XOR masks address
+//     only bits 0..4 of lane id at the encoding level. Probed via
+//     BROADCAST(32, 5) → lanes 32..63 read lane 37 (= 32+5) and
+//     SWAP-1 → lane 32↔33, …, 62↔63. Per-half-independent.
 //
-// Check ordering note: the QUAD_PERM and BITMASK_PERM checks are
-// mutually exclusive on bit 15 (QUAD_PERM_ENC = 0x8000 requires bit
-// 15 set; BITMASK_PERM_ENC = 0x0000 requires bit 15 clear), so the
-// order between them is irrelevant for correctness. The FFT/ROTATE
-// envelope (top nibble 0xC..0xF) is also disjoint from BITMASK_PERM
-// (which requires top bit clear), so the implicit "neither matched
-// → return false" branch correctly catches FFT/ROTATE without
-// needing an explicit check.
+//   * FFT_MODE (top nibble = 0xE) — 5-bit FFT swizzle selector
+//     drives a butterfly pattern within each 32-lane half. Probed
+//     across sub-modes 0x00 (5-bit-reverse), 0x10 (4-bit-reverse-
+//     in-16-lane-group), 0x1F (identity); upper-half result is
+//     lower-half-result + 32 in every case.
+//
+//   * ROTATE_MODE (top nibble = 0xC) — direction bit (10) +
+//     5-bit size selector (bits 5..9). Probed across ROTATE-LEFT-1
+//     and ROTATE-LEFT-31; each 32-lane half rotates internally
+//     (lane 31 → lane 0, lane 63 → lane 32 for left-1).
+//
+// The BROADCAST/SWAP/REVERSE/raw-bitmask family that wave32 source
+// kernels can encode therefore all map cleanly under modulo-
+// replication. See the MODREP block in handle_ds.cpp for the full
+// reproduction notes (the probe kernels live in inline asm under
+// /tmp during development; if the hardware contract is ever
+// re-questioned, regenerate the probes from the documentation in
+// the handler).
+//
+// RESERVED top-nibble envelopes (0x9, 0xA, 0xB, 0xD, 0xF): the
+// AMDGPU SIDefines.h `Swizzle::EncBits` table assigns no semantics
+// to these. Hardware behavior is undefined; refuse loudly so the
+// kernel does not silently lift to whatever the wave64 backend
+// happens to do.
+//
+// Check ordering note: the four valid-mode checks are pairwise
+// disjoint on bit 15 / top byte / top nibble, so the order between
+// them is irrelevant for correctness. The implicit "no match →
+// return false" branch correctly catches the RESERVED envelopes.
 bool dsSwizzleSafeForModRep(uint16_t imm) {
   if ((imm & AMDGPU::Swizzle::QUAD_PERM_ENC_MASK) ==
       AMDGPU::Swizzle::QUAD_PERM_ENC)
@@ -203,7 +211,13 @@ bool dsSwizzleSafeForModRep(uint16_t imm) {
   if ((imm & AMDGPU::Swizzle::BITMASK_PERM_ENC_MASK) ==
       AMDGPU::Swizzle::BITMASK_PERM_ENC)
     return true;
-  // FFT_MODE / ROTATE_MODE / unknown high-bit envelope: refuse.
+  if ((imm & AMDGPU::Swizzle::FFT_ROTATE_MODE_MASK) ==
+      AMDGPU::Swizzle::FFT_MODE_ENC)
+    return true;
+  if ((imm & AMDGPU::Swizzle::FFT_ROTATE_MODE_MASK) ==
+      AMDGPU::Swizzle::ROTATE_MODE_ENC)
+    return true;
+  // RESERVED top-nibble envelope (0x9, 0xA, 0xB, 0xD, 0xF): refuse.
   return false;
 }
 
@@ -381,8 +395,9 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
           raw_string_ostream os(det);
           os << "ds_swizzle_b32 imm 0x"
              << format_hex_no_prefix(di.dsSwizzleImm, 4)
-             << " uses FFT_MODE/ROTATE_MODE/unknown sub-mode — not "
-                "modulo-replication-safe (P6.b pending)";
+             << " is in the RESERVED top-nibble envelope "
+                "(not QUAD_PERM/BITMASK_PERM/FFT_MODE/ROTATE_MODE) — "
+                "AMDGPU hardware semantics undefined";
           site.detail = os.str();
         }
       }
