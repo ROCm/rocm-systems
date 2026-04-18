@@ -24,11 +24,52 @@ from typing import Iterable
 
 from perfxpert.tools._tooldep import require_tool
 
-__all__ = ["main", "resolve_opencode_binary", "resolve_config_dir", "print_banner"]
+__all__ = [
+    "main",
+    "resolve_opencode_binary",
+    "resolve_config_dir",
+    "print_banner",
+    "route_subcommand",
+]
 
 
 _BRANDING_NAME = "AMD ROCm PerfXpert"
 _BRANDING_VERSION = "0.2.0"
+
+# Known opencode subcommands (v1.4.x) — a single bare positional that matches
+# one of these MUST be forwarded as a subcommand, not treated as the CWD.
+# Derived from opencode/packages/opencode/src/cli/cmd/*.ts.
+_OPENCODE_SUBCOMMANDS = frozenset({
+    "account",
+    "acp",
+    "agent",
+    "auth",      # legacy alias for account
+    "config",
+    "db",
+    "debug",
+    "export",
+    "generate",
+    "github",
+    "import",
+    "mcp",
+    "models",
+    "pr",
+    "plug",
+    "plugin",
+    "providers",
+    "run",
+    "serve",
+    "session",
+    "stats",
+    "tui",
+    "web",
+})
+
+# Subcommand names the launcher itself dispatches to `python -m perfxpert`.
+# ``doctor`` is the only one that must short-circuit BEFORE
+# resolve_opencode_binary() (so the health check works on a fresh install
+# without opencode on disk).
+_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"doctor"})
 
 
 def _perfxpert_version() -> str:
@@ -211,6 +252,53 @@ def _handle_help_flag(argv: Iterable[str]) -> bool:
     return False
 
 
+def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
+    """Classify argv for dispatch.
+
+    Returns a tuple ``(kind, argv_out)`` where ``kind`` is one of:
+
+      - ``"perfxpert"``: the first positional is a perfxpert-handled
+        subcommand (``doctor``); ``argv_out`` is forwarded to
+        ``python -m perfxpert``.
+      - ``"opencode_subcommand"``: the first positional is a known opencode
+        subcommand; ``argv_out`` is forwarded verbatim to opencode.
+      - ``"opencode_default"``: no recognized subcommand; ``argv_out`` is
+        forwarded to opencode for interactive-TUI-from-CWD behavior.
+
+    The distinction matters because opencode treats a single unrecognized
+    positional as a CWD override, which produced the
+    "Failed to change directory to ...doctor" bug reported in session
+    ses_25e1. See docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md.
+    """
+    # Find the first non-flag positional token (flags start with '-').
+    first_positional: str | None = None
+    for a in argv:
+        if not a.startswith("-"):
+            first_positional = a
+            break
+
+    if first_positional is None:
+        return ("opencode_default", list(argv))
+
+    if first_positional in _PERFXPERT_DISPATCH_SUBCOMMANDS:
+        return ("perfxpert", list(argv))
+
+    if first_positional in _OPENCODE_SUBCOMMANDS:
+        return ("opencode_subcommand", list(argv))
+
+    return ("opencode_default", list(argv))
+
+
+def _exec_perfxpert_subcommand(argv: list[str]) -> int:
+    """Shell out to ``python -m perfxpert <argv...>``."""
+    cmd = [sys.executable, "-m", "perfxpert", *argv]
+    try:
+        proc = subprocess.run(cmd, check=False)
+    except KeyboardInterrupt:
+        return 130
+    return proc.returncode
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for `perfxpert-code`."""
     if argv is None:
@@ -223,6 +311,16 @@ def main(argv: list[str] | None = None) -> int:
     # We still fall through to `opencode --help` afterwards so the user sees
     # the generic opencode flag reference appended to our perfxpert summary.
     _printed_perfxpert_help = _handle_help_flag(argv)
+
+    kind, argv_out = route_subcommand(argv)
+
+    # perfxpert-owned subcommands (doctor) short-circuit before opencode is
+    # resolved so that `perfxpert-code doctor` works even if opencode is not
+    # installed yet.
+    if kind == "perfxpert":
+        # Strip the leading subcommand token; python -m perfxpert gets it
+        # as its own first positional.
+        return _exec_perfxpert_subcommand(argv_out)
 
     try:
         binary = resolve_opencode_binary()
@@ -245,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     # so MCP wiring + AGENTS.md instructions apply without polluting the user's cwd.
     runtime_cfg_dir = _prepare_runtime_config_dir(config_dir)
 
-    cmd = [str(binary), *argv]
+    cmd = [str(binary), *argv_out]
 
     # Pass through most of the user env; opencode needs LLM API keys and rocprofv3 envs.
     # We do NOT use the EXECUTION-tool env whitelist here because opencode is the
@@ -254,8 +352,16 @@ def main(argv: list[str] | None = None) -> int:
     # Recursion guard marker (spec §5.8 / R10)
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
 
+    # Subcommand dispatch:
+    #   - Known opencode subcommands (stats/run/auth/…) are NOT executed from
+    #     the runtime-config dir because they operate on the user's project
+    #     and must see the user's cwd. Pass them through verbatim.
+    #   - Default/interactive launches stage into runtime_cfg_dir so opencode
+    #     picks up the bundled opencode.json + MCP wiring.
+    exec_cwd = None if kind == "opencode_subcommand" else str(runtime_cfg_dir)
+
     try:
-        proc = subprocess.run(cmd, env=env, cwd=str(runtime_cfg_dir), check=False)
+        proc = subprocess.run(cmd, env=env, cwd=exec_cwd, check=False)
     except KeyboardInterrupt:
         return 130
     return proc.returncode
