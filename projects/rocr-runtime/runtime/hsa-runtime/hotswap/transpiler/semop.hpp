@@ -78,6 +78,38 @@ enum class SemOp : uint16_t {
   // Sites the analysis cannot resolve refuse loudly via
   // RaiseFailure::unsupportedShape — never silently emit a stub.
   S_SET_PC_I64,
+  // SOP1 branch-and-link. gfx1250 asm rename for `S_SWAPPC_B64`
+  // (SOPInstructions.td:336 declares `isCall = 1`, line 2311 renames
+  // the asm string to `s_swap_pc_i64`). Operands:
+  //   sdst = sX:X+1 receives the return PC (i.e. the absolute kernel
+  //          offset of the instruction immediately following the
+  //          swap, swap.offset + swap.size).
+  //   ssrc = sY:Y+1 holds the absolute call target PC.
+  //   PC <- ssrc; sdst <- (return-PC)  (atomically)
+  //
+  // Two raisings, mirroring S_SET_PC_I64:
+  //   Pattern A — call target ssrc was produced by a local
+  //               `s_get_pc_i64 + s_add_co_u32 + s_add_co_ci_u32` chain
+  //               that the SetPcAnalysis can resolve. Lowering writes
+  //               `blockaddress(@kernel, %BB_returnAddr)` cast to i64
+  //               into sdst and emits `br label %BB_callee`. The
+  //               return PC the callee will eventually consume via a
+  //               Pattern B `s_set_pc_i64 sdst` is therefore a real
+  //               LLVM blockaddress constant.
+  //   Otherwise — the call target is statically unresolvable
+  //               (typical tensilelite pattern: chain addend is a
+  //               runtime scalar derived from a kernarg, so the
+  //               target is dynamic-dispatch). Refuse loudly via
+  //               RaiseFailure::unsupportedShape — never emit a stub
+  //               branch. Cross-block scalar / kernarg-derived call
+  //               target resolution is tracked as a separate story
+  //               (see semop dispatch site for the link).
+  // Independent of the above, the analysis registers a synthetic
+  // chain-terminator at the swap site itself (key = swap.offset,
+  // value = {sdst-low-reg, swap.offset+swap.size}) so any downstream
+  // Pattern B `s_set_pc_i64` reading sdst enumerates the swap's
+  // return offset as one of its indirectbr targets.
+  S_SWAP_PC_I64,
   S_ABS_I32,
   S_SET_VGPR_MSB,
   // Read-modify-write bit set/clear on an SGPR. Tied src keeps the

@@ -400,6 +400,114 @@ SetPcAnalysis analyseSetPC(ArrayRef<DecodedInst> insts,
       continue;
     }
 
+    case SemOp::S_SWAP_PC_I64: {
+      // Branch-and-link: PC <- ssrc, sdst <- (di.offset + di.size).
+      // sdst is the ret pair (op 0); ssrc is the call target pair
+      // (op firstSrcIdx). The instruction is a CFG terminator: the
+      // next instruction is reachable only via the called subroutine
+      // returning into it, so we always promote (di.offset + di.size)
+      // to a BB leader.
+      result.extraBlockStarts.insert(di.offset + di.size);
+
+      // Resolve the dst (ret) pair low index. Without it we cannot
+      // register the synthetic chainTerminator, but we can still
+      // refuse the swap site loudly. With it, downstream Pattern B
+      // `s_set_pc_i64 sdst:sdst+1` enumerates this swap's return
+      // offset as one of its indirectbr targets.
+      std::optional<unsigned> dstLow;
+      if (di.numDefs >= 1 && di.isReg(0))
+        dstLow = sgprIdx(MRI, di.getReg(0));
+
+      // Synthetic chain-terminator registration. We always record it
+      // when dstLow is known; Pass 2 will drop it if no downstream
+      // `s_set_pc_i64` reads `sdst`. The key (di.offset) is unique
+      // because LLVM never lays two instructions at the same offset;
+      // the value carries (retPair=sdstLow, returnAddr=swap.end).
+      // The raiser's S_ADDC_U32 post-hook does not fire on
+      // S_SWAP_PC_I64 (gated by SemOp), so the equivalent
+      // blockaddress materialisation happens inline in handleSOP1.
+      if (dstLow)
+        result.chainTerminators[di.offset] =
+            SetPcCallSiteInfo{di.offset + di.size, *dstLow};
+
+      // Now classify the call target.
+      unsigned srcOpIdx = di.firstSrcIdx;
+      if (!di.isReg(srcOpIdx)) {
+        SetPcSiteInfo info;
+        info.kind = SetPcSiteInfo::Kind::Unresolvable;
+        info.refusalReason =
+            "s_swap_pc_i64 source operand is not a register";
+        result.setpcSites[di.offset] = std::move(info);
+        // Both src and dst pair tracking dies at this terminator.
+        if (dstLow) {
+          state.invalidatePcAt(*dstLow);
+          state.invalidatePcAt(*dstLow + 1);
+        }
+        continue;
+      }
+      auto srcLow = sgprIdx(MRI, di.getReg(srcOpIdx));
+      if (!srcLow) {
+        SetPcSiteInfo info;
+        info.kind = SetPcSiteInfo::Kind::Unresolvable;
+        info.refusalReason =
+            "s_swap_pc_i64 source register is not an SGPR pair";
+        result.setpcSites[di.offset] = std::move(info);
+        if (dstLow) {
+          state.invalidatePcAt(*dstLow);
+          state.invalidatePcAt(*dstLow + 1);
+        }
+        continue;
+      }
+      PcChain *chain = state.findPc(*srcLow);
+      if (chain && chain->lowAddDone) {
+        // Pattern A swap: chain resolves the absolute callee target.
+        SetPcSiteInfo info;
+        info.kind = SetPcSiteInfo::Kind::DirectA;
+        info.directTarget = chain->value;
+        result.setpcSites[di.offset] = std::move(info);
+        result.extraBlockStarts.insert(chain->value);
+        // Source chain is consumed inline by the swap; drop its
+        // terminator entry from chainTerminators so the raiser's
+        // S_ADDC_U32 hook does not also rewrite the source-pair
+        // post-fact (the source pair is dead from PC tracking after
+        // this point anyway, but we keep the table clean). Note we
+        // are careful NOT to drop the synthetic entry we just
+        // installed at di.offset above (different key).
+        if (chain->terminator)
+          result.chainTerminators.erase(chain->terminator);
+        state.invalidatePcAt(*srcLow);
+      } else {
+        // Pattern B (call target itself is dynamic) or unresolved
+        // chain. We cannot enumerate callee candidates from the
+        // current analysis: the corpus pattern uses
+        // `s_get_pc_i64 + s_add_co_u32 sX, sX, sZ` where sZ is a
+        // runtime scalar derived from a kernarg, and we do not yet
+        // do cross-block scalar / kernarg-derived target resolution
+        // (see semop.hpp's S_SWAP_PC_I64 doc and the dedicated
+        // `swap_pc_dynamic_dispatch` worklist item).
+        SetPcSiteInfo info;
+        info.kind = SetPcSiteInfo::Kind::Unresolvable;
+        info.refusalReason =
+            ("s_swap_pc_i64 source SGPR pair s[" +
+             std::to_string(*srcLow) + ":" +
+             std::to_string(*srcLow + 1) +
+             "] does not have a statically resolvable getpc+add "
+             "chain in this basic block (dynamic-dispatch call "
+             "target; cross-block scalar / kernarg-derived target "
+             "resolution is not yet implemented)");
+        result.setpcSites[di.offset] = std::move(info);
+      }
+      // Dst pair now holds an opaque (return-PC) value; remove from
+      // PC tracking so a downstream `s_set_pc_i64` reading dst falls
+      // into Pattern B (indirectbr) rather than being misclassified
+      // as a Pattern A direct branch to the swap's return offset.
+      if (dstLow) {
+        state.invalidatePcAt(*dstLow);
+        state.invalidatePcAt(*dstLow + 1);
+      }
+      continue;
+    }
+
     case SemOp::S_SET_PC_I64: {
       // The source SGPR pair is the indirect target.
       unsigned srcOpIdx = di.firstSrcIdx;

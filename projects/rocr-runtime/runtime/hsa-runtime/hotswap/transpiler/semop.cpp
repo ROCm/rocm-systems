@@ -50,6 +50,7 @@ const char *semOpName(SemOp op) {
     S(S_ANDN2_SAVEEXEC_B32) S(S_ORN2_SAVEEXEC_B32)
     S(S_GETPC_B64)
     S(S_SET_PC_I64)
+    S(S_SWAP_PC_I64)
     S(S_ABS_I32)
     S(S_SET_VGPR_MSB)
     S(S_BITSET0_B32) S(S_BITSET1_B32)

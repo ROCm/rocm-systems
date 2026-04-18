@@ -164,6 +164,67 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
         di, "SOP1", "s_set_pc_i64 SetPcSiteInfo::Kind not handled");
     return hr;
   }
+  if (sop == SemOp::S_SWAP_PC_I64) {
+    // Branch-and-link. setpc_analysis classifies the call-target
+    // pair (ssrc) as DirectA (chain resolves the absolute callee
+    // offset) or Unresolvable (call target is dynamic-dispatch /
+    // chain doesn't reach here). For DirectA we materialise
+    // `blockaddress(@kernel, %BB_returnAddr)` cast to i64 into sdst
+    // and then emit `br label %BB_callee`; the eventual Pattern B
+    // `s_set_pc_i64 sdst` in the callee will consume that
+    // blockaddress via its indirectbr enumeration. For everything
+    // else we refuse loudly — never silently emit a stub branch.
+    // See semop.hpp's S_SWAP_PC_I64 doc for the lowering contract.
+    if (!ctx.setpcAnalysis) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "SOP1",
+          "s_swap_pc_i64 reached without a SetPcAnalysis "
+          "(raiser pipeline is missing the Phase 1.1 step)");
+      return hr;
+    }
+    auto it = ctx.setpcAnalysis->setpcSites.find(di.offset);
+    if (it == ctx.setpcAnalysis->setpcSites.end()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "SOP1",
+          "s_swap_pc_i64 site not classified by SetPcAnalysis");
+      return hr;
+    }
+    const SetPcSiteInfo &info = it->second;
+    if (info.kind == SetPcSiteInfo::Kind::Unresolvable) {
+      hr.failure = RaiseFailure::unsupportedShape(di, "SOP1",
+                                                  info.refusalReason);
+      return hr;
+    }
+    if (info.kind == SetPcSiteInfo::Kind::IndirectB) {
+      // Indirect call target (e.g. function-pointer dispatch). We do
+      // not enumerate callee candidates today — that requires either
+      // a per-kernel subroutine-entry catalogue or cross-block scalar
+      // / kernarg-derived target resolution. Refuse loudly with a
+      // distinct reason so future work can pivot off this string.
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "SOP1",
+          "s_swap_pc_i64 with an indirect call-target SGPR pair is "
+          "not yet supported (would require enumerating callee "
+          "candidates for `indirectbr`); track via the "
+          "swap_pc_dynamic_dispatch worklist item");
+      return hr;
+    }
+    // DirectA path: write the return address (a real LLVM
+    // BlockAddress constant cast to i64) into sdst BEFORE the
+    // branch, then emit the unconditional br to the callee. Both
+    // operations land in the swap's own BB; the raiser's BB-layout
+    // phase has already promoted (di.offset + di.size) to a leader
+    // so subsequent linear instructions live in their own BB.
+    uint64_t returnAddr = di.offset + di.size;
+    BasicBlock *retBB = ctx.lookupBB(returnAddr);
+    Constant *ba = BlockAddress::get(ctx.kernel, retBB);
+    Value *baInt = ctx.B.CreatePtrToInt(ba, ctx.i64Ty,
+                                          "swap_ret_blockaddr");
+    ctx.regs.writeReg64(ctx.B, op.dst(), baInt);
+    ctx.B.CreateBr(ctx.lookupBB(info.directTarget));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::S_NOT_B64) {
     hr.sccResult = ctx.B.CreateNot(op.src64(0), "not64");
     ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
