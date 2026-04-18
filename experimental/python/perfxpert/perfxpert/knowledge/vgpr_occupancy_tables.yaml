@@ -1,0 +1,59 @@
+# Per-arch VGPR → waves/EU lookup tables.
+# Ref: llm-reference-guide.md lines 695-714.
+# Used by: occupancy.lookup_waves_per_eu(vgpr_count, gfx_id)
+
+# CDNA3 (MI300X, gfx942) — 256 VGPRs per EU per thread
+gfx942:
+  - {max_vgprs: 32,  waves_per_eu: 8}
+  - {max_vgprs: 40,  waves_per_eu: 6}
+  - {max_vgprs: 48,  waves_per_eu: 5}
+  - {max_vgprs: 64,  waves_per_eu: 4}
+  - {max_vgprs: 80,  waves_per_eu: 3}
+  - {max_vgprs: 128, waves_per_eu: 2}
+  - {max_vgprs: 256, waves_per_eu: 1}
+
+# CDNA4 (MI350X, gfx950) — same VGPR table as CDNA3 but LDS doubled
+gfx950:
+  - {max_vgprs: 32,  waves_per_eu: 8}
+  - {max_vgprs: 40,  waves_per_eu: 6}
+  - {max_vgprs: 48,  waves_per_eu: 5}
+  - {max_vgprs: 64,  waves_per_eu: 4}
+  - {max_vgprs: 80,  waves_per_eu: 3}
+  - {max_vgprs: 128, waves_per_eu: 2}
+  - {max_vgprs: 256, waves_per_eu: 1}
+
+# CDNA2 (MI250X, gfx90a) — 256 VGPRs
+gfx90a:
+  - {max_vgprs: 32,  waves_per_eu: 8}
+  - {max_vgprs: 40,  waves_per_eu: 6}
+  - {max_vgprs: 48,  waves_per_eu: 5}
+  - {max_vgprs: 64,  waves_per_eu: 4}
+  - {max_vgprs: 80,  waves_per_eu: 3}
+  - {max_vgprs: 128, waves_per_eu: 2}
+  - {max_vgprs: 256, waves_per_eu: 1}
+
+# CDNA1 (MI100, gfx908) — 256 VGPRs
+gfx908:
+  - {max_vgprs: 32,  waves_per_eu: 8}
+  - {max_vgprs: 40,  waves_per_eu: 6}
+  - {max_vgprs: 48,  waves_per_eu: 5}
+  - {max_vgprs: 64,  waves_per_eu: 4}
+  - {max_vgprs: 80,  waves_per_eu: 3}
+  - {max_vgprs: 128, waves_per_eu: 2}
+  - {max_vgprs: 256, waves_per_eu: 1}
+
+# RDNA2 (gfx1030) — larger VGPR range
+gfx1030:
+  - {max_vgprs: 24,  waves_per_eu: 16}
+  - {max_vgprs: 32,  waves_per_eu: 12}
+  - {max_vgprs: 48,  waves_per_eu: 8}
+  - {max_vgprs: 96,  waves_per_eu: 4}
+  - {max_vgprs: 1024, waves_per_eu: 1}
+
+# RDNA3 (gfx1100) — larger VGPR range
+gfx1100:
+  - {max_vgprs: 24,  waves_per_eu: 16}
+  - {max_vgprs: 32,  waves_per_eu: 12}
+  - {max_vgprs: 48,  waves_per_eu: 8}
+  - {max_vgprs: 96,  waves_per_eu: 4}
+  - {max_vgprs: 1536, waves_per_eu: 1}
