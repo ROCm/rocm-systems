@@ -24,6 +24,7 @@ Legacy aliases (honored with DeprecationWarning):
     ROCPD_LLM_*       → PERFXPERT_LLM_*
 """
 
+from perfxpert.providers._base import Provider, ProviderResponse
 from perfxpert.providers._exceptions import (
     AuthError,
     DryRunResponse,
@@ -36,6 +37,8 @@ __all__ = [
     "AuthError",
     "DryRunResponse",
     "ProviderError",
+    "Provider",
+    "ProviderResponse",
     "RateLimitError",
     "TimeoutError",
 ]
