@@ -180,6 +180,19 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // gfx11+ scalar FP subtract. Direct mirror of S_ADD_F32 above;
+  // the .td pattern is `any_fsub` (SOPInstructions.td:894). No
+  // source modifiers on SOP2 — the operands are bare i32-shaped
+  // SGPRs that we reinterpret as f32.
+  if (sop == SemOp::S_SUB_F32) {
+    Value *s0 = ctx.B.CreateBitCast(op.src(0), ctx.f32Ty);
+    Value *s1 = ctx.B.CreateBitCast(op.src(1), ctx.f32Ty);
+    ctx.regs.writeReg32(
+        ctx.B, op.dst(),
+        ctx.B.CreateBitCast(ctx.B.CreateFSub(s0, s1, "s_fsub"), ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
   // GFX12 scalar 64-bit ops
   if (sop == SemOp::S_MUL_U64) {
     ctx.regs.writeReg64(ctx.B, op.dst(),

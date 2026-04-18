@@ -44,6 +44,7 @@ config.fixtures = {
     "s_cmov_b32": r"@LIT_FIXTURE_S_CMOV_B32_CO@",
     "s_mul_hi_i32": r"@LIT_FIXTURE_S_MUL_HI_I32_CO@",
     "s_sub_nc_u64": r"@LIT_FIXTURE_S_SUB_NC_U64_CO@",
+    "s_sub_f32": r"@LIT_FIXTURE_S_SUB_F32_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
 }
