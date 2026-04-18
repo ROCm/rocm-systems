@@ -66,6 +66,9 @@ class RootInput(_FrozenModel):
     airgap: bool = False
     session_id: Optional[str] = None
     intent_hint: Optional[str] = None  # populated by intent.classify upstream
+    # CLI-flag side-channel forwarded downstream via Analysis handoff.
+    # Kept as a single dict so we respect the ≤10-field schema cap (§2).
+    analysis_options: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RootOutput(_FrozenModel):

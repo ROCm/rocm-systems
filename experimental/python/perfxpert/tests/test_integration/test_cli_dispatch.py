@@ -33,7 +33,10 @@ def test_cli_always_runs_agentic(fake_db, monkeypatch):
     monkeypatch.delenv("PERFXPERT_LEGACY", raising=False)  # regression guard
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         agentic.return_value = 0
-        analyze_mod.execute(input=mock.MagicMock(), format="text")
+        # Use the kwarg name the agentic layer actually reads. The legacy
+        # `format=` kwarg was silently dropped in cycle-1 tests
+        # (nitpick: misleading even though harmless).
+        analyze_mod.execute(input=mock.MagicMock(), output_format="text")
         agentic.assert_called_once()
 
 
@@ -42,7 +45,7 @@ def test_cli_legacy_flag_is_no_op(fake_db, monkeypatch):
     monkeypatch.setenv("PERFXPERT_LEGACY", "1")  # regression guard
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         agentic.return_value = 0
-        analyze_mod.execute(input=mock.MagicMock(), format="text")
+        analyze_mod.execute(input=mock.MagicMock(), output_format="text")
         agentic.assert_called_once()
 
 

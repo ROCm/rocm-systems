@@ -323,12 +323,29 @@ def add_args(parser: argparse.ArgumentParser):
             "llm_local",
             "llm_local_model",
         ]
+        # Argparse defaults argparse emits for flags not passed by the
+        # user; we skip these so kwargs do not carry noise that the
+        # downstream agentic runtime has to special-case. Example: the
+        # `--verbose` store_true flag defaults to False, and the
+        # `--top-kernels` integer flag defaults to 10; passing them
+        # unconditionally would mask "user did not set this" from
+        # `_execute_agentic`.
+        _cli_defaults = {
+            "verbose": False,
+            "top_kernels": 10,
+            "min_duration": 0.0,
+        }
         ret = {}
         for itr in valid_args:
             if hasattr(args, itr):
                 val = getattr(args, itr)
-                if val is not None:
-                    ret[itr] = val
+                if val is None:
+                    continue
+                # Drop pure-default values so kwargs reflect what the user
+                # actually set on the CLI.
+                if itr in _cli_defaults and val == _cli_defaults[itr]:
+                    continue
+                ret[itr] = val
         # Convert min_duration from microseconds to nanoseconds
         if "min_duration" in ret:
             ret["min_duration"] = ret["min_duration"] * 1000
@@ -359,6 +376,35 @@ def execute(
     return _execute_agentic(input, config=config, **kwargs)
 
 
+# -- known kwargs accepted by `_execute_agentic` ---------------------------
+# Any kwarg not in this set that is forwarded from `execute()` will emit a
+# WARNING so future argparse additions cannot silently drop through the
+# agentic pipeline (cycle-2 I-1 regression guard).
+_KNOWN_EXECUTE_KWARGS = frozenset({
+    # Output routing
+    "output_format",
+    "output_file",
+    "output_path",
+    # LLM provider wiring
+    "enable_llm",
+    "llm_provider",
+    "llm_api_key",
+    "llm_model",
+    "llm_thinking",
+    "llm_local",
+    "llm_local_model",
+    # Analysis options forwarded through RootInput.analysis_options
+    "source_dir",
+    "att_dir",
+    "prompt",
+    "custom_prompt",  # historical alias for prompt
+    "top_kernels",
+    "min_duration",
+    # Execution flags
+    "verbose",
+})
+
+
 def _execute_agentic(
     input: Optional[RocpdImportData],
     config: Optional[output_config.output_config] = None,
@@ -377,6 +423,19 @@ def _execute_agentic(
             "This is a Phase 3 dependency."
         ) from e
 
+    # Guard rail against silent kwarg drop — any new CLI flag that isn't
+    # wired here surfaces a WARNING instead of being ignored (I-1).
+    _unused = set(kwargs) - _KNOWN_EXECUTE_KWARGS
+    if _unused:
+        import warnings
+        warnings.warn(
+            f"perfxpert.analyze: unused kwargs ignored by agentic runtime: "
+            f"{sorted(_unused)}. Wire them in _execute_agentic or drop the "
+            f"corresponding --flag.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
     # Update config if provided
     if config is not None:
         config = config.update(**kwargs)
@@ -393,8 +452,9 @@ def _execute_agentic(
     # Get source_dir if provided (for Tier 0 analysis)
     source_dir = kwargs.get("source_dir")
 
-    # Get custom prompt if provided
-    custom_prompt = kwargs.get("custom_prompt")
+    # Get custom prompt if provided. CLI emits `prompt` (argparse dest);
+    # accept `custom_prompt` as a back-compat alias for library callers.
+    custom_prompt = kwargs.get("prompt") or kwargs.get("custom_prompt")
 
     # Build session
     enable_llm = kwargs.get("enable_llm", False)
@@ -403,6 +463,17 @@ def _execute_agentic(
         provider=llm_provider if enable_llm else None,
         airgap=(not enable_llm),
     )
+
+    # Collect downstream analysis options as a side-channel dict on
+    # RootInput so specialised agents (Analysis et al.) can read them
+    # without exploding the schema field count.
+    analysis_options: Dict[str, Any] = {}
+    for key in ("top_kernels", "att_dir", "min_duration", "llm_api_key",
+                "llm_model", "llm_thinking", "llm_local", "llm_local_model",
+                "verbose"):
+        val = kwargs.get(key)
+        if val is not None:
+            analysis_options[key] = val
 
     # Build RootInput payload
     try:
@@ -413,6 +484,7 @@ def _execute_agentic(
             provider=llm_provider if enable_llm else None,
             airgap=(not enable_llm),
             session_id=session.session_id,
+            analysis_options=analysis_options,
         )
     except Exception as e:
         raise RuntimeError(f"Failed to build RootInput: {e}") from e
