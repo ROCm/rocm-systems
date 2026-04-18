@@ -146,6 +146,79 @@ std::optional<int64_t> extractLaneOperandImm(const DecodedInst &di) {
   return std::nullopt; // dynamic SGPR operand — cannot statically prove range
 }
 
+// Extract the 16-bit `offset` immediate of a `ds_swizzle_b32`
+// instruction. Used by the §3 Class 2 DsSwizzle gate to decide whether
+// the encoded swizzle pattern is wave-size-oblivious under modulo-
+// replication (see `dsSwizzleSafeForModRep` below).
+//
+// Returns std::nullopt if the operand is missing or non-immediate
+// (which would indicate a malformed disassembly — DS_SWIZZLE_B32's
+// MC layout always has `OpName::offset` as an immediate per
+// DSInstructions.td's `DS_1A_RET <"ds_swizzle_b32", VGPR_32, 0,
+// Swizzle>` definition).
+std::optional<uint16_t>
+extractDsSwizzleOffsetImm(const DecodedInst &di) {
+  const MCInst &inst = di.inst;
+  int idx =
+      AMDGPU::getNamedOperandIdx(inst.getOpcode(), AMDGPU::OpName::offset);
+  if (idx < 0 || static_cast<unsigned>(idx) >= inst.getNumOperands())
+    return std::nullopt;
+  const MCOperand &op = inst.getOperand(idx);
+  if (!op.isImm())
+    return std::nullopt;
+  return static_cast<uint16_t>(op.getImm());
+}
+
+// Decide whether a `ds_swizzle_b32` immediate encodes a swizzle mode
+// that is *structurally* wave-size-oblivious under modulo-replication
+// (SPE_DESIGN.md §7's coverage-ladder rung 1).
+//
+// The 16-bit imm encodes one of seven modes (SIDefines.h
+// `Swizzle::Id`). Per AMDGPU SIDefines.h `Swizzle::EncBits`:
+//
+//   QUAD_PERM_ENC   == 0x8000, QUAD_PERM_ENC_MASK   == 0xFF00
+//   BITMASK_PERM_ENC == 0x0000, BITMASK_PERM_ENC_MASK == 0x8000
+//   FFT_MODE_ENC    == 0xE000  (FFT_ROTATE_MODE_MASK 0xF000)
+//   ROTATE_MODE_ENC == 0xC000  (FFT_ROTATE_MODE_MASK 0xF000)
+//
+// QUAD_PERM operates on independent 4-lane quads — wave-relative but
+// 4-lane-bounded, so each 32-lane half of a wave64 target reproduces
+// the source's wave32 quad swizzle independently. Modulo-replication
+// safe.
+//
+// BITMASK_PERM uses three 5-bit AND/OR/XOR masks against the lane
+// index. The 5-bit width caps the addressed bits at 0..4 of lane id —
+// never reaching bit 5 (the bit that distinguishes the lower vs upper
+// 32-lane half of a wave64). Each 32-lane half therefore swizzles
+// independently using the same pattern. Modulo-replication safe.
+//
+// FFT and ROTATE span the full source-wave width and have no
+// half-wave-independent semantics; lifting them onto a wave64 target
+// changes the pattern (a wave32 8-lane FFT becomes a wave64 8-lane FFT
+// on the SAME 8 lanes, which IS coincidentally OK for FFT widths <=
+// source-wave, but the encoding does NOT bound the FFT/ROTATE width
+// to <= source-wave by the imm field alone — there are reserved /
+// unknown sub-mode encodings under the FFT_ROTATE_MODE_MASK envelope
+// whose semantics are ISA-version-dependent). To stay sound we refuse
+// the entire FFT_MODE / ROTATE_MODE envelope and let a future P6.b
+// landing parse those sub-modes precisely if the corpus needs them.
+bool dsSwizzleSafeForModRep(uint16_t imm) {
+  // QUAD_PERM: top byte must be exactly 0x80.
+  if ((imm & AMDGPU::Swizzle::QUAD_PERM_ENC_MASK) ==
+      AMDGPU::Swizzle::QUAD_PERM_ENC)
+    return true;
+  // BITMASK_PERM: top bit must be 0. Note: BITMASK_PERM_ENC == 0 so
+  // the test is `(imm & 0x8000) == 0`, equivalently bit 15 clear.
+  // The QUAD_PERM check above must run first because QUAD_PERM_ENC
+  // (0x8000) sets bit 15 and would otherwise be misread as a mis-
+  // encoded BITMASK_PERM.
+  if ((imm & AMDGPU::Swizzle::BITMASK_PERM_ENC_MASK) ==
+      AMDGPU::Swizzle::BITMASK_PERM_ENC)
+    return true;
+  // FFT_MODE / ROTATE_MODE / unknown high-bit envelope: refuse.
+  return false;
+}
+
 } // namespace
 
 // ----------------------------------------------------------------------------
@@ -292,9 +365,34 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       site.inst = &di;
       site.kind = ObstructionKind::DsSwizzle;
       site.rewrite = RewriteId::P6_DsSwizzle;
-      // TODO(CROSS_LANE_SURVEY P6): flip to true once the handler lifts
-      // through llvm.amdgcn.ds.swizzle.
-      site.rewriteImplemented = false;
+      // P6 (CROSS_LANE_SURVEY.md item 6) landed: the handler in
+      // handle_ds.cpp emits `llvm.amdgcn.ds.swizzle(value, offset)`
+      // with the 16-bit immediate plumbed through. The lift is only
+      // wave-size-oblivious for the QUAD_PERM and BITMASK_PERM
+      // sub-modes (see `dsSwizzleSafeForModRep` above for the
+      // structural argument); FFT_MODE / ROTATE_MODE / unknown-high-
+      // nibble imms remain pending and refuse loudly via the same
+      // CrossWaveShuffleRewritePending channel as before.
+      auto immOpt = extractDsSwizzleOffsetImm(di);
+      if (!immOpt.has_value()) {
+        // Malformed disassembly: the imm is missing or non-immediate.
+        // Refuse — the handler would otherwise have to invent a
+        // value, which violates the no-fallback contract.
+        site.rewriteImplemented = false;
+        site.detail = "ds_swizzle_b32 missing OpName::offset immediate "
+                      "operand — disassembly malformed";
+      } else {
+        site.rewriteImplemented = dsSwizzleSafeForModRep(*immOpt);
+        if (!site.rewriteImplemented) {
+          std::string det;
+          raw_string_ostream os(det);
+          os << "ds_swizzle_b32 imm 0x"
+             << format_hex_no_prefix(*immOpt, 4)
+             << " uses FFT_MODE/ROTATE_MODE/unknown sub-mode — not "
+                "modulo-replication-safe (P6.b pending)";
+          site.detail = os.str();
+        }
+      }
       report.sites.push_back(std::move(site));
       continue;
     }

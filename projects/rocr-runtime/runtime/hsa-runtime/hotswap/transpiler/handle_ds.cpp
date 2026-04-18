@@ -1,6 +1,7 @@
 #include "handlers.hpp"
 
 #include "semop.hpp"
+#include "Utils/AMDGPUBaseInfo.h" // AMDGPU::getNamedOperandIdx
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -328,17 +329,73 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   if (sop == SemOp::DS_SWIZZLE_B32) {
-    // CROSS_LANE_SURVEY.md item P6 (pending). Refuse the lift until
-    // the handler emits `llvm.amdgcn.ds.swizzle` with the offset
-    // immediate plumbed through. The wave-size classifier (Phase
-    // 1.4.5) catches this earlier in the cross-wave case and reports
-    // the more specific `cross-wave-shuffle-rewrite-pending`
-    // diagnostic; this same-wave fallback exists so that a same-wave
-    // raise also fails loudly rather than silently same-laning the
-    // cross-lane shuffle.
-    hr.failure = RaiseFailure::unsupportedShape(
-        di, "DS",
-        "ds_swizzle_b32 — CROSS_LANE_SURVEY.md P6 lift not implemented");
+    // CROSS_LANE_SURVEY.md item P6 — lift `ds_swizzle_b32` through
+    // `llvm.amdgcn.ds.swizzle`. The intrinsic signature is
+    //   declare i32 @llvm.amdgcn.ds.swizzle(i32 %src, i32 immarg %offset)
+    // (`ImmArg<ArgIndex<1>>`), so the second operand MUST be a
+    // ConstantInt — we read the 16-bit `offset` field from the MC
+    // operand table and materialise it as `i32 immarg`.
+    //
+    // MODREP: wave-width projection. The 16-bit swizzle imm encodes
+    // one of seven swizzle modes (SIDefines.h `Swizzle::Id`):
+    //
+    //   QUAD_PERM   (top byte = 0x80) — independent 4-lane quads.
+    //   BITMASK_PERM (top bit = 0)    — per-lane swizzle via 5-bit
+    //                                    AND/OR/XOR masks; the 5-bit
+    //                                    masks address only bits 0..4
+    //                                    of the lane index, never
+    //                                    crossing a 32-lane boundary.
+    //   FFT_MODE    (top nibble = 0xE) — wave-relative FFT pattern.
+    //   ROTATE_MODE (top nibble = 0xC) — wave-relative rotation.
+    //
+    // QUAD_PERM and BITMASK_PERM are *structurally* wave-size-
+    // oblivious: the hardware semantics are confined to 32-lane
+    // groups by the encoding itself, so a wave32 source kernel's
+    // swizzle pattern lifts to the same llvm.amdgcn.ds.swizzle call
+    // on the wave64 target and the two 32-lane halves of the wave64
+    // target each independently reproduce the source's wave32
+    // shuffle — the textbook modulo-replication match.
+    //
+    // FFT_MODE / ROTATE_MODE / unknown-mode imms span the full wave
+    // width and are NOT modulo-replication-safe; the Phase 1.4.5
+    // classifier filters those at the cross-wave boundary
+    // (rewriteImplemented = false → CrossWaveShuffleRewritePending),
+    // so by the time control reaches this handler in a cross-wave
+    // raise we know the imm is in the safe set. Same-wave raises
+    // bypass the classifier (it early-returns when src/tgt wave
+    // sizes match) and reach here unconditionally; for same-wave
+    // every imm is correct by construction (same-wave ds_swizzle is
+    // always the identity transformation of itself), so the same
+    // intrinsic emit covers both paths.
+    //
+    // EXEC gating: `amdgcn.ds.swizzle` is convergent (`isConvergent`
+    // in DSInstructions.td); same convergence reasoning as the
+    // `ds_bpermute` handler above applies — emit OUTSIDE
+    // `emitUnderExec` so all hardware lanes participate, and trust
+    // that inactive-lane reads of the result do not feed any
+    // observable side effect under a correct source kernel.
+    int offsetIdx = AMDGPU::getNamedOperandIdx(di.inst.getOpcode(),
+                                                AMDGPU::OpName::offset);
+    if (offsetIdx < 0 ||
+        (unsigned)offsetIdx >= di.inst.getNumOperands() ||
+        !di.inst.getOperand((unsigned)offsetIdx).isImm()) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "DS",
+          "ds_swizzle_b32 missing or non-immediate offset operand "
+          "(expected OpName::offset)");
+      return hr;
+    }
+    uint16_t offsetImm = static_cast<uint16_t>(
+        di.inst.getOperand((unsigned)offsetIdx).getImm());
+    Value *src = op.src(0);
+    Function *swiz = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_swizzle);
+    Value *result = ctx.B.CreateCall(
+        swiz,
+        {src, ConstantInt::get(ctx.i32Ty, offsetImm)},
+        "ds_swiz");
+    ctx.writeReg32(op.dst(), result);
+    hr.handled = true;
     return hr;
   }
   return hr;

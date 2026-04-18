@@ -35,6 +35,7 @@ config.fixtures = {
     "c2_permlane16": r"@LIT_FIXTURE_C2_PERMLANE16_CO@",
     "c2_dpp_quad_perm": r"@LIT_FIXTURE_C2_DPP_QUAD_PERM_CO@",
     "c2_ds_swizzle": r"@LIT_FIXTURE_C2_DS_SWIZZLE_CO@",
+    "c2_ds_swizzle_unsafe": r"@LIT_FIXTURE_C2_DS_SWIZZLE_UNSAFE_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
 }
