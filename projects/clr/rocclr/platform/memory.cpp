@@ -84,7 +84,7 @@ Memory::Memory(Context& context, Type type, Flags flags, size_t size, void* svmP
       resOffset_(0),
       flagsEx_(0),
       alignment_(alignment) /* Memory Ops Lock */ {
-  svmPtrCommited_ = (flags & CL_MEM_SVM_FINE_GRAIN_BUFFER) ? true : false;
+  svmPtrCommited_ = (flags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None ? true : false;
   canBeCached_ = true;
 }
 
@@ -94,7 +94,7 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
       destructorCallbacks_(NULL),
       context_((new_ctx != nullptr) ? *new_ctx : parent.getContext()),
       parent_(&parent),
-      type_((type == 0) ? parent.type_ : type),
+      type_((type == static_cast<amd::MemObjectType>(0)) ? parent.type_ : type),
       hostMemRef_(NULL),
       origin_(origin),
       size_(size),
@@ -121,16 +121,20 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
   }
 
   // Inherit memory flags from the parent
-  if ((flags_ & (CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) == 0) {
-    flags_ |= parent_->getMemFlags() & (CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY);
+  if ((flags_ & (amd::MemFlags::ReadWrite | amd::MemFlags::ReadOnly | amd::MemFlags::WriteOnly)) ==
+      amd::MemFlags::None) {
+    flags_ |= parent_->getMemFlags() &
+              (amd::MemFlags::ReadWrite | amd::MemFlags::ReadOnly | amd::MemFlags::WriteOnly);
   }
 
-  flags_ |=
-      parent_->getMemFlags() & (CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR);
+  flags_ |= parent_->getMemFlags() &
+             (amd::MemFlags::AllocHostPtr | amd::MemFlags::CopyHostPtr | amd::MemFlags::UseHostPtr);
 
-  if ((flags_ & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) == 0) {
+  if ((flags_ & (amd::MemFlags::HostReadOnly | amd::MemFlags::HostWriteOnly |
+                 amd::MemFlags::HostNoAccess)) == amd::MemFlags::None) {
     flags_ |= parent_->getMemFlags() &
-              (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS);
+              (amd::MemFlags::HostReadOnly | amd::MemFlags::HostWriteOnly |
+               amd::MemFlags::HostNoAccess);
   }
 }
 
@@ -187,18 +191,22 @@ void Memory::removeSubBuffer(Memory* view) {
 
 bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) {
   // Sanity checks (the parameters should have been prevalidated by the API)
-  assert(!(flags_ & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR) && (initFrom == NULL) &&
-           !allocHostMem && !isSvmPtrCommited()));
-  assert(
-      !((initFrom != NULL) && !forceCopy &&
-        !(flags_ & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_EXTERNAL_PHYSICAL_AMD))));
-  assert(!(flags_ & CL_MEM_COPY_HOST_PTR && flags_ & CL_MEM_USE_HOST_PTR));
+  assert(!((flags_ & (amd::MemFlags::UseHostPtr | amd::MemFlags::CopyHostPtr)) !=
+               amd::MemFlags::None &&
+           (initFrom == NULL) && !allocHostMem && !isSvmPtrCommited()));
+  // Note: CL_MEM_EXTERNAL_PHYSICAL_AMD is a CL-layer extension flag; checked there.
+  assert(!((initFrom != NULL) && !forceCopy &&
+           (flags_ & (amd::MemFlags::UseHostPtr | amd::MemFlags::CopyHostPtr)) ==
+               amd::MemFlags::None));
+  assert(!((flags_ & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None &&
+           (flags_ & amd::MemFlags::UseHostPtr) != amd::MemFlags::None));
 
   const std::vector<Device*>& devices = context_().devices();
 
   // This allocation is necessary to use coherency mechanism
   // for the initialization
-  if (getMemFlags() & (CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
+  if ((getMemFlags() & (amd::MemFlags::CopyHostPtr | amd::MemFlags::AllocHostPtr)) !=
+      amd::MemFlags::None) {
     // Extra system memory allocation and copy can be very expensive.
     // Thus, avoid it if runtime doesn't perform deferred allocations
     if ((devices.size() == 1) || DISABLE_DEFERRED_ALLOC) {
@@ -210,7 +218,7 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
   }
 
   // Did application request to use host memory?
-  if (getMemFlags() & CL_MEM_USE_HOST_PTR) {
+  if ((getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::None) {
     setHostMem(initFrom);
 
     // Recalculate image size according to pitch
@@ -225,19 +233,21 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
   }
   // Allocate host memory buffer if needed.
   // @note: SVM host memory allocation should be done in the device backend
-  else if (allocHostMem && !isInterop() && !(getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER)) {
+  else if (allocHostMem && !isInterop() &&
+           (getMemFlags() & amd::MemFlags::SvmFineGrain) == amd::MemFlags::None) {
     if (!hostMemRef_.allocateMemory(size_, context_())) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot allocate Host Memory Buffer \n");
       return false;
     }
 
     // Copy data to the backing store if the app has requested
-    if (((flags_ & CL_MEM_COPY_HOST_PTR) || forceCopy) && (initFrom != NULL)) {
+    if (((flags_ & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None || forceCopy) &&
+        (initFrom != NULL)) {
       copyToBackingStore(initFrom);
     }
   }
 
-  if (allocHostMem && type_ == CL_MEM_OBJECT_PIPE) {
+  if (allocHostMem && type_ == amd::MemObjectType::Pipe) {
     // Initialize the pipe for a CPU device
     clk_pipe_t* pipe = reinterpret_cast<clk_pipe_t*>(getHostMem());
     pipe->read_idx = 0;
@@ -245,7 +255,8 @@ bool Memory::allocHostMemory(void* initFrom, bool allocHostMem, bool forceCopy) 
     pipe->end_idx = asPipe()->getMaxNumPackets();
   }
 
-  if ((flags_ & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR)) && (NULL == lastWriter_)) {
+  if ((flags_ & (amd::MemFlags::UseHostPtr | amd::MemFlags::CopyHostPtr)) != amd::MemFlags::None &&
+      (NULL == lastWriter_)) {
     // Signal write, so coherency mechanism will initialize
     // memory on all devices
     signalWrite(NULL);
@@ -445,7 +456,8 @@ Memory::~Memory() {
     parent_->release();
   }
   hostMemRef_.deallocateMemory(context_());
-  if (parent_ == nullptr && (getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+  if (parent_ == nullptr &&
+      (getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::None) {
     // The mapping may manually be removed prior to objects destruction
     if (amd::MemObjMap::FindVirtualMemObj(getSvmPtr())) {
       amd::MemObjMap::RemoveVirtualMemObj(getSvmPtr());
@@ -508,7 +520,7 @@ void Memory::cacheWriteBack(device::VirtualDevice* vDev) {
 void Memory::copyToBackingStore(void* initFrom) { memcpy(getHostMem(), initFrom, size_); }
 
 bool Memory::usesSvmPointer() const {
-  if (!(flags_ & CL_MEM_USE_HOST_PTR)) {
+  if ((flags_ & amd::MemFlags::UseHostPtr) == amd::MemFlags::None) {
     return false;
   }
   // If the application host pointer lies within a SVM region, so does the
@@ -530,7 +542,7 @@ void Memory::commitSvmMemory() {
 
 void Memory::uncommitSvmMemory() {
   std::scoped_lock lock(lockMemoryOps_);
-  if (svmPtrCommited_ && !(flags_ & CL_MEM_SVM_FINE_GRAIN_BUFFER)) {
+  if (svmPtrCommited_ && (flags_ & amd::MemFlags::SvmFineGrain) == amd::MemFlags::None) {
     if (amd::Os::uncommitMemory(svmHostAddress_, size_)) {
       svmPtrCommited_ = false;
     } else {
@@ -546,7 +558,7 @@ Device* Memory::GetDeviceById() {
 
 // =================================================================================================
 bool Memory::ValidateMemAccess(const Device& dev, bool read_write) {
-  if (flags_ & CL_MEM_VA_RANGE_AMD) {
+  if ((flags_ & amd::MemFlags::VaRangeAmd) != amd::MemFlags::None) {
     return dev.ValidateMemAccess(*this, read_write);
   }
   return true;
@@ -558,7 +570,10 @@ void Buffer::initDeviceMemory() {
 }
 
 bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc) {
-  if ((getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) && (initFrom != NULL)) {
+  // CL_MEM_EXTERNAL_PHYSICAL_AMD (CL ext) shares bit 31 with FollowUserNumaPolicy.
+  // When set, initFrom points to a cl_bus_address_amd struct.
+  if ((getMemFlags() & amd::MemFlags::FollowUserNumaPolicy) != amd::MemFlags::None &&
+      (initFrom != NULL)) {
     busAddress_ = *(reinterpret_cast<cl_bus_address_amd*>(initFrom));
     initFrom = NULL;
   } else {
@@ -585,7 +600,7 @@ void Pipe::initDeviceMemory() {
 
 #define GETMIPDIM(dim, mip) (((dim >> mip) > 0) ? (dim >> mip) : 1)
 
-Image::Image(const Format& format, Image& parent, uint baseMipLevel, cl_mem_flags flags,
+Image::Image(const Format& format, Image& parent, uint baseMipLevel, amd::MemFlags flags,
              bool isMipmapView)
     : Memory(parent, flags, 0,
              parent.getWidth() * parent.getHeight() * parent.getDepth() * format.getElementSize()),
@@ -602,9 +617,9 @@ Image::Image(const Format& format, Image& parent, uint baseMipLevel, cl_mem_flag
     impl_.region_.c[1] = GETMIPDIM(parent.getHeight(), baseMipLevel);
     impl_.region_.c[2] = GETMIPDIM(parent.getDepth(), baseMipLevel);
 
-    if (parent.getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+    if (parent.getType() == amd::MemObjectType::Image1DArray) {
       impl_.region_.c[1] = parent.getHeight();
-    } else if (parent.getType() == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
+    } else if (parent.getType() == amd::MemObjectType::Image2DArray) {
       impl_.region_.c[2] = parent.getDepth();
     }
     size_ = getWidth() * getHeight() * parent.getDepth() * format.getElementSize();
@@ -632,11 +647,11 @@ Image::Image(Buffer& buffer, Type type, Flags flags, const Format& format, size_
   initDimension();
 }
 
-bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_object_type type,
+bool Image::validateDimensions(const std::vector<amd::Device*>& devices, amd::MemObjectType type,
                                size_t width, size_t height, size_t depth, size_t arraySize) {
   bool sizePass = false;
   switch (type) {
-    case CL_MEM_OBJECT_IMAGE3D:
+    case amd::MemObjectType::Image3D:
       if ((width == 0) || (height == 0) || (depth < 1)) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE,
                  "Invalid Dimenstions, width: %u height: %u depth: %u \n", width, height,
@@ -650,7 +665,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         }
       }
       break;
-    case CL_MEM_OBJECT_IMAGE2D_ARRAY:
+    case amd::MemObjectType::Image2DArray:
       if (arraySize == 0) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Array is empty \n");
         return false;
@@ -666,14 +681,14 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         return false;
       }
     // Fall through...
-    case CL_MEM_OBJECT_IMAGE2D:
+    case amd::MemObjectType::Image2D:
       for (const auto dev : devices) {
         if ((dev->info().image2DMaxHeight_ >= height) && (dev->info().image2DMaxWidth_ >= width)) {
           return true;
         }
       }
       break;
-    case CL_MEM_OBJECT_IMAGE1D_ARRAY:
+    case amd::MemObjectType::Image1DArray:
       if (arraySize == 0) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Array size cannot be empty \n");
         return false;
@@ -690,7 +705,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         return false;
       }
     // Fall through...
-    case CL_MEM_OBJECT_IMAGE1D:
+    case amd::MemObjectType::Image1D:
       if (width == 0) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid dimension \n");
         return false;
@@ -701,7 +716,7 @@ bool Image::validateDimensions(const std::vector<amd::Device*>& devices, cl_mem_
         }
       }
       break;
-    case CL_MEM_OBJECT_IMAGE1D_BUFFER:
+    case amd::MemObjectType::Image1DBuffer:
       for (const auto& dev : devices) {
         if (dev->info().imageMaxBufferSize_ >= width) {
           return true;
@@ -722,22 +737,22 @@ void Image::initDimension() {
     impl_.rp_ = impl_.region_[0] * elemSize;
   }
   switch (type_) {
-    case CL_MEM_OBJECT_IMAGE3D:
-    case CL_MEM_OBJECT_IMAGE2D_ARRAY:
+    case amd::MemObjectType::Image3D:
+    case amd::MemObjectType::Image2DArray:
       dim_ = 3;
       if (impl_.sp_ == 0) {
         impl_.sp_ = impl_.region_[0] * impl_.region_[1] * elemSize;
       }
       break;
-    case CL_MEM_OBJECT_IMAGE2D:
-    case CL_MEM_OBJECT_IMAGE1D_ARRAY:
+    case amd::MemObjectType::Image2D:
+    case amd::MemObjectType::Image1DArray:
       dim_ = 2;
-      if ((impl_.sp_ == 0) && (type_ == CL_MEM_OBJECT_IMAGE1D_ARRAY)) {
+      if ((impl_.sp_ == 0) && (type_ == amd::MemObjectType::Image1DArray)) {
         impl_.sp_ = impl_.rp_;
       }
       break;
-    case CL_MEM_OBJECT_IMAGE1D:
-    case CL_MEM_OBJECT_IMAGE1D_BUFFER:
+    case amd::MemObjectType::Image1D:
+    case amd::MemObjectType::Image1DBuffer:
     default:
       dim_ = 1;
       break;
@@ -750,41 +765,44 @@ void Image::initDeviceMemory() {
 }
 
 size_t Image::Format::getNumChannels() const {
-  switch (image_channel_order) {
-    case CL_RG:
-    case CL_RA:
+  switch (channelOrder) {
+    case amd::ChannelOrder::RG:
+    case amd::ChannelOrder::RA:
       return 2;
 
-    case CL_RGB:
-    case CL_sRGB:
-    case CL_sRGBx:
+    case amd::ChannelOrder::RGB:
+    case amd::ChannelOrder::sRGB:
+    case amd::ChannelOrder::sRGBx:
       return 3;
 
-    case CL_RGBA:
-    case CL_BGRA:
-    case CL_ARGB:
-    case CL_sRGBA:
-    case CL_sBGRA:
+    case amd::ChannelOrder::RGBA:
+    case amd::ChannelOrder::BGRA:
+    case amd::ChannelOrder::ARGB:
+    case amd::ChannelOrder::sRGBA:
+    case amd::ChannelOrder::sBGRA:
       return 4;
+
+    default:
+      break;
   }
   return 1;
 }
 
 size_t Image::Format::getElementSize() const {
   size_t bytesPerPixel = getNumChannels();
-  switch (image_channel_data_type) {
-    case CL_SNORM_INT8:
-    case CL_UNORM_INT8:
-    case CL_SIGNED_INT8:
-    case CL_UNSIGNED_INT8:
+  switch (channelDataType) {
+    case amd::ChannelDataType::SNormInt8:
+    case amd::ChannelDataType::UNormInt8:
+    case amd::ChannelDataType::SignedInt8:
+    case amd::ChannelDataType::UnsignedInt8:
       break;
 
-    case CL_UNORM_INT_101010:
+    case amd::ChannelDataType::UNormInt101010:
       bytesPerPixel = 4;
       break;
-    case CL_SIGNED_INT32:
-    case CL_UNSIGNED_INT32:
-    case CL_FLOAT:
+    case amd::ChannelDataType::SignedInt32:
+    case amd::ChannelDataType::UnsignedInt32:
+    case amd::ChannelDataType::Float:
       bytesPerPixel *= 4;
       break;
 
@@ -796,114 +814,121 @@ size_t Image::Format::getElementSize() const {
 }
 
 bool Image::Format::isValid() const {
-  switch (image_channel_data_type) {
-    case CL_SNORM_INT8:
-    case CL_SNORM_INT16:
-    case CL_UNORM_INT8:
-    case CL_UNORM_INT16:
-    case CL_UNORM_SHORT_565:
-    case CL_UNORM_SHORT_555:
-    case CL_UNORM_INT_101010:
-    case CL_SIGNED_INT8:
-    case CL_SIGNED_INT16:
-    case CL_SIGNED_INT32:
-    case CL_UNSIGNED_INT8:
-    case CL_UNSIGNED_INT16:
-    case CL_UNSIGNED_INT32:
-    case CL_HALF_FLOAT:
-    case CL_FLOAT:
+  switch (channelDataType) {
+    case amd::ChannelDataType::SNormInt8:
+    case amd::ChannelDataType::SNormInt16:
+    case amd::ChannelDataType::UNormInt8:
+    case amd::ChannelDataType::UNormInt16:
+    case amd::ChannelDataType::UNormShort565:
+    case amd::ChannelDataType::UNormShort555:
+    case amd::ChannelDataType::UNormInt101010:
+    case amd::ChannelDataType::SignedInt8:
+    case amd::ChannelDataType::SignedInt16:
+    case amd::ChannelDataType::SignedInt32:
+    case amd::ChannelDataType::UnsignedInt8:
+    case amd::ChannelDataType::UnsignedInt16:
+    case amd::ChannelDataType::UnsignedInt32:
+    case amd::ChannelDataType::HalfFloat:
+    case amd::ChannelDataType::Float:
       break;
 
     default: {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Image format: %u \n", image_channel_data_type);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Image format: %u \n",
+              static_cast<uint32_t>(channelDataType));
       return false;
     }
   }
 
-  switch (image_channel_order) {
-    case CL_R:
-    case CL_A:
-    case CL_RG:
-    case CL_RA:
-    case CL_RGBA:
+  switch (channelOrder) {
+    case amd::ChannelOrder::R:
+    case amd::ChannelOrder::A:
+    case amd::ChannelOrder::RG:
+    case amd::ChannelOrder::RA:
+    case amd::ChannelOrder::RGBA:
       break;
 
-    case CL_INTENSITY:
-    case CL_LUMINANCE:
-      switch (image_channel_data_type) {
-        case CL_SNORM_INT8:
-        case CL_SNORM_INT16:
-        case CL_UNORM_INT8:
-        case CL_UNORM_INT16:
-        case CL_HALF_FLOAT:
-        case CL_FLOAT:
+    case amd::ChannelOrder::Intensity:
+    case amd::ChannelOrder::Luminance:
+      switch (channelDataType) {
+        case amd::ChannelDataType::SNormInt8:
+        case amd::ChannelDataType::SNormInt16:
+        case amd::ChannelDataType::UNormInt8:
+        case amd::ChannelDataType::UNormInt16:
+        case amd::ChannelDataType::HalfFloat:
+        case amd::ChannelDataType::Float:
           break;
 
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Luminance: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid Luminance: %u \n",
+                  static_cast<uint32_t>(channelDataType));
           return false;
         }
       }
       break;
 
-    case CL_RGB:
-      switch (image_channel_data_type) {
-        case CL_UNORM_SHORT_565:
-        case CL_UNORM_SHORT_555:
-        case CL_UNORM_INT_101010:
+    case amd::ChannelOrder::RGB:
+      switch (channelDataType) {
+        case amd::ChannelDataType::UNormShort565:
+        case amd::ChannelDataType::UNormShort555:
+        case amd::ChannelDataType::UNormInt101010:
           break;
 
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid RGB: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid RGB: %u \n",
+                  static_cast<uint32_t>(channelDataType));
           return false;
         }
       }
       break;
 
-    case CL_BGRA:
-    case CL_ARGB:
-      switch (image_channel_data_type) {
-        case CL_SNORM_INT8:
-        case CL_UNORM_INT8:
-        case CL_SIGNED_INT8:
-        case CL_UNSIGNED_INT8:
+    case amd::ChannelOrder::BGRA:
+    case amd::ChannelOrder::ARGB:
+      switch (channelDataType) {
+        case amd::ChannelDataType::SNormInt8:
+        case amd::ChannelDataType::UNormInt8:
+        case amd::ChannelDataType::SignedInt8:
+        case amd::ChannelDataType::UnsignedInt8:
           break;
 
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid BGRA/ARGB: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid BGRA/ARGB: %u \n",
+                  static_cast<uint32_t>(channelDataType));
           return false;
         }
       }
       break;
 
-    case CL_sRGB:
-    case CL_sRGBx:
-    case CL_sRGBA:
-    case CL_sBGRA:
-      switch (image_channel_data_type) {
-        case CL_UNORM_INT8:
+    case amd::ChannelOrder::sRGB:
+    case amd::ChannelOrder::sRGBx:
+    case amd::ChannelOrder::sRGBA:
+    case amd::ChannelOrder::sBGRA:
+      switch (channelDataType) {
+        case amd::ChannelDataType::UNormInt8:
           break;
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid sBGRA: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid sBGRA: %u \n",
+                  static_cast<uint32_t>(channelDataType));
           return false;
         }
       }
       break;
 
-    case CL_DEPTH:
-      switch (image_channel_data_type) {
-        case CL_UNORM_INT16:
-        case CL_FLOAT:
+    case amd::ChannelOrder::Depth:
+      switch (channelDataType) {
+        case amd::ChannelDataType::UNormInt16:
+        case amd::ChannelDataType::Float:
           break;
         default: {
-          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid CL Depth: %u \n", image_channel_data_type);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid CL Depth: %u \n",
+                  static_cast<uint32_t>(channelDataType));
           return false;
         }
       }
       break;
 
     default: {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid image_channel_order: %u \n", image_channel_order);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Invalid image_channel_order: %u \n",
+              static_cast<uint32_t>(channelOrder));
       return false;
     }
   }
@@ -911,108 +936,108 @@ bool Image::Format::isValid() const {
 }
 
 // definition of list of supported formats
-const cl_image_format Image::supportedFormats[] = {
+const amd::ImageFormat Image::supportedFormats[] = {
     // R
-    {CL_R, CL_SNORM_INT8},
-    {CL_R, CL_SNORM_INT16},
-    {CL_R, CL_UNORM_INT8},
-    {CL_R, CL_UNORM_INT16},
+    {amd::ChannelOrder::R, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::R, amd::ChannelDataType::SNormInt16},
+    {amd::ChannelOrder::R, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::R, amd::ChannelDataType::UNormInt16},
 
-    {CL_R, CL_SIGNED_INT8},
-    {CL_R, CL_SIGNED_INT16},
-    {CL_R, CL_SIGNED_INT32},
-    {CL_R, CL_UNSIGNED_INT8},
-    {CL_R, CL_UNSIGNED_INT16},
-    {CL_R, CL_UNSIGNED_INT32},
+    {amd::ChannelOrder::R, amd::ChannelDataType::SignedInt8},
+    {amd::ChannelOrder::R, amd::ChannelDataType::SignedInt16},
+    {amd::ChannelOrder::R, amd::ChannelDataType::SignedInt32},
+    {amd::ChannelOrder::R, amd::ChannelDataType::UnsignedInt8},
+    {amd::ChannelOrder::R, amd::ChannelDataType::UnsignedInt16},
+    {amd::ChannelOrder::R, amd::ChannelDataType::UnsignedInt32},
 
-    {CL_R, CL_HALF_FLOAT},
-    {CL_R, CL_FLOAT},
+    {amd::ChannelOrder::R, amd::ChannelDataType::HalfFloat},
+    {amd::ChannelOrder::R, amd::ChannelDataType::Float},
 
     // A
-    {CL_A, CL_SNORM_INT8},
-    {CL_A, CL_SNORM_INT16},
-    {CL_A, CL_UNORM_INT8},
-    {CL_A, CL_UNORM_INT16},
+    {amd::ChannelOrder::A, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::A, amd::ChannelDataType::SNormInt16},
+    {amd::ChannelOrder::A, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::A, amd::ChannelDataType::UNormInt16},
 
-    {CL_A, CL_SIGNED_INT8},
-    {CL_A, CL_SIGNED_INT16},
-    {CL_A, CL_SIGNED_INT32},
-    {CL_A, CL_UNSIGNED_INT8},
-    {CL_A, CL_UNSIGNED_INT16},
-    {CL_A, CL_UNSIGNED_INT32},
+    {amd::ChannelOrder::A, amd::ChannelDataType::SignedInt8},
+    {amd::ChannelOrder::A, amd::ChannelDataType::SignedInt16},
+    {amd::ChannelOrder::A, amd::ChannelDataType::SignedInt32},
+    {amd::ChannelOrder::A, amd::ChannelDataType::UnsignedInt8},
+    {amd::ChannelOrder::A, amd::ChannelDataType::UnsignedInt16},
+    {amd::ChannelOrder::A, amd::ChannelDataType::UnsignedInt32},
 
-    {CL_A, CL_HALF_FLOAT},
-    {CL_A, CL_FLOAT},
+    {amd::ChannelOrder::A, amd::ChannelDataType::HalfFloat},
+    {amd::ChannelOrder::A, amd::ChannelDataType::Float},
 
     // RG
-    {CL_RG, CL_SNORM_INT8},
-    {CL_RG, CL_SNORM_INT16},
-    {CL_RG, CL_UNORM_INT8},
-    {CL_RG, CL_UNORM_INT16},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::SNormInt16},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::UNormInt16},
 
-    {CL_RG, CL_SIGNED_INT8},
-    {CL_RG, CL_SIGNED_INT16},
-    {CL_RG, CL_SIGNED_INT32},
-    {CL_RG, CL_UNSIGNED_INT8},
-    {CL_RG, CL_UNSIGNED_INT16},
-    {CL_RG, CL_UNSIGNED_INT32},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::SignedInt8},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::SignedInt16},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::SignedInt32},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::UnsignedInt8},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::UnsignedInt16},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::UnsignedInt32},
 
-    {CL_RG, CL_HALF_FLOAT},
-    {CL_RG, CL_FLOAT},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::HalfFloat},
+    {amd::ChannelOrder::RG, amd::ChannelDataType::Float},
 
     // RGBA
-    {CL_RGBA, CL_SNORM_INT8},
-    {CL_RGBA, CL_SNORM_INT16},
-    {CL_RGBA, CL_UNORM_INT8},
-    {CL_RGBA, CL_UNORM_INT16},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::SNormInt16},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::UNormInt16},
 
-    {CL_RGBA, CL_SIGNED_INT8},
-    {CL_RGBA, CL_SIGNED_INT16},
-    {CL_RGBA, CL_SIGNED_INT32},
-    {CL_RGBA, CL_UNSIGNED_INT8},
-    {CL_RGBA, CL_UNSIGNED_INT16},
-    {CL_RGBA, CL_UNSIGNED_INT32},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::SignedInt8},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::SignedInt16},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::SignedInt32},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::UnsignedInt8},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::UnsignedInt16},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::UnsignedInt32},
 
-    {CL_RGBA, CL_HALF_FLOAT},
-    {CL_RGBA, CL_FLOAT},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::HalfFloat},
+    {amd::ChannelOrder::RGBA, amd::ChannelDataType::Float},
 
     // ARGB
-    {CL_ARGB, CL_SNORM_INT8},
-    {CL_ARGB, CL_UNORM_INT8},
-    {CL_ARGB, CL_SIGNED_INT8},
-    {CL_ARGB, CL_UNSIGNED_INT8},
+    {amd::ChannelOrder::ARGB, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::ARGB, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::ARGB, amd::ChannelDataType::SignedInt8},
+    {amd::ChannelOrder::ARGB, amd::ChannelDataType::UnsignedInt8},
 
     // BGRA
-    {CL_BGRA, CL_SNORM_INT8},
-    {CL_BGRA, CL_UNORM_INT8},
-    {CL_BGRA, CL_SIGNED_INT8},
-    {CL_BGRA, CL_UNSIGNED_INT8},
+    {amd::ChannelOrder::BGRA, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::BGRA, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::BGRA, amd::ChannelDataType::SignedInt8},
+    {amd::ChannelOrder::BGRA, amd::ChannelDataType::UnsignedInt8},
 
     // LUMINANCE
-    {CL_LUMINANCE, CL_SNORM_INT8},
-    {CL_LUMINANCE, CL_SNORM_INT16},
-    {CL_LUMINANCE, CL_UNORM_INT8},
-    {CL_LUMINANCE, CL_UNORM_INT16},
-    {CL_LUMINANCE, CL_HALF_FLOAT},
-    {CL_LUMINANCE, CL_FLOAT},
+    {amd::ChannelOrder::Luminance, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::Luminance, amd::ChannelDataType::SNormInt16},
+    {amd::ChannelOrder::Luminance, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::Luminance, amd::ChannelDataType::UNormInt16},
+    {amd::ChannelOrder::Luminance, amd::ChannelDataType::HalfFloat},
+    {amd::ChannelOrder::Luminance, amd::ChannelDataType::Float},
 
     // INTENSITY
-    {CL_INTENSITY, CL_SNORM_INT8},
-    {CL_INTENSITY, CL_SNORM_INT16},
-    {CL_INTENSITY, CL_UNORM_INT8},
-    {CL_INTENSITY, CL_UNORM_INT16},
-    {CL_INTENSITY, CL_HALF_FLOAT},
-    {CL_INTENSITY, CL_FLOAT},
+    {amd::ChannelOrder::Intensity, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::Intensity, amd::ChannelDataType::SNormInt16},
+    {amd::ChannelOrder::Intensity, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::Intensity, amd::ChannelDataType::UNormInt16},
+    {amd::ChannelOrder::Intensity, amd::ChannelDataType::HalfFloat},
+    {amd::ChannelOrder::Intensity, amd::ChannelDataType::Float},
 
     // RGB
-    {CL_RGB, CL_UNORM_INT_101010},
+    {amd::ChannelOrder::RGB, amd::ChannelDataType::UNormInt101010},
 
     // sRGB
-    {CL_sRGBA, CL_UNORM_INT8},
+    {amd::ChannelOrder::sRGBA, amd::ChannelDataType::UNormInt8},
 
     // DEPTH
-    {CL_DEPTH, CL_UNORM_INT16},
-    {CL_DEPTH, CL_FLOAT},
+    {amd::ChannelOrder::Depth, amd::ChannelDataType::UNormInt16},
+    {amd::ChannelOrder::Depth, amd::ChannelDataType::Float},
 };
 
 const uint32_t NUM_CHANNEL_ORDER_OF_RGB = 1;   // The number of channel orders of RGB at the end of
@@ -1024,22 +1049,30 @@ const uint32_t NUM_CHANNEL_ORDER_OF_DEPTH =
     2;  // The number of channel orders of DEPTH at the end of the table supportedFormats above.
 
 // definition of list of supported RA formats
-const cl_image_format Image::supportedFormatsRA[] = {
-    {CL_RA, CL_SNORM_INT8},     {CL_RA, CL_SNORM_INT16},   {CL_RA, CL_UNORM_INT8},
-    {CL_RA, CL_UNORM_INT16},    {CL_RA, CL_SIGNED_INT8},   {CL_RA, CL_SIGNED_INT16},
-    {CL_RA, CL_SIGNED_INT32},   {CL_RA, CL_UNSIGNED_INT8}, {CL_RA, CL_UNSIGNED_INT16},
-    {CL_RA, CL_UNSIGNED_INT32}, {CL_RA, CL_HALF_FLOAT},    {CL_RA, CL_FLOAT},
+const amd::ImageFormat Image::supportedFormatsRA[] = {
+    {amd::ChannelOrder::RA, amd::ChannelDataType::SNormInt8},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::SNormInt16},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::UNormInt8},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::UNormInt16},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::SignedInt8},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::SignedInt16},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::SignedInt32},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::UnsignedInt8},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::UnsignedInt16},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::UnsignedInt32},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::HalfFloat},
+    {amd::ChannelOrder::RA, amd::ChannelDataType::Float},
 };
 
-const cl_image_format Image::supportedDepthStencilFormats[] = {
+const amd::ImageFormat Image::supportedDepthStencilFormats[] = {
     // DEPTH STENCIL
-    {CL_DEPTH_STENCIL, CL_FLOAT},
-    {CL_DEPTH_STENCIL, CL_UNORM_INT24}};
+    {amd::ChannelOrder::DepthStencil, amd::ChannelDataType::Float},
+    {amd::ChannelOrder::DepthStencil, amd::ChannelDataType::UNormInt24}};
 
-uint32_t Image::numSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                    cl_mem_flags flags) {
+uint32_t Image::numSupportedFormats(const Context& context, amd::MemObjectType image_type,
+                                    amd::MemFlags flags) {
   const std::vector<amd::Device*>& devices = context.devices();
-  uint numFormats = sizeof(supportedFormats) / sizeof(cl_image_format);
+  uint numFormats = sizeof(supportedFormats) / sizeof(amd::ImageFormat);
 
   bool supportRA = false;
   bool supportDepthsRGB = false;
@@ -1060,13 +1093,15 @@ uint32_t Image::numSupportedFormats(const Context& context, cl_mem_object_type i
   }
 
   if (supportDepthsRGB) {
-    if ((image_type != CL_MEM_OBJECT_IMAGE2D) && (image_type != CL_MEM_OBJECT_IMAGE2D_ARRAY) &&
-        (image_type != 0)) {
+    if ((image_type != amd::MemObjectType::Image2D) &&
+        (image_type != amd::MemObjectType::Image2DArray) &&
+        (image_type != static_cast<amd::MemObjectType>(0))) {
       numFormats -= NUM_CHANNEL_ORDER_OF_DEPTH;  // substract channel order of DEPTH type.
     }
     // Currently we are not supported sRGB for write_imagef (extension cl_khr_srgb_image_writes)
-    if ((image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) ||
-        ((flags & (CL_MEM_WRITE_ONLY | CL_MEM_READ_WRITE | CL_MEM_KERNEL_READ_AND_WRITE)) != 0)) {
+    if ((image_type == amd::MemObjectType::Image1DBuffer) ||
+        ((flags & (amd::MemFlags::WriteOnly | amd::MemFlags::ReadWrite |
+                   amd::MemFlags::KernelReadWrite)) != amd::MemFlags::None)) {
       numFormats -= NUM_CHANNEL_ORDER_OF_sRGB;
     }
   } else {
@@ -1078,21 +1113,21 @@ uint32_t Image::numSupportedFormats(const Context& context, cl_mem_object_type i
   // Add RA if RA is supported. RA isn't supported on SI.
   if (supportRA) {
     numFormats +=
-        sizeof(supportedFormatsRA) / sizeof(cl_image_format);  // Add channel order of RA type.
+        sizeof(supportedFormatsRA) / sizeof(amd::ImageFormat);  // Add channel order of RA type.
   }
 
   if (supportDepthStencil) {
-    if (flags & CL_MEM_READ_ONLY) {
-      numFormats += sizeof(supportedDepthStencilFormats) / sizeof(cl_image_format);
+    if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::None) {
+      numFormats += sizeof(supportedDepthStencilFormats) / sizeof(amd::ImageFormat);
     }
   }
 
   return numFormats;
 }
 
-uint32_t Image::getSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                    const uint32_t num_entries, cl_image_format* image_formats,
-                                    cl_mem_flags flags) {
+uint32_t Image::getSupportedFormats(const Context& context, amd::MemObjectType image_type,
+                                    const uint32_t num_entries, amd::ImageFormat* image_formats,
+                                    amd::MemFlags flags) {
   const std::vector<amd::Device*>& devices = context.devices();
   uint numFormats = 0;
 
@@ -1114,18 +1149,20 @@ uint32_t Image::getSupportedFormats(const Context& context, cl_mem_object_type i
     }
   }
 
-  cl_image_format* format = image_formats;
-  uint numSupportedFormats = sizeof(supportedFormats) / sizeof(cl_image_format);
+  amd::ImageFormat* format = image_formats;
+  uint numSupportedFormats = sizeof(supportedFormats) / sizeof(amd::ImageFormat);
 
   bool srgbWriteSupported = true;
   if (supportDepthsRGB) {
-    if ((image_type != CL_MEM_OBJECT_IMAGE2D) && (image_type != CL_MEM_OBJECT_IMAGE2D_ARRAY) &&
-        (image_type != 0)) {
+    if ((image_type != amd::MemObjectType::Image2D) &&
+        (image_type != amd::MemObjectType::Image2DArray) &&
+        (image_type != static_cast<amd::MemObjectType>(0))) {
       numSupportedFormats -= NUM_CHANNEL_ORDER_OF_DEPTH;
     }
     // Currently we are not supported sRGB for write_imagef (extension cl_khr_srgb_image_writes)
-    if ((image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) ||
-        ((flags & (CL_MEM_WRITE_ONLY | CL_MEM_READ_WRITE | CL_MEM_KERNEL_READ_AND_WRITE)) != 0)) {
+    if ((image_type == amd::MemObjectType::Image1DBuffer) ||
+        ((flags & (amd::MemFlags::WriteOnly | amd::MemFlags::ReadWrite |
+                   amd::MemFlags::KernelReadWrite)) != amd::MemFlags::None)) {
       srgbWriteSupported = false;
     }
   } else {
@@ -1139,10 +1176,10 @@ uint32_t Image::getSupportedFormats(const Context& context, cl_mem_object_type i
       break;
     }
     if (!srgbWriteSupported) {
-      if ((amd::Image::supportedFormats[i].image_channel_order == CL_sRGBA) ||
-          (amd::Image::supportedFormats[i].image_channel_order == CL_sRGB) ||
-          (amd::Image::supportedFormats[i].image_channel_order == CL_sRGBx) ||
-          (amd::Image::supportedFormats[i].image_channel_order == CL_sBGRA)) {
+      if ((amd::Image::supportedFormats[i].channelOrder == amd::ChannelOrder::sRGBA) ||
+          (amd::Image::supportedFormats[i].channelOrder == amd::ChannelOrder::sRGB) ||
+          (amd::Image::supportedFormats[i].channelOrder == amd::ChannelOrder::sRGBx) ||
+          (amd::Image::supportedFormats[i].channelOrder == amd::ChannelOrder::sBGRA)) {
         continue;
       }
     }
@@ -1152,7 +1189,7 @@ uint32_t Image::getSupportedFormats(const Context& context, cl_mem_object_type i
 
   // Add RA if RA is supported.
   if (supportRA) {
-    for (uint i = 0; i < sizeof(supportedFormatsRA) / sizeof(cl_image_format); i++) {
+    for (uint i = 0; i < sizeof(supportedFormatsRA) / sizeof(amd::ImageFormat); i++) {
       if (numFormats == num_entries) {
         break;
       }
@@ -1162,8 +1199,8 @@ uint32_t Image::getSupportedFormats(const Context& context, cl_mem_object_type i
   }
 
   if (supportDepthStencil) {
-    if (flags & CL_MEM_READ_ONLY) {
-      for (uint i = 0; i < sizeof(supportedDepthStencilFormats) / sizeof(cl_image_format); i++) {
+    if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::None) {
+      for (uint i = 0; i < sizeof(supportedDepthStencilFormats) / sizeof(amd::ImageFormat); i++) {
         if (numFormats == num_entries) {
           break;
         }
@@ -1175,22 +1212,22 @@ uint32_t Image::getSupportedFormats(const Context& context, cl_mem_object_type i
   return numFormats;
 }
 
-bool Image::Format::isSupported(const Context& context, cl_mem_object_type image_type,
-                                cl_mem_flags flags) const {
-  const cl_image_format RGBA10 = {CL_RGBA, CL_UNORM_INT_101010};
+bool Image::Format::isSupported(const Context& context, amd::MemObjectType image_type,
+                                amd::MemFlags flags) const {
+  const amd::ImageFormat RGBA10 = {amd::ChannelOrder::RGBA, amd::ChannelDataType::UNormInt101010};
 
   uint numFormats = numSupportedFormats(context, image_type, flags);
 
-  std::vector<cl_image_format> image_formats(numFormats);
+  std::vector<amd::ImageFormat> image_formats(numFormats);
 
   getSupportedFormats(context, image_type, numFormats, image_formats.data(), flags);
 
   for (uint i = 0; i < numFormats; i++) {
-    if (*this == image_formats[i]) {
+    if (static_cast<const amd::ImageFormat&>(*this) == image_formats[i]) {
       return true;
     }
   }
-  if (*this == RGBA10) {
+  if (static_cast<const amd::ImageFormat&>(*this) == RGBA10) {
     return true;
   }
 
@@ -1199,7 +1236,7 @@ bool Image::Format::isSupported(const Context& context, cl_mem_object_type image
 
 // ================================================================================================
 Image* Image::createView(const Context& context, const Format& format, device::VirtualDevice* vDev,
-                         uint baseMipLevel, cl_mem_flags flags, bool createMipmapView,
+                         uint baseMipLevel, amd::MemFlags flags, bool createMipmapView,
                          bool forceAlloc) {
   // Find the image dimensions and create a corresponding object
   Image* view = new (context) Image(format, *this, baseMipLevel, flags, createMipmapView);
@@ -1245,7 +1282,7 @@ bool Image::validateRegion(const Coord3D& origin, const Coord3D& region) const {
 }
 
 bool Image::isRowSliceValid(size_t rowPitch, size_t slice, size_t width, size_t height) const {
-  size_t tmpHeight = (getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? 1 : height;
+  size_t tmpHeight = (getType() == amd::MemObjectType::Image1DArray) ? 1 : height;
 
   bool valid = (rowPitch == 0) ||
                ((rowPitch != 0) && (rowPitch >= width * getImageFormat().getElementSize()));
@@ -1347,24 +1384,24 @@ static uint16_t float2half_rtz(float f) {
 
 void Image::Format::getChannelOrder(uint8_t* channelOrder) const {
   enum { CH_ORDER_R = 0, CH_ORDER_G, CH_ORDER_B, CH_ORDER_A };
-  switch (image_channel_order) {
-    case CL_A:
+  switch (this->channelOrder) {
+    case amd::ChannelOrder::A:
       channelOrder[0] = CH_ORDER_A;
       break;
 
-    case CL_RA:
+    case amd::ChannelOrder::RA:
       channelOrder[0] = CH_ORDER_R;
       channelOrder[1] = CH_ORDER_A;
       break;
 
-    case CL_BGRA:
+    case amd::ChannelOrder::BGRA:
       channelOrder[0] = CH_ORDER_B;
       channelOrder[1] = CH_ORDER_G;
       channelOrder[2] = CH_ORDER_R;
       channelOrder[3] = CH_ORDER_A;
       break;
 
-    case CL_ARGB:
+    case amd::ChannelOrder::ARGB:
       channelOrder[0] = CH_ORDER_A;
       channelOrder[1] = CH_ORDER_R;
       channelOrder[2] = CH_ORDER_G;
@@ -1425,31 +1462,31 @@ void Image::Format::formatColor(const void* colorRGBA, void* colorFormat) const 
 
   bool allChannels = false;
   for (size_t i = 0; i < chCount && !allChannels; ++i) {
-    switch (image_channel_data_type) {
-      case CL_SNORM_INT8: {
+    switch (channelDataType) {
+      case amd::ChannelDataType::SNormInt8: {
         int8_t* color = reinterpret_cast<int8_t*>(colorFormat);
         color[i] = round_to_even(INT8_MAX * colorRGBAf[chOrder[i]]);
       } break;
-      case CL_SNORM_INT16: {
+      case amd::ChannelDataType::SNormInt16: {
         int16_t* color = reinterpret_cast<int16_t*>(colorFormat);
         color[i] = round_to_even(INT16_MAX * colorRGBAf[chOrder[i]]);
       } break;
-      case CL_UNORM_INT8: {
+      case amd::ChannelDataType::UNormInt8: {
         uint8_t* color = reinterpret_cast<uint8_t*>(colorFormat);
         color[i] = round_to_even(UINT8_MAX * colorRGBAf[chOrder[i]]);
       } break;
-      case CL_UNORM_INT16: {
+      case amd::ChannelDataType::UNormInt16: {
         uint16_t* color = reinterpret_cast<uint16_t*>(colorFormat);
         color[i] = round_to_even(UINT16_MAX * colorRGBAf[chOrder[i]]);
       } break;
-      case CL_UNORM_SHORT_565: {
+      case amd::ChannelDataType::UNormShort565: {
         t565* color = reinterpret_cast<t565*>(colorFormat);
         color->r_ = round_to_even(0x1F * colorRGBAf[0]);
         color->g_ = round_to_even(0x3F * colorRGBAf[1]);
         color->b_ = round_to_even(0x1F * colorRGBAf[2]);
         allChannels = true;
       } break;
-      case CL_UNORM_SHORT_555: {
+      case amd::ChannelDataType::UNormShort555: {
         t555* color = reinterpret_cast<t555*>(colorFormat);
         color->r_ = round_to_even(0x1F * colorRGBAf[0]);
         color->g_ = round_to_even(0x1F * colorRGBAf[1]);
@@ -1457,7 +1494,7 @@ void Image::Format::formatColor(const void* colorRGBA, void* colorFormat) const 
         color->a_ = round_to_even(colorRGBAf[3]);
         allChannels = true;
       } break;
-      case CL_UNORM_INT_101010: {
+      case amd::ChannelDataType::UNormInt101010: {
         t101010* color = reinterpret_cast<t101010*>(colorFormat);
         color->r_ = round_to_even(0x3FF * colorRGBAf[0]);
         color->g_ = round_to_even(0x3FF * colorRGBAf[1]);
@@ -1465,38 +1502,40 @@ void Image::Format::formatColor(const void* colorRGBA, void* colorFormat) const 
         color->a_ = round_to_even(0x3 * colorRGBAf[3]);
         allChannels = true;
       } break;
-      case CL_SIGNED_INT8: {
+      case amd::ChannelDataType::SignedInt8: {
         int8_t* color = reinterpret_cast<int8_t*>(colorFormat);
         color[i] = colorRGBAi[chOrder[i]];
       } break;
-      case CL_SIGNED_INT16: {
+      case amd::ChannelDataType::SignedInt16: {
         int16_t* color = reinterpret_cast<int16_t*>(colorFormat);
         color[i] = colorRGBAi[chOrder[i]];
       } break;
-      case CL_SIGNED_INT32: {
+      case amd::ChannelDataType::SignedInt32: {
         int32_t* color = reinterpret_cast<int32_t*>(colorFormat);
         color[i] = colorRGBAi[chOrder[i]];
       } break;
-      case CL_UNSIGNED_INT8: {
+      case amd::ChannelDataType::UnsignedInt8: {
         uint8_t* color = reinterpret_cast<uint8_t*>(colorFormat);
         color[i] = colorRGBAui[chOrder[i]];
       } break;
-      case CL_UNSIGNED_INT16: {
+      case amd::ChannelDataType::UnsignedInt16: {
         uint16_t* color = reinterpret_cast<uint16_t*>(colorFormat);
         color[i] = colorRGBAui[chOrder[i]];
       } break;
-      case CL_UNSIGNED_INT32: {
+      case amd::ChannelDataType::UnsignedInt32: {
         uint32_t* color = reinterpret_cast<uint32_t*>(colorFormat);
         color[i] = colorRGBAui[chOrder[i]];
       } break;
-      case CL_HALF_FLOAT: {
+      case amd::ChannelDataType::HalfFloat: {
         uint16_t* color = reinterpret_cast<uint16_t*>(colorFormat);
         color[i] = float2half_rtz(colorRGBAf[chOrder[i]]);
       } break;
-      case CL_FLOAT: {
+      case amd::ChannelDataType::Float: {
         float* color = reinterpret_cast<float*>(colorFormat);
         color[i] = colorRGBAf[chOrder[i]];
       } break;
+      default:
+        break;
     }
   }
 }

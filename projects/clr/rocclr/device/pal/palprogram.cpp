@@ -268,7 +268,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
 
   uint32_t length = 0;
   size_t offset = 0;
-  uint32_t flags = 0;
+  amd::MemFlags flags = amd::MemFlags::None;
   amd::Memory* parent = nullptr;
   hsa_symbol_kind_t type;
   hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -349,7 +349,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
   }
 
   /* Create a View from the global pal::Memory */
-  flags = ROCCLR_MEM_INTERNAL_MEMORY;
+  flags = amd::MemFlags::InternalMemory;
   parent = codeSegGpu_->owner();
   *amd_mem_obj = new (parent->getContext()) amd::Buffer(*parent, flags, offset, *bytes);
 

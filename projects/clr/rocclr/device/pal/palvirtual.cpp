@@ -2335,7 +2335,8 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   profilingBegin(vcmd);
   amd::Memory* phys_mem_obj = vcmd.memory();
   amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vcmd.ptr());
-  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+  if (vaddr_base_obj == nullptr ||
+      (vaddr_base_obj->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::None) {
     profilingEnd(vcmd);
     return;
   }

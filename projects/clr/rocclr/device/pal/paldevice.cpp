@@ -1409,7 +1409,7 @@ bool Device::init() {
       // Allocate a staging buffer for P2P emulation path
       if (devices.size() > 1) {
         amd::Buffer* buf =
-            new (*glb_ctx_) amd::Buffer(*glb_ctx_, CL_MEM_ALLOC_HOST_PTR, kP2PStagingSize);
+            new (*glb_ctx_) amd::Buffer(*glb_ctx_, amd::MemFlags::AllocHostPtr, kP2PStagingSize);
         if ((buf != nullptr) && buf->create()) {
           p2p_stage_ = buf;
         } else {
@@ -1472,7 +1472,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
   // Create resource
   bool result = false;
 
-  if (owner.getType() == CL_MEM_OBJECT_PIPE) {
+  if (owner.getType() == amd::MemObjectType::Pipe) {
     // directAccess isnt needed as Pipes shouldnt be host accessible for GPU
     directAccess = false;
   }
@@ -1500,13 +1500,14 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
   }
 
   Resource::MemoryType type =
-      (owner.forceSysMemAlloc() || (owner.getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER))
+      (owner.forceSysMemAlloc() ||
+       (owner.getMemFlags() & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None)
           ? Resource::Remote
           : Resource::Local;
 
   // Check if runtime can force a tiny buffer into USWC memory
   if ((size <= (GPU_MAX_REMOTE_MEM_SIZE * Ki)) && (type == Resource::Local) &&
-      (owner.getMemFlags() & CL_MEM_READ_ONLY)) {
+      (owner.getMemFlags() & amd::MemFlags::ReadOnly) != amd::MemFlags::None) {
     type = Resource::RemoteUSWC;
   }
 
@@ -1514,7 +1515,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
     type = Resource::BusAddressable;
   } else if (owner.getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) {
     type = Resource::ExternalPhysical;
-  } else if (owner.getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+  } else if ((owner.getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::None) {
     type = Resource::VaRange;
   }
 
@@ -1522,7 +1523,8 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
   bool remoteAlloc = false;
   // Internal means VirtualDevice!=nullptr
   bool internalAlloc =
-      ((owner.getMemFlags() & CL_MEM_USE_HOST_PTR) && (owner.getVirtualDevice() != nullptr))
+      ((owner.getMemFlags() & amd::MemFlags::UseHostPtr) != amd::MemFlags::None &&
+       (owner.getVirtualDevice() != nullptr))
           ? true
           : false;
 

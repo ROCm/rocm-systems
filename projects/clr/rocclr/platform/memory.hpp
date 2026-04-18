@@ -22,15 +22,6 @@
 #include <unordered_map>
 #include <memory>
 #include <limits>
-#define CL_MEM_FOLLOW_USER_NUMA_POLICY (1u << 31)
-#define ROCCLR_MEM_HSA_SIGNAL_MEMORY (1u << 30)
-#define ROCCLR_MEM_INTERNAL_MEMORY (1u << 29)
-#define CL_MEM_VA_RANGE_AMD (1u << 28)
-#define ROCCLR_MEM_HSA_UNCACHED (1u << 27)
-#define ROCCLR_MEM_INTERPROCESS (1u << 26)
-#define ROCCLR_MEM_PHYMEM (1u << 25)
-#define ROCCLR_MEM_HSA_CONTIGUOUS (1u << 24)
-#define ROCCLR_MEM_IO_MEMORY (1u << 23)
 
 namespace amd::device {
 class Memory;
@@ -155,8 +146,8 @@ class Memory : public amd::RuntimeObject {
   };
 
  protected:
-  typedef cl_mem_object_type Type;
-  typedef cl_mem_flags Flags;
+  using Type = amd::MemObjectType;
+  using Flags = amd::MemFlags;
   typedef DeviceMap<const Device*, device::Memory*> DeviceMemory;
 
   //! Returns the number of devices this memory object is associated, including P2P access
@@ -228,12 +219,12 @@ class Memory : public amd::RuntimeObject {
          void* svmPtr = NULL,  //!< svm host memory address, NULL if no SVM mem object
          size_t alignment = 0  //!< allocation addr alignment
   );
-  Memory(Memory& parent,             //!< Parent Mem obj
-         Flags flags,                //!< Object's flags
-         size_t offset,              //!< Memory offset
-         size_t size,                //!< Memory size
-         Type type = 0,              //!< Memory type
-         Context* context = nullptr  //!< Input context
+  Memory(Memory& parent,                              //!< Parent Mem obj
+         Flags flags,                                //!< Object's flags
+         size_t offset,                              //!< Memory offset
+         size_t size,                                //!< Memory size
+         Type type = static_cast<Type>(0),           //!< Memory type
+         Context* context = nullptr                  //!< Input context
   );
 
   //! Memory object destructor
@@ -442,9 +433,9 @@ class Buffer : public Memory {
 
  public:
   Buffer(Context& context, Flags flags, size_t size, void* svmPtr = NULL, size_t alignment = 0)
-      : Memory(context, CL_MEM_OBJECT_BUFFER, flags, size, svmPtr, alignment) {}
+      : Memory(context, amd::MemObjectType::Buffer, flags, size, svmPtr, alignment) {}
   Buffer(Memory& parent, Flags flags, size_t origin, size_t size, Context* context = nullptr)
-      : Memory(parent, flags, origin, size, 0, context) {}
+      : Memory(parent, flags, origin, size, static_cast<Type>(0), context) {}
 
   bool create(void* initFrom = NULL,     //!< Pointer to the initialization data
               bool sysMemAlloc = false,  //!< Allocate device memory in system memory
@@ -479,7 +470,7 @@ class Pipe : public Buffer {
 
  public:
   Pipe(Context& context, Flags flags, size_t size, size_t pipe_packet_size, size_t pipe_max_packets)
-      : Buffer(context, CL_MEM_OBJECT_PIPE, flags, size), initialized_(false) {
+      : Buffer(context, amd::MemObjectType::Pipe, flags, size), initialized_(false) {
     packetSize_ = pipe_packet_size;
     maxPackets_ = pipe_max_packets;
   }
@@ -498,34 +489,32 @@ class Pipe : public Buffer {
 class Image : public Memory {
  public:
   // declaration of list of supported formats
-  static const cl_image_format supportedFormats[];
-  static const cl_image_format supportedFormatsRA[];
-  static const cl_image_format supportedDepthStencilFormats[];
-  static uint32_t numSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                      cl_mem_flags flags = 0);
-  static uint32_t getSupportedFormats(const Context& context, cl_mem_object_type image_type,
-                                      const uint32_t num_entries, cl_image_format* image_formats,
-                                      cl_mem_flags flags = 0);
+  static const amd::ImageFormat supportedFormats[];
+  static const amd::ImageFormat supportedFormatsRA[];
+  static const amd::ImageFormat supportedDepthStencilFormats[];
+  static uint32_t numSupportedFormats(const Context& context, amd::MemObjectType image_type,
+                                      amd::MemFlags flags = amd::MemFlags::None);
+  static uint32_t getSupportedFormats(const Context& context, amd::MemObjectType image_type,
+                                      const uint32_t num_entries, amd::ImageFormat* image_formats,
+                                      amd::MemFlags flags = amd::MemFlags::None);
 
   //! Helper struct to manipulate image formats.
-  struct Format : public cl_image_format {
+  struct Format : public amd::ImageFormat {
     //! Construct a new ImageFormat wrapper.
-    Format(const cl_image_format& format) {
-      image_channel_order = format.image_channel_order;
-      image_channel_data_type = format.image_channel_data_type;
-    }
+    Format(const amd::ImageFormat& format) : amd::ImageFormat(format) {}
 
     //! Return true if this is a valid image format, false otherwise.
     bool isValid() const;
 
     //! Returns true if this format is supported by runtime, false otherwise
-    bool isSupported(const Context& context, cl_mem_object_type image_type = 0,
-                     cl_mem_flags flags = 0) const;
+    bool isSupported(const Context& context,
+                     amd::MemObjectType image_type = static_cast<amd::MemObjectType>(0),
+                     amd::MemFlags flags = amd::MemFlags::None) const;
 
     //! Compare 2 image formats.
     bool operator==(const Format& rhs) const {
-      return image_channel_order == rhs.image_channel_order &&
-             image_channel_data_type == rhs.image_channel_data_type;
+      return channelOrder == rhs.channelOrder &&
+             channelDataType == rhs.channelDataType;
     }
     bool operator!=(const Format& rhs) const { return !(*this == rhs); }
 
@@ -563,8 +552,8 @@ class Image : public Memory {
   uint baseMipLevel_;  //!< The base mip level for a view
 
  protected:
-  Image(const Format& format, Image& parent, uint baseMipLevel = 0, cl_mem_flags flags = 0,
-        bool isMipmapView = false);
+  Image(const Format& format, Image& parent, uint baseMipLevel = 0,
+        amd::MemFlags flags = amd::MemFlags::None, bool isMipmapView = false);
 
   ///! Initializes the device memory array which is nested
   // after'Image' object in memory layout.
@@ -586,7 +575,7 @@ class Image : public Memory {
   //! Validate image dimensions with supported sizes
   static bool validateDimensions(
       const std::vector<amd::Device*>& devices,  //!< List of devices for validation
-      cl_mem_object_type type,                   //!< Image type
+      amd::MemObjectType type,                   //!< Image type
       size_t width,                              //!< Image width
       size_t height,                             //!< Image height
       size_t depth,                              //!< Image depth
@@ -617,13 +606,13 @@ class Image : public Memory {
 
   //! Creates a view memory object
   virtual Image* createView(
-      const Context& context,         //!< Context for a view creation
-      const Format& format,           //!< The new format for a view
-      device::VirtualDevice* vDev,    //!< Virtual device object
-      uint baseMipLevel = 0,          //!< Base mip level for a view
-      cl_mem_flags flags = 0,         //!< Memory allocation flags
-      bool createMipmapView = false,  //!< To create mipmap view based on this image
-      bool forceAlloc = false         //!< To bypass deffered alloc
+      const Context& context,                        //!< Context for a view creation
+      const Format& format,                          //!< The new format for a view
+      device::VirtualDevice* vDev,                   //!< Virtual device object
+      uint baseMipLevel = 0,                         //!< Base mip level for a view
+      amd::MemFlags flags = amd::MemFlags::None,     //!< Memory allocation flags
+      bool createMipmapView = false,                 //!< To create mipmap view based on this image
+      bool forceAlloc = false                        //!< To bypass deffered alloc
   );
 
   //! Returns the impl for this image.

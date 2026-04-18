@@ -170,7 +170,7 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, 
 
     roc_device = &(rocDevice());
     *amd_mem_obj = new (roc_device->context())
-        amd::Buffer(roc_device->context(), ROCCLR_MEM_INTERNAL_MEMORY, *bytes, *device_pptr);
+        amd::Buffer(roc_device->context(), amd::MemFlags::InternalMemory, *bytes, *device_pptr);
 
     if (*amd_mem_obj == nullptr) {
       buildLog_ += "[OCL] Failed to create a mem object!";

@@ -2507,7 +2507,7 @@ bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) 
 // ================================================================================================
 amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
   amd::Memory* amd_mem_obj = new (context())
-      amd::Buffer(context(), ROCCLR_MEM_PHYMEM | ROCCLR_MEM_INTERPROCESS, 0, osHandle);
+      amd::Buffer(context(), amd::MemFlags::PhyMem | amd::MemFlags::Interprocess, 0, osHandle);
   if (amd_mem_obj == nullptr) {
     LogError("Cannot create memory object");
     return nullptr;

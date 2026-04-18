@@ -3519,7 +3519,8 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // Find the amd::Memory object for virtual ptr. vcmd.ptr() is vaddr.
   amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vcmd.ptr());
-  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+  if (vaddr_base_obj == nullptr ||
+      (vaddr_base_obj->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::None) {
     profilingEnd();
     return;
   }
@@ -3544,7 +3545,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       amd::MemObjMap::AddMemObj(vcmd.ptr(), vaddr_sub_obj);
       vaddr_sub_obj->getUserData().phys_mem_obj = phys_mem_obj;
       phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
-      if (phys_mem_obj->getMemFlags() & ROCCLR_MEM_INTERPROCESS) {
+      if ((phys_mem_obj->getMemFlags() & amd::MemFlags::Interprocess) != amd::MemFlags::None) {
         vaddr_sub_obj->setVmmImported(true);
       }
     } else {

@@ -139,13 +139,14 @@ class Memory : public device::Memory {
   void* persistent_host_ptr_;  //!< Host accessible pointer for persistent memory
 
   // Get MemorySegment type in terms of host memory allocation flags
-  Device::MemorySegment getHostMemorySegment(const unsigned int memFlags) {
-    return (memFlags & CL_MEM_SVM_ATOMICS) == 0 ? Device::MemorySegment::kNoAtomics
-                                                : ((memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0
-                                                       ? Device::MemorySegment::kUncachedAtomics
-                                                : ((memFlags & ROCCLR_MEM_IO_MEMORY) != 0
-                                                       ? Device::MemorySegment::kIoMemory
-                                                       : Device::MemorySegment::kAtomics));
+  Device::MemorySegment getHostMemorySegment(const amd::MemFlags memFlags) {
+    return (memFlags & amd::MemFlags::SvmAtomics) == amd::MemFlags::None
+               ? Device::MemorySegment::kNoAtomics
+               : ((memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::None
+                      ? Device::MemorySegment::kUncachedAtomics
+                      : ((memFlags & amd::MemFlags::IoMemory) != amd::MemFlags::None
+                             ? Device::MemorySegment::kIoMemory
+                             : Device::MemorySegment::kAtomics));
   }
 
  private:
@@ -179,7 +180,7 @@ class Buffer : public roc::Memory {
   hsa_signal_t getSignal() const { return signal_; }
 
  private:
-  // signal object used when ROCCLR_MEM_HSA_SIGNAL_MEMORY is set
+  // signal object used when amd::MemFlags::HsaSignalMemory is set
   hsa_signal_t signal_;
 
   // Disable copy constructor
