@@ -540,6 +540,14 @@ static const Entry kCanonTable[] = {
     E(DS_LOAD_TR16_B128, DS_LOAD_TR16_B128),
     E(DS_READ_B64_TR_B16, DS_READ_B64_TR_B16),
     E(DS_READ_B64_TR_B8, DS_READ_B64_TR_B8),
+    // gfx1250 64-bit transposed LDS load (i8 element, 8 elements per
+    // lane post-transpose). Distinct LLVM MC pseudo from the gfx950
+    // `DS_READ_B64_TR_B8` sibling — same semantics, different isel
+    // gate (isGFX1250Plus vs HasGFX950Insts). The handler folds both
+    // paths into a shared hand-rolled emulation; canonicalising the
+    // SemOp on the gfx1250 spelling matches the disassembly the
+    // raise_cli operator sees.
+    E(DS_LOAD_TR8_B64, DS_LOAD_TR8_B64),
     E(DS_READ_B32, DS_READ_B32), E(DS_READ_B64, DS_READ_B64),
     E(DS_READ_B128, DS_READ_B128),
     E(DS_READ2_B32, DS_READ2_B32), E(DS_READ2_B64, DS_READ2_B64),

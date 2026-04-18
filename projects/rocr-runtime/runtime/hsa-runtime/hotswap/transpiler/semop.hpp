@@ -262,6 +262,21 @@ enum class SemOp : uint16_t {
   DS_LOAD_TR16_B128,
   DS_READ_B64_TR_B16,
   DS_READ_B64_TR_B8,
+  // gfx1250 spelling of the same 64-bit transposed LDS load that
+  // gfx950 disassembles as `ds_read_b64_tr_b8`. The hardware
+  // semantics are identical: each lane reads 64 bits (8 x i8) from
+  // its LDS base, then the data is transposed across 8-lane groups
+  // so each lane post-transpose holds 8 i8 values from 8 different
+  // source lanes at the same intra-group element offset (v2i32
+  // packed). The two SemOps are kept distinct because they are two
+  // distinct LLVM MC opcodes (DS_LOAD_TR8_B64 vs DS_READ_B64_TR_B8)
+  // with separate isel patterns and separate intrinsics
+  // (`int_amdgcn_ds_load_tr8_b64` gated isGFX1250Plus,
+  // `int_amdgcn_ds_read_tr8_b64` gated HasGFX950Insts); both lower
+  // through the same hand-rolled bpermute-based emulation in
+  // handle_ds.cpp because gfx942 (the transpiler's target ISA) has
+  // neither isel pattern and no in-tree pre-isel emulation.
+  DS_LOAD_TR8_B64,
   DS_READ_B32, DS_READ_B64, DS_READ_B128,
   DS_READ2_B32, DS_READ2_B64,
   DS_READ_U16, DS_READ_I16, DS_READ_U8, DS_READ_I8,

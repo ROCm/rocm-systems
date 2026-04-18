@@ -95,28 +95,110 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
-  // gfx950 ds_read_b64_tr_b8: 64 bits of 8-bit data laid out 8x8 inside the
-  // wave, then transposed across lanes. Use the LLVM intrinsic (v2i32) so
-  // the backend selects the native instruction on gfx950 and emulates it
-  // elsewhere.
-  if (sop == SemOp::DS_READ_B64_TR_B8) {
-    Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");
+  // 64-bit transposed LDS load with 8-bit elements (gfx950
+  // `ds_read_b64_tr_b8` and its gfx1250 spelling `ds_load_tr8_b64`).
+  //
+  // Hardware behaviour (CDNA4 ISA §11.4 / RDNA4 gfx1250 spec):
+  //   Each lane provides a base address via VGPR + immediate offset.
+  //   The hardware reads 64 bits (8 x i8) from each lane's LDS
+  //   address, then transposes across 8-lane groups so each lane
+  //   post-transpose holds 8 i8 values that originally lived at the
+  //   same intra-group element offset across 8 different source
+  //   lanes:
+  //     result[lane][k] = raw[group_base + k][l_in_group]   k = 0..7
+  //   where group_base = lane & ~7 and l_in_group = lane & 7.
+  //   The transpose converts M-contiguous LDS data into the
+  //   WMMA/MFMA register layout where each thread holds K-contiguous
+  //   elements.
+  //
+  // Software emulation (target gfx942 has no isel pattern for either
+  // intrinsic — neither HasGFX950Insts nor isGFX1250Plus):
+  //   1. Compute lane_id, group_base, l_in_group via
+  //      mbcnt_lo/mbcnt_hi.
+  //   2. For each output dword j (0..1, each holds 4 i8 values):
+  //      For each in-dword element i (0..3):
+  //        a. src_lane = group_base + (4 * j + i)
+  //        b. base    = ds_bpermute(src_lane * 4, addr32)
+  //        c. val_i8  = LOAD_I8(base + l_in_group)
+  //        d. accumulate into outDw[j] at byte slot i.
+  //   The direct byte-offset addressing into the source lane's
+  //   contiguous data is byte-correct for i8 elements; no `* sizeof`
+  //   scaling is needed because each element is one byte wide. Total:
+  //   8 ds_bpermute + 8 i8 LDS loads + 8 OR/shifts per lane.
+  //
+  // EXEC gating: ds_bpermute is convergent and must run with all
+  // hardware lanes participating; emit OUTSIDE emitUnderExec, same
+  // contract as DS_LOAD_TR16_B128. Inactive-lane reads of the result
+  // are not propagated to side effects under a correct source kernel
+  // (each lane only reads its own packed-i8 result).
+  auto emitDsLoadTr8B64 = [&]() {
+    Value *addr32 = op.src(0);
     for (unsigned k = 1; k < op.nSrcs(); k++) {
       if (di.isImm(op.srcIdx(k))) {
         int64_t imm = di.getImm(op.srcIdx(k));
         if (imm != 0)
-          addr = ctx.B.CreateAdd(addr, ConstantInt::get(ctx.i64Ty, imm), "ds_off");
+          addr32 = ctx.B.CreateAdd(addr32,
+                       ConstantInt::get(ctx.i32Ty, imm), "ds_off32");
         break;
       }
     }
-    auto *ldsPtrTy = PointerType::get(ctx.C, 3);
-    Value *ptr = ctx.B.CreateIntToPtr(addr, ldsPtrTy, "tr8_ptr");
-    auto *v2i32Ty = FixedVectorType::get(ctx.i32Ty, 2);
-    Function *trFn = Intrinsic::getOrInsertDeclaration(
-        &ctx.M, Intrinsic::amdgcn_ds_read_tr8_b64, {v2i32Ty});
-    Value *trResult = ctx.B.CreateCall(trFn, {ptr}, "tr8_ld");
-    ctx.writeRegVec(op.dst(), trResult);
+
+    Function *mbcntLo = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_mbcnt_lo);
+    Function *mbcntHi = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_mbcnt_hi);
+    Value *allOnes = ConstantInt::getSigned(ctx.i32Ty, -1);
+    Value *zero32 = ConstantInt::get(ctx.i32Ty, 0);
+    Value *lo = ctx.B.CreateCall(mbcntLo, {allOnes, zero32}, "lane_lo");
+    Value *laneId = ctx.B.CreateCall(mbcntHi, {allOnes, lo}, "lane_id");
+
+    Value *lInGroup = ctx.B.CreateAnd(laneId, ctx.B.getInt32(7),
+                                       "l_in_grp");
+    Value *groupBase = ctx.B.CreateAnd(laneId,
+        ctx.B.CreateNot(ctx.B.getInt32(7)), "grp_base");
+    // Each i8 = 1 byte, so the per-element byte offset is just
+    // l_in_group; no shift needed.
+
+    Function *bperm = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_ds_bpermute);
+
+    Type *ptrLdsTy = PointerType::get(ctx.C, 3);
+    auto *i8Ty = Type::getInt8Ty(ctx.C);
+
+    // 2 output dwords, each holds 4 i8 values from 4 different
+    // source lanes within the 8-lane transpose group.
+    Value *outDw[2];
+    for (unsigned j = 0; j < 2; j++) {
+      Value *acc = ConstantInt::get(ctx.i32Ty, 0);
+      for (unsigned i = 0; i < 4; i++) {
+        Value *srcLane = ctx.B.CreateAdd(groupBase,
+                            ctx.B.getInt32(4 * j + i));
+        // ds_bpermute selector is byte-addressed (lane_id << 2).
+        Value *base = ctx.B.CreateCall(bperm,
+            {ctx.B.CreateShl(srcLane, ctx.B.getInt32(2)), addr32},
+            "bp_base");
+        Value *ldAddr = ctx.B.CreateAdd(base, lInGroup, "ld_addr");
+        Value *ptr = ctx.B.CreateIntToPtr(
+            ctx.B.CreateZExt(ldAddr, ctx.i64Ty), ptrLdsTy, "tr8_p");
+        Value *valI8 = ctx.B.CreateLoad(i8Ty, ptr, "tr8_b");
+        Value *valI32 = ctx.B.CreateZExt(valI8, ctx.i32Ty);
+        Value *shifted = ctx.B.CreateShl(valI32,
+                            ctx.B.getInt32(8 * i));
+        acc = ctx.B.CreateOr(acc, shifted, "tr8_pack");
+      }
+      outDw[j] = acc;
+    }
+
+    ParsedReg dest = op.dst();
+    for (unsigned j = 0; j < 2; j++)
+      ctx.storeVGPR32(dest.baseIdx + j, outDw[j]);
+
     hr.handled = true;
+  };
+
+  if (sop == SemOp::DS_READ_B64_TR_B8 ||
+      sop == SemOp::DS_LOAD_TR8_B64) {
+    emitDsLoadTr8B64();
     return hr;
   }
 

@@ -64,6 +64,13 @@ config.fixtures = {
         r"@LIT_FIXTURE_S_SET_PC_I64_PATTERN_B_CO@",
     "s_set_pc_i64_unresolvable":
         r"@LIT_FIXTURE_S_SET_PC_I64_UNRESOLVABLE_CO@",
+    # ds_load_tr8_b64 (DS) — gfx1250 64-bit transposed LDS load with
+    # 8-bit elements.  See handle_ds.cpp's `emitDsLoadTr8B64` shared
+    # lambda and the SemOp::DS_LOAD_TR8_B64 docstring in semop.hpp
+    # for the lowering contract; the fixture pins the bpermute-based
+    # emulation that gfx942 needs because neither HasGFX950Insts nor
+    # isGFX1250Plus isel patterns fire on gfx942.
+    "ds_load_tr8_b64": r"@LIT_FIXTURE_DS_LOAD_TR8_B64_CO@",
 }
 
 lit_config.load_config(
