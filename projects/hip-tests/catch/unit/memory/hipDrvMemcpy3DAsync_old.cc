@@ -447,6 +447,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
  */
 
 HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
+  CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
