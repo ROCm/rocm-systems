@@ -343,30 +343,55 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     //   BITMASK_PERM (top bit = 0)    — per-lane swizzle via 5-bit
     //                                    AND/OR/XOR masks; the 5-bit
     //                                    masks address only bits 0..4
-    //                                    of the lane index, never
-    //                                    crossing a 32-lane boundary.
+    //                                    of the lane index by the
+    //                                    encoding itself.
     //   FFT_MODE    (top nibble = 0xE) — wave-relative FFT pattern.
     //   ROTATE_MODE (top nibble = 0xC) — wave-relative rotation.
     //
-    // QUAD_PERM and BITMASK_PERM are *structurally* wave-size-
-    // oblivious: the hardware semantics are confined to 32-lane
-    // groups by the encoding itself, so a wave32 source kernel's
-    // swizzle pattern lifts to the same llvm.amdgcn.ds.swizzle call
-    // on the wave64 target and the two 32-lane halves of the wave64
-    // target each independently reproduce the source's wave32
-    // shuffle — the textbook modulo-replication match.
+    // The wave-size-obliviousness claim for QUAD_PERM and BITMASK_PERM
+    // depends on a hardware property: that wave64 ds_swizzle preserves
+    // bit 5 of the lane id (so each 32-lane half of a wave64 target
+    // independently swizzles using the same pattern). The encoding
+    // alone confines the swizzle masks to bits 0..4; whether the
+    // upper bit survives the hardware permutation is a separate ISA
+    // contract that is documented neither in IntrinsicsAMDGPU.td nor
+    // in AMDGPUUsage.rst. We verified it empirically on gfx942
+    // (CDNA3) wave64:
     //
-    // FFT_MODE / ROTATE_MODE / unknown-mode imms span the full wave
-    // width and are NOT modulo-replication-safe; the Phase 1.4.5
-    // classifier filters those at the cross-wave boundary
+    //   * BROADCAST(32, 5) (imm=0x00A0): lanes 0..31 → lane 5,
+    //     lanes 32..63 → lane 37 (= 32+5). Bit 5 preserved.
+    //   * SWAP-1          (imm=0x041F): lane 32↔33, 34↔35, …,
+    //     62↔63. Each 32-lane half pairs internally.
+    //
+    // Reproduction: a small HIP probe that issues `ds_swizzle_b32`
+    // via inline asm against a per-lane lane-id VGPR and prints
+    // each lane's destination. Both probes confirm the upper-half
+    // independence the modulo-replication argument requires; the
+    // BITMASK_PERM check in `dsSwizzleSafeForModRep` is therefore
+    // sound for the BROADCAST/SWAP/REVERSE/raw-bitmask family that
+    // wave32 source kernels can encode.
+    //
+    // FFT_MODE / ROTATE_MODE / unknown-mode imms span the full
+    // source-wave width and are NOT modulo-replication-safe under
+    // the same hardware contract; the Phase 1.4.5 classifier
+    // filters those at the cross-wave boundary
     // (rewriteImplemented = false → CrossWaveShuffleRewritePending),
     // so by the time control reaches this handler in a cross-wave
     // raise we know the imm is in the safe set. Same-wave raises
     // bypass the classifier (it early-returns when src/tgt wave
     // sizes match) and reach here unconditionally; for same-wave
-    // every imm is correct by construction (same-wave ds_swizzle is
-    // always the identity transformation of itself), so the same
-    // intrinsic emit covers both paths.
+    // every imm is correct by construction (the source and target
+    // hardware execute the same `ds_swizzle_b32` byte-for-byte), so
+    // the same intrinsic emit covers both paths.
+    //
+    // gfx942 backend support: confirmed via a separate verification
+    // run — the lifted IR `call i32 @llvm.amdgcn.ds.swizzle(i32 %v,
+    // i32 1055)` lowers through `llc -mcpu=gfx942
+    // -mattr=+wavefrontsize64` to a direct `ds_swizzle_b32 ...
+    // offset:swizzle(SWAP,1)` instruction with `.wavefront_size: 64`
+    // metadata. No emulation needed (unlike P2's permlane16 path,
+    // where the gfx942 backend lacked native isel and we routed
+    // through ds_bpermute).
     //
     // EXEC gating: `amdgcn.ds.swizzle` is convergent (`isConvergent`
     // in DSInstructions.td); same convergence reasoning as the
@@ -385,8 +410,22 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
           "(expected OpName::offset)");
       return hr;
     }
-    uint16_t offsetImm = static_cast<uint16_t>(
-        di.inst.getOperand((unsigned)offsetIdx).getImm());
+    int64_t rawImm = di.inst.getOperand((unsigned)offsetIdx).getImm();
+    // The MC operand stores the 16-bit `offset` field as int64_t.
+    // The encoding is unsigned 16-bit per AMDGPU SIDefines.h
+    // `Swizzle::EncBits`, so the value must fit in [0, 0xFFFF]. A
+    // value outside this range would indicate either a malformed
+    // disassembly or an LLVM-side change to the operand encoding
+    // we have not accounted for; abort loudly rather than silently
+    // truncate via the uint16_t cast below.
+    if (rawImm < 0 || rawImm > 0xFFFF) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "DS",
+          "ds_swizzle_b32 offset imm out of 16-bit range — disassembly "
+          "or LLVM operand-encoding change");
+      return hr;
+    }
+    uint16_t offsetImm = static_cast<uint16_t>(rawImm);
     Value *src = op.src(0);
     Function *swiz = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_ds_swizzle);
