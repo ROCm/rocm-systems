@@ -209,12 +209,40 @@ def _check_mcp_server() -> tuple[bool, str]:
         return False, f"MCP server FAILED: {e}"
 
 
+def _check_opencode_bundled() -> tuple[bool, str]:
+    """Check that bundled opencode binary can be resolved."""
+    from perfxpert.cli.opencode_launcher import resolve_opencode_binary
+    try:
+        p = resolve_opencode_binary()
+        return True, f"opencode binary at {p}"
+    except FileNotFoundError as e:
+        return False, str(e)
+
+
+def _check_opencode_config() -> tuple[bool, str]:
+    """Check that opencode config bundle is present and complete."""
+    from perfxpert.cli.opencode_launcher import resolve_config_dir
+    try:
+        p = resolve_config_dir()
+        missing = [
+            name for name in ("opencode.json", "amd-theme.json", "AGENTS.md", "mcp.json")
+            if not (p / name).is_file()
+        ]
+        if missing:
+            return False, f"opencode_config missing files: {missing}"
+        return True, f"opencode config bundle at {p}"
+    except FileNotFoundError as e:
+        return False, str(e)
+
+
 def _run_doctor():
     """Run all health checks and print results."""
     print("perfxpert doctor — health check\n")
 
     checks = [
         ("MCP server", _check_mcp_server()),
+        ("opencode binary", _check_opencode_bundled()),
+        ("opencode config", _check_opencode_config()),
     ]
 
     for name, (ok, msg) in checks:
