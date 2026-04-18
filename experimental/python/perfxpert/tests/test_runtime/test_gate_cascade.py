@@ -211,3 +211,99 @@ def test_regression_failure_short_circuits_anchors(patches):
     assert patches["bitwise"].called, "Gate 3 (bitwise) should have been invoked"
     # Gate 5 MUST NOT be invoked
     assert not patches["anchors"].called, "Gate 5 (anchors) must not run after Gate 4 fails"
+
+
+# ---------------------------------------------------------------------------
+# Finding #2 — _run_sol_gate un-mocked integration tests
+# ---------------------------------------------------------------------------
+
+class TestRunSolGateUnmocked:
+    """Call _run_sol_gate DIRECTLY (no mocking) — exercises the real sol.sanity_check
+    integration path.  These are the tests the bug was hiding from.
+    """
+
+    def test_impossible_speedup_ratio_rejected(self):
+        """1000× claimed speedup must be caught by the hard cap (> 50×)."""
+        r = gate_cascade._run_sol_gate(claimed_speedup=1000.0, gfx_id="gfx942")
+        assert r["ok"] is False, "1000× speedup should be rejected by hard cap"
+        assert "exploit" in r["reason"].lower() or "exceeds" in r["reason"].lower()
+
+    def test_reasonable_speedup_passes_cap(self):
+        """2× speedup is well within the 50× hard cap."""
+        r = gate_cascade._run_sol_gate(claimed_speedup=2.0, gfx_id="gfx942")
+        assert r["ok"] is True
+
+    def test_exactly_at_cap_boundary_passes(self):
+        """50× is the maximum allowed — exactly at cap should pass."""
+        r = gate_cascade._run_sol_gate(
+            claimed_speedup=gate_cascade.SOL_MAX_REASONABLE_SPEEDUP,
+            gfx_id="gfx942",
+        )
+        assert r["ok"] is True
+
+    def test_one_over_cap_rejects(self):
+        """50.001× exceeds the hard cap → reject."""
+        r = gate_cascade._run_sol_gate(
+            claimed_speedup=gate_cascade.SOL_MAX_REASONABLE_SPEEDUP + 0.001,
+            gfx_id="gfx942",
+        )
+        assert r["ok"] is False
+
+    def test_absolute_flops_within_peak_passes(self):
+        """When achieved_flops_per_sec is supplied and within peak, gate passes."""
+        # MI300X fp64 peak = 81.7 TFLOPS; 40 TFLOPS is plausible
+        r = gate_cascade._run_sol_gate(
+            claimed_speedup=2.0,
+            gfx_id="gfx942",
+            achieved_flops_per_sec=40e12,
+            kernel_type="fp64",
+        )
+        assert r["ok"] is True, f"40 TFLOPS fp64 should be within MI300X peak: {r}"
+
+    def test_absolute_flops_exceeding_peak_rejects(self):
+        """When achieved_flops_per_sec exceeds hardware peak, gate rejects even if
+        speedup ratio is modest.  This is the Sakana-style attack path."""
+        # MI300X fp64 peak = 81.7 TFLOPS; claim 500 TFLOPS → impossible
+        r = gate_cascade._run_sol_gate(
+            claimed_speedup=3.0,   # ratio looks innocent
+            gfx_id="gfx942",
+            achieved_flops_per_sec=500e12,  # but absolute FLOPS exceed hardware peak
+            kernel_type="fp64",
+        )
+        assert r["ok"] is False, (
+            "500 TFLOPS fp64 exceeds MI300X peak 81.7 TFLOPS — must reject"
+        )
+
+    def test_evaluate_rejects_1000x_claimed_speedup_end_to_end(self, monkeypatch):
+        """evaluate() with claimed_speedup=1000× must fail at Gate 2 even when
+        all other gates are mocked as passing.  This would have silently passed
+        before the fix (TypeError was swallowed)."""
+        monkeypatch.setattr(
+            gate_cascade, "_run_compile_gate",
+            MagicMock(return_value={"ok": True, "stderr": ""}),
+        )
+        # Do NOT mock _run_sol_gate — it must run for real
+        monkeypatch.setattr(
+            gate_cascade, "_run_bitwise_gate",
+            MagicMock(return_value={"ok": True, "diff": None}),
+        )
+        monkeypatch.setattr(
+            gate_cascade, "_run_regression_gate",
+            MagicMock(return_value={
+                "ok": True,
+                "total_delta_pct": 0.0,
+                "weighted_geomean_delta_pct": 0.0,
+                "per_kernel_deltas": [],
+            }),
+        )
+
+        v = gate_cascade.evaluate(
+            baseline_db="b.db", candidate_db="c.db",
+            patch_file="foo.hip", patch_sha="abc123",
+            gfx_id="gfx942",
+            claimed_speedup=1000.0,
+        )
+        assert v.status == "reject", (
+            f"1000× speedup must be rejected at Gate 2, got: {v.status}"
+        )
+        assert v.failing_gate == "sol"

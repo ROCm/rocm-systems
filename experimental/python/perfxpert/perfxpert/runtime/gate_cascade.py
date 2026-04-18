@@ -71,12 +71,58 @@ def _run_compile_gate(patch_file: str, flags: List[str]) -> Dict[str, Any]:
     return compile_tool.build(patch_file, flags)
 
 
-def _run_sol_gate(claimed_speedup: float, gfx_id: str) -> Dict[str, Any]:
-    """Delegate to tools.sol.sanity_check."""
+def _run_sol_gate(
+    claimed_speedup: float,
+    gfx_id: str,
+    achieved_flops_per_sec: Optional[float] = None,
+    kernel_type: str = "fp64",
+) -> Dict[str, Any]:
+    """Delegate to tools.sol.sanity_check.
+
+    Two-tier check:
+    1. Hard cap: reject any claimed_speedup > SOL_MAX_REASONABLE_SPEEDUP (50×).
+       This is architecture-independent and catches gross reward-hacking even when
+       absolute FLOPS are unavailable.
+    2. Absolute-FLOPS check (when achieved_flops_per_sec is provided): delegate to
+       sol.sanity_check which compares against per-architecture hardware peak.
+
+    Returns dict with "ok" key: True = plausible, False = reject.
+    """
     from perfxpert.tools import sol
-    r = sol.sanity_check(claimed_speedup=claimed_speedup, gfx_id=gfx_id)
-    r["ok"] = r.get("verdict") == "sane"
-    return r
+
+    # Tier 1: hard cap on speedup ratio (architecture-independent fast path)
+    if claimed_speedup > SOL_MAX_REASONABLE_SPEEDUP:
+        return {
+            "ok": False,
+            "plausible": False,
+            "peak_ratio": claimed_speedup,
+            "reason": (
+                f"Claimed speedup {claimed_speedup}× exceeds maximum plausible ratio "
+                f"{SOL_MAX_REASONABLE_SPEEDUP}× — likely sandbox exploit"
+            ),
+            "sol_peak": None,
+        }
+
+    # Tier 2: absolute FLOPS check when caller supplies measured throughput
+    if achieved_flops_per_sec is not None:
+        r = sol.sanity_check(
+            achieved_flops_per_sec=achieved_flops_per_sec,
+            kernel_type=kernel_type,
+            gfx_id=gfx_id,
+        )
+        # sol.sanity_check returns {"plausible": bool, "reason": str, "sol_peak": float}
+        r["ok"] = r["plausible"]
+        r["peak_ratio"] = claimed_speedup
+        return r
+
+    # No absolute FLOPS available; tier-1 passed, so accept
+    return {
+        "ok": True,
+        "plausible": True,
+        "peak_ratio": claimed_speedup,
+        "reason": f"Claimed speedup {claimed_speedup}× is within {SOL_MAX_REASONABLE_SPEEDUP}× cap",
+        "sol_peak": None,
+    }
 
 
 def _run_bitwise_gate(baseline_db: str, candidate_db: str) -> Dict[str, Any]:
@@ -106,6 +152,8 @@ def evaluate(
     claimed_speedup: float,
     compile_flags: Optional[List[str]] = None,
     candidate_binary: Optional[str] = None,
+    achieved_flops_per_sec: Optional[float] = None,
+    kernel_type: str = "fp64",
 ) -> GateVerdict:
     """Run the 5-gate cascade and return a structured verdict.
 
@@ -127,7 +175,11 @@ def evaluate(
         )
 
     # Gate 2: SOL sanity (anti-Sakana)
-    r = _run_sol_gate(claimed_speedup, gfx_id)
+    r = _run_sol_gate(
+        claimed_speedup, gfx_id,
+        achieved_flops_per_sec=achieved_flops_per_sec,
+        kernel_type=kernel_type,
+    )
     if not r.get("ok", False):
         return GateVerdict(
             status="reject", failing_gate="sol",
