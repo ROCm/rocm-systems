@@ -9,9 +9,18 @@ Tool class: READ_ONLY (pure analysis, no modification).
 
 import math
 import sqlite3
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from perfxpert.tools._class import ToolClass, tool_class
+
+
+@dataclass(frozen=True)
+class KernelRuntime:
+    """Simple kernel runtime snapshot for testing and analysis."""
+    kernel_name: str
+    total_runtime_ns: int
+    share: float
 
 
 HOT_COVERAGE_PCT = 0.80
@@ -161,3 +170,27 @@ def compare_runs(
         "per_kernel_deltas": per_kernel,
         "threshold_pct": threshold,
     }
+
+
+@tool_class(ToolClass.READ_ONLY)
+def extract_kernel_runtimes_from_db(db_path: str) -> List[KernelRuntime]:
+    """Extract kernel runtimes from a rocpd database.
+
+    Returns:
+        List of KernelRuntime ordered by total_runtime_ns (descending).
+    """
+    durations = _kernel_durations(db_path)
+    total = sum(durations.values())
+    if total == 0:
+        return []
+
+    result = []
+    for kernel_name, total_ns in sorted(durations.items(), key=lambda x: x[1], reverse=True):
+        result.append(
+            KernelRuntime(
+                kernel_name=kernel_name,
+                total_runtime_ns=int(total_ns),
+                share=total_ns / total,
+            )
+        )
+    return result
