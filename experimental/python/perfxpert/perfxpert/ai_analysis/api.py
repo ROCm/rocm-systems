@@ -511,6 +511,12 @@ class AnalysisResult:
         return "\n".join(lines)
 
 
+def _is_agentic_enabled() -> bool:
+    """Feature flag: PERFXPERT_USE_AGENTS truthy values opt into the new path."""
+    import os
+    return os.environ.get("PERFXPERT_USE_AGENTS", "").strip().lower() in {"1", "true", "yes"}
+
+
 def analyze_database(
     database_path: Union[str, Path],
     *,
@@ -525,7 +531,14 @@ def analyze_database(
     att_dir: Optional[str] = None,
 ) -> AnalysisResult:
     """
-    Analyze a rocpd database file and return AI-powered insights.
+    Public entry point — dispatches to legacy or agentic implementation.
+
+    Default behavior: LEGACY (backward compatible). Set PERFXPERT_USE_AGENTS=1
+    to enable the new hierarchical-agent path. This env-flag is a Phase 4/5/6
+    transition switch; Phase 6 flips the default.
+
+    Args and semantics are identical in both branches. The agentic branch
+    delegates to perfxpert.agents.runtime.
 
     This is the main entry point for programmatic analysis.
     Performs local analysis (always) and optional LLM enhancement.
@@ -559,6 +572,108 @@ def analyze_database(
         >>> print(result.summary.overall_assessment)
         >>> for rec in result.recommendations.high_priority:
         ...     print(f"- {rec.title}")
+    """
+    if _is_agentic_enabled():
+        return _analyze_database_agentic(
+            database_path,
+            custom_prompt=custom_prompt,
+            enable_llm=enable_llm,
+            llm_provider=llm_provider,
+            llm_api_key=llm_api_key,
+            llm_thinking_tokens=llm_thinking_tokens,
+            output_format=output_format,
+            verbose=verbose,
+            top_kernels=top_kernels,
+            att_dir=att_dir,
+        )
+    return _analyze_database_legacy(
+        database_path,
+        custom_prompt=custom_prompt,
+        enable_llm=enable_llm,
+        llm_provider=llm_provider,
+        llm_api_key=llm_api_key,
+        llm_thinking_tokens=llm_thinking_tokens,
+        output_format=output_format,
+        verbose=verbose,
+        top_kernels=top_kernels,
+        att_dir=att_dir,
+    )
+
+
+def _analyze_database_agentic(
+    database_path: Union[str, Path],
+    *,
+    custom_prompt: Optional[str] = None,
+    enable_llm: bool = False,
+    llm_provider: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    llm_thinking_tokens: Optional[int] = None,
+    output_format: OutputFormat = OutputFormat.PYTHON_OBJECT,
+    verbose: bool = False,
+    top_kernels: int = 10,
+    att_dir: Optional[str] = None,
+) -> AnalysisResult:
+    """Agentic path: delegates to Phase 3 runtime if available."""
+    try:
+        from perfxpert.agents import runtime
+    except ImportError as e:
+        raise RuntimeError(
+            "PERFXPERT_USE_AGENTS=1 is set but agent runtime is not available. "
+            "This is a Phase 3 dependency. Unset the env var to use the legacy path."
+        ) from e
+    return runtime.run_analyze(
+        database_path=database_path,
+        custom_prompt=custom_prompt,
+        enable_llm=enable_llm,
+        llm_provider=llm_provider,
+        llm_api_key=llm_api_key,
+        llm_thinking_tokens=llm_thinking_tokens,
+        output_format=output_format,
+        verbose=verbose,
+        top_kernels=top_kernels,
+        att_dir=att_dir,
+    )
+
+
+def _analyze_database_legacy(
+    database_path: Union[str, Path],
+    *,
+    custom_prompt: Optional[str] = None,
+    enable_llm: bool = False,
+    llm_provider: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    llm_thinking_tokens: Optional[int] = None,
+    output_format: OutputFormat = OutputFormat.PYTHON_OBJECT,
+    verbose: bool = False,
+    top_kernels: int = 10,
+    att_dir: Optional[str] = None,
+) -> AnalysisResult:
+    """
+    Analyze a rocpd database file and return AI-powered insights.
+
+    This is the legacy (default) implementation.
+    Performs local analysis (always) and optional LLM enhancement.
+
+    Args:
+        database_path: Path to .rpd or .db file
+        custom_prompt: Optional user question to guide analysis
+        enable_llm: Enable LLM-powered natural language enhancement
+        llm_provider: LLM provider ("anthropic", "openai")
+        llm_api_key: API key for LLM provider (or set env var)
+        llm_thinking_tokens: Enable extended thinking with this token budget.
+            Only supported with the Anthropic provider and compatible models
+            (claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet).
+        output_format: Desired output format
+        verbose: Enable verbose logging
+        top_kernels: Number of top kernels to analyze
+
+    Returns:
+        AnalysisResult object with complete analysis
+
+    Raises:
+        DatabaseNotFoundError: Database file doesn't exist
+        DatabaseCorruptedError: Database schema is invalid
+        MissingDataError: Required tables are missing
     """
     database_path = Path(database_path)
     # Validate database exists
