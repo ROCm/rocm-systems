@@ -55,8 +55,8 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
     for pname, p in sig.parameters.items():
         if pname == "self" or p.kind == inspect.Parameter.VAR_KEYWORD:
             continue
-        schema_type = _annotation_to_json_type(p.annotation)
-        properties[pname] = {"type": schema_type}
+        schema = _annotation_to_json_schema(p.annotation)
+        properties[pname] = schema
         if p.default is inspect.Parameter.empty:
             required.append(pname)
 
@@ -86,6 +86,24 @@ def _annotation_to_json_type(ann) -> str:
     if ann is dict or getattr(ann, "__origin__", None) is dict:
         return "object"
     return "string"
+
+
+def _annotation_to_json_schema(ann) -> Dict[str, Any]:
+    """Build a JSON-Schema fragment for one parameter annotation.
+
+    OpenAI function-calling requires `items` for arrays and `additionalProperties`
+    for objects, else the tool is rejected. We infer element type from parametric
+    hints (List[str], Dict[str, int]) when present, else default to string.
+    """
+    origin = getattr(ann, "__origin__", None)
+    args = getattr(ann, "__args__", ()) or ()
+
+    if ann is list or origin is list:
+        item_ann = args[0] if args else str
+        return {"type": "array", "items": _annotation_to_json_schema(item_ann)}
+    if ann is dict or origin is dict:
+        return {"type": "object", "additionalProperties": True}
+    return {"type": _annotation_to_json_type(ann)}
 
 
 def build_server() -> Server:

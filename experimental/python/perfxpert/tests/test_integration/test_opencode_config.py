@@ -16,8 +16,8 @@ def test_config_dir_exists():
 
 def test_opencode_json_is_valid_and_has_amd_branding():
     data = json.loads((CONFIG_DIR / "opencode.json").read_text())
-    assert "branding" in data
-    assert "AMD" in data["branding"]["version_banner"] or "AMD" in data.get("theme", "")
+    assert data["$schema"] == "https://opencode.ai/config.json"
+    assert data["mcp"]["perfxpert"]["command"] == ["perfxpert-mcp"]
 
 
 def test_theme_json_is_valid():

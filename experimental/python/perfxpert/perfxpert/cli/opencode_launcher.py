@@ -123,8 +123,12 @@ def main(argv: list[str] | None = None) -> int:
     if os.environ.get("PERFXPERT_CODE_NO_BANNER", "").strip().lower() not in {"1", "true", "yes"}:
         print_banner()
 
-    # Build the opencode argv: bundled binary + --config <dir> + passthrough
-    cmd = [str(binary), "--config", str(config_dir), *argv]
+    # opencode 1.4.x discovers `opencode.json` from cwd (no `--config` flag).
+    # Copy the bundled config into a stable per-user dir and `cd` there before exec,
+    # so MCP wiring + AGENTS.md instructions apply without polluting the user's cwd.
+    runtime_cfg_dir = _prepare_runtime_config_dir(config_dir)
+
+    cmd = [str(binary), *argv]
 
     # Pass through most of the user env; opencode needs LLM API keys and rocprofv3 envs.
     # We do NOT use the EXECUTION-tool env whitelist here because opencode is the
@@ -134,7 +138,25 @@ def main(argv: list[str] | None = None) -> int:
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
 
     try:
-        proc = subprocess.run(cmd, env=env, check=False)
+        proc = subprocess.run(cmd, env=env, cwd=str(runtime_cfg_dir), check=False)
     except KeyboardInterrupt:
         return 130
     return proc.returncode
+
+
+def _prepare_runtime_config_dir(src_config_dir: Path) -> Path:
+    """Stage a read-only copy of the bundled config where opencode will pick it up.
+
+    opencode 1.4.x has no `--config <path>` flag; it auto-discovers `opencode.json`
+    from the current directory. We create a dedicated runtime dir so we can point
+    opencode at our bundled config without forcing the user to run from a specific
+    directory or clobber their own `opencode.json`.
+    """
+    import shutil
+    runtime_dir = Path.home() / ".cache" / "perfxpert" / "opencode"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    for f in src_config_dir.iterdir():
+        target = runtime_dir / f.name
+        if not target.exists() or target.read_bytes() != f.read_bytes():
+            shutil.copy2(f, target)
+    return runtime_dir
