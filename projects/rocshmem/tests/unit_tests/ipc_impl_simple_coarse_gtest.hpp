@@ -44,7 +44,7 @@ __global__
 void
 kernel_simple_coarse_copy(IpcImpl *ipc_impl, int *src, int *dest, size_t bytes) {
     if (!threadIdx.x) {
-      ipc_impl->ipcCopy(dest, src, bytes);
+      ipc_impl->ipcCopy(dest, src, bytes, 0);
       ipc_impl->ipcFence();
     }
     __syncthreads();
@@ -53,7 +53,7 @@ kernel_simple_coarse_copy(IpcImpl *ipc_impl, int *src, int *dest, size_t bytes) 
 __global__
 void
 kernel_simple_coarse_copy_block(IpcImpl *ipc_impl, int *src, int *dest, size_t bytes) {
-    ipc_impl->ipcCopy_wg(dest, src, bytes);
+    ipc_impl->ipcCopy_wg(dest, src, bytes, 0);
     ipc_impl->ipcFence();
     __syncthreads();
 }
@@ -61,7 +61,7 @@ kernel_simple_coarse_copy_block(IpcImpl *ipc_impl, int *src, int *dest, size_t b
 __global__
 void
 kernel_simple_coarse_copy_warp(IpcImpl *ipc_impl, int *src, int *dest, size_t bytes) {
-    ipc_impl->ipcCopy_wave(dest, src, bytes);
+    ipc_impl->ipcCopy_wave(dest, src, bytes, 0);
     ipc_impl->ipcFence();
     __syncthreads();
 }

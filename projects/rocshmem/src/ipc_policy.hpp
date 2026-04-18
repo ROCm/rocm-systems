@@ -86,23 +86,11 @@ class IpcOnImpl {
 
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size);
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe);
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size);
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe);
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size);
-
-  __device__ void ipcPut(void *dst, void *src, size_t size, int pe) {
-    ipcCopy(dst, src, size);
-  }
-
-  __device__ void ipcPut_wg(void *dst, void *src, size_t size, int pe) {
-    ipcCopy_wg(dst, src, size);
-  }
-
-  __device__ void ipcPut_wave(void *dst, void *src, size_t size, int pe) {
-    ipcCopy_wave(dst, src, size);
-  }
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe);
 
   template <detail::atomic::rocshmem_memory_scope scope = detail::atomic::memory_scope_system,
             detail::atomic::rocshmem_memory_order order = detail::atomic::memory_order_seq_cst>
@@ -205,25 +193,25 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   __host__ void ipcHostStop();
 
-  __device__ void ipcPut(void *dst, void *src, size_t size, int pe) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
-      sdmaImpl_.sdmaCopy(dst, src, size, pe);
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
+      sdmaImpl_.sdmaCopy(dst, src, size, local_pe);
       return;
     }
     memcpy_lane(dst, src, size);
   }
 
-  __device__ void ipcPut_wg(void *dst, void *src, size_t size, int pe) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
-      sdmaImpl_.sdmaCopy_wg(dst, src, size, pe);
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
+      sdmaImpl_.sdmaCopy_wg(dst, src, size, local_pe);
       return;
     }
     memcpy_wg(dst, src, size);
   }
 
-  __device__ void ipcPut_wave(void *dst, void *src, size_t size, int pe) {
-    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, pe)) {
-      sdmaImpl_.sdmaCopy_wave(dst, src, size, pe);
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
+    if (size >= sdmaImpl_.sdmaThreshold && sdmaImpl_.isSdmaAvailable(shm_rank, local_pe)) {
+      sdmaImpl_.sdmaCopy_wave(dst, src, size, local_pe);
       return;
     }
     memcpy_wave(dst, src, size);
@@ -264,17 +252,11 @@ class IpcOffImpl {
   __device__ void ipcGpuInit(Backend *rocshmem_handle, Context *ctx,
                              int thread_id) {}
 
-  __device__ void ipcCopy(void *dst, void *src, size_t size) {}
+  __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe = 0) {}
 
-  __device__ void ipcCopy_wg(void *dst, void *src, size_t size) {}
+  __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe = 0) {}
 
-  __device__ void ipcCopy_wave(void *dst, void *src, size_t size) {}
-
-  __device__ void ipcPut(void *dst, void *src, size_t size, int pe) {}
-
-  __device__ void ipcPut_wg(void *dst, void *src, size_t size, int pe) {}
-
-  __device__ void ipcPut_wave(void *dst, void *src, size_t size, int pe) {}
+  __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe = 0) {}
 
   __device__ void ipcQuiet() {}
 

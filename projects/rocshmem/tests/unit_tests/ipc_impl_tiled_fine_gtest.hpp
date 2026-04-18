@@ -89,7 +89,7 @@ __global__
 void
 kernel_tiled_fine_copy(IpcImpl *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
     if (!get_flat_id()) {
-        ipc_impl->ipcCopy(dest, src, bytes);
+        ipc_impl->ipcCopy(dest, src, bytes, 0);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, -1);
@@ -109,7 +109,7 @@ kernel_tiled_fine_copy_block(IpcImpl *ipc_impl, bool *error, int *golden, int *s
     size_t block_byte_offset = blockIdx.x * block_bytes;
     for (size_t i = block_byte_offset; i < bytes; i += get_flat_grid_size() * THREAD_TRANSFER_GRANULARITY) {
 	      int chunk = min(block_bytes, bytes - i);
-        ipc_impl->ipcCopy_wg((char*)dest + i, (char*)src + i, chunk);
+        ipc_impl->ipcCopy_wg((char*)dest + i, (char*)src + i, chunk, 0);
         ipc_impl->ipcFence();
         __syncthreads();
         if (test == WRITE) {
@@ -133,7 +133,7 @@ kernel_tiled_fine_copy_warp(IpcImpl *ipc_impl, bool *error, int *golden, int *sr
     size_t warp_byte_offset = warp_id * warp_bytes;
     for (size_t i = warp_byte_offset; i < bytes; i += get_flat_grid_size() * THREAD_TRANSFER_GRANULARITY) {
         int chunk = min(warp_bytes, bytes - i);
-        ipc_impl->ipcCopy_wave(((char*)dest) + i, ((char*)src) + i, chunk);
+        ipc_impl->ipcCopy_wave(((char*)dest) + i, ((char*)src) + i, chunk, 0);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             if (!(threadIdx.x % WARP_SIZE)) {

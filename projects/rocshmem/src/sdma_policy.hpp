@@ -75,8 +75,7 @@ class SdmaImpl {
   }
 
   // Device-side copy using a single channel (for single-thread operations)
-  __device__ void sdmaCopy(void* dst, void* src, size_t size, int pe) {
-    int local_pe = pe % shm_size;
+  __device__ void sdmaCopy(void* dst, void* src, size_t size, int local_pe) {
     // Use channel 0 for single-thread operations
     int idx = local_pe * numChannels;
     anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
@@ -87,8 +86,7 @@ class SdmaImpl {
 
   // Wave-level copy: split transfer across multiple channels
   // Each participating lane handles a different channel concurrently
-  __device__ void sdmaCopy_wave(void* dst, void* src, size_t size, int pe) {
-    int local_pe = pe % shm_size;
+  __device__ void sdmaCopy_wave(void* dst, void* src, size_t size, int local_pe) {
     int lane_id = get_flat_block_id() % WF_SIZE;
     int num_lanes = wave_SZ();
 
@@ -120,8 +118,7 @@ class SdmaImpl {
 
   // Workgroup-level copy: split transfer across multiple channels
   // Multiple threads prepare and submit packets concurrently
-  __device__ void sdmaCopy_wg(void* dst, void* src, size_t size, int pe) {
-    int local_pe = pe % shm_size;
+  __device__ void sdmaCopy_wg(void* dst, void* src, size_t size, int local_pe) {
     int thread_id = get_flat_block_id();
 
     // Determine how many channels to use based on transfer size
@@ -152,8 +149,7 @@ class SdmaImpl {
 
   // Wait for SDMA completions for a specific PE (all channels)
   // Uses rptr-based polling via anvil::quiet()
-  __device__ void sdmaQuiet(int pe) {
-    int local_pe = pe % shm_size;
+  __device__ void sdmaQuiet(int local_pe) {
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = local_pe * numChannels + ch;
       anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];

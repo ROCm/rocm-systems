@@ -79,7 +79,7 @@ __global__
 void
 kernel_simple_fine_copy(IpcImpl *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
     if (!get_flat_id()) {
-        ipc_impl->ipcCopy(dest, src, bytes);
+        ipc_impl->ipcCopy(dest, src, bytes, 0);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             ipc_impl->ipcAMOFetchAdd(dest + SIGNAL_OFFSET, 1);
@@ -96,7 +96,7 @@ __global__
 void
 kernel_simple_fine_copy_block(IpcImpl *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
     if (!blockIdx.x) {
-        ipc_impl->ipcCopy_wg(dest, src, bytes);
+        ipc_impl->ipcCopy_wg(dest, src, bytes, 0);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             if (!threadIdx.x) {
@@ -115,7 +115,7 @@ __global__
 void
 kernel_simple_fine_copy_warp(IpcImpl *ipc_impl, bool *error, int *golden, int *src, int *dest, size_t bytes, TestType test, NotifierT *notifier) {
     if (!blockIdx.x && threadIdx.x < 64) {
-        ipc_impl->ipcCopy_wave(dest, src, bytes);
+        ipc_impl->ipcCopy_wave(dest, src, bytes, 0);
         ipc_impl->ipcFence();
         if (test == WRITE) {
             if (!threadIdx.x) {

@@ -225,15 +225,18 @@ __host__ void IpcOnImpl::ipcHostStop() {
   }
 }
 
-__device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size) {
+__device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size,
+                                   [[maybe_unused]] int local_pe) {
   memcpy_lane(dst, src, size);
 }
 
-__device__ void IpcOnImpl::ipcCopy_wave(void *dst, void *src, size_t size) {
+__device__ void IpcOnImpl::ipcCopy_wave(void *dst, void *src, size_t size,
+                                        [[maybe_unused]] int local_pe) {
   memcpy_wave(dst, src, size);
 }
 
-__device__ void IpcOnImpl::ipcCopy_wg(void *dst, void *src, size_t size) {
+__device__ void IpcOnImpl::ipcCopy_wg(void *dst, void *src, size_t size,
+                                      [[maybe_unused]] int local_pe) {
   memcpy_wg(dst, src, size);
 }
 
