@@ -45,6 +45,13 @@ import pytest
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+# Check if rocprof-trace-decoder is available (required for ATT tests)
+try:
+    import rocprof_trace_decoder  # noqa
+    HAS_ROCPROF_TRACE_DECODER = True
+except ImportError:
+    HAS_ROCPROF_TRACE_DECODER = False
+
 
 def _empty_breakdown(**overrides):
     """Return a time_breakdown dict with all fields zeroed unless overridden."""
@@ -1259,6 +1266,7 @@ def test_att_missing_directory():
     assert result["kernels"] == []
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_empty_directory():
     """analyze_thread_trace returns has_att_data=False when no CSVs are present."""
     import tempfile
@@ -1271,6 +1279,7 @@ def test_att_empty_directory():
     assert "stats_*.csv" in result["reason"]
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_single_kernel_high_stall():
     """analyze_thread_trace parses a CSV and identifies high VMEM stall."""
     import pathlib
@@ -1306,6 +1315,7 @@ def test_att_single_kernel_high_stall():
     assert top["weighted_stall"] == 180 * 8192
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_stall_ratio_threshold_for_recommendations():
     """generate_recommendations emits HIGH rec when stall_ratio >= 0.60 and hitcount >= 6400."""
     import pathlib
@@ -1344,6 +1354,7 @@ def test_att_stall_ratio_threshold_for_recommendations():
     assert any(c.get("tool") == "rocprofv3" for c in cmds)
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_stall_ratio_medium_threshold():
     """generate_recommendations emits MEDIUM rec when 0.40 <= stall_ratio < 0.60."""
     import pathlib
@@ -1370,6 +1381,7 @@ def test_att_stall_ratio_medium_threshold():
     assert att_recs[0]["priority"] == "MEDIUM"
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_below_hitcount_threshold_no_rec():
     """generate_recommendations does NOT emit rec when hitcount < 6400 (statistically unreliable)."""
     import pathlib
@@ -1398,6 +1410,7 @@ def test_att_below_hitcount_threshold_no_rec():
     assert att_recs[0]["priority"] == "INFO"
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_below_stall_ratio_threshold_no_rec():
     """generate_recommendations does NOT emit rec when stall_ratio < 0.40."""
     import pathlib
@@ -1426,6 +1439,7 @@ def test_att_below_stall_ratio_threshold_no_rec():
     assert att_recs[0]["priority"] == "INFO"
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_multiple_kernels_sorted_by_weighted_stall():
     """analyze_thread_trace sorts kernels by total_weighted_stall descending."""
     import pathlib
@@ -1455,6 +1469,7 @@ def test_att_multiple_kernels_sorted_by_weighted_stall():
     assert result["kernels"][1]["name"] == "kernel_a"
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_summary_counts():
     """analyze_thread_trace summary counts high-stall kernels correctly."""
     import pathlib
@@ -1481,6 +1496,7 @@ def test_att_summary_counts():
     assert result["summary"]["high_stall_kernels"] == 1
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_json_output_includes_att_trace_field():
     """_format_as_json includes att_trace key and bumps schema_version to 0.4.0."""
     import json
@@ -1524,6 +1540,7 @@ def test_att_json_output_no_att_trace_without_data():
     assert doc["schema_version"] == "0.1.0"
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_text_output_shows_att_section():
     """format_analysis_output text format shows the ATT section when ATT data present."""
     import pathlib
@@ -1559,6 +1576,7 @@ def test_att_text_output_shows_att_section():
     assert "stall_kernel" in output
 
 
+@pytest.mark.skipif(not HAS_ROCPROF_TRACE_DECODER, reason="rocprof-trace-decoder not installed")
 def test_att_malformed_csv_skipped_gracefully():
     """analyze_thread_trace skips malformed CSVs without crashing."""
     import pathlib
