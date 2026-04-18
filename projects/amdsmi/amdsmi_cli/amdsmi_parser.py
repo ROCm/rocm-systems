@@ -137,10 +137,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Get choices based on driver initialized
         if self.helpers.is_amdgpu_initialized():
             self.gpu_choices, self.gpu_choices_str = self.helpers.get_gpu_choices()
-            self.switch_choices, self.switch_choices_str = self.helpers.get_switch_choices()
         else:
             self.gpu_choices = {}
             self.gpu_choices_str = ""
+
+        if self.helpers.is_brcm_switch_initialized():
+            self.switch_choices, self.switch_choices_str = self.helpers.get_switch_choices()
+        else:
             self.switch_choices = {}
             self.switch_choices_str = ""
 
@@ -1739,8 +1742,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments
         self._add_device_arguments(firmware_parser, required=False)
-        if self.helpers.is_brcm_nic_initialized():
-            self._add_brcm_nic_device_arguments(firmware_parser, nicMandatory=True, required=False)
         self._add_command_modifiers(firmware_parser)
 
     def _add_bad_pages_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -2206,6 +2207,20 @@ class AMDSMIParser(argparse.ArgumentParser):
                 action="store_true",
                 required=False,
                 help=core_eff_floor_limit_help,
+            )
+
+        # Add BRCM NIC/Switch Arguments
+        if self.helpers.is_brcm_nic_initialized():
+            metric_parser.add_argument(
+                "-nic", "--brcm_nic", action="store_true", required=False, help=nic_metric_help
+            )
+        if self.helpers.is_brcm_switch_initialized():
+            metric_parser.add_argument(
+                "-switch",
+                "--brcm_switch",
+                action="store_true",
+                required=False,
+                help=switch_metric_help,
             )
 
         # Add Universal Arguments & watch Args
@@ -3077,7 +3092,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-
         if self.helpers.is_brcm_nic_initialized():
             monitor_parser.add_argument(
                 "-nic", "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
@@ -3105,12 +3119,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add Universal Arguments & Watch Args
         self._add_watch_arguments(monitor_parser)
         self._add_device_arguments(monitor_parser, required=False)
-        if self.helpers.is_brcm_nic_initialized():
-            self._add_brcm_nic_device_arguments(monitor_parser, nicMandatory=True, required=False)
-        if self.helpers.is_brcm_switch_initialized():
-            self._add_brcm_switch_device_arguments(
-                monitor_parser, switchMandatory=True, required=False
-            )
         self._add_command_modifiers(monitor_parser)
 
     def _add_xgmi_parser(self, subparsers: argparse._SubParsersAction, func):

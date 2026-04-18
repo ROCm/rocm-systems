@@ -93,6 +93,15 @@ def check_amd_ionic_driver():
     return False
 
 
+def check_brcm_nic_driver():
+    """Returns true if bnxt_en is found in the list of initialized modules"""
+    status_file = Path("/sys/module/bnxt_en/initstate")
+    if status_file.exists():
+        if status_file.read_text(encoding="ascii").strip() == "live":
+            return True
+    return False
+
+
 def amdsmi_cli_init():
     """Initializes AMDSMI Library for the CLI
 
@@ -124,6 +133,9 @@ def amdsmi_cli_init():
         logging.debug("hsmp driver's initstate is live")
     if check_amd_ionic_driver():
         logging.debug("ionic driver's initstate is live")
+        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
+    if check_brcm_nic_driver():
+        logging.debug("bnxt_en driver's initstate is live")
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
 
     _INIT_TIMEOUT_SEC = 60
