@@ -333,6 +333,10 @@ for rec in out.recommendations:
 
 ![Python API Demo](assets/python-api.gif)
 
+For the full air-gap vs LLM comparison, provider ladder, and CLI /
+Python entry points, see
+[../guides/agentic-mode.md](../guides/agentic-mode.md).
+
 ---
 
 ## 10. Fence Slices (Per-Agent System Prompts)
