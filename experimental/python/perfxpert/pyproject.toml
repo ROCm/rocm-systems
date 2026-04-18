@@ -27,7 +27,16 @@ rich = ["rich>=13.0"]
 # claude-agent-sdk enables --llm claude-code using Claude Code's stored credentials
 # (falls back to ANTHROPIC_API_KEY if CLI not found)
 all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0", "claude-agent-sdk>=0.1"]
-dev  = ["pytest>=8.0", "pytest-asyncio>=0.21", "flake8", "black", "pexpect>=4.8"]
+dev  = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.21",
+    "flake8",
+    "black",
+    "pexpect>=4.8",
+    "pytest-xdist>=3.5",    # parallel red-team / parity execution
+    "hypothesis>=6.100",    # property-based fuzz for sanitizer
+    "rich>=13.0",           # exit-dashboard rendering (already a runtime dep; dev pin kept for parity)
+]
 
 [project.scripts]
 perfxpert = "perfxpert.__main__:main"
@@ -74,6 +83,13 @@ testpaths = [
 ]
 python_files = ["test_*.py"]
 addopts = "-ra"
+markers = [
+    "parity: parity (new-path vs old-path) tests — can be slow",
+    "red_team: adversarial tests; every one MUST pass",
+    "regression_gate: proven-optimization false-positive tests",
+    "dashboard: exit-dashboard contract tests",
+    "slow: runs > 10s; excluded from default CI",
+]
 
 [tool.black]
 line-length = 120
