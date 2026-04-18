@@ -1,0 +1,8 @@
+{
+  "attack_id": "malformed_patch_compile_fail",
+  "status": "defeated",
+  "details": {
+    "verdict_status": "reject",
+    "failing_gate": "compile"
+  }
+}

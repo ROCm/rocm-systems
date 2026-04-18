@@ -1,0 +1,7 @@
+{
+  "attack_id": "5_consecutive_failures_plateau",
+  "status": "defeated",
+  "details": {
+    "verdict_detail": "5 consecutive failures detected; deeper-tier debugging required (plateau)"
+  }
+}
