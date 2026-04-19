@@ -69,7 +69,8 @@ without being ported.
 ## Phase 7 ship state (cycle-3 convergence, 2026-04-18)
 
 - **Cycle-3 reviewers**: 0 blockers, 0 important across all three branches.
-- **Phase 7 test suite**: 1036 passed / 2 skipped / 0 failed. Skips are documented opencode-binary absences; `test_llm_end_to_end.py` skips on LLM quota/auth/transient errors to avoid false negatives.
+- **Phase 7 test suite**: 1036 passed / 3 skipped / 0 failed (measured 2026-04-19 after secret-scanner removal). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1).
+- **Secret scanning**: local-only dev tool; not shipped in the repo. Each developer is responsible for their own secret-detection tooling. The scanner, its CI workflow, pre-commit hook, and contributor guide were removed on 2026-04-19.
 - **Known ongoing work** (not blocking ship):
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
   - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
