@@ -124,8 +124,12 @@ server for free. Pick whichever matches your existing LLM workflow.
   `~/.gemini/settings.json` and list-appends a project-cache
   prompt file to `context.fileName` (never touches user's
   `GEMINI.md`), then execs `gemini`.
-- **`perfxpert-code codex`** — coming soon; ships in PR 2. The
-  subcommand currently prints a "deferred" message and exits 42.
+- **`perfxpert-code codex`** — writes the perfxpert MCP stanza into
+  `~/.codex/config.toml` (TOML, not JSON) and execs `codex`. Gate
+  enforcement is prompt-layer-only because Codex's native
+  `PreToolUse` hook is Bash-only as of April 2026; the trust gate
+  runs before MCP registration and either prompts or honors
+  `PERFXPERT_AUTO_TRUST=1` (see §3.2 below).
 
 Short recipe per backend:
 
@@ -134,6 +138,7 @@ Short recipe per backend:
 perfxpert-code                              # default (bundled opencode)
 perfxpert-code claude                       # Claude Code (native TUI)
 perfxpert-code gemini                       # Gemini CLI
+perfxpert-code codex                        # Codex CLI
 perfxpert-code uninstall claude             # reverse the Claude install
 ```
 
@@ -142,7 +147,29 @@ uninstall recipes, the gate-hook event-based lift semantics, the
 consent model (per-backend × cwd × file-set), and the env-var
 reference (`PERFXPERT_MCP_WARMUP_TIMEOUT_S`,
 `PERFXPERT_MCP_RETRY_BUDGET_S`, `PERFXPERT_SKIP_LIVE_CHECK`,
-`PERFXPERT_ASSUME_CONSENT`).
+`PERFXPERT_ASSUME_CONSENT`). The gate-probe coverage table in
+[backends.md §Gate-probe](backends.md) documents which small-model
+probe each backend uses to verify mechanical gate enforcement at
+`install()` time — Codex is not probed because its gate is
+prompt-layer-only.
+
+## 3.2 Codex trust gate
+
+Codex refuses to run agents in a project directory that isn't marked
+`trusted` in `~/.codex/config.toml`. `perfxpert-code codex` handles
+this as a separate step BEFORE MCP registration:
+
+- **Interactive sessions** — the adapter prompts "Trust <cwd> for
+  Codex? [y/N]" and writes `[projects."<abs-cwd>"].trust_level =
+  "trusted"` on confirmation.
+- **CI / non-interactive** — set `PERFXPERT_AUTO_TRUST=1` to
+  auto-trust the cwd without prompting. An always-on stderr warning
+  ("perfxpert-code codex: auto-trusted <cwd> because
+  PERFXPERT_AUTO_TRUST=1") is emitted even under `--quiet` — this is
+  the security-warning contract.
+- Without either path, the adapter raises `TrustRequired` and exits
+  non-zero. `ConfigClobber` is raised if `~/.codex/config.toml` is
+  git-tracked or fails to parse.
 
 ## 4. First analysis (60 seconds)
 
