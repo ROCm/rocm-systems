@@ -65,3 +65,11 @@ producer-consumer symmetric by construction:
 This note is preserved for institutional memory so future contributors
 who find PR #4979 in the commit history understand why it was closed
 without being ported.
+
+## Phase 7 ship state (cycle-3 convergence, 2026-04-18)
+
+- **Cycle-3 reviewers**: 0 blockers, 0 important across all three branches.
+- **Phase 7 test suite**: 1036 passed / 2 skipped / 0 failed. Skips are documented opencode-binary absences; `test_llm_end_to_end.py` skips on LLM quota/auth/transient errors to avoid false negatives.
+- **Known ongoing work** (not blocking ship):
+  - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
+  - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
