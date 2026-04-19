@@ -1,5 +1,11 @@
 # MCP Server (`perfxpert-mcp`)
 
+**If you use `perfxpert-code claude`, `perfxpert-code codex`, or
+`perfxpert-code gemini`, the MCP registration is done automatically
+— see [../guides/backends.md](../guides/backends.md). The manual
+integration snippets below remain for users running `claude`,
+`codex`, or `gemini` directly.**
+
 PerfXpert ships a stdio-transport MCP server (`perfxpert-mcp`) that
 re-exposes every `READ_ONLY` tool in `perfxpert.tools.*` to any
 MCP-compatible client (opencode, Claude Desktop, Cursor, etc.). The

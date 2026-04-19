@@ -3,6 +3,58 @@
 All notable changes to perfxpert will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.3.0 — multi-backend launcher
+
+### Added
+- **`perfxpert-code claude|gemini|codex|uninstall` subcommands.**
+  Multi-backend launcher. `claude` / `gemini` adapters fully ship in
+  PR 1; `codex` is a stub that prints a deferred notice and exits
+  42. `uninstall <backend>` reverses an install.
+- **`--dry-run`, `--quiet` dispatcher flags.** `--dry-run` runs
+  `adapter.plan()`, prints the actions, skips every write + `spawn()`.
+  `--quiet` suppresses the AMD banner + per-step progress log.
+- **`BackendAdapter` Protocol for contributors.** Locked day-1
+  interface under `perfxpert/cli/_backend/protocol.py` so
+  fifth-backend work doesn't need Protocol churn. See
+  `docs/architecture/backend-adapter.md`.
+- **Per-backend gate hook with event-based lift.** Native
+  `PreToolUse` for Claude Code, `allowedTools` restriction for
+  Gemini. Lift fires once `perfxpert_intent_classify` returns in the
+  current session; non-perfxpert tool calls before that are rejected
+  with a retry-hint message.
+- **MCP warmup + retry (env-configurable).**
+  `PERFXPERT_MCP_WARMUP_TIMEOUT_S` (default 10s),
+  `PERFXPERT_MCP_RETRY_BUDGET_S` (default 30s),
+  `PERFXPERT_SKIP_LIVE_CHECK` to skip post-install verification in
+  CI.
+- **Consent model: per-`(backend, cwd-hash, file-set-hash)` tuple.**
+  Persisted under `~/.perfxpert/consent.json`. Re-runs in the same
+  directory are silent; changing the file set re-prompts.
+  `PERFXPERT_ASSUME_CONSENT=1` bypasses the prompt (required for
+  non-interactive stdin).
+
+### Deferred
+- Codex adapter. Lands in PR 2 (plan Task 10). The `codex`
+  subcommand is wired as a stub in PR 1 for surface stability.
+
+### Decisions
+- Claude Code gate hook uses the native `PreToolUse` surface (not
+  `permissions.deny`). See
+  [docs/decisions/2026-04-19-claude-hook-surface.md](../../../docs/decisions/2026-04-19-claude-hook-surface.md)
+  for the doc-fetch evidence + rationale.
+
+### Docs
+- `docs/guides/getting-started.md` §"Choosing a backend" —
+  short-recipe overview.
+- `docs/guides/backends.md` — dedicated user guide (comparison
+  table, install / uninstall recipes, env-var reference, four
+  troubleshooting scenarios).
+- `docs/architecture/backend-adapter.md` — contributor-facing
+  Protocol + lifecycle + "how to add a new backend" steps.
+- `docs/integration/mcp-server.md` — cross-link to
+  `guides/backends.md` at the top (manual snippets remain for
+  direct-CLI users).
+
 ## vNEXT
 
 ### Removed
@@ -13,7 +65,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `PERFXPERT_*` namespace. The canonical names are
   `PERFXPERT_LLM_ANTHROPIC_KEY`, `PERFXPERT_LLM_OPENAI_KEY`, and the
   standard vendor `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` continue to be
-  honored. A single pre-rename alias (the `ROCPD_LLM_*` prefix — the rest were removed in Phase 7.1) still works with a `DeprecationWarning` as a migration ramp.
+  honored. A single pre-rename alias (the `ROCPD_LLM_*` prefix — the rest were subsequently dropped) still works with a `DeprecationWarning` as a migration ramp.
 - Legacy `ai_analysis` module (`perfxpert/ai_analysis/`) fully removed,
   along with all parity and feature-flag dispatch tests. The
   `PERFXPERT_LEGACY` environment variable is now unrecognized — setting it
@@ -52,25 +104,25 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `perfxpert doctor` now reports active mode (`agentic` | `legacy`).
 
 ### Changed
-- `PERFXPERT_USE_AGENTS` was removed in Phase 7.1 along with the toggle code it kept alive.
-- The single-call LLM entrypoint was removed in Phase 7.1; use `perfxpert.agents.runtime.build_session()` + `session.run_root(...)`.
+- `PERFXPERT_USE_AGENTS` was subsequently removed along with the toggle code it kept alive.
+- The single-call LLM entrypoint was subsequently removed; use `perfxpert.agents.runtime.build_session()` + `session.run_root(...)`.
 - **CI matrix inverted**: agentic is the primary test matrix; the
-  pre-v0.2.0 matrix was removed in Phase 7.1.
+  pre-v0.2.0 matrix was subsequently removed.
 - README, CONTRIBUTING, and the Python API docs rewritten for the new
   architecture.
 
 ### Deprecated
-- `PERFXPERT_LEGACY` was introduced as a one-minor-version fallback in v0.2.0 and was then removed in Phase 7.1.
-- `LLMAnalyzer` was kept as a deprecation stub in v0.2.0 and was removed in Phase 7.1.
+- `PERFXPERT_LEGACY` was introduced as a one-minor-version fallback in v0.2.0 and was then subsequently removed.
+- `LLMAnalyzer` was kept as a deprecation stub in v0.2.0 and was subsequently removed.
 
 ### Removed
-- Pre-agentic interactive workflow module (~4000 LOC: InteractiveSession + WorkflowSession + 7-phase loop) removed in Phase 7.1. Replaced by `perfxpert-code` wrapping the bundled opencode TUI.
-- Pre-agentic LLM conversation module (~600 LOC: streaming + auto-compaction) removed in Phase 7.1. Replaced by Agents SDK native sessions.
-- Monolithic fence reference guide removed in Phase 7.1. Split into per-agent slices + structured knowledge YAMLs under `perfxpert/knowledge/`.
-- `LLMAnalyzer.analyze_with_llm` and the `_call_<provider>()` private methods were removed in Phase 7.1.
-- `tests/test_llm_conversation.py` (51 tests of a deleted module) removed in Phase 7.1.
-- Conversational-session CLI flags removed in Phase 7.1. Users typing the old flags get a migration hint pointing to `perfxpert-code`.
-- `load_reference_guide` export from the pre-agentic tree was removed in Phase 7.1 (previously relocated to `perfxpert.providers._reference_guide`).
+- Pre-agentic interactive workflow module (~4000 LOC: InteractiveSession + WorkflowSession + 7-phase loop) subsequently removed. Replaced by `perfxpert-code` wrapping the bundled opencode TUI. (The 7-phase loop here refers to the user-facing workflow phases — profile → analyze → optimize → re-profile — not release phases.)
+- Pre-agentic LLM conversation module (~600 LOC: streaming + auto-compaction) subsequently removed. Replaced by Agents SDK native sessions.
+- Monolithic fence reference guide subsequently removed. Split into per-agent slices + structured knowledge YAMLs under `perfxpert/knowledge/`.
+- `LLMAnalyzer.analyze_with_llm` and the `_call_<provider>()` private methods were subsequently removed.
+- `tests/test_llm_conversation.py` (51 tests of a deleted module) subsequently removed.
+- Conversational-session CLI flags subsequently removed. Users typing the old flags get a migration hint pointing to `perfxpert-code`.
+- `load_reference_guide` export from the pre-agentic tree was subsequently removed (previously relocated to `perfxpert.providers._reference_guide`).
 
 ### Migration
 

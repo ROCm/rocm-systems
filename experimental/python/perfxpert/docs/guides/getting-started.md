@@ -106,6 +106,44 @@ agent runtime.
   → Recommendation → Specialist agent hierarchy and gate-cascade
   correctness middleware.
 
+## 3.1 Choosing a backend
+
+`perfxpert-code` is multi-backend: the same AMD-branded bundled
+opencode is the default, but it can also wrap the user's native
+Claude Code, Gemini CLI, or (soon) Codex TUI while still enforcing
+the perfxpert tool-priority gate and registering the `perfxpert-mcp`
+server for free. Pick whichever matches your existing LLM workflow.
+
+- **Default (no subcommand)** — AMD-branded bundled opencode, the
+  recommended entry point. Ships with patched prompt + MCP
+  pre-wired, no extra install.
+- **`perfxpert-code claude`** — registers perfxpert as an MCP
+  server in the Claude Code project config, installs the native
+  `PreToolUse` gate hook, then execs the user's `claude` CLI.
+- **`perfxpert-code gemini`** — appends `perfxpert-mcp` to
+  `~/.gemini/settings.json` and list-appends a project-cache
+  prompt file to `context.fileName` (never touches user's
+  `GEMINI.md`), then execs `gemini`.
+- **`perfxpert-code codex`** — coming soon; ships in PR 2. The
+  subcommand currently prints a "deferred" message and exits 42.
+
+Short recipe per backend:
+
+```bash
+# SKIP-SAMPLE — requires the named backend binary on PATH
+perfxpert-code                              # default (bundled opencode)
+perfxpert-code claude                       # Claude Code (native TUI)
+perfxpert-code gemini                       # Gemini CLI
+perfxpert-code uninstall claude             # reverse the Claude install
+```
+
+See [backends.md](backends.md) for the full per-backend install /
+uninstall recipes, the gate-hook event-based lift semantics, the
+consent model (per-backend × cwd × file-set), and the env-var
+reference (`PERFXPERT_MCP_WARMUP_TIMEOUT_S`,
+`PERFXPERT_MCP_RETRY_BUDGET_S`, `PERFXPERT_SKIP_LIVE_CHECK`,
+`PERFXPERT_ASSUME_CONSENT`).
+
 ## 4. First analysis (60 seconds)
 
 Profile a trivial HIP app, then analyze.
