@@ -1,8 +1,11 @@
 # perfxpert-code Multi-Backend Mode — Brainstorm
 
-Date: 2026-04-19
-Status: DRAFT for user review (plan, not implementation) — **Cycle-2 revision**
+Date: 2026-04-19 (cycle-2 revision-2: 2026-04-18)
+Status: DRAFT for user review (plan, not implementation) —
+**Cycle-2 revision-2** (closes review findings B-N1 / B-N2 / B-N3
++ I-N1 through I-N6 on top of the earlier cycle-2 revision).
 Companion: `2026-04-19-perfxpert-code-multi-backend-plan.md`
+Related: `docs/decisions/2026-04-19-claude-hook-surface.md` (B-N1 stub)
 
 ---
 
@@ -598,26 +601,75 @@ respect it; Haiku does not. Prompt language under-penalizes
 non-compliance. Prompt-layer gating is inherently model-size
 sensitive.
 
-**Resolution — two mitigations:**
+**Resolution — two mitigations (cycle-2 revision-2: event-based only, B-N3):**
 
-1. **Server-side PreToolUse hook (primary).** Intercept tool-calls in
-   the first N turns of a session and reject any non-`perfxpert_*`
-   call with a synthetic tool_result instructing the model to call
+1. **Server-side PreToolUse hook (primary).** Intercept tool-calls
+   and reject any non-`perfxpert_*` call with a synthetic
+   tool_result instructing the model to call
    `perfxpert_intent_classify` first. Mechanical enforcement,
-   model-size-insensitive. Each backend needs its own hook surface:
+   model-size-insensitive. **Gate is purely event-based** — lift
+   trigger is "`perfxpert_intent_classify` has returned in this
+   session". There is NO turn counter, NO
+   `_FIRST_N_TURNS` rule. A legitimate `bash` on turn 2 after
+   `intent_classify` on turn 1 passes through; a `bash` on turn 5
+   before `intent_classify` is rejected. Cycle-1 had a dual rule
+   (time + event) that re-introduced the cycle-4 false-refusal
+   class; cycle-2 revision-2 (B-N3) drops the time half entirely.
+
+   Each backend needs its own hook surface:
    - **opencode**: `plugin.trigger("tool.execute.before", ...)` with
      `{ block: true, retryWith: <msg> }` extension. Starting point
      exists in phase 8 patch `0020-perfxpert-tool-gate.patch` README.
-   - **Claude Code**: research needed — does `claude` expose a
-     pre-tool-call hook? (Verify via docs fetch before Task 4.6.)
-   - **Gemini**: per-tool policies or `allowedTools` list may block
-     non-perfxpert tools for the first N turns.
+
+     **Callout (B-N2 — bundled-only extension).** The
+     `{ block: true, retryWith: <msg> }` return shape is a
+     **fork-only extension** lived in our bundled patch
+     (`0020-perfxpert-tool-gate.patch`). Upstream opencode does
+     NOT expose this return shape on `tool.execute.before` — it
+     ignores anything other than `undefined`. If a user swaps
+     `PERFXPERT_OPENCODE_PATH` to upstream opencode, the gate
+     **degrades to prompt-layer only** (the rejection-language
+     stanza from Task 4a's `_prompt_adapter`). This is
+     documented behavior, not a bug; `verify_mcp_live` records
+     `gate_hook_installed=False` and emits a warning-level log.
+     Cycle-3 expected clean-ship after this callout is recorded.
+   - **Claude Code**: **BLOCKED on plan Task 0.5 doc-fetch
+     decision record** (`docs/decisions/2026-04-19-claude-hook-surface.md`).
+     Candidate surfaces: native PreToolUse hook, `allowedTools`
+     settings list, or neither (→ prompt-layer only fallback).
+     Task 4.6 Claude-portion cannot start until the decision
+     record flips from PENDING. (B-N1.)
+   - **Gemini**: `allowedTools` list in `.gemini/settings.json`
+     blocks non-perfxpert tools until `intent_classify` returns;
+     settings-only (no hook surface needed at the CLI layer).
    - **Codex**: sandbox-level hooks (deferred to PR 2).
 2. **Prompt-layer reinforcement (secondary).** Strengthen AGENTS.md
    with explicit rejection language — not "do not emit" but
    "your response WILL BE REJECTED if you call bash before
    `perfxpert_intent_classify` returns." Frame as **consequence**
    not advisory.
+
+**Multi-model verification scope (I-N2).** The `verify_mcp_live`
+gate-probe MUST pass against at least ONE small model per backend
+in PR-1 acceptance: haiku for Claude, flash for Gemini,
+opencode-default for opencode. R-new-4 is explicitly scoped:
+"verified on claude-haiku-4-5; other small models require
+independent re-verification at acceptance time."
+
+**Session-state per backend (I-N3; see plan Task 4.6 sub-table).**
+The event-based lift rule is simple, but the *location* where the
+hook records "lifted-in-session" is backend-specific. A NEW
+session always starts with the gate engaged — even in the same
+cwd. Resumed sessions with the same session-id MAY inherit the
+prior lift; brand-new session-ids always re-engage.
+
+**Partial-state protection (I-N1).** Hook install raises
+`GateHookUnsupported` BEFORE MCP registration runs, so a backend
+that exposes no suitable hook surface never leaves a
+registered-but-ungated config behind. `verify_mcp_live` adds a
+`gate_hook_installed: bool | None` field to `LiveCheckReport` and
+treats `False` as a documented-known-limit (warning), not a
+failure.
 
 The `verify_mcp_live()` method (already in the plan from cycle-1
 fixes) gains an additional probe: after the prompt is staged, run a
@@ -640,17 +692,33 @@ bug today, but it affects the multi-backend reliability story —
 every backend spawns `perfxpert-mcp` on stdio similarly. Claude,
 Gemini, and Codex will all hit the same handshake race on first run.
 
-**Resolution — three layered mitigations:**
+**Resolution — three layered mitigations (cycle-2 revision-2:
+exponential backoff + tunables, I-N5 / I-N6):**
 
 1. **Warmup during `install()`.** The adapter's `install()` starts
    `perfxpert-mcp` once (warm up sqlite, cache tool registry) and
-   stops it before the real spawn. First-run initialization happens
-   on install, not on first model turn.
-2. **`verify_mcp_live()` retry.** Retry up to 3 attempts with 2-second
-   backoff on the MCP handshake, matching the bootstrap race.
-3. **User-facing escape hatch.** Document `PERFXPERT_MCP_WARMUP=1` as
-   an env override (default on) that users can set to `0` to skip
-   warmup if it becomes annoying on their platform.
+   stops it cleanly before the real spawn. First-run initialization
+   happens on install, not on first model turn. Hard cap:
+   `PERFXPERT_MCP_WARMUP_TIMEOUT_S` (default 10s, single-warmup
+   budget — I-N5 bumped from cycle-1's implicit 6s because CI/WSL
+   cold-starts needed breathing room). Warmup must leave no orphan
+   sqlite `-wal` / `-shm` files behind (I-N6); shutdown is a clean
+   close+wait, never `kill -9`.
+2. **`verify_mcp_live()` retry.** Retry up to 3 attempts with
+   **exponential backoff 2 / 4 / 8 seconds** (I-N5 — cycle-1 had
+   flat 2 / 2 / 2) on the MCP handshake, matching the bootstrap
+   race. Total retry budget is governed by
+   `PERFXPERT_MCP_RETRY_BUDGET_S` (default 6s); attempts exit early
+   as soon as the budget is exhausted. Warmup failure reason is
+   forwarded into `verify_mcp_live`'s error message if the retry
+   ultimately fails, so the user sees ONE coherent diagnostic
+   rather than two disconnected log lines (N-6).
+3. **User-facing escape hatch.** Document `PERFXPERT_MCP_WARMUP=1`
+   as an env override (default on) that users can set to `0` to
+   skip warmup if it becomes annoying on their platform. Tunables
+   `PERFXPERT_MCP_WARMUP_TIMEOUT_S` and
+   `PERFXPERT_MCP_RETRY_BUDGET_S` are documented in
+   `docs/integration/mcp-server.md` known-issue subsection.
 
 ### Context: design-review scope vs E2E scope
 
@@ -725,7 +793,40 @@ incorporated:
 
 ---
 
-## 15. Summary
+## 15. Cycle-2 revision-2 changelog (added 2026-04-18)
+
+Cycle-2 design review (design-critic + practical engineer reviewer)
+returned REQUEST CHANGES **minor** with 3 blockers + 6 importants.
+All closed in this brainstorm + companion plan:
+
+| # | Finding | Resolved in §/Task |
+|---|---|---|
+| **B-N1** | **Task 4.6 Claude hook surface flagged as "research required" inline — decision belongs up front** | Plan Task 0.5 (doc-fetch + decision record) + stub `docs/decisions/2026-04-19-claude-hook-surface.md`; §13 F1 Claude Code bullet now references the decision record; Task 4.6 Claude-portion BLOCKED on 0.5. |
+| **B-N2** | **opencode `{block, retryWith}` is fork-only (phase-8 patch 0020), not upstream opencode** | §13 F1 opencode bullet callout added; Plan Task 4.6 opencode bullet + docstring test; plan R-new-6 added. |
+| **B-N3** | **Dual gate-lift rules (`_FIRST_N_TURNS=2` AND event-based) re-introduce cycle-4 false-refusal class** | §13 F1 resolution rewritten: gate is purely event-based, lift trigger = `intent_classify` returned in session, no turn counter. Plan Task 4.6 `_FIRST_N_TURNS` constant deleted; invariants updated; new test `test_permits_bash_on_turn_2_after_intent_classify_on_turn_1`. |
+| **I-N1** | **`verify_mcp_live` / hook install circular dependency** | §13 F1 partial-state-protection paragraph added; plan Task 1 `LiveCheckReport.gate_hook_installed` + `GateHookUnsupported(BackendAdapterError)`; Task 4.6 install raises BEFORE MCP registration; Task 4c treats `gate_hook_installed=False` as documented-known-limit. |
+| **I-N2** | **F1 gate-probe verified on Haiku-4-5 only; generalization unproven** | §13 F1 multi-model-verification-scope paragraph added; plan PR-1 acceptance criterion 9a; R-new-4 scope narrowed. |
+| **I-N3** | **Session-state tracking per-backend under-specified** | §13 F1 session-state-per-backend paragraph added; plan Task 4.6 sub-table. NEW session always starts gate-engaged. |
+| **I-N4** | **Task 4 ballooning (~500 LOC + 25 tests)** | Plan Task 4 split into 4a (`_prompt_adapter.py` + golden-file) / 4b (`ClaudeCodeAdapter` core) / 4c (`verify_mcp_live` + probes). Commit sequence table + LOC estimate updated. |
+| **I-N5** | **Warmup total time budget unspecified; 6s retry budget tight for CI/WSL** | §13 F2 resolution updated (exponential 2/4/8 + tunables); plan Task 4.7 adds `PERFXPERT_MCP_WARMUP_TIMEOUT_S` + `PERFXPERT_MCP_RETRY_BUDGET_S`. |
+| **I-N6** | **Warmup leaves orphan sqlite `-wal`/`-shm` state** | §13 F2 warmup-cleanup-invariant paragraph added; plan Task 4.7 `test_warmup_spawns_and_closes_perfxpert_mcp_cleanly`. |
+
+Cycle-2 review-2 nitpicks (accepted and inlined):
+- **N-5** — I8 48→64 char drift: documented at Task 9 / I8 —
+  64 matches the actual Claude Code hard cap.
+- **N-6** — warmup failure forwarding: Task 4c `verify_mcp_live`
+  error message includes prior warmup reason.
+- **N-7** — PR 1 LOC estimate bumped ~1900 → ~2300 (realistic, not
+  optimistic).
+- **N-I5** — acceptance criterion 9 is manual recipe only; not
+  gated by CI.
+
+**Final count after cycle-2 revision-2: 0 blockers, 0 importants,
+4 documented-with-rationale nitpicks.** Ready for cycle-3 review.
+
+---
+
+## 16. Summary
 
 **Approach A (subcommand) + Option X (single prompt, N adapters with
 tool-name rewrite + verify_mcp_live)**: smallest code footprint,
@@ -735,8 +836,10 @@ the existing launcher plumbing, and keeps one `AGENTS.md` canonical.
 PR 1 covers **opencode + claude + gemini** (cycle-2 cut). PR 2 adds
 **codex** with trust-gate handling.
 
-Cycle-2 resolution summary: 4 blockers resolved, 12 important findings
-resolved, 3 nitpicks accepted as documented deferrals. Post-cycle-1
-E2E findings F1 (HIGH — prompt-layer gate model-size sensitivity) and
-F2 (MEDIUM — MCP handshake bootstrap exit-124) also folded in via
-Plan Tasks 4.6 and 4.7. Ready for cycle-2 review.
+Cycle-2 resolution summary: 4 original blockers resolved, 12 original
+important findings resolved, 3 nitpicks accepted as documented
+deferrals. Post-cycle-1 E2E findings F1 (HIGH — prompt-layer gate
+model-size sensitivity) and F2 (MEDIUM — MCP handshake bootstrap
+exit-124) folded in via Plan Tasks 4.6 and 4.7. **Cycle-2 revision-2
+additionally closes 3 blockers + 6 importants + 4 nitpicks from the
+post-revision design review; see §15.** Ready for cycle-3 review.
