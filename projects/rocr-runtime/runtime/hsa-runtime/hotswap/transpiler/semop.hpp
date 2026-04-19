@@ -135,6 +135,13 @@ enum class SemOp : uint16_t {
   S_ADD_U32, S_ADDC_U32, S_SUB_U32, S_SUBB_U32, S_ADD_U64,
   S_AND_B32, S_AND_B64, S_OR_B32, S_OR_B64, S_XOR_B32, S_XOR_B64,
   S_ANDN2_B32, S_ANDN2_B64, S_ORN2_B32, S_ORN2_B64,
+  // SOP2 negated bitops (gfx7+). SOPInstructions.td:789-803 — each
+  // computes `dst = ~(src0 OP src1)` and sets SCC = (result != 0). These
+  // are produced heavily by triton/tensilelite when constant-folding
+  // bitfield masks (e.g. `s_nand_b32 sX, sY, 0xffff` to clear the low
+  // 16 bits). All can target EXEC, so they must be marked
+  // routesExecThroughStoreExec.
+  S_NAND_B32, S_NAND_B64, S_NOR_B32, S_NOR_B64, S_XNOR_B32, S_XNOR_B64,
   S_LSHL_B32, S_LSHL_B64, S_LSHR_B32, S_LSHR_B64, S_ASHR_I32, S_ASHR_I64,
   S_MUL_I32, S_MUL_HI_U32, S_MUL_HI_I32, S_MUL_U64, S_MUL_F32, S_ADD_F32, S_SUB_F32,
   S_BFE_U32, S_BFE_I32, S_BFM_B32, S_BFM_B64,

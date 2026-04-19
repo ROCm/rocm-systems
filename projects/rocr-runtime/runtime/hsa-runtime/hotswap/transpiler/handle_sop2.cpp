@@ -23,6 +23,17 @@ ArrayRef<SemOpAttrSpec> getHandlerSOP2Attrs() {
       {SemOp::S_ANDN2_B64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_ORN2_B32, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_ORN2_B64, {/*routesExecThroughStoreExec=*/true}},
+      // s_{nand,nor,xnor}_b{32,64}: `dst = ~(src0 OP src1)`. Identical
+      // SPE shape to s_{and,or,xor}_b* — they read EXEC-relative scalar
+      // sources and dispatch the result through writeReg{32,64}, which
+      // routes to storeExec when the destination operand is EXEC. See
+      // SOPInstructions.td:789-803 for the LLVM patterns.
+      {SemOp::S_NAND_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_NAND_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_NOR_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_NOR_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_XNOR_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_XNOR_B64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHL_B32, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHL_B64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHR_B32, {/*routesExecThroughStoreExec=*/true}},
@@ -502,6 +513,53 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::S_ORN2_B32) {
     hr.sccResult = ctx.B.CreateOr(op.src(0), ctx.B.CreateNot(op.src(1)), "orn2");
     ctx.regs.writeReg32(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  // s_{nand,nor,xnor}_b{32,64} — negated bitops, `dst = ~(src0 OP src1)`.
+  // SCC follows writeReg32/64's standard rule (set when result != 0).
+  // Each opcode uses the same SOP2 operand triplet (sdst, src0, src1)
+  // and identical sign-/zero-extension semantics as their non-negated
+  // siblings (S_AND_B32 etc.), so we can reuse op.src/op.src64 directly.
+  if (sop == SemOp::S_NAND_B32) {
+    hr.sccResult = ctx.B.CreateNot(
+        ctx.B.CreateAnd(op.src(0), op.src(1), "and"), "nand");
+    ctx.regs.writeReg32(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_NAND_B64) {
+    hr.sccResult = ctx.B.CreateNot(
+        ctx.B.CreateAnd(op.src64(0), op.src64(1), "and64"), "nand64");
+    ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_NOR_B32) {
+    hr.sccResult = ctx.B.CreateNot(
+        ctx.B.CreateOr(op.src(0), op.src(1), "or"), "nor");
+    ctx.regs.writeReg32(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_NOR_B64) {
+    hr.sccResult = ctx.B.CreateNot(
+        ctx.B.CreateOr(op.src64(0), op.src64(1), "or64"), "nor64");
+    ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_XNOR_B32) {
+    hr.sccResult = ctx.B.CreateNot(
+        ctx.B.CreateXor(op.src(0), op.src(1), "xor"), "xnor");
+    ctx.regs.writeReg32(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_XNOR_B64) {
+    hr.sccResult = ctx.B.CreateNot(
+        ctx.B.CreateXor(op.src64(0), op.src64(1), "xor64"), "xnor64");
+    ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
     hr.handled = true;
     return hr;
   }
