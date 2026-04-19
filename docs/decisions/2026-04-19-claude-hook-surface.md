@@ -1,7 +1,7 @@
 # Decision: Claude Code pre-tool-call hook surface for perfxpert gate
 
 Date: 2026-04-19
-Status: **PENDING — live doc-fetch required before Task 4.6 (Claude portion) can start**
+Status: **DECIDED (native-pretooluse)**
 Owner: `users/aelwazir/perfxpert-code-multi-backend`
 Blocks: Plan Task 4.6 Claude-portion (does NOT block opencode or Gemini
 portions; does NOT block the rest of PR 1)
@@ -22,73 +22,124 @@ Cycle-2 resolution: move the decision UP to a dedicated Task 0.5 (in
 the plan) with this file as the decision record. Task 4.6's
 Claude-portion is gated on this decision landing.
 
-## Candidate surfaces (to be verified live)
+## Candidate surfaces (verified live 2026-04-18)
 
-1. **Native PreToolUse hook**. A `.claude/hooks/pre-tool-use.<ext>`
-   file (shell/JS/Python — TBD by doc) that receives the pending
-   tool-call and may return a synthetic rejection with a retry
-   message. Preferred if available because it matches opencode's
-   `tool.execute.before` pattern most closely.
-2. **`allowedTools` settings list**. A `.claude/settings.json` key
-   that restricts which tools the model may call for the current
-   session. We would write
-   `allowedTools: ["mcp__perfxpert__*"]` at install time and clear it
-   after `intent_classify` is observed. Lift-mechanism TBD
-   (file-write on intent-classify? settings refresh cadence?).
-3. **Neither** — Claude Code exposes no suitable surface. In that
-   case Task 4.6 Claude-portion **degrades to prompt-layer
-   enforcement only** (the rejection-language stanza from Task 4
-   `_prompt_adapter.render_prompt(reject_language=True)`), ships in
-   PR 1 with this explicit acceptance-of-partial-mitigation, and
-   the gate-probe in `verify_mcp_live` is documented as
-   "known-limited on Claude" rather than asserting mechanical
-   enforcement.
+1. **Native `PreToolUse` hook** — a command- or HTTP-invocable hook
+   configured inside `.claude/settings.json` under the `hooks` key.
+   Receives a JSON payload on stdin with `hook_event_name`,
+   `tool_name`, `tool_input`, `session_id`, `transcript_path`, `cwd`.
+   Writes a JSON response on stdout (with exit code 0 for "parse
+   stdout") containing `hookSpecificOutput.permissionDecision`:
+   `"allow" | "deny" | "ask" | "defer"` plus a
+   `permissionDecisionReason` string shown to Claude as context when
+   denied. **Exit code 2 is also a blocking error** (stderr surfaced
+   to Claude). Non-blocking errors on any other non-zero exit.
+2. **`permissions.allow` / `permissions.deny` settings** — static
+   rule lists inside the `permissions` key of `.claude/settings.json`
+   (e.g. `"deny": ["Bash(rm -rf *)"]`). Simple but static: the rule
+   set is loaded once per session; there is no documented
+   per-tool-call runtime toggle from a sidecar signal.
+3. **Neither** — would force prompt-layer-only enforcement.
 
 ## Decision
 
-**PENDING.** Requires a live web-fetch of the Claude Code
-documentation under <https://code.claude.com/docs> (in particular
-plugin/hook pages, settings reference, and any `allowedTools`
-documentation) to confirm which of the three options is available
-as of late April 2026.
+**native-pretooluse.** Evidence below.
 
-Outputs of the doc-fetch task:
+### Evidence (doc-fetch 2026-04-18)
 
-- Chosen surface (1, 2, or 3).
-- If (1): hook file path + invocation contract + return-shape for
-  rejection.
-- If (2): settings key name + update mechanism + lift trigger.
-- If (3): the acceptance-of-partial-mitigation callout to add to
-  Task 4.6 Claude bullet + PR-1 acceptance criterion 9 footnote +
-  R-new-4 scope narrowing.
+Primary source: <https://code.claude.com/docs/en/hooks> (followed from
+<https://docs.claude.com/en/docs/claude-code/hooks> via 301 redirect,
+retrieved 2026-04-18).
+
+Key confirmations:
+
+- The `PreToolUse` event "runs after Claude creates tool parameters
+  and before processing the tool call" — the exact blocking point
+  the gate needs.
+- Configuration lives in `.claude/settings.json` (shared, committed)
+  or `.claude/settings.local.json` (gitignored) at project scope;
+  also `~/.claude/settings.json` at user scope. Project scope matches
+  our plan default.
+- Contract: stdin JSON with `hook_event_name`, `tool_name`,
+  `tool_input`, `session_id`, `transcript_path`. Stdout JSON with
+  `hookSpecificOutput.permissionDecision` (`allow|deny|ask|defer`)
+  and `permissionDecisionReason`. Exit 0 = parse stdout, exit 2 =
+  blocking error (stderr → Claude).
+- When the hook returns `deny`, **the tool call is prevented
+  entirely AND the `permissionDecisionReason` is shown to Claude as
+  context**. This matches opencode's `{ block: true, retryWith: ...}`
+  semantic: Claude sees the rejection reason and "must decide
+  independently how to proceed" — typically retrying with the
+  recommended alternative (calling `mcp__perfxpert__intent_classify`
+  first).
+
+Secondary source: <https://code.claude.com/docs/en/settings> (followed
+from <https://docs.claude.com/en/docs/claude-code/settings>).
+
+- `permissions.allow` and `permissions.deny` exist and accept rules
+  like `"Bash(git diff *)"` or `"WebFetch"`. But these are static
+  per-session rule lists, not event-driven.
+- The same `settings.json` hosts the `hooks` object, so both
+  surfaces live in one file.
+
+### Why native PreToolUse over `permissions.deny`
+
+1. **Event-based lift (B-N3).** The gate must lift once
+   `perfxpert_intent_classify` has returned in the current session.
+   The native hook runs per-tool-call and can read a sidecar state
+   file (written when `intent_classify` returns) to decide. A static
+   `permissions.deny: ["Bash", "Read", ...]` list would require
+   mid-session mutation of `settings.json` + a settings refresh —
+   not a documented mechanism.
+2. **Retry signal (B-N2 parity).** `permissionDecisionReason` is
+   piped to Claude on deny. That is the exact counterpart to
+   opencode's `retryWith` message (fork-only patch 0020), so both
+   backends share the same UX: "call `intent_classify` first."
+3. **Partial-state safety (I-N1).** Hook install is a single
+   `settings.json` patch under `hooks.PreToolUse`. If it fails (e.g.
+   file write race or invalid JSON merge), the adapter can detect
+   pre-MCP-registration and raise `GateHookUnsupported` cleanly. A
+   `permissions.deny` fallback would require a different code path
+   and a different lift mechanism.
+
+### One-paragraph change set for Task 4.6 (Claude portion)
+
+Implement `ClaudeGateHook` in `perfxpert/cli/_gate_hooks/claude.py`
+that, on `install()`, atomically patches `<cwd>/.claude/settings.json`
+to add a `hooks.PreToolUse` entry invoking a shipped shell script
+(`<cwd>/.claude/hooks/perfxpert-gate.sh`). The script reads stdin
+JSON, checks for `<cwd>/.claude/.perfxpert-gate-state.<session-id>.json`
+(created by a separate `PostToolUse` hook on `mcp__perfxpert__intent_classify`),
+and emits the appropriate `permissionDecision` + reason on stdout.
+Install **MUST** run BEFORE MCP registration (I-N1); if the
+settings.json patch fails (pre-existing conflicting hook, invalid
+JSON, etc.), raise `GateHookUnsupported` so no partial state is left
+behind. Session state location per I-N3 sub-table:
+`<cwd>/.claude/.perfxpert-gate-state.<session-id>.json`; a NEW
+session (different `session_id`) always starts with the gate
+engaged even in the same cwd, because the sidecar file is keyed on
+`session_id`.
 
 ## Acceptance
 
 This decision record is resolved when:
 
-- Doc-fetch step in Plan Task 0.5 has been completed and cited here
-  with URLs and retrieval date.
-- Decision above is updated from **PENDING** to the chosen option.
-- A one-paragraph change set for Task 4.6 (Claude portion) is noted
-  below the decision so the implementer can mechanically apply it.
+- [x] Doc-fetch step in Plan Task 0.5 has been completed and cited
+      here with URLs and retrieval date.
+- [x] Decision above is updated from **PENDING** to the chosen option.
+- [x] A one-paragraph change set for Task 4.6 (Claude portion) is
+      noted below the decision so the implementer can mechanically
+      apply it.
 
-Until resolved, Task 4.6 opencode-portion and Gemini-portion can
-proceed in parallel. Task 4.6 Claude-portion MUST wait for this
-file to flip to a non-PENDING status.
+Task 4.6 Claude-portion is now **UNBLOCKED**.
 
-## Session state location (forward-reference to plan I-N3)
+## Session state location (I-N3 table entry)
 
-Once the surface is chosen, record the session-state location for
-the gate in the Plan Task 4.6 sub-table (I-N3). Candidates:
-
-- If (1): the hook file persists across invocations; state lives
-  in `.claude/.perfxpert-gate-state.json` (or similar), keyed by
-  Claude session id when exposed by the hook runtime; invalidated
-  at session end.
-- If (2): `.claude/settings.json` itself is the state (restriction
-  present = gate engaged, restriction cleared = gate lifted).
-  Invalidated by clearing the list; new session starts by
-  re-writing the restriction.
+| Backend | Session state location | Invalidation |
+|---|---|---|
+| Claude Code | `<cwd>/.claude/.perfxpert-gate-state.<session_id>.json` (written by PostToolUse hook on `mcp__perfxpert__intent_classify` return; read by PreToolUse hook for every non-perfxpert tool call) | Session end (new `session_id` = fresh state file required) |
 
 A NEW Claude Code session always starts with the gate engaged —
-even in the same cwd.
+even in the same cwd. The sidecar file keyed on `session_id`
+enforces this naturally; without a matching file, the hook defaults
+to `deny` for any non-`mcp__perfxpert__*` tool.
