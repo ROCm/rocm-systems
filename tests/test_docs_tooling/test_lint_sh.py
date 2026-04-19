@@ -4,8 +4,9 @@
 Covers:
 - Existence / executability
 - Original 9 banned strings (Dimension 1)
-- 10 Phase-9 total-legacy-scrub additions
-- Historical-anchor exception ("removed in Phase 7.1")
+- 10 total-legacy-scrub additions
+- Historical-anchor exception ("removed in Phase 7.1" — load-bearing
+  literal string; see docs/lint.sh for why the phrase is load-bearing)
 - Exact-phrase-match semantics of the anchor filter
 """
 
@@ -138,10 +139,10 @@ def test_lint_sh_detects_all_banned_strings():
 
 
 # -----------------------------------------------------------------------
-# Phase 9 total-legacy-scrub additions — cycle-2 coverage hardening
+# Total-legacy-scrub additions — cycle-2 coverage hardening
 # -----------------------------------------------------------------------
 # The 10 new banned strings added by commit `dfdae97794`. The lint.sh
-# currently encodes 10 post-Phase-7.1 entries (9 original + 10 new = 19).
+# currently encodes 10 post-refactor entries (9 original + 10 new = 19).
 # Coverage requirement: one positive test per new banned string, plus
 # dedicated tests for the historical-anchor exception path.
 

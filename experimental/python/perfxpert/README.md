@@ -79,8 +79,8 @@ an [RFC](docs/rfcs/README.md).
 The agentic runtime is the sole execution path; no feature flag
 toggles it. Setting any of the following has no effect:
 
-- `PERFXPERT_USE_AGENTS` — removed.
-- `PERFXPERT_LEGACY` — removed.
+- `PERFXPERT_USE_AGENTS` — removed in Phase 7.1.
+- `PERFXPERT_LEGACY` — removed in Phase 7.1.
 
 See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 

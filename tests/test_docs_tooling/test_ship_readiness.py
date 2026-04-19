@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Ship-readiness gate for Phase 9 docs audit (cycle-4).
+"""Ship-readiness gate for the docs-audit scanners (cycle-4).
 
 This test runs all three docs scanners as subprocesses in --strict mode
 and asserts each exits 0. It exists to prevent silent regression of the
-docs gates after Phase 9 ships — any new banned-string hit, dead
-internal link, or non-executable code sample will turn CI red here.
+docs gates post-merge — any new banned-string hit, dead internal link,
+or non-executable code sample will turn CI red here.
 
 All scanners live at the repo root under ``docs/``; the lint script
 searches relative paths (``experimental/python/perfxpert`` + ``docs``)

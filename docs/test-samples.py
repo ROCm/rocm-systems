@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 docs/test-samples.py — Extract and execute bash/Python samples from Markdown docs
-Part of Phase 9 docs audit tooling
+Part of the docs-audit tooling
 """
 
 import os
@@ -199,7 +199,7 @@ def main():
         # Skip hidden and cache dirs
         if any(part.startswith('.') for part in md_file.parts):
             continue
-        # Skip legacy ai_analysis tree — being deleted by Phase 7.1
+        # Skip legacy ai_analysis tree — being deleted by the agentic refactor
         if 'ai_analysis' in md_file.parts:
             continue
 

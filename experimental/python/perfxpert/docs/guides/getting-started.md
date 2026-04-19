@@ -1,6 +1,6 @@
 # PerfXpert — Getting Started
 
-Refreshed for the Phase 7 + 7.1 + 8 + 9 stack. This guide walks through
+This guide walks through
 install, the three entry points, the first analysis, and the top
 troubleshooting cases. For deeper dives follow the cross-links at the
 end of each section; nothing here duplicates reference material that
