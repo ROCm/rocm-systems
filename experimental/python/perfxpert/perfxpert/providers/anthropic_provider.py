@@ -13,8 +13,38 @@ try:
     _SDK = _anthropic_sdk
 except ImportError:
     _SDK = None  # type: ignore[assignment]
-_DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
+# Cycle-4 B2: parameterize default model via env. The previous hardcode
+# (claude-3-5-sonnet-20241022) is stale; callers can still pin any model
+# via the explicit `model=` argument to `.complete()`, via
+# PERFXPERT_ANTHROPIC_MODEL (provider-specific), or via PERFXPERT_LLM_MODEL
+# (global). Built-in default is the latest widely-available Claude Sonnet.
+_BUILTIN_DEFAULT_MODEL = "claude-sonnet-4-5"
 _DEFAULT_MAX_TOKENS = 2048
+
+
+def _resolve_default_model() -> str:
+    """Return the default model id for AnthropicProvider at call time.
+
+    Order (matches framework._resolve_model for cross-layer consistency):
+      1. PERFXPERT_ANTHROPIC_MODEL
+      2. PERFXPERT_LLM_MODEL
+      3. Built-in default.
+    """
+    for var in ("PERFXPERT_ANTHROPIC_MODEL", "PERFXPERT_LLM_MODEL"):
+        val = os.environ.get(var)
+        if val:
+            return val
+    return _BUILTIN_DEFAULT_MODEL
+
+
+# Backwards-compat name — some tests import `_DEFAULT_MODEL` directly.
+# Resolve lazily so env changes in-process are picked up.
+def __getattr__(name: str) -> Any:  # pragma: no cover - shim
+    if name == "_DEFAULT_MODEL":
+        return _resolve_default_model()
+    raise AttributeError(name)
+
+
 def _resolve_api_key(explicit: Optional[str]) -> str:
     if explicit:
         return explicit
@@ -42,7 +72,7 @@ class AnthropicProvider(Provider):
     def complete(self, messages, *, system="", model=None, max_tokens=None, dry_run=False):
         if dry_run:
             return DryRunResponse
-        model_id = model or _DEFAULT_MODEL
+        model_id = model or _resolve_default_model()
         budget = max_tokens or _DEFAULT_MAX_TOKENS
         try:
             resp = self._client.messages.create(

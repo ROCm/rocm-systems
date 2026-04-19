@@ -337,6 +337,24 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
     return sorted(configured), sorted(unconfigured)
 
 
+def _resolved_models() -> dict[str, str]:
+    """Return {provider: resolved_model_id} for each LLM provider.
+
+    Shared view across the agents-SDK path and Provider.complete path so
+    `perfxpert doctor` output tells the user EXACTLY which model string
+    a live `--llm <provider>` call would use.
+    """
+    from perfxpert.agents.framework import _resolve_model as _agents_resolve
+
+    result: dict[str, str] = {}
+    for prov in ("anthropic", "openai", "ollama", "private", "opencode"):
+        try:
+            result[prov] = _agents_resolve(prov)
+        except Exception:  # pragma: no cover - defensive
+            result[prov] = "<unresolved>"
+    return result
+
+
 def _report_active_mode() -> str:
     """Return the active analysis mode string."""
     return "Mode: agentic"
@@ -371,6 +389,14 @@ def _run_doctor():
     print(f"✓ {len(configured)}/5 LLM providers configured ({configured_str})")
     if unconfigured:
         print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
+
+    # Cycle-4 B2: show the RESOLVED model id per provider so users can tell
+    # at a glance what `--llm <provider>` would actually invoke. If the
+    # default is stale (ancient hardcode), this is where it shows.
+    print(f"  resolved models (override with --llm-model or PERFXPERT_<PROVIDER>_MODEL):")
+    for prov, model_id in _resolved_models().items():
+        marker = "✓" if prov in configured else "·"
+        print(f"    {marker} {prov}: {model_id}")
 
     # Report active mode
     print()

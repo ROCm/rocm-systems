@@ -13,8 +13,34 @@ try:
     _SDK = _openai_sdk
 except ImportError:
     _SDK = None  # type: ignore[assignment]
-_DEFAULT_MODEL = "gpt-4o-mini"
+# Cycle-4 B2: parameterize default model via env var. See
+# anthropic_provider for the rationale; the OpenAI default moves less
+# frequently but should stay consistent across both layers.
+_BUILTIN_DEFAULT_MODEL = "gpt-4o-mini"
 _DEFAULT_MAX_TOKENS = 2048
+
+
+def _resolve_default_model() -> str:
+    """Return the default model id for OpenAIProvider at call time.
+
+    Order:
+      1. PERFXPERT_OPENAI_MODEL
+      2. PERFXPERT_LLM_MODEL
+      3. Built-in default.
+    """
+    for var in ("PERFXPERT_OPENAI_MODEL", "PERFXPERT_LLM_MODEL"):
+        val = os.environ.get(var)
+        if val:
+            return val
+    return _BUILTIN_DEFAULT_MODEL
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover - shim for legacy imports
+    if name == "_DEFAULT_MODEL":
+        return _resolve_default_model()
+    raise AttributeError(name)
+
+
 def _resolve_api_key(explicit: Optional[str]) -> str:
     if explicit:
         return explicit
@@ -51,7 +77,7 @@ class OpenAIProvider(Provider):
     def complete(self, messages, *, system="", model=None, max_tokens=None, dry_run=False):
         if dry_run:
             return DryRunResponse
-        model_id = model or _DEFAULT_MODEL
+        model_id = model or _resolve_default_model()
         budget = max_tokens or _DEFAULT_MAX_TOKENS
         try:
             resp = self._call(model=model_id, system=system, messages=messages, budget=budget)

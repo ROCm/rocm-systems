@@ -54,11 +54,19 @@ except ImportError:  # pragma: no cover - branch only when SDK absent
 _LOG = logging.getLogger(__name__)
 
 
-# Per-provider default models. Can be overridden via PERFXPERT_LLM_MODEL env
-# or the PERFXPERT_AGENTS_MODEL_<PROVIDER> env.
+# Per-provider default models. Resolution order (see `_resolve_model`):
+#   1. PERFXPERT_AGENTS_MODEL_<PROVIDER>   (agents-SDK-specific override)
+#   2. PERFXPERT_<PROVIDER>_MODEL          (cross-layer provider-specific)
+#   3. PERFXPERT_LLM_MODEL                 (cross-provider global override)
+#   4. built-in default below
+#
+# IMPORTANT: these must be kept current. Stale model IDs cause
+# `400 model_not_found` at runtime (cycle-4 blocker B2). The built-in
+# defaults are intentionally the *latest widely-available* snapshot for
+# each family so `--llm anthropic` "just works" without env setup.
 _DEFAULT_MODELS: Dict[str, str] = {
     "openai": "gpt-4o-mini",
-    "anthropic": "claude-sonnet-4-20250514",
+    "anthropic": "claude-sonnet-4-5",
     "ollama": "ollama/llama3.1",
     "private": "gpt-4o-mini",
     "opencode": "gpt-4o-mini",
@@ -175,14 +183,20 @@ class Handoff:
 def _resolve_model(provider: str) -> str:
     """Pick the model string to hand to the openai-agents SDK for ``provider``.
 
-    Precedence:
-      1. ``PERFXPERT_AGENTS_MODEL_<PROVIDER>`` (e.g. ``..._OPENAI``)
-      2. ``PERFXPERT_LLM_MODEL`` (cross-provider override)
-      3. Built-in default from :data:`_DEFAULT_MODELS`
+    Precedence (cycle-4 B2 — parameterize model via env var):
+      1. ``PERFXPERT_AGENTS_MODEL_<PROVIDER>`` (agents-SDK-specific override,
+         e.g. ``..._OPENAI``)
+      2. ``PERFXPERT_<PROVIDER>_MODEL`` (provider-specific, shared with the
+         Provider.complete() path — this is the lever documented in the
+         user-visible --help and README).
+      3. ``PERFXPERT_LLM_MODEL`` (cross-provider global override)
+      4. Built-in default from :data:`_DEFAULT_MODELS`.
     """
-    specific = os.environ.get(f"PERFXPERT_AGENTS_MODEL_{provider.upper()}")
-    if specific:
-        return specific
+    up = provider.upper()
+    for var in (f"PERFXPERT_AGENTS_MODEL_{up}", f"PERFXPERT_{up}_MODEL"):
+        val = os.environ.get(var)
+        if val:
+            return val
     generic = os.environ.get("PERFXPERT_LLM_MODEL")
     if generic:
         return generic
