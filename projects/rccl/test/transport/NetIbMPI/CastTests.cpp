@@ -275,4 +275,56 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastSchedParmsReflectEnvVars
+//
+// White-box: schedParms inside sendComm must match env vars:
+// enable=true, doWrr=true, splitData=false, splitDataMin=65536.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 64;
+    char sendBuf[kMsgSize], recvBuf[kMsgSize];
+    memset(sendBuf, 0xAB, sizeof(sendBuf));
+    memset(recvBuf, 0, sizeof(recvBuf));
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 900, mhandle);
+
+    if (rank == 1) {
+        struct ncclIbCastSchedState state = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        EXPECT_TRUE(state.schedEnable);
+        EXPECT_TRUE(state.doWrr);
+        EXPECT_EQ(state.splitDataMin, static_cast<uint32_t>(65536));
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
