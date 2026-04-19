@@ -1026,4 +1026,97 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastSendRecvMultipleSizes
+//
+// nqps=2, splitData=true, splitDataMin=65536.
+// Per-QP threshold = 131072 bytes (dataPerQp = size / 2).
+// WRR  sizes (<131072): {512, 4096, 65536, 131071} → each consumes 1 WRR token
+// Split sizes (≥131072): {131072, 262144}           → 0 WRR tokens consumed
+// Data integrity verified for all sizes.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kBufSz = 262144;
+    std::vector<char> sendBuf(kBufSz);
+    std::vector<char> recvBuf(kBufSz);
+    for (size_t i = 0; i < kBufSz; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+    }
+
+    // Sizes below per-QP threshold → WRR path
+    const size_t kWrrSizes[]   = {512, 4096, 65536, 131071};
+    // Sizes at/above per-QP threshold → split path
+    const size_t kSplitSizes[] = {131072, 262144};
+    int baseTag = 2000;
+
+    for (size_t sz : kWrrSizes) {
+        int prevActiveTot = 0;
+        if (rank == 1) {
+            struct ncclIbCastSchedState st = {};
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+            prevActiveTot = st.activeTotTokens;
+        }
+        CastDoSendRecv(rank, sendComm, recvComm, baseBuf, sz, baseTag++, mhandle);
+        if (rank == 0)
+            EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), sz), 0) << "data mismatch at size " << sz;
+        if (rank == 1) {
+            struct ncclIbCastSchedState st = {};
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+            int delta = prevActiveTot - st.activeTotTokens;
+            EXPECT_EQ(delta, 1) << "WRR path must consume exactly 1 token for size=" << sz;
+        }
+    }
+
+    for (size_t sz : kSplitSizes) {
+        int prevActiveTot = 0;
+        if (rank == 1) {
+            struct ncclIbCastSchedState st = {};
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+            prevActiveTot = st.activeTotTokens;
+        }
+        CastDoSendRecv(rank, sendComm, recvComm, baseBuf, sz, baseTag++, mhandle);
+        if (rank == 0)
+            EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), sz), 0) << "data mismatch at size " << sz;
+        if (rank == 1) {
+            struct ncclIbCastSchedState st = {};
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+            int delta = prevActiveTot - st.activeTotTokens;
+            EXPECT_EQ(delta, 0) << "split path must not consume WRR tokens for size=" << sz;
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
