@@ -363,6 +363,29 @@ export PERFXPERT_SKIP_LIVE_CHECK=1
 perfxpert-code claude
 ```
 
+## Gate-probe coverage (acceptance criterion 9a)
+
+The `verify_mcp_live()` gate probe (invoked during `install()` unless
+`PERFXPERT_SKIP_LIVE_CHECK=1`) confirms the gate actually holds at
+runtime by running a canned query through one small model per
+backend. Acceptance criterion 9a from the multi-backend plan requires
+that probe to pass against at least one small model per backend —
+the specific models used are:
+
+| Backend  | Small model used for gate probe | Notes |
+|----------|---------------------------------|-------|
+| opencode | opencode-default                | patched `{block, retryWith}` gate (bundled patch 0020). |
+| claude   | `claude-haiku-4-5`              | native `PreToolUse` hook. R-new-4 scope: verified on haiku-4-5; other small models require independent re-verification at acceptance time. |
+| gemini   | `gemini-2.5-flash`              | `allowedTools` restriction + runtime-state file for event-based lift. |
+| codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only); `verify_mcp_live` records `gate_hook_installed=False` and skips the probe with a warning-level log. See the [Codex hook-surface decision record](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md). |
+
+If you re-verify against a different small model for a non-Codex
+backend (for example `claude-haiku-5` when it ships, or
+`gemini-3.0-flash`), update this table and the corresponding
+`R-new-4` / `I-N2` entries in the multi-backend plan. The probe
+itself does not hard-code the model name — it reads `PERFXPERT_GATE_PROBE_MODEL`
+per backend (see `perfxpert/cli/_backend/_prompt_adapter.py`).
+
 ## See also
 
 - [../architecture/backend-adapter.md](../architecture/backend-adapter.md)
