@@ -896,3 +896,74 @@ def test_install_consent_denied_leaves_codex_home_untouched(
     # Project-scope .codex/ also must not be created.
     assert not (project_cwd / ".codex").exists()
     assert not (project_cwd / ".perfxpert").exists()
+
+
+# ---------------------------------------------------------------------------
+# Finding #4: malformed TOML raises a clear user-facing error
+# (not a raw tomllib.TOMLDecodeError traceback).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_toml",
+    [
+        "[bad\nno_close_bracket = true\n",   # unclosed table header
+        "bare_key_no_equals\n",              # missing `=`
+        '[projects."x"]\ntrust_level = \n',  # value missing
+    ],
+    ids=["unclosed-bracket", "bare-key", "missing-value"],
+)
+def test_mark_trusted_on_malformed_toml_raises_config_clobber(
+    isolated_home: Path, project_cwd: Path, bad_toml: str
+) -> None:
+    """Malformed ~/.codex/config.toml → ConfigClobber with a clear
+    message, not a raw tomllib/tomlkit traceback."""
+    _write_user_codex_config(isolated_home, bad_toml)
+
+    with pytest.raises(ConfigClobber) as excinfo:
+        CodexAdapter()._mark_trusted(project_cwd, home=isolated_home)
+
+    msg = str(excinfo.value)
+    assert "not valid TOML" in msg
+    assert "config.toml" in msg
+    # Must not surface the internal exception class name.
+    assert "TOMLDecodeError" not in msg
+    assert "Traceback" not in msg
+
+
+def test_structured_remove_on_malformed_toml_raises_config_clobber(
+    isolated_home: Path, project_cwd: Path
+) -> None:
+    """Malformed project-scope config.toml → _structured_remove raises
+    ConfigClobber (caller translates to drift + action message)."""
+    cfg = project_cwd / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("[mcp_servers.perfxpert\ncommand = \"perfxpert-mcp\"\n")
+
+    drifted: list[Path] = []
+    with pytest.raises(ConfigClobber) as excinfo:
+        CodexAdapter()._structured_remove(cfg, drifted)
+
+    msg = str(excinfo.value)
+    assert "not valid TOML" in msg
+    assert str(cfg) in msg
+    assert "TOMLDecodeError" not in msg
+
+
+def test_uninstall_on_malformed_project_config_records_drift_without_traceback(
+    project_cwd: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: a user-edited malformed config.toml at uninstall time
+    lands in `skipped_due_to_drift` with a clear action message — no
+    raw traceback escapes to the caller."""
+    cfg = project_cwd / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("[bad no close bracket\nkey = 1\n")
+
+    monkeypatch.setattr("shutil.which", lambda _: None)  # tomlkit fallback
+
+    report = CodexAdapter().uninstall(project_cwd, scope="project")
+    assert cfg in report.skipped_due_to_drift
+    joined = "\n".join(report.actions)
+    assert "not valid TOML" in joined
+    assert "refused to edit" in joined

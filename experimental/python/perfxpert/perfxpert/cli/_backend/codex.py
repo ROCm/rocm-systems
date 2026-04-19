@@ -571,7 +571,17 @@ class CodexAdapter:
             "marking a project trusted in ~/.codex/config.toml"
         )
 
-        doc = tomlkit_mod.parse(existing)
+        try:
+            doc = tomlkit_mod.parse(existing)
+        except Exception as exc:
+            # A syntactically invalid file should NEVER produce a raw
+            # `tomllib.TOMLDecodeError` traceback — user-facing error
+            # with remediation instead. Finding #4 from PR 2 review.
+            raise ConfigClobber(
+                f"{cfg} is not valid TOML: {exc}. "
+                "Fix the syntax error or move the file aside before "
+                "re-running perfxpert-code."
+            ) from exc
         projects = doc.get("projects")
         if projects is None:
             projects = tomlkit_mod.table()
@@ -848,13 +858,21 @@ class CodexAdapter:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 actions.append(f"codex mcp remove failed: {exc}")
                 # Fall through to structured edit.
-                if not self._structured_remove(config_toml, drifted):
-                    pass
-                else:
-                    actions.append(f"removed MCP entry from {config_toml}")
+                try:
+                    if self._structured_remove(config_toml, drifted):
+                        actions.append(f"removed MCP entry from {config_toml}")
+                except ConfigClobber as cexc:
+                    # Malformed user-edited TOML → record drift + surface
+                    # the clear user-facing message in actions.
+                    actions.append(f"refused to edit {config_toml}: {cexc}")
+                    drifted.append(config_toml)
         else:
-            if self._structured_remove(config_toml, drifted):
-                actions.append(f"removed MCP entry from {config_toml}")
+            try:
+                if self._structured_remove(config_toml, drifted):
+                    actions.append(f"removed MCP entry from {config_toml}")
+            except ConfigClobber as cexc:
+                actions.append(f"refused to edit {config_toml}: {cexc}")
+                drifted.append(config_toml)
 
         # Remove cache file.
         if agents_cache.exists():
@@ -897,9 +915,17 @@ class CodexAdapter:
     ) -> bool:
         """Remove `[mcp_servers.perfxpert]` from `config_toml`.
 
-        Returns True iff the entry was present AND removed. Any
-        parse failure is recorded as drift (user-edited invalid
-        TOML — we won't silently overwrite their file).
+        Returns True iff the entry was present AND removed.
+
+        Malformed TOML → raises `ConfigClobber` with a clear user-
+        facing message (finding #4). The caller can catch this and
+        surface drift through `UninstallReport.skipped_due_to_drift`;
+        the error message tells the user exactly what to do, instead
+        of the raw `tomllib.TOMLDecodeError` traceback we used to
+        swallow silently.
+
+        `tomlkit` missing → swallowed as drift (the user never
+        installed the optional extra; not a config error).
         """
         if not config_toml.is_file():
             return False
@@ -912,9 +938,12 @@ class CodexAdapter:
             doc = tomlkit_mod.parse(
                 config_toml.read_text(encoding="utf-8")
             )
-        except Exception:
-            drifted.append(config_toml)
-            return False
+        except Exception as exc:
+            raise ConfigClobber(
+                f"{config_toml} is not valid TOML: {exc}. "
+                "Fix the syntax error or delete the file before "
+                "re-running perfxpert-code uninstall."
+            ) from exc
 
         servers = doc.get("mcp_servers")
         if not isinstance(servers, dict) or "perfxpert" not in servers:
