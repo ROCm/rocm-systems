@@ -186,6 +186,69 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
   //   * 8-bit  i32-acc: AMDGPUWmmaIntrinsicModsABClamp — 8 args
   //       (A_mod, A, B_mod, B, C, reuse_a, reuse_b, clamp)
   // The MFMA fallback path is uniform across all three.
+  // 16x16x4 WMMA (32-bit f32 A/B/C, gfx1250 VOP3P opcode 0x05D).
+  // This handler stands alone from the K=32 / K=64 family below
+  // because (a) the per-lane A/B fragment is `<2 x f32>` (only 2
+  // dwords) instead of <16 x t> (16-bit) or <8 x i32> (8-bit), and
+  // (b) `emitWMMAtoMFMA` is parameterised on 16-/8-bit element
+  // packing and does not cover the K=4 f32 case.
+  //
+  // The native intrinsic `int_amdgcn_wmma_f32_16x16x4_f32` is
+  // declared inside `AMDGPUWMMAIntrinsicsGFX1250` (gated by
+  // `isGFX125xOnly` in IntrinsicsAMDGPU.td:4113-4114), so it is
+  // strictly gfx1250-only — the gfx12 (RDNA4 base) WMMA family
+  // (`AMDGPUWMMAIntrinsicsGFX12`, gated by `hasWMMA12` =
+  // FeatureWMMA{128,256}bInsts) does NOT include it. Same-target
+  // lift therefore gates on `ctx.targetIsa.hasTensorOps`
+  // (FeatureGFX1250Insts), not `hasWMMA12`. Cross-target lift to
+  // gfx942 would need a new K=4 MFMA decomposition path (gfx942
+  // has `mfma_f32_16x16x4f32`) that no kernel in the current
+  // corpus exercises, so we refuse loudly instead of silently
+  // mis-lowering.
+  case SemOp::V_WMMA_F32_16x16x4_F32: {
+    if (!ctx.targetIsa.hasTensorOps) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3P",
+          "v_wmma_f32_16x16x4_f32 is a gfx1250-only intrinsic "
+          "(int_amdgcn_wmma_f32_16x16x4_f32 lives in "
+          "AMDGPUWMMAIntrinsicsGFX1250, not the gfx12 WMMA family); "
+          "cross-target lift to gfx942 would need a K=4 MFMA "
+          "decomposition via mfma_f32_16x16x4f32 — no corpus kernel "
+          "exercises this path");
+      return hr;
+    }
+    auto *abIRTy = FixedVectorType::get(ctx.f32Ty, 2);
+    auto *cdIRTy = FixedVectorType::get(ctx.f32Ty, 8);
+
+    ParsedReg dest = op.dst();
+    ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
+    ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
+
+    Value *a = ctx.regs.readRegVec(ctx.B, srcA, abIRTy);
+    Value *b = ctx.regs.readRegVec(ctx.B, srcB, abIRTy);
+    Value *c = ctx.regs.readRegVec(ctx.B, srcC, cdIRTy);
+
+    Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_wmma_f32_16x16x4_f32, {cdIRTy, abIRTy});
+    // AMDGPUWmmaIntrinsicModsAllReuse:
+    //   (A_mod, A, B_mod, B, C_mod, C, reuse_a, reuse_b)
+    // A_mod / B_mod carry per-element negation (i1) and C_mod
+    // carries the i16 source-modifier bitfield (op_sel etc.). The
+    // gfx1250 corpus emits the instruction without those modifiers
+    // set; defaulting to false / 0 matches what the disassembler
+    // surfaces for the failing kernels.
+    Value *result_val = ctx.B.CreateCall(wmmaFn, {
+        ctx.B.getFalse(), a,
+        ctx.B.getFalse(), b,
+        ConstantInt::get(Type::getInt16Ty(ctx.C), 0), c,
+        ctx.B.getFalse(), ctx.B.getFalse()
+    }, "wmma");
+
+    ctx.writeRegVec(dest, result_val);
+    hr.handled = true;
+    return hr;
+  }
+
   case SemOp::V_WMMA_F32_16x16x32_F16:
   case SemOp::V_WMMA_F32_16x16x32_BF16:
   case SemOp::V_WMMA_F32_16x16x64_FP8_FP8:

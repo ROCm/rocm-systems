@@ -830,6 +830,14 @@ static const Entry kCanonTable[] = {
     // ---------------------------------------------------------------------
     E(V_WMMA_F32_16X16X32_F16_w32_twoaddr, V_WMMA_F32_16x16x32_F16),
     E(V_WMMA_F32_16X16X32_F16_w32_threeaddr, V_WMMA_F32_16x16x32_F16),
+    // 16x16x4 WMMA, 32-bit f32 inputs and accumulator (gfx1250 RDNA4
+    // VOP3P opcode 0x05D, K=4 across 32 lanes -> per-lane <2 x f32>
+    // for A and B). Lifts to the gfx1250-only intrinsic
+    // amdgcn_wmma_f32_16x16x4_f32 in the same-target path; cross-
+    // target (gfx942) refuses loudly because no K=4 f32 -> MFMA
+    // decomposition exists in `wmma_lowering.cpp` yet.
+    E(V_WMMA_F32_16X16X4_F32_w32_twoaddr, V_WMMA_F32_16x16x4_F32),
+    E(V_WMMA_F32_16X16X4_F32_w32_threeaddr, V_WMMA_F32_16x16x4_F32),
     // 16x16x32 WMMA, BF16 inputs, F32 accumulator (gfx1250 RDNA4 VOP3P
     // opcode 0x062). Same fragment shape as the F16 variant — the only
     // delta is the input element type, which routes to the bf16 MFMA

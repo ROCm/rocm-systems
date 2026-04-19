@@ -276,6 +276,29 @@ config.fixtures = {
     # contracts off it.
     "tensor_load_to_lds":
         r"@LIT_FIXTURE_TENSOR_LOAD_TO_LDS_CO@",
+    # v_wmma_f32_16x16x4_f32 (gfx1250 RDNA4 VOP3P opcode 0x05D) —
+    # single `.co` fixture shared by two complementary lit tests in
+    # the `wmma_f32_16x16x4_f32/` directory:
+    #   * `wmma_f32_16x16x4_f32.ll` — pins the cross-target
+    #     (gfx1250 -> gfx942) loud refusal contract. Stands alone
+    #     from the K=32/K=64 WMMA family because the K=4 f32
+    #     fragment shape (`<2 x f32>` per lane) has no codepath in
+    #     the parameterised `emitWMMAtoMFMA` helper, and the LLVM
+    #     intrinsic `int_amdgcn_wmma_f32_16x16x4_f32`
+    #     (IntrinsicsAMDGPU.td:4113-4114) is itself
+    #     `isGFX125xOnly`.
+    #   * `wmma_f32_16x16x4_f32_same_target.ll` — pins the
+    #     same-target (gfx1250 -> gfx1250) intrinsic-emit shape:
+    #     the `<2 x f32>` A/B fragments and `<8 x float>`
+    #     accumulator, the canonical defaulted modifier args
+    #     (i1 false / i16 0), and the absence of any cross-K
+    #     dispatch / MFMA fallback. Same-target gating is
+    #     `ISAProfile::hasTensorOps` (FeatureGFX1250Insts) — NOT
+    #     `hasWMMA12`, since the gfx12 RDNA4-base WMMA family
+    #     (`AMDGPUWMMAIntrinsicsGFX12`, FeatureWMMA{128,256}bInsts)
+    #     does NOT include this K=4 f32 intrinsic.
+    "wmma_f32_16x16x4_f32":
+        r"@LIT_FIXTURE_WMMA_F32_16X16X4_F32_CO@",
 }
 
 lit_config.load_config(

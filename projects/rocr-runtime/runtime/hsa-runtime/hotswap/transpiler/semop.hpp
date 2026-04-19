@@ -574,6 +574,29 @@ enum class SemOp : uint16_t {
   // (mfma_f32_16x16x16f16 vs mfma_f32_16x16x16bf16_1k).
   V_WMMA_F32_16x16x32_F16,
   V_WMMA_F32_16x16x32_BF16,
+  // 16x16x4 WMMA with f32 accumulator and 32-bit f32 element types
+  // for both A and B (gfx1250 RDNA4 VOP3P opcode 0x05D). Per-Wave32-
+  // lane fragment shape is A,B: <2 x f32> (only 4 K-elements split
+  // across 2 dwords per lane), C/D: <8 x f32>; this is structurally
+  // distinct from the 16-bit (K=32, A/B = <16 x t>) and 8-bit
+  // (K=64, A/B = <8 x i32>) families above and so does NOT share
+  // the `emitWMMAtoMFMA` decomposition (which is parameterised on
+  // 16-/8-bit element packing, not f32). The native intrinsic
+  // `amdgcn_wmma_f32_16x16x4_f32` is declared inside
+  // `AMDGPUWMMAIntrinsicsGFX1250` (gated by `isGFX125xOnly` in
+  // IntrinsicsAMDGPU.td:4113-4114) and is NOT part of the gfx12
+  // RDNA4-base WMMA family (`AMDGPUWMMAIntrinsicsGFX12`,
+  // FeatureWMMA{128,256}bInsts), so the same-target lift gates on
+  // `ISAProfile::hasTensorOps` (FeatureGFX1250Insts) — matching
+  // the LLVM intrinsic's actual subtarget gating — rather than
+  // `hasWMMA12`. Call shape is `AMDGPUWmmaIntrinsicModsAllReuse`,
+  // 8 args: `(A_mod, A, B_mod, B, C_mod, C, reuse_a, reuse_b)`.
+  // Cross-target lift to gfx942 would need a new K=4 MFMA
+  // decomposition path (gfx942 has `mfma_f32_16x16x4f32`) that no
+  // kernel in the current corpus exercises, so we refuse loudly
+  // via `RaiseFailure::unsupportedShape` to surface the gap
+  // immediately rather than silently degrade.
+  V_WMMA_F32_16x16x4_F32,
   // 16x16x64 WMMA with f32 accumulator and 8-bit element types
   // (fp8/bf8). The four AB combinations are distinct opcodes (and
   // distinct CDNA3 MFMA intrinsics on gfx942) but share the same
