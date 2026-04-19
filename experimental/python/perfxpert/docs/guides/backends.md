@@ -14,7 +14,9 @@ contract every adapter satisfies, see
 For the underlying MCP server (34 READ_ONLY tools), see
 [../integration/mcp-server.md](../integration/mcp-server.md). The
 rationale for the Claude PreToolUse choice is recorded in
-[../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md).
+[../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md);
+the (different) decision for Codex lives in
+[../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
 
 ## Why multi-backend?
 
@@ -38,7 +40,7 @@ no user-side install is required for the tool-priority gate to work.
 | **opencode** (default, bundled) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
 | **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./.claude/CLAUDE.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
 | **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `~/.gemini/settings.json` + `./.perfxpert/AGENTS.md` | User (MCP) + project (prompt) | `allowedTools` restriction (event-based lift) | `mcp_perfxpert_*` |
-| **Codex CLI** (coming soon) | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (TBD) | Project (TBD) | TBD | `mcp_perfxpert_*` (TBD) |
+| **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (TOML: trust + MCP) + `./.perfxpert/AGENTS.md` | User (MCP + trust) + project (prompt) | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp_perfxpert_*` |
 
 Consent is requested once per **(backend, cwd-hash, file-set-hash)**
 tuple and persisted — re-running the same subcommand in the same
@@ -98,16 +100,76 @@ supported extension point.
 perfxpert-code gemini
 ```
 
-### Codex CLI — deferred
+### Codex CLI (`perfxpert-code codex`)
 
-The Codex adapter ships in PR 2. Running the subcommand today prints
-a "deferred" message and exits 42. Use `perfxpert-code claude` or
-`perfxpert-code gemini` in the meantime.
+Registers perfxpert in `~/.codex/config.toml` under the
+`[mcp_servers.perfxpert]` table, stages the rendered prompt at
+`<cwd>/.perfxpert/AGENTS.md`, and marks the current project as
+trusted via the `[projects."<abs-cwd>"]` TOML table (required — Codex
+refuses to run agents in untrusted projects). Writes preserve
+comments + key ordering via lazy-imported `tomlkit`.
 
 ```bash
-# SKIP-SAMPLE — prints deferred notice and exits 42
+# SKIP-SAMPLE — requires codex CLI ≥ 0.7.0 on PATH
 perfxpert-code codex
+
+# Equivalent explicit form (showing the MCP registration step Codex does natively):
+codex mcp add perfxpert perfxpert-mcp
 ```
+
+#### Trust gate
+
+Codex requires `[projects."<abs-path>"].trust_level = "trusted"` in
+`~/.codex/config.toml` before it will run agents in a given project
+directory. The adapter handles this for you: if the cwd is not yet
+trusted, it prompts `[y/N]` (interactive) or aborts with
+`TrustRequired` (non-interactive). To auto-trust during bootstrap or
+CI, set `PERFXPERT_AUTO_TRUST=1`:
+
+```bash
+# SKIP-SAMPLE — bootstrap path: auto-trust the cwd without prompting
+PERFXPERT_AUTO_TRUST=1 perfxpert-code codex
+```
+
+**Security caveat.** When `PERFXPERT_AUTO_TRUST=1` is honored, the
+adapter prints a `[WARN]` line to stderr naming the trusted cwd —
+and that warning bypasses `--quiet`. This is intentional: silently
+marking a directory as trusted is a security-relevant action and
+deserves an audit trail even in non-interactive runs. If you need
+completely silent installs and your cwd is already trusted from a
+previous run, the warning never fires.
+
+#### Prompt-layer-only gate (why Codex differs)
+
+Unlike Claude (`PreToolUse`) and Gemini (`allowedTools`), the Codex
+adapter does **not** install a server-side pre-tool-call gate hook.
+Codex's native `PreToolUse` hook exists (behind `[features]
+codex_hooks = true`) but currently intercepts Bash only — it cannot
+block MCP, Write, or other tool calls. The perfxpert gate must
+intercept every non-`perfxpert_*` tool call until
+`intent_classify` returns, so a Bash-only hook cannot satisfy the
+contract. Installing one anyway would give false confidence.
+
+Instead, the Codex install relies on the rejection-language stanza
+embedded in the staged `.perfxpert/AGENTS.md` (prompt-layer
+enforcement). Smaller models may bypass advisory language; if
+mechanical enforcement matters for your workflow, use
+`perfxpert-code claude` or the bundled `opencode` default (both
+have server-side mechanical gates). The full rationale + re-visit
+conditions are in
+[../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+
+#### Git-tracked config refused
+
+Same rule as Claude / opencode: if `~/.codex/config.toml` is tracked
+inside a git repo (unusual but possible in dotfile repos), the
+adapter refuses to write and raises `ConfigClobber` with a
+`git rm --cached ~/.codex/config.toml` remediation hint. Malformed
+TOML is surfaced the same way — `ConfigClobber("...not valid
+TOML...Fix the syntax error...")` rather than a raw `tomlkit`
+traceback. During uninstall, a malformed file is recorded as
+`skipped_due_to_drift` so you can clean the other backends and come
+back to the broken file.
 
 ## Uninstall recipes
 
@@ -123,6 +185,9 @@ perfxpert-code uninstall claude
 # SKIP-SAMPLE — reverses a Gemini install
 perfxpert-code uninstall gemini
 
+# SKIP-SAMPLE — reverses a Codex install (drops MCP table + trust entry + staged AGENTS.md)
+perfxpert-code uninstall codex
+
 # SKIP-SAMPLE — non-interactive: consent the uninstall in advance
 perfxpert-code uninstall --yes claude
 ```
@@ -130,7 +195,10 @@ perfxpert-code uninstall --yes claude
 On a successful uninstall, all of the following are reverted: MCP
 registration entry, `.perfxpert/AGENTS.md` cache, any pointer file
 the adapter wrote, and the gate-hook settings block. Files the user
-created (e.g. a pre-existing `.claude/CLAUDE.md`) are preserved.
+created (e.g. a pre-existing `.claude/CLAUDE.md`) are preserved. For
+Codex specifically, the `[projects."<cwd>"]` trust entry that the
+install added is also removed; any other `[projects.*]` entries are
+preserved untouched.
 
 ## Advanced flags
 
@@ -168,6 +236,7 @@ The uninstall subcommand accepts a separate short flag list:
 | `PERFXPERT_SKIP_LIVE_CHECK` | unset | `1`/`true`/`yes` skips the post-install `verify_mcp_live()` step entirely. Useful in CI where the backend isn't reachable. |
 | `PERFXPERT_ASSUME_CONSENT` | unset | `1`/`true`/`yes` bypasses the interactive consent prompt (install AND uninstall). Required for non-interactive stdin. |
 | `PERFXPERT_IN_AGENT_SESSION` | set by dispatcher | Recursion guard — the dispatcher sets this to the backend name in the child env so a nested `perfxpert-code <backend>` refuses to launch. Override with `--force`. |
+| `PERFXPERT_AUTO_TRUST` | unset | **Codex-only.** `1` auto-marks the current cwd as `trust_level = "trusted"` in `~/.codex/config.toml` without prompting. Prints a `[WARN]` to stderr identifying the trusted cwd; this warning bypasses `--quiet` by design (security-relevant audit trail). Required for non-interactive Codex bootstraps; skipped for Claude / Gemini / opencode. |
 
 ## Troubleshooting
 
@@ -236,6 +305,43 @@ the decision record at
 [../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md)
 and retry.
 
+### Codex refuses to run ("project not trusted")
+
+Symptom: `TrustRequired: current project <cwd> is not trusted by
+Codex. Pass PERFXPERT_AUTO_TRUST=1 to auto-trust, OR rerun
+interactively to accept the prompt.`
+
+Cause: `perfxpert-code codex` was run in a non-interactive context
+(e.g. CI, piped stdin) and the cwd wasn't yet in the
+`[projects."..."]` table of `~/.codex/config.toml`.
+
+Fix — pick one:
+
+```bash
+# SKIP-SAMPLE — CI path: auto-trust the cwd; warning prints to stderr
+PERFXPERT_AUTO_TRUST=1 perfxpert-code codex
+
+# SKIP-SAMPLE — interactive path: accept the prompt once, cached afterwards
+perfxpert-code codex
+```
+
+### Codex uninstall reports `skipped_due_to_drift`
+
+Symptom: `perfxpert-code uninstall codex` completes but the report
+lists `~/.codex/config.toml` under `skipped_due_to_drift` (non-zero
+exit).
+
+Cause: either the file is git-tracked (refuses to write, same rule
+as Claude / opencode) or the TOML is malformed (parse failed, also
+refused). Drift protection is deliberate — the uninstall does not
+overwrite user state.
+
+Fix: inspect the file manually. If it's git-tracked, `git rm --cached
+~/.codex/config.toml` and re-run the uninstall. If it's malformed,
+fix the syntax (`codex mcp list` will hard-error on parse failure
+too) and re-run. Other backends in the same uninstall invocation
+are unaffected — they already cleaned up.
+
 ### MCP warmup times out
 
 Symptom: `PartialInstall: perfxpert MCP registered but live-check
@@ -265,5 +371,8 @@ perfxpert-code claude
   underlying MCP server + 34 READ_ONLY tool list
 - [../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md)
   — why Claude uses the native `PreToolUse` hook surface
+- [../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md)
+  — why Codex uses prompt-layer-only enforcement (PreToolUse is
+  Bash-only)
 - [getting-started.md](getting-started.md) — §"Choosing a backend"
   for the short recipe
