@@ -123,6 +123,34 @@ Current entries:
 current shell. See [contributing/providers.md](../contributing/providers.md)
 for how to register a new one.
 
+## Fallback chain (`PERFXPERT_LLM_FALLBACK_CHAIN`)
+
+Phase 8 introduced a multi-provider fallback chain so a rate-limited or
+unavailable primary provider doesn't force a rerun. Set the env var to a
+comma-separated list of provider names in preference order:
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db and live LLM credentials
+# Try Anthropic first; fall back to OpenAI, then a private endpoint.
+export PERFXPERT_LLM_FALLBACK_CHAIN="anthropic,openai,private"
+perfxpert analyze -i trace.db --llm anthropic
+```
+
+When set, `build_session(provider="anthropic", ...)` wraps the primary
+provider in a `FallbackProvider` that cascades down the chain on typed
+error classes (`RateLimitError`, `AuthError`, `TimeoutError`). The
+`recursion_guard` still applies to each candidate — `opencode` cannot
+be chosen from inside an already-running opencode session.
+
+Unset or empty: no fallback. A typed error surfaces to the caller
+unchanged.
+
+Related knob:
+
+- `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` disables client-side retry
+  before falling through; useful when you want the fallback chain to
+  take over immediately on 429.
+
 ## CLI entry points
 
 Two CLI surfaces drive the same agent runtime:

@@ -13,8 +13,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `PERFXPERT_*` namespace. The canonical names are
   `PERFXPERT_LLM_ANTHROPIC_KEY`, `PERFXPERT_LLM_OPENAI_KEY`, and the
   standard vendor `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` continue to be
-  honored. A single `ROCPD_LLM_*` alias remains with a
-  `DeprecationWarning` as a migration ramp.
+  honored. A single pre-rename alias (the `ROCPD_LLM_*` prefix — the rest were removed in Phase 7.1) still works with a `DeprecationWarning` as a migration ramp.
 - Legacy `ai_analysis` module (`perfxpert/ai_analysis/`) fully removed,
   along with all parity and feature-flag dispatch tests. The
   `PERFXPERT_LEGACY` environment variable is now unrecognized — setting it
@@ -75,7 +74,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Migration
 
-See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
+See [docs/archive/migration-to-agentic.md](docs/archive/migration-to-agentic.md).
 
 ### Backwards-compatible stubs (v0.2.0 only, all subsequently removed)
 
