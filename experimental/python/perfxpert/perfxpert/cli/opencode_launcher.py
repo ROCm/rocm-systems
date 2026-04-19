@@ -496,6 +496,9 @@ def main(argv: list[str] | None = None) -> int:
     env = dict(os.environ)
     # Recursion guard marker (spec §5.8 / R10)
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
+    # Disable opencode's auto-update check — it prompts with upstream branding
+    # and, if confirmed, would replace our patched bundle with upstream.
+    env.setdefault("OPENCODE_DISABLE_AUTOUPDATE", "1")
 
     # Phase 8 fix — point opencode at our bundled config regardless of cwd.
     # Previously `perfxpert-code run ...` preserved the user's CWD (so they
