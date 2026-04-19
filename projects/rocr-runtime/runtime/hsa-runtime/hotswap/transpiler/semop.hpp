@@ -630,6 +630,66 @@ enum class SemOp : uint16_t {
   // and the 8-bit FP8 ModsC shapes.
   V_WMMA_I32_16x16x64_IU8,
 
+  // 16x16x128 WMMA with f32 accumulator and per-matrix scale exponents,
+  // f8f6f4 mantissa-format family (gfx1250 RDNA4 VOP3P opcode 0x033 in
+  // VOP3PX2 form, pseudo `V_WMMA_SCALE_F32_16X16X128_F8F6F4_*_w32_*`).
+  // Each kernel encodes one of 9 opcode-suffix mantissa-pair variants
+  // (`{f4,f6,f8} × {f4,f6,f8}`), but the in-family element format
+  // (BF8 vs FP8 within f8; BF6 vs FP6 within f6) is selected at runtime
+  // by the `matrix_a_fmt` / `matrix_b_fmt` named-immediate operands
+  // (`enum MatrixFMT { FP8=0, BF8=1, FP6=2, BF6=3, FP4=4 }`,
+  // SIDefines.h:1052-1058). Per-Wave32-lane fragment shape is therefore
+  // format-dependent: A is `<16 x i32>` for f8 (32 packed bytes/lane),
+  // `<12 x i32>` for f6 (24 packed bytes/lane), and `<8 x i32>` for f4
+  // (16 packed bytes/lane); B is independently `<16/12/8 x i32>` per
+  // its own format. C/D is `<8 x f32>`. We collapse all 18 MC pseudos
+  // (9 mantissa pairs × `_twoaddr` / `_threeaddr`) onto this single
+  // SemOp and discriminate at the handler with `getNamedOperandIdx`,
+  // mirroring the F8F6F4 MFMA collapse rule in `kCanonTable`.
+  //
+  // The native intrinsic `int_amdgcn_wmma_scale_f32_16x16x128_f8f6f4`
+  // (IntrinsicsAMDGPU.td:4138, class `AMDGPUWmmaScaleIntrinsicModsC
+  // <llvm_i32_ty>`) takes 14 arguments:
+  //   (i32 matrix_a_fmt, <Nax i32> A, i32 matrix_b_fmt, <Nbx i32> B,
+  //    i16 C_modifiers, <8 x f32> C,
+  //    i32 matrix_a_scale, i32 matrix_a_scale_fmt, i32 scale_src0,
+  //    i32 matrix_b_scale, i32 matrix_b_scale_fmt, i32 scale_src1,
+  //    i1 matrix_a_reuse, i1 matrix_b_reuse)
+  // and is gated by `isGFX125xOnly` inside `AMDGPUWMMAIntrinsicsGFX1250`
+  // (IntrinsicsAMDGPU.td:4113). Handler decodes operands by name via
+  // `AMDGPU::getNamedOperandIdx` (`matrix_a_fmt`, `matrix_b_fmt`,
+  // `matrix_a_scale`, `matrix_b_scale`, `matrix_a_scale_fmt`,
+  // `matrix_b_scale_fmt`, `scale_src0`, `scale_src1`, `matrix_a_reuse`,
+  // `matrix_b_reuse`, `src2_modifiers`) so any future TableGen operand
+  // reshuffle flows in for free.
+  //
+  // === Same-target gfx1250 → gfx1250 contract ===
+  //
+  // Lift directly to `int_amdgcn_wmma_scale_f32_16x16x128_f8f6f4` with
+  // overloaded {<8 x f32>, <16 x i32>, <16 x i32>} type arguments
+  // (the overload widths match the f8 family used by the corpus
+  // kernels; the matrix_a_fmt / matrix_b_fmt immediates carry the
+  // BF8 vs FP8 distinction). The call is NOT wrapped in
+  // `emitUnderExec` because the WMMA intrinsic is `IntrConvergent`
+  // and operates on the wave's matrix fragment, not per-lane
+  // divergent values — wrapping would emit one matrix multiply per
+  // active lane.
+  //
+  // === Cross-target (gfx942 and earlier) contract ===
+  //
+  // gfx942 has no scaled-WMMA hardware. The closest sibling on gfx942
+  // is `mfma_scale_f32_16x16x128_f8f6f4` (already mapped via
+  // `V_MFMA_SCALE_F32_16x16x128_F8F6F4`), but the WMMA-to-MFMA lane
+  // redistribution for K=128 + per-matrix-fmt selection + the
+  // matrix_a/b_scale_fmt × scale_src0/src1 exponent application is
+  // not modelled in `wmma_lowering.cpp` (only K=32 / K=64 fp16/bf16/
+  // fp8/bf8/iu8 paths exist). Per the user-rules (no silent
+  // fallbacks) and consistent with the gfx1250-only refusal contract
+  // applied to `V_WMMA_F32_16x16x4_F32` above, we refuse loudly via
+  // `RaiseFailure::unsupportedShape` to surface both the cross-target
+  // capability gap and the missing scaled-WMMA decomposition path.
+  V_WMMA_SCALE_F32_16x16x128_F8F6F4,
+
   // -- VOPD -- (handled via string parsing of fullText, not opcode)
   VOPD_GENERIC,
 

@@ -872,6 +872,46 @@ static const Entry kCanonTable[] = {
     E(V_WMMA_I32_16X16X64_IU8_w32_twoaddr,   V_WMMA_I32_16x16x64_IU8),
     E(V_WMMA_I32_16X16X64_IU8_w32_threeaddr, V_WMMA_I32_16x16x64_IU8),
     // ---------------------------------------------------------------------
+    // Scaled WMMA F8F6F4 (gfx1250 RDNA4 — VOP3PX2 paired form, real opcode
+    // 0x033 + 0x35 / 0x3a, FLATInstructions / VOP3PInstructions.td:1987).
+    // The 9 mantissa-pair pseudos (`f4_f4`, `f4_f6`, …, `f8_f8`) all share
+    // the same SemOp because the per-format element distinction (BF8 vs
+    // FP8 within f8, etc.) travels as the `matrix_a_fmt` /
+    // `matrix_b_fmt` named-immediate operands rather than the opcode
+    // suffix. Each mantissa-pair has both a `_twoaddr` (src2 tied to
+    // vdst) and `_threeaddr` (independent vdst) MC pseudo because the
+    // `WMMAInstGFX12` multiclass emits both — the canonicalization
+    // chain treats them as the same semantic op (matching the
+    // F8F6F4-MFMA collapse rule above and the `_twoaddr / _threeaddr`
+    // collapse rule used for the K=32 / K=64 WMMA family). The
+    // companion `int_amdgcn_wmma_scale_f32_16x16x128_f8f6f4` intrinsic
+    // is gfx1250-only (`isGFX125xOnly`); cross-target gfx942 lift is a
+    // loud refusal in `handle_valu_vop3p.cpp` because the K=128 +
+    // matrix-fmt + scale-exponent decomposition into MFMA is not
+    // modelled in `wmma_lowering.cpp`. The non-paired
+    // `V_WMMA_F32_16X16X128_F8F6F4` family (no SCALE prefix) is not
+    // currently observed in the kerneldex corpus; it can be added
+    // alongside this entry when a kernel surfaces it.
+    // ---------------------------------------------------------------------
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f4_f4_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f4_f4_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f4_f6_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f4_f6_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f4_f8_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f4_f8_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f6_f4_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f6_f4_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f6_f6_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f6_f6_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f6_f8_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f6_f8_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f8_f4_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f8_f4_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f8_f6_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f8_f6_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f8_f8_w32_twoaddr,   V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    E(V_WMMA_SCALE_F32_16X16X128_F8F6F4_f8_f8_w32_threeaddr, V_WMMA_SCALE_F32_16x16x128_F8F6F4),
+    // ---------------------------------------------------------------------
     // VIMAGE TENSOR (gfx1250 RDNA4 — VIMAGE 0xc4 / 0xc5).
     // The disassembler's MC opcodes are the `_gfx1250` reals
     // (`TENSOR_LOAD_TO_LDS_d{2,4}_gfx1250`,

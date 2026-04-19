@@ -3,6 +3,7 @@
 #include "semop.hpp"
 #include "wmma_lowering.hpp"
 
+#include "Utils/AMDGPUBaseInfo.h" // AMDGPU::getNamedOperandIdx, AMDGPU::OpName
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Constants.h"
@@ -357,6 +358,146 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
     } else {
       result_val = emitWMMAtoMFMA(ctx, a, b, c, wmmaInputType);
     }
+
+    ctx.writeRegVec(dest, result_val);
+    hr.handled = true;
+    return hr;
+  }
+
+  // 16x16x128 scaled WMMA, f8f6f4 mantissa-format family (gfx1250-only).
+  //
+  // 18 MC pseudos (`{f4,f6,f8} A × {f4,f6,f8} B × _twoaddr/_threeaddr`)
+  // collapse onto this single SemOp; the per-matrix vector width is
+  // encoded by the opcode's `_fA_fB_w32_*` suffix (per
+  // `WMMA_F8F6F4_Profiles` in VOP3PInstructions.td:1908) — f8 → 16
+  // dwords, f6 → 12 dwords, f4 → 8 dwords. The in-family element
+  // distinction (BF8 vs FP8 within f8; BF6 vs FP6 within f6) lives in
+  // the `matrix_a_fmt` / `matrix_b_fmt` named-immediate operands
+  // (`enum MatrixFMT`, SIDefines.h:1052-1058).
+  //
+  // Cross-target gfx942 has no scaled-WMMA hardware and the
+  // WMMA→MFMA decomposition path for K=128 + per-matrix scale
+  // exponents is not implemented in `wmma_lowering.cpp`, so we
+  // refuse loudly per user-rules (no silent fallbacks) — same
+  // contract as `V_WMMA_F32_16x16x4_F32` above.
+  case SemOp::V_WMMA_SCALE_F32_16x16x128_F8F6F4: {
+    if (!ctx.targetIsa.hasTensorOps) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3P",
+          "v_wmma_scale_f32_16x16x128_f8f6f4 is a gfx1250-only opcode "
+          "(int_amdgcn_wmma_scale_f32_16x16x128_f8f6f4 lives in "
+          "AMDGPUWMMAIntrinsicsGFX1250); cross-target lift to gfx942 "
+          "would need a K=128 scaled-WMMA → MFMA decomposition with "
+          "per-matrix scale-exponent application that no corpus path "
+          "currently exercises");
+      return hr;
+    }
+
+    // Extract per-matrix dword count from the MC pseudo suffix
+    // (`*_fA_fB_w32_{twoaddr,threeaddr}`). MCInstrInfo names the
+    // pseudo verbatim from TableGen, so the suffix is the
+    // authoritative source of A/B widths.
+    auto fmtSuffixToDwords = [](StringRef tag) -> unsigned {
+      if (tag == "f8") return 16;
+      if (tag == "f6") return 12;
+      if (tag == "f4") return 8;
+      return 0;
+    };
+    StringRef pseudoName = ctx.mc.instrInfo->getName(di.inst.getOpcode());
+    StringRef body = pseudoName;
+    body.consume_front("V_WMMA_SCALE_F32_16X16X128_F8F6F4_");
+    SmallVector<StringRef, 4> parts;
+    body.split(parts, '_');
+    if (parts.size() < 2) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3P",
+          "v_wmma_scale_f32_16x16x128_f8f6f4: cannot parse fA_fB suffix from "
+          "MC pseudo name");
+      return hr;
+    }
+    unsigned aDwords = fmtSuffixToDwords(parts[0]);
+    unsigned bDwords = fmtSuffixToDwords(parts[1]);
+    if (aDwords == 0 || bDwords == 0) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3P",
+          "v_wmma_scale_f32_16x16x128_f8f6f4: unrecognised mantissa-format "
+          "tag in MC pseudo suffix (expected f4/f6/f8)");
+      return hr;
+    }
+
+    auto *aTy = FixedVectorType::get(ctx.i32Ty, aDwords);
+    auto *bTy = FixedVectorType::get(ctx.i32Ty, bDwords);
+    auto *cdTy = FixedVectorType::get(ctx.f32Ty, 8);
+
+    ParsedReg dest = op.dst();
+    ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
+    ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
+
+    Value *a = ctx.regs.readRegVec(ctx.B, srcA, aTy);
+    Value *b = ctx.regs.readRegVec(ctx.B, srcB, bTy);
+    Value *c = ctx.regs.readRegVec(ctx.B, srcC, cdTy);
+
+    // Read named-immediate / named-register operands. Using
+    // `getNamedOperandIdx` instead of positional scan means any
+    // future TableGen reshuffle of the scaled-WMMA Ins64 layout
+    // flows in for free (mirrors the MFMA-scale handler in
+    // handle_mfma.cpp:175-194).
+    auto namedImm = [&](AMDGPU::OpName name) -> int64_t {
+      int idx = AMDGPU::getNamedOperandIdx(di.inst.getOpcode(), name);
+      if (idx < 0 || !di.isImm(idx)) return 0;
+      return di.getImm(idx);
+    };
+    auto namedReg32 = [&](AMDGPU::OpName name) -> Value * {
+      int idx = AMDGPU::getNamedOperandIdx(di.inst.getOpcode(), name);
+      if (idx < 0 || !di.isReg(idx))
+        return ConstantInt::get(ctx.i32Ty, 0);
+      ParsedReg pr = ctx.parseReg(di.getReg(idx), idx);
+      if (pr.kind == ParsedReg::OTHER || pr.kind == ParsedReg::NOREG)
+        return ConstantInt::get(ctx.i32Ty, 0);
+      return ctx.regs.readReg32(ctx.B, pr);
+    };
+
+    Value *matrixAFmt =
+        ConstantInt::get(ctx.i32Ty, namedImm(AMDGPU::OpName::matrix_a_fmt));
+    Value *matrixBFmt =
+        ConstantInt::get(ctx.i32Ty, namedImm(AMDGPU::OpName::matrix_b_fmt));
+    Value *cMod = ConstantInt::get(
+        Type::getInt16Ty(ctx.C),
+        namedImm(AMDGPU::OpName::src2_modifiers));
+    Value *matrixAScale = ConstantInt::get(
+        ctx.i32Ty, namedImm(AMDGPU::OpName::matrix_a_scale));
+    Value *matrixAScaleFmt = ConstantInt::get(
+        ctx.i32Ty, namedImm(AMDGPU::OpName::matrix_a_scale_fmt));
+    Value *scaleSrc0 = namedReg32(AMDGPU::OpName::scale_src0);
+    Value *matrixBScale = ConstantInt::get(
+        ctx.i32Ty, namedImm(AMDGPU::OpName::matrix_b_scale));
+    Value *matrixBScaleFmt = ConstantInt::get(
+        ctx.i32Ty, namedImm(AMDGPU::OpName::matrix_b_scale_fmt));
+    Value *scaleSrc1 = namedReg32(AMDGPU::OpName::scale_src1);
+    Value *matrixAReuse = ConstantInt::get(
+        Type::getInt1Ty(ctx.C),
+        namedImm(AMDGPU::OpName::matrix_a_reuse));
+    Value *matrixBReuse = ConstantInt::get(
+        Type::getInt1Ty(ctx.C),
+        namedImm(AMDGPU::OpName::matrix_b_reuse));
+
+    // AMDGPUWmmaScaleIntrinsicModsC<i32>:
+    //   (matrix_a_fmt, A, matrix_b_fmt, B, C_mod, C,
+    //    matrix_a_scale, matrix_a_scale_fmt, scale_src0,
+    //    matrix_b_scale, matrix_b_scale_fmt, scale_src1,
+    //    matrix_a_reuse, matrix_b_reuse)
+    // Overloaded on D, A, B element vector types.
+    Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_wmma_scale_f32_16x16x128_f8f6f4,
+        {cdTy, aTy, bTy});
+    Value *result_val = ctx.B.CreateCall(wmmaFn, {
+        matrixAFmt, a,
+        matrixBFmt, b,
+        cMod, c,
+        matrixAScale, matrixAScaleFmt, scaleSrc0,
+        matrixBScale, matrixBScaleFmt, scaleSrc1,
+        matrixAReuse, matrixBReuse
+    }, "wmma_scale");
 
     ctx.writeRegVec(dest, result_val);
     hr.handled = true;

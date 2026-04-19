@@ -363,6 +363,40 @@ config.fixtures = {
     # corpus producer to validate the lifted shape against).
     "global_prefetch_b8":
         r"@LIT_FIXTURE_GLOBAL_PREFETCH_B8_CO@",
+    # v_wmma_scale_f32_16x16x128_f8f6f4 (gfx1250 RDNA4 VOP3PX2 opcode
+    # 0x033, ScaledWMMA family) — single `.co` fixture shared by two
+    # complementary lit tests in the
+    # `wmma_scale_f32_16x16x128_f8f6f4/` directory:
+    #   * `wmma_scale_f32_16x16x128_f8f6f4.ll` — pins the cross-target
+    #     (gfx1250 -> gfx942) loud refusal contract. The handler in
+    #     `handle_valu_vop3p.cpp` refuses via
+    #     `RaiseFailure::unsupportedShape` because gfx942 has no
+    #     scaled-WMMA hardware AND the WMMA -> MFMA decomposition for
+    #     K=128 + per-matrix-fmt selection + scale-exponent
+    #     application is not modelled in `wmma_lowering.cpp` (only
+    #     K=32 / K=64 fp16/bf16/fp8/bf8/iu8 paths exist). The matching
+    #     LLVM intrinsic
+    #     `int_amdgcn_wmma_scale_f32_16x16x128_f8f6f4`
+    #     (IntrinsicsAMDGPU.td:4138) is itself `isGFX125xOnly`, so
+    #     even an intrinsic-emit on a non-gfx1250 target would fail
+    #     at codegen — the principled lift is the loud refusal.
+    #   * `wmma_scale_f32_16x16x128_f8f6f4_same_target.ll` — pins the
+    #     same-target (gfx1250 -> gfx1250) intrinsic-emit shape:
+    #     `i32 matrix_a_fmt` / `i32 matrix_b_fmt` named-immediate
+    #     decode (`MATRIX_FMT_BF8=1`, `MATRIX_FMT_FP8=0`), per-matrix
+    #     dword count `<16 x i32>` for the f8_f8 family (suffix
+    #     `_f8_f8_w32_*` of the MC pseudo per `WMMA_F8F6F4_Profiles`),
+    #     `<8 x float>` accumulator, scale_src0 / scale_src1 read as
+    #     runtime VGPR values via `getNamedOperandIdx`, and the
+    #     canonical `i1 false` reuse defaults. 18 MC pseudos
+    #     (9 mantissa pairs `{f4,f6,f8} A × {f4,f6,f8} B` ×
+    #     `_twoaddr`/`_threeaddr`) collapse onto the single SemOp;
+    #     the f8_f8 form covered here is what the failing kerneldex
+    #     B8F8 / F8B8 ID73f0 tensilelite GEMMs emit. Same-target
+    #     gating is `ISAProfile::hasTensorOps` (FeatureGFX1250Insts)
+    #     — matching the LLVM intrinsic's actual subtarget gating.
+    "wmma_scale_f32_16x16x128_f8f6f4":
+        r"@LIT_FIXTURE_WMMA_SCALE_F32_16X16X128_F8F6F4_CO@",
 }
 
 lit_config.load_config(
