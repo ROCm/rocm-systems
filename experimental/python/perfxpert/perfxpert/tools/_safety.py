@@ -158,15 +158,10 @@ def build_safe_env(extra: dict | None = None) -> dict:
     """Construct a minimal subprocess env containing only whitelisted keys.
 
     - API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) are NEVER forwarded.
-    - Env vars matching *_API_KEY, *_TOKEN, *_SECRET suffixes are always stripped.
     - Adds anything in `extra` last (caller responsibility for those values).
     """
     safe = {}
     for k, v in os.environ.items():
-        # Skip if matches dangerous suffix patterns
-        if k.endswith(('_API_KEY', '_TOKEN', '_SECRET')):
-            continue
-        # Otherwise apply whitelist
         if k in _ENV_WHITELIST or any(k.startswith(p) for p in _ENV_PREFIX_WHITELIST):
             safe[k] = v
     if extra:
