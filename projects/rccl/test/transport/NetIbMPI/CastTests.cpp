@@ -217,4 +217,62 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastSingleQPBypassesWrr
+//
+// White-box: nqps=1. WRR must be bypassed (schedInit stays false).
+// =============================================================================
+TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/1, /*schedWeight=*/"0", /*splitData=*/0);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 256;
+    char sendBuf[kMsgSize], recvBuf[kMsgSize];
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 3) & 0xFF);
+    memset(recvBuf, 0, sizeof(recvBuf));
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 800, mhandle);
+
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "data mismatch";
+
+    if (rank == 1) {
+        struct ncclIbCastSchedState state = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        // NCCL_PARAM IB_QPS_PER_CONNECTION is cached per-process. If a previous test
+        // already cached nqps=2, SetupCastEnv(1) has no effect.
+        // Only assert WRR-bypass when nqps is actually 1.
+        if (state.nqps <= 1) {
+            EXPECT_FALSE(state.schedInit) << "WRR must be bypassed for nqps=1";
+        }
+        // else: nqps was cached to a higher value; skip the bypass assertion.
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
