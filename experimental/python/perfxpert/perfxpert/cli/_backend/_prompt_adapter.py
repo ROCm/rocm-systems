@@ -274,8 +274,8 @@ def retry_mcp_handshake(
     attempts: int = 3,
     backoff_s: tuple[float, ...] = (2.0, 4.0, 8.0),
     budget_s: float | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> T:
     """Call `fn` up to `attempts` times with exponential backoff.
 
@@ -293,6 +293,12 @@ def retry_mcp_handshake(
     """
     if budget_s is None:
         budget_s = float(os.environ.get(MCP_RETRY_BUDGET_ENV, "6"))
+    # Resolve sleep + clock lazily so monkeypatching `time.sleep` /
+    # `time.monotonic` in tests takes effect per-call.
+    if sleep is None:
+        sleep = time.sleep
+    if clock is None:
+        clock = time.monotonic
 
     start = clock()
     last_exc: Exception | None = None

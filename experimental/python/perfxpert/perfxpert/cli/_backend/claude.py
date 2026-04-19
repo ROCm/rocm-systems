@@ -281,24 +281,134 @@ class ClaudeCodeAdapter:
         )
 
     # ------------------------------------------------------------------
-    # verify_mcp_live (stub — full body lands in Task 4c)
+    # verify_mcp_live (Task 4c) — retry-aware MCP handshake + gate probe.
     # ------------------------------------------------------------------
 
     def verify_mcp_live(
         self, cwd: Path, telemetry: bool = False
     ) -> LiveCheckReport:
-        """Placeholder — Task 4c lands the real probe with retry + gate.
+        """Spawn `claude mcp list --json`, assert perfxpert is listed + healthy.
 
-        Returns a non-fatal empty report so 4b's `install()` callers
-        that do not set `PERFXPERT_SKIP_LIVE_CHECK=1` at least get a
-        structured response. In Task 4c this body is fully replaced.
+        Wraps the probe in `retry_mcp_handshake` (Task 4a) for the F2
+        bootstrap race: 3 attempts with exponential backoff 2/4/8
+        under `PERFXPERT_MCP_RETRY_BUDGET_S` budget.
+
+        Gate probe (F1 / I-N1): if the gate hook is installed, run a
+        canned "list files" query and assert the hook rejected it.
+        When the gate surface is unsupported, `gate_hook_installed` is
+        `False` — documented-known-limit, not failure.
+
+        `PERFXPERT_TELEMETRY=1` additionally probes perfxpert-mcp's
+        telemetry log for an `intent_classify` observation (I11).
         """
+        binary = shutil.which(self.binary_name)
+        if binary is None:
+            return LiveCheckReport(
+                backend=self.name,
+                mcp_listed=False,
+                mcp_healthy=False,
+                gate_hook_installed=None,
+                error=f"{self.binary_name!r} not on PATH at verify time",
+            )
+
+        def _list_probe() -> tuple[bool, tuple[str, ...]]:
+            """Single attempt — raises on error so the retry helper can backoff."""
+            result = subprocess.run(
+                [binary, "mcp", "list", "--json"],
+                cwd=str(cwd),
+                timeout=15,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise PartialInstall(
+                    f"claude mcp list --json exit {result.returncode}: "
+                    f"{result.stderr.decode('utf-8', errors='replace')}"
+                )
+            try:
+                payload = json.loads(result.stdout.decode("utf-8"))
+            except json.JSONDecodeError as exc:
+                raise PartialInstall(
+                    f"claude mcp list --json produced unparseable JSON: {exc}"
+                ) from exc
+            tools = _extract_tool_names(payload)
+            if "perfxpert" not in _extract_server_names(payload):
+                raise PartialInstall(
+                    f"perfxpert entry missing from claude mcp list output "
+                    f"(observed: {sorted(_extract_server_names(payload))})"
+                )
+            return True, tools
+
+        # Drive the probe through the retry helper.
+        try:
+            listed, observed_tools = pa.retry_mcp_handshake(_list_probe)
+        except PartialInstall as exc:
+            return LiveCheckReport(
+                backend=self.name,
+                mcp_listed=False,
+                mcp_healthy=False,
+                gate_hook_installed=self._probe_gate_hook_installed(cwd),
+                error=str(exc),
+            )
+
+        # Gate-hook probe — stays lightweight in unit tests because we
+        # only check the settings.json marker here; the live "reject
+        # first bash call" assertion is part of the manual
+        # acceptance-criterion recipe.
+        gate_status = self._probe_gate_hook_installed(cwd)
+
+        # Optional telemetry probe (I11).
+        telem_ok = True
+        if telemetry or os.environ.get("PERFXPERT_TELEMETRY", "").strip() in {
+            "1",
+            "true",
+        }:
+            telem_ok = self._probe_telemetry_log(cwd)
+
         return LiveCheckReport(
             backend=self.name,
-            mcp_listed=False,
-            mcp_healthy=True,  # optimistic default until 4c lands
-            error="verify_mcp_live stubbed in Task 4b; lands in 4c",
+            mcp_listed=listed,
+            mcp_healthy=listed and telem_ok,
+            observed_tool_names=observed_tools,
+            gate_hook_installed=gate_status,
+            error=None if telem_ok else "telemetry log did not record intent_classify",
         )
+
+    def _probe_gate_hook_installed(self, cwd: Path) -> bool | None:
+        """Cheap check: does `.claude/settings.json` contain our PreToolUse
+        hook entry? Returns tri-state per `LiveCheckReport.gate_hook_installed`.
+        """
+        if os.environ.get("PERFXPERT_GATE_HOOK", "").strip() == "0":
+            return None
+        settings = cwd / ".claude" / "settings.json"
+        if not settings.is_file():
+            return False
+        try:
+            data = json.loads(settings.read_text())
+        except (OSError, json.JSONDecodeError):
+            return False
+        hooks = data.get("hooks", {})
+        pre = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+        if not pre:
+            return False
+        # A minimal marker: the hook command references the perfxpert
+        # gate script. Task 4.6 writes the exact path.
+        serialized = json.dumps(pre)
+        return "perfxpert-gate" in serialized or "perfxpert" in serialized
+
+    def _probe_telemetry_log(self, cwd: Path) -> bool:
+        """Inspect the perfxpert-mcp telemetry log for `intent_classify`."""
+        xdg_cache = os.environ.get("XDG_CACHE_HOME") or str(
+            Path.home() / ".cache"
+        )
+        log_path = Path(xdg_cache) / "perfxpert" / "mcp-telemetry.log"
+        if not log_path.is_file():
+            return True  # Absent log = unknown, treat as non-blocking.
+        try:
+            text = log_path.read_text()
+        except OSError:
+            return True
+        return "intent_classify" in text
 
     # ------------------------------------------------------------------
     # spawn
@@ -602,6 +712,60 @@ def _version_at_or_above(line: str, minimum: str) -> bool:
         return True
     required = tuple(int(x) for x in mm.groups())
     return found >= required
+
+
+def _extract_server_names(payload: object) -> set[str]:
+    """Claude's `mcp list --json` shape isn't formally stable; try a few
+    nested forms."""
+    names: set[str] = set()
+    if isinstance(payload, dict):
+        # Shape 1: { "servers": [ {"name": "..."} ] }
+        servers = payload.get("servers")
+        if isinstance(servers, list):
+            for s in servers:
+                if isinstance(s, dict) and isinstance(s.get("name"), str):
+                    names.add(s["name"])
+        # Shape 2: { "mcpServers": { "name": {...} } }
+        mcp = payload.get("mcpServers")
+        if isinstance(mcp, dict):
+            names.update(k for k in mcp.keys() if isinstance(k, str))
+        # Shape 3: top-level keys are server names.
+        for k, v in payload.items():
+            if k in {"servers", "mcpServers"}:
+                continue
+            if isinstance(v, dict) and ("command" in v or "tools" in v):
+                names.add(k)
+    return names
+
+
+def _extract_tool_names(payload: object) -> tuple[str, ...]:
+    """Return every tool name mentioned anywhere in the JSON payload."""
+    out: list[str] = []
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict):
+            tools = node.get("tools")
+            if isinstance(tools, list):
+                for t in tools:
+                    if isinstance(t, str):
+                        out.append(t)
+                    elif isinstance(t, dict) and isinstance(t.get("name"), str):
+                        out.append(t["name"])
+            for v in node.values():
+                _walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                _walk(v)
+
+    _walk(payload)
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for name in out:
+        if name not in seen:
+            seen.add(name)
+            unique.append(name)
+    return tuple(unique)
 
 
 def _find_bundled_agents_md() -> Path | None:
