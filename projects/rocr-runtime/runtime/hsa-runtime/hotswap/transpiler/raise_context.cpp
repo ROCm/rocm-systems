@@ -191,6 +191,25 @@ ParsedReg RaiseContext::parseReg(MCRegister reg, int mciOpIdx) const {
     pr.kind = ParsedReg::SRC_SCC;
     pr.width = 1;
     return pr;
+  // Aperture / runtime-defined source registers: SRC_SHARED_BASE /
+  // _LIMIT, SRC_PRIVATE_BASE / _LIMIT, SRC_FLAT_SCRATCH_BASE_LO /
+  // _HI, SRC_POPS_EXITING_WAVE_ID. Their values are set per-queue by
+  // the firmware and have no compile-time-knowable IR encoding, so
+  // we cannot lower them principledly. Classify as OTHER so parseReg
+  // does not crash; readOp32 / readOp64 will route OTHER through
+  // `recordReadFailure(unsupportedShape)` and the per-instruction
+  // dispatch loop in raiser.cpp will surface it as a clean
+  // unsupported-shape failure rather than a SIGABRT.
+  case AMDGPU::SRC_SHARED_BASE_LO:
+  case AMDGPU::SRC_SHARED_LIMIT_LO:
+  case AMDGPU::SRC_PRIVATE_BASE_LO:
+  case AMDGPU::SRC_PRIVATE_LIMIT_LO:
+  case AMDGPU::SRC_POPS_EXITING_WAVE_ID:
+  case AMDGPU::SRC_FLAT_SCRATCH_BASE_LO:
+  case AMDGPU::SRC_FLAT_SCRATCH_BASE_HI:
+    pr.kind = ParsedReg::OTHER;
+    pr.width = width;
+    return pr;
   default:
     break;
   }
@@ -287,6 +306,21 @@ Value *RaiseContext::readOp32(const DecodedInst &di, unsigned opIdx) {
       return ConstantInt::get(i32Ty, 0);
     if (pr.kind == ParsedReg::MODE)
       return ConstantInt::get(i32Ty, 0);
+    // OTHER is the parser's "I recognised the register but cannot
+    // model it" channel, used today for runtime-defined aperture
+    // registers (SRC_SHARED_BASE / SRC_FLAT_SCRATCH_BASE_LO etc.,
+    // see parseReg's switch). Surface a clean unsupported-shape
+    // failure on the dispatch loop and return undef so we don't
+    // crash mid-handler — the next instruction-boundary check in
+    // raiser.cpp will abort the kernel raise.
+    if (pr.kind == ParsedReg::OTHER) {
+      recordReadFailure(RaiseFailure::unsupportedShape(
+          di, "operand-read",
+          (Twine("readOp32 saw unmodeled register '") +
+           mc.regInfo->getName(di.getReg(opIdx)) + "' in " + di.mnemonic)
+              .str()));
+      return UndefValue::get(i32Ty);
+    }
     Value *v = regs.readReg32(B, pr);
     if (!v) {
       errs() << "transpiler: unreadable register '"
@@ -342,6 +376,14 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
       Value *exec = regs.loadExec(B);
       Value *zero = ConstantInt::get(exec->getType(), 0);
       return B.CreateZExt(B.CreateICmpEQ(exec, zero, "execz"), i64Ty);
+    }
+    if (pr.kind == ParsedReg::OTHER) {
+      recordReadFailure(RaiseFailure::unsupportedShape(
+          di, "operand-read",
+          (Twine("readOp64 saw unmodeled register '") +
+           mc.regInfo->getName(di.getReg(opIdx)) + "' in " + di.mnemonic)
+              .str()));
+      return UndefValue::get(i64Ty);
     }
     Value *v = regs.readReg64(B, pr);
     if (!v) {

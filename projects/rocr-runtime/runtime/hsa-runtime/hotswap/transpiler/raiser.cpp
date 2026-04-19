@@ -15,6 +15,7 @@
 #include "raise_context.hpp"
 #include "sem_op_attrs.hpp"
 #include "setpc_analysis.hpp"
+#include "user_sgpr_layout.hpp"
 #include "wave_projection.hpp"
 #include "wave_size_obstruction.hpp"
 #include "handlers.hpp"
@@ -427,7 +428,15 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // ==== Phase 5: Raise each instruction ====
 
   auto *f16Ty = Type::getHalfTy(C);
-  RaiseContext ctx{C, M, B, regs, projection, mc, isa, targetIsa, kernargs, F,
+  // Build the user-SGPR ABI for the source ISA. handle_smem and any other
+  // handler that needs to identify a specific source-ABI SGPR (e.g. the
+  // kernarg pointer) reads this through `ctx.userSgprLayout`. The layout
+  // is owned by this stack frame; the `RaiseContext` borrows a pointer
+  // valid for the duration of `raiseToIR`. `fromKernelMeta` aborts loudly
+  // if the kernel descriptor is missing — there is no fallback layout.
+  UserSgprLayout userSgprLayout = UserSgprLayout::fromKernelMeta(meta);
+  RaiseContext ctx{C, M, B, regs, projection, mc, isa, targetIsa, kernargs,
+                   &userSgprLayout, F,
                    i1Ty, i8Ty, i32Ty, i64Ty, f32Ty, f16Ty,
                    ptrGlobalTy, offsetToBB};
   ctx.setpcAnalysis = &setpcAnalysis;
@@ -537,6 +546,17 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     // when the same-target intrinsic-emit path lands.
     else if (flags & SIInstrFlags::TENSOR_CNT)
       hr = handleVIMAGE(ctx, di, op);
+
+    // Operand-read paths (`readOp32` / `readOp64`) cannot bail mid-
+    // handler, so they record any unsupported-register failures into
+    // `ctx.pendingFailure`. Promote that to the structured failure
+    // *before* the `hr.handled` check — a handler that "succeeded"
+    // by returning undef from a read is still an unraised kernel.
+    if (ctx.pendingFailure.hasFailed()) {
+      result.failure = std::move(ctx.pendingFailure);
+      ctx.pendingFailure = RaiseFailure{};
+      return result;
+    }
 
     if (hr.handled) {
       if (di.defsSCC && !hr.sccHandled && hr.sccResult) {

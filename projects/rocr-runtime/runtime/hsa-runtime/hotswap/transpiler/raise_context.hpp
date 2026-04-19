@@ -9,6 +9,7 @@
 #include "raise_failure.hpp"
 #include "reg_file.hpp"
 #include "setpc_analysis.hpp"
+#include "user_sgpr_layout.hpp"
 #include "wave_projection.hpp"
 
 #include "llvm/ADT/STLFunctionalExtras.h"
@@ -31,6 +32,14 @@ struct RaiseContext {
   const ISAProfile &isa;       // source ISA (for disassembly / instruction semantics)
   ISAProfile targetIsa;        // compilation target ISA (for code generation decisions)
   KernargLayout &kernargs;
+  // Source-ISA user-SGPR ABI derived from the kernel descriptor. Owned by
+  // the raiser; threaded into every handler that needs to identify a
+  // specific SGPR by its source-ABI role (e.g. handle_smem.cpp must know
+  // which SGPR holds kernarg_segment_ptr to recognise s_load_b* against
+  // the kernarg segment). Always non-null in production; the raiser
+  // populates it from `UserSgprLayout::fromKernelMeta` before constructing
+  // the context.
+  const UserSgprLayout *userSgprLayout = nullptr;
   llvm::Function *kernel;
 
   llvm::Type *i1Ty;
@@ -224,6 +233,26 @@ struct RaiseContext {
   // `resetLaneActiveCache` / `emitLaneIdx`.
   llvm::Value *cachedLaneIdx = nullptr;
   llvm::BasicBlock *cachedLaneIdxBB = nullptr;
+
+  // Pending failure raised during operand-read dispatch (e.g.
+  // `readOp32` / `readOp64` encountering an unmodeled aperture
+  // register such as SRC_SHARED_BASE / SRC_FLAT_SCRATCH_BASE_LO).
+  // Read paths cannot bail mid-handler — they must return some
+  // Value* — so they record the failure here and the per-instruction
+  // dispatch loop in `raiser.cpp` checks `pendingFailure` after each
+  // handler returns and aborts the kernel raise. Set via
+  // `recordReadFailure`; cleared per instruction by the dispatch
+  // loop after consumption (or before the next instruction starts).
+  RaiseFailure pendingFailure;
+
+  // Record an operand-read failure. Only the first failure per
+  // instruction is captured; subsequent reads of the same kernel
+  // simply return undef and let the dispatch loop bail on the
+  // first one we observed.
+  void recordReadFailure(RaiseFailure f) {
+    if (!pendingFailure.hasFailed())
+      pendingFailure = std::move(f);
+  }
 };
 
 // Return value from every format handler.
