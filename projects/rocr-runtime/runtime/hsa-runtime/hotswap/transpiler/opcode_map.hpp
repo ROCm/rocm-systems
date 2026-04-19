@@ -19,12 +19,22 @@ namespace transpiler {
 // map-build time and looked up by MC opcode at dispatch time.
 struct VCmpMeta {
   // LLVM predicate to feed to `IRBuilder::CreateICmp` / `CreateFCmp`.
+  // Ignored when `isClass == true` (no predicate; the comparison is the
+  // floating-point classification mask in src1).
   llvm::CmpInst::Predicate pred;
   // Element width in bits: 16, 32, or 64.
   uint8_t bits;
   // False → integer compare (ICmp; `pred` is `ICMP_*`).
   // True  → float compare   (FCmp; `pred` is `FCMP_*`).
   bool isFloat;
+  // True for the V_CMP_CLASS_F* / V_CMPX_CLASS_F* family. These are
+  // NOT predicate compares — src0 is a float operand and src1 is an
+  // i32 mask of FP classes; the result lane bit is set iff src0
+  // matches any class enabled in the mask. Lifts to
+  // `llvm.amdgcn.class.f<bits>(src0, src1)` rather than CreateFCmp;
+  // `pred` is unused on class entries. See V_CMP_CLASS in the
+  // gfx9+ AMDGPU ISA manual and the dispatch in handle_valu_vcmp.cpp.
+  bool isClass = false;
 };
 
 // Maps raw LLVM MC opcodes emitted by the AMDGPU disassembler to

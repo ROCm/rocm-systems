@@ -397,6 +397,38 @@ config.fixtures = {
     #     — matching the LLVM intrinsic's actual subtarget gating.
     "wmma_scale_f32_16x16x128_f8f6f4":
         r"@LIT_FIXTURE_WMMA_SCALE_F32_16X16X128_F8F6F4_CO@",
+    # v_cmp_class_f32_e64 (VOPC, floating-point IEEE class predicate)
+    # — closes the parser-level gap in `parseVCmpPseudoName` in
+    # transpiler/opcode_map.cpp: `V_CMP_CLASS_F<bits>` MC pseudos
+    # were leaving the map as `SemOp::Unknown` because the pseudo
+    # name parser only recognised the predicate-compare token grammar
+    # (EQ/NE/LT/.../O), not the special `CLASS` token. The handler
+    # in `handle_valu_vcmp.cpp` already had the `if (m->isClass)`
+    # branch wired up to emit `llvm.amdgcn.class.f<bits>`; the parser
+    # fix flips on `VCmpMeta::isClass` for the matched MC pseudo and
+    # makes the existing handler-side dispatch reachable.
+    #
+    # Fixture pins both sides of the contract:
+    #   * `llvm.amdgcn.class.f32(float, i32 <mask>)` — the special-case
+    #     intrinsic-emit path (NOT a CreateFCmp); the mask immediate
+    #     (here `0x200` = +inf singleton class) threads through
+    #     verbatim.
+    #   * `llvm.amdgcn.ballot.i64` + `trunc i64 -> i32` — the wave-mask
+    #     write-back tail that the V_CMP class branch shares with the
+    #     V_CMP/V_CMPX predicate-compare branch (same `vcmp_ballot` /
+    #     `vcmp_ballot_trunc` identifiers as the v_cmpx_ballot
+    #     fixture; this is the cross-wave wave32 -> wave64 routing
+    #     contract).
+    #
+    # Sibling V_CMP_CLASS_F16 / V_CMP_CLASS_F64 share the same parser
+    # path (same `_e64` -> `CLASS_F<bits>` token grammar) and the same
+    # handler dispatch (the `m->bits == 16/32/64` switch in the
+    # `if (m->isClass)` block); they are covered transitively. The
+    # V_CMPX_CLASS_F* compare-and-EXEC siblings exercise the same
+    # parser branch and route through the V_CMPX EXEC-AND tail
+    # already pinned by v_cmpx_ballot.
+    "v_cmp_class_f32":
+        r"@LIT_FIXTURE_V_CMP_CLASS_F32_CO@",
 }
 
 lit_config.load_config(

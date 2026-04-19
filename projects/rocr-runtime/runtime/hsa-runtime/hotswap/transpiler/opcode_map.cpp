@@ -1296,8 +1296,9 @@ unsigned canonicalize(unsigned mc,
 
 // Parse a canonical vector-compare pseudo name into (predicate, bits, kind).
 // Accepted shape: `V_CMP_<PRED>_<TYPE><BITS>_e64` where
-//   PRED  ∈ {EQ, NE, GT, GE, LT, LE, LG, NEQ, NLT, NLE, NGT, NGE, NLG, U, O}
-//   TYPE  ∈ {U, I, F}
+//   PRED  ∈ {EQ, NE, GT, GE, LT, LE, LG, NEQ, NLT, NLE, NGT, NGE, NLG, U, O,
+//            CLASS}
+//   TYPE  ∈ {U, I, F} (CLASS only ever appears with TYPE=F)
 //   BITS  ∈ {16, 32, 64}
 // and an optional `V_CMPX_` prefix plays the role of `V_CMP_`. Returns
 // `std::nullopt` for anything else; caller is responsible for only passing
@@ -1308,6 +1309,17 @@ unsigned canonicalize(unsigned mc,
 // element width. Rather than hand-list 100 opcode→metadata pairs we parse
 // the pseudo name once at init time; the same token grammar is already
 // hard-coded in LLVM's TableGen for these instructions.
+//
+// CLASS is special: `V_CMP_CLASS_F<bits>` is *not* a predicate compare. src1
+// is an i32 mask of FP classes (signaling NaN, quiet NaN, ±inf, ±normal,
+// ±subnormal, ±0), and the result lane bit is set iff src0's IEEE class
+// matches any enabled bit in the mask. We collapse it onto the same
+// `V_CMP` / `V_CMPX` SemOps and signal the special-case lift via
+// `VCmpMeta::isClass`; the dispatch in handle_valu_vcmp.cpp branches on
+// that flag and emits `llvm.amdgcn.class.f<bits>` instead of an FCmp.
+// This keeps the parser surface narrow (one extra grammar branch, no new
+// SemOps) and matches the wave-mask write-back path used by the other
+// V_CMP forms.
 std::optional<VCmpMeta> parseVCmpPseudoName(llvm::StringRef name) {
   llvm::StringRef rest = name;
   if (!rest.consume_front("V_CMPX_") && !rest.consume_front("V_CMP_"))
@@ -1328,6 +1340,18 @@ std::optional<VCmpMeta> parseVCmpPseudoName(llvm::StringRef name) {
 
   using llvm::CmpInst;
   VCmpMeta m{CmpInst::BAD_ICMP_PREDICATE, static_cast<uint8_t>(bits), false};
+
+  // V_CMP_CLASS_F<bits> / V_CMPX_CLASS_F<bits>: floating-point classification
+  // mask, not a predicate compare. The handler takes the `isClass` branch and
+  // ignores `pred`; we leave `pred` as BAD_ICMP_PREDICATE so any accidental
+  // FCmp/ICmp use would assert loudly rather than silently miscompile.
+  if (predTok == "CLASS") {
+    if (typeCh != 'F')
+      return std::nullopt;
+    m.isFloat = true;
+    m.isClass = true;
+    return m;
+  }
 
   if (typeCh == 'F') {
     m.isFloat = true;

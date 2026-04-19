@@ -6,7 +6,10 @@
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -54,6 +57,44 @@ HandlerResult handleVALU_Vcmp(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
+  // ---- v_cmp_class_f<bits> / v_cmpx_class_f<bits> ----
+  // Special-cased before the generic predicate-compare dispatch
+  // because the second operand is an i32 mask of FP classes, NOT a
+  // value to compare against. Lifts to `llvm.amdgcn.class.f<bits>`,
+  // which yields one i1 per active lane (the wave-mask plumbing is
+  // shared with the predicate-compare path below).
+  Value *cmp = nullptr;
+  if (m->isClass) {
+    Type *fTy = nullptr;
+    Value *src0 = nullptr;
+    if (m->bits == 16) {
+      auto *i16Ty = Type::getInt16Ty(ctx.C);
+      fTy = Type::getHalfTy(ctx.C);
+      Value *raw0 = op.srcF(0);
+      if (raw0->getType() != fTy) {
+        if (raw0->getType() != i16Ty)
+          raw0 = ctx.B.CreateTrunc(raw0, i16Ty, "vclassf16_lo");
+        raw0 = ctx.B.CreateBitCast(raw0, fTy, "vclassf16");
+      }
+      src0 = raw0;
+    } else if (m->bits == 32) {
+      fTy = ctx.f32Ty;
+      Value *raw0 = op.srcF(0);
+      if (raw0->getType() != fTy)
+        raw0 = ctx.B.CreateBitCast(raw0, fTy, "vclassf32");
+      src0 = raw0;
+    } else {
+      fTy = Type::getDoubleTy(ctx.C);
+      src0 = ctx.B.CreateBitCast(op.src64(0), fTy, "vclassf64");
+    }
+    Value *mask = op.src(1);
+    Function *classFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_class, {fTy});
+    cmp = ctx.B.CreateCall(classFn, {src0, mask}, "vclass");
+    // fall through to the wave-mask write-back / EXEC-AND logic
+    // below by reusing the same `cmp`-driven tail.
+  }
+
   // Fetch operands at the correct width. For 64-bit integer compares we
   // read as i64; for 64-bit float compares we read as i64 and bitcast.
   // For 32-bit float compares we read as i32 and bitcast to f32. For
@@ -62,7 +103,9 @@ HandlerResult handleVALU_Vcmp(RaiseContext &ctx, const DecodedInst &di,
   // (e.g. an inline integer immediate -1 = 0xFFFFFFFF for `v_cmpx_lt_
   // f16 vcc, -1, vN`) and CreateFCmp asserts on non-FP operand types.
   Value *s0 = nullptr, *s1 = nullptr;
-  if (m->isFloat) {
+  if (m->isClass) {
+    // Already lifted above; skip the predicate-operand fetch.
+  } else if (m->isFloat) {
     if (m->bits == 64) {
       auto *f64Ty = Type::getDoubleTy(ctx.C);
       s0 = ctx.B.CreateBitCast(op.src64(0), f64Ty);
@@ -99,15 +142,16 @@ HandlerResult handleVALU_Vcmp(RaiseContext &ctx, const DecodedInst &di,
       s1 = op.src(1);
     }
   }
-  if (!s0 || !s1) {
+  if (!m->isClass && (!s0 || !s1)) {
     errs() << "transpiler: " << mn << ": missing operand\n";
     hr.failure = RaiseFailure::unsupportedShape(
         di, "VALU", "V_CMP/V_CMPX missing operand");
     return hr;
   }
 
-  Value *cmp = m->isFloat ? ctx.B.CreateFCmp(m->pred, s0, s1, "vcmpf")
-                          : ctx.B.CreateICmp(m->pred, s0, s1, "vcmp");
+  if (!m->isClass)
+    cmp = m->isFloat ? ctx.B.CreateFCmp(m->pred, s0, s1, "vcmpf")
+                     : ctx.B.CreateICmp(m->pred, s0, s1, "vcmp");
 
   if (sop == SemOp::V_CMPX) {
     // Compare-and-exec: result ANDs into EXEC.
