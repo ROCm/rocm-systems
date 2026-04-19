@@ -255,9 +255,6 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
         ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
-        // NCCL_PARAM IB_QPS_PER_CONNECTION is cached per-process. If a previous test
-        // already cached nqps=2, SetupCastEnv(1) has no effect.
-        // Only assert WRR-bypass when nqps is actually 1.
         if (state.nqps <= 1) {
             EXPECT_FALSE(state.schedInit) << "WRR must be bypassed for nqps=1";
         }
@@ -493,6 +490,131 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
             EXPECT_EQ(state.activeQpTokens[i], 0) << "QP " << i << " activeToken must be 0";
         // Cursor wrapped back to 0 after a full round-robin.
         EXPECT_EQ(state.qpIndex, 0);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// =============================================================================
+// Test: CastFourQPsMonotonicOrder
+//
+// White-box: request 4 QPs; actual nqps determined at runtime (NCCL_PARAM cache).
+// Assign tokens as a strictly-decreasing sequence summing to 100 using
+// triangular proportions: token[i] = round(100 * (nqps-i) / weightSum),
+// where weightSum = nqps*(nqps+1)/2; the last token absorbs rounding residual.
+// Run exactly 100 sends (= totTokens). Verify:
+//   - initQpTokens are strictly decreasing
+//   - activeTotTokens == 0 after exactly totTokens sends (lazy refill not yet triggered)
+//   - activeQpTokens[i] == 0 for all i (every token consumed)
+// =============================================================================
+TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/4, /*schedWeight=*/"0", /*splitData=*/0);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr int    kNMsgs  = 100; // = totTokens; both ranks know this
+    constexpr size_t kMsgSz  = 32;
+    constexpr size_t kBufSz  = (kNMsgs + 1) * kMsgSz; // +1 for warm-up
+    constexpr int    kBaseTag = 1500;
+
+    std::vector<char> sendBuf(kBufSz, 0);
+    std::vector<char> recvBuf(kBufSz, 0);
+    for (size_t i = 0; i < kBufSz; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Phase 0: warm-up send to learn the real nqps (NCCL_PARAM caches it; may be
+    // less than 4 on this hardware). Also consumes the stagedSchedParms epoch so
+    // SetTokens is the only thing that matters for subsequent sends.
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 998, mhandle);
+
+    int actualNqps = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState probe = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), 0);
+        actualNqps = probe.nqps;
+    }
+
+    // Build a strictly-decreasing token sequence summing to kNMsgs.
+    // token[i] = kNMsgs * (nqps - i) / weightSum, residual in last slot.
+    // For nqps=2: weights {2,1}/3 → tokens {67,33}; for nqps=4: {40,30,20,10}.
+    if (rank == 1) {
+        ASSERT_GT(actualNqps, 0);
+        int weightSum = actualNqps * (actualNqps + 1) / 2;
+        std::vector<int> tokens(actualNqps);
+        int allocated = 0;
+        for (int i = 0; i < actualNqps - 1; i++) {
+            tokens[i] = kNMsgs * (actualNqps - i) / weightSum;
+            allocated += tokens[i];
+        }
+        tokens[actualNqps - 1] = kNMsgs - allocated; // absorb rounding residual
+
+        // Guard: must be strictly decreasing (required for test validity).
+        bool isDecreasing = true;
+        for (int i = 0; i < actualNqps - 1; i++)
+            if (tokens[i] <= tokens[i + 1]) { isDecreasing = false; break; }
+        ASSERT_TRUE(isDecreasing)
+            << "Generated token sequence is not strictly decreasing for nqps=" << actualNqps
+            << "; increase kNMsgs or reduce nqps";
+
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), 0);
+    }
+
+    // Verify initTokens immediately after SetTokens, before any send can trigger the
+    // periodic IbCastQpSchedUpdateTx timer that would overwrite them with RTT weights.
+    if (rank == 1) {
+        struct ncclIbCastSchedState probe = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), 0);
+
+        ASSERT_TRUE(probe.schedInit);
+        // initTokens must be strictly decreasing right after we set them.
+        for (int i = 0; i < probe.nqps - 1; i++)
+            EXPECT_GT(probe.initQpTokens[i], probe.initQpTokens[i + 1])
+                << "initTokens not strictly decreasing at index " << i;
+    }
+
+    // Phase 1: exactly kNMsgs sends = exactly one full WRR round.
+    // The periodic timer may fire during these sends and reset initTokens to RTT-based
+    // weights, but activeTokens are only reset at the START of the NEXT send after
+    // exhaustion. So after exactly kNMsgs sends, activeTotTokens == 0 regardless.
+    // Post all kNMsgs concurrently (offset by 1 slot to skip the warm-up message).
+    CastDoBatchSendRecv(rank, sendComm, recvComm,
+                        sendBuf.data() + kMsgSz, recvBuf.data() + kMsgSz,
+                        kMsgSz, kNMsgs, kBaseTag, mhandle);
+
+    if (rank == 1) {
+        struct ncclIbCastSchedState state = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+
+        ASSERT_TRUE(state.schedInit);
+        // After exactly kNMsgs (= original totTokens) sends, all active tokens consumed.
+        // Refill is lazy (happens at start of next send), so activeTotTokens == 0 here.
+        EXPECT_EQ(state.activeTotTokens, 0);
+        for (int i = 0; i < state.nqps; i++)
+            EXPECT_EQ(state.activeQpTokens[i], 0)
+                << "QP " << i << " activeToken must be 0 after full round";
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
