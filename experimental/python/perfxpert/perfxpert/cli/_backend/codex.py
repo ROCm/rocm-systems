@@ -476,10 +476,19 @@ class CodexAdapter:
         # Path 1: Auto-trust via env (CI pipelines).
         if os.environ.get(AUTO_TRUST_ENV, "").strip() == "1":
             self._mark_trusted(cwd)
-            self._log_step(
-                quiet,
-                f"[trust] {AUTO_TRUST_ENV}=1 — marked {cwd} as trusted "
-                "in ~/.codex/config.toml",
+            # Security decision: auto-trust bypasses the normal
+            # consent/trust prompt. The warning MUST print regardless
+            # of --quiet so the user always sees that trust was granted
+            # automatically (finding #5). Logged as a fresh \n-prefixed
+            # line to stand out on stderr.
+            sys.stderr.write(
+                f"\n[WARN] codex: {AUTO_TRUST_ENV}=1 — marked {cwd} as "
+                "trusted in ~/.codex/config.toml without prompting. "
+                "This bypasses Codex's trust gate.\n"
+            )
+            sys.stderr.flush()
+            _LOG.info(
+                "%s=1 auto-trust granted for %s", AUTO_TRUST_ENV, cwd
             )
             return scope
 
