@@ -950,6 +950,35 @@ def test_structured_remove_on_malformed_toml_raises_config_clobber(
     assert "TOMLDecodeError" not in msg
 
 
+# ---------------------------------------------------------------------------
+# Finding #5: PERFXPERT_AUTO_TRUST warning bypasses --quiet.
+# ---------------------------------------------------------------------------
+
+
+def test_auto_trust_warning_prints_even_with_quiet(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Auto-trust is a security decision; the warning must print to
+    stderr unconditionally — NOT be suppressed by `--quiet`."""
+    monkeypatch.setenv(AUTO_TRUST_ENV, "1")
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(),
+    )
+
+    CodexAdapter().install(project_cwd, scope="project", quiet=True)
+
+    err = capsys.readouterr().err
+    # Warning is present and explicit about the bypass.
+    assert AUTO_TRUST_ENV in err
+    assert "trust" in err.lower()
+    assert "[WARN]" in err or "bypass" in err.lower()
+
+
 def test_uninstall_on_malformed_project_config_records_drift_without_traceback(
     project_cwd: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
