@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # apply-opencode-patches.sh — apply .patches/*.patch to the opencode submodule.
 #
-# Part of Phase 8 PR 2e. See .patches/README.md for the patch catalog and
+# See .patches/README.md for the patch catalog and
 # docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md for
 # the motivation behind each patch.
 #

@@ -41,7 +41,7 @@ once (`00001-...` etc.). Do **not** mix 4-digit and 5-digit
 prefixes — mixing breaks the lexicographic-equals-numeric invariant
 (`10000-foo.patch` would sort before `9999-foo.patch`).
 
-### AMD Rebrand (Phase 8 PR 2d)
+### AMD Rebrand
 
 | # | File | What it does |
 |---|------|--------------|
@@ -51,7 +51,7 @@ prefixes — mixing breaks the lexicographic-equals-numeric invariant
 | 0004 | `0004-color-palette-amd.patch` | `cli/ui.ts` — shifts `TEXT_HIGHLIGHT` from cyan (`\x1b[96m`) to 24-bit truecolor `\x1b[38;2;237;28;36m` for the exact AMD red `#ED1C24`; WCAG AA contrast preserved on light+dark terminal bg. Modern terminals render the brand colour exactly; legacy xterm-256 terminals approximate to index 160. |
 | 0005 | `0005-footer-attribution.patch` | `cli/ui.ts` — exports `PERFXPERT_ATTRIBUTION = "AMD ROCm PerfXpert · opencode v1.4.11 (MIT)"` for the status-bar renderer. Applies after 0004 in the same file. |
 
-### User-Issue Patches (Phase 8 PR 2a, 2c)
+### User-Issue Patches
 
 | # | File | What it does |
 |---|------|--------------|
@@ -64,7 +64,7 @@ prefixes — mixing breaks the lexicographic-equals-numeric invariant
 | 0016 | `0016-prompt-beast-perfxpert.patch` | `session/prompt/beast.txt` — same preamble for GPT-4/o1/o3 models (routed via `PROMPT_BEAST`). |
 | 0017 | `0017-prompt-trinity-perfxpert.patch` | `session/prompt/trinity.txt` — same preamble for Trinity models (routed via `PROMPT_TRINITY`). |
 
-### Cycle-4 Tool-Gate Patch (Phase 8 cycle-4 B1)
+### Cycle-4 Tool-Gate Patch (cycle-4 B1)
 
 | # | File | What it does |
 |---|------|--------------|
@@ -102,7 +102,7 @@ identical PerfXpert framing — no single-model bias. Auxiliary prompts
 `copilot-gpt-5.txt`) are not patched: the first three are tactical inserts, and
 the last two are not imported by opencode v1.4.11.
 
-### Deep Rebrand (Phase 8 follow-up)
+### Deep Rebrand (follow-up)
 
 Existing patches 0001/0003/0004/0005 only rebrand banner, tips, color, and
 footer. Patches 0030–0040 extend the rebrand to every remaining user-visible
@@ -144,7 +144,7 @@ bash scripts/apply-opencode-patches.sh
 The script iterates `.patches/*.patch` in order, `git apply --check`s
 each, then applies it. Any failure short-circuits.
 
-## Build-hook status (Phase 8 note)
+## Build-hook status
 
 Ideally the wheel build runs `apply-opencode-patches.sh` automatically
 before bundling the opencode binary. That hook requires `bun install`

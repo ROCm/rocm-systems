@@ -71,7 +71,7 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
     # (per blocker report — prompt-layer hints alone had no observable
     # runtime effect; LLMs respect name-prefixed directives more reliably).
     # See docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md
-    # and the follow-up plan for cycle-4 (phase5-parity-redteam).
+    # and the follow-up cycle-4 plan for the tool-gate rationale.
     priority_hint = (
         "[MUST BE CALLED FIRST FOR GPU-PERF QUERIES] "
         "Call BEFORE file-search tools (read/glob/grep) for any GPU-performance, "

@@ -1,9 +1,9 @@
 """Test that integration docs required by the multi-backend plan exist.
 
-Task 0 of the multi-backend plan (B4): port `docs/integration/mcp-server.md`
-from phase 9 into phase 8 so later tasks can cross-reference it without
-dangling links. This test guards that port: if the file goes missing or
-someone accidentally deletes the integration/ subtree, CI fails loudly.
+Task 0 of the multi-backend plan (B4): ensure `docs/integration/mcp-server.md`
+is present so later tasks can cross-reference it without dangling links.
+This test guards that port: if the file goes missing or someone
+accidentally deletes the integration/ subtree, CI fails loudly.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ _APP_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_mcp_server_doc_exists() -> None:
-    """`docs/integration/mcp-server.md` must exist (ported from phase 9)."""
+    """`docs/integration/mcp-server.md` must exist (docs-integration port)."""
     target = _APP_ROOT / "docs" / "integration" / "mcp-server.md"
     assert target.is_file(), f"Missing {target}. Task 0 of multi-backend plan port failed."
 
