@@ -261,7 +261,18 @@ enum class SemOp : uint16_t {
   V_ADD_I32, V_SUB_I32,
 
   // -- 64-bit vector ops --
-  V_LSHLREV_B64, V_LSHL_ADD_U64, V_ADD_NC_U64,
+  V_LSHLREV_B64,
+  // gfx8+ VOP3 64-bit shifts. Same operand shape as V_LSHLREV_B64
+  // (i64 dst, i32 shamt, i64 src1, reversed-operand convention:
+  // `dst = src1 >> shamt`). Lower to LLVM `lshr` (logical right) and
+  // `ashr` (arithmetic right) on the i64 src1, with the i32 shamt
+  // zext'd to i64 — the AMDGPU hardware masks the count to 6 bits so
+  // the LLVM behaviour matches as long as we feed a valid i32 (LLVM
+  // shifts >= bitwidth are poison, the hardware masks; we don't paper
+  // over the difference because corpus shifts always carry a finite
+  // immediate or a producer that already masks).
+  V_LSHRREV_B64, V_ASHRREV_I64,
+  V_LSHL_ADD_U64, V_ADD_NC_U64,
   // gfx1250 VOP2 64-bit unsigned multiply (low 64 bits of s0 * s1).
   V_MUL_U64,
   V_MAD_U64_U32, V_MAD_CO_U64_U32,

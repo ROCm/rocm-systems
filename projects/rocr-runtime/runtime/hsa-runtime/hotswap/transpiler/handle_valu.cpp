@@ -1099,6 +1099,26 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // gfx8+ V_LSHRREV_B64 / V_ASHRREV_I64 — same operand shape as
+  // V_LSHLREV_B64: `dst = src1 >> src0`. Logical right shift fills with
+  // zero (lshr) and arithmetic right shift fills with the sign bit (ashr).
+  // The hardware masks the shift count to 6 bits; LLVM treats shifts >=
+  // bitwidth as poison, so we don't paper over the difference. Corpus
+  // shifts always carry a finite immediate or a producer that already
+  // masks (the `_upcast_from_mxfp` blocker is `>> 16` over an i64 that
+  // packs two i32 lanes — well-defined for both ISA and LLVM).
+  if (sop == SemOp::V_LSHRREV_B64 || sop == SemOp::V_ASHRREV_I64) {
+    Value *shamt = op.src(0);
+    Value *src = op.src64(1);
+    if (src->getType() != ctx.i64Ty) src = ctx.B.CreateBitOrPointerCast(src, ctx.i64Ty);
+    Value *shamtExt = ctx.B.CreateZExt(shamt, ctx.i64Ty);
+    Value *res = (sop == SemOp::V_LSHRREV_B64)
+                     ? ctx.B.CreateLShr(src, shamtExt, "lshr")
+                     : ctx.B.CreateAShr(src, shamtExt, "ashr");
+    ctx.writeReg64(op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_LSHL_ADD_U64) {
     Value *src0 = op.src64(0);
     Value *shamt = op.src(1);

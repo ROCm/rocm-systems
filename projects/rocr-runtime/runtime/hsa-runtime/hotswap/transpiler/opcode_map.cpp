@@ -474,6 +474,15 @@ static const Entry kCanonTable[] = {
     // 64-bit vector
     // ---------------------------------------------------------------------
     E(V_LSHLREV_B64_e64, V_LSHLREV_B64),
+    // V_LSHRREV_B64 / V_ASHRREV_I64 — gfx8+ 64-bit logical / arithmetic
+    // right shift with reversed operands (`dst = src1 >> shamt`). Only
+    // the plain `_e64` pseudo exists; per-ISA realtriples (gfx10 / gfx11
+    // / gfx1250) all collapse back to it through the disassembler's
+    // pseudo-alias step (TableGen treats the gfx1250 form as a `_e64`
+    // realtriple, not a `_t16_e64` half-precision variant — see
+    // VOP3Instructions.td:2341 vs the b16 family at 2336-2340).
+    E(V_LSHRREV_B64_e64, V_LSHRREV_B64),
+    E(V_ASHRREV_I64_e64, V_ASHRREV_I64),
     E(V_LSHL_ADD_U64_e64, V_LSHL_ADD_U64),
     // LLVM's 64-bit no-carry add pseudo is simply `V_ADD_U64_e64`.
     E(V_ADD_U64_e64, V_ADD_NC_U64),
