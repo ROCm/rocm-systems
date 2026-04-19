@@ -608,8 +608,29 @@ static const Entry kCanonTable[] = {
     MUBUF4(BUFFER_LOAD_SBYTE, BUFFER_LOAD_SBYTE),
     MUBUF4(BUFFER_LOAD_USHORT, BUFFER_LOAD_USHORT),
     MUBUF4(BUFFER_LOAD_SSHORT, BUFFER_LOAD_SSHORT),
+    // D16 partial-write loads: the 16-bit (or 8-bit, sign/zero-extended
+    // to i16) datum lands in the lo half (`_D16`) or hi half
+    // (`_D16_HI`) of the destination VGPR, preserving the other 16
+    // bits (BUFInstructions.td:1155-1177, predicate
+    // `D16PreservesUnusedBits`). gfx10- uses the legacy MUBUF
+    // encodings; gfx11+/gfx1250 fork to VBUFFER (BUFInstructions.td
+    // 2610-2620 maps `_d16_*` mnemonics to the VBUFFER pseudos). Both
+    // encodings dispatch to the same partial-write handler in
+    // handle_mubuf.cpp via the SemOp; the `D16PreservesUnusedBits`
+    // semantics is enforced there by reading the prior dst and
+    // merging.
     MUBUF4(BUFFER_LOAD_SHORT_D16, BUFFER_LOAD_SHORT_D16),
+    VBUF4(BUFFER_LOAD_SHORT_D16, BUFFER_LOAD_SHORT_D16),
     MUBUF4(BUFFER_LOAD_SHORT_D16_HI, BUFFER_LOAD_SHORT_D16_HI),
+    VBUF4(BUFFER_LOAD_SHORT_D16_HI, BUFFER_LOAD_SHORT_D16_HI),
+    MUBUF4(BUFFER_LOAD_UBYTE_D16, BUFFER_LOAD_UBYTE_D16),
+    VBUF4(BUFFER_LOAD_UBYTE_D16, BUFFER_LOAD_UBYTE_D16),
+    MUBUF4(BUFFER_LOAD_UBYTE_D16_HI, BUFFER_LOAD_UBYTE_D16_HI),
+    VBUF4(BUFFER_LOAD_UBYTE_D16_HI, BUFFER_LOAD_UBYTE_D16_HI),
+    MUBUF4(BUFFER_LOAD_SBYTE_D16, BUFFER_LOAD_SBYTE_D16),
+    VBUF4(BUFFER_LOAD_SBYTE_D16, BUFFER_LOAD_SBYTE_D16),
+    MUBUF4(BUFFER_LOAD_SBYTE_D16_HI, BUFFER_LOAD_SBYTE_D16_HI),
+    VBUF4(BUFFER_LOAD_SBYTE_D16_HI, BUFFER_LOAD_SBYTE_D16_HI),
 
     // ---------------------------------------------------------------------
     // MUBUF stores

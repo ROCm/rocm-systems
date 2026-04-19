@@ -351,6 +351,14 @@ enum class SemOp : uint16_t {
   BUFFER_LOAD_DWORD, BUFFER_LOAD_DWORDX2, BUFFER_LOAD_DWORDX3, BUFFER_LOAD_DWORDX4,
   BUFFER_LOAD_UBYTE, BUFFER_LOAD_SBYTE, BUFFER_LOAD_USHORT, BUFFER_LOAD_SSHORT,
   BUFFER_LOAD_SHORT_D16, BUFFER_LOAD_SHORT_D16_HI,
+  // D16 byte variants — gfx9+ partial-write loads. The 8-bit datum is
+  // sign- or zero-extended to i16 and merged into the lo (`_D16`) or
+  // hi (`_D16_HI`) half of the destination VGPR; the other 16 bits
+  // are preserved (BUFInstructions.td:1155-1169, predicate
+  // `D16PreservesUnusedBits`). Mnemonic on gfx11+/gfx1250 is
+  // `buffer_load_d16_u8` / `_d16_i8` / `_d16_hi_u8` / `_d16_hi_i8`.
+  BUFFER_LOAD_UBYTE_D16, BUFFER_LOAD_UBYTE_D16_HI,
+  BUFFER_LOAD_SBYTE_D16, BUFFER_LOAD_SBYTE_D16_HI,
   BUFFER_LOAD_DWORD_LDS, BUFFER_LOAD_DWORDX2_LDS,
   BUFFER_LOAD_DWORDX4_LDS, BUFFER_STORE_DWORDX4_LDS,
   BUFFER_STORE_DWORD, BUFFER_STORE_DWORDX2, BUFFER_STORE_DWORDX3, BUFFER_STORE_DWORDX4,

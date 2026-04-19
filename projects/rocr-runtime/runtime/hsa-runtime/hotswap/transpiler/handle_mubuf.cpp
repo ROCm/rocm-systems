@@ -25,29 +25,41 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
   StringRef mn(di.mnemonic);
   SemOp sop = di.semOp;
 
-  auto mubufClassify = [](SemOp s) -> std::tuple<bool, bool, int, int, bool, bool> {
-    // returns {isLoad, isStore, dwords, loadBits, isSubDword, isSigned}
+  // d16Half encodes D16 partial-write target: 0 = full-write (regular
+  // load), 1 = low half (`_D16`), 2 = high half (`_D16_HI`). The
+  // partial-write loads zero/sign-extend the loaded sub-dword to i16
+  // and merge into the named half of the destination VGPR, preserving
+  // the other half. See BUFInstructions.td:1155-1177 (predicate
+  // `D16PreservesUnusedBits`).
+  auto mubufClassify = [](SemOp s)
+      -> std::tuple<bool, bool, int, int, bool, bool, int> {
+    // returns {isLoad, isStore, dwords, loadBits, isSubDword, isSigned, d16Half}
     switch (s) {
-    case SemOp::BUFFER_LOAD_DWORD:    return {true, false, 1, 32, false, false};
-    case SemOp::BUFFER_LOAD_DWORDX2:  return {true, false, 2, 64, false, false};
-    case SemOp::BUFFER_LOAD_DWORDX3:  return {true, false, 3, 96, false, false};
-    case SemOp::BUFFER_LOAD_DWORDX4:  return {true, false, 4, 128, false, false};
-    case SemOp::BUFFER_LOAD_UBYTE:    return {true, false, 1, 8, true, false};
-    case SemOp::BUFFER_LOAD_SBYTE:    return {true, false, 1, 8, true, true};
-    case SemOp::BUFFER_LOAD_USHORT:   return {true, false, 1, 16, true, false};
-    case SemOp::BUFFER_LOAD_SSHORT:   return {true, false, 1, 16, true, true};
-    case SemOp::BUFFER_LOAD_SHORT_D16:     return {true, false, 1, 16, true, false};
-    case SemOp::BUFFER_LOAD_SHORT_D16_HI: return {true, false, 1, 16, true, false};
-    case SemOp::BUFFER_STORE_DWORD:   return {false, true, 1, 32, false, false};
-    case SemOp::BUFFER_STORE_DWORDX2: return {false, true, 2, 64, false, false};
-    case SemOp::BUFFER_STORE_DWORDX3: return {false, true, 3, 96, false, false};
-    case SemOp::BUFFER_STORE_DWORDX4: return {false, true, 4, 128, false, false};
-    case SemOp::BUFFER_STORE_BYTE:    return {false, true, 1, 8, true, false};
-    case SemOp::BUFFER_STORE_SHORT:   return {false, true, 1, 16, true, false};
-    default: return {false, false, 0, 0, false, false};
+    case SemOp::BUFFER_LOAD_DWORD:    return {true, false, 1, 32, false, false, 0};
+    case SemOp::BUFFER_LOAD_DWORDX2:  return {true, false, 2, 64, false, false, 0};
+    case SemOp::BUFFER_LOAD_DWORDX3:  return {true, false, 3, 96, false, false, 0};
+    case SemOp::BUFFER_LOAD_DWORDX4:  return {true, false, 4, 128, false, false, 0};
+    case SemOp::BUFFER_LOAD_UBYTE:    return {true, false, 1, 8, true, false, 0};
+    case SemOp::BUFFER_LOAD_SBYTE:    return {true, false, 1, 8, true, true, 0};
+    case SemOp::BUFFER_LOAD_USHORT:   return {true, false, 1, 16, true, false, 0};
+    case SemOp::BUFFER_LOAD_SSHORT:   return {true, false, 1, 16, true, true, 0};
+    case SemOp::BUFFER_LOAD_SHORT_D16:     return {true, false, 1, 16, true, false, 1};
+    case SemOp::BUFFER_LOAD_SHORT_D16_HI:  return {true, false, 1, 16, true, false, 2};
+    case SemOp::BUFFER_LOAD_UBYTE_D16:     return {true, false, 1, 8,  true, false, 1};
+    case SemOp::BUFFER_LOAD_UBYTE_D16_HI:  return {true, false, 1, 8,  true, false, 2};
+    case SemOp::BUFFER_LOAD_SBYTE_D16:     return {true, false, 1, 8,  true, true,  1};
+    case SemOp::BUFFER_LOAD_SBYTE_D16_HI:  return {true, false, 1, 8,  true, true,  2};
+    case SemOp::BUFFER_STORE_DWORD:   return {false, true, 1, 32, false, false, 0};
+    case SemOp::BUFFER_STORE_DWORDX2: return {false, true, 2, 64, false, false, 0};
+    case SemOp::BUFFER_STORE_DWORDX3: return {false, true, 3, 96, false, false, 0};
+    case SemOp::BUFFER_STORE_DWORDX4: return {false, true, 4, 128, false, false, 0};
+    case SemOp::BUFFER_STORE_BYTE:    return {false, true, 1, 8, true, false, 0};
+    case SemOp::BUFFER_STORE_SHORT:   return {false, true, 1, 16, true, false, 0};
+    default: return {false, false, 0, 0, false, false, 0};
     }
   };
-  auto [isLoad, isStore, dwords, loadBits, isSubDword, isBufSigned] = mubufClassify(sop);
+  auto [isLoad, isStore, dwords, loadBits, isSubDword, isBufSigned, d16Half] =
+      mubufClassify(sop);
   if (isLoad || isStore) {
     // Use gfx942 buffer intrinsics directly. The hardware handles OOB:
     // loads return 0, stores are silently dropped. This avoids the
@@ -64,26 +76,47 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
 
     if (isLoad) {
       if (isSubDword) {
-        if (loadBits == 8) {
-          Function *bufLdI8 = Intrinsic::getOrInsertDeclaration(
-              &ctx.M,
-              Intrinsic::amdgcn_raw_buffer_load,
-              {Type::getInt8Ty(ctx.C)});
-          Value *loaded = ctx.B.CreateCall(bufLdI8,
-              {srd, voffset, soffset, auxFlags}, "buf_ld");
+        // Load the sub-dword datum and zero/sign-extend to i32. For
+        // plain ushort/sbyte/etc. (`d16Half == 0`) we then write the
+        // whole VGPR; for D16 partial-write loads we merge with the
+        // prior dst (see comment block above mubufClassify).
+        Type *memTy = (loadBits == 8) ? Type::getInt8Ty(ctx.C)
+                                      : Type::getInt16Ty(ctx.C);
+        Function *bufLd = Intrinsic::getOrInsertDeclaration(
+            &ctx.M, Intrinsic::amdgcn_raw_buffer_load, {memTy});
+        Value *loaded = ctx.B.CreateCall(bufLd,
+            {srd, voffset, soffset, auxFlags}, "buf_ld");
+        if (d16Half == 0) {
           Value *ext = isBufSigned ? ctx.B.CreateSExt(loaded, ctx.i32Ty)
                                    : ctx.B.CreateZExt(loaded, ctx.i32Ty);
           ctx.writeReg32(vdata, ext);
         } else {
-          Function *bufLdI16 = Intrinsic::getOrInsertDeclaration(
-              &ctx.M,
-              Intrinsic::amdgcn_raw_buffer_load,
-              {Type::getInt16Ty(ctx.C)});
-          Value *loaded = ctx.B.CreateCall(bufLdI16,
-              {srd, voffset, soffset, auxFlags}, "buf_ld");
-          Value *ext = isBufSigned ? ctx.B.CreateSExt(loaded, ctx.i32Ty)
-                                   : ctx.B.CreateZExt(loaded, ctx.i32Ty);
-          ctx.writeReg32(vdata, ext);
+          // Partial-write: extend to i16 (sign for `_SBYTE_D16*`,
+          // zero for `_UBYTE_D16*` / `_SHORT_D16*`), zext to i32 so
+          // the high half of the i32 is exactly zero before merging.
+          Value *ext16 = loaded;
+          if (loadBits == 8) {
+            ext16 = isBufSigned
+                        ? ctx.B.CreateSExt(loaded, Type::getInt16Ty(ctx.C))
+                        : ctx.B.CreateZExt(loaded, Type::getInt16Ty(ctx.C));
+          }
+          Value *ext32 = ctx.B.CreateZExt(ext16, ctx.i32Ty);
+          Value *prior = ctx.regs.readReg32(ctx.B, vdata);
+          Value *merged;
+          if (d16Half == 1) {
+            // _D16: place datum in lo 16, preserve hi 16 of prior.
+            Value *priorHi =
+                ctx.B.CreateAnd(prior, ConstantInt::get(ctx.i32Ty, 0xFFFF0000));
+            merged = ctx.B.CreateOr(priorHi, ext32, "d16_lo_merge");
+          } else {
+            // _D16_HI: place datum in hi 16, preserve lo 16 of prior.
+            Value *priorLo =
+                ctx.B.CreateAnd(prior, ConstantInt::get(ctx.i32Ty, 0x0000FFFF));
+            Value *shifted =
+                ctx.B.CreateShl(ext32, ConstantInt::get(ctx.i32Ty, 16));
+            merged = ctx.B.CreateOr(priorLo, shifted, "d16_hi_merge");
+          }
+          ctx.writeReg32(vdata, merged);
         }
       } else if (dwords == 1) {
         Function *bufLd = Intrinsic::getOrInsertDeclaration(

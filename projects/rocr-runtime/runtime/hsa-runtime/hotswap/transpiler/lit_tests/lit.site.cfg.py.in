@@ -97,6 +97,17 @@ config.fixtures = {
     # BUFFER_ATOMIC_ADD) in opcode_map.cpp.
     "buffer_atomic_add_u32":
         r"@LIT_FIXTURE_BUFFER_ATOMIC_ADD_U32_CO@",
+    # buffer_load_d16_u8 (MUBUF/VBUFFER) — gfx9+/gfx1250 D16 partial-
+    # write byte loads.  Pins both half-merge directions:
+    #   `_d16_u8`     -> (prior & 0xFFFF0000) | zext(byte, i32)
+    #   `_d16_hi_u8`  -> (prior & 0x0000FFFF) | (zext(byte, i32) << 16)
+    # See SemOp::BUFFER_LOAD_UBYTE_D16{,_HI} in semop.hpp, the d16Half
+    # branch of mubufClassify in handle_mubuf.cpp, and the matching
+    # MUBUF4 + VBUF4 entries in opcode_map.cpp.  Adding this fixture
+    # also retroactively pins the bug fix for `BUFFER_LOAD_SHORT_D16`,
+    # which previously zext'd the loaded value to i32 and overwrote
+    # the whole VGPR (silently violating `D16PreservesUnusedBits`).
+    "buffer_load_d16_u8": r"@LIT_FIXTURE_BUFFER_LOAD_D16_U8_CO@",
     # s_bitset0_b32 (SOP1) — bit-clear with tied sdst_in.  Pins the
     # read-modify-write shape under the AMDGPU disassembler's tied-
     # operand collapse: the prior dst value must come from
