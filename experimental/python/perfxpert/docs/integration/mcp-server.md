@@ -379,3 +379,102 @@ Send `initialize` → `tools/list` → `tools/call` in that order. See the
   READ_ONLY-only per spec §5.8. If you need to run a profiler from a
   client, use that client's own shell tool (opencode's `bash`, Claude
   Desktop's `run_shell_command`, etc.), NOT an MCP call.
+
+## Launching via `perfxpert-code <backend>` (multi-backend dispatch)
+
+The `perfxpert-code` launcher supports three third-party agent
+backends in addition to the bundled opencode TUI. Each subcommand
+installs perfxpert MCP + AGENTS.md + a server-side tool-priority
+gate hook, then execs the backend binary for an interactive
+session:
+
+| Subcommand | Backend | Config file written | Tool-name wire format |
+|---|---|---|---|
+| `perfxpert-code claude`  | Claude Code | `.mcp.json` + `.claude/CLAUDE.md` + `.claude/settings.json` | `mcp__perfxpert__<tool>` |
+| `perfxpert-code gemini`  | Gemini CLI  | `~/.gemini/settings.json` (list-append, never touches `GEMINI.md`) | `mcp_perfxpert_<tool>` |
+| `perfxpert-code codex`   | Codex CLI   | (PR 2 — Task 10) | (probed live) |
+
+All three subcommands accept the same dispatcher-owned flags:
+
+- `--dry-run` — run plan(), print intended actions, write nothing,
+  skip the backend spawn. Useful for code review.
+- `--quiet` — suppress banner + per-step progress.
+- `--force` — bypass the recursion guard
+  (`PERFXPERT_IN_AGENT_SESSION`) and any clobber refusals.
+- `--allow-agents-md-append` — opt-in for merging into a
+  git-tracked `CLAUDE.md` / `AGENTS.md` (default: refuse, stage at
+  `.claude/CLAUDE.md` / dedicated pointer instead — I3).
+
+Example:
+
+```bash
+# SKIP-SAMPLE — requires the claude CLI installed and on PATH
+perfxpert-code claude --dry-run "analyze this trace"
+perfxpert-code claude "analyze this trace"
+```
+
+### First-run consent
+
+On first install for a given `(backend, cwd, file-set)` triple,
+the launcher lists every planned file edit and asks `[y/N]`. Set
+`PERFXPERT_ASSUME_CONSENT=1` to auto-grant (CI / automated
+bootstrapping). Consent invalidates automatically when the
+file set changes (e.g. the user newly tracks `CLAUDE.md` in
+git — the security impact of "yes" changed).
+
+### Tool-priority gate (event-based)
+
+Each backend receives a server-side hook that rejects any
+non-`perfxpert_*` tool call UNTIL
+`perfxpert_intent_classify` has returned in the current session.
+There is no turn counter — a legitimate `bash` on turn 2 AFTER
+`intent_classify` on turn 1 passes through. Gate escape hatch:
+`export PERFXPERT_GATE_HOOK=0`.
+
+Surfaces per backend:
+
+- **Claude Code** — native `PreToolUse` hook inside
+  `.claude/settings.json` with `permissionDecision: deny` +
+  `permissionDecisionReason` (per
+  `docs/decisions/2026-04-19-claude-hook-surface.md`).
+- **Gemini** — `allowedTools: ["mcp_perfxpert_*"]` in
+  `~/.gemini/settings.json` + runtime sidecar at
+  `~/.gemini/runtime/perfxpert-gate-<session_id>.json`.
+- **opencode** — `{block, retryWith}` from patched
+  `tool.execute.before` plugin (fork-only — patch 0020).
+
+### Known issue: first-run exit-124
+
+Sporadically the first `perfxpert-code <backend>` invocation
+after a stale server state hangs with an MCP handshake timeout.
+The launcher mitigates this in three layers:
+
+1. **Warmup during `install()`** — boots `perfxpert-mcp` once to
+   prime sqlite + tool registry. Bounded by
+   `PERFXPERT_MCP_WARMUP_TIMEOUT_S` (default `10`).
+   Disable via `PERFXPERT_MCP_WARMUP=0`.
+2. **Handshake retry in `verify_mcp_live()`** — 3 attempts with
+   exponential backoff 2s / 4s / 8s, early-exit on
+   `PERFXPERT_MCP_RETRY_BUDGET_S` (default `6`).
+3. **Graceful degradation** — warmup failure is logged but
+   non-fatal; install continues.
+
+### `perfxpert-code install-patches` (deprecated)
+
+The `install-patches` subcommand is kept as a backward-compat
+alias for the bundled opencode build step. It now prints a
+yellow-stderr deprecation notice. Silence with
+`export PERFXPERT_SILENCE_DEPRECATION=1`.
+
+### `.gitignore` hints
+
+Project-scope MCP config lives in `.mcp.json`; if a `.gitignore`
+is present, `perfxpert-code claude install` appends `.mcp.json`
+to it so multi-collaborator repos don't leak per-user paths. No
+action taken when `.gitignore` is absent (installer won't
+create one).
+
+### Platform boundary
+
+POSIX only (Linux + macOS + WSL). Windows-native is explicitly
+out of scope; a tracking issue follows.
