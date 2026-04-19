@@ -711,4 +711,113 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastAlternatingWrrNonWrr
+//
+// White-box: Toggle doWrr mid-test on an established connection.
+// Phase 1 (doWrr=true):  10 sends → 10 WRR tokens consumed
+// Phase 2 (doWrr=false): 10 sends → 0 WRR tokens consumed
+// Phase 3 (doWrr=true):  10 sends → 10 WRR tokens consumed
+// =============================================================================
+TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr int    kPhase  = 10;
+    constexpr size_t kMsgSz  = 64;
+    constexpr int    kBaseTag = 1700;
+
+    char sendBuf[kPhase * 3 * kMsgSz], recvBuf[kPhase * 3 * kMsgSz];
+    memset(sendBuf, 0xAA, sizeof(sendBuf));
+    memset(recvBuf, 0,    sizeof(recvBuf));
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, sizeof(sendBuf), NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+    }
+
+    // Post kPhase sends/recvs concurrently within each phase.
+    auto doPhase = [&](int phaseBase) {
+        CastDoBatchSendRecv(rank, sendComm, recvComm,
+                            sendBuf + phaseBase * kMsgSz, recvBuf + phaseBase * kMsgSz,
+                            kMsgSz, kPhase, kBaseTag + phaseBase, mhandle);
+    };
+
+    // Phase 1: WRR on
+    int activeTotBefore1 = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore1 = st.activeTotTokens;
+    }
+    doPhase(0);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        int consumed = activeTotBefore1 - st.activeTotTokens;
+        ASSERT_TRUE(st.schedInit);
+        EXPECT_EQ(consumed, kPhase) << "phase 1: expected " << kPhase << " WRR selections";
+
+        // Phase 2: WRR off
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, false, false, 65536), 0);
+    }
+
+    int activeTotBefore2 = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore2 = st.activeTotTokens;
+    }
+    doPhase(kPhase);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        int consumed = activeTotBefore2 - st.activeTotTokens;
+        EXPECT_EQ(consumed, 0) << "phase 2: doWrr=false must not consume WRR tokens";
+
+        // Phase 3: WRR on again
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, 65536), 0);
+    }
+
+    int activeTotBefore3 = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore3 = st.activeTotTokens;
+    }
+    doPhase(kPhase * 2);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        int consumed = activeTotBefore3 - st.activeTotTokens;
+        EXPECT_EQ(consumed, kPhase) << "phase 3: expected " << kPhase << " WRR selections";
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
