@@ -554,8 +554,16 @@ class CodexAdapter:
         back to a minimal hand-rolled rewrite if `tomlkit` is not
         installed (plan I7 says the fallback is rare — most users
         install the `[backends]` extra).
+
+        **Git-tracked refusal.** If `~/.codex/config.toml` is tracked
+        in an enclosing git repo (dotfiles-style), raise
+        `ConfigClobber` rather than silently rewriting a versioned
+        file. The user must move it outside version control before
+        we'll touch it. Mirrors the git-tracked rule the Claude
+        adapter applies to `.claude/CLAUDE.md`.
         """
         cfg = self._user_codex_config_path(home)
+        self._refuse_if_git_tracked(cfg)
         cfg.parent.mkdir(parents=True, exist_ok=True)
         existing = cfg.read_text(encoding="utf-8") if cfg.is_file() else ""
 
@@ -666,13 +674,18 @@ class CodexAdapter:
         """Merge `[mcp_servers.perfxpert]` into `config_toml`.
 
         Preserves every other table and comment. Raises `ConfigClobber`
-        if a conflicting entry exists (different `command`).
+        if a conflicting entry exists (different `command`) OR if
+        `config_toml` is git-tracked in an enclosing repo (the user
+        must move a versioned config out of tree before we'll touch
+        it).
 
         **Lazy-import.** `tomlkit` is ONLY imported here — never at
         module import time — per plan cycle-2 I7. Users who never hit
         the fallback (i.e. whose `codex mcp add` works) don't need
         `tomlkit` installed.
         """
+        self._refuse_if_git_tracked(config_toml)
+
         tomlkit_mod = _lazy_import_tomlkit(
             "editing codex config.toml directly"
         )
@@ -927,6 +940,26 @@ class CodexAdapter:
             sys.stderr.write(msg + "\n")
             sys.stderr.flush()
         _LOG.debug(msg)
+
+    def _refuse_if_git_tracked(self, config_path: Path) -> None:
+        """Raise `ConfigClobber` if `config_path` is tracked in any git repo.
+
+        Walks upward from `config_path.parent` looking for a `.git`
+        entry, then asks git whether the file is tracked relative to
+        that repo root (dotfiles-style layouts do check ``~/.codex/``
+        into git from time to time — we refuse to silently rewrite
+        such a versioned file). Mirrors the ``AGENTS.md`` /
+        ``CLAUDE.md`` git-tracked rule the Claude adapter already
+        applies.
+        """
+        if pa.is_absolute_path_git_tracked(config_path):
+            raise ConfigClobber(
+                f"{config_path} is tracked in a git repository. "
+                "Refusing to rewrite a versioned config file — move "
+                "it outside version control (e.g. `git rm --cached` "
+                "the file and add it to .gitignore), then re-run "
+                "perfxpert-code."
+            )
 
     def _render_prompt_for_codex(self) -> str:
         bundled_source = _find_bundled_agents_md()
