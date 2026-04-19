@@ -377,14 +377,16 @@ the specific models used are:
 | opencode | opencode-default                | patched `{block, retryWith}` gate (bundled patch 0020). |
 | claude   | `claude-haiku-4-5`              | native `PreToolUse` hook. R-new-4 scope: verified on haiku-4-5; other small models require independent re-verification at acceptance time. |
 | gemini   | `gemini-2.5-flash`              | `allowedTools` restriction + runtime-state file for event-based lift. |
-| codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only); `verify_mcp_live` records `gate_hook_installed=False` and skips the probe with a warning-level log. See the [Codex hook-surface decision record](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md). |
+| codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only). `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs its connectivity checks (e.g. `codex mcp list`) but skips the gate-probe canary. See the [Codex hook-surface decision record](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md). |
 
 If you re-verify against a different small model for a non-Codex
 backend (for example `claude-haiku-5` when it ships, or
 `gemini-3.0-flash`), update this table and the corresponding
-`R-new-4` / `I-N2` entries in the multi-backend plan. The probe
-itself does not hard-code the model name — it reads `PERFXPERT_GATE_PROBE_MODEL`
-per backend (see `perfxpert/cli/_backend/_prompt_adapter.py`).
+`R-new-4` / `I-N2` entries in the multi-backend plan. Today the
+probe-target model for each backend is hard-coded inside that
+adapter's `verify_mcp_live()` — there is no runtime override
+env var. If future work parameterises this, add the env var name
+here.
 
 ## See also
 
