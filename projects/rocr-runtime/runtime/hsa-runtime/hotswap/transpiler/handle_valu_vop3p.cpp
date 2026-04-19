@@ -159,36 +159,47 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
   }
 
   // ---- WMMA (gfx1250 RDNA4, VOP3P encoding) ----
-  // 16x16xK WMMA family with f32 accumulator. Two K-families:
-  //   * 16-bit elements, K=32 (8 VGPRs of <16 x t> per A/B side):
+  // 16x16xK WMMA family. Three K-families × accumulator-type
+  // permutations covered today:
+  //   * 16-bit elements, K=32, f32 acc (8 VGPRs of <16 x t> per A/B side):
   //       v_wmma_f32_16x16x32_f16,  v_wmma_f32_16x16x32_bf16
-  //   * 8-bit elements,  K=64 (8 VGPRs of <8 x i32> per A/B side):
+  //   * 8-bit elements,  K=64, f32 acc (8 VGPRs of <8 x i32> per A/B side):
   //       v_wmma_f32_16x16x64_<a>_<b>  for a,b ∈ {fp8, bf8}
+  //   * 8-bit elements,  K=64, i32 acc (8 VGPRs of <8 x i32> per A/B side):
+  //       v_wmma_i32_16x16x64_iu8  (signed/unsigned 8-bit integer GEMMs)
   //
-  // All share the per-Wave32-lane fragment shape on both A/B (8 VGPRs,
-  // 32 bytes) and C/D (<8 x f32>) sides. The WMMA12 native-intrinsic
-  // path (when target supports it) and the gfx942 MFMA lowering path
-  // (`emitWMMAtoMFMA`, parameterised on `WMMAInputType`) are common
-  // across the entire family — the local A/B IR vector type +
-  // native-WMMA intrinsic ID + WMMAInputType triple is the only delta
-  // between variants. "Design the operation, not the opcode."
+  // All share the per-Wave32-lane A/B fragment shape (8 VGPRs, 32 bytes).
+  // The C/D side is <8 x f32> for the f32-accumulator variants and
+  // <8 x i32> for the IU8 integer-accumulator variant. The WMMA12
+  // native-intrinsic path (when target supports it) and the gfx942
+  // MFMA lowering path (`emitWMMAtoMFMA`, parameterised on
+  // `WMMAInputType`) are uniform across the entire family — the local
+  // A/B IR vector type + native-WMMA intrinsic ID + WMMAInputType +
+  // accumulator IR type is the only delta between variants. "Design
+  // the operation, not the opcode."
   //
-  // Native WMMA12 intrinsic-call shapes diverge between the 16-bit and
-  // 8-bit families: the 16-bit form uses `AMDGPUWmmaIntrinsicModsAllReuse`
-  // (8 args: A_mod, A, B_mod, B, C_mod, C, reuse_a, reuse_b) and the
-  // 8-bit form uses `AMDGPUWmmaIntrinsicModsC` (6 args: A, B, C_mod, C,
-  // reuse_a, reuse_b). The MFMA fallback path is uniform across both.
+  // Native WMMA12 intrinsic-call shapes split THREE ways:
+  //   * 16-bit f32-acc: AMDGPUWmmaIntrinsicModsAllReuse — 8 args
+  //       (A_mod, A, B_mod, B, C_mod, C, reuse_a, reuse_b)
+  //   * 8-bit  f32-acc: AMDGPUWmmaIntrinsicModsC       — 6 args
+  //       (A, B, C_mod, C, reuse_a, reuse_b)
+  //   * 8-bit  i32-acc: AMDGPUWmmaIntrinsicModsABClamp — 8 args
+  //       (A_mod, A, B_mod, B, C, reuse_a, reuse_b, clamp)
+  // The MFMA fallback path is uniform across all three.
   case SemOp::V_WMMA_F32_16x16x32_F16:
   case SemOp::V_WMMA_F32_16x16x32_BF16:
   case SemOp::V_WMMA_F32_16x16x64_FP8_FP8:
   case SemOp::V_WMMA_F32_16x16x64_FP8_BF8:
   case SemOp::V_WMMA_F32_16x16x64_BF8_FP8:
-  case SemOp::V_WMMA_F32_16x16x64_BF8_BF8: {
-    const bool is8bit =
+  case SemOp::V_WMMA_F32_16x16x64_BF8_BF8:
+  case SemOp::V_WMMA_I32_16x16x64_IU8: {
+    const bool isIU8 = (sop == SemOp::V_WMMA_I32_16x16x64_IU8);
+    const bool isFP8orBF8 =
         (sop == SemOp::V_WMMA_F32_16x16x64_FP8_FP8) ||
         (sop == SemOp::V_WMMA_F32_16x16x64_FP8_BF8) ||
         (sop == SemOp::V_WMMA_F32_16x16x64_BF8_FP8) ||
         (sop == SemOp::V_WMMA_F32_16x16x64_BF8_BF8);
+    const bool is8bit = isIU8 || isFP8orBF8;
     const bool isBF16 = (sop == SemOp::V_WMMA_F32_16x16x32_BF16);
 
     Type *abIRTy = nullptr;
@@ -199,7 +210,8 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
                             : Type::getHalfTy(ctx.C);
       abIRTy = FixedVectorType::get(elemTy, 16);
     }
-    Type *v8f32Ty = FixedVectorType::get(ctx.f32Ty, 8);
+    Type *cdIRTy = isIU8 ? FixedVectorType::get(ctx.i32Ty, 8)
+                         : FixedVectorType::get(ctx.f32Ty, 8);
 
     ParsedReg dest = op.dst();
     ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
@@ -207,7 +219,7 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
 
     Value *a = ctx.regs.readRegVec(ctx.B, srcA, abIRTy);
     Value *b = ctx.regs.readRegVec(ctx.B, srcB, abIRTy);
-    Value *c = ctx.regs.readRegVec(ctx.B, srcC, v8f32Ty);
+    Value *c = ctx.regs.readRegVec(ctx.B, srcC, cdIRTy);
 
     auto wmmaInputType = [&]() -> WMMAInputType {
       switch (sop) {
@@ -217,6 +229,7 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       case SemOp::V_WMMA_F32_16x16x64_FP8_BF8:return WMMAInputType::FP8_BF8;
       case SemOp::V_WMMA_F32_16x16x64_BF8_FP8:return WMMAInputType::BF8_FP8;
       case SemOp::V_WMMA_F32_16x16x64_BF8_BF8:return WMMAInputType::BF8_BF8;
+      case SemOp::V_WMMA_I32_16x16x64_IU8:    return WMMAInputType::IU8;
       default:
         report_fatal_error("transpiler: WMMA SemOp not in dispatch table");
       }
@@ -238,12 +251,30 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
         wmmaId = Intrinsic::amdgcn_wmma_f32_16x16x64_bf8_fp8; break;
       case SemOp::V_WMMA_F32_16x16x64_BF8_BF8:
         wmmaId = Intrinsic::amdgcn_wmma_f32_16x16x64_bf8_bf8; break;
+      case SemOp::V_WMMA_I32_16x16x64_IU8:
+        wmmaId = Intrinsic::amdgcn_wmma_i32_16x16x64_iu8; break;
       default:
         report_fatal_error("transpiler: WMMA SemOp not in WMMA12 dispatch");
       }
       Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
-          &ctx.M, wmmaId, {v8f32Ty, abIRTy});
-      if (is8bit) {
+          &ctx.M, wmmaId, {cdIRTy, abIRTy});
+      if (isIU8) {
+        // AMDGPUWmmaIntrinsicModsABClamp:
+        //   (A_mod, A, B_mod, B, C, reuse_a, reuse_b, clamp)
+        // A_mod / B_mod carry the IU8 sign-vs-zero-extension knobs in
+        // the gfx1250 ISA; we conservatively emit 0 (zero-extend, i.e.
+        // unsigned interpretation) because the corpus IU8 GEMMs
+        // observed so far never set the matching `neg_lo` bits. A
+        // future loud refusal could be added if a corpus kernel ever
+        // surfaces a non-zero A_mod / B_mod through the decoder.
+        result_val = ctx.B.CreateCall(wmmaFn, {
+            ctx.B.getFalse(), a,
+            ctx.B.getFalse(), b,
+            c,
+            ctx.B.getFalse(), ctx.B.getFalse(),
+            ctx.B.getFalse()
+        }, "wmma");
+      } else if (is8bit) {
         // AMDGPUWmmaIntrinsicModsC: (A, B, C_mod, C, reuse_a, reuse_b)
         result_val = ctx.B.CreateCall(wmmaFn, {
             a, b,

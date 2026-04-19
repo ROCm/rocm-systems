@@ -824,6 +824,17 @@ static const Entry kCanonTable[] = {
     E(V_WMMA_F32_16X16X64_BF8_FP8_w32_threeaddr, V_WMMA_F32_16x16x64_BF8_FP8),
     E(V_WMMA_F32_16X16X64_BF8_BF8_w32_twoaddr,   V_WMMA_F32_16x16x64_BF8_BF8),
     E(V_WMMA_F32_16X16X64_BF8_BF8_w32_threeaddr, V_WMMA_F32_16x16x64_BF8_BF8),
+    // 16x16x64 WMMA, IU8 (signed/unsigned 8-bit integer inputs, i32
+    // accumulator; gfx1250 RDNA4 VOP3P opcode 0x072). The MC opcode
+    // sign-extension knobs travel through the `neg_lo` operand bits
+    // rather than the opcode itself, so there's a single SemOp for
+    // both signed and unsigned interpretations. On gfx942 this
+    // routes to mfma_i32_16x16x32_i8 (i64 packed A/B, <4 x i32>
+    // accumulator). Both `_twoaddr` and `_threeaddr` MC pseudo
+    // variants represent the same semantic op, mirroring the
+    // F16/BF16 / FP8/BF8 mappings above.
+    E(V_WMMA_I32_16X16X64_IU8_w32_twoaddr,   V_WMMA_I32_16x16x64_IU8),
+    E(V_WMMA_I32_16X16X64_IU8_w32_threeaddr, V_WMMA_I32_16x16x64_IU8),
 };
 
 #undef SMEM3

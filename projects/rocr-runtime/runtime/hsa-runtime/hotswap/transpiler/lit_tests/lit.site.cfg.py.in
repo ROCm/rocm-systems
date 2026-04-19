@@ -177,6 +177,19 @@ config.fixtures = {
     # in handle_valu_vop3p.cpp.
     "wmma_f32_16x16x64_fp8_fp8":
         r"@LIT_FIXTURE_WMMA_F32_16X16X64_FP8_FP8_CO@",
+    # v_wmma_i32_16x16x64_iu8 (gfx1250 RDNA4 VOP3P opcode 0x072)
+    # lowered to gfx942 (CDNA3) via the parameterised emitWMMAtoMFMA
+    # helper with WMMAInputType::IU8.  This is the ONLY WMMA variant
+    # with an integer accumulator — the fixture pins (a) the
+    # mfma.i32.16x16x32.i8 intrinsic dispatch (vs every other variant
+    # which dispatches to mfma.f32.*), (b) the `<4 x i32>` accumulator
+    # pack type (vs `<4 x float>` everywhere else), (c) the per-MFMA
+    # `bitcast <2 x i32> ... to i64` AB pack (shared shape with the
+    # FP8/BF8 siblings), and (d) the K=64 -> 2x K=32 chained
+    # decomposition over two virtual Wave32 groups (4 MFMA calls
+    # total, matching the FP8/BF8 shape exactly).
+    "wmma_i32_16x16x64_iu8":
+        r"@LIT_FIXTURE_WMMA_I32_16X16X64_IU8_CO@",
 }
 
 lit_config.load_config(

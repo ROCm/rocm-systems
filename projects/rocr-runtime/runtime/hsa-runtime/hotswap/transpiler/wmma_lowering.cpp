@@ -304,46 +304,63 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   // Per-MFMA bitcast type and intrinsic dispatch — the only point in
   // the lowering where the WMMA variants diverge.
   //
-  // 16-bit variants pack 2 redistributed dwords into a `<4 x t>` vector
-  // (4 elements per lane × 2 bytes = 8 bytes = 2 dwords). The 8-bit
-  // variants pack the same 2 dwords into a single `i64`; the CDNA fp8/
-  // bf8 MFMA intrinsics were defined before fp8 became a first-class
-  // LLVM type, so they take 8 packed fp8/bf8 bytes as i64 directly.
-  // Both packings are 64-bit and produced by the same 2-dword reduce
-  // (`packDwords`) — only the bitcast target type differs.
-  Type *mfmaPackTy = nullptr;
+  // AB pack type:
+  //   16-bit variants pack 2 redistributed dwords into a `<4 x t>` vector
+  //   (4 elements per lane × 2 bytes = 8 bytes = 2 dwords). The 8-bit
+  //   variants pack the same 2 dwords into a single `i64`; the CDNA fp8/
+  //   bf8/i8 MFMA intrinsics were defined before fp8 became a first-class
+  //   LLVM type (and there's no first-class packed-i8 vector type either),
+  //   so they take 8 packed fp8/bf8/i8 bytes as i64 directly. Both packings
+  //   are 64-bit and produced by the same 2-dword reduce (`packDwords`).
+  //
+  // Accumulator pack type:
+  //   F32-accumulator MFMAs (everything except IU8) take `<4 x float>`.
+  //   The IU8 path takes `<4 x i32>` to match the integer-accumulator
+  //   `mfma_i32_16x16x32_i8` signature.
+  Type *mfmaABPackTy = nullptr;
+  Type *mfmaAccPackTy = nullptr;
   Intrinsic::ID mfmaId;
   switch (inputType) {
   case WMMAInputType::F16:
-    mfmaPackTy = FixedVectorType::get(ctx.f16Ty, 4);
+    mfmaABPackTy = FixedVectorType::get(ctx.f16Ty, 4);
+    mfmaAccPackTy = FixedVectorType::get(ctx.f32Ty, 4);
     mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x16f16;
     break;
   case WMMAInputType::BF16:
-    mfmaPackTy = FixedVectorType::get(Type::getInt16Ty(ctx.C), 4);
+    mfmaABPackTy = FixedVectorType::get(Type::getInt16Ty(ctx.C), 4);
+    mfmaAccPackTy = FixedVectorType::get(ctx.f32Ty, 4);
     mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x16bf16_1k;
     break;
   case WMMAInputType::FP8_FP8:
-    mfmaPackTy = ctx.i64Ty;
+    mfmaABPackTy = ctx.i64Ty;
+    mfmaAccPackTy = FixedVectorType::get(ctx.f32Ty, 4);
     mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_fp8_fp8;
     break;
   case WMMAInputType::FP8_BF8:
-    mfmaPackTy = ctx.i64Ty;
+    mfmaABPackTy = ctx.i64Ty;
+    mfmaAccPackTy = FixedVectorType::get(ctx.f32Ty, 4);
     mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_fp8_bf8;
     break;
   case WMMAInputType::BF8_FP8:
-    mfmaPackTy = ctx.i64Ty;
+    mfmaABPackTy = ctx.i64Ty;
+    mfmaAccPackTy = FixedVectorType::get(ctx.f32Ty, 4);
     mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_bf8_fp8;
     break;
   case WMMAInputType::BF8_BF8:
-    mfmaPackTy = ctx.i64Ty;
+    mfmaABPackTy = ctx.i64Ty;
+    mfmaAccPackTy = FixedVectorType::get(ctx.f32Ty, 4);
     mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_bf8_bf8;
     break;
+  case WMMAInputType::IU8:
+    mfmaABPackTy = ctx.i64Ty;
+    mfmaAccPackTy = FixedVectorType::get(ctx.i32Ty, 4);
+    mfmaId = Intrinsic::amdgcn_mfma_i32_16x16x32_i8;
+    break;
   }
-  auto *v4f32Ty = FixedVectorType::get(ctx.f32Ty, 4);
 
-  Value *srcA_lo = packDwords(B, mfmaA_lo, 2, ctx.i32Ty, mfmaPackTy);
-  Value *srcB_lo = packDwords(B, mfmaB_lo, 2, ctx.i32Ty, mfmaPackTy);
-  Value *acc     = packDwords(B, mfmaC,    4, ctx.i32Ty, v4f32Ty);
+  Value *srcA_lo = packDwords(B, mfmaA_lo, 2, ctx.i32Ty, mfmaABPackTy);
+  Value *srcB_lo = packDwords(B, mfmaB_lo, 2, ctx.i32Ty, mfmaABPackTy);
+  Value *acc     = packDwords(B, mfmaC,    4, ctx.i32Ty, mfmaAccPackTy);
 
   Function *mfmaFn = Intrinsic::getOrInsertDeclaration(&M, mfmaId);
   Value *cbsz = B.getInt32(0), *abid = B.getInt32(0), *blgp = B.getInt32(0);
@@ -351,8 +368,8 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   Value *mfma1 = B.CreateCall(mfmaFn,
       {srcA_lo, srcB_lo, acc, cbsz, abid, blgp}, "mfma1");
 
-  Value *srcA_hi = packDwords(B, mfmaA_hi, 2, ctx.i32Ty, mfmaPackTy);
-  Value *srcB_hi = packDwords(B, mfmaB_hi, 2, ctx.i32Ty, mfmaPackTy);
+  Value *srcA_hi = packDwords(B, mfmaA_hi, 2, ctx.i32Ty, mfmaABPackTy);
+  Value *srcB_hi = packDwords(B, mfmaB_hi, 2, ctx.i32Ty, mfmaABPackTy);
 
   Value *mfma2 = B.CreateCall(mfmaFn,
       {srcA_hi, srcB_hi, mfma1, cbsz, abid, blgp}, "mfma2");
@@ -384,12 +401,18 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
                result1);
 
   Value *isGroup1 = B.CreateICmpUGE(laneId, B.getInt32(32), "is_group1");
-  auto *v8f32Ty = FixedVectorType::get(ctx.f32Ty, 8);
+  // Result element type matches the dispatched MFMA accumulator type
+  // (i32 for the IU8 integer-accumulator variant, f32 for everything
+  // else). The two-pass redistribution above operated on i32 dwords
+  // throughout; only the final reassembly cares about the element
+  // semantics.
+  Type *resultElemTy = (inputType == WMMAInputType::IU8) ? ctx.i32Ty : ctx.f32Ty;
+  auto *resultTy = FixedVectorType::get(resultElemTy, 8);
   Value *finalDwords[8];
   for (unsigned i = 0; i < 8; ++i)
     finalDwords[i] = B.CreateSelect(isGroup1, result1[i], result0[i], "sel");
 
-  return packDwords(B, finalDwords, 8, ctx.i32Ty, v8f32Ty);
+  return packDwords(B, finalDwords, 8, ctx.i32Ty, resultTy);
 }
 
 } // namespace transpiler

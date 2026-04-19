@@ -452,6 +452,21 @@ enum class SemOp : uint16_t {
   V_WMMA_F32_16x16x64_FP8_BF8,
   V_WMMA_F32_16x16x64_BF8_FP8,
   V_WMMA_F32_16x16x64_BF8_BF8,
+  // 16x16x64 WMMA with i32 accumulator and unsigned/signed 8-bit
+  // integer inputs (the gfx1250 IU8 variant; the LLVM intrinsic
+  // uses `iu8` to denote that the per-input sign extension is
+  // selected at call site through the `neg_lo` modifier rather
+  // than the opcode itself). Per-Wave32-lane fragment shape is
+  // identical to the FP8 sibling (A,B: <8 x i32> = 32 packed i8
+  // bytes per lane, C/D: <8 x i32> for integer accumulator). On
+  // gfx942 we lower through the same `emitWMMAtoMFMA` helper,
+  // dispatching the per-MFMA call to `mfma_i32_16x16x32_i8`
+  // (i64 packed A/B, <4 x i32> accumulator). The handler must
+  // also use a different native-WMMA12 intrinsic shape on gfx12
+  // hardware: `AMDGPUWmmaIntrinsicModsABClamp` (8 args including
+  // a trailing clamp flag), distinct from the 16-bit AllReuse
+  // and the 8-bit FP8 ModsC shapes.
+  V_WMMA_I32_16x16x64_IU8,
 
   // -- VOPD -- (handled via string parsing of fullText, not opcode)
   VOPD_GENERIC,
