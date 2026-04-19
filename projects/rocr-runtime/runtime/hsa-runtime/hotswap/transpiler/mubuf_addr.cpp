@@ -1,5 +1,6 @@
 #include "mubuf_addr.hpp"
 
+#include "Utils/AMDGPUBaseInfo.h" // AMDGPU::getNamedOperandIdx, AMDGPU::OpName::offset
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -21,6 +22,20 @@ namespace {
 // MUBUF and VBUFFER encodings with different operand orders both
 // route here. `isStore` controls the skip-first-VGPR rule: stores
 // carry vdata (VGPR) ahead of vaddr (VGPR) in the operand list.
+//
+// `immOff` is read by name (`AMDGPU::OpName::offset`) rather than
+// scanning for the first non-zero immediate. The greedy scan was
+// unsound: MUBUF / VBUFFER carry both an `OpName::offset` byte
+// immediate AND an `OpName::cpol` cache-policy immediate, and when
+// the byte offset is zero the scan would silently grab cpol's value
+// (e.g. `0x20` for `scope:SCOPE_DEV`) and use it as a per-lane voffset
+// — every store/load with `offset:0 scope:SCOPE_*` would land 32 B
+// past the intended address. The R1 lit regression guard issues
+// exactly this shape (`buffer_store_b128 ... offset:0 scope:SCOPE_DEV`),
+// so the fix is required for the BUFFER_STORE rewrite to actually
+// hit the right address. CPol bits are otherwise still dropped (see
+// the "Not refused here" note in handle_mubuf.cpp's refusal block,
+// and §"Known limitations" of hotswap/docs/buffer-store-lowering.md).
 struct MubufOps {
   ParsedReg srsrc;
   ParsedReg vaddr;
@@ -35,35 +50,43 @@ struct MubufOps {
 MubufOps classifyMubufOps(const DecodedInst &di, OpResolver &op,
                            bool isStore) {
   MubufOps out;
+
+  // Byte offset by name. Absent (-1) on encodings that don't carry it
+  // (e.g. atomics with no immediate offset slot); the default `immOff
+  // = 0` is correct for those — the caller layers in `voffset` from
+  // `vaddr` independently.
+  int offIdx =
+      llvm::AMDGPU::getNamedOperandIdx(di.inst.getOpcode(),
+                                       llvm::AMDGPU::OpName::offset);
+  if (offIdx >= 0 && (unsigned)offIdx < di.inst.getNumOperands() &&
+      di.inst.getOperand((unsigned)offIdx).isImm()) {
+    out.immOff = di.inst.getOperand((unsigned)offIdx).getImm();
+  }
+
   int vgprSrcCount = 0;
   for (unsigned k = 0; k < op.nSrcs(); ++k) {
-    unsigned idx = op.srcIdx(k);
-    if (di.isReg(idx)) {
-      ParsedReg pr = op.srcReg(k);
-      if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !out.haveSrsrc) {
-        out.srsrc = pr;
-        out.haveSrsrc = true;
-      } else if (pr.kind == ParsedReg::VGPR) {
-        vgprSrcCount++;
-        // For stores, the first VGPR source is vdata (the stored value);
-        // the second is the per-lane buffer offset (vaddr).
-        if (isStore && vgprSrcCount == 1) {
-          out.vdata = pr;
-          continue;
-        }
-        if (!out.haveVaddr) {
-          out.vaddr = pr;
-          out.haveVaddr = true;
-        }
-      } else if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 &&
-                 !out.haveSoff) {
-        out.soff = pr;
-        out.haveSoff = true;
+    if (!di.isReg(op.srcIdx(k)))
+      continue;
+    ParsedReg pr = op.srcReg(k);
+    if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 && !out.haveSrsrc) {
+      out.srsrc = pr;
+      out.haveSrsrc = true;
+    } else if (pr.kind == ParsedReg::VGPR) {
+      vgprSrcCount++;
+      // For stores, the first VGPR source is vdata (the stored value);
+      // the second is the per-lane buffer offset (vaddr).
+      if (isStore && vgprSrcCount == 1) {
+        out.vdata = pr;
+        continue;
       }
-    } else if (di.isImm(idx)) {
-      int64_t v = di.getImm(idx);
-      if (v != 0 && out.immOff == 0)
-        out.immOff = v;
+      if (!out.haveVaddr) {
+        out.vaddr = pr;
+        out.haveVaddr = true;
+      }
+    } else if (pr.kind == ParsedReg::SGPR && pr.baseIdx >= 0 &&
+               !out.haveSoff) {
+      out.soff = pr;
+      out.haveSoff = true;
     }
   }
   return out;
