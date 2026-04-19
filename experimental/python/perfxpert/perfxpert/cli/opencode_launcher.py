@@ -363,6 +363,18 @@ def _run_install_patches(argv: list[str]) -> int:
             script = c
             break
 
+    # Task 6: deprecation notice — `install-patches` is an alias kept
+    # for backward-compat; the first-class surface is
+    # `perfxpert-code install --backend=<name>` (arrives with Task 7).
+    if not os.environ.get("PERFXPERT_SILENCE_DEPRECATION"):
+        sys.stderr.write(
+            "\033[33mperfxpert-code install-patches: this command is a "
+            "deprecated alias for the opencode bundle-build step.\n"
+            "  Future releases will route `install` through per-backend "
+            "adapters (claude/codex/gemini).\n"
+            "  Silence: export PERFXPERT_SILENCE_DEPRECATION=1\033[0m\n"
+        )
+
     if script is None:
         sys.stderr.write(
             "\033[31mperfxpert-code install-patches: build-bundled-opencode.sh not found.\n"

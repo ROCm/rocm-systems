@@ -1,22 +1,26 @@
 """Backend-subcommand dispatcher for `perfxpert-code {claude|codex|gemini}`.
 
-Task 2 delivers a stub registry and help-passthrough / recursion-guard
-scaffolding. Tasks 4b/5/10 register real adapters; Task 6 wires the
-flag parser. Until then, every backend returns a "not-yet-implemented"
-rc=42 so the user sees a clear signal rather than a traceback.
+Task 2 delivered the stub registry + help-passthrough / recursion-guard.
+Task 6 wires the real adapters into the registry, parses dispatcher-
+owned flags (`--dry-run`, `--quiet`, `--force`,
+`--allow-agents-md-append`), runs the install-then-spawn flow, and
+sets the recursion-guard env for child processes.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from typing import Callable, Dict
+from pathlib import Path
+from typing import Callable, Dict, List, Tuple
 
 
 __all__ = [
     "_exec_backend",
     "is_help_request",
     "RECURSION_GUARD_ENV",
+    "parse_dispatcher_flags",
+    "BACKEND_REGISTRY",
 ]
 
 
@@ -37,51 +41,167 @@ def is_help_request(remaining_argv: list[str]) -> bool:
     return bool(remaining_argv) and remaining_argv[0] in ("--help", "-h")
 
 
-def _stub_backend(name: str) -> Callable[[list[str]], int]:
-    """Return a stub handler for a backend whose adapter has not landed yet.
+def _stub_backend(name: str, message: str | None = None) -> Callable[[list[str]], int]:
+    """Stub handler for a backend whose adapter has not landed yet.
 
-    Task 2 scaffolding: PR 1's final commit (Task 6) wires the real
-    adapters into this registry via a monkey-patched dict. Until then
-    (or if a user invokes `codex` in PR 1, where Codex ships in PR 2),
-    the stub prints an actionable message and returns rc=42 so the
-    surrounding tests can assert the stub was reached.
+    Codex falls into this bucket in PR 1 (lands in Task 10 / PR 2).
     """
 
     def _run(remaining_argv: list[str]) -> int:
         sys.stderr.write(
-            f"perfxpert-code {name}: adapter not yet implemented in this build.\n"
-            f"  The dispatcher routes correctly; the {name}-adapter lands in a\n"
-            f"  later task (see docs/superpowers/plans/2026-04-19-perfxpert-code-multi-backend-plan.md).\n"
+            message
+            or (
+                f"perfxpert-code {name}: adapter not yet implemented in this build.\n"
+                f"  The {name} adapter ships in a later task.\n"
+            )
         )
         return 42
 
     return _run
 
 
-# Registry of backend-name → handler. Tasks 4b / 5 / 10 replace the stub
-# entries. Keeping the mapping module-level so tests can monkeypatch the
-# registry directly.
+# Registry of backend-name → handler. Tests may monkeypatch the dict.
+# Codex is deliberately a stub in PR 1.
+def _claude_runner(argv: list[str]) -> int:
+    from perfxpert.cli._backend.claude import ClaudeCodeAdapter
+
+    return _run_adapter(ClaudeCodeAdapter(), argv)
+
+
+def _gemini_runner(argv: list[str]) -> int:
+    from perfxpert.cli._backend.gemini import GeminiAdapter
+
+    return _run_adapter(GeminiAdapter(), argv)
+
+
 BACKEND_REGISTRY: Dict[str, Callable[[list[str]], int]] = {
-    "claude": _stub_backend("claude"),
-    "codex": _stub_backend("codex"),
-    "gemini": _stub_backend("gemini"),
+    "claude": _claude_runner,
+    "gemini": _gemini_runner,
+    "codex": _stub_backend(
+        "codex",
+        message=(
+            "perfxpert-code codex: the Codex adapter ships in PR 2 "
+            "(Task 10). Use `perfxpert-code claude` or "
+            "`perfxpert-code gemini` in PR 1.\n"
+        ),
+    ),
 }
+
+
+class DispatcherFlags:
+    """Mutable container for dispatcher-owned flags (Task 6)."""
+
+    __slots__ = (
+        "dry_run",
+        "quiet",
+        "force",
+        "allow_agents_md_append",
+        "remaining",
+    )
+
+    def __init__(self) -> None:
+        self.dry_run: bool = False
+        self.quiet: bool = False
+        self.force: bool = False
+        self.allow_agents_md_append: bool = False
+        self.remaining: List[str] = []
+
+
+def parse_dispatcher_flags(argv: list[str]) -> DispatcherFlags:
+    """Consume dispatcher-owned leading flags; return the remainder.
+
+    Flags:
+
+    * `--dry-run` — run `plan()`, skip writes, skip `spawn()`.
+    * `--quiet` — suppress per-step progress + banner.
+    * `--force` — bypass recursion guard + clobber checks.
+    * `--allow-agents-md-append` — opt-in for appending to tracked
+      CLAUDE.md / AGENTS.md files.
+
+    Flags are consumed greedily from the FRONT of argv; once a
+    non-dispatcher token appears, the remainder is left intact for
+    the backend binary. This means users can write
+    `perfxpert-code claude --dry-run hello` and the `hello` prompt
+    reaches the backend, while `perfxpert-code claude hello --dry-run`
+    treats `--dry-run` as a backend flag (unambiguous).
+    """
+    flags = DispatcherFlags()
+    idx = 0
+    while idx < len(argv):
+        a = argv[idx]
+        if a == "--dry-run":
+            flags.dry_run = True
+        elif a == "--quiet":
+            flags.quiet = True
+        elif a == "--force":
+            flags.force = True
+        elif a == "--allow-agents-md-append":
+            flags.allow_agents_md_append = True
+        else:
+            break
+        idx += 1
+    flags.remaining = list(argv[idx:])
+    return flags
+
+
+def _run_adapter(adapter, remaining_argv: list[str]) -> int:
+    """End-to-end flow: parse flags → install → spawn (or dry-run).
+
+    `adapter` must satisfy `BackendAdapter` (Task 1 Protocol). The
+    backend name is read from `adapter.name`.
+    """
+    # Help passthrough — skip the installer entirely.
+    if is_help_request(remaining_argv):
+        # Just exec the backend with --help; adapter.spawn returns
+        # the exit code if spawn_strategy == "subprocess".
+        env = dict(os.environ)
+        env[RECURSION_GUARD_ENV] = adapter.name
+        return adapter.spawn(remaining_argv, env, Path.cwd())
+
+    flags = parse_dispatcher_flags(remaining_argv)
+
+    # Banner (unless quiet).
+    if not flags.quiet:
+        from perfxpert.cli.opencode_launcher import print_banner
+
+        try:
+            print_banner()
+        except Exception:
+            pass
+
+    try:
+        adapter.install(
+            Path.cwd(),
+            allow_agents_md_append=flags.allow_agents_md_append,
+            dry_run=flags.dry_run,
+            quiet=flags.quiet,
+        )
+    except Exception as exc:
+        sys.stderr.write(
+            f"perfxpert-code {adapter.name}: install failed: {exc}\n"
+        )
+        return 1
+
+    if flags.dry_run:
+        sys.stderr.write(
+            f"[DRY-RUN] Would exec: {adapter.binary_name} {' '.join(flags.remaining)}\n"
+        )
+        return 0
+
+    env = dict(os.environ)
+    env[RECURSION_GUARD_ENV] = adapter.name
+    return adapter.spawn(flags.remaining, env, Path.cwd())
 
 
 def _exec_backend(name: str, remaining_argv: list[str]) -> int:
     """Dispatch to the named backend.
 
-    Responsibilities (Task 2 scope):
+    Responsibilities:
 
     * Recursion guard (R5): refuse if `PERFXPERT_IN_AGENT_SESSION` is
       already set in env — unless `--force` is present in argv.
     * Help passthrough (practical §1.2): `--help` / `-h` short-circuits
-      the installer and forwards to the backend binary. In Task 2 this
-      means the stub adapter just prints its message; once the real
-      adapter lands, it will exec `<backend> --help`.
-
-    The returned int is the exit code surfaced to the caller. On
-    `execvpe` strategy (Task 4b+), control normally never returns.
+      the installer and forwards to the backend binary directly.
     """
     # Recursion guard — refuse if we are already inside an agent session.
     already = os.environ.get(RECURSION_GUARD_ENV, "").strip()
@@ -95,8 +215,6 @@ def _exec_backend(name: str, remaining_argv: list[str]) -> int:
 
     handler = BACKEND_REGISTRY.get(name)
     if handler is None:
-        # Shouldn't happen — route_subcommand gates the name set — but be
-        # defensive so a refactor doesn't silently swallow the mismatch.
         sys.stderr.write(
             f"perfxpert-code: no handler registered for backend {name!r}.\n"
         )
