@@ -1,0 +1,87 @@
+From: AMD ROCm PerfXpert <perfxpert@amd.com>
+Subject: [PATCH] feat(perfxpert/opencode): replace ASCII OPENCODE logo with AMD PerfXpert art
+
+Replaces the 8-letter OPENCODE TUI ASCII wordmark with a 9-letter PERFXPERT
+wordmark, split PERF (left) / XPERT (right). Width stays under 80 columns
+(19 + 1 + 24 = 44 chars combined). The existing shimmer renderer in
+cli/cmd/tui/component/logo.tsx consumes `logo.left` / `logo.right` unchanged,
+so the animation, marker glyphs (_ ^ ~ ,), and shadow semantics all keep
+working.
+
+Also:
+- Replaces the `go` accent (previously "GO") with "PX" (PerfXpert initials).
+  The dialog-go-upsell.tsx keeps its `GoLogo` import; visual swap only.
+- Replaces the non-TTY plain wordmark in cli/ui.ts to spell PERFXPERT.
+- Adds explanatory header/inline comments describing the marker glyph
+  semantics so future maintainers can tweak letters without re-reading
+  logo.tsx.
+
+No brand image assets (.png/.svg/.ico) are bundled into the opencode binary
+(verified via `strings _bundled/opencode | grep -E opencode-(logo|wordmark)`
+returning zero hits), so those assets in packages/console and
+packages/docs are left untouched — they ship only with the web console,
+which perfxpert does not distribute.
+
+Signed-off-by: AMD ROCm PerfXpert team <perfxpert@amd.com>
+---
+ packages/opencode/src/cli/logo.ts | 27 ++++++++++++++++++++++-----
+ packages/opencode/src/cli/ui.ts   |  8 ++++----
+ 2 files changed, 26 insertions(+), 9 deletions(-)
+
+diff --git a/packages/opencode/src/cli/logo.ts b/packages/opencode/src/cli/logo.ts
+--- a/packages/opencode/src/cli/logo.ts
++++ b/packages/opencode/src/cli/logo.ts
+@@ -1,11 +1,27 @@
++// ASCII wordmark renders as "PERF" (left) + "XPERT" (right), separated by the
++// 1-char GAP rendered in ui.ts / logo.tsx.
++// Each letter is 4 cells wide + 1-space separator: left=4 letters×4+3=19 chars,
++// right=5 letters×4+4=24 chars, combined=44 chars (under 80-col terminal width).
++// Marker glyphs: _ shadow-only cell, ^ letter-top + shadow-bottom,
++// ~ shadow-top ▀, , shadow-bottom ▄. See renderer in cli/cmd/tui/component/logo.tsx.
+ export const logo = {
+-  left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
+-  right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
++  left: [
++    "                   ",
++    "█▀▀█ █▀▀█ █▀▀█ █▀▀▀",
++    "█__█ █^^^ █▀▀█ █^^^",
++    "█▀▀▀ ▀▀▀▀ ▀~~▀ ▀~~~",
++  ],
++  right: [
++    "                        ",
++    "▀▄▄▀ █▀▀█ █▀▀█ █▀▀█ ▀▀▀▀",
++    "_██_ █__█ █^^^ █▀▀█ _██_",
++    "▄▀▀▄ █▀▀▀ ▀▀▀▀ ▀~~▀ _▀▀_",
++  ],
+ }
+
++// Small "PX" (PerfXpert initials) glyph used in place of the legacy "GO"
++// upsell accent. The existing dialog-go-upsell.tsx still imports this via
++// `GoLogo` so the export shape is preserved; only the visual changes.
+ export const go = {
+-  left: ["    ", "█▀▀▀", "█_^█", "▀▀▀▀"],
+-  right: ["    ", "█▀▀█", "█__█", "▀▀▀▀"],
++  left: ["    ", "█▀▀█", "█__█", "█▀▀▀"],
++  right: ["    ", "█__█", "_██_", "█__█"],
+ }
+
+diff --git a/packages/opencode/src/cli/ui.ts b/packages/opencode/src/cli/ui.ts
+--- a/packages/opencode/src/cli/ui.ts
++++ b/packages/opencode/src/cli/ui.ts
+@@ -3,11 +3,14 @@ import { EOL } from "os"
+ import { NamedError } from "@opencode-ai/shared/util/error"
+ import { logo as glyphs } from "./logo"
+
++// "PERFXPERT" plain wordmark used when stdout/stderr is not a TTY. Mirrors the
++// PERF (left) + XPERT (right) split rendered in the TUI via cli/logo.ts.
++// Width: 9 letters × 4 cells + 8 separators = 44 columns (still < 80).
+ const wordmark = [
+-  `⠀                                ▄     `,
+-  `█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█`,
+-  `█  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀`,
+-  `▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`,
++  `                                            `,
++  `█▀▀█ █▀▀█ █▀▀█ █▀▀▀ █  █ █▀▀█ █▀▀█ █▀▀█ ▀▀▀▀`,
++  `█  █ █▀▀  █▀▀█ █▀▀   ██  █  █ █▀▀  █▀▀█  ██ `,
++  `█▀▀▀ ▀▀▀▀ ▀  ▀ ▀    █  █ █▀▀▀ ▀▀▀▀ ▀  ▀  ▀▀ `,
+ ]
