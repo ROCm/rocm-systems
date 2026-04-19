@@ -4,8 +4,7 @@ Covers:
 
 * `uninstall` is a perfxpert-owned dispatch subcommand (short-circuits
   before opencode resolution).
-* Invokes the correct adapter's `uninstall()` for claude / gemini.
-* Codex path reports "ships in PR 2".
+* Invokes the correct adapter's `uninstall()` for claude / gemini / codex.
 * Missing backend name → exit 2 with usage message.
 * `--yes` / `PERFXPERT_ASSUME_CONSENT=1` skips the prompt.
 * Round-trip: install → uninstall → files removed (byte-identical
@@ -81,13 +80,33 @@ def test_uninstall_unknown_backend_returns_2(
     assert "unknown backend" in err.lower()
 
 
-def test_uninstall_codex_reports_pr2(
-    isolated_home: Path, capsys: pytest.CaptureFixture
+def test_uninstall_codex_routes_to_adapter(
+    isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rc = main(["uninstall", "codex"])
-    assert rc == 42
-    err = capsys.readouterr().err
-    assert "PR 2" in err
+    """Codex uninstall now dispatches to CodexAdapter.uninstall, not a stub.
+
+    The output must NOT contain the word "stub" or "ships in PR" (those
+    belonged to the PR-1 placeholder message removed in Finding #1).
+    """
+    monkeypatch.setattr("shutil.which", lambda _: None)  # no codex binary
+    # Redirect chdir target to a writable dir inside isolated_home.
+    cwd = isolated_home / "codex-proj"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    import io
+
+    fake_err = io.StringIO()
+    monkeypatch.setattr("sys.stderr", fake_err)
+    rc = main(["uninstall", "--yes", "codex"])
+    err = fake_err.getvalue()
+    # The adapter succeeds even without the binary (best-effort shell-out
+    # plus tomlkit fallback); the key assertion is that we no longer
+    # emit the stub message.
+    assert rc == 0, f"rc={rc}, err={err!r}"
+    assert "stub" not in err.lower()
+    assert "ships in PR" not in err
+    assert "Task 10" not in err
 
 
 # ---------------------------------------------------------------------------
