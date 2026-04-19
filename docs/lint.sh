@@ -1,6 +1,6 @@
 #!/bin/bash
 # docs/lint.sh — Scan all .md files for banned API strings
-# Part of Phase 9 docs audit tooling
+# Part of the docs-audit tooling
 
 set +e
 
@@ -13,13 +13,14 @@ for arg in "$@"; do
 done
 
 # Banned strings — from design spec Section 4 Dimension 1
-# + Phase 9 total-legacy-scrub additions (post-Phase 7.1 cleanup).
+# + total-legacy-scrub additions (post-refactor cleanup).
 #
-# Historical-anchor exception: any hit on a line that contains the phrase
-# "removed in Phase 7.1" is ignored — this lets us keep a searchable
+# Historical-anchor exception: any hit on a line that contains the literal
+# phrase "removed in Phase 7.1" is ignored — this lets us keep a searchable
 # record of removed flags/classes without re-introducing live guidance.
+# The literal string is a load-bearing linter anchor; do not edit it.
 BANNED=(
-  # Phase 9 Dimension 1 (original 9)
+  # Dimension 1 (original 9)
   "interactive\.py"
   "LLMConversation"
   "llm_analyzer\.analyze_with_llm"
@@ -29,7 +30,7 @@ BANNED=(
   "ROCINSIGHT_LLM_"
   "ROCPD_LLM_"
   "\.resume\(\)"
-  # Phase 9 total-legacy-scrub additions
+  # Total-legacy-scrub additions
   "PERFXPERT_USE_AGENTS"
   "ROCINSIGHT_"
   "_route_to_legacy"
@@ -44,7 +45,7 @@ BANNED=(
   "analyze_database("
 )
 
-# Search paths: experimental/python/perfxpert + docs/ (exclude phase specs/plans)
+# Search paths: experimental/python/perfxpert + docs/ (exclude plan directories)
 SEARCH_DIRS=(
   "experimental/python/perfxpert"
   "docs"
@@ -52,19 +53,19 @@ SEARCH_DIRS=(
 
 VIOLATION_COUNT=0
 
-# Scan all .md files (excluding phase specs/plans and git directories).
+# Scan all .md files (excluding plan/spec/audit directories and git directories).
 # Exclusion list is documented in experimental/python/perfxpert/docs/
 # known-issues.md under "Scanner scope limitations → docs/lint.sh".
 # Rationale for each path:
-#   - docs/superpowers/specs: phase specs (historical reference)
-#   - docs/superpowers/plans: phase plans (historical reference)
+#   - docs/superpowers/specs: plan-stage specs (historical reference)
+#   - docs/superpowers/plans: plan-stage plans (historical reference)
 #   - docs/confluence: Confluence-amendment audit artifacts that
 #     describe what was removed / renamed (must reference the old
 #     symbol names to explain what was scrubbed). Not shipped docs.
 #   - .git: internals
 #   - .pytest_cache: test runner artifacts
 #   - perfxpert/ai_analysis: the pre-agentic module tree; the
-#     phase 7.1 rebase deletes the entire directory, so scrubbing
+#     refactor deletes the entire directory, so scrubbing
 #     those files now would produce a merge conflict the rebase
 #     immediately resolves by removing them.
 for dir in "${SEARCH_DIRS[@]}"; do

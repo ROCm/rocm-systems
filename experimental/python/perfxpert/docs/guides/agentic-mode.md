@@ -125,9 +125,10 @@ for how to register a new one.
 
 ## Fallback chain (`PERFXPERT_LLM_FALLBACK_CHAIN`)
 
-Phase 8 introduced a multi-provider fallback chain so a rate-limited or
-unavailable primary provider doesn't force a rerun. Set the env var to a
-comma-separated list of provider names in preference order:
+The multi-provider fallback chain lets a rate-limited or unavailable
+primary provider hand off to another, so users don't have to rerun.
+Set the env var to a comma-separated list of provider names in
+preference order:
 
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and live LLM credentials

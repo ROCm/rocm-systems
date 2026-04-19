@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 docs/link-checker.py — Validate internal Markdown links across docs.
-Part of Phase 9 docs audit tooling.
+Part of the docs-audit tooling.
 
 Scope (what IS checked):
   - Relative file-existence of every `[text](path)` link in .md files
@@ -63,7 +63,7 @@ def find_broken_links(search_root="."):
         # Skip hidden and cache dirs
         if any(part.startswith('.') for part in md_file.parts):
             continue
-        # Skip legacy ai_analysis tree — being deleted by Phase 7.1
+        # Skip legacy ai_analysis tree — being deleted by the agentic refactor
         if 'ai_analysis' in md_file.parts:
             continue
 

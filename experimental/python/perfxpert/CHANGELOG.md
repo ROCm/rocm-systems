@@ -83,7 +83,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `PERFXPERT_*` namespace. The canonical names are
   `PERFXPERT_LLM_ANTHROPIC_KEY`, `PERFXPERT_LLM_OPENAI_KEY`, and the
   standard vendor `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` continue to be
-  honored. A single pre-rename alias (the `ROCPD_LLM_*` prefix — the rest were subsequently dropped) still works with a `DeprecationWarning` as a migration ramp.
+  honored. A single pre-rename alias (the `ROCPD_LLM_*` prefix — the rest were removed in Phase 7.1) still works with a `DeprecationWarning` as a migration ramp.
 - Legacy `ai_analysis` module (`perfxpert/ai_analysis/`) fully removed,
   along with all parity and feature-flag dispatch tests. The
   `PERFXPERT_LEGACY` environment variable is now unrecognized — setting it
@@ -122,7 +122,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `perfxpert doctor` now reports active mode (`agentic` | `legacy`).
 
 ### Changed
-- `PERFXPERT_USE_AGENTS` was subsequently removed along with the toggle code it kept alive.
+- `PERFXPERT_USE_AGENTS` was removed in Phase 7.1, along with the toggle code it kept alive.
 - The single-call LLM entrypoint was subsequently removed; use `perfxpert.agents.runtime.build_session()` + `session.run_root(...)`.
 - **CI matrix inverted**: agentic is the primary test matrix; the
   pre-v0.2.0 matrix was subsequently removed.
@@ -131,13 +131,13 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Deprecated
 - `PERFXPERT_LEGACY` was introduced as a one-minor-version fallback in v0.2.0 and was then subsequently removed.
-- `LLMAnalyzer` was kept as a deprecation stub in v0.2.0 and was subsequently removed.
+- `LLMAnalyzer` was kept as a deprecation stub in v0.2.0 and was removed in Phase 7.1.
 
 ### Removed
 - Pre-agentic interactive workflow module (~4000 LOC: InteractiveSession + WorkflowSession + 7-phase loop) subsequently removed. Replaced by `perfxpert-code` wrapping the bundled opencode TUI. (The 7-phase loop here refers to the user-facing workflow phases — profile → analyze → optimize → re-profile — not release phases.)
 - Pre-agentic LLM conversation module (~600 LOC: streaming + auto-compaction) subsequently removed. Replaced by Agents SDK native sessions.
 - Monolithic fence reference guide subsequently removed. Split into per-agent slices + structured knowledge YAMLs under `perfxpert/knowledge/`.
-- `LLMAnalyzer.analyze_with_llm` and the `_call_<provider>()` private methods were subsequently removed.
+- `LLMAnalyzer.analyze_with_llm` and the `_call_<provider>()` private methods were removed in Phase 7.1.
 - `tests/test_llm_conversation.py` (51 tests of a deleted module) subsequently removed.
 - Conversational-session CLI flags subsequently removed. Users typing the old flags get a migration hint pointing to `perfxpert-code`.
 - `load_reference_guide` export from the pre-agentic tree was subsequently removed (previously relocated to `perfxpert.providers._reference_guide`).
@@ -148,8 +148,8 @@ See [docs/archive/migration-to-agentic.md](docs/archive/migration-to-agentic.md)
 
 ### Backwards-compatible stubs (v0.2.0 only, all subsequently removed)
 
-- `LLMAnalyzer` stub class — still importable in v0.2.0, subsequently removed.
-- `PERFXPERT_USE_AGENTS` env var — no-op in v0.2.0, subsequently removed.
+- `LLMAnalyzer` stub class — still importable in v0.2.0, removed in Phase 7.1.
+- `PERFXPERT_USE_AGENTS` env var — no-op in v0.2.0, removed in Phase 7.1.
 - `PERFXPERT_LEGACY` — fallback toggle in v0.2.0, subsequently removed.
   A user-supplied reference-guide override env var (pre-rename name)
   was also required while `PERFXPERT_LEGACY=1` was active; both were
@@ -160,5 +160,4 @@ See [docs/archive/migration-to-agentic.md](docs/archive/migration-to-agentic.md)
 ## [0.1.x] — 2026-0X-XX and earlier
 
 See git history. v0.1.x ran the pre-agentic path by default. The
-experimental opt-in `PERFXPERT_USE_AGENTS` was available in later v0.1.x
-releases (during the agentic refactor) and was itself subsequently removed.
+experimental opt-in `PERFXPERT_USE_AGENTS` (available in later v0.1.x releases during the agentic refactor) was removed in Phase 7.1.

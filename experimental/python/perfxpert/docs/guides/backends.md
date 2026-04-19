@@ -1,8 +1,8 @@
 # Multi-Backend Launcher (`perfxpert-code <backend>`)
 
 `perfxpert-code` is multi-backend. The default `perfxpert-code`
-invocation still launches the AMD-branded bundled opencode (Phase 7
-deliverable, unchanged). In addition, each supported backend has a
+invocation still launches the AMD-branded bundled opencode (unchanged).
+In addition, each supported backend has a
 subcommand that registers the `perfxpert-mcp` server in the backend's
 native config, stages an `AGENTS.md`-equivalent rendered prompt,
 installs a pre-tool-call gate hook, and then execs the backend's
@@ -22,7 +22,7 @@ the (different) decision for Codex lives in
 
 Users arrive with a backend already chosen — Claude Code, Gemini CLI,
 Codex CLI, or no preference. Forcing everyone through the bundled
-opencode (Phase 7) blocked adoption for Claude Code / Gemini users
+opencode blocked adoption for Claude Code / Gemini users
 who had already invested in their native TUI, muscle memory, and
 auth. The multi-backend launcher lets `perfxpert-code <backend>`
 write the correct MCP registration + gate hook + prompt cache for
@@ -51,9 +51,9 @@ directory is silent. Changing the file set (e.g. adding
 
 ### Default: bundled opencode
 
-No subcommand, no extra install. Phase 7 patched the upstream opencode
-with AMD branding + the STRICT-TOOL-DISCIPLINE stanza + AMD red
-palette; the launcher spawns the bundled binary with `perfxpert-mcp`
+No subcommand, no extra install. The bundled opencode ships with AMD
+branding + the STRICT-TOOL-DISCIPLINE stanza + AMD red palette pre-applied;
+the launcher spawns the bundled binary with `perfxpert-mcp`
 already wired into its config.
 
 ```bash

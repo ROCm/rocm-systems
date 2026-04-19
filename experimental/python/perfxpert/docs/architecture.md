@@ -122,11 +122,10 @@ Level 0 — Knowledge YAML (PR)         pytest tests/test_knowledge
 The following symbols were deleted during the agentic refactor and are
 no longer present:
 
-- `interactive.py`, `llm_conversation.py` — bespoke LLM-session state
-  machine, superseded by OpenAI Agents SDK sessions.
-- `perfxpert/ai_analysis/` module — superseded by `perfxpert/agents/`.
-- `PERFXPERT_LEGACY` env var — no longer recognized.
-- `PERFXPERT_USE_AGENTS` env var — no longer recognized.
+- `interactive.py`, `llm_conversation.py` — bespoke LLM-session state machine (removed in Phase 7.1), superseded by OpenAI Agents SDK sessions.
+- `perfxpert/ai_analysis/` module — removed in Phase 7.1 and superseded by `perfxpert/agents/`.
+- `PERFXPERT_LEGACY` env var — no longer recognized (removed in Phase 7.1).
+- `PERFXPERT_USE_AGENTS` env var — no longer recognized (removed in Phase 7.1).
 
 Consult the git history or [CHANGELOG.md](../CHANGELOG.md) for the
 old code.
