@@ -103,11 +103,15 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 - **Getting started**
   - [Getting started guide](docs/guides/getting-started.md)
   - [Agentic mode: air-gap vs LLM, provider ladder](docs/guides/agentic-mode.md)
+  - [Multi-backend launcher (`perfxpert-code claude|gemini|codex`)](docs/guides/backends.md)
+    — register perfxpert with your native Claude Code / Gemini CLI
+    TUI while keeping the perfxpert tool-priority gate.
 - **Architecture (v0.2.0+)**
   - [Architecture overview](docs/architecture.md)
   - [Architecture index](docs/architecture/README.md)
     - [Agent hierarchy (Root / Analysis / Recommendation / specialists)](docs/architecture/agent-hierarchy.md)
     - [Gate cascade (5 correctness gates as middleware)](docs/architecture/gate-cascade.md)
+    - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
 - **Integration**
   - [Integration index](docs/integration/README.md)
     - [MCP server (`perfxpert-mcp`) — 34 READ_ONLY tools](docs/integration/mcp-server.md)
