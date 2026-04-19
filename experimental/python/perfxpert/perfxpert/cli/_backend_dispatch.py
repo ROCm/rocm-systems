@@ -44,7 +44,9 @@ def is_help_request(remaining_argv: list[str]) -> bool:
 def _stub_backend(name: str, message: str | None = None) -> Callable[[list[str]], int]:
     """Stub handler for a backend whose adapter has not landed yet.
 
-    Codex falls into this bucket in PR 1 (lands in Task 10 / PR 2).
+    All three initial backends (claude / gemini / codex) ship real
+    adapters as of PR 2; this helper is retained for future backends
+    that are added to the registry before their adapter code lands.
     """
 
     def _run(remaining_argv: list[str]) -> int:
@@ -61,7 +63,7 @@ def _stub_backend(name: str, message: str | None = None) -> Callable[[list[str]]
 
 
 # Registry of backend-name → handler. Tests may monkeypatch the dict.
-# Codex is deliberately a stub in PR 1.
+# Codex adapter was wired in PR 2 (Task 10).
 def _claude_runner(argv: list[str]) -> int:
     from perfxpert.cli._backend.claude import ClaudeCodeAdapter
 
@@ -74,17 +76,16 @@ def _gemini_runner(argv: list[str]) -> int:
     return _run_adapter(GeminiAdapter(), argv)
 
 
+def _codex_runner(argv: list[str]) -> int:
+    from perfxpert.cli._backend.codex import CodexAdapter
+
+    return _run_adapter(CodexAdapter(), argv)
+
+
 BACKEND_REGISTRY: Dict[str, Callable[[list[str]], int]] = {
     "claude": _claude_runner,
     "gemini": _gemini_runner,
-    "codex": _stub_backend(
-        "codex",
-        message=(
-            "perfxpert-code codex: the Codex adapter ships in PR 2 "
-            "(Task 10). Use `perfxpert-code claude` or "
-            "`perfxpert-code gemini` in PR 1.\n"
-        ),
-    ),
+    "codex": _codex_runner,
 }
 
 

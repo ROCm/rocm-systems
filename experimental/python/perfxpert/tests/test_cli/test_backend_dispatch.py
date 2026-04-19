@@ -65,28 +65,46 @@ def test_route_doctor_still_perfxpert_owned() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_codex_stub_returns_42(capsys, monkeypatch) -> None:
-    """Codex ships in PR 2 (Task 10); in PR 1 its stub returns 42."""
+def test_codex_adapter_dispatches_cleanly(monkeypatch) -> None:
+    """PR 2 Task 10: CodexAdapter is wired into the dispatcher; the
+    old PR-1-stub-returns-42 behavior is gone. Invoking the handler
+    reaches CodexAdapter.install() (not the stub-42 path)."""
     monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
-    rc = _backend_dispatch._exec_backend("codex", [])
-    assert rc == 42
-    err = capsys.readouterr().err
-    assert "codex" in err
-    assert "PR 2" in err
+    import perfxpert.cli._backend.codex as codex_mod
+
+    calls = {"install": 0}
+
+    def _fake_install(self, cwd, **kw):
+        calls["install"] += 1
+        from perfxpert.cli._backend.protocol import InstallReport
+
+        return InstallReport(backend=self.name)
+
+    def _fake_spawn(self, argv, env, cwd):
+        return 0
+
+    monkeypatch.setattr(codex_mod.CodexAdapter, "install", _fake_install)
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", _fake_spawn)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+
+    rc = _backend_dispatch._exec_backend("codex", ["--quiet", "hello"])
+    # rc==0 proves we reached the adapter path (not the old stub-42).
+    assert rc == 0
+    assert calls["install"] == 1
 
 
-@pytest.mark.parametrize("name", ["claude", "gemini"])
-def test_real_adapters_registered_for_claude_and_gemini(
+@pytest.mark.parametrize("name", ["claude", "gemini", "codex"])
+def test_real_adapters_registered_for_all_three_backends(
     name: str, monkeypatch
 ) -> None:
-    """Task 6: real adapter runners replace the Task-2 stubs for
-    claude + gemini. Invoking the handler reaches the install flow
-    (we don't verify the full install here — other test files do — but
-    we DO verify the handler is not the stub-42 path)."""
+    """Task 6 (claude, gemini) + PR-2 Task 10 (codex): real adapter
+    runners replace the Task-2 stubs. Invoking the handler reaches
+    the install flow (we don't verify the full install here — other
+    test files do — but we DO verify the handler is not the stub-42
+    path)."""
     monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
-    # Replace the adapter's install method with a sentinel so we
-    # short-circuit without real file writes.
     import perfxpert.cli._backend.claude as claude_mod
+    import perfxpert.cli._backend.codex as codex_mod
     import perfxpert.cli._backend.gemini as gemini_mod
 
     calls = {"install": 0}
@@ -99,13 +117,14 @@ def test_real_adapters_registered_for_claude_and_gemini(
 
     monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "install", _fake_install)
     monkeypatch.setattr(gemini_mod.GeminiAdapter, "install", _fake_install)
+    monkeypatch.setattr(codex_mod.CodexAdapter, "install", _fake_install)
 
-    # Also stub spawn so we don't try to execvpe.
     def _fake_spawn(self, argv, env, cwd):
         return 0
 
     monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "spawn", _fake_spawn)
     monkeypatch.setattr(gemini_mod.GeminiAdapter, "spawn", _fake_spawn)
+    monkeypatch.setattr(codex_mod.CodexAdapter, "spawn", _fake_spawn)
     monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
 
     rc = _backend_dispatch._exec_backend(name, ["--quiet", "hello"])
@@ -130,20 +149,55 @@ def test_recursion_guard_refuses_when_env_set(
 
 
 def test_recursion_guard_force_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--force` in the argv bypasses the recursion refusal."""
+    """`--force` in the argv bypasses the recursion refusal.
+
+    Post-PR-2: all three backends have real adapters; we stub the
+    codex adapter's install + spawn to a sentinel rc so we can
+    assert the guard was bypassed (rc != 3).
+    """
+    import perfxpert.cli._backend.codex as codex_mod
+
     monkeypatch.setenv(RECURSION_GUARD_ENV, "claude")
-    # codex stub returns 42 — use it to verify the guard is bypassed.
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter,
+        "install",
+        lambda self, cwd, **kw: _make_install_report(self.name),
+    )
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter, "spawn", lambda self, a, e, c: 77
+    )
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     rc = _backend_dispatch._exec_backend("codex", ["--force", "hello"])
-    assert rc == 42
+    # rc==77 proves the spawn ran (guard was bypassed), rc==3 would
+    # mean the guard fired.
+    assert rc == 77
 
 
 def test_recursion_guard_empty_env_does_not_trigger(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Empty guard env → dispatcher proceeds normally."""
+    import perfxpert.cli._backend.codex as codex_mod
+
     monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
-    # codex stub returns 42 when guard permits dispatch.
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter,
+        "install",
+        lambda self, cwd, **kw: _make_install_report(self.name),
+    )
+    monkeypatch.setattr(
+        codex_mod.CodexAdapter, "spawn", lambda self, a, e, c: 77
+    )
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
     rc = _backend_dispatch._exec_backend("codex", [])
-    assert rc == 42
+    assert rc == 77
+
+
+def _make_install_report(name: str):
+    """Helper: return a zero-cost InstallReport sentinel."""
+    from perfxpert.cli._backend.protocol import InstallReport
+
+    return InstallReport(backend=name)
 
 
 # ---------------------------------------------------------------------------
