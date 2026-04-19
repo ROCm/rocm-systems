@@ -45,10 +45,12 @@ BANNED=(
   "analyze_database("
 )
 
-# Search paths: experimental/python/perfxpert + docs/ (exclude plan directories)
+# Search paths: experimental/python/perfxpert only. The repo-root docs/
+# directory contains general ROCm monorepo docs (continuous-integration.md,
+# gardening.md, etc.) — no perfxpert content. All perfxpert .md files live
+# under experimental/python/perfxpert/.
 SEARCH_DIRS=(
   "experimental/python/perfxpert"
-  "docs"
 )
 
 VIOLATION_COUNT=0
