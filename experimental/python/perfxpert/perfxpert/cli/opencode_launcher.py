@@ -84,6 +84,13 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
 _PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"doctor", "install-patches"})
 
 
+# Cycle-2 Task 2: third-party agent backends the launcher dispatches to via
+# `perfxpert.cli._backend.claude|gemini|codex` adapters. Codex is listed
+# here so the dispatcher routes correctly, but the adapter itself ships
+# in PR 2 — the PR-1 dispatcher raises NotImplementedError for codex.
+_BACKEND_SUBCOMMANDS: frozenset[str] = frozenset({"claude", "codex", "gemini"})
+
+
 def _perfxpert_version() -> str:
     try:
         import perfxpert
@@ -296,6 +303,10 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
       - ``"perfxpert"``: the first positional is a perfxpert-handled
         subcommand (``doctor``); ``argv_out`` is forwarded to
         ``python -m perfxpert``.
+      - ``"backend"`` (cycle-2 Task 2): the first positional is a
+        third-party agent backend (``claude`` / ``codex`` / ``gemini``);
+        ``argv_out`` is forwarded to
+        ``perfxpert.cli._backend_dispatch._exec_backend``.
       - ``"opencode_subcommand"``: the first positional is a known opencode
         subcommand; ``argv_out`` is forwarded verbatim to opencode.
       - ``"opencode_default"``: no recognized subcommand; ``argv_out`` is
@@ -318,6 +329,12 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
 
     if first_positional in _PERFXPERT_DISPATCH_SUBCOMMANDS:
         return ("perfxpert", list(argv))
+
+    # Cycle-2 Task 2: route claude/codex/gemini to the backend dispatcher.
+    # Checked BEFORE the opencode-subcommand table so a name collision
+    # (if upstream opencode ever added one) still routes to the adapter.
+    if first_positional in _BACKEND_SUBCOMMANDS:
+        return ("backend", list(argv))
 
     if first_positional in _OPENCODE_SUBCOMMANDS:
         return ("opencode_subcommand", list(argv))
@@ -459,6 +476,18 @@ def main(argv: list[str] | None = None) -> int:
     # installed yet.
     if kind == "perfxpert":
         return _exec_perfxpert_subcommand(argv_out)
+
+    # Cycle-2 Task 2 — route to a third-party agent adapter
+    # (claude / codex / gemini). The dispatcher handles recursion-guard,
+    # help passthrough, and the stub "not implemented" responses until
+    # Tasks 4b/5/10 register the real adapters.
+    if kind == "backend":
+        # argv_out[0] is the backend name (route_subcommand gated it).
+        backend_name = argv_out[0]
+        remaining = argv_out[1:]
+        from perfxpert.cli._backend_dispatch import _exec_backend
+
+        return _exec_backend(backend_name, remaining)
 
     try:
         binary = resolve_opencode_binary()
