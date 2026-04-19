@@ -140,43 +140,70 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
     return hr;
     }
     if (isStore) {
-      // Flat store with OOB sink: redirect out-of-bounds writes to
-      // private scratch memory to avoid illegal memory access faults.
-      Value *lo = ctx.B.CreateZExt(mbuf.dw0, ctx.i64Ty);
-      Value *hi = ctx.B.CreateAnd(ctx.B.CreateZExt(mbuf.dw1, ctx.i64Ty),
-                               ConstantInt::get(ctx.i64Ty, 0xFFFF));
-      Value *basePtr = ctx.B.CreateOr(lo, ctx.B.CreateShl(hi, 32), "buf_base");
-      Value *totalOff = ctx.B.CreateZExt(voffset, ctx.i64Ty);
-      if (mbuf.haveSoffset)
-        totalOff = ctx.B.CreateAdd(totalOff, ctx.B.CreateZExt(soffset, ctx.i64Ty));
-      Value *numRec = ctx.B.CreateZExt(mbuf.dw2, ctx.i64Ty);
-      Value *oob = ctx.B.CreateICmpUGE(totalOff, numRec, "buf_oob");
-
-      Value *realAddr = ctx.B.CreateAdd(basePtr, totalOff, "buf_addr");
-      Value *realPtr = ctx.B.CreateIntToPtr(realAddr, PointerType::get(ctx.C, 0));
-
-      Function *parentFn = ctx.kernel;
-      IRBuilder<> entryB(&parentFn->getEntryBlock(),
-                          parentFn->getEntryBlock().getFirstInsertionPt());
-      AllocaInst *sink = entryB.CreateAlloca(ctx.i32Ty, /*AddrSpace=*/5,
-                                              nullptr, "oob_sink");
-      sink->setAlignment(Align(4));
-      Value *sinkFlat = ctx.B.CreateAddrSpaceCast(sink, PointerType::get(ctx.C, 0));
-      Value *storePtr = ctx.B.CreateSelect(oob, sinkFlat, realPtr,
-                                        "store_ptr");
-
+      // Use the gfx942 buffer-store intrinsic directly, exactly
+      // mirroring the load path above. The hardware's BUFFER unit
+      // handles OOB silently (the write is dropped when the per-lane
+      // offset is >= num_records), so no software OOB sink is needed.
+      //
+      // The earlier implementation lowered every BUFFER_STORE_* to a
+      // generic `store` against an `addrspacecast(alloca i32, addrspace(5))`
+      // OOB sink (selected via `select i1 oob, sink, real`). That was
+      // wrong on three independent axes:
+      //
+      //   1. Size mismatch. The sink alloca was always `i32` (4 B), but
+      //      `BUFFER_STORE_DWORDX4` writes 16 B. For OOB lanes the
+      //      flat_store_dwordx4 walked 12 B past the sink and into
+      //      either the next per-thread scratch slot or unmapped
+      //      scratch — root cause of the gfx1250 Triton vector-add
+      //      SIGSEGV (R1).
+      //
+      //   2. Forced scratch enablement. Adding any `addrspace(5)`
+      //      alloca that survives PromoteMemToReg makes the AMDGPU
+      //      backend emit `.amdhsa_enable_private_segment 1` plus
+      //      `.amdhsa_private_segment_fixed_size > 0`. Salmon's KD
+      //      doesn't request `flat_scratch_init` (we model only the
+      //      source ABI's user-SGPR set), so on entry FLAT_SCRATCH is
+      //      undefined; any flat instruction touching the scratch
+      //      aperture (including the OOB sink path) is a fault waiting
+      //      to happen. Native gfx942 Triton emits `buffer_store_*`
+      //      directly and reports `private_segment_fixed_size 0` /
+      //      `enable_private_segment 0` — confirming hardware OOB
+      //      handling is the right primitive.
+      //
+      //   3. Asymmetric with the load path. Loads already go through
+      //      `amdgcn.raw.buffer.load` and rely on hardware OOB clamp.
+      //      Routing stores through a software select+sink was an
+      //      avoidable divergence whose only justification ("avoids
+      //      flat-memory lowering with conditional branches breaking
+      //      under -O1+ SIMT optimisations" — comment block above)
+      //      doesn't apply when we use the buffer intrinsic itself.
+      //
+      // EXEC gating: like the load, the call is emitted unconditionally;
+      // the hardware EXEC mask suppresses inactive-lane writes natively.
+      // We still wrap in `emitUnderExec` so that within an
+      // already-narrowed IR-level lane window (e.g. an inner if-then
+      // branch handled earlier in the kernel) the store body is
+      // dominated by the handler's lane-active diamond, keeping
+      // EXEC and IR-level dominance in sync — same pattern other
+      // store handlers (DS, scratch) use.
+      Type *storeTy;
+      Value *val;
       if (isSubDword) {
-        Type *memTy = Type::getIntNTy(ctx.C, loadBits);
-        Value *val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, vdata), memTy);
-        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
+        storeTy = Type::getIntNTy(ctx.C, loadBits);
+        val = ctx.B.CreateTrunc(ctx.regs.readReg32(ctx.B, vdata), storeTy);
       } else if (dwords == 1) {
-        Value *val = ctx.regs.readReg32(ctx.B, vdata);
-        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
+        storeTy = ctx.i32Ty;
+        val = ctx.regs.readReg32(ctx.B, vdata);
       } else {
         auto *vecTy = FixedVectorType::get(ctx.i32Ty, dwords);
-        Value *val = ctx.regs.readRegVec(ctx.B, vdata, vecTy);
-        ctx.emitUnderExec([&] { ctx.B.CreateStore(val, storePtr); });
+        storeTy = vecTy;
+        val = ctx.regs.readRegVec(ctx.B, vdata, vecTy);
       }
+      Function *bufSt = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::amdgcn_raw_buffer_store, {storeTy});
+      ctx.emitUnderExec([&] {
+        ctx.B.CreateCall(bufSt, {val, srd, voffset, soffset, auxFlags});
+      });
       hr.handled = true;
     return hr;
     }
