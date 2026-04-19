@@ -419,6 +419,122 @@ protected:
 
         return outMergedDev;
     }
+
+    // Composite block: Configure CAST/WRR environment variables.
+    // Must be called before InitNetIb().
+    //   qpsPerConn  — NCCL_IB_QPS_PER_CONNECTION
+    //   schedWeight — RCCL_IB_QP_SCHED_WEIGHT string ("0" = equal, "0.8" = EWMA)
+    //   splitData   — NCCL_IB_SPLIT_DATA_ON_QPS (0 = WRR-only, 1 = split+WRR)
+    void SetupCastEnv(int qpsPerConn, const char* schedWeight, int splitData) {
+        // Switch net plugin to IB-CAST so sendComm is ncclIbSendComm from net_ib_cast.cc.
+        net_ = &netIbCast;
+        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_ENABLE",          "1",         1), 0);
+        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_WRR_ENABLE",      "1",         1), 0);
+        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_WEIGHT",          schedWeight, 1), 0);
+        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_UPDATE_INTERVAL", "50",        1), 0);
+        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_RESET_INTERVAL",  "60000",     1), 0);
+        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_SPLIT_DATA_MIN",  "65536",     1), 0);
+        char qpsBuf[16];
+        snprintf(qpsBuf, sizeof(qpsBuf), "%d", qpsPerConn);
+        ASSERT_EQ(setenv("NCCL_IB_QPS_PER_CONNECTION",       qpsBuf,      1), 0);
+        char splitBuf[4];
+        snprintf(splitBuf, sizeof(splitBuf), "%d", splitData);
+        ASSERT_EQ(setenv("NCCL_IB_SPLIT_DATA_ON_QPS",        splitBuf,    1), 0);
+    }
+
+    // On return: rank 0 owns listenComm+recvComm, rank 1 owns sendComm.
+    // Caller is responsible for closing all comms.
+    void SetupCastConnection(int dev,
+                             void** listenComm, void** sendComm, void** recvComm) {
+        const int rank = MPIEnvironment::world_rank;
+        const int peer = 1 - rank;
+        ncclNetHandle_t handle;
+        memset(&handle, 0, sizeof(handle));
+
+        if (rank == 0) {
+            ASSERT_EQ(CreateListenComm(dev, &handle, listenComm), ncclSuccess);
+            ASSERT_NE(*listenComm, nullptr);
+
+            MPI_Send(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
+
+            for (int i = 0; i < kMaxRetryAttempts && *recvComm == nullptr; i++) {
+                ASSERT_EQ(AcceptConnection(*listenComm, recvComm), ncclSuccess);
+                if (*recvComm == nullptr) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(*recvComm, nullptr);
+        } else {
+            MPI_Recv(&handle, sizeof(handle), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
+                     MPI_STATUS_IGNORE);
+
+            for (int i = 0; i < kMaxRetryAttempts && *sendComm == nullptr; i++) {
+                ncclResult_t r = ConnectToRemote(dev, &handle, sendComm);
+                ASSERT_EQ(r, ncclSuccess);
+                if (*sendComm == nullptr) usleep(kPollIntervalUs);
+            }
+            ASSERT_NE(*sendComm, nullptr);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Composite block: Single-message send/recv pair for CAST tests.
+    // rank 0 posts irecv and waits; rank 1 posts isend (with retry) and waits.
+    // Both sides must have already registered buf/mhandle against their comm.
+    void CastDoSendRecv(int rank, void* sendComm, void* recvComm,
+                        void* buf, size_t size, int tag, void* mhandle) {
+        void* req = nullptr;
+        if (rank == 0) {
+            void*  bufs[1]    = {buf};
+            size_t sizes[1]   = {size};
+            int    tags[1]    = {tag};
+            void*  handles[1] = {mhandle};
+            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req), ncclSuccess);
+            ASSERT_NE(req, nullptr);
+            int sz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+        } else {
+            PostSendWithRetry(sendComm, buf, size, tag, mhandle, &req);
+            int sz = 0;
+            ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+        }
+    }
+
+    // Composite block: Concurrent N-message send/recv for CAST tests.
+    // All N sends/recvs are posted before any completion is waited on, allowing
+    // the transport to pipeline multiple WRs in flight simultaneously.
+    //
+    // bufs[i] / baseTag+i must be pre-registered via mhandle (a single MR
+    // covering the whole multi-message buffer is fine).
+    //
+    // rank 0: posts N irecvs, then waits for all N completions.
+    // rank 1: posts N isends (with per-message retry), then waits for all N.
+    void CastDoBatchSendRecv(int rank, void* sendComm, void* recvComm,
+                             char* sendBuf, char* recvBuf,
+                             size_t msgSz, int nMsgs, int baseTag, void* mhandle) {
+        std::vector<void*> reqs(nMsgs, nullptr);
+        if (rank == 0) {
+            for (int i = 0; i < nMsgs; i++) {
+                void*  bufs[1]    = {recvBuf + i * msgSz};
+                size_t sizes[1]   = {msgSz};
+                int    tags[1]    = {baseTag + i};
+                void*  handles[1] = {mhandle};
+                ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &reqs[i]), ncclSuccess);
+                ASSERT_NE(reqs[i], nullptr);
+            }
+            for (int i = 0; i < nMsgs; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs[i], &sz, 10000), ncclSuccess);
+            }
+        } else {
+            for (int i = 0; i < nMsgs; i++) {
+                PostSendWithRetry(sendComm, sendBuf + i * msgSz, msgSz, baseTag + i, mhandle, &reqs[i]);
+            }
+            for (int i = 0; i < nMsgs; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs[i], &sz, 10000), ncclSuccess);
+            }
+        }
+    }
 };
 
 #endif // MPI_TESTS_ENABLED
