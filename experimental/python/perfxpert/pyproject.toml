@@ -19,6 +19,10 @@ dependencies = [
     "jsonschema>=4.0",
     "httpx>=0.25",
     "mcp>=1.0",
+    # tomlkit is used by the Codex backend adapter to round-trip edits
+    # to ~/.codex/config.toml while preserving user comments/formatting.
+    # Required (not optional) so `perfxpert-code codex` works out of the box.
+    "tomlkit>=0.12",
 ]
 
 [project.optional-dependencies]
