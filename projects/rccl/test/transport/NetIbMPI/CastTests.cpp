@@ -153,4 +153,68 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastTokenSumInvariantAfterConsumption
+//
+// White-box: 2 QPs, 50/50 tokens. After 10 sends: initTokens immutable,
+// sum(activeQpTokens)==activeTotTokens.
+// =============================================================================
+TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 128;
+    constexpr int    kNMsgs   = 10;
+    char sendBuf[kMsgSize * kNMsgs], recvBuf[kMsgSize * kNMsgs];
+    for (size_t i = 0; i < sizeof(sendBuf); i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+    memset(recvBuf, 0, sizeof(recvBuf));
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, sizeof(sendBuf), NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+    }
+
+    // Post all 10 sends/recvs concurrently, then wait for all completions.
+    CastDoBatchSendRecv(rank, sendComm, recvComm, sendBuf, recvBuf, kMsgSize, kNMsgs, 700, mhandle);
+
+    if (rank == 1) {
+        struct ncclIbCastSchedState state = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+
+        ASSERT_TRUE(state.schedInit);
+        EXPECT_EQ(state.initTotTokens, 100);
+        EXPECT_EQ(state.initQpTokens[0], 50);
+        EXPECT_EQ(state.initQpTokens[1], 50);
+        int activeSum = 0;
+        for (int i = 0; i < state.nqps; i++) activeSum += state.activeQpTokens[i];
+        EXPECT_EQ(activeSum, state.activeTotTokens);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
