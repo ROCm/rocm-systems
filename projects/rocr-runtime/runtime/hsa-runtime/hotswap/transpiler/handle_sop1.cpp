@@ -264,6 +264,44 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // s_ff0_i32_b{32,64} — find first 0 bit (lowest position), -1 if
+  // none. SOPInstructions.td:278-279 omits an LLVM ISel pattern, so
+  // we lower directly: invert the source and reuse the cttz path
+  // shared with V_FFBL_B32 (handle_valu_small_ops.cpp), then patch
+  // the all-ones-input case to -1 since llvm.cttz with
+  // is_zero_poison=false returns the bitwidth (32 / 64) for a zero
+  // input rather than the AMDGPU's -1 sentinel.
+  if (sop == SemOp::S_FF0_I32_B32) {
+    Function *cttz = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::cttz,
+                                                       {ctx.i32Ty});
+    Value *src = op.src(0);
+    Value *inv = ctx.B.CreateNot(src, "ff0_inv");
+    Value *raw = ctx.B.CreateCall(
+        cttz, {inv, ConstantInt::getFalse(ctx.i1Ty)}, "ff0_raw");
+    Value *isAllOnes = ctx.B.CreateICmpEQ(
+        src, ConstantInt::getAllOnesValue(ctx.i32Ty), "ff0_allones");
+    Value *res = ctx.B.CreateSelect(
+        isAllOnes, ctx.B.getInt32(-1), raw, "ff0");
+    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_FF0_I32_B64) {
+    Function *cttz64 = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::cttz, {ctx.i64Ty});
+    Value *src64 = op.src64(0);
+    Value *inv = ctx.B.CreateNot(src64, "ff0_inv64");
+    Value *raw = ctx.B.CreateCall(
+        cttz64, {inv, ConstantInt::getFalse(ctx.i1Ty)}, "ff0_raw64");
+    Value *rawTrunc = ctx.B.CreateTrunc(raw, ctx.i32Ty, "ff0_raw32");
+    Value *isAllOnes = ctx.B.CreateICmpEQ(
+        src64, ConstantInt::getAllOnesValue(ctx.i64Ty), "ff0_allones64");
+    Value *res = ctx.B.CreateSelect(
+        isAllOnes, ctx.B.getInt32(-1), rawTrunc, "ff0_64");
+    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::S_FLBIT_I32_B64) {
     Function *ctlz64 = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::ctlz, {ctx.i64Ty});

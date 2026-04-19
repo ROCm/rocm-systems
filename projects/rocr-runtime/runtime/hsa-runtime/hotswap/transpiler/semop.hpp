@@ -54,6 +54,15 @@ enum class SemOp : uint16_t {
   // -- SOP1 --
   S_MOV_B32, S_MOV_B64, S_NOT_B32, S_NOT_B64,
   S_BREV_B32, S_FF1_I32_B32, S_FF1_I32_B64,
+  // s_ff0_i32_b{32,64}: find first 0 bit (lowest position), returning
+  // -1 when the source is all-ones. SOPInstructions.td:278-279 (no
+  // LLVM ISel pattern is provided, so the instruction is only emitted
+  // by hand-written asm / inline-asm — but the corpus contains it).
+  // Lowers to `cttz(~src, is_zero_poison=false)` with a `cmov` to -1
+  // on the all-ones input path, mirroring the V_FFBL_B32 / V_FFBH_U32
+  // shape (the AMDGPU instruction returns 0xFFFFFFFF in the no-bit
+  // case rather than the LLVM intrinsic's bitwidth-wide return).
+  S_FF0_I32_B32, S_FF0_I32_B64,
   S_FLBIT_I32_B32, S_FLBIT_I32_B64,
   // s_flbit_i32 / s_flbit_i32_i64: signed find-leading-bit-not-equal-to-
   // sign-bit. Lowers to llvm.amdgcn.sffbh, the dedicated AMDGPU
