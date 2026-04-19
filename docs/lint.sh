@@ -58,6 +58,9 @@ VIOLATION_COUNT=0
 # Rationale for each path:
 #   - docs/superpowers/specs: phase specs (historical reference)
 #   - docs/superpowers/plans: phase plans (historical reference)
+#   - docs/confluence: Confluence-amendment audit artifacts that
+#     describe what was removed / renamed (must reference the old
+#     symbol names to explain what was scrubbed). Not shipped docs.
 #   - .git: internals
 #   - .pytest_cache: test runner artifacts
 #   - perfxpert/ai_analysis: the pre-agentic module tree; the
@@ -81,11 +84,12 @@ for dir in "${SEARCH_DIRS[@]}"; do
       fi
     done
   done < <(find "$dir" -name "*.md" \
-    -not -path "*/docs/superpowers/specs/*" \
-    -not -path "*/docs/superpowers/plans/*" \
-    -not -path "*/.git/*" \
-    -not -path "*/.pytest_cache/*" \
-    -not -path "*/perfxpert/ai_analysis/*")
+    -not -path "*docs/superpowers/specs/*" \
+    -not -path "*docs/superpowers/plans/*" \
+    -not -path "*docs/confluence/*" \
+    -not -path "*.git/*" \
+    -not -path "*.pytest_cache/*" \
+    -not -path "*perfxpert/ai_analysis/*")
 done
 
 if [ $VIOLATION_COUNT -eq 0 ]; then
