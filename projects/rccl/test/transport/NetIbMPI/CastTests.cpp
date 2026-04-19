@@ -820,4 +820,111 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastEnableDisableSplitData
+//
+// White-box: Toggle splitData on an established connection using a 131072-byte
+// message (at the per-QP threshold boundary with nqps=2, splitDataMin=65536).
+// Phase 1 (splitData=false): oneQp WRR → 1 token consumed
+// Phase 2 (splitData=true):  split path  → 0 tokens consumed
+// Phase 3 (splitData=false): oneQp WRR → 1 token consumed
+// =============================================================================
+TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    // Start with splitData=0 so we can verify the toggle
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    // 131072 bytes: dataPerQp=65536 ≥ splitDataMin → split path when splitData=true
+    //                                               → WRR  path when splitData=false
+    constexpr size_t kMsgSz = 131072;
+    std::vector<char> sendBuf(kMsgSz, 0xBC);
+    std::vector<char> recvBuf(kMsgSz, 0x00);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Warm-up send: fires updateSchedParmsTry so epoch is consumed and future
+    // SetSchedParms calls are not overwritten by staged params on next isend.
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1799, mhandle);
+
+    // Now arm WRR tokens and force splitData=false via API (overrides any cached env).
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, 65536), 0);
+    }
+
+    // Phase 1: splitData=false → oneQp WRR → 1 token consumed
+    int activeTotBefore1ed = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore1ed = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1800, mhandle);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_TRUE(st.schedInit);
+        int delta = activeTotBefore1ed - st.activeTotTokens;
+        EXPECT_EQ(delta, 1);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, true, 65536), 0);
+    }
+
+    // Phase 2: splitData=true → split path → 0 tokens consumed
+    int activeTotBefore2ed = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore2ed = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1801, mhandle);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        int delta = activeTotBefore2ed - st.activeTotTokens;
+        EXPECT_EQ(delta, 0) << "split path must not consume tokens";
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, 65536), 0);
+    }
+
+    // Phase 3: splitData=false → oneQp WRR → 1 token consumed
+    int activeTotBefore3ed = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore3ed = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1802, mhandle);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        int delta = activeTotBefore3ed - st.activeTotTokens;
+        EXPECT_EQ(delta, 1);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
