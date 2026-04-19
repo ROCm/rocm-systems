@@ -10,8 +10,6 @@ Env var ``PERFXPERT_LLM_FALLBACK_CHAIN`` is a comma-separated list of
 registered provider names, e.g. ``openai,anthropic,claude-code``. The
 first name is tried first; each subsequent name is tried only on
 ``RateLimitError`` from the previous one.
-
-See docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md.
 """
 
 from __future__ import annotations

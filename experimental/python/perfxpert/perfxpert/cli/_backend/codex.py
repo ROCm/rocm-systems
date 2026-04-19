@@ -195,10 +195,9 @@ class CodexAdapter:
 
         **API drift note.** The original plan assumed a
         `codex projects list --json` command existed. As of April 2026
-        it does NOT; trust is config-only (see decision record
-        `docs/decisions/2026-04-19-codex-hook-surface.md` under the
-        "API drift" section). We read the config file directly,
-        consulting `[projects."<abs-cwd>"].trust_level`.
+        it does NOT; trust is config-only (rationale in the local
+        Codex hook-surface decision record). We read the config file
+        directly, consulting `[projects."<abs-cwd>"].trust_level`.
         """
         cfg = self._user_codex_config_path(home)
         if not cfg.is_file():

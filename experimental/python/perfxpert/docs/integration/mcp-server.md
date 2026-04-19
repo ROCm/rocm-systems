@@ -435,8 +435,8 @@ Surfaces per backend:
 
 - **Claude Code** — native `PreToolUse` hook inside
   `.claude/settings.json` with `permissionDecision: deny` +
-  `permissionDecisionReason` (per
-  `docs/decisions/2026-04-19-claude-hook-surface.md`).
+  `permissionDecisionReason`. The decision record lives locally in
+  the contributor's working copy.
 - **Gemini** — `allowedTools: ["mcp_perfxpert_*"]` in
   `~/.gemini/settings.json` + runtime sidecar at
   `~/.gemini/runtime/perfxpert-gate-<session_id>.json`.

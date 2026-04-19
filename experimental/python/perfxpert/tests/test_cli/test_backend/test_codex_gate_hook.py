@@ -1,9 +1,8 @@
 """Tests for `perfxpert.cli._gate_hooks.codex` (Task 4.6 Codex-portion, PR 2).
 
-Codex's native PreToolUse hook only intercepts Bash as of April 2026
-(see `docs/decisions/2026-04-19-codex-hook-surface.md`), so the gate
-hook module raises `GateHookUnsupported` unconditionally. That's the
-prompt-layer-only fallback per plan guardrail.
+Codex's native PreToolUse hook only intercepts Bash as of April 2026,
+so the gate hook module raises `GateHookUnsupported` unconditionally.
+That's the prompt-layer-only fallback per plan guardrail.
 
 The spec's key invariant is:
   * `install()` MUST raise BEFORE MCP registration runs so no

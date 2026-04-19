@@ -1,9 +1,8 @@
 """Claude Code gate hook — native PreToolUse surface (Task 4.6).
 
-Per decision record `docs/decisions/2026-04-19-claude-hook-surface.md`
-(Status: DECIDED (native-pretooluse), 2026-04-18), the Claude gate
-uses Claude Code's native `PreToolUse` hook configured inside
-`.claude/settings.json`.
+Per the local Claude hook-surface decision record (Status: DECIDED
+(native-pretooluse), 2026-04-18), the Claude gate uses Claude Code's
+native `PreToolUse` hook configured inside `.claude/settings.json`.
 
 Install plan:
 

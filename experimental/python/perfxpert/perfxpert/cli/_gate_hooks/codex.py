@@ -14,8 +14,8 @@ that requirement.
 
 Per plan guardrail "If Codex's hook surface probe returns ambiguous,
 default to prompt-layer-only": we default to prompt-layer-only here.
-The full research + rationale lives in
-`docs/decisions/2026-04-19-codex-hook-surface.md`.
+The full research + rationale is captured in the local Codex hook
+surface decision record.
 
 This module exposes `install(cwd)` / `uninstall(cwd)` as a uniform
 gate-hook interface for the adapter. `install()` raises
@@ -73,9 +73,8 @@ def install(cwd: Path, *, env: dict | None = None) -> NoReturn:
         "Write, or other tool types) as of April 2026 — cannot "
         "enforce the perfxpert gate mechanically. Degrading to "
         "prompt-layer-only enforcement (rejection-language stanza "
-        "in the staged AGENTS.md). See "
-        "docs/decisions/2026-04-19-codex-hook-surface.md for "
-        "rationale + re-visit conditions."
+        "in the staged AGENTS.md). Rationale + re-visit conditions "
+        "are captured in the local Codex hook-surface decision record."
     )
 
 

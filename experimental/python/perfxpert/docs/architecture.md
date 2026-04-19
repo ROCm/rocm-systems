@@ -1,7 +1,7 @@
 # perfxpert Architecture
 
-_Last refreshed: v0.2.0. Source of truth:
-`docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`._
+_Last refreshed: v0.2.0. Source of truth: local multi-agent-perfxpert
+design spec (kept in the contributor's working copy)._
 
 ## High-level shape
 
@@ -122,7 +122,7 @@ old code.
 
 ## Pointers
 
-- Full spec: `docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`
-- Phase plans: `docs/superpowers/plans/2026-04-17-perfxpert-phase*`
+- Full spec and phase plans: living documents in the contributor's
+  working copy (not tracked in the repo).
 - Contributor entry: `CONTRIBUTING.md`
 - RFCs: `docs/rfcs/`

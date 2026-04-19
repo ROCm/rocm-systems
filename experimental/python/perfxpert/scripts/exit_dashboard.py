@@ -6,8 +6,8 @@ Usage:
 
 Runs before any breaking change. Output determines GO vs NO-GO.
 
-Spec reference: `docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`
-§7 Go/No-Go table (9 rows).
+The Go/No-Go table (9 rows) is defined in the multi-agent design spec
+(local contributor doc, §7).
 """
 
 from __future__ import annotations

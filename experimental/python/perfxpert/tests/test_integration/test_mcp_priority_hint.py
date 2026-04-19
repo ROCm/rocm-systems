@@ -1,9 +1,9 @@
 """MCP tool descriptions lead with the perfxpert-first priority hint.
 
-See issue 1 in docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md:
-opencode-hosted LLMs ignored perfxpert MCP tools in favor of read/glob/grep for
-GPU-performance queries. Reinforcing tool priority at the schema layer is a
-belt-and-suspenders counterpart to the default-prompt patch.
+Opencode-hosted LLMs ignored perfxpert MCP tools in favor of
+read/glob/grep for GPU-performance queries. Reinforcing tool priority
+at the schema layer is a belt-and-suspenders counterpart to the
+default-prompt patch.
 """
 
 from __future__ import annotations
