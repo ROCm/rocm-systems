@@ -73,14 +73,15 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
     "analyze": "Analyze a rocprofiler-sdk trace database for GPU bottlenecks",
     "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
     "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
+    "install-patches": "Build the patched opencode submodule and install into perfxpert/_bundled/opencode",
     "providers": "List LLM providers and configuration status",
 }
 
-# Subcommand names the launcher itself dispatches to `python -m perfxpert`.
-# ``doctor`` is the only one that must short-circuit BEFORE
-# resolve_opencode_binary() (so the health check works on a fresh install
-# without opencode on disk).
-_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"doctor"})
+# Subcommand names the launcher itself dispatches to `python -m perfxpert`
+# or handles inline. ``doctor`` and ``install-patches`` must short-circuit
+# BEFORE resolve_opencode_binary() (so they work on a fresh install, without
+# opencode on disk — install-patches is precisely what produces opencode).
+_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"doctor", "install-patches"})
 
 
 def _perfxpert_version() -> str:
@@ -110,16 +111,43 @@ def _wellknown_opencode_paths() -> "list[Path]":
     ]
 
 
+def _warn_unpatched_fallback(path: Path) -> None:
+    """Emit a one-line warning when falling back to an unpatched opencode.
+
+    The bundled binary carries perfxpert's tool-priority gate and AMD
+    rebrand; anything on disk (well-known path / PATH) is the vanilla
+    upstream binary. Warn once so the user knows the gate is inactive
+    and tells them how to build the bundled copy.
+    """
+    if os.environ.get("PERFXPERT_SILENCE_UNPATCHED_WARNING", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return
+    sys.stderr.write(
+        "\033[33mWARNING: using unpatched upstream opencode at "
+        f"{path}; tool-priority gate + AMD rebrand not active.\n"
+        "  Run: perfxpert-code install-patches   (builds the bundled patched opencode)\n"
+        "  Silence: export PERFXPERT_SILENCE_UNPATCHED_WARNING=1\033[0m\n"
+    )
+
+
 def resolve_opencode_binary() -> Path:
     """Locate the opencode binary.
 
-    Priority:
-    1. ``$PERFXPERT_OPENCODE_PATH`` (user override; must exist or raise)
-    2. ``perfxpert/_bundled/opencode`` (per-platform wheel)
-    3. ``$HOME/.opencode/bin/opencode`` and other well-known paths
-       (upstream installer default)
-    4. ``shutil.which("opencode")`` on PATH (via require_tool install hint)
+    Priority (Phase 8 — bundled patched binary wins over upstream):
+
+    1. ``$PERFXPERT_OPENCODE_PATH`` — explicit override, power users.
+    2. ``perfxpert/_bundled/opencode`` — OUR patched bundle (preferred).
+    3. ``$HOME/.opencode/bin/opencode`` and other well-known install dirs
+       (upstream, unpatched — WARN on fallthrough).
+    4. ``shutil.which("opencode")`` on PATH (upstream, unpatched — WARN).
     5. Final actionable error with install command hint.
+
+    When falling back past the bundled binary (layers 3 and 4), a
+    yellow warning is printed to stderr so the user knows the
+    tool-priority gate + AMD rebrand patches aren't active.
     """
     override = os.environ.get("PERFXPERT_OPENCODE_PATH")
     if override:
@@ -131,7 +159,8 @@ def resolve_opencode_binary() -> Path:
             )
         return p
 
-    # Bundled binary (per-platform wheel ships this under _bundled/)
+    # Bundled binary (per-platform wheel ships this under _bundled/).
+    # This MUST win over any upstream install so users get our patches.
     try:
         with resources.as_file(resources.files("perfxpert") / "_bundled" / "opencode") as p:
             if p.is_file():
@@ -139,16 +168,19 @@ def resolve_opencode_binary() -> Path:
     except (ModuleNotFoundError, FileNotFoundError):
         pass
 
-    # Well-known install locations (upstream installer puts it at ~/.opencode/bin/)
+    # Well-known install locations (upstream installer puts it at ~/.opencode/bin/).
+    # This is the UNPATCHED upstream — warn the user so they know our gate is off.
     for candidate in _wellknown_opencode_paths():
         if candidate.is_file() and os.access(candidate, os.X_OK):
+            _warn_unpatched_fallback(candidate)
             return candidate
 
-    # PATH fallback with install helper
+    # PATH fallback with install helper — also unpatched; warn.
     try:
         require_tool("opencode", allow_install=True)
         on_path = shutil.which("opencode")
         if on_path:
+            _warn_unpatched_fallback(Path(on_path))
             return Path(on_path)
     except Exception:
         pass
@@ -156,7 +188,8 @@ def resolve_opencode_binary() -> Path:
     raise FileNotFoundError(
         "opencode binary not found. Install it with:\n"
         "  curl -fsSL https://opencode.ai/install.sh | bash\n"
-        "or set PERFXPERT_OPENCODE_PATH / install a platform wheel that bundles opencode."
+        "or run: perfxpert-code install-patches   (builds the bundled patched opencode)\n"
+        "or set PERFXPERT_OPENCODE_PATH to point at an existing binary."
     )
 
 
@@ -292,8 +325,99 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
     return ("opencode_default", list(argv))
 
 
+def _run_install_patches(argv: list[str]) -> int:
+    """Run scripts/build-bundled-opencode.sh.
+
+    The script lives alongside the perfxpert source tree; from a wheel
+    install it is reachable because pyproject includes the scripts/
+    directory via the `perfxpert` package. We look for it relative to
+    this module first, then walk up to the repo root for editable
+    installs.
+    """
+    # Path discovery — search candidate locations for the build script.
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent.parent.parent / "scripts" / "build-bundled-opencode.sh",  # editable install
+        Path.cwd() / "scripts" / "build-bundled-opencode.sh",                 # dev cwd
+    ]
+    script: Path | None = None
+    for c in candidates:
+        if c.is_file():
+            script = c
+            break
+
+    if script is None:
+        sys.stderr.write(
+            "\033[31mperfxpert-code install-patches: build-bundled-opencode.sh not found.\n"
+            "  Expected alongside perfxpert source at experimental/python/perfxpert/scripts/.\n"
+            "  This command is for editable/source installs; wheel users should already\n"
+            "  have a bundled binary — if not, reinstall perfxpert from source.\033[0m\n"
+        )
+        return 2
+
+    # Forward remaining argv (e.g. --skip-install) to the build script.
+    cmd = ["bash", str(script), *argv[1:]]
+    print(f"perfxpert-code install-patches: running {script.name}")
+    try:
+        proc = subprocess.run(cmd, check=False)
+    except KeyboardInterrupt:
+        return 130
+    return proc.returncode
+
+
+def _inject_perfxpert_agent_for_run(argv_out: list[str]) -> list[str]:
+    """Force ``--agent perfxpert`` on ``opencode run`` when the user did
+    not pass ``--agent`` explicitly.
+
+    opencode's ``run`` subcommand otherwise defaults to ``agent=build``,
+    which ignores our bundled AGENTS.md (tool-priority gate + MCP wiring).
+    We only inject for ``run``; other subcommands (``stats``, ``auth``,
+    etc.) don't take an ``--agent`` flag.
+
+    Users can still override by passing ``--agent <something>``
+    explicitly. They can opt out of the auto-inject with
+    ``PERFXPERT_NO_AUTO_AGENT=1``.
+    """
+    if os.environ.get("PERFXPERT_NO_AUTO_AGENT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return argv_out
+
+    # First non-flag positional must be "run".
+    run_idx: int | None = None
+    for i, tok in enumerate(argv_out):
+        if tok.startswith("-"):
+            continue
+        if tok == "run":
+            run_idx = i
+        break  # stop at first positional either way
+
+    if run_idx is None:
+        return argv_out
+
+    # User already specified --agent somewhere?
+    if any(tok == "--agent" or tok.startswith("--agent=") for tok in argv_out):
+        return argv_out
+
+    # Insert after `run`. argv is [maybe-flags..., 'run', message_tokens...].
+    new_argv = list(argv_out)
+    new_argv.insert(run_idx + 1, "--agent")
+    new_argv.insert(run_idx + 2, "perfxpert")
+    return new_argv
+
+
 def _exec_perfxpert_subcommand(argv: list[str]) -> int:
-    """Shell out to ``python -m perfxpert <argv...>``."""
+    """Dispatch a perfxpert-owned subcommand.
+
+    ``install-patches`` is handled inline (invokes the bundled build
+    script); all other dispatch-subcommands shell out to
+    ``python -m perfxpert <argv...>``.
+    """
+    if argv and argv[0] == "install-patches":
+        return _run_install_patches(argv)
+
     cmd = [sys.executable, "-m", "perfxpert", *argv]
     try:
         proc = subprocess.run(cmd, check=False)
@@ -357,6 +481,13 @@ def main(argv: list[str] | None = None) -> int:
     # so MCP wiring + AGENTS.md instructions apply without polluting the user's cwd.
     runtime_cfg_dir = _prepare_runtime_config_dir(config_dir)
 
+    # Phase 8 fix — force `--agent perfxpert` on `run` when the user did
+    # not override. opencode's `run` subcommand otherwise defaults to
+    # `agent=build`, which loads the stock prompt; `perfxpert` loads
+    # AGENTS.md with the tool-priority gate.  MUST run BEFORE `cmd` is
+    # constructed from argv_out.
+    argv_out = _inject_perfxpert_agent_for_run(argv_out)
+
     cmd = [str(binary), *argv_out]
 
     # Pass through most of the user env; opencode needs LLM API keys and rocprofv3 envs.
@@ -365,6 +496,18 @@ def main(argv: list[str] | None = None) -> int:
     env = dict(os.environ)
     # Recursion guard marker (spec §5.8 / R10)
     env["PERFXPERT_IN_OPENCODE_SESSION"] = "1"
+
+    # Phase 8 fix — point opencode at our bundled config regardless of cwd.
+    # Previously `perfxpert-code run ...` preserved the user's CWD (so they
+    # could reference files in their project), which meant opencode never
+    # picked up the bundled opencode.json → users got the default `build`
+    # agent instead of our `perfxpert` agent, and the tool-priority gate in
+    # AGENTS.md never loaded. OPENCODE_CONFIG=<file> force-loads our
+    # bundled opencode.json globally; the user's own opencode.json (if any)
+    # still merges on top.
+    bundled_cfg_file = runtime_cfg_dir / "opencode.json"
+    if bundled_cfg_file.is_file() and "OPENCODE_CONFIG" not in env:
+        env["OPENCODE_CONFIG"] = str(bundled_cfg_file)
 
     # Subcommand dispatch:
     #   - Known opencode subcommands (stats/run/auth/…) are NOT executed from

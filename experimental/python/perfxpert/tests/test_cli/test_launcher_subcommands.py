@@ -147,6 +147,299 @@ def test_dispatch_set_contains_doctor() -> None:
     assert "doctor" in _PERFXPERT_DISPATCH_SUBCOMMANDS
 
 
+def test_dispatch_set_contains_install_patches() -> None:
+    """Phase 8: install-patches must short-circuit before opencode resolution
+    (it's the command that CREATES the opencode binary; it'd deadlock if it
+    required opencode first)."""
+    assert "install-patches" in _PERFXPERT_DISPATCH_SUBCOMMANDS
+
+
+def test_install_patches_listed_in_perfxpert_subcommands() -> None:
+    """Help banner must discover install-patches."""
+    assert "install-patches" in _PERFXPERT_SUBCOMMANDS
+    assert _PERFXPERT_SUBCOMMANDS["install-patches"].strip()
+
+
+def test_route_install_patches_is_perfxpert_owned() -> None:
+    kind, out = route_subcommand(["install-patches"])
+    assert kind == "perfxpert"
+    assert out == ["install-patches"]
+
+
+# ---------------------------------------------------------------------------
+# Bundled-binary priority (Phase 8): the launcher must prefer
+# perfxpert/_bundled/opencode over upstream installs on disk.
+# ---------------------------------------------------------------------------
+
+
+class TestBundledPriority:
+    """resolve_opencode_binary() priority order:
+       env override → _bundled → well-known → PATH.
+
+    Phase 8 requirement: the bundled binary wins over
+    ~/.opencode/bin/opencode (upstream, unpatched).
+    """
+
+    def test_bundled_wins_over_wellknown(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """If both bundled and upstream exist, we pick bundled."""
+        # Stub importlib.resources so _bundled/opencode is "present".
+        bundled = tmp_path / "bundled" / "opencode"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_text("#!/bin/sh\nexit 0\n")
+        bundled.chmod(0o755)
+
+        # Also create an upstream well-known entry — it must NOT win.
+        upstream = tmp_path / "home" / ".opencode" / "bin" / "opencode"
+        upstream.parent.mkdir(parents=True)
+        upstream.write_text("#!/bin/sh\nexit 1\n")
+        upstream.chmod(0o755)
+
+        # Make well-known list point at the upstream binary.
+        monkeypatch.setattr(
+            opencode_launcher,
+            "_wellknown_opencode_paths",
+            lambda: [upstream],
+        )
+
+        # Patch importlib.resources.files() for _bundled lookup.
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _fake_as_file(p):
+            yield bundled
+
+        class _FakeTraversable:
+            def __truediv__(self, other):
+                return self
+
+            def is_file(self):
+                return True
+
+        monkeypatch.setattr(
+            opencode_launcher.resources, "as_file", _fake_as_file
+        )
+        monkeypatch.setattr(
+            opencode_launcher.resources,
+            "files",
+            lambda _pkg: _FakeTraversable(),
+        )
+        monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+
+        resolved = opencode_launcher.resolve_opencode_binary()
+        assert resolved == bundled, (
+            f"bundled must win over upstream; got {resolved}"
+        )
+
+    def test_env_override_wins_over_bundled(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """PERFXPERT_OPENCODE_PATH trumps bundled — power-user escape hatch."""
+        explicit = tmp_path / "mycustom" / "opencode"
+        explicit.parent.mkdir(parents=True)
+        explicit.write_text("#!/bin/sh\nexit 0\n")
+        explicit.chmod(0o755)
+
+        monkeypatch.setenv("PERFXPERT_OPENCODE_PATH", str(explicit))
+        resolved = opencode_launcher.resolve_opencode_binary()
+        assert resolved == explicit
+
+    def test_wellknown_emits_warning_when_bundled_absent(
+        self,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        """Falling through to upstream must warn the user that patches aren't active."""
+        upstream = tmp_path / "home" / ".opencode" / "bin" / "opencode"
+        upstream.parent.mkdir(parents=True)
+        upstream.write_text("#!/bin/sh\nexit 0\n")
+        upstream.chmod(0o755)
+
+        # Bundled absent.
+        class _FakeTraversable:
+            def __truediv__(self, other):
+                return self
+
+            def is_file(self):
+                return False
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _fake_as_file(p):
+            yield tmp_path / "bundled" / "missing"
+
+        monkeypatch.setattr(
+            opencode_launcher.resources, "as_file", _fake_as_file
+        )
+        monkeypatch.setattr(
+            opencode_launcher.resources,
+            "files",
+            lambda _pkg: _FakeTraversable(),
+        )
+        monkeypatch.setattr(
+            opencode_launcher,
+            "_wellknown_opencode_paths",
+            lambda: [upstream],
+        )
+        monkeypatch.delenv("PERFXPERT_OPENCODE_PATH", raising=False)
+        monkeypatch.delenv("PERFXPERT_SILENCE_UNPATCHED_WARNING", raising=False)
+
+        resolved = opencode_launcher.resolve_opencode_binary()
+        assert resolved == upstream
+
+        captured = capsys.readouterr()
+        assert "unpatched" in captured.err.lower()
+        assert "install-patches" in captured.err
+
+
+class TestRunAutoAgentInject:
+    """Phase 8: `perfxpert-code run ...` must load the perfxpert agent
+    so AGENTS.md (with the tool-priority gate) applies.
+
+    opencode's `run` otherwise defaults to agent=build and ignores our
+    bundled opencode.json. The launcher injects `--agent perfxpert` when
+    the user did not already specify `--agent`.
+    """
+
+    def test_inject_adds_agent_perfxpert_for_run(self) -> None:
+        out = opencode_launcher._inject_perfxpert_agent_for_run(
+            ["run", "optimize kernel X"]
+        )
+        assert out == ["run", "--agent", "perfxpert", "optimize kernel X"]
+
+    def test_inject_preserves_explicit_agent(self) -> None:
+        out = opencode_launcher._inject_perfxpert_agent_for_run(
+            ["run", "--agent", "build", "explain this"]
+        )
+        # User override wins — inject is a no-op.
+        assert out == ["run", "--agent", "build", "explain this"]
+
+    def test_inject_handles_agent_equals_form(self) -> None:
+        out = opencode_launcher._inject_perfxpert_agent_for_run(
+            ["run", "--agent=plan", "my message"]
+        )
+        assert out == ["run", "--agent=plan", "my message"]
+
+    def test_inject_noop_for_non_run_subcommand(self) -> None:
+        # stats / auth / models don't take --agent; we must NOT inject.
+        assert opencode_launcher._inject_perfxpert_agent_for_run(["stats"]) == [
+            "stats"
+        ]
+        assert opencode_launcher._inject_perfxpert_agent_for_run(
+            ["models", "anthropic"]
+        ) == ["models", "anthropic"]
+
+    def test_inject_honors_opt_out_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PERFXPERT_NO_AUTO_AGENT", "1")
+        out = opencode_launcher._inject_perfxpert_agent_for_run(
+            ["run", "explain"]
+        )
+        # Opt-out → no inject.
+        assert out == ["run", "explain"]
+
+    def test_main_run_sets_opencode_config_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """The launcher must set OPENCODE_CONFIG so opencode loads our
+        bundled opencode.json even when `run` keeps the user's CWD."""
+        fake_bin = tmp_path / "opencode"
+        fake_bin.write_text("#!/bin/sh\nexit 0\n")
+        fake_bin.chmod(0o755)
+        fake_cfg = tmp_path / "cfg"
+        fake_cfg.mkdir()
+        (fake_cfg / "opencode.json").write_text("{}")
+
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+            lambda: fake_bin,
+        )
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_config_dir",
+            lambda: fake_cfg,
+        )
+        monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+        monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
+
+        captured: dict[str, object] = {}
+
+        def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured["env"] = kwargs.get("env", {})
+            return _FakeProc(0)
+
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
+        )
+        rc = main(["run", "hello"])
+        assert rc == 0
+        env = captured["env"]
+        assert isinstance(env, dict)
+        cfg = env.get("OPENCODE_CONFIG")
+        assert cfg is not None
+        assert cfg.endswith("opencode.json"), cfg
+
+    def test_main_run_preserves_user_opencode_config(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """If user already exported OPENCODE_CONFIG, don't clobber it."""
+        fake_bin = tmp_path / "opencode"
+        fake_bin.write_text("#!/bin/sh\nexit 0\n")
+        fake_bin.chmod(0o755)
+        fake_cfg = tmp_path / "cfg"
+        fake_cfg.mkdir()
+        (fake_cfg / "opencode.json").write_text("{}")
+
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_opencode_binary",
+            lambda: fake_bin,
+        )
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.resolve_config_dir",
+            lambda: fake_cfg,
+        )
+        monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+        monkeypatch.setenv("OPENCODE_CONFIG", "/user/custom.json")
+
+        captured: dict[str, object] = {}
+
+        def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured["env"] = kwargs.get("env", {})
+            return _FakeProc(0)
+
+        monkeypatch.setattr(
+            "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
+        )
+        rc = main(["run", "hello"])
+        assert rc == 0
+        env = captured["env"]
+        assert env.get("OPENCODE_CONFIG") == "/user/custom.json"  # type: ignore[union-attr]
+
+
+def test_main_install_patches_dispatches_inline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`perfxpert-code install-patches` must invoke the build script,
+    NOT `python -m perfxpert install-patches` (which doesn't exist)."""
+    captured: dict[str, object] = {}
+
+    def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        captured["cmd"] = cmd
+        return _FakeProc(0)
+
+    monkeypatch.setattr(
+        "perfxpert.cli.opencode_launcher.subprocess.run", _fake_run
+    )
+    rc = main(["install-patches"])
+    assert rc == 0
+    cmd = captured["cmd"]
+    # The inline handler invokes `bash <path>/build-bundled-opencode.sh`.
+    assert isinstance(cmd, list)
+    assert cmd[0] == "bash"
+    assert cmd[1].endswith("build-bundled-opencode.sh")
+
+
 # ---------------------------------------------------------------------------
 # main() — end-to-end dispatch, mocked at subprocess.run.
 # ---------------------------------------------------------------------------
@@ -242,7 +535,9 @@ def test_main_run_passes_prompt_through(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert rc == 0
     cmd = captured["cmd"]
     assert cmd[0] == str(fake_bin)
-    assert cmd[1:] == ["run", "explain this kernel"]
+    # Phase 8 auto-inject: `run` without explicit --agent gets
+    # `--agent perfxpert` so AGENTS.md (tool-priority gate) loads.
+    assert cmd[1:] == ["run", "--agent", "perfxpert", "explain this kernel"]
     assert captured["kwargs"].get("cwd") is None  # type: ignore[union-attr]
 
 
