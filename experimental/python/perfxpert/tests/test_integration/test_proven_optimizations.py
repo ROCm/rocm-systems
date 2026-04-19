@@ -34,7 +34,7 @@ def _get_total_kernel_duration_ns(db_path: str) -> int:
     """Sum all kernel durations from the DB.
 
     Supports two schemas:
-    - Synthetic Phase 7 PR 1 fixtures: table has an explicit `duration_ns` column
+    - Synthetic fixtures: table has an explicit `duration_ns` column
     - Real rocprofv3 fixtures: duration derived from `(end_ns - start_ns)`
     Both use UUID-suffixed table names (rocpd_kernel_dispatch_<uuid>).
     """

@@ -85,6 +85,6 @@ Update `tests/test_knowledge/test_gpu_specs.py`:
 
 ## Related docs
 
-- Phase 1 GPU schema (spec §6.2 Task 2)
+- GPU schema (spec §6.2 Task 2)
 - AMD GPU data sheets: https://www.amd.com/en/products/specifications/processors
 - CDNA architecture docs: https://rocmdocs.amd.com

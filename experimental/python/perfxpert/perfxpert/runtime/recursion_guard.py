@@ -1,6 +1,6 @@
 """Opencode-in-opencode recursion guard (spec §5.8, review N8).
 
-When the opencode binary is bundled as a perfxpert provider (see Phase 2
+When the opencode binary is bundled as a perfxpert provider (see
 providers/opencode_model.py), a naively-configured session could recurse:
   perfxpert-code (opencode TUI) → MCP → agent with provider=opencode →
   subprocess opencode → MCP → … forever.
@@ -39,7 +39,7 @@ def ensure_not_recursive(provider: str) -> None:
 def mark_entry() -> None:
     """Mark the current process as running inside an opencode session.
 
-    Called by cli/opencode_launcher.py (Phase 4) immediately before exec'ing
+    Called by cli/opencode_launcher.py immediately before exec'ing
     the bundled opencode binary.
     """
     os.environ[_ENV_VAR] = "1"

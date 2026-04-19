@@ -3,7 +3,7 @@
 All notable changes to perfxpert will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## vNEXT — Phase 7.1
+## vNEXT
 
 ### Removed
 - **BREAKING**: pre-rename API-key env vars from the old project name are
@@ -94,7 +94,7 @@ See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
 - `PERFXPERT_USE_AGENTS` env var still recognized (no-op).
 - `PERFXPERT_LEGACY=1` reroutes to the pre-v0.2.0 path with a stderr warning
   (required a user-supplied reference-guide override env var under the
-  old pre-rename name — no longer honored in Phase 7.1; see Removed above).
+  old pre-rename name — no longer honored; see Removed above).
 
 ---
 
@@ -102,4 +102,4 @@ See [docs/migration-to-agentic.md](docs/migration-to-agentic.md).
 
 See git history. v0.1.x ran the legacy (pre-agentic) path by default.
 `PERFXPERT_USE_AGENTS=1` was the experimental opt-in in later v0.1.x
-releases (Phase 4 of the agentic refactor).
+releases (during the agentic refactor).

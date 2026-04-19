@@ -36,5 +36,5 @@ def test_recursion_guard_documented_in_agents_md():
     # AGENTS.md covers the master agent's mandatory behavior; recursion guard
     # is enforced at the launcher level, so this test just confirms the file
     # exists and is nontrivial. The actual recursion-guard enforcement happens
-    # in perfxpert/runtime/recursion_guard.py (Phase 3 deliverable).
+    # in perfxpert/runtime/recursion_guard.py.
     assert len(content) > 500

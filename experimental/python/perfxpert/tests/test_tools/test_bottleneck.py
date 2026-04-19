@@ -164,10 +164,10 @@ def test_classify_trace_only_memcpy_above_threshold_returns_non_data_insufficien
     too sparse to make a confident memory_transfer claim.
 
     NOTE: the agentic path (run_analysis) currently forces data_insufficient
-    for all no-PMC traces as a Phase 6 design decision. This test validates
-    the pure rule-based classify_from_metrics() tool — which has no such
-    override — so that the tool itself remains correct and does not return
-    data_insufficient (it returns mixed, indicating uncertainty).
+    for all no-PMC traces by design. This test validates the pure rule-based
+    classify_from_metrics() tool — which has no such override — so that the
+    tool itself remains correct and does not return data_insufficient (it
+    returns mixed, indicating uncertainty).
     """
     # User has Tier 1 trace only. Only memcpy_pct extracted. No PMC counters.
     result = bottleneck.classify_from_metrics({"memcpy_pct": 0.25})

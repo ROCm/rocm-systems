@@ -21,10 +21,10 @@ REQUIRED_FENCE_FILES = [
 
 @pytest.mark.parametrize("name", REQUIRED_FENCE_FILES)
 def test_fence_file_within_400_lines(name):
-    """Phase 2 creates these fence files. If missing, test is skipped (xfail
-    on CI where Phase 2 has landed)."""
+    """Each agent ships a fence slice under agents/fence/. If missing,
+    test is skipped (a split fence is required for the agent runtime)."""
     path = FENCE_DIR / name
     if not path.exists():
-        pytest.skip(f"{name} not yet present (Phase 2 deliverable)")
+        pytest.skip(f"{name} not yet present")
     n = path.read_text().count("\n") + 1
     assert n <= 400, f"{name} has {n} lines (cap 400)"

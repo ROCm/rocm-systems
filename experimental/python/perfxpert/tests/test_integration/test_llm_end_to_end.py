@@ -4,7 +4,7 @@ Skipped when:
   * Neither OPENAI_API_KEY nor ANTHROPIC_API_KEY is set,
   * the memory_bound fixture DB is missing,
   * the framework's live SDK path (`_sdk_invoke`) is still a stub
-    (Phase 8 wires the real Agents-SDK runtime; this test activates
+    (the real Agents-SDK runtime wires it up; this test activates
     automatically once that landing happens), or
   * the live provider returns a quota/auth/transient error (environmental,
     not a code defect — see docs/known-issues.md).
@@ -53,7 +53,7 @@ def _live_sdk_path_implemented() -> bool:
 )
 @pytest.mark.skipif(
     not _live_sdk_path_implemented(),
-    reason="framework._sdk_invoke is still a Phase-5 stub; live path lands in Phase 8",
+    reason="framework._sdk_invoke is still a stub; live path pending SDK wire-up",
 )
 def test_llm_enabled_produces_rec_type():
     # Import SDK exception taxonomies lazily so the module loads even when a

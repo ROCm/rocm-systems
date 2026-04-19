@@ -29,7 +29,7 @@ def tool_class(klass: ToolClass) -> Callable[[T], T]:
         @tool_class(ToolClass.EXECUTION)
         def apply_patch(file: str, diff: str) -> bool: ...
 
-    The MCP server (Phase 4) only registers functions annotated with
+    The MCP server only registers functions annotated with
     ToolClass.READ_ONLY. CI test test_mcp_exposure.py enforces that no
     EXECUTION tool is in the MCP registry.
     """

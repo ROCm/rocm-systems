@@ -1,7 +1,7 @@
 """Rule-based intent classifier for air-gap routing (spec §2, review C2).
 
-This is a thin middleware wrapper around perfxpert.tools.intent.classify
-(Phase 1). Lives in runtime/ because it is ALWAYS consulted — even in
+This is a thin middleware wrapper around perfxpert.tools.intent.classify.
+Lives in runtime/ because it is ALWAYS consulted — even in
 LLM-enabled mode the deterministic verdict is computed first and the LLM
 may only refine it. This preserves the air-gap parity invariant (§5):
 handoff targets are byte-identical with and without LLM.

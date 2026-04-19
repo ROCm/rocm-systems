@@ -107,7 +107,7 @@ def test_check_binary_missing_returns_false(monkeypatch):
 
 
 def test_check_pylib_present_returns_true():
-    # mcp is installed in this env (Phase 4 landed it)
+    # mcp is a required runtime dep and should be importable
     ok, detail = check_tool_available("mcp")
     # Either mcp is installed OR the test env doesn't have it — both are OK.
     assert isinstance(ok, bool)

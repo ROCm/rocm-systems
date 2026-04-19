@@ -1,6 +1,6 @@
 # Migrating from Legacy perfxpert to the Agentic Path
 
-> **Historical — the legacy path has been removed in Phase 7.1.** This document
+> **Historical — the legacy path has been removed.** This document
 > is retained for reference only. New users can disregard `PERFXPERT_LEGACY`
 > entirely; the agentic runtime is the only path.
 
@@ -8,10 +8,10 @@
 
 
 As of v0.2.0, perfxpert's execution path is the **agentic runtime** (OpenAI
-Agents SDK + ~45 deterministic tools + split fence). The Phase-4 opt-in flag
+Agents SDK + ~45 deterministic tools + split fence). The former opt-in flag
 `PERFXPERT_USE_AGENTS=1` has become a no-op (the behavior is now default).
-The Phase-2-Phase-5 legacy path is gated behind `PERFXPERT_LEGACY=1` for
-one minor release and will be deleted in **vX.Y+1**.
+The old legacy path used to be gated behind `PERFXPERT_LEGACY=1` for one
+minor release; that path is now deleted and the env var is unrecognized.
 
 ## What changed
 
@@ -67,7 +67,7 @@ which file controls which behavior.
 Historical: setting `PERFXPERT_LEGACY=1` used to route analyze_database()
 through the pre-v0.2.0 path. That safety net, and the accompanying
 pre-rename reference-guide override env var (from the old project
-name), were both removed in Phase 7.1 — `PERFXPERT_LEGACY=1` is now a
+name), were both removed — `PERFXPERT_LEGACY=1` is now a
 no-op and no pre-rename env vars are honored. Migrate to the agentic
 runtime directly.
 

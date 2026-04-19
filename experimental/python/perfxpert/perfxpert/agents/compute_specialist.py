@@ -30,7 +30,7 @@ def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
         from perfxpert.tools import compute_techniques  # type: ignore
         return compute_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
-        return []  # Phase 4 deliverable
+        return []  # defensive fallback if compute_techniques tool is absent
 
 
 def build_compute_specialist() -> Agent:

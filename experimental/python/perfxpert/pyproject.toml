@@ -10,7 +10,7 @@ readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Advanced Micro Devices, Inc." }]
 requires-python = ">=3.10"
-# Phase 1 (agentic refactor) adds pydantic/pyyaml/jsonschema for structured
+# The agentic runtime uses pydantic/pyyaml/jsonschema for structured
 # knowledge loading and schema validation. LLM enhancement still requires
 # anthropic or openai (optional extras below).
 dependencies = [

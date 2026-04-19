@@ -1,6 +1,6 @@
 # Known Issues
 
-## LLM end-to-end smoke test may fail with 429 insufficient_quota (Phase 7.1)
+## LLM end-to-end smoke test may fail with 429 insufficient_quota
 
 `tests/test_integration/test_llm_end_to_end.py::test_llm_enabled_produces_rec_type`
 executes a real OpenAI Agents SDK call against `gpt-4o-mini` (default) or
@@ -30,7 +30,7 @@ provisioned.
 
 **Status: obsolete. No fix required on perfxpert.**
 
-In the pre-refactor codebase (Phases 1–6), the now-deleted bridge
+In the pre-refactor codebase, the now-deleted bridge
 function `ai_analysis/api.py::_convert_result_to_llm_format()`
 emitted kernel dictionaries with the keys `calls` and `percent_of_total`,
 but the consumer
@@ -47,7 +47,7 @@ added `_MEMORY_DIR_MAP` plus field-name renames inside
 
 **Why the bug cannot occur in perfxpert**
 
-Phase 7.1 deleted the entire `perfxpert/ai_analysis/` package — both
+The agentic refactor deleted the entire `perfxpert/ai_analysis/` package — both
 sides of the mismatched bridge are gone. The current flow is
 producer-consumer symmetric by construction:
 
@@ -66,10 +66,10 @@ This note is preserved for institutional memory so future contributors
 who find PR #4979 in the commit history understand why it was closed
 without being ported.
 
-## Phase 7 ship state (cycle-3 convergence, 2026-04-18)
+## Ship state (cycle-3 convergence, 2026-04-18)
 
 - **Cycle-3 reviewers**: 0 blockers, 0 important across all three branches.
-- **Phase 7 test suite**: 1036 passed / 3 skipped / 0 failed (measured 2026-04-19 after secret-scanner removal). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1).
+- **Test suite**: 1036 passed / 3 skipped / 0 failed (measured 2026-04-19 after secret-scanner removal). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1).
 - **Secret scanning**: local-only dev tool; not shipped in the repo. Each developer is responsible for their own secret-detection tooling. The scanner, its CI workflow, pre-commit hook, and contributor guide were removed on 2026-04-19.
 - **Known ongoing work** (not blocking ship):
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.

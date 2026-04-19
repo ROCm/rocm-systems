@@ -156,7 +156,7 @@ def test_root_lambdas_for_tasks_never_invoked_during_routing(monkeypatch, fake_p
     doesn't actually invoke them in normal routing paths (Finding #24).
 
     If it does, the lambda stubs are hiding real behavior — switch to real
-    tasks.* wrappers from the Phase 7 tasks module.
+    tasks.* wrappers from the tasks module.
     """
     from perfxpert.agents.framework import dispatch_tool as real_dispatch_tool
 
@@ -192,12 +192,12 @@ def test_root_lambdas_for_tasks_never_invoked_during_routing(monkeypatch, fake_p
     # If this assertion fails, the lambda stubs are hiding real behavior.
     assert not tasks_invocations, (
         f"Root invoked tasks.* tools during routing: {tasks_invocations}. "
-        "Switch the lambda stubs to real tasks.* wrappers (Phase 7 provides them)."
+        "Switch the lambda stubs to real tasks.* wrappers from perfxpert.tools.tasks."
     )
 
 
 def test_root_tasks_bindings_are_real():
-    """Phase 7.1 wired real tasks.* wrappers — no lambda stubs must remain.
+    """Root must wire real tasks.* wrappers — no lambda stubs may remain.
 
     Regression guard for Finding #24.
     """
@@ -234,7 +234,7 @@ def test_root_tasks_bindings_are_real():
 
     assert not lambda_stubs, (
         f"Root still uses lambda stub(s) for: {lambda_stubs}. "
-        "Phase 7.1 replaced these with real perfxpert.tools.tasks wrappers."
+        "Real perfxpert.tools.tasks wrappers must be used instead."
     )
 
 

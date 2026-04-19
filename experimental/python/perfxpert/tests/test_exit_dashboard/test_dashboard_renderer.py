@@ -19,6 +19,6 @@ def test_render_mode_prints_table(tmp_path: Path) -> None:
     )
     # Look for table-ish output in stdout
     stdout = proc.stdout
-    assert "Phase 5" in stdout or "GO" in stdout or "NO-GO" in stdout or "PARTIAL" in stdout
+    assert "Audit Gate" in stdout or "GO" in stdout or "NO-GO" in stdout or "PARTIAL" in stdout
     assert "parity" in stdout.lower()
     assert "red_team" in stdout or "red-team" in stdout.lower()

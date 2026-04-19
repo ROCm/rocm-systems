@@ -20,7 +20,7 @@ def test_no_execution_tools_in_registry():
 
 
 def test_registry_discovers_expected_tools():
-    """Sanity: at least 30 read-only tools are discovered (Phase 1 floor was ~25)."""
+    """Sanity: at least 30 read-only tools are discovered (baseline floor ~25)."""
     registered = discover_read_only_tools()
     assert len(registered) >= 30, (
         f"registry has only {len(registered)} tools — did tool discovery break?"

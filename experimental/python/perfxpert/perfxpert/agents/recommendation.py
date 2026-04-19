@@ -91,7 +91,7 @@ def build_recommendation_agent() -> Agent:
     tools = [
         ToolBinding(name="plateau.check", fn=_plateau_check),
         ToolBinding(name="trace.fingerprint", fn=trace_fingerprint.fingerprint),
-        ToolBinding(name="profiling.fill_gap", fn=lambda **kw: {}),  # Phase 1 placeholder
+        ToolBinding(name="profiling.fill_gap", fn=lambda **kw: {}),  # placeholder stub
     ]
     return Agent(
         name="Recommendation",
@@ -115,7 +115,7 @@ def _hash_technique(t: Dict[str, Any]) -> str:
     Uses only the ``name`` field as the key to avoid over-specifying.
     This keeps the hash stable even when non-identity fields like ``rationale``
     or ``estimated_impact`` are updated — matching the dedup contract used by
-    the Phase 3 session history tracker in agents/runtime.py.
+    the session history tracker in agents/runtime.py.
     """
     key = {"name": t.get("name", "")}
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()

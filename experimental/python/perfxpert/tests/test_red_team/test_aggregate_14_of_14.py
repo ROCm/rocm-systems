@@ -42,6 +42,6 @@ def test_aggregate_all_14_attacks_defeated() -> None:
     assert not not_defeated, (
         f"Red-team suite FAILED — {len(not_defeated)}/14 attacks succeeded.\n"
         f"Not defeated: {not_defeated}\n"
-        f"Spec §7 exit criteria requires 100% pass. Phase 6 BLOCKED."
+        f"Spec §7 exit criteria requires 100% pass. Audit gate BLOCKED."
     )
     assert len(defeated) == 14

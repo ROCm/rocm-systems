@@ -49,8 +49,8 @@ jobs:
           cd experimental/python/perfxpert
           pytest tests/test_agents/test_opencode.py -v 2>/dev/null || echo "No opencode tests yet"
 
-  phase5-gate:
-    name: "Phase 5 Go/No-Go (red-team + false-positive)"
+  audit-gate:
+    name: "Audit gate (red-team + false-positive)"
     if: github.event.pull_request.draft == false
     needs: [test, integration, opencode-wrapper]
     runs-on: ubuntu-latest
@@ -84,6 +84,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase5-exit-dashboard
+          name: audit-exit-dashboard
           path: experimental/python/perfxpert/exit_dashboard.json
           retention-days: 30

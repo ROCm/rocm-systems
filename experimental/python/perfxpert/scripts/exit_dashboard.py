@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Phase 5 Exit Dashboard — aggregates all Week-5 Go/No-Go metrics into one JSON.
+"""Audit Gate Exit Dashboard — aggregates all Go/No-Go metrics into one JSON.
 
 Usage:
     python scripts/exit_dashboard.py --output exit_dashboard.json [--allow-partial]
 
-Runs BEFORE Phase 6 deletion. Output determines GO vs NO-GO.
+Runs before any breaking change. Output determines GO vs NO-GO.
 
 Spec reference: `docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`
 §7 Go/No-Go table (9 rows).
@@ -30,8 +30,8 @@ def collect_parity() -> float | str:
     if not PARITY_SNAPSHOT.exists():
         return "pending"
     data = json.loads(PARITY_SNAPSHOT.read_text())
-    # Phase 7 refactored snapshot: top-level "pmc_subset_agreement" with nested "agreement_rate".
-    # Pre-Phase-7 snapshots had "agreement_rate" at the top level.
+    # Current snapshot format: top-level "pmc_subset_agreement" with nested "agreement_rate".
+    # Older snapshots had "agreement_rate" at the top level.
     if "pmc_subset_agreement" in data:
         return float(data["pmc_subset_agreement"]["agreement_rate"])
     return float(data["agreement_rate"])
@@ -225,7 +225,7 @@ def render_to_terminal(dashboard: Dict[str, Any]) -> None:
     verdict = dashboard["overall_verdict"]
     color = {"GO": "green", "NO-GO": "red", "PARTIAL (pending)": "yellow"}[verdict]
 
-    console.rule(f"[bold {color}]Phase 5 Exit Dashboard — Week-5 Go/No-Go[/]")
+    console.rule(f"[bold {color}]Audit Gate Exit Dashboard — Go/No-Go[/]")
 
     table = Table(title="", show_lines=True)
     table.add_column("Metric", style="cyan")

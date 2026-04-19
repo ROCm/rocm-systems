@@ -410,7 +410,7 @@ def _execute_agentic(
     config: Optional[output_config.output_config] = None,
     **kwargs: Any,
 ) -> Optional[RocpdImportData]:
-    """Agentic path: delegates to Phase 3 session API.
+    """Agentic path: delegates to the agents session API.
 
     Builds an AnalysisSession, invokes run_root with a RootInput,
     and formats the output according to the requested format.
@@ -420,7 +420,7 @@ def _execute_agentic(
     except ImportError as e:
         raise RuntimeError(
             "Agent runtime is not available. "
-            "This is a Phase 3 dependency."
+            "perfxpert.agents must be importable for the agentic path."
         ) from e
 
     # Guard rail against silent kwarg drop — any new CLI flag that isn't
@@ -489,7 +489,7 @@ def _execute_agentic(
     except Exception as e:
         raise RuntimeError(f"Failed to build RootInput: {e}") from e
 
-    # Run root analysis via Phase 3 session API
+    # Run root analysis via the agents session API
     try:
         root_output = session.run_root(root_input)
     except Exception as e:

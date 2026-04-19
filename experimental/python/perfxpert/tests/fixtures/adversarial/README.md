@@ -1,4 +1,4 @@
-# Adversarial fixtures for Phase 5 red-team suite
+# Adversarial fixtures for the red-team suite
 
 Each fixture is a **deliberately malicious input** used by exactly one test in
 `tests/test_red_team/`. These fixtures are NOT safe to execute directly — they

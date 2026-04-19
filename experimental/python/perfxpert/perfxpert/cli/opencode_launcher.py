@@ -4,7 +4,7 @@ Launches opencode (from PERFXPERT_OPENCODE_PATH / bundled wheel / system PATH
 in that order) with the AMD-themed config directory.
 
 opencode is a system dependency — it is NOT bundled inside the perfxpert wheel
-in this release (bundling is a Phase 8 deliverable). Users must install it
+in this release (bundling is tracked as future work). Users must install it
 separately: ``curl -fsSL https://opencode.ai/install | bash``.
 
 PERFXPERT_OPENCODE_PATH, if set, must point to an existing executable file;

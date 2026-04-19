@@ -80,4 +80,4 @@ def test_doctor_exits_zero_on_clean_system():
         assert exit_code == 0, f"exit={exit_code}\noutput: {out}"
     # Always check that output is not malformed (has sections, no NameError, etc.)
     assert "LLM providers configured" in out
-    assert "Mode:" in out  # Active mode reporting (Phase 6)
+    assert "Mode:" in out  # Active mode reporting

@@ -1,6 +1,6 @@
 # AMD GPU hardware specifications per architecture.
 # Source of truth for arch.lookup_peaks(). Extracted during the agentic refactor
-# (Phase 1) from vendor-published reference data.
+# from vendor-published reference data.
 #
 # CRITICAL CORRECTIONS (per CLAUDE.md):
 # - MI300X FP64 = 81.7 TFLOPS (NOT 163.4 which is FP32)

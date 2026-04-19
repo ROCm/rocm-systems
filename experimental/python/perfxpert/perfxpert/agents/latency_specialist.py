@@ -23,7 +23,7 @@ def _fetch_catalog(gfx_id: str) -> List[Dict[str, Any]]:
         from perfxpert.tools import latency_techniques  # type: ignore
         return latency_techniques.catalog(gfx_id=gfx_id)
     except ImportError:
-        return []  # Phase 4 deliverable
+        return []  # defensive fallback if latency_techniques tool is absent
 
 
 def build_latency_specialist() -> Agent:

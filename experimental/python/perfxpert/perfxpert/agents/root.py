@@ -13,7 +13,7 @@ Tool allowlist (≤5):
 Handoff whitelist: analysis, recommendation, correctness (Layer 1 only).
 Cannot skip directly to Layer 2.
 
-Fence: agents/fence/root.md (≤ 400 lines; Phase 2 decomposed the monolith).
+Fence: agents/fence/root.md (≤ 400 lines; per-agent slice of the split fence).
 """
 
 from __future__ import annotations

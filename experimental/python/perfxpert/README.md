@@ -48,7 +48,7 @@ perfxpert doctor
 Core analysis is self-contained — `pip install perfxpert` is sufficient for all
 profiling and recommendation features. `perfxpert-code` (`perfxpert-code`
 sub-command) requires **opencode** as a system dependency (bundling into the
-wheel is a Phase 8 deliverable). Install opencode separately:
+wheel is tracked as future work). Install opencode separately:
 
 ```bash
 curl -fsSL https://opencode.ai/install | bash
@@ -72,8 +72,8 @@ an [RFC](docs/rfcs/README.md).
 The agentic runtime is the sole execution path; no feature flag
 toggles it. Setting any of the following has no effect:
 
-- `PERFXPERT_USE_AGENTS` — removed in Phase 7.1.
-- `PERFXPERT_LEGACY` — removed in Phase 7.1.
+- `PERFXPERT_USE_AGENTS` — removed.
+- `PERFXPERT_LEGACY` — removed.
 
 See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
@@ -96,7 +96,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
 
 - [Architecture](docs/architecture.md)
 - [Getting started](docs/guides/getting-started.md)
-- [Historical migration notes](docs/archive/migration-to-agentic.md) (pre-Phase 7.1)
+- [Historical migration notes](docs/archive/migration-to-agentic.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## Licensing

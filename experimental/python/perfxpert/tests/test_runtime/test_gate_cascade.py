@@ -2,7 +2,7 @@
 
 Mocks the execution tools (compile.build etc.) so the cascade logic is
 tested in isolation. Red-team attacks on specific gates live in
-tests/test_red_team/ (Phase 5).
+tests/test_red_team/.
 """
 
 import pytest

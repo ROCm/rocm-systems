@@ -321,9 +321,9 @@ class GateInput:
 def run_gate_cascade(gate_input: GateInput, stop_at: Optional[str] = None) -> GateVerdict:
     """Run the gate cascade with synthetic test inputs.
 
-    Used exclusively by red-team attack tests (Phase 5) to inject malicious
-    data at each gate boundary. Mocks the execution tools to test gate logic
-    in isolation.
+    Used exclusively by red-team attack tests to inject malicious data at
+    each gate boundary. Mocks the execution tools to test gate logic in
+    isolation.
 
     Args:
         gate_input: GateInput dataclass with test vectors

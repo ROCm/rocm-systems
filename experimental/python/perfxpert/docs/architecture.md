@@ -1,6 +1,6 @@
 # perfxpert Architecture
 
-_Last refreshed: Phase 7 (v0.2.0). Source of truth:
+_Last refreshed: v0.2.0. Source of truth:
 `docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md`._
 
 ## High-level shape
@@ -34,8 +34,8 @@ Every tool is pure (modulo knowledge YAML loads and SQL reads); < 100 ms p99.
 
 ## Knowledge (spec §3 Appendix B)
 
-22 YAML files (21 from Phase 1 + `proven_optimizations.yaml` from Phase 7)
-under `perfxpert/knowledge/`, each paired with a JSON schema in `_schemas/`.
+22 YAML files under `perfxpert/knowledge/`, each paired with a JSON schema
+in `_schemas/`.
 CI validates every YAML against its schema on every PR.
 
 ## Providers (spec §3)
@@ -108,14 +108,14 @@ Level 0 — Knowledge YAML (PR)         pytest tests/test_knowledge
 
 ## What's NOT in this diagram
 
-Deleted in Phase 6: `interactive.py`, `llm_conversation.py`, the
-bespoke LLM-session state machine.
+The following symbols were deleted during the agentic refactor and are
+no longer present:
 
-The following symbols were all removed in Phase 7.1:
-
-- `perfxpert/ai_analysis/` module — removed in Phase 7.1.
-- `PERFXPERT_LEGACY` env var — removed in Phase 7.1.
-- `PERFXPERT_USE_AGENTS` env var — removed in Phase 7.1.
+- `interactive.py`, `llm_conversation.py` — bespoke LLM-session state
+  machine, superseded by OpenAI Agents SDK sessions.
+- `perfxpert/ai_analysis/` module — superseded by `perfxpert/agents/`.
+- `PERFXPERT_LEGACY` env var — no longer recognized.
+- `PERFXPERT_USE_AGENTS` env var — no longer recognized.
 
 Consult the git history or [CHANGELOG.md](../CHANGELOG.md) for the
 old code.

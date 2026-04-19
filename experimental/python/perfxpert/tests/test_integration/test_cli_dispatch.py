@@ -1,7 +1,7 @@
-"""Tests for analyze.py CLI dispatch (Phase 7.1: agentic is the only path).
+"""Tests for analyze.py CLI dispatch (agentic is the only path).
 
-Regression guards: assert the legacy dispatch symbols removed in
-Phase 7.1 stay removed and that pre-7.1 env vars cannot revive them.
+Regression guards: assert the legacy dispatch symbols stay removed and
+that legacy env vars cannot revive them.
 """
 
 from pathlib import Path
@@ -41,7 +41,7 @@ def test_cli_always_runs_agentic(fake_db, monkeypatch):
 
 
 def test_cli_legacy_flag_is_no_op(fake_db, monkeypatch):
-    """Regression guard: env var removed in Phase 7.1 must still route agentic."""
+    """Regression guard: the removed PERFXPERT_LEGACY env var must still route agentic."""
     monkeypatch.setenv("PERFXPERT_LEGACY", "1")  # regression guard
     with mock.patch.object(analyze_mod, "_execute_agentic") as agentic:
         agentic.return_value = 0
@@ -50,9 +50,9 @@ def test_cli_legacy_flag_is_no_op(fake_db, monkeypatch):
 
 
 def test_legacy_symbols_are_absent():
-    """Regression guard: symbols removed in Phase 7.1 must stay gone."""
+    """Regression guard: removed legacy symbols must stay gone."""
     assert not hasattr(analyze_mod, "_execute_legacy"), (  # regression guard
-        "_execute_legacy was removed in Phase 7.1 and must stay gone"
+        "_execute_legacy was removed during the agentic refactor and must stay gone"
     )
     import importlib
     with pytest.raises(ModuleNotFoundError):

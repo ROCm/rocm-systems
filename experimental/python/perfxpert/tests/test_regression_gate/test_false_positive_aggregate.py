@@ -74,5 +74,5 @@ def test_false_positive_rate_at_or_below_5pct() -> None:
     assert fp_rate <= FALSE_POSITIVE_THRESHOLD, (
         f"Regression-gate false-positive rate {fp_rate:.1%} "
         f"exceeds {FALSE_POSITIVE_THRESHOLD:.0%}. Rejected: {rejected}\n"
-        f"Spec §7 criterion 4 + R17 — Phase 6 BLOCKED."
+        f"Spec §7 criterion 4 + R17 — audit gate BLOCKED."
     )
