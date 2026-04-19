@@ -1,5 +1,33 @@
 # PerfXpert — Known Issues
 
+## Tool gate is prompt-layer only — not a mechanical hook
+
+The `0020-perfxpert-tool-gate.patch` and the bracketed `[MUST BE CALLED FIRST
+FOR GPU-PERF QUERIES]` prefix in `mcp_server/server.py::_fn_to_tool_schema`
+are a **weaker-variant** solution to the cycle-4 B1 blocker (LLMs calling
+`bash`/`read` before `perfxpert_intent_classify`). The brief asked for a
+pre-turn tool-availability hook (only expose `perfxpert_*` for the first 2
+turns) OR a post-turn rejection hook (rewrite non-perfxpert `tool_calls`
+into a synthetic retry). Implementing either requires intercepting
+opencode's session message flow in `packages/opencode/src/session/processor.ts`
+and `prompt.ts`, whose `plugin.trigger(...)` hook points are currently
+fire-and-forget — a real blocking hook inside the opencode TypeScript
+runtime was outside the time budget for cycle-4.
+
+**Known-limitation:** the current patch does not mechanically reject a
+non-perfxpert first tool call; an adversarial LLM can still call `bash`
+first. Live-scenario D (cycle-4 validation) showed the prompt+bracket
+combo moves the needle but does not guarantee 100% compliance.
+
+**Follow-up:** track a real pre-/post-turn gate at the opencode
+TypeScript layer. The cleanest attach point is
+`packages/opencode/src/session/prompt.ts` around the `plugin.trigger(
+"tool.execute.before", ...)` invocation (lines 414-419 and 455-460) —
+extending that hook to allow a plugin to return `{ block: true, retryWith:
+<message> }` would give us the rejection semantics the brief described.
+Proposed env var: `PERFXPERT_DISABLE_TOOL_GATE=1` (already documented in
+the prompt text for user-facing discoverability).
+
 ## LLM end-to-end smoke test may fail with 429 insufficient_quota
 
 `tests/test_integration/test_llm_end_to_end.py::test_llm_enabled_produces_rec_type`
@@ -75,7 +103,7 @@ without being ported.
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
   - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
 
-## Phase 8
+## Opencode fork / bundling
 
 - **`apply-opencode-patches.sh` is not yet wired into the wheel build.**
   The patch apply step is manual: run
@@ -100,5 +128,5 @@ without being ported.
 - **Forced tool priority is LLM-dependent.**
   Patch `0010-perfxpert-tool-priority.patch` and the MCP description
   hint strongly bias the LLM toward `intent_classify` first, but a
-  determined model can still skip. Measurement + feedback will come
-  in Phase 9.
+  determined model can still skip. Measurement + feedback is
+  tracked as future telemetry work.
