@@ -31,6 +31,17 @@ struct KernargParam {
 struct KernargLayout {
   std::vector<KernargParam> params;
   int implicitArgsBase = 0;
+  // Total kernarg segment size in bytes, copied from the kernel
+  // descriptor's `.kernarg_segment_size`. Used by `extractKernargDword`
+  // to distinguish a load that lands in trailing alignment padding
+  // *within* the segment (HSA spec leaves those bytes uninitialised, so
+  // an `undef i32` is the spec-correct LLVM representation) from a load
+  // that overruns the segment entirely (a hard error). Tensile-style
+  // GEMM kernels routinely emit `s_load_b128` over the last named arg
+  // when `last_arg_end < segment_end` because the aligned 16-byte load
+  // is cheaper than a split 12+4 sequence; the trailing dword is loaded
+  // into an SGPR that the kernel never reads.
+  int kernargSegmentSize = 0;
 
   // Legacy "fully-contained slot list" resolver; kept around for any
   // future caller that wants the slot-coarse-grained view, but
@@ -59,7 +70,8 @@ struct KernargLayout {
 // Returns the materialised i32 Value on success.  On failure returns
 // `nullptr` and (if `whyNot != nullptr`) writes a precise diagnostic
 // describing why the load could not be served — the caller turns that
-// into a `RaiseFailure::smemKernargMiss` (handle_smem.cpp).  Diagnostics
+// into a `RaiseFailure::smemKernargMiss` (handle_smem.cpp) or a
+// `report_fatal_error` (raiser.cpp Phase-4 SGPR preload).  Diagnostics
 // always name the byte offset, the conflicting param's offset/size, and
 // the sub-offset that defeated the lift, so the message is actionable
 // without re-running with a debugger attached.

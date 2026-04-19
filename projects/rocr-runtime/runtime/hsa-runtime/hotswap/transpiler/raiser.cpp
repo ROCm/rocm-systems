@@ -350,6 +350,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         "rejected by the no-fallback rule.");
   }
   kernargs.implicitArgsBase = meta.implicitArgsBase();
+  kernargs.kernargSegmentSize = meta.kernargSegmentSize;
 
   auto *funcTy = FunctionType::get(voidTy, paramTypes, false);
   Function *F =
