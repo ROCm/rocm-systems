@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-docs/test-samples.py — Extract and execute bash/Python samples from Markdown docs
+scripts/test-samples.py — Extract and execute bash/Python samples from Markdown docs
 Part of the docs-audit tooling
 """
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-docs/link-checker.py — Validate internal Markdown links across docs.
+scripts/link-checker.py — Validate internal Markdown links across docs.
 Part of the docs-audit tooling.
 
 Scope (what IS checked):

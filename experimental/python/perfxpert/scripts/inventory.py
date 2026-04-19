@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-docs/inventory.py — Generate inventory of all audited docs
-Runs lint, link-checker, and sample-executor; outputs JSON inventory
+scripts/inventory.py — Generate inventory of all audited docs
+Runs lint, link-checker, and sample-executor; outputs JSON inventory.
+
+All scripts live alongside this one under
+experimental/python/perfxpert/scripts/; they are invoked by absolute
+path so this file works regardless of the caller's cwd.
 """
 
 import subprocess
@@ -10,10 +14,16 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+_LINT_SH = _SCRIPTS_DIR / "lint.sh"
+_LINK_CHECKER = _SCRIPTS_DIR / "link-checker.py"
+_TEST_SAMPLES = _SCRIPTS_DIR / "test-samples.py"
+
+
 def run_lint_check():
     """Run lint.sh and count violations."""
     result = subprocess.run(
-        ["bash", "docs/lint.sh"],
+        ["bash", str(_LINT_SH)],
         capture_output=True,
         text=True,
     )
@@ -24,7 +34,7 @@ def run_lint_check():
 def run_link_check():
     """Run link-checker.py --strict and count broken links (CSV rows only)."""
     result = subprocess.run(
-        ["python3", "docs/link-checker.py", "--strict", "experimental/python/perfxpert"],
+        ["python3", str(_LINK_CHECKER), "--strict", "experimental/python/perfxpert"],
         capture_output=True,
         text=True,
     )
@@ -39,7 +49,7 @@ def run_link_check():
 def run_sample_check():
     """Run test-samples.py and count failures."""
     result = subprocess.run(
-        ["python3", "docs/test-samples.py", "experimental/python/perfxpert"],
+        ["python3", str(_TEST_SAMPLES), "experimental/python/perfxpert"],
         capture_output=True,
         text=True,
     )

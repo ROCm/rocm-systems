@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
-"""Unit tests for docs/canonical-facts.json."""
+"""Unit tests for experimental/python/perfxpert/docs/canonical_facts.json."""
 
 import json
 from pathlib import Path
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_CANONICAL_FACTS = (
+    _REPO_ROOT
+    / "experimental"
+    / "python"
+    / "perfxpert"
+    / "docs"
+    / "canonical_facts.json"
+)
+
+
 def test_canonical_facts_exists():
     """Canonical facts JSON must exist."""
-    facts_file = Path("docs/canonical_facts.json")
-    assert facts_file.exists(), "docs/canonical_facts.json does not exist"
+    assert _CANONICAL_FACTS.exists(), f"{_CANONICAL_FACTS} does not exist"
 
 
 def test_canonical_facts_valid_json():
     """Canonical facts must be valid JSON."""
-    facts_file = Path("docs/canonical_facts.json")
+    facts_file = _CANONICAL_FACTS
     content = facts_file.read_text()
     facts = json.loads(content)
     assert isinstance(facts, dict), "Canonical facts must be a JSON object"
@@ -21,7 +31,7 @@ def test_canonical_facts_valid_json():
 
 def test_canonical_facts_has_required_fields():
     """Canonical facts must include all required fields from spec."""
-    facts_file = Path("docs/canonical_facts.json")
+    facts_file = _CANONICAL_FACTS
     facts = json.loads(facts_file.read_text())
 
     required_fields = [
@@ -48,7 +58,7 @@ def test_canonical_facts_has_required_fields():
 
 def test_canonical_facts_values():
     """Canonical facts must match spec values."""
-    facts_file = Path("docs/canonical_facts.json")
+    facts_file = _CANONICAL_FACTS
     facts = json.loads(facts_file.read_text())
 
     # Verify some key values match spec (Section 5)
@@ -65,7 +75,7 @@ def test_canonical_facts_values():
 
 def test_canonical_facts_banned_apis_count():
     """Canonical facts must list all 9 banned APIs."""
-    facts_file = Path("docs/canonical_facts.json")
+    facts_file = _CANONICAL_FACTS
     facts = json.loads(facts_file.read_text())
 
     banned = facts["banned_apis"]
@@ -74,7 +84,7 @@ def test_canonical_facts_banned_apis_count():
 
 def test_canonical_facts_feature_flags():
     """Canonical facts must list all feature flags."""
-    facts_file = Path("docs/canonical_facts.json")
+    facts_file = _CANONICAL_FACTS
     facts = json.loads(facts_file.read_text())
 
     expected_flags = [

@@ -139,32 +139,23 @@ one-line rationale + optional follow-up tracking id.
 
 ### Zero-violation baseline
 
-None. All four scanners (`docs/lint.sh`, `docs/link-checker.py`,
-`docs/test-samples.py`, `docs/inventory.py`) report zero violations
-at the baseline snapshot. See `docs/inventory-baseline.json`.
+None. All four scanners (`scripts/lint.sh`, `scripts/link-checker.py`,
+`scripts/test-samples.py`, `scripts/inventory.py`) report zero
+violations at the baseline snapshot. See `inventory-baseline.json`
+in this directory.
 
 ### `inventory-baseline.json` — source of truth
 
-Two copies exist on disk and are byte-identical except for the ISO-8601
-`timestamp` field (they are written in the same `docs/inventory.py`
-run, a few seconds apart):
-
-- `docs/inventory-baseline.json` (repo root) — **authoritative**. This
-  is the copy scanned/compared against by CI and by
-  `docs/inventory.py` itself; the tooling under `docs/` lives at repo
-  root.
-- `experimental/python/perfxpert/docs/inventory-baseline.json` —
-  convenience mirror so the perfxpert docs tree is self-contained for
-  users reading it in-place. If the two diverge, the repo-root copy
-  wins; regenerate the mirror with `python docs/inventory.py` from the
-  repo root.
+Single copy under `experimental/python/perfxpert/docs/inventory-baseline.json`
+— written by `scripts/inventory.py`. CI scans / compares against this
+file, which is the shipped source of truth.
 
 ### Scanner scope limitations
 
 Documented here so users reading "zero violations" know what is and
 isn't covered.
 
-#### `docs/link-checker.py`
+#### `scripts/link-checker.py`
 - **External URLs not validated.** Any `http://` or `https://` link is
   skipped (`is_external_url`). Dead external links will not flag.
 - **Anchor fragments not validated.** `#section-id` is stripped before
@@ -179,13 +170,11 @@ Workaround: rely on Markdown preview in your IDE / GitHub for anchor
 correctness; external URL health is covered nightly by a separate
 link-health workflow (not part of the zero-violation baseline).
 
-#### `docs/lint.sh` — banned-string scanner
+#### `scripts/lint.sh` — banned-string scanner
 The banned-string scan excludes these paths (`lint.sh:50-54`) so that
 historical context or pre-existing test fixtures don't cause false
 positives:
 
-- `docs/superpowers/specs/**` — superpowers phase specs (reference)
-- `docs/superpowers/plans/**` — superpowers phase plans (reference)
 - `**/.git/**` — git internals
 - `**/.pytest_cache/**` — test runner cache
 - `**/perfxpert/ai_analysis/**` — legacy module removed during the
