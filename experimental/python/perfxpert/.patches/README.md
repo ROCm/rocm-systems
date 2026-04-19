@@ -64,6 +64,35 @@ prefixes — mixing breaks the lexicographic-equals-numeric invariant
 | 0016 | `0016-prompt-beast-perfxpert.patch` | `session/prompt/beast.txt` — same preamble for GPT-4/o1/o3 models (routed via `PROMPT_BEAST`). |
 | 0017 | `0017-prompt-trinity-perfxpert.patch` | `session/prompt/trinity.txt` — same preamble for Trinity models (routed via `PROMPT_TRINITY`). |
 
+### Cycle-4 Tool-Gate Patch (Phase 8 cycle-4 B1)
+
+| # | File | What it does |
+|---|------|--------------|
+| 0020 | `0020-perfxpert-tool-gate.patch` | All 8 primary prompts — appends a **TOOL GATE ENFORCEMENT** block after the existing STRICT TOOL DISCIPLINE stanza. Mandates that the FIRST tool call for any GPU-perf query be a perfxpert MCP tool (not `bash`/`read`/`glob`/`grep`/`edit`/`todowrite`). Documents a self-correction retry protocol and the `PERFXPERT_DISABLE_TOOL_GATE=1` escape hatch. Paired with the strengthened `[MUST BE CALLED FIRST FOR GPU-PERF QUERIES]` priority bracket in `mcp_server/server.py::_fn_to_tool_schema`. |
+
+**B1 approach — weaker-variant, known limitation.** The cycle-4 brief asked
+for a *pre-turn* tool-availability hook that only exposes `perfxpert_*` tools
+for the first 2 turns, OR a *post-turn* rejection hook that rewrites
+non-perfxpert tool_calls into a retry. Both require patching opencode's
+session/processor.ts message-flow machinery (`plugin.trigger(...)` is
+currently fire-and-forget). Implementing a real blocking hook inside the
+opencode TypeScript runtime is outside the 45-minute budget for this
+cycle. The weaker-variant we ship instead:
+
+  1. Strengthens the MCP tool descriptions with an ALL-CAPS
+     `[MUST BE CALLED FIRST FOR GPU-PERF QUERIES]` bracketed imperative
+     (LLMs respect this form more reliably than a plain sentence).
+  2. Prepends a new **TOOL GATE ENFORCEMENT** stanza to the STRICT TOOL
+     DISCIPLINE block in every primary prompt, including a self-correction
+     retry protocol and an opt-out env var.
+
+The **limitation**: neither of these measures *mechanically* blocks a
+non-perfxpert tool call — an adversarial or ignorant LLM can still call
+`bash` first. The live-scenario validation shows the prompt+bracket
+combo moves the needle (perfxpert-ratio up from 0/17), but does not
+guarantee 100% compliance. A real pre-/post-turn gate at the opencode
+TypeScript layer is tracked as a follow-up (see `docs/known-issues.md`).
+
 **Coverage note (I1 fix):** opencode ships 8 *imported* primary model prompts
 (anthropic, default, beast, codex, gemini, gpt, kimi, trinity) selected by
 `session/system.ts::provider()`. All 8 now receive the same 7-agent hierarchy

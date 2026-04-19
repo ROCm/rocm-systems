@@ -67,8 +67,13 @@ def _fn_to_tool_schema(name: str, fn: Callable) -> Tool:
     doc = inspect.getdoc(fn) or ""
     # Tool-priority hint: reinforce at the schema layer so GPU-performance
     # queries hit perfxpert tools BEFORE the model reaches for read/glob/grep.
+    # Cycle-4 B1: strengthened to lead with an ALL-CAPS bracketed imperative
+    # (per blocker report — prompt-layer hints alone had no observable
+    # runtime effect; LLMs respect name-prefixed directives more reliably).
     # See docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md
+    # and the follow-up plan for cycle-4 (phase5-parity-redteam).
     priority_hint = (
+        "[MUST BE CALLED FIRST FOR GPU-PERF QUERIES] "
         "Call BEFORE file-search tools (read/glob/grep) for any GPU-performance, "
         "profiling, bottleneck, or kernel-optimization query. "
     )

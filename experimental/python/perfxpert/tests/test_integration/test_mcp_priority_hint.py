@@ -22,6 +22,13 @@ def test_every_tool_description_leads_with_priority_hint() -> None:
     for name, fn in tools.items():
         schema = _fn_to_tool_schema(name, fn)
         desc = schema.description  # type: ignore[attr-defined]
-        assert desc.lower().startswith(
-            "call before file-search tools"
-        ), f"{name!r} description does not lead with priority hint: {desc[:80]!r}"
+        # Cycle-4 B1: the leading imperative is an ALL-CAPS bracketed tag
+        # which surfaces the priority rule at the very start of the tool
+        # listing — LLMs respect this form more reliably than a plain
+        # sentence (observed during live-user validation).
+        assert desc.startswith(
+            "[MUST BE CALLED FIRST FOR GPU-PERF QUERIES]"
+        ), f"{name!r} description does not lead with priority bracket: {desc[:80]!r}"
+        assert (
+            "call before file-search tools" in desc.lower()
+        ), f"{name!r} description lost the file-search-tools hint: {desc[:120]!r}"
