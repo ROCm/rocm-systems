@@ -211,7 +211,39 @@ enum class SemOp : uint16_t {
   V_LDEXP_F32,
   V_FLOOR_F32, V_CEIL_F32, V_TRUNC_F32, V_FRACT_F32,
   V_READFIRSTLANE_B32,
-  V_CVT_PK_F32_FP8,
+  // VOP1 packed FP8/BF8 → 2x F32 expansion (VOP1Instructions.td:652-
+  // 653, profile VOPProfileCVT_PK_F32_F8). Reads 16 bits of the i32
+  // src — the low half (bytes 0,1) when op_sel:[0,*] / SDWA WORD_0,
+  // the high half (bytes 2,3) when op_sel:[1,*] / SDWA WORD_1 — and
+  // expands the two FP8/BF8 lanes into a v2f32 written to a VGPR
+  // pair starting at vdst. FP8 is the OCP E4M3FN format; BF8 is the
+  // OCP E5M2 format. Lowering selects the matching
+  // `llvm.amdgcn.cvt.pk.f32.{fp8,bf8}(i32 src, i1 word_sel)`
+  // intrinsic and bitcasts the v2f32 result to i64 before
+  // writeReg64. The op_sel-based word selector is parsed from the
+  // disassembly text exactly as in V_ADD_NC_U16 / V_FMA_MIX_F32 (no
+  // first-class "modifier" channel exists in our OperandView yet);
+  // unparseable / out-of-range selectors fall through to word_sel=0
+  // — never silently corrupted, the parser invariant is the same as
+  // for the other op_sel handlers. The reverse direction
+  // (V_CVT_PK_FP8_F32 / V_CVT_PK_BF8_F32) lives in the VOP3 block
+  // below; this is the read-side companion.
+  V_CVT_PK_F32_FP8, V_CVT_PK_F32_BF8,
+  // VOP1 single-lane FP8/BF8 → F32 expansion (VOP1Instructions.td:650-
+  // 651, profile VOPProfileCVT_F32_F8). Reads ONE 8-bit lane of the
+  // i32 src — selected by SDWA src0_sel / e64 op_sel byte_sel — and
+  // produces an f32. The SDWA encoding can pick any of the four bytes
+  // (0..3); the e64 encoding's default (no op_sel printed) is byte 0
+  // and is the only shape the gfx1250 corpus emits today (the LLVM
+  // isel pattern in VOP1Instructions.td:670-680 maps non-zero
+  // byte_sel through the SDWA pseudo, which we have not yet wired —
+  // adding it would only widen this handler, not change its shape).
+  // Lowering selects `llvm.amdgcn.cvt.f32.{fp8,bf8}(i32 src, i32
+  // byte_sel)` and writeReg32 the result. SDWA / op_sel-bearing
+  // encodings refuse loudly via RaiseFailure::unsupportedShape so a
+  // future corpus drift surfaces immediately rather than silently
+  // collapsing to byte 0.
+  V_CVT_F32_FP8, V_CVT_F32_BF8,
   // VOP1 find-first-bit family (gfx7+, VOP1Instructions.td:371-373).
   // V_FFBH_U32  -> AMDGPUffbh_u32 = ctlz_zero_undef but returns -1 on
   //                input 0; lower with llvm.ctlz(x, false) — LLVM

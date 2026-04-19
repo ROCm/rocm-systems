@@ -284,6 +284,9 @@ static const Entry kCanonTable[] = {
     E(V_CVT_F32_F16_e64, V_CVT_F32_F16),
     E(V_CVT_F32_BF16_e64, V_CVT_F32_BF16),
     E(V_CVT_PK_F32_FP8_e64, V_CVT_PK_F32_FP8),
+    E(V_CVT_PK_F32_BF8_e64, V_CVT_PK_F32_BF8),
+    E(V_CVT_F32_FP8_e64, V_CVT_F32_FP8),
+    E(V_CVT_F32_BF8_e64, V_CVT_F32_BF8),
     E(V_CVT_F32_UBYTE0_e64, V_CVT_F32_UBYTE0),
     E(V_CVT_F32_UBYTE1_e64, V_CVT_F32_UBYTE1),
     E(V_CVT_F32_UBYTE2_e64, V_CVT_F32_UBYTE2),
@@ -1035,6 +1038,17 @@ buildPseudoAliasMap(const MCInstrInfo &MCII) {
       // arity are preserved, but tolerate encoding-bit drift.
       {"_t16_", false, sameSemanticShape},
       {"_fake16_", false, sameSemanticShape},
+      // `_OP_SEL_` infix marks the gfx11+ encoding variant for VOP1 cvt
+      // instructions (e.g. v_cvt_f32_{fp8,bf8}, v_cvt_pk_f32_{fp8,bf8}).
+      // The OP_SEL pseudo carries an extra `byte_sel` immediate operand and
+      // toggles `VOP3_OPSEL`/`maybeAtomic`/`ASYNC_CNT` bits relative to the
+      // base e64 pseudo, but dispatch identity (instruction family + def
+      // arity + atomic/MAI classification) is preserved. Collapsing onto
+      // the base pseudo lets a single SemOp handler service both the
+      // pre-gfx11 SDWA/byte_sel-via-disassembly form and the gfx11+ encoded
+      // byte_sel form; the handler reads the byte_sel from the disassembly
+      // text (`op_sel:`), which is identical for both.
+      {"_OP_SEL_", false, sameSemanticShape},
       // GFX11+ VOPC CMPX family drops the scalar destination register; the
       // raiser's CMPX handler only touches EXEC so the `_nosdst_` form
       // collapses cleanly onto the base pseudo of the same encoding width.

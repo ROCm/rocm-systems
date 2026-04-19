@@ -1109,6 +1109,87 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP1 read-side companions: v_cvt_pk_f32_{fp8,bf8} expand 16 bits
+  // of the i32 src into a v2f32 written to the dst VGPR pair. The
+  // word selector (which 16-bit half of src to decode) lives in
+  // op_sel:[0] for the e64 / VOP3 form and is parsed from di.fullText
+  // — we do not have a first-class modifier channel in OperandView.
+  // The dst op_sel slot (op_sel:[1]) is irrelevant: the destination
+  // is a v2f32 pair, not a half-register, so the assembler always
+  // prints `0` there. We refuse loudly if op_sel parsing produces a
+  // value outside {0,1} so corpus drift surfaces immediately rather
+  // than silently flipping the word selector. Lowering selects the
+  // matching `llvm.amdgcn.cvt.pk.f32.{fp8,bf8}` intrinsic and
+  // bitcasts its v2f32 result to i64 before writeReg64.
+  if (sop == SemOp::V_CVT_PK_F32_FP8 || sop == SemOp::V_CVT_PK_F32_BF8) {
+    int wordSelInt = 0;
+    StringRef text(di.fullText);
+    auto pos = text.find("op_sel:");
+    if (pos != StringRef::npos) {
+      auto brk = text.find('[', pos);
+      auto end = text.find(']', brk);
+      if (brk != StringRef::npos && end != StringRef::npos) {
+        StringRef inner = text.slice(brk + 1, end);
+        SmallVector<StringRef, 4> parts;
+        inner.split(parts, ',');
+        if (!parts.empty()) {
+          int parsed = 0;
+          if (parts[0].trim().getAsInteger(10, parsed) ||
+              (parsed != 0 && parsed != 1)) {
+            hr.failure = RaiseFailure::unsupportedShape(
+                di, "VOP3",
+                "unparseable or out-of-range op_sel[0] (expected 0 or 1)");
+            return hr;
+          }
+          wordSelInt = parsed;
+        }
+      }
+    }
+    Value *src = op.src(0);
+    if (src->getType() != ctx.i32Ty)
+      src = ctx.B.CreateBitOrPointerCast(src, ctx.i32Ty);
+    Intrinsic::ID iid = (sop == SemOp::V_CVT_PK_F32_FP8)
+                            ? Intrinsic::amdgcn_cvt_pk_f32_fp8
+                            : Intrinsic::amdgcn_cvt_pk_f32_bf8;
+    Function *cvtFn = Intrinsic::getOrInsertDeclaration(&ctx.M, iid);
+    Value *v2 = ctx.B.CreateCall(cvtFn,
+        {src, ConstantInt::get(ctx.i1Ty, wordSelInt != 0)},
+        sop == SemOp::V_CVT_PK_F32_FP8 ? "cvt_pk_f32_fp8"
+                                       : "cvt_pk_f32_bf8");
+    ctx.writeReg64(op.dst(), ctx.B.CreateBitCast(v2, ctx.i64Ty));
+    hr.handled = true;
+    return hr;
+  }
+  // VOP1 single-lane v_cvt_f32_{fp8,bf8}: decode one 8-bit lane of
+  // src into f32. The corpus only ever emits the e64 form with no
+  // op_sel (byte_sel=0) — the SDWA / op_sel-bearing encodings, which
+  // would let LLVM's isel pick byte 1/2/3, are not present in any
+  // gfx1250 kernel today. We refuse loudly if disassembly carries an
+  // op_sel: marker so corpus drift surfaces instead of a silent
+  // byte-0 collapse.
+  if (sop == SemOp::V_CVT_F32_FP8 || sop == SemOp::V_CVT_F32_BF8) {
+    StringRef text(di.fullText);
+    if (text.contains("op_sel:") || text.contains("_sdwa")) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP1",
+          "non-default op_sel/sdwa byte_sel on v_cvt_f32_{fp8,bf8} "
+          "(only the byte_sel=0 e64 form is wired today)");
+      return hr;
+    }
+    Value *src = op.src(0);
+    if (src->getType() != ctx.i32Ty)
+      src = ctx.B.CreateBitOrPointerCast(src, ctx.i32Ty);
+    Intrinsic::ID iid = (sop == SemOp::V_CVT_F32_FP8)
+                            ? Intrinsic::amdgcn_cvt_f32_fp8
+                            : Intrinsic::amdgcn_cvt_f32_bf8;
+    Function *cvtFn = Intrinsic::getOrInsertDeclaration(&ctx.M, iid);
+    Value *f = ctx.B.CreateCall(cvtFn,
+        {src, ConstantInt::get(ctx.i32Ty, 0)},
+        sop == SemOp::V_CVT_F32_FP8 ? "cvt_f32_fp8" : "cvt_f32_bf8");
+    ctx.writeReg32(op.dst(), ctx.B.CreateBitCast(f, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_PERM_B32) {
     Function *permFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_perm);
     ctx.writeReg32(op.dst(), ctx.B.CreateCall(permFn, {op.src(0), op.src(1), op.src(2)}, "perm"));
