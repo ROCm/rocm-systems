@@ -628,4 +628,87 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastSplitDataThresholdBoundary
+//
+// White-box: nqps=2, splitDataMin=65536. Per-QP threshold = 131072 bytes.
+//   size=131072 → dataPerQp=65536 >= 65536 → split path → 0 WRR tokens consumed
+//   size=131071 → dataPerQp=65535 <  65536 → WRR  path → 1 WRR token consumed
+// =============================================================================
+TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    // splitDataMin=65536, nqps=2 → threshold at size = 65536 * 2 = 131072
+    constexpr size_t kSplitSz = 131072; // dataPerQp = 65536 — split path
+    constexpr size_t kWrrSz   = 131071; // dataPerQp = 65535 — WRR  path
+    constexpr size_t kBufSz   = kSplitSz;
+
+    std::vector<char> sendBuf(kBufSz, 0x5A);
+    std::vector<char> recvBuf(kBufSz, 0x00);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+    }
+
+    // Large send: split path — activeTotTokens must NOT change.
+    int activeTotBeforeSplit = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBeforeSplit = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kSplitSz, 1600, mhandle);
+
+    int activeTotAfterSplit = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_TRUE(st.schedInit);
+        EXPECT_EQ(st.activeTotTokens, activeTotBeforeSplit)
+            << "split path must not consume WRR tokens";
+        activeTotAfterSplit = st.activeTotTokens;
+    }
+
+    // Small send: WRR path — activeTotTokens must decrease by exactly 1.
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kWrrSz, 1601, mhandle);
+
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_TRUE(st.schedInit);
+        int delta = activeTotAfterSplit - st.activeTotTokens;
+        EXPECT_EQ(delta, 1)
+            << "WRR path must consume exactly one token";
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
