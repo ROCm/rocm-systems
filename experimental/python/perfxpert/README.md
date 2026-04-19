@@ -57,6 +57,7 @@ sub-command) requires **opencode** as a system dependency (bundling into the
 wheel is tracked as future work). Install opencode separately:
 
 ```bash
+# SKIP-SAMPLE — actual installer; docs/test-samples.py must not execute this
 curl -fsSL https://opencode.ai/install | bash
 ```
 
