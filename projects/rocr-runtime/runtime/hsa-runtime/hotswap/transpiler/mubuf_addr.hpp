@@ -17,26 +17,28 @@ namespace transpiler {
 // would otherwise insert). `voffset` is the per-lane i32 byte offset
 // (vaddr + imm). `soffset` is the SGPR byte offset (defaults to 0).
 // `auxFlags` is always a zero i32 — the raw buffer intrinsics take it
-// but today's raiser doesn't surface cpol/th/scope.
+// but today's raiser doesn't surface cpol/th/scope (see the
+// "auxFlags is hard-coded to 0" item in
+// hotswap/docs/buffer-store-lowering.md §"Known limitations").
 //
 // For stores, `stData` is the VGPR source carrying the data. For
 // loads it's a default-constructed ParsedReg (kind == OTHER).
+//
+// Historical note: an earlier revision of this struct also exposed
+// the raw SRSRC dwords (`dw0` / `dw1` / `dw2`) for the flat-store
+// OOB-sink pattern in handle_mubuf.cpp.  That pattern was removed
+// when the BUFFER_STORE handler was rewritten to use
+// `llvm.amdgcn.raw.buffer.store` directly (R1 fix; see
+// hotswap/docs/buffer-store-lowering.md), so the dword fields became
+// dead — every consumer now goes through `srd`.  The fields were
+// removed in the same cleanup pass that added the lit regression
+// guard (lit_tests/buffer_store_no_scratch_alloca/).
 struct MubufAddr {
   llvm::Value *srd = nullptr;
   llvm::Value *voffset = nullptr;
   llvm::Value *soffset = nullptr;
   llvm::Value *auxFlags = nullptr;
   ParsedReg stData;
-  // Raw SRSRC dwords, retained for callers that need to reconstruct
-  // the base pointer / numRec out-of-band (the flat-store OOB-sink
-  // pattern in handle_mubuf.cpp):
-  //   dw0 = base_lo, dw1 = base_hi (low 16 bits), dw2 = numRec.
-  // Not needed by users that only consume `srd` through the raw-
-  // buffer intrinsics.
-  llvm::Value *dw0 = nullptr;
-  llvm::Value *dw1 = nullptr;
-  llvm::Value *dw2 = nullptr;
-  bool haveSoffset = false;
 };
 
 // Decode a MUBUF / VBUFFER load or store's addressing operands into a

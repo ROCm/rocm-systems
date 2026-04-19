@@ -135,12 +135,8 @@ MubufAddr decodeMubufAddr(RaiseContext &ctx, const DecodedInst &di,
 
   MubufAddr out;
   SRSRCDwords dw = readSRSRCDwords(ctx, m.srsrc);
-  out.dw0 = dw.dw0;
-  out.dw1 = dw.dw1;
-  out.dw2 = dw.dw2;
   out.srd = buildMubufSRD(ctx, dw);
   out.stData = m.vdata;
-  out.haveSoffset = m.haveSoff;
 
   Value *voffset = ConstantInt::get(ctx.i32Ty, 0);
   if (m.haveVaddr)
