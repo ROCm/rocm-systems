@@ -135,6 +135,13 @@ config.fixtures = {
     # flow through the SMEM kernarg branch in handle_smem.cpp.
     "s_load_b96_kernarg":
         r"@LIT_FIXTURE_S_LOAD_B96_KERNARG_CO@",
+    # s_lshr_b64 (SOP2 64-bit logical right shift) with an
+    # immediate shift count — the dominant corpus shape (every
+    # observed `s_lshr_b64` in the kerneldex sweep uses an
+    # immediate, typically `>> 16` for high-half pointer
+    # extraction). Pins the i32→i64 zext of the shift amount
+    # constant-folding away into a single `lshr i64 ..., 16`.
+    "s_lshr_b64_imm": r"@LIT_FIXTURE_S_LSHR_B64_IMM_CO@",
 }
 
 lit_config.load_config(

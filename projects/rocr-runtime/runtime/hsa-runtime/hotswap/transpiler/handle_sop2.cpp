@@ -26,6 +26,8 @@ ArrayRef<SemOpAttrSpec> getHandlerSOP2Attrs() {
       {SemOp::S_LSHL_B32, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHL_B64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHR_B32, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_LSHR_B64, {/*routesExecThroughStoreExec=*/true}},
+      {SemOp::S_ASHR_I64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_BFM_B32, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_BFM_B64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_CSELECT_B32, {/*routesExecThroughStoreExec=*/true}},
@@ -417,9 +419,47 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // 64-bit SOP2 — auto SCC via sccResult
+  // 64-bit SOP2 — auto SCC via sccResult.
+  //
+  // S_LSHL_B64 / S_LSHR_B64 / S_ASHR_I64 are all `SOP2_64_32` shape per
+  // SOPInstructions.td (`SReg_64:$sdst, SSrc_b64:$src0, SSrc_b32:$src1`)
+  // — src1 is a SINGLE 32-bit SGPR holding the shift count, not a
+  // 64-bit pair. Reading it as i64 via `op.src64(1)` would pull the
+  // following SGPR (s_n+1) as garbage in the high half, and LLVM's
+  // `lshr/shl/ashr i64 %a, %b` produces poison whenever `%b >= 64`,
+  // which a randomly-set bit in s_n+1 will trigger. We read src1 as
+  // i32 and zext to i64 so the shift count is bounded to [0, 2^32).
+  // The hardware's effective shift modulo (low 6 bits) is preserved
+  // by LLVM's IR semantics: any zext'd i32 < 64 yields the same shift
+  // result as a direct 64-bit op, and any value >= 64 is undefined in
+  // both hardware (per the AMDGPU ISA docs: "shift count is masked to
+  // [0,63]") and IR (poison) — but only the IR path makes the boundary
+  // observable, so emitting a defensive `urem` here would mask a real
+  // source-binary bug rather than reflect hardware. We do NOT mask.
+  //
+  // Test back-reference: lit_tests/s_lshr_b64_imm/ pins the dominant
+  // corpus shape `s_lshr_b64 sdst, src0, IMM` lifting to
+  // `%lshr64 = lshr i64 %src0, IMM` (the i32→i64 zext on the
+  // immediate constant-folds away). Any change to this branch — the
+  // shift-count zext, the i64 dst write, or the value-name
+  // `lshr64` — must keep that fixture green.
   if (sop == SemOp::S_LSHL_B64) {
-    hr.sccResult = ctx.B.CreateShl(op.src64(0), op.src64(1), "shl64");
+    Value *amt = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "shamt64");
+    hr.sccResult = ctx.B.CreateShl(op.src64(0), amt, "shl64");
+    ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_LSHR_B64) {
+    Value *amt = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "shamt64");
+    hr.sccResult = ctx.B.CreateLShr(op.src64(0), amt, "lshr64");
+    ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_ASHR_I64) {
+    Value *amt = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "shamt64");
+    hr.sccResult = ctx.B.CreateAShr(op.src64(0), amt, "ashr64");
     ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
     hr.handled = true;
     return hr;
