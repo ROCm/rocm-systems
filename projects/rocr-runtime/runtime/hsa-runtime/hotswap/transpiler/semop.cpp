@@ -217,6 +217,8 @@ const char *semOpName(SemOp op) {
     S(V_WMMA_I32_16x16x64_IU8)
     // VOPD
     S(VOPD_GENERIC)
+    // VIMAGE TENSOR (gfx1250-only)
+    S(TENSOR_LOAD_TO_LDS) S(TENSOR_STORE_FROM_LDS)
     // AGPR
     S(V_ACCVGPR_READ_B32) S(V_ACCVGPR_WRITE_B32)
 

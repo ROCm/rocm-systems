@@ -471,6 +471,29 @@ enum class SemOp : uint16_t {
   // -- VOPD -- (handled via string parsing of fullText, not opcode)
   VOPD_GENERIC,
 
+  // -- VIMAGE TENSOR (gfx1250-only) --
+  // Tensor descriptor memory ops driven by the gfx1250 TENSOR cnt unit
+  // (`MIMGInstructions.td:2049-2113`, `VIMAGE_TENSOR_Pseudo`,
+  // `let SubtargetPredicate = isGFX125xOnly`). Each opcode encodes
+  // up to four 128-/256-bit Tensor Descriptors (`D# group 0..3`),
+  // a `R128A16:$r128` flag, and a `CPol:$cpol` cachepolicy immediate.
+  // `_d2` is the up-to-2D form (passes NULL for D# group 2/3); `_d4`
+  // is the up-to-4D form. Both share the same SemOp here because
+  // their semantic intent is identical and their refusal contract is
+  // identical too — the handler `handleVIMAGE` discriminates on
+  // `di.mnemonic` only when shape differentiation matters (e.g.,
+  // a future native-target intrinsic-emit path that fills the
+  // 0-init D# operands for `_d2`).
+  //
+  // gfx942 has no equivalent hardware unit. The handler refuses
+  // loudly via `RaiseFailure::unsupportedShape` with a precise
+  // diagnostic explaining the cross-target gap, in line with the
+  // user-rules (no silent fallbacks). The matching LLVM intrinsics
+  // are `int_amdgcn_tensor_load_to_lds` /
+  // `int_amdgcn_tensor_store_from_lds` (IntrinsicsAMDGPU.td:4213).
+  TENSOR_LOAD_TO_LDS,
+  TENSOR_STORE_FROM_LDS,
+
   // -- AGPR --
   V_ACCVGPR_READ_B32, V_ACCVGPR_WRITE_B32,
 

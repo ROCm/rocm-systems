@@ -835,6 +835,25 @@ static const Entry kCanonTable[] = {
     // F16/BF16 / FP8/BF8 mappings above.
     E(V_WMMA_I32_16X16X64_IU8_w32_twoaddr,   V_WMMA_I32_16x16x64_IU8),
     E(V_WMMA_I32_16X16X64_IU8_w32_threeaddr, V_WMMA_I32_16x16x64_IU8),
+    // ---------------------------------------------------------------------
+    // VIMAGE TENSOR (gfx1250 RDNA4 — VIMAGE 0xc4 / 0xc5).
+    // The disassembler's MC opcodes are the `_gfx1250` reals
+    // (`TENSOR_LOAD_TO_LDS_d{2,4}_gfx1250`,
+    // `TENSOR_STORE_FROM_LDS_d{2,4}_gfx1250`,
+    // `MIMGInstructions.td:2115`); the canonicalization chain in
+    // `OpcodeMap::canonicalize` collapses each real onto its pseudo
+    // (`TENSOR_LOAD_TO_LDS_d{2,4}` / `TENSOR_STORE_FROM_LDS_d{2,4}`)
+    // via `buildMcToPseudoMap`. Both the `_d2` (up-to-2D) and `_d4`
+    // (up-to-4D) operand-shape variants share a SemOp because their
+    // semantic intent and their cross-target refusal contract are
+    // identical; `handleVIMAGE` uses `di.mnemonic` directly when it
+    // needs to discriminate (e.g., a future native-target intrinsic
+    // lowering that zero-fills D# group 2/3 for the `_d2` form).
+    // ---------------------------------------------------------------------
+    E(TENSOR_LOAD_TO_LDS_d2,    TENSOR_LOAD_TO_LDS),
+    E(TENSOR_LOAD_TO_LDS_d4,    TENSOR_LOAD_TO_LDS),
+    E(TENSOR_STORE_FROM_LDS_d2, TENSOR_STORE_FROM_LDS),
+    E(TENSOR_STORE_FROM_LDS_d4, TENSOR_STORE_FROM_LDS),
 };
 
 #undef SMEM3

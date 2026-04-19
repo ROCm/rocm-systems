@@ -39,6 +39,8 @@ HandlerResult handleMFMA(RaiseContext &ctx, const DecodedInst &di,
                          OpResolver &op);
 HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
                          OpResolver &op);
+HandlerResult handleVIMAGE(RaiseContext &ctx, const DecodedInst &di,
+                           OpResolver &op);
 
 } // namespace transpiler
 

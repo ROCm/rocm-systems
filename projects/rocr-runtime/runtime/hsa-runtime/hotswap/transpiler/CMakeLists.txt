@@ -89,6 +89,7 @@ add_library(hotswap-transpiler STATIC
   handle_mubuf.cpp
   handle_mfma.cpp
   handle_vopd.cpp
+  handle_vimage.cpp
   wmma_lowering.cpp
   pipeline.cpp
   code_object_utils.cpp

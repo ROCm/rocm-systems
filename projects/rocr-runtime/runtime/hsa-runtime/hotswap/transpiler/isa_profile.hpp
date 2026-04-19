@@ -26,6 +26,17 @@ struct ISAProfile {
   // + VOP3P patterns and is not covered here; the only WMMA source we lift
   // today is gfx1250.
   bool hasWMMA12 = false;
+  // True iff the subtarget exposes the gfx1250 TENSOR cnt unit
+  // (FeatureGFX1250Insts gates the VIMAGE TENSOR pseudo-instructions
+  // `tensor_load_to_lds_d{2,4}` and `tensor_store_from_lds_d{2,4}` —
+  // see `isGFX125xOnly` in AMDGPU.td and the
+  // `int_amdgcn_tensor_load_to_lds` /
+  // `int_amdgcn_tensor_store_from_lds` intrinsics in
+  // IntrinsicsAMDGPU.td:4213). The flag is consumed by `handleVIMAGE`
+  // to discriminate between the same-target intrinsic-emit path and
+  // the cross-target loud refusal: the gfx942 and earlier ISAs have
+  // no equivalent hardware unit, so cross-target lifts must refuse.
+  bool hasTensorOps = false;
 
   bool isWave32() const { return waveSize == 32; }
 
@@ -40,6 +51,7 @@ struct ISAProfile {
     p.hasScalarFP = STI.hasFeature(llvm::AMDGPU::FeatureSALUFloatInsts);
     p.hasWMMA12 = STI.hasFeature(llvm::AMDGPU::FeatureWMMA128bInsts) ||
                   STI.hasFeature(llvm::AMDGPU::FeatureWMMA256bInsts);
+    p.hasTensorOps = STI.hasFeature(llvm::AMDGPU::FeatureGFX1250Insts);
     return p;
   }
 

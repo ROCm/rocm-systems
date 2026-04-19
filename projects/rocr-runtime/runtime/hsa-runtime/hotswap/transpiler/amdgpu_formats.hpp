@@ -49,6 +49,21 @@ inline const char *formatName(uint64_t flags, unsigned opc) {
   if (flags & SIInstrFlags::FLAT)    return "FLAT";
   if (flags & SIInstrFlags::MUBUF)   return "MUBUF";
   if (flags & SIInstrFlags::DS)      return "DS";
+  // VIMAGE: gfx12+ vector image / tensor encoding family. Pure-image
+  // members carry `SIInstrFlags::VIMAGE` directly; the gfx1250 TENSOR
+  // pseudos (`tensor_load_to_lds_d{2,4}`,
+  // `tensor_store_from_lds_d{2,4}`, MIMGInstructions.td:2049-2113) do
+  // NOT — they extend `InstSI` directly and only set `let VALU = 1`
+  // and `let TENSOR_CNT = 1`, so the `VIMAGE` field stays 0. Detect
+  // them via the `TENSOR_CNT` TSFlags bit instead. The only other
+  // user of that bit is `s_wait_tensorcnt` (SOPP), which already
+  // matches the SOPP arm above and never reaches this fallthrough.
+  // Routing both arms to the same `"VIMAGE"` label lets
+  // `kerneldex`/`raise_cli` bucket the cross-target failures as
+  // `[format=VIMAGE]` rather than `[format=Unknown]`, which is what
+  // the handler refusal contract is keyed on.
+  if (flags & SIInstrFlags::VIMAGE)     return "VIMAGE";
+  if (flags & SIInstrFlags::TENSOR_CNT) return "VIMAGE";
   return "Unknown";
 }
 

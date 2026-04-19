@@ -522,6 +522,20 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       hr = handleMUBUF(ctx, di, op);
     else if (flags & SIInstrFlags::DS)
       hr = handleDS(ctx, di, op);
+    // VIMAGE TENSOR pseudo-instructions (`tensor_load_to_lds_d{2,4}`,
+    // `tensor_store_from_lds_d{2,4}`, MIMGInstructions.td:2049-2113).
+    // The pseudo extends `InstSI` directly and only sets `let VALU =
+    // 1` and `let TENSOR_CNT = 1` (NOT `let VIMAGE = 1`), so the
+    // `SIInstrFlags::VIMAGE` bit stays 0 on these. Dispatch on
+    // `TENSOR_CNT` instead — the only other carrier of that bit is
+    // `s_wait_tensorcnt` (SOPP), which is already claimed by the
+    // SOPP arm above and never reaches this fallthrough. Routed
+    // late because TENSOR ops are exclusive to the gfx1250
+    // (`isGFX125xOnly`) generation and the handler's only contract
+    // today is a cross-target loud refusal; the same gating applies
+    // when the same-target intrinsic-emit path lands.
+    else if (flags & SIInstrFlags::TENSOR_CNT)
+      hr = handleVIMAGE(ctx, di, op);
 
     if (hr.handled) {
       if (di.defsSCC && !hr.sccHandled && hr.sccResult) {
