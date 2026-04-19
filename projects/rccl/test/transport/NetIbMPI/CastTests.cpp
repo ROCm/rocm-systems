@@ -1259,4 +1259,199 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastStressMultiRoundTwoConns
+//
+// Stress test: two independent connections running concurrently, 500 sends each.
+// Goals:
+//   - Multiple token refill cycles (totTokens=100, kNMsgs=500 → 5 full rounds).
+//   - Timer (IbCastQpSchedUpdateTx, ~50ms interval) fires multiple times during
+//     the ~1KB * 500 run, changing initTokens mid-flight.
+//   - Active tokens exhaust at least 5 times per connection (lazy refill).
+//   - Sends and recvs for BOTH connections are posted before any waits (true
+//     parallelism between the two connections).
+//   - Data integrity verified on rank 0 via memcmp.
+//
+// Invariants asserted (timer may alter initTokens so exact values not fixed):
+//   - schedInit == true on both connections after all sends complete.
+//   - sum(activeQpTokens[i]) == activeTotTokens for both connections.
+//   - 0 <= activeTotTokens <= initTotTokens for both connections.
+// =============================================================================
+TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    AssertInitAndGetDevices(nullptr);
+
+    // ----- Connection 1 -----
+    void* listenComm1 = nullptr;
+    void* sendComm1   = nullptr;
+    void* recvComm1   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm1, &sendComm1, &recvComm1);
+
+    // ----- Connection 2 -----
+    void* listenComm2 = nullptr;
+    void* sendComm2   = nullptr;
+    void* recvComm2   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm2, &sendComm2, &recvComm2);
+
+    constexpr int    kNMsgs  = 500;
+    constexpr size_t kMsgSz  = 1024; // 1KB — small enough for WRR, large enough for timer firings
+    constexpr int    kBase1  = 4000;
+    constexpr int    kBase2  = 5000;
+
+    const size_t kBufSz = static_cast<size_t>(kNMsgs) * kMsgSz;
+
+    // Allocate send/recv buffers for both connections.
+    std::vector<char> sendBuf1(kBufSz), recvBuf1(kBufSz);
+    std::vector<char> sendBuf2(kBufSz), recvBuf2(kBufSz);
+    for (size_t i = 0; i < kBufSz; i++) {
+        sendBuf1[i] = static_cast<char>((i * 3 + 7)  & 0xFF);
+        sendBuf2[i] = static_cast<char>((i * 5 + 13) & 0xFF);
+    }
+    memset(recvBuf1.data(), 0, kBufSz);
+    memset(recvBuf2.data(), 0, kBufSz);
+
+    // Register memory: rank 0 registers recvComm, rank 1 registers sendComm.
+    void* comm1    = (rank == 0) ? recvComm1 : sendComm1;
+    void* comm2    = (rank == 0) ? recvComm2 : sendComm2;
+    char* regBuf1  = (rank == 0) ? recvBuf1.data() : sendBuf1.data();
+    char* regBuf2  = (rank == 0) ? recvBuf2.data() : sendBuf2.data();
+    void* mhandle1 = nullptr;
+    void* mhandle2 = nullptr;
+    ASSERT_EQ(RegisterMemory(comm1, regBuf1, kBufSz, NCCL_PTR_HOST, &mhandle1), ncclSuccess);
+    ASSERT_EQ(RegisterMemory(comm2, regBuf2, kBufSz, NCCL_PTR_HOST, &mhandle2), ncclSuccess);
+
+    // Arm tokens on both connections (rank 1 = sender).
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm1, tokens, 2), 0);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm2, tokens, 2), 0);
+    }
+
+    // Process sends/recvs in batches to stay within NCCL_NET_MAX_REQUESTS (32)
+    // per comm. Both connections are pipelined within each batch for concurrency.
+    constexpr int kBatch = 16; // half of MAX_REQUESTS so conn1+conn2 fit simultaneously
+
+    if (rank == 0) {
+        for (int base = 0; base < kNMsgs; base += kBatch) {
+            const int end = std::min(base + kBatch, kNMsgs);
+            std::vector<void*> reqs1(end - base, nullptr);
+            std::vector<void*> reqs2(end - base, nullptr);
+            // Post recvs for both connections.
+            for (int i = base; i < end; i++) {
+                void*  bufs[1]    = {recvBuf1.data() + i * kMsgSz};
+                size_t sizes[1]   = {kMsgSz};
+                int    tags[1]    = {kBase1 + i};
+                void*  handles[1] = {mhandle1};
+                ASSERT_EQ(PostRecv(recvComm1, 1, bufs, sizes, tags, handles, &reqs1[i - base]), ncclSuccess);
+                ASSERT_NE(reqs1[i - base], nullptr);
+            }
+            for (int i = base; i < end; i++) {
+                void*  bufs[1]    = {recvBuf2.data() + i * kMsgSz};
+                size_t sizes[1]   = {kMsgSz};
+                int    tags[1]    = {kBase2 + i};
+                void*  handles[1] = {mhandle2};
+                ASSERT_EQ(PostRecv(recvComm2, 1, bufs, sizes, tags, handles, &reqs2[i - base]), ncclSuccess);
+                ASSERT_NE(reqs2[i - base], nullptr);
+            }
+            // Wait for both connections.
+            for (int i = 0; i < end - base; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs1[i], &sz, 10000), ncclSuccess);
+            }
+            for (int i = 0; i < end - base; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs2[i], &sz, 10000), ncclSuccess);
+            }
+        }
+
+        // Data integrity: received bytes must match what rank 1 sent.
+        EXPECT_EQ(memcmp(recvBuf1.data(), sendBuf1.data(), kBufSz), 0)
+            << "conn1: data corruption detected";
+        EXPECT_EQ(memcmp(recvBuf2.data(), sendBuf2.data(), kBufSz), 0)
+            << "conn2: data corruption detected";
+    } else {
+        for (int base = 0; base < kNMsgs; base += kBatch) {
+            const int end = std::min(base + kBatch, kNMsgs);
+            std::vector<void*> reqs1(end - base, nullptr);
+            std::vector<void*> reqs2(end - base, nullptr);
+            // Post sends for both connections.
+            for (int i = base; i < end; i++) {
+                PostSendWithRetry(sendComm1, sendBuf1.data() + i * kMsgSz, kMsgSz,
+                                  kBase1 + i, mhandle1, &reqs1[i - base]);
+            }
+            for (int i = base; i < end; i++) {
+                PostSendWithRetry(sendComm2, sendBuf2.data() + i * kMsgSz, kMsgSz,
+                                  kBase2 + i, mhandle2, &reqs2[i - base]);
+            }
+            // Wait for both connections.
+            for (int i = 0; i < end - base; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs1[i], &sz, 10000), ncclSuccess);
+            }
+            for (int i = 0; i < end - base; i++) {
+                int sz = 0;
+                ASSERT_EQ(WaitForCompletion(reqs2[i], &sz, 10000), ncclSuccess);
+            }
+        }
+
+        // WRR consistency invariants for conn1.
+        {
+            struct ncclIbCastSchedState st = {};
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm1, &st), 0);
+            EXPECT_TRUE(st.schedInit) << "conn1: schedInit must be true after sends";
+            int qpSum = 0;
+            for (int q = 0; q < st.nqps; q++) qpSum += st.activeQpTokens[q];
+            EXPECT_EQ(qpSum, st.activeTotTokens)
+                << "conn1: sum(activeQpTokens) must equal activeTotTokens";
+            EXPECT_GE(st.activeTotTokens, 0)
+                << "conn1: activeTotTokens must be >= 0";
+            EXPECT_LE(st.activeTotTokens, st.initTotTokens)
+                << "conn1: activeTotTokens must not exceed initTotTokens";
+        }
+
+        // WRR consistency invariants for conn2.
+        {
+            struct ncclIbCastSchedState st = {};
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm2, &st), 0);
+            EXPECT_TRUE(st.schedInit) << "conn2: schedInit must be true after sends";
+            int qpSum = 0;
+            for (int q = 0; q < st.nqps; q++) qpSum += st.activeQpTokens[q];
+            EXPECT_EQ(qpSum, st.activeTotTokens)
+                << "conn2: sum(activeQpTokens) must equal activeTotTokens";
+            EXPECT_GE(st.activeTotTokens, 0)
+                << "conn2: activeTotTokens must be >= 0";
+            EXPECT_LE(st.activeTotTokens, st.initTotTokens)
+                << "conn2: activeTotTokens must not exceed initTotTokens";
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // Teardown conn1.
+    ASSERT_EQ(DeregisterMemory(comm1, mhandle1), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm1), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm1), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm1), ncclSuccess);
+    }
+
+    // Teardown conn2.
+    ASSERT_EQ(DeregisterMemory(comm2, mhandle2), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm2), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm2), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm2), ncclSuccess);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
