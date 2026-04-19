@@ -43,14 +43,40 @@ def cwd(tmp_path: Path) -> Path:
 
 
 def _fake_mcp_list_response(
-    payload: dict, *, returncode: int = 0
+    payload: dict,
+    *,
+    returncode: int = 0,
+    status: str = "✓ Connected",
 ) -> "subprocess.CompletedProcess":
+    """Simulate `claude mcp list` plain-text output from a server dict.
+
+    Accepts the legacy `{"mcpServers": {<name>: {...}}}` shape used
+    across tests, plus a flat `{<name>: {...}}`. Each listed server
+    becomes a line of the form:
+
+        <name>: <command-or-endpoint> - <status>
+
+    `status` defaults to "✓ Connected" (healthy). Pass `status="✘ failed"`
+    to simulate an unhealthy entry.
+    """
     class _R:
         pass
 
+    # Normalise the two legacy shapes.
+    servers = payload.get("mcpServers", payload) if isinstance(payload, dict) else {}
+
+    lines = ["Checking MCP server health…", ""]
+    for name, spec in servers.items():
+        endpoint = (
+            (isinstance(spec, dict) and spec.get("command"))
+            or (isinstance(spec, dict) and spec.get("url"))
+            or "/usr/bin/perfxpert-mcp"
+        )
+        lines.append(f"{name}: {endpoint} - {status}")
+
     r = _R()
     r.returncode = returncode
-    r.stdout = json.dumps(payload).encode("utf-8")
+    r.stdout = ("\n".join(lines) + "\n").encode("utf-8")
     r.stderr = b""
     return r
 
@@ -100,36 +126,6 @@ def test_verify_mcp_live_detects_unhealthy_entry(
     assert report.mcp_healthy is False
     assert report.error is not None
     assert "perfxpert" in report.error
-
-
-def test_verify_mcp_live_extracts_tool_names(
-    cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/claude")
-
-    def _run(cmd, *a, **kw):
-        if cmd[:1] == ["git"]:
-            return _REAL_RUN(cmd, *a, **kw)
-        return _fake_mcp_list_response(
-            {
-                "mcpServers": {
-                    "perfxpert": {
-                        "command": "perfxpert-mcp",
-                        "tools": [
-                            {"name": "mcp__perfxpert__intent_classify"},
-                            {"name": "mcp__perfxpert__report"},
-                        ],
-                    }
-                }
-            }
-        )
-
-    monkeypatch.setattr(
-        "perfxpert.cli._backend.claude.subprocess.run", _run
-    )
-    report = ClaudeCodeAdapter().verify_mcp_live(cwd)
-    assert "mcp__perfxpert__intent_classify" in report.observed_tool_names
-    assert "mcp__perfxpert__report" in report.observed_tool_names
 
 
 # ---------------------------------------------------------------------------
