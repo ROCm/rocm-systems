@@ -1063,18 +1063,23 @@ def _find_bundled_agents_md() -> Path | None:
 def _lazy_import_tomlkit(reason: str):
     """Import `tomlkit` lazily — raises `BackendNotFound` if missing.
 
-    The error message is reason-specific so the user knows which code
-    path triggered the import. Per plan cycle-2 I7, `tomlkit` is an
-    OPTIONAL extra (`pip install 'perfxpert[backends]'`); the primary
-    `codex mcp add` path does not require it.
+    `tomlkit` is a required dependency of perfxpert (declared in
+    `pyproject.toml`), so this import should always succeed in a
+    correctly-installed environment. The error-path survives as a
+    safety net for broken installs (e.g. user-site / virtualenv
+    misalignment where the adapter runs with a different Python than
+    `pip install` used). The error message tells the user how to
+    recover without rebuilding the wheel.
     """
     try:
         import tomlkit as _tomlkit
     except ImportError as exc:
         raise BackendNotFound(
-            f"tomlkit is required for {reason}. "
-            f"Install: pip install 'perfxpert[backends]' "
-            f"(or directly: pip install tomlkit). "
+            f"tomlkit is required for {reason} but isn't importable from "
+            f"the Python that runs `perfxpert-code` ({sys.executable}). "
+            f"Reinstall perfxpert into that environment, or install "
+            f"tomlkit there directly: "
+            f"{sys.executable} -m pip install tomlkit. "
             f"Original error: {exc}"
         ) from exc
     return _tomlkit
