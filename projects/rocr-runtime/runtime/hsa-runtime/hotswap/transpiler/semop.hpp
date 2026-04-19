@@ -142,6 +142,12 @@ enum class SemOp : uint16_t {
   // 16 bits). All can target EXEC, so they must be marked
   // routesExecThroughStoreExec.
   S_NAND_B32, S_NAND_B64, S_NOR_B32, S_NOR_B64, S_XNOR_B32, S_XNOR_B64,
+  // SOP2 absolute-difference (gfx7+). SOPInstructions.td:886-888 —
+  // `dst = |src0 - src1|` on signed i32, SCC = (result != 0). Lower
+  // through llvm.abs.i32 with is_int_min_poison=false: hardware wraps
+  // for INT_MIN (the only value whose negation equals itself), so we
+  // mustn't poison there. Heavily used by tensilelite for stride math.
+  S_ABSDIFF_I32,
   S_LSHL_B32, S_LSHL_B64, S_LSHR_B32, S_LSHR_B64, S_ASHR_I32, S_ASHR_I64,
   S_MUL_I32, S_MUL_HI_U32, S_MUL_HI_I32, S_MUL_U64, S_MUL_F32, S_ADD_F32, S_SUB_F32,
   S_BFE_U32, S_BFE_I32, S_BFM_B32, S_BFM_B64,

@@ -34,6 +34,10 @@ ArrayRef<SemOpAttrSpec> getHandlerSOP2Attrs() {
       {SemOp::S_NOR_B64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_XNOR_B32, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_XNOR_B64, {/*routesExecThroughStoreExec=*/true}},
+      // s_absdiff_i32 returns an i32 magnitude; in principle the result
+      // can target EXEC like any other SOP2 i32 writer, so route through
+      // storeExec for safety.
+      {SemOp::S_ABSDIFF_I32, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHL_B32, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHL_B64, {/*routesExecThroughStoreExec=*/true}},
       {SemOp::S_LSHR_B32, {/*routesExecThroughStoreExec=*/true}},
@@ -560,6 +564,21 @@ HandlerResult handleSOP2(RaiseContext &ctx, const DecodedInst &di,
     hr.sccResult = ctx.B.CreateNot(
         ctx.B.CreateXor(op.src64(0), op.src64(1), "xor64"), "xnor64");
     ctx.regs.writeReg64(ctx.B, op.dst(), hr.sccResult);
+    hr.handled = true;
+    return hr;
+  }
+  // s_absdiff_i32 — `dst = |src0 - src1|` on signed i32. The hardware
+  // wraps for INT_MIN (since `0 - INT_MIN` overflows back to itself in
+  // two's complement), so we lower with `llvm.abs.i32(diff, false)` —
+  // is_int_min_poison=false matches the wrapping behaviour exactly.
+  // SCC follows writeReg32's standard (set when result != 0).
+  if (sop == SemOp::S_ABSDIFF_I32) {
+    Value *diff = ctx.B.CreateSub(op.src(0), op.src(1), "absdiff_sub");
+    Value *res = ctx.B.CreateIntrinsic(Intrinsic::abs, {ctx.i32Ty},
+                                       {diff, ctx.B.getFalse()},
+                                       /*FMFSource=*/nullptr, "absdiff");
+    ctx.regs.writeReg32(ctx.B, op.dst(), res);
+    hr.sccResult = res;
     hr.handled = true;
     return hr;
   }
