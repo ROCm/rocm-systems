@@ -674,6 +674,16 @@ bool Kernel::createSignature(const parameters_t& params, uint32_t numParameters,
   delete signature_;
   signature_ = new amd::KernelSignature(params, attribs.str(), numParameters, version);
   if (NULL != signature_) {
+    // Precompute whether any user parameter uses __local address space.
+    // Used to gate the processMemObjects fast path under AMD_DIRECT_DISPATCH.
+    hasLocalMemArgs_ = false;
+    for (uint32_t i = 0; i < numParameters; ++i) {
+      if (params[i].type_ == T_POINTER &&
+          params[i].addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+        hasLocalMemArgs_ = true;
+        break;
+      }
+    }
     return true;
   }
   return false;

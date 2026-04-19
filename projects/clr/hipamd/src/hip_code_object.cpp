@@ -594,6 +594,16 @@ void StatCO::ResizeForDevices(size_t device_count) {
 
 // ================================================================================================
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
+  // Fast path: check atomic bitmask before acquiring the lock.
+  // Supports up to 256 devices (4 × 64-bit words).
+  const unsigned uid = static_cast<unsigned>(deviceId);
+  if (uid < 256u) {
+    const unsigned word = uid / 64u;
+    const unsigned bit  = uid % 64u;
+    if (managedVarsInitializedMask_[word].load(std::memory_order_acquire) & (uint64_t{1} << bit)) {
+      return hipSuccess;
+    }
+  }
   std::scoped_lock lock(sclock_);
   hipError_t err = hipSuccess;
   if (managedVarsDevicePtrInitalized_.find(deviceId) == managedVarsDevicePtrInitalized_.end() ||
@@ -620,6 +630,11 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
       }
     }
     managedVarsDevicePtrInitalized_[deviceId] = true;
+    if (uid < 256u) {
+      const unsigned word = uid / 64u;
+      const unsigned bit  = uid % 64u;
+      managedVarsInitializedMask_[word].fetch_or(uint64_t{1} << bit, std::memory_order_release);
+    }
   }
   return err;
 }

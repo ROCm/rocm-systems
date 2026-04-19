@@ -840,6 +840,15 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
   // Mark the tracker with a new kernel, so it can avoid checks of the aliased objects
   memoryDependency().newKernel();
 
+  // Fast path: under AMD_DIRECT_DISPATCH all memory slots are null (no MemObjMap lookups),
+  // and on non-FGS devices null pointers require no dependency or cache-coherency work.
+  // Skip the SVM exec-info loop and the parameter loop entirely.
+  if (amd::IS_HIP && AMD_DIRECT_DISPATCH && !cooperativeGroups &&
+      !dev().isFineGrainedSystem(true) && kernelParams.getNumberOfSvmPtr() == 0 &&
+      !hsaKernel.hasLocalMemArgs()) {
+    return true;
+  }
+
   bool deviceSupportFGS = 0 != dev().isFineGrainedSystem(true);
   bool supportFineGrainedSystem = deviceSupportFGS;
   FGSStatus status = kernelParams.getSvmSystemPointersSupport();
@@ -3867,8 +3876,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   }
 
   // Init PrintfDbg object if printf is enabled.
-  bool printfEnabled = (gpuKernel.printfInfo().size() > 0) ? true : false;
-  if (!printfDbg()->init(printfEnabled)) {
+  bool printfEnabled = !gpuKernel.printfInfo().empty();
+  if (printfEnabled && !printfDbg()->init(true)) {
     LogError("\nPrintfDbg object initialization failed!");
     return false;
   }

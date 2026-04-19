@@ -320,15 +320,16 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
     return hipErrorInvalidValue;
   }
-  if (!kernel->getDeviceKernel(*device)) {
+  const device::Kernel* devKernel = kernel->getDeviceKernel(*device);
+  if (!devKernel) {
     return hipErrorInvalidDevice;
   }
   // Make sure the launch params are not larger than if specified launch_bounds
   // If it exceeds, then return a failure
-  if (launch_params.local_.product() > kernel->getDeviceKernel(*device)->workGroupInfo()->size_) {
+  if (launch_params.local_.product() > devKernel->workGroupInfo()->size_) {
     LogPrintfError("Launch params (%u, %u, %u) are larger than launch bounds (%lu) for kernel %s",
                    launch_params.local_[0], launch_params.local_[1], launch_params.local_[2],
-                   kernel->getDeviceKernel(*device)->workGroupInfo()->size_,
+                   devKernel->workGroupInfo()->size_,
                    kernel->name().c_str());
     return hipErrorLaunchFailure;
   }

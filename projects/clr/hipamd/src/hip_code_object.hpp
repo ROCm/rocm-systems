@@ -9,6 +9,8 @@
 
 #include "hip_global.hpp"
 
+#include <array>
+#include <atomic>
 #include <cstring>
 #include <unordered_map>
 
@@ -183,6 +185,9 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
   std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
+  //! Bitmask fast-path: bit N set means InitManagedVarDevicePtr already ran for device N.
+  //! 4 × 64 = 256 devices supported.
+  std::array<std::atomic<uint64_t>, 4> managedVarsInitializedMask_{};
 };
 
 };  // namespace hip

@@ -343,6 +343,9 @@ class Kernel : public amd::HeapObject {
 
   bool isFiniKernel() const { return kind_ == Fini; }
 
+  //! Returns true if any parameter uses __local (LDS) address space
+  bool hasLocalMemArgs() const { return hasLocalMemArgs_; }
+
  protected:
   //! Initializes the abstraction layer kernel parameters
   void InitParameters(const amd_comgr_metadata_node_t kernelMD);
@@ -380,6 +383,7 @@ class Kernel : public amd::HeapObject {
   uint32_t kernargSegmentByteSize_ = 0;  //!< Size of kernel argument buffer
   uint32_t kernargSegmentAlignment_ = 0;
   bool kernelHasDynamicCallStack_ = 0;
+  bool hasLocalMemArgs_ = false;  //!< True if any parameter uses __local address space
 
   union Flags {
     struct {
