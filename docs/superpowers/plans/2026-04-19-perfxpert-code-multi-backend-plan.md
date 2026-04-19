@@ -540,6 +540,15 @@ final step is live from the first release.
         check fails, raise `PartialInstall` with the observed tool
         names. (B1 + I11.)
         - stderr: `[4/4] Verifying perfxpert MCP is live ... ok`.
+        - **Safe-intermediate-state flag (Practical-top — cycle-3
+          followup).** Task 4b's initial commit sets
+          `PERFXPERT_SKIP_LIVE_CHECK=1` as the default when running
+          inside Task 4b's own test suite (not user-facing). Task 4c's
+          commit removes the default. This makes the 4b→4c intermediate
+          state (4b merged, 4c still in review) safe: `install()`
+          Step 4/4 becomes a no-op until 4c lands. User-facing default
+          for the installed package is `PERFXPERT_SKIP_LIVE_CHECK=0`
+          (live-check runs).
       - `grant_consent(...)` on success.
       - Return `InstallReport`.
     - `verify_mcp_live(cwd, telemetry=False)` → **implemented in Task 4c**.
@@ -713,6 +722,12 @@ as part of each adapter's `install()`.
   `perfxpert/cli/backends/_gate_hooks/claude.py` AFTER Task 0.5
   flips `docs/decisions/2026-04-19-claude-hook-surface.md` from
   PENDING to a chosen surface.
+
+  **Subagent precondition (Practical-3 — cycle-3 followup).** Refuse
+  to execute Task 4.6 Claude-portion if
+  `docs/decisions/2026-04-19-claude-hook-surface.md` still says
+  `Status: PENDING`. The implementing subagent MUST grep the decision
+  record for `Status: DECIDED` before proceeding.
 - **Gemini** — use per-tool policies or `allowedTools` list in
   `.gemini/settings.json` to block non-perfxpert tools initially.
   Settings-only (no hook surface needed at the CLI layer). Lift
@@ -1264,6 +1279,18 @@ Sub-task naming:
   same adapter surface as 4a/4b/4c and ship within PR 1.
 - Tasks 5, 6, 7, 8, 9, 10, 11 retain their original numbers.
 
+**4a/4b/4c sequencing vs Task 0.5 gate (N3-1 + Practical-3 — cycle-3 followup).**
+Tasks 4a, 4b, 4c commit WITHOUT the Claude hook-install step. Task 4.6
+inserts the Claude hook-install step into `install()` AFTER Task 0.5's
+decision record flips from `Status: PENDING`. This lets 4a/4b/4c commit
+early while 0.5 is still pending; the 4.6 Claude-portion is gated.
+
+**4b → 4c batching (Practical-top — cycle-3 followup).** Task 4b and 4c
+SHOULD be reviewed and merged in the same batch. If they land in separate
+batches, 4b's `PERFXPERT_SKIP_LIVE_CHECK=1` default (see Task 4b Step 4/4)
+avoids a broken intermediate state — `install()` Step 4/4 becomes a no-op
+until 4c lands.
+
 The PR 1 commit count grew from 12 to 14 (added 0.5 + split 4 into
 4a/4b/4c). Average commit size dropped (biggest commit was ~500 LOC
 Task 4; now biggest is ~200 LOC Task 4b). Review throughput
@@ -1378,6 +1405,11 @@ improves; total LOC unchanged-to-slightly-higher.
 ## Acceptance criteria (per PR)
 
 **PR 1 is done when:**
+0. **Task 0.5 decision record flipped from `PENDING` (N3-2 — cycle-3
+   followup).** `docs/decisions/2026-04-19-claude-hook-surface.md` has
+   `Status: DECIDED (<surface>)` where `<surface>` is one of:
+   `native-pretooluse` / `allowedTools` / `prompt-layer-only`. This gate
+   is hard — PR 1 cannot be merged while PENDING.
 1. `perfxpert-code` with no args = unchanged behavior (existing
    `test_main_default_invocation_stages_runtime_cfg_dir` passes).
 2. `perfxpert-code claude --dry-run "hello"` prints a plan with every
