@@ -341,6 +341,22 @@ Value *AllocaRegFile::readReg64(IRBuilder<> &B, ParsedReg pr) {
     Value *hi = B.CreateZExt(B.CreateLoad(i32Ty, flatScr[1]), i64Ty);
     return B.CreateOr(lo, B.CreateShl(hi, 32), "fscr64");
   }
+  // TTMP[baseIdx:baseIdx+1] read as i64 — combine the two adjacent
+  // i32 lanes the same way SGPR pairs are combined. The 32-bit
+  // single-lane read above lives in readReg32; this is the
+  // S_LOAD_DWORDX2 / DWORDX4 path where the kernel addresses a TTMP
+  // pair (e.g. `s_load_dwordx2 ..., ttmp[12:13], 0x0`). Without this
+  // case the dispatcher fires `failUnhandledKind`, which the corpus
+  // exercises in 49 gfx1250 kernels.
+  if (pr.kind == ParsedReg::TTMP && pr.baseIdx >= 0 &&
+      (unsigned)(pr.baseIdx + 1) < ttmp.size()) {
+    Type *i32Ty = B.getInt32Ty();
+    Type *i64Ty = B.getInt64Ty();
+    Value *lo = B.CreateZExt(B.CreateLoad(i32Ty, ttmp[pr.baseIdx]), i64Ty);
+    Value *hi = B.CreateZExt(B.CreateLoad(i32Ty, ttmp[pr.baseIdx + 1]),
+                              i64Ty);
+    return B.CreateOr(lo, B.CreateShl(hi, 32), "ttmp64");
+  }
   failUnhandledKind("readReg64", pr);
 }
 
@@ -427,6 +443,21 @@ void AllocaRegFile::writeReg64(IRBuilder<> &B, ParsedReg pr, Value *v) {
     if (v->getType() != i64Ty) v = B.CreateBitOrPointerCast(v, i64Ty);
     B.CreateStore(B.CreateTrunc(v, i32Ty), flatScr[0]);
     B.CreateStore(B.CreateTrunc(B.CreateLShr(v, 32), i32Ty), flatScr[1]);
+    return;
+  }
+  // 64-bit TTMP write — split into two i32 stores at baseIdx and
+  // baseIdx+1, matching the readReg64 TTMP shape above. Trap-handler
+  // kernels routinely materialise a 64-bit address into a TTMP pair
+  // before invoking the trap; we route them through the same alloca
+  // bank as the 32-bit case so subsequent reads see the stored value.
+  if (pr.kind == ParsedReg::TTMP && pr.baseIdx >= 0 &&
+      (unsigned)(pr.baseIdx + 1) < ttmp.size()) {
+    Type *i32Ty = B.getInt32Ty();
+    Type *i64Ty = B.getInt64Ty();
+    if (v->getType() != i64Ty) v = B.CreateBitOrPointerCast(v, i64Ty);
+    B.CreateStore(B.CreateTrunc(v, i32Ty), ttmp[pr.baseIdx]);
+    B.CreateStore(B.CreateTrunc(B.CreateLShr(v, 32), i32Ty),
+                   ttmp[pr.baseIdx + 1]);
     return;
   }
 }
@@ -523,6 +554,18 @@ void AllocaRegFile::collectAllocas(SmallVectorImpl<AllocaInst *> &out) {
   if (exec) out.push_back(exec);
   if (m0) out.push_back(m0);
   for (auto *a : flatScr) if (a) out.push_back(a);
+  // ttmps must be promoted too, otherwise they survive into the AMDGPU
+  // backend and trigger AMDGPUPromoteAllocaToLDS, which inserts an
+  // `amdgcn.dispatch.ptr` intrinsic *and* removes the kernel's
+  // `amdgpu-no-dispatch-ptr` attribute (see
+  // AMDGPUPromoteAlloca.cpp::getLocalSizeYZ). Once dispatch_ptr is
+  // re-enabled in the kernel descriptor, the regalloc treats s[0:1] as
+  // a free preloaded SGPR and uses s1 as scratch — corrupting buffer
+  // pointer high words and producing the gfx1250 Triton SIGSEGV (R1).
+  // Lifting these allocas requires a dominating defining store for
+  // every read; raiser.cpp Phase 4 seeds every ttmp with `i32 0` in
+  // the entry block so PromoteMemToReg can lift the rest cleanly.
+  for (auto *a : ttmp) if (a) out.push_back(a);
 }
 
 } // namespace transpiler

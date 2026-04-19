@@ -291,6 +291,16 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
         v = B.CreateZExt(v, i64Ty, "exec_ext");
       return v;
     }
+    // Mirror the readOp32 NOREG / MODE handling: SGPR_NULL64 (carry
+    // sink), XNACK_MASK pairs, and the architectural MODE register
+    // have no backing slot in our reg-file model. The 32-bit path
+    // already returns the zero constant; the 64-bit path crashed
+    // because readReg64 had no branch for these kinds. Returning
+    // i64 0 matches hardware (SGPR_NULL reads as 0; XNACK_MASK and
+    // MODE behave as 0 in compute kernels, see parseReg and the
+    // SHORTCUTS_AND_LIMITATIONS XNACK note for rationale).
+    if (pr.kind == ParsedReg::NOREG || pr.kind == ParsedReg::MODE)
+      return ConstantInt::get(i64Ty, 0);
     Value *v = regs.readReg64(B, pr);
     if (!v) {
       errs() << "transpiler: unreadable register64 '"
