@@ -1,11 +1,11 @@
 """Tests for perfxpert-code launcher subcommand dispatch.
 
-Covers two phases of review findings:
+Covers two distinct review findings:
 
-* Review-finding I4 (phase 7): `perfxpert-code --help` must surface the
+* Review-finding I4: `perfxpert-code --help` must surface the
   perfxpert-owned subcommands (`doctor`, `analyze`, `config`, `providers`)
   so users can discover them, not silently forward to opencode.
-* Issue 2 (phase 8): `perfxpert-code doctor` errored with
+* Issue 2: `perfxpert-code doctor` errored with
   ``Failed to change directory to .../doctor`` because opencode
   interpreted ``doctor`` as a positional CWD. The launcher now routes
   known subcommands explicitly. See
@@ -148,7 +148,7 @@ def test_dispatch_set_contains_doctor() -> None:
 
 
 def test_dispatch_set_contains_install_patches() -> None:
-    """Phase 8: install-patches must short-circuit before opencode resolution
+    """install-patches must short-circuit before opencode resolution
     (it's the command that CREATES the opencode binary; it'd deadlock if it
     required opencode first)."""
     assert "install-patches" in _PERFXPERT_DISPATCH_SUBCOMMANDS
@@ -167,7 +167,7 @@ def test_route_install_patches_is_perfxpert_owned() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Bundled-binary priority (Phase 8): the launcher must prefer
+# Bundled-binary priority: the launcher must prefer
 # perfxpert/_bundled/opencode over upstream installs on disk.
 # ---------------------------------------------------------------------------
 
@@ -176,7 +176,7 @@ class TestBundledPriority:
     """resolve_opencode_binary() priority order:
        env override → _bundled → well-known → PATH.
 
-    Phase 8 requirement: the bundled binary wins over
+    Requirement: the bundled binary wins over
     ~/.opencode/bin/opencode (upstream, unpatched).
     """
 
@@ -296,7 +296,7 @@ class TestBundledPriority:
 
 
 class TestRunAutoAgentInject:
-    """Phase 8: `perfxpert-code run ...` must load the perfxpert agent
+    """`perfxpert-code run ...` must load the perfxpert agent
     so AGENTS.md (with the tool-priority gate) applies.
 
     opencode's `run` otherwise defaults to agent=build and ignores our
@@ -535,7 +535,7 @@ def test_main_run_passes_prompt_through(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert rc == 0
     cmd = captured["cmd"]
     assert cmd[0] == str(fake_bin)
-    # Phase 8 auto-inject: `run` without explicit --agent gets
+    # Auto-inject: `run` without explicit --agent gets
     # `--agent perfxpert` so AGENTS.md (tool-priority gate) loads.
     assert cmd[1:] == ["run", "--agent", "perfxpert", "explain this kernel"]
     assert captured["kwargs"].get("cwd") is None  # type: ignore[union-attr]
@@ -579,7 +579,7 @@ def test_main_default_invocation_stages_runtime_cfg_dir(
 
 
 class TestHelpFlag:
-    """Help-flag handling composed from Phase 7's `_handle_help_flag`.
+    """Help-flag handling composed from `_handle_help_flag`.
 
     Bare ``--help`` / ``-h`` before any positional must print the AMD
     PerfXpert banner (via _print_perfxpert_help) and then fall through
@@ -650,7 +650,7 @@ class TestHelpFlag:
         self, capsys, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """If opencode isn't installed, bare --help MUST still print our
-        banner and return 0 (per the composed Phase 7 behavior).
+        banner and return 0 (per the composed fallback behavior).
         """
         monkeypatch.setattr(
             "perfxpert.cli.opencode_launcher.resolve_opencode_binary",

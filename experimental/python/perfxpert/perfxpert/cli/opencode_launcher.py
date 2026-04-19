@@ -144,7 +144,7 @@ def _warn_unpatched_fallback(path: Path) -> None:
 def resolve_opencode_binary() -> Path:
     """Locate the opencode binary.
 
-    Priority (Phase 8 — bundled patched binary wins over upstream):
+    Priority (bundled patched binary wins over upstream):
 
     1. ``$PERFXPERT_OPENCODE_PATH`` — explicit override, power users.
     2. ``perfxpert/_bundled/opencode`` — OUR patched bundle (preferred).
@@ -623,7 +623,7 @@ def main(argv: list[str] | None = None) -> int:
     # so MCP wiring + AGENTS.md instructions apply without polluting the user's cwd.
     runtime_cfg_dir = _prepare_runtime_config_dir(config_dir)
 
-    # Phase 8 fix — force `--agent perfxpert` on `run` when the user did
+    # Force `--agent perfxpert` on `run` when the user did
     # not override. opencode's `run` subcommand otherwise defaults to
     # `agent=build`, which loads the stock prompt; `perfxpert` loads
     # AGENTS.md with the tool-priority gate.  MUST run BEFORE `cmd` is
@@ -642,7 +642,7 @@ def main(argv: list[str] | None = None) -> int:
     # and, if confirmed, would replace our patched bundle with upstream.
     env.setdefault("OPENCODE_DISABLE_AUTOUPDATE", "1")
 
-    # Phase 8 fix — point opencode at our bundled config regardless of cwd.
+    # Point opencode at our bundled config regardless of cwd.
     # Previously `perfxpert-code run ...` preserved the user's CWD (so they
     # could reference files in their project), which meant opencode never
     # picked up the bundled opencode.json → users got the default `build`

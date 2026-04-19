@@ -2,8 +2,8 @@
 # build-bundled-opencode.sh — apply perfxpert patches + build opencode +
 # install the patched binary into perfxpert/_bundled/opencode.
 #
-# Phase 8 deliverable: `pip install perfxpert` ships with an unbuilt
-# placeholder for the opencode binary; running this script populates
+# `pip install perfxpert` ships with an unbuilt placeholder for the
+# opencode binary; running this script populates
 # _bundled/opencode with our fork. The launcher prefers this bundled
 # binary over any upstream install on disk, so users get the
 # tool-priority gate + AMD rebrand patches automatically.
