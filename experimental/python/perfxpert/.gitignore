@@ -20,6 +20,12 @@ opencode/.turbo/
 opencode/target/
 opencode/*.log
 
+# Bundled opencode binary — built locally (or on first run) by
+# scripts/build-bundled-opencode.sh. NOT committed; wheel build picks it
+# up via pyproject `package_data` at sdist/wheel time.
+perfxpert/_bundled/opencode
+perfxpert/_bundled/opencode.*
+
 # BUT: do NOT ignore .patches/*.patch files
 !.patches/*.patch
 
