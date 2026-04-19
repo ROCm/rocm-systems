@@ -462,8 +462,9 @@ def _exec_perfxpert_subcommand(argv: list[str]) -> int:
 def _run_uninstall(remaining_argv: list[str]) -> int:
     """Handle `perfxpert-code uninstall <backend>` (Task 8).
 
-    Backends supported in PR 1: claude, gemini. Codex routes to a
-    TODO message and exits 42 (parity with the Task-2/6 Codex stub).
+    Backends supported: claude, gemini, codex. Each backend's adapter
+    is imported lazily so unrelated subcommands don't pay the import
+    cost.
     """
     # Parse dispatcher flags (--yes / -y / --quiet).
     assume_yes = False
@@ -497,11 +498,9 @@ def _run_uninstall(remaining_argv: list[str]) -> int:
 
         adapter = GeminiAdapter()
     elif backend == "codex":
-        sys.stderr.write(
-            "perfxpert-code uninstall codex: the Codex adapter ships in PR 2 "
-            "(Task 10).\n"
-        )
-        return 42
+        from perfxpert.cli._backend.codex import CodexAdapter
+
+        adapter = CodexAdapter()
     else:
         sys.stderr.write(
             f"perfxpert-code uninstall: unknown backend {backend!r}. "
