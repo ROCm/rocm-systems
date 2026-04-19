@@ -108,6 +108,14 @@ config.fixtures = {
     # which previously zext'd the loaded value to i32 and overwrote
     # the whole VGPR (silently violating `D16PreservesUnusedBits`).
     "buffer_load_d16_u8": r"@LIT_FIXTURE_BUFFER_LOAD_D16_U8_CO@",
+    # v_pk_add_f32 with inline literal source — pins the broadcast
+    # path the VOP3P handler emits for non-register operands.
+    # See the readPkSrc lambda in handle_valu_vop3p.cpp; the
+    # tensilelite swiglu kernel was previously rejected at this
+    # operand shape with "non-register source ... immediate in VOP3P
+    # not supported".  Register/register form is exercised
+    # transitively through the corpus.
+    "v_pk_add_f32_lit": r"@LIT_FIXTURE_V_PK_ADD_F32_LIT_CO@",
     # s_bitset0_b32 (SOP1) — bit-clear with tied sdst_in.  Pins the
     # read-modify-write shape under the AMDGPU disassembler's tied-
     # operand collapse: the prior dst value must come from

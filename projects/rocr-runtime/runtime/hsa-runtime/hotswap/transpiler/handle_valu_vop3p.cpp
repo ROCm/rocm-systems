@@ -71,18 +71,36 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
     parseBracketList3(text, "neg_hi:", negHi);
 
     // Read each source as <2 x f32>, apply element selection and negation.
+    //
+    // Two operand shapes are accepted:
+    //   * Register (the common case): reads a 64-bit VGPR pair as
+    //     `<2 x f32>`; lo/hi extract index the two packed lanes.
+    //   * Immediate / inline literal: VOP3P encodes a single 32-bit
+    //     literal per source slot which the hardware broadcasts to
+    //     both packed lanes (the `op_sel_hi` modifier is ignored on
+    //     scalar literals because there's only one element to choose).
+    //     The swiglu tensilelite kernel exercises this path with
+    //     `v_pk_add_f32 vN, vM, 0x...` where the literal is a packed
+    //     bias constant.  We model it by reading the i32, bit-casting
+    //     to f32, and constructing a 2-lane vector with both lanes
+    //     equal to the literal — the high-lane source will then be
+    //     `lit_f32` regardless of `opSelHi[i]` (broadcast is
+    //     idempotent).  `negLo` / `negHi` still apply per-lane.
     auto readPkSrc = [&](unsigned i) -> Value * {
-      if (!op.isSrcReg(i)) {
-        errs() << "transpiler: " << mn << ": non-register source "
-               << i << " (immediate in VOP3P not supported)\n";
-        return nullptr;
+      Value *lo, *hi;
+      if (op.isSrcReg(i)) {
+        Value *vec = ctx.regs.readRegVec(ctx.B, op.srcReg(i), v2f32);
+        lo = ctx.B.CreateExtractElement(vec, (uint64_t)0);
+        hi = ctx.B.CreateExtractElement(vec, (uint64_t)1);
+        // op_sel_hi: if 0, high lane reads low element (broadcast).
+        if (opSelHi[i] == 0)
+          hi = lo;
+      } else {
+        // Inline 32-bit literal broadcast to both packed lanes.
+        Value *lit = ctx.B.CreateBitCast(op.src(i), ctx.f32Ty);
+        lo = lit;
+        hi = lit;
       }
-      Value *vec = ctx.regs.readRegVec(ctx.B, op.srcReg(i), v2f32);
-      Value *lo = ctx.B.CreateExtractElement(vec, (uint64_t)0);
-      Value *hi = ctx.B.CreateExtractElement(vec, (uint64_t)1);
-      // op_sel_hi: if 0, high lane uses low element (broadcast)
-      if (opSelHi[i] == 0)
-        hi = lo;
       if (negLo[i])
         lo = ctx.B.CreateFNeg(lo);
       if (negHi[i])
