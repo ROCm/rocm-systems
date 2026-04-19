@@ -108,6 +108,25 @@ config.fixtures = {
     # which previously zext'd the loaded value to i32 and overwrote
     # the whole VGPR (silently violating `D16PreservesUnusedBits`).
     "buffer_load_d16_u8": r"@LIT_FIXTURE_BUFFER_LOAD_D16_U8_CO@",
+    # buffer_store_no_scratch_alloca (MUBUF/VBUFFER) — regression guard
+    # for the principled BUFFER_STORE_* lowering.  See SemOp::
+    # BUFFER_STORE_DWORDX4 in semop.hpp, the `if (isStore)` block in
+    # transpiler/handle_mubuf.cpp, and the design discussion in
+    # hotswap/docs/buffer-store-lowering.md.  The fixture pins both the
+    # positive shape (`call void @llvm.amdgcn.raw.buffer.store.v4i32`)
+    # and — more importantly — the ABI invariant that fixed Triton
+    # vector-add R1: ZERO `addrspace(5)` allocas in the lifted module.
+    # Any future change that reintroduces an `addrspace(5)` alloca in
+    # a BUFFER_STORE-only kernel re-couples the kernel descriptor to
+    # `enable_private_segment` and resurrects the SIGSEGV under
+    # salmon's KD (which models only the source ABI's user-SGPR set
+    # and therefore does not request flat_scratch_init).  Sibling
+    # widths BUFFER_STORE_BYTE / SHORT / DWORD / DWORDX2 / DWORDX3
+    # share the same handler shape and are covered transitively;
+    # a per-width follow-up fixture would close the lit-coverage
+    # gap called out in the principled review.
+    "buffer_store_no_scratch_alloca":
+        r"@LIT_FIXTURE_BUFFER_STORE_NO_SCRATCH_ALLOCA_CO@",
     # v_pk_add_f32 with inline literal source — pins the broadcast
     # path the VOP3P handler emits for non-register operands.
     # See the readPkSrc lambda in handle_valu_vop3p.cpp; the
@@ -210,6 +229,22 @@ config.fixtures = {
     # and are covered transitively.
     "vopd_extra_subops":
         r"@LIT_FIXTURE_VOPD_EXTRA_SUBOPS_CO@",
+    # tensor_load_to_lds (VIMAGE TENSOR, gfx1250-only) — pins the
+    # cross-target (gfx1250 -> gfx942) loud refusal contract for the
+    # gfx1250 TENSOR cnt unit (`MIMGInstructions.td:2049-2113`,
+    # `isGFX125xOnly`).  The handler in `handle_vimage.cpp` refuses
+    # via `RaiseFailure::unsupportedShape` because the per-dim
+    # addressing semantics of a Tensor Descriptor cannot be
+    # reconstructed from gfx9xx primitives, and the matching LLVM
+    # intrinsic `int_amdgcn_tensor_load_to_lds`
+    # (IntrinsicsAMDGPU.td:4213) is itself `isGFX125xOnly`.  Sibling
+    # `tensor_store_from_lds` and the `_d4` operand-shape variant
+    # follow the identical SemOp dispatch and are covered by
+    # handler-shape identity (only the trailing diagnostic intrinsic
+    # name differs); the corpus blockers we are unblocking here are
+    # all `_d2` loads.
+    "tensor_load_to_lds":
+        r"@LIT_FIXTURE_TENSOR_LOAD_TO_LDS_CO@",
 }
 
 lit_config.load_config(
