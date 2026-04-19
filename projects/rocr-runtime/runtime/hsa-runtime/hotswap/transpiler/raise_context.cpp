@@ -173,6 +173,24 @@ ParsedReg RaiseContext::parseReg(MCRegister reg, int mciOpIdx) const {
     pr.kind = ParsedReg::LDS_DIRECT;
     pr.width = 1;
     return pr;
+  // Source-only "compact predicate" registers
+  // (SIRegisterInfo.td:198-200). They have no backing storage; their
+  // value at use-time is a single i1 derived from VCC / EXEC / SCC.
+  // Mark them here so readOp32 / readOp64 can materialise the boolean
+  // (zext to the requested width). Encountered as VOP src operands in
+  // gfx1250 Tensile kernels (e.g. `v_sub_f16 v64, src_vccz, v48`).
+  case AMDGPU::SRC_VCCZ:
+    pr.kind = ParsedReg::SRC_VCCZ;
+    pr.width = 1;
+    return pr;
+  case AMDGPU::SRC_EXECZ:
+    pr.kind = ParsedReg::SRC_EXECZ;
+    pr.width = 1;
+    return pr;
+  case AMDGPU::SRC_SCC:
+    pr.kind = ParsedReg::SRC_SCC;
+    pr.width = 1;
+    return pr;
   default:
     break;
   }
@@ -253,6 +271,18 @@ Value *RaiseContext::readOp32(const DecodedInst &di, unsigned opIdx) {
     }
     if (pr.kind == ParsedReg::SCC)
       return B.CreateZExt(regs.loadSCC(B), i32Ty);
+    if (pr.kind == ParsedReg::SRC_SCC)
+      return B.CreateZExt(regs.loadSCC(B), i32Ty);
+    if (pr.kind == ParsedReg::SRC_VCCZ) {
+      Value *vcc = regs.readVCCAsWaveMask(B, regs.execTy);
+      Value *zero = ConstantInt::get(regs.execTy, 0);
+      return B.CreateZExt(B.CreateICmpEQ(vcc, zero, "vccz"), i32Ty);
+    }
+    if (pr.kind == ParsedReg::SRC_EXECZ) {
+      Value *exec = regs.loadExec(B);
+      Value *zero = ConstantInt::get(exec->getType(), 0);
+      return B.CreateZExt(B.CreateICmpEQ(exec, zero, "execz"), i32Ty);
+    }
     if (pr.kind == ParsedReg::NOREG)
       return ConstantInt::get(i32Ty, 0);
     if (pr.kind == ParsedReg::MODE)
@@ -301,6 +331,18 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
     // SHORTCUTS_AND_LIMITATIONS XNACK note for rationale).
     if (pr.kind == ParsedReg::NOREG || pr.kind == ParsedReg::MODE)
       return ConstantInt::get(i64Ty, 0);
+    if (pr.kind == ParsedReg::SRC_SCC)
+      return B.CreateZExt(regs.loadSCC(B), i64Ty);
+    if (pr.kind == ParsedReg::SRC_VCCZ) {
+      Value *vcc = regs.readVCCAsWaveMask(B, regs.execTy);
+      Value *zero = ConstantInt::get(regs.execTy, 0);
+      return B.CreateZExt(B.CreateICmpEQ(vcc, zero, "vccz"), i64Ty);
+    }
+    if (pr.kind == ParsedReg::SRC_EXECZ) {
+      Value *exec = regs.loadExec(B);
+      Value *zero = ConstantInt::get(exec->getType(), 0);
+      return B.CreateZExt(B.CreateICmpEQ(exec, zero, "execz"), i64Ty);
+    }
     Value *v = regs.readReg64(B, pr);
     if (!v) {
       errs() << "transpiler: unreadable register64 '"

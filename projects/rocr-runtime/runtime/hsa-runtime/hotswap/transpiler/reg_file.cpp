@@ -38,6 +38,9 @@ const char *kindName(ParsedReg::Kind k) {
   case ParsedReg::FLAT_SCR:   return "FLAT_SCR";
   case ParsedReg::TTMP:       return "TTMP";
   case ParsedReg::LDS_DIRECT: return "LDS_DIRECT";
+  case ParsedReg::SRC_VCCZ:   return "SRC_VCCZ";
+  case ParsedReg::SRC_EXECZ:  return "SRC_EXECZ";
+  case ParsedReg::SRC_SCC:    return "SRC_SCC";
   case ParsedReg::NOREG:      return "NOREG";
   case ParsedReg::OTHER:      return "OTHER";
   }
