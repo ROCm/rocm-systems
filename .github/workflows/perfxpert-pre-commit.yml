@@ -1,0 +1,61 @@
+name: PerfXpert Pre-Commit Checks
+
+on:
+  pull_request:
+    paths:
+      - 'experimental/python/perfxpert/**'
+      - 'docs/**'
+      - 'tools/**'
+      - '.pre-commit-config.yaml'
+      - '.github/workflows/perfxpert-pre-commit.yml'
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    name: Pre-Commit Hygiene
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Run secret scanner
+        run: python3 tools/_secret_scanner.py
+        continue-on-error: true
+
+      - name: Run docs lint
+        run: bash docs/lint.sh
+        continue-on-error: true
+
+      - name: Run link checker
+        run: python3 docs/link-checker.py experimental/python/perfxpert
+        continue-on-error: true
+
+      - name: Run sample executor
+        run: python3 docs/test-samples.py experimental/python/perfxpert
+        continue-on-error: true
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    name: Docs Tooling Unit Tests
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run docs tooling tests
+        run: python3 -m pytest tests/test_docs_tooling/ -v
+
+      - name: Run env sanitization tests
+        run: python3 -m pytest tests/test_tools/test_env_sanitization.py -v
