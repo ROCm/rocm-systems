@@ -327,4 +327,82 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastCursorWrapsAtNqpsBoundary
+//
+// White-box: 4 QPs, tokens={0,0,0,1}. Cursor starts at qpIndex=0.
+// The WRR while(1) loop must skip QP0-2 and select QP3.
+// After selection cursor advances to (3+1)%4=0.
+// =============================================================================
+TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/4, /*schedWeight=*/"0", /*splitData=*/0);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 128;
+    char sendBuf[kMsgSize], recvBuf[kMsgSize];
+    memset(sendBuf, 0xCC, kMsgSize);
+    memset(recvBuf, 0,    kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Phase 0: warm-up send so IbCastQpSchedUpdateTx fires and base->nqps is set.
+    // GetSchedState returns nqps=0 before the first isend; we cannot set tokens
+    // safely until we know the real QP count.
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 999, mhandle);
+
+    // Now read the real nqps.
+    int actualNqps = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState probe = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), 0);
+        actualNqps = probe.nqps;
+    }
+
+    // Set single token on the last QP; all others get 0.
+    if (rank == 1) {
+        ASSERT_GT(actualNqps, 0);
+        std::vector<int> tokens(actualNqps, 0);
+        tokens[actualNqps - 1] = 1;
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), 0);
+    }
+
+    // Phase 1: the send must land on QP[nqps-1] and wrap cursor to 0.
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 1000, mhandle);
+
+    if (rank == 1) {
+        struct ncclIbCastSchedState state = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+
+        ASSERT_TRUE(state.schedInit);
+        // One token was consumed from QP[nqps-1]; activeTotTokens must be 0 (round exhausted).
+        EXPECT_EQ(state.activeTotTokens, 0);
+        // After selecting QP[nqps-1] the cursor must wrap to 0.
+        EXPECT_EQ(state.qpIndex, 0);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
