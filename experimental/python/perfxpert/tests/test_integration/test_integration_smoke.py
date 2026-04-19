@@ -1,4 +1,4 @@
-"""End-of-Phase-2 integration smoke test.
+"""Integration smoke test — provider registry, fence roles, conversation round-trip.
 
 Covers:
   * All 5 providers resolvable via registry + dry_run path
@@ -125,4 +125,4 @@ def test_total_runtime_budget_under_three_seconds():
     _ = load_config()
 
     elapsed = time.perf_counter() - t0
-    assert elapsed < 3.0, f"phase-2 smoke exceeded 3s budget: {elapsed:.2f}s"
+    assert elapsed < 3.0, f"integration smoke exceeded 3s budget: {elapsed:.2f}s"

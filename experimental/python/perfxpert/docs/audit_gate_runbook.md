@@ -1,10 +1,11 @@
-# Phase 5 Runbook — Parity + Red-Team + Go/No-Go
+# Audit Gate Runbook — Parity + Red-Team + Go/No-Go
 
 ## Context
 
-Phase 5 is the **audit gate** before Phase 6 deletion. Every exit criterion in
-the spec §7 Go/No-Go table has a corresponding test suite here. If any gate
-slips, Phase 6 is blocked until fixed.
+This runbook describes the audit gate that guards breaking changes to the
+agentic runtime. Every exit criterion in the spec §7 Go/No-Go table has a
+corresponding test suite here. If any gate slips, a breaking change is
+blocked until fixed.
 
 ## How to run the full gate locally
 
@@ -36,22 +37,22 @@ Three verdicts:
 
 | Verdict | Meaning | Action |
 |---------|---------|--------|
-| GO | All 9 thresholds met (including nightly) | Proceed to Phase 6 |
-| PARTIAL (pending) | All non-nightly green; nightly inputs not yet collected | Wait for nightly CI; do NOT merge Phase 6 yet |
+| GO | All 9 thresholds met (including nightly) | Change may proceed |
+| PARTIAL (pending) | All non-nightly green; nightly inputs not yet collected | Wait for nightly CI; do NOT merge breaking changes yet |
 | NO-GO | One or more PR-lane thresholds failed | Fix failing area, re-run |
 
 ## Interpreting a NO-GO
 
 Each metric maps to a failure region:
 
-| Metric | Owner (fix PR against) |
-|--------|------------------------|
-| `parity_agreement_rate < 0.95` | Phases 3/4 — new-path diverges from old |
-| `red_team_pass_count < 14` | Phase 3/4 — sanitizer, allowlist, or gate_cascade bug |
-| `airgap_identical_rate < 1.0` | Phase 3 — intent_classifier or gate_cascade dependency on LLM |
-| `regression_gate_false_positive_rate > 0.05` | Phase 3 — regression.compare_runs threshold tuning |
-| `per_agent_narrow_scope_violations > 0` | Phase 3 — fence exceeded 400 lines / agent exceeded 5 tools |
-| `tool_class_split_violations > 0` | Phase 4 — an EXECUTION tool was registered with MCP |
+| Metric | Likely root cause |
+|--------|-------------------|
+| `parity_agreement_rate < 0.95` | Parity/fixture drift — new path diverges from expected |
+| `red_team_pass_count < 14` | Sanitizer, allowlist, or gate_cascade bug |
+| `airgap_identical_rate < 1.0` | `intent_classifier` or `gate_cascade` grew a dependency on the LLM |
+| `regression_gate_false_positive_rate > 0.05` | `regression.compare_runs` threshold tuning |
+| `per_agent_narrow_scope_violations > 0` | Fence exceeded 400 lines / agent exceeded 5 tools |
+| `tool_class_split_violations > 0` | An EXECUTION tool was registered with MCP |
 
 ## Adding a new parity fixture
 
@@ -72,15 +73,15 @@ requires an RFC + normative update to the spec. Prefer:
 1. Locate which attack regressed: `cat tests/test_red_team/_attack_outcomes/*.json | jq`.
 2. The `expected_rejection_site` field on the Attack entry tells you which
    production module should have caught it.
-3. Write a failing unit test in the owning Phase 3/4 module's test dir.
+3. Write a failing unit test in the owning module's test dir.
 4. Fix in the owning module; do NOT modify the red-team test (it is the spec).
 5. Re-run the red-team suite.
 
 ## Rollback plan
 
-If Phase 5 reveals a fundamental defect in Phase 3/4, the rollback is:
+If the audit gate reveals a fundamental defect in the runtime or tools:
 1. Revert the offending PR(s) from the work branch.
-2. Re-run Phase 5 gate locally until GO.
+2. Re-run the audit gate locally until GO.
 3. Re-attempt with smaller diffs.
 
-Phase 5 tests themselves are additive — they never need to be reverted.
+Audit-gate tests themselves are additive — they never need to be reverted.

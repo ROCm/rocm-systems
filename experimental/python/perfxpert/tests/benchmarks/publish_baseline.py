@@ -3,7 +3,7 @@
 Usage (one-shot, MI300X host only):
     python3 tests/benchmarks/publish_baseline.py \
        --input  tritonbench_results.json kernelbench_results.json \
-       --output benchmarks/baseline/mi300x_phase7_baseline.json
+       --output benchmarks/baseline/mi300x_baseline.json
 
 Subsequent baseline bumps are explicit PRs that replace the file —
 the nightly workflow never writes to this path.

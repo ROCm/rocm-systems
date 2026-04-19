@@ -92,7 +92,7 @@ jobs:
           import json
           from pathlib import Path
 
-          baseline_data = json.load(open("benchmarks/baseline/mi300x_phase7_baseline.json"))
+          baseline_data = json.load(open("benchmarks/baseline/mi300x_baseline.json"))
           nightly_results = {}
 
           # Load nightly results

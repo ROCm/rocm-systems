@@ -1,6 +1,6 @@
-# MI300X Phase 7 Benchmark Baseline
+# MI300X Benchmark Baseline
 
-_Generated from `benchmarks/baseline/mi300x_phase7_baseline.json`._
+_Generated from `benchmarks/baseline/mi300x_baseline.json`._
 
 ## Hardware
 - MI300X (gfx942), 304 CUs, 192 GB HBM3
@@ -26,7 +26,7 @@ Per-kernel measurements use median of 30 runs after 3 warm-up iterations.
 - Weight: baseline_ns (longer-running kernels count more)
 
 ## Current published numbers
-_See mi300x_phase7_baseline.json for machine-readable per-kernel data._
+_See mi300x_baseline.json for machine-readable per-kernel data._
 
 ### TritonBench-ROCm
 - matmul_f16_256x256: 1.000 → 0.700 ms (1.429× speedup, perfxpert applied)
@@ -48,7 +48,7 @@ _See mi300x_phase7_baseline.json for machine-readable per-kernel data._
 - New kernels added → geomean computed on intersection set only
 
 ## How to refresh the baseline
-1. Open PR editing `benchmarks/baseline/mi300x_phase7_baseline.json`
+1. Open PR editing `benchmarks/baseline/mi300x_baseline.json`
 2. CI runs suites on self-hosted MI300X runner
 3. If geomean ≥ 1.20× and no kernel regresses > 10%, PR is reviewable
 4. Two core reviewers approve → merge
