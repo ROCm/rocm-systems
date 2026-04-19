@@ -419,10 +419,10 @@ def _get_version():
         return version("perfxpert")
     except (ImportError, ModuleNotFoundError):
         # importlib.metadata not available (Python < 3.8 edge case)
-        return "0.1.0"
+        return "0.2.0"
     except ValueError:
         # Package not installed / metadata lookup failed
-        return "0.1.0"
+        return "0.2.0"
 
 
 if __name__ == "__main__":
