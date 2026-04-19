@@ -73,15 +73,16 @@ _PERFXPERT_SUBCOMMANDS: "dict[str, str]" = {
     "analyze": "Analyze a rocprofiler-sdk trace database for GPU bottlenecks",
     "config": "Show or set perfxpert configuration (~/.config/perfxpert/config.yaml)",
     "doctor": "Health check: verify MCP server, LLM providers, and dependencies",
-    "install-patches": "Build the patched opencode submodule and install into perfxpert/_bundled/opencode",
+    "install-patches": "(deprecated) Build the patched opencode submodule into perfxpert/_bundled/opencode",
     "providers": "List LLM providers and configuration status",
+    "uninstall": "Reverse `perfxpert-code <backend>` install: remove MCP + AGENTS + gate hook",
 }
 
 # Subcommand names the launcher itself dispatches to `python -m perfxpert`
 # or handles inline. ``doctor`` and ``install-patches`` must short-circuit
 # BEFORE resolve_opencode_binary() (so they work on a fresh install, without
 # opencode on disk — install-patches is precisely what produces opencode).
-_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"doctor", "install-patches"})
+_PERFXPERT_DISPATCH_SUBCOMMANDS = frozenset({"doctor", "install-patches", "uninstall"})
 
 
 # Cycle-2 Task 2: third-party agent backends the launcher dispatches to via
@@ -441,11 +442,14 @@ def _exec_perfxpert_subcommand(argv: list[str]) -> int:
     """Dispatch a perfxpert-owned subcommand.
 
     ``install-patches`` is handled inline (invokes the bundled build
-    script); all other dispatch-subcommands shell out to
-    ``python -m perfxpert <argv...>``.
+    script); ``uninstall <backend>`` routes into the backend
+    adapter's uninstall(); all other dispatch-subcommands shell out
+    to ``python -m perfxpert <argv...>``.
     """
     if argv and argv[0] == "install-patches":
         return _run_install_patches(argv)
+    if argv and argv[0] == "uninstall":
+        return _run_uninstall(argv[1:])
 
     cmd = [sys.executable, "-m", "perfxpert", *argv]
     try:
@@ -453,6 +457,104 @@ def _exec_perfxpert_subcommand(argv: list[str]) -> int:
     except KeyboardInterrupt:
         return 130
     return proc.returncode
+
+
+def _run_uninstall(remaining_argv: list[str]) -> int:
+    """Handle `perfxpert-code uninstall <backend>` (Task 8).
+
+    Backends supported in PR 1: claude, gemini. Codex routes to a
+    TODO message and exits 42 (parity with the Task-2/6 Codex stub).
+    """
+    # Parse dispatcher flags (--yes / -y / --quiet).
+    assume_yes = False
+    quiet = False
+    idx = 0
+    while idx < len(remaining_argv):
+        a = remaining_argv[idx]
+        if a in ("--yes", "-y"):
+            assume_yes = True
+        elif a == "--quiet":
+            quiet = True
+        else:
+            break
+        idx += 1
+    backend = remaining_argv[idx] if idx < len(remaining_argv) else None
+
+    if backend is None:
+        sys.stderr.write(
+            "perfxpert-code uninstall: which backend?\n"
+            "  Usage: perfxpert-code uninstall {claude,gemini,codex}\n"
+        )
+        return 2
+
+    # Lazy import: avoid loading adapter modules for unrelated subcommands.
+    if backend == "claude":
+        from perfxpert.cli._backend.claude import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+    elif backend == "gemini":
+        from perfxpert.cli._backend.gemini import GeminiAdapter
+
+        adapter = GeminiAdapter()
+    elif backend == "codex":
+        sys.stderr.write(
+            "perfxpert-code uninstall codex: the Codex adapter ships in PR 2 "
+            "(Task 10).\n"
+        )
+        return 42
+    else:
+        sys.stderr.write(
+            f"perfxpert-code uninstall: unknown backend {backend!r}. "
+            "Expected one of: claude, gemini, codex.\n"
+        )
+        return 2
+
+    from pathlib import Path
+
+    cwd = Path.cwd()
+
+    # Dry-run preview + confirmation.
+    plan = adapter.plan(cwd)
+    if not quiet:
+        sys.stderr.write(
+            f"perfxpert-code uninstall {backend}: will remove\n"
+        )
+        for action in plan.actions:
+            sys.stderr.write(f"    - (reverse) {action}\n")
+
+    if not assume_yes and os.environ.get("PERFXPERT_ASSUME_CONSENT", "") not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        if not sys.stdin.isatty():
+            sys.stderr.write(
+                "perfxpert-code uninstall: non-interactive stdin; pass --yes or "
+                "export PERFXPERT_ASSUME_CONSENT=1 to confirm.\n"
+            )
+            return 2
+        sys.stderr.write(f"\nProceed? [y/N] ")
+        sys.stderr.flush()
+        try:
+            answer = input().strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in {"y", "yes"}:
+            sys.stderr.write("aborted.\n")
+            return 1
+
+    report = adapter.uninstall(cwd)
+    if not quiet:
+        for action in report.actions:
+            sys.stderr.write(f"  {action}\n")
+        if report.skipped_due_to_drift:
+            sys.stderr.write(
+                "\nRefused to remove these files (marker drift):\n"
+            )
+            for p in report.skipped_due_to_drift:
+                sys.stderr.write(f"  - {p}\n")
+            return 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
