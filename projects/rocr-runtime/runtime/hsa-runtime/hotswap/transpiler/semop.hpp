@@ -306,6 +306,19 @@ enum class SemOp : uint16_t {
   // (no LLVM `*3` IR intrinsic exists). gfx11/gfx12 keep these
   // (VOP3Instructions.td:1792-1798).
   V_MAX3_U32,
+  // VOP3 signed-integer median-of-three. Hardware semantic
+  // (VOP3Instructions.td:1796 via AMDGPUsmed3 SDAG node):
+  //   med3_i32(a, b, c) = smax(smin(a, b), smin(smax(a, b), c))
+  // i.e. the middle of three signed i32 values. We lift it as a
+  // pair of `llvm.smin`/`llvm.smax` intrinsics (matching the
+  // `handle_vopd.cpp` style that already uses these intrinsics for
+  // VOPD smin/smax/umin/umax pairs). The backend's
+  // `AMDGPUISelDAGToDAG`/`AMDGPUISelLowering` pattern-matches the
+  // `smax(smin(...), smin(smax(...), ...))` shape back to
+  // V_MED3_I32, so the round-trip is structure-preserving and the
+  // generated assembly recovers the original instruction without
+  // codegen quality loss.
+  V_MED3_I32,
   V_MAX_NUM_F32, V_MIN_NUM_F32,
   // IEEE-754 2019 maximum/minimum: propagate NaN (distinct from maxnum/minnum).
   V_MAXIMUM_F32, V_MINIMUM_F32,

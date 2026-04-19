@@ -882,6 +882,37 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 v_med3_i32: signed-integer median-of-three.
+  // Hardware semantic (VOP3Instructions.td:1796 via AMDGPUsmed3
+  // SDAG node) is the standard sort-and-pick-middle for three i32
+  // values:
+  //   med3_i32(a, b, c) = smax(smin(a, b), smin(smax(a, b), c))
+  // We emit it as a pair of `llvm.smin.i32` + `llvm.smax.i32`
+  // intrinsics — these are the canonical IR forms, and the AMDGPU
+  // backend pattern-matches the exact `smax(smin(...),
+  // smin(smax(...), ...))` shape back to V_MED3_I32 via
+  // AMDGPUInstructions.td so the round-trip is structure-preserving
+  // (no codegen quality loss). We deliberately do not depend on
+  // `llvm.amdgcn.smed3` because: (a) the LLVM IR-level intrinsic
+  // is already the most compact lowering for the same pattern;
+  // (b) the smin/smax form composes with peephole IR optimisations
+  // that smed3 does not (e.g. constant folding when one source is
+  // a known bound).
+  if (sop == SemOp::V_MED3_I32) {
+    Value *s0 = op.src(0), *s1 = op.src(1), *s2 = op.src(2);
+    Function *sminFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::smin, {ctx.i32Ty});
+    Function *smaxFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::smax, {ctx.i32Ty});
+    Value *lo = ctx.B.CreateCall(sminFn, {s0, s1}, "vmed3_lo");
+    Value *hi = ctx.B.CreateCall(smaxFn, {s0, s1}, "vmed3_hi");
+    Value *clamped = ctx.B.CreateCall(sminFn, {hi, s2}, "vmed3_clamp");
+    ctx.writeReg32(
+        op.dst(),
+        ctx.B.CreateCall(smaxFn, {lo, clamped}, "vmed3"));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::V_MAX3_F32 || sop == SemOp::V_MAX3_NUM_F32) {
     Value *s0 = op.srcF(0), *s1 = op.srcF(1), *s2 = op.srcF(2);
     if (s0->getType() != ctx.f32Ty) s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);

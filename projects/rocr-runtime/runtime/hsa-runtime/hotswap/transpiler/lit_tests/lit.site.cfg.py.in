@@ -51,6 +51,15 @@ config.fixtures = {
     "v_xad_u32": r"@LIT_FIXTURE_V_XAD_U32_CO@",
     "v_alignbit_b32": r"@LIT_FIXTURE_V_ALIGNBIT_B32_CO@",
     "v_minmax_num_f32": r"@LIT_FIXTURE_V_MINMAX_NUM_F32_CO@",
+    # v_med3_i32 (VOP3, signed integer median-of-three) — pins the
+    # canonical `smax(smin(a, b), smin(smax(a, b), c))` lowering the
+    # handler in `handle_valu.cpp` emits via paired `llvm.smin.i32`
+    # / `llvm.smax.i32` intrinsics. The shape is the round-trip
+    # identity that the AMDGPU backend's `AMDGPUsmed3` SDAG pattern
+    # (AMDGPUInstructions.td) matches back to V_MED3_I32, so the
+    # generated assembly recovers the original instruction without
+    # codegen quality loss.
+    "v_med3_i32": r"@LIT_FIXTURE_V_MED3_I32_CO@",
     "v_mul_u64": r"@LIT_FIXTURE_V_MUL_U64_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",

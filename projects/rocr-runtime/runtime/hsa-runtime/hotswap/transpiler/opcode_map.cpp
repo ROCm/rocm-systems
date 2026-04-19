@@ -404,6 +404,7 @@ static const Entry kCanonTable[] = {
     // VOP3Instructions.td:1795). LLVM only emits the e64 form for
     // VOP3 ternaries; no DPP variant exists for v_max3_*.
     E(V_MAX3_U32_e64, V_MAX3_U32),
+    E(V_MED3_I32_e64, V_MED3_I32),
     // LLVM does not yet expose a `V_MAX3_MAXIMUM_F32` pseudo; leave the
     // `V_MAX3_NUM_F32` SemOp unmapped until it does.
     E(V_BITOP3_B32_e64, V_BITOP3_B32),
