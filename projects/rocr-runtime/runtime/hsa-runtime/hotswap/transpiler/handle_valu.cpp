@@ -590,6 +590,33 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // v_madmk_f16 dst, src0, K, src2: dst = src0 * K + src2
+  // v_madak_f16 dst, src0, src1, K: dst = src0 * src1 + K
+  // F16 mirror of V_FMAMK_F32 / V_FMAAK_F32. Same operand ordering
+  // convention: srcF(0..2) follow the disassembler's order, and the
+  // 16-bit literal K lives in the slot named in the mnemonic. Both
+  // lower to llvm.fma.f16 (no rounding of the intermediate product),
+  // matching VOP2Instructions.td:1206-1210.
+  if (sop == SemOp::V_MADMK_F16 || sop == SemOp::V_MADAK_F16) {
+    Type *f16Ty = Type::getHalfTy(ctx.C);
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    auto toF16 = [&](Value *v) -> Value * {
+      Value *truncated = ctx.B.CreateTrunc(v, i16Ty);
+      return ctx.B.CreateBitCast(truncated, f16Ty);
+    };
+    Value *s0 = toF16(op.srcF(0));
+    Value *s1 = toF16(op.srcF(1));
+    Value *s2 = toF16(op.srcF(2));
+    Function *fma = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::fma,
+                                                     {f16Ty});
+    Value *res = ctx.B.CreateCall(
+        fma, {s0, s1, s2},
+        sop == SemOp::V_MADMK_F16 ? "madmk_f16" : "madak_f16");
+    Value *bits = ctx.B.CreateBitCast(res, i16Ty);
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(bits, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
 
   // ---- Division helpers (VOP3) ----
   if (sop == SemOp::V_DIV_SCALE_F32) {

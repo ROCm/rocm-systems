@@ -243,6 +243,16 @@ enum class SemOp : uint16_t {
   V_DIV_FIXUP_F32, V_DIV_FMAS_F32, V_DIV_SCALE_F32,
   V_FMA_MIX_F32,
   V_ADD_F16, V_MUL_F16, V_SUB_F16, V_SUBREV_F16, V_MAC_F16, V_FMAC_F16,
+  // VOP2 F16 multiply-add-with-literal pseudos (mirror of
+  // V_FMAMK_F32 / V_FMAAK_F32 for the f16 lane). Defined in
+  // VOP2Instructions.td:1206-1210 — both take a 16-bit constant K
+  // alongside two F16 sources and lower to llvm.fma.f16:
+  //   v_madmk_f16 dst, src0, K, src2 -> dst = src0 * K + src2
+  //   v_madak_f16 dst, src0, src1, K -> dst = src0 * src1 + K
+  // Note: hardware uses the legacy "mad" name, but the lowered
+  // semantics are fused-multiply-add (no rounding of the intermediate
+  // product), matching the F32 FMAMK/FMAAK convention.
+  V_MADMK_F16, V_MADAK_F16,
   V_MAX_F16, V_MIN_F16, V_LDEXP_F16, V_FLOOR_F16, V_CVT_F16_U16, V_CVT_U16_F16,
   V_ASHRREV_I16, V_LSHRREV_B16, V_LSHLREV_B16,
   V_MAX_U16, V_MIN_U16, V_MAX_I16, V_MIN_I16,
