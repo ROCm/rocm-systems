@@ -2,6 +2,7 @@
 
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <cassert>
 #include <utility>
@@ -61,22 +62,47 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     });
 
     if (isKernarg && immOffset && byteOffset < ctx.kernargs.implicitArgsBase) {
-      std::vector<std::pair<int, int>> resolved;
-      ctx.kernargs.resolveLoad(byteOffset, loadBytes, resolved);
-      if (resolved.empty()) {
-        llvm::errs() << "transpiler: Cannot resolve kernarg at offset "
-                     << byteOffset << "\n";
-        hr.failure = RaiseFailure::smemKernargMiss(di);
-        return hr;
-      }
-      int regOff = 0;
-      for (auto &[regWidth, pIdx] : resolved) {
-        Value *arg = ctx.kernel->getArg(pIdx);
-        if (regWidth == 1)
-          ctx.regs.storeSGPR32(ctx.B, dest.baseIdx + regOff, arg);
-        else if (regWidth == 2)
-          ctx.regs.storeSGPR64(ctx.B, dest.baseIdx + regOff, arg);
-        regOff += regWidth;
+      // Materialise the load one dword at a time. Per-dword extraction
+      // is the only shape that handles every kernarg layout we see in
+      // the corpus uniformly:
+      //   * scalar args (i32, i64, ptr) — the helper splits 64-bit args
+      //     into low/high dwords as needed (B96 over a (ptr, i32)
+      //     pair, etc.);
+      //   * `by_value` aggregates with size > 8 (Triton tensor-
+      //     descriptor structs, tensilelite kernarg blobs) — the
+      //     raiser's per-dword decomposition (raiser.cpp) makes every
+      //     interior dword addressable as a standalone i32 slot, so a
+      //     B96 load that lands inside such a struct (e.g. offset 8
+      //     inside an 80-byte arg) materialises correctly without any
+      //     aggregate-aware extract logic in this handler.
+      // If any dword in the load can't be served (out-of-range offset,
+      // partial-overlap with an unsupported slot type, etc.) we refuse
+      // loudly with the helper's diagnostic. The no-fallback rule
+      // forbids reading uninitialised SGPRs or substituting zero for
+      // a missing dword — a kernel that gets a wrong kernarg byte will
+      // compute out-of-bounds GPU addresses, and that is the failure
+      // mode this refusal exists to surface.
+      //
+      // Test back-reference: lit_tests/s_load_b96_kernarg/ exercises
+      // the by_value-aggregate path end-to-end with an explicit
+      // `s_load_b96 s[0:2], s[0:1], 0x4` over a 16-byte by_value;
+      // any change to this loop or to `extractKernargDword` in
+      // kernarg_layout.cpp must keep that fixture's IR signature
+      // and `phi i32 [ %arg{1,2}, ... ]` data-flow pins green.
+      for (int d = 0; d < loadDwords; ++d) {
+        int dwordOffset = (int)byteOffset + d * 4;
+        std::string why;
+        Value *v = extractKernargDword(ctx.kernargs, ctx.B, ctx.kernel,
+                                       dwordOffset, &why);
+        if (!v) {
+          llvm::errs() << "transpiler: " << di.mnemonic
+                       << " kernarg load loadBytes=" << loadBytes
+                       << " byteOffset=" << byteOffset << " dword=" << d
+                       << " (offset=" << dwordOffset << "): " << why << "\n";
+          hr.failure = RaiseFailure::smemKernargMiss(di);
+          return hr;
+        }
+        ctx.regs.storeSGPR32(ctx.B, dest.baseIdx + d, v);
       }
     } else if (isKernarg && immOffset) {
       int implOffset = byteOffset - ctx.kernargs.implicitArgsBase;

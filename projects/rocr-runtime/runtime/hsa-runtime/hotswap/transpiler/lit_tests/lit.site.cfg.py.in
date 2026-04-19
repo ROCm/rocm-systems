@@ -124,6 +124,17 @@ config.fixtures = {
     # tied).  See the S_BITSET block in handle_sop1.cpp and the
     # caveat note appended to `kKnownTiedIn` in decode.cpp.
     "s_bitset0_b32": r"@LIT_FIXTURE_S_BITSET0_B32_CO@",
+    # s_load_b96 (SMEM) over a kernarg buffer with a `by_value`
+    # aggregate larger than 8 bytes — pins the per-dword
+    # `extractKernargDword` resolution path AND the raiser's
+    # `byValueSize > 8 && % 4 == 0` decomposition into i32 IR slots.
+    # 502 tensilelite + Triton attention kernels were blocked on
+    # this row before the fix; the fixture exists to regression-pin
+    # the (i32 %arg0, i32 %arg1, i32 %arg2, i32 %arg3, ptr %arg4)
+    # signature shape and the (%arg1, %arg2, %arg3) -> s[0:2] data
+    # flow through the SMEM kernarg branch in handle_smem.cpp.
+    "s_load_b96_kernarg":
+        r"@LIT_FIXTURE_S_LOAD_B96_KERNARG_CO@",
 }
 
 lit_config.load_config(

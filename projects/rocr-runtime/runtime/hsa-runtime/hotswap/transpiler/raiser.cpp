@@ -266,7 +266,39 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   auto *f32Ty = Type::getFloatTy(C);
   auto *ptrGlobalTy = PointerType::get(C, 1);
 
-  // Build function signature dynamically from kernel metadata
+  // Build function signature dynamically from kernel metadata.
+  //
+  // The IR-level argument list must reproduce the source binary's
+  // kernarg byte layout exactly: every byte the source reads from the
+  // kernarg buffer at offset O must be reachable through some IR
+  // argument anchored at that offset. The AMDGPU backend places kernel
+  // arguments in the kernarg buffer by their natural alignment + size,
+  // so as long as we emit the right type at the right cumulative
+  // offset, the buffer layout matches the runtime's packing.
+  //
+  // Three slot shapes are emitted:
+  //   * `global_buffer` (size==8) → ptr addrspace(1).
+  //   * non-pointer `by_value` size==4 → i32.
+  //   * non-pointer `by_value` size==8 → i64.
+  //   * non-pointer `by_value` size > 8 (and divisible by 4, i.e. an
+  //     aggregate kernarg like Triton's tensor-descriptor struct) is
+  //     DECOMPOSED into one i32 slot per dword. Without this split the
+  //     IR would carry a single i32 placeholder for the whole struct
+  //     and codegen would only allocate 4 bytes for it — silently
+  //     shifting every downstream arg's runtime byte offset and turning
+  //     all kernarg loads past the struct into reads of garbage. The
+  //     per-dword split also makes SMEM kernarg loads against the
+  //     interior of the struct addressable through `extractKernargDword`
+  //     in handle_smem.cpp without needing any aggregate-aware extract
+  //     logic. Sizes that are not 4, 8, or a multiple of 4 are refused
+  //     loudly: they would require partial-dword extraction that no
+  //     current handler supports, and the no-fallback rule applies.
+  //
+  // Test back-reference: lit_tests/s_load_b96_kernarg/ pins the i32
+  // slot signature this branch produces for a 16-byte by_value
+  // aggregate; any change to the dword-decomposition logic must keep
+  // that fixture's `(i32 %arg0, i32 %arg1, i32 %arg2, i32 %arg3, ptr
+  // addrspace(1) %arg4)` signature green.
   SmallVector<Type *, 8> paramTypes;
   KernargLayout kernargs;
   int paramIdx = 0;
@@ -277,18 +309,45 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
         arg.valueKind.rfind("hidden_", 0) == 0)
       continue;
     bool isPtr = (arg.valueKind == "global_buffer");
-    Type *ty;
     if (isPtr) {
-      ty = ptrGlobalTy;
-    } else if (arg.size == 8) {
-      ty = i64Ty;
-    } else {
-      ty = i32Ty;
+      if (arg.size != 8)
+        report_fatal_error(
+            Twine("transpiler: kernel '") + kernelName + "' arg '" +
+            arg.name + "' is global_buffer but size=" +
+            Twine(arg.size) + " (expected 8)");
+      paramTypes.push_back(ptrGlobalTy);
+      kernargs.params.push_back({arg.offset, 8, paramIdx, true});
+      paramIdx++;
+      continue;
     }
-    paramTypes.push_back(ty);
-    kernargs.params.push_back(
-        {arg.offset, arg.size, paramIdx, isPtr});
-    paramIdx++;
+    if (arg.size == 4) {
+      paramTypes.push_back(i32Ty);
+      kernargs.params.push_back({arg.offset, 4, paramIdx, false});
+      paramIdx++;
+      continue;
+    }
+    if (arg.size == 8) {
+      paramTypes.push_back(i64Ty);
+      kernargs.params.push_back({arg.offset, 8, paramIdx, false});
+      paramIdx++;
+      continue;
+    }
+    if (arg.size > 0 && arg.size % 4 == 0) {
+      int nDwords = arg.size / 4;
+      for (int d = 0; d < nDwords; ++d) {
+        paramTypes.push_back(i32Ty);
+        kernargs.params.push_back(
+            {arg.offset + d * 4, 4, paramIdx, false});
+        paramIdx++;
+      }
+      continue;
+    }
+    report_fatal_error(
+        Twine("transpiler: kernel '") + kernelName + "' arg '" +
+        arg.name + "' has unsupported by_value size=" + Twine(arg.size) +
+        " (expected 4, 8, or a positive multiple of 4); partial-dword "
+        "kernarg extraction is not modelled and silent rounding is "
+        "rejected by the no-fallback rule.");
   }
   kernargs.implicitArgsBase = meta.implicitArgsBase();
 

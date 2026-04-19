@@ -92,6 +92,7 @@ add_library(hotswap-transpiler STATIC
   wmma_lowering.cpp
   pipeline.cpp
   code_object_utils.cpp
+  kernarg_layout.cpp
 )
 
 # AMDGPU target-private headers (not installed by `ninja install`).
