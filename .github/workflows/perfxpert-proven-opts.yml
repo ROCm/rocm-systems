@@ -9,6 +9,9 @@ on:
     branches:
       - users/aelwazir/perfxpert-agentic-refactor
       - develop
+    paths:
+      - 'experimental/python/perfxpert/**'
+      - '.github/workflows/perfxpert-proven-opts.yml'
 
 jobs:
   proven-opts-gates:
