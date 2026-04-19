@@ -58,7 +58,6 @@ def hip_graph_bubbles_rules(validation_rules_dir: Path) -> list[Path]:
 class TestHipGraphBubbles(RocprofsysTest):
     """Exercise hip-graph-bubbles under rocprofiler-systems (no binary rewrite / runtime)."""
 
-    @pytest.mark.ci_disable("assert_rocpd")
     @pytest.mark.rocpd("hip_graph_bubbles_rocpd_env")
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
     def test(
