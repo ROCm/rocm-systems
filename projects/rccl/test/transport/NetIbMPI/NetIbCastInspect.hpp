@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include "nccl.h" // ncclResult_t — must match the definitions in net_ib_cast.cc exactly
 
 // Test-only introspection API for the net-ib-cast WRR scheduler.
 // The implementation lives in src/transport/net_ib_cast.cc and is compiled
@@ -37,19 +38,19 @@ struct ncclIbCastSchedState {
 };
 
 // Declared in net_ib_cast.cc; linked from librccl.so in debug builds.
-extern "C" int ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out);
+extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out);
 
 // Force-initialize the WRR token table, bypassing RTT-based scheduling.
 // Immediately arms schedInit=true.
-// nqps must equal the connection's actual nqps.
-extern "C" int ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
+// nqps must equal the connection's actual nqps (base->nqps).
+extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 
 // Override schedParms fields for mid-test toggling.
 // Takes effect on the very next isend; does not require re-connection.
-extern "C" int ncclIbCastSetSchedParms(void* sendComm,
-                                        bool schedEnable,
-                                        bool doWrr,
-                                        bool splitData,
-                                        uint32_t splitDataMin);
+extern "C" ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
+                                                 bool schedEnable,
+                                                 bool doWrr,
+                                                 bool splitData,
+                                                 uint32_t splitDataMin);
 
 #endif // MPI_TESTS_ENABLED

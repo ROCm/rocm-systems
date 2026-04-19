@@ -12,17 +12,19 @@
 // =============================================================================
 // Test: CastEqualWeightsTwoQPsTokenCounts
 //
-// White-box: 2 QPs, equal weights (schedWeight=0), WRR+split mode.
-// Verifies initTokens.totTokens=100, per-QP tokens=50 each, sum invariant.
+// White-box: request 2 QPs, equal weights (schedWeight=0), WRR+split mode.
+// Actual nqps determined at runtime (ionic caps at 1, mlx5 supports 2+).
+// Verifies: initTokens.totTokens=100, per-QP tokens equal, sum invariant.
 // =============================================================================
 TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -40,10 +42,14 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps (NCCL_PARAM cache may cap below requested 2).
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, 122, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    // Arm equal-weight tokens.
     if (rank == 1) {
-        // Force-arm the WRR scheduler with equal 50/50 tokens before sending.
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
     CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 123, mhandle);
@@ -53,13 +59,16 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
 
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
 
         ASSERT_TRUE(state.schedInit);
-        EXPECT_EQ(state.nqps, 2);
+        EXPECT_EQ(state.nqps, actualNqps);
         EXPECT_EQ(state.initTotTokens, 100);
-        EXPECT_EQ(state.initQpTokens[0], 50);
-        EXPECT_EQ(state.initQpTokens[1], 50);
+        // Each QP must have 100/nqps tokens (±1 for remainder distribution).
+        const int base = 100 / actualNqps;
+        for (int i = 0; i < state.nqps; i++)
+            EXPECT_GE(state.initQpTokens[i], base)
+                << "QP " << i << " initToken below equal-weight floor";
         int sum = 0;
         for (int i = 0; i < state.nqps; i++) sum += state.initQpTokens[i];
         EXPECT_EQ(sum, state.initTotTokens);
@@ -79,21 +88,22 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
 // =============================================================================
 // Test: CastWeightsDistributionOneRound
 //
-// White-box: Verifies that exactly totTokens sends exhaust all WRR tokens for
-// both equal (50/50) and unequal (75/25) weight distributions on the same
-// connection. After each phase of exactly 100 sends the active token counter
-// must be 0 (lazy refill: reset happens at the *start* of the next send, not
-// immediately after exhaustion). SetTokens resets both init and active tokens,
-// so re-arming between phases is sufficient without re-connecting.
+// White-box: Verifies that exactly totTokens sends exhaust all WRR tokens.
+// Two phases on the same connection:
+//   Phase 1: equal weights (100/nqps each) — totTokens sends → activeTokens == 0
+//   Phase 2: unequal weights (triangular: higher-indexed QPs get fewer tokens)
+//            — totTokens sends → activeTokens == 0
+// SetTokens resets both init and active tokens, so no reconnect needed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -101,10 +111,11 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    constexpr int    kNMsgs  = 100; // = totTokens for both phases
-    constexpr size_t kMsgSz  = 64;
+    constexpr int    kTotTokens = 100;
+    constexpr size_t kMsgSz     = 64;
 
-    char sendBuf[kNMsgs * kMsgSz], recvBuf[kNMsgs * kMsgSz];
+    // Buffer sized for kTotTokens messages.
+    char sendBuf[kTotTokens * kMsgSz], recvBuf[kTotTokens * kMsgSz];
     for (size_t i = 0; i < sizeof(sendBuf); i++) sendBuf[i] = static_cast<char>(i & 0xFF);
     memset(recvBuf, 0, sizeof(recvBuf));
 
@@ -113,31 +124,47 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, sizeof(sendBuf), NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
-    // Phase 1: equal weights {50, 50} — 100 sends exhaust one full WRR round.
+    // Warmup: learn real nqps before arming tokens.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, kMsgSz, 199, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    // Phase 1: equal weights, kTotTokens sends exhaust one full WRR round.
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps, kTotTokens);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
-    CastDoBatchSendRecv(rank, sendComm, recvComm, sendBuf, recvBuf, kMsgSz, kNMsgs, 200, mhandle);
+    CastDoBatchSendRecv(rank, sendComm, recvComm, sendBuf, recvBuf, kMsgSz, kTotTokens, 200, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
         ASSERT_TRUE(state.schedInit);
         EXPECT_EQ(state.activeTotTokens, 0) << "equal weights: after one full round active tokens must be 0";
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // Phase 2: unequal weights {75, 25} — 100 sends exhaust one full WRR round.
-    // SetTokens resets activeTokens as well, so no reconnect is needed.
+    // Phase 2: unequal weights (triangular: token[i] ∝ nqps-i), kTotTokens sends.
     if (rank == 1) {
-        const int tokens[2] = {75, 25};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const int weightSum = actualNqps * (actualNqps + 1) / 2;
+        std::vector<int> tokens(actualNqps);
+        int allocated = 0;
+        for (int i = 0; i < actualNqps - 1; i++) {
+            tokens[i] = kTotTokens * (actualNqps - i) / weightSum;
+            allocated += tokens[i];
+        }
+        tokens[actualNqps - 1] = kTotTokens - allocated;
+        // For nqps=1 the sequence is trivially {100}; strictly-decreasing check only for nqps>1.
+        if (actualNqps > 1) {
+            for (int i = 0; i < actualNqps - 1; i++)
+                ASSERT_GT(tokens[i], tokens[i + 1])
+                    << "triangular sequence not strictly decreasing for nqps=" << actualNqps;
+        }
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
-    CastDoBatchSendRecv(rank, sendComm, recvComm, sendBuf, recvBuf, kMsgSz, kNMsgs, 300, mhandle);
+    CastDoBatchSendRecv(rank, sendComm, recvComm, sendBuf, recvBuf, kMsgSz, kTotTokens, 300, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
         ASSERT_TRUE(state.schedInit);
         EXPECT_EQ(state.activeTotTokens, 0) << "unequal weights: after one full round active tokens must be 0";
     }
@@ -156,17 +183,18 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
 // =============================================================================
 // Test: CastTokenSumInvariantAfterConsumption
 //
-// White-box: 2 QPs, 50/50 tokens. After 10 sends: initTokens immutable,
+// White-box: Equal tokens. After 10 sends: initTokens immutable,
 // sum(activeQpTokens)==activeTotTokens.
 // =============================================================================
 TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -185,22 +213,28 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, sizeof(sendBuf), NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, kMsgSize, 699, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Post all 10 sends/recvs concurrently, then wait for all completions.
     CastDoBatchSendRecv(rank, sendComm, recvComm, sendBuf, recvBuf, kMsgSize, kNMsgs, 700, mhandle);
 
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
 
         ASSERT_TRUE(state.schedInit);
         EXPECT_EQ(state.initTotTokens, 100);
-        EXPECT_EQ(state.initQpTokens[0], 50);
-        EXPECT_EQ(state.initQpTokens[1], 50);
+        // Equal tokens: each QP gets 100/nqps (±1 for remainder).
+        const int base = 100 / actualNqps;
+        for (int i = 0; i < state.nqps; i++)
+            EXPECT_GE(state.initQpTokens[i], base)
+                << "QP " << i << " initToken below equal-weight floor";
         int activeSum = 0;
         for (int i = 0; i < state.nqps; i++) activeSum += state.activeQpTokens[i];
         EXPECT_EQ(activeSum, state.activeTotTokens);
@@ -225,11 +259,12 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
 TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/1, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -254,7 +289,7 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
 
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
         if (state.nqps <= 1) {
             EXPECT_FALSE(state.schedInit) << "WRR must be bypassed for nqps=1";
         }
@@ -276,16 +311,17 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
 // Test: CastSchedParmsReflectEnvVars
 //
 // White-box: schedParms inside sendComm must match env vars:
-// enable=true, doWrr=true, splitData=false, splitDataMin=65536.
+// enable=true, doWrr=true, splitData=false, splitDataMin from env.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -307,10 +343,10 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
 
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
         EXPECT_TRUE(state.schedEnable);
         EXPECT_TRUE(state.doWrr);
-        EXPECT_EQ(state.splitDataMin, static_cast<uint32_t>(65536));
+        EXPECT_EQ(state.splitDataMin, GetSplitDataMin());
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -327,18 +363,19 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
 // =============================================================================
 // Test: CastCursorWrapsAtNqpsBoundary
 //
-// White-box: 4 QPs, tokens={0,0,0,1}. Cursor starts at qpIndex=0.
-// The WRR while(1) loop must skip QP0-2 and select QP3.
-// After selection cursor advances to (3+1)%4=0.
+// White-box: actual nqps determined at runtime. Tokens={0,...,0,1} (only last QP).
+// The WRR while(1) loop must skip QP0..nqps-2 and select QP[nqps-1].
+// After selection cursor advances to 0.
 // =============================================================================
 TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/4, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -356,38 +393,26 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
-    // Phase 0: warm-up send so IbCastQpSchedUpdateTx fires and base->nqps is set.
-    // GetSchedState returns nqps=0 before the first isend; we cannot set tokens
-    // safely until we know the real QP count.
-    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 999, mhandle);
-
-    // Now read the real nqps.
-    int actualNqps = 0;
-    if (rank == 1) {
-        struct ncclIbCastSchedState probe = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), 0);
-        actualNqps = probe.nqps;
-    }
+    // Warmup: learn real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, 999, mhandle);
+    ASSERT_GT(actualNqps, 0);
 
     // Set single token on the last QP; all others get 0.
     if (rank == 1) {
-        ASSERT_GT(actualNqps, 0);
         std::vector<int> tokens(actualNqps, 0);
         tokens[actualNqps - 1] = 1;
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), 0);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Phase 1: the send must land on QP[nqps-1] and wrap cursor to 0.
+    // The send must land on QP[nqps-1] and wrap cursor to 0.
     CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 1000, mhandle);
 
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
 
         ASSERT_TRUE(state.schedInit);
-        // One token was consumed from QP[nqps-1]; activeTotTokens must be 0 (round exhausted).
         EXPECT_EQ(state.activeTotTokens, 0);
-        // After selecting QP[nqps-1] the cursor must wrap to 0.
         EXPECT_EQ(state.qpIndex, 0);
     }
 
@@ -405,21 +430,19 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
 // =============================================================================
 // Test: CastMaxQPCount128
 //
-// White-box: Use 4 QPs (hardware limit on this platform) with 1 token each
-// (totTokens=actualNqps). Run exactly actualNqps sends — one full WRR round.
+// Run exactly actualNqps sends — one full WRR round.
 // Verify every QP was selected exactly once: activeQpTokens[i]==0 for all i,
 // activeTotTokens==0, and qpIndex==0 (cursor wrapped back to start).
-//
 // =============================================================================
 TEST_F(NetIbMPITest, CastMaxQPCount128) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    // Requesting 128 QPs breaks the IB transport (ncclSystemError on all sends).
-    SetupCastEnv(/*qpsPerConn=*/4, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -428,7 +451,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSz  = 32;
-    constexpr size_t kBufSz  = NCCL_IB_CAST_INSPECT_MAX_QPS * kMsgSz;
+    constexpr size_t kBufSz  = (NCCL_IB_CAST_INSPECT_MAX_QPS + 1) * kMsgSz;
     constexpr int    kBaseTag = 1300;
 
     std::vector<char> sendBuf(kBufSz, 0);
@@ -441,54 +464,31 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
-    // Phase 0: warm-up send so IbCastQpSchedUpdateTx fires and base->nqps is set.
-    // GetSchedState returns nqps=0 before the first isend; we cannot set tokens
-    // safely until we know the real QP count.
-    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 999, mhandle);
-
-    // Read the real nqps.
-    int actualNqps = 0;
-    if (rank == 1) {
-        struct ncclIbCastSchedState probe = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), 0);
-        actualNqps = probe.nqps;
-    }
-
-    // Rank 0 needs actualNqps to run the right number of receives.
-    int kNMsgs = 0;
-    if (rank == 1) {
-        kNMsgs = actualNqps;
-        MPI_Send(&kNMsgs, 1, MPI_INT, 0, 9900, MPI_COMM_WORLD);
-    } else {
-        MPI_Recv(&kNMsgs, 1, MPI_INT, 1, 9900, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-    ASSERT_GT(kNMsgs, 0);
+    // Warmup: learn real nqps (driver caps 128 at hardware limit).
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, kMsgSz, 999, mhandle);
+    ASSERT_GT(actualNqps, 0);
 
     // Set 1 token per QP — each QP selected exactly once across kNMsgs sends.
     if (rank == 1) {
-        ASSERT_GT(actualNqps, 0);
         std::vector<int> tokens(actualNqps, 1);
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), 0);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Post all kNMsgs sends/recvs concurrently (skipping slot 0 used by warm-up).
+    // Post all actualNqps sends/recvs concurrently (skip slot 0 used by warmup).
     CastDoBatchSendRecv(rank, sendComm, recvComm,
                         sendBuf.data() + kMsgSz, recvBuf.data() + kMsgSz,
-                        kMsgSz, kNMsgs, kBaseTag, mhandle);
+                        kMsgSz, actualNqps, kBaseTag, mhandle);
 
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
 
         ASSERT_TRUE(state.schedInit);
-        // Each QP was assigned 1 token.
         for (int i = 0; i < state.nqps; i++)
             EXPECT_EQ(state.initQpTokens[i], 1) << "QP " << i << " initToken must be 1";
-        // After exactly nqps sends (= totTokens), all active tokens are consumed.
         EXPECT_EQ(state.activeTotTokens, 0);
         for (int i = 0; i < state.nqps; i++)
             EXPECT_EQ(state.activeQpTokens[i], 0) << "QP " << i << " activeToken must be 0";
-        // Cursor wrapped back to 0 after a full round-robin.
         EXPECT_EQ(state.qpIndex, 0);
     }
 
@@ -506,23 +506,25 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
 // =============================================================================
 // Test: CastFourQPsMonotonicOrder
 //
-// White-box: request 4 QPs; actual nqps determined at runtime (NCCL_PARAM cache).
+// White-box: request 4 QPs; actual nqps determined at runtime.
 // Assign tokens as a strictly-decreasing sequence summing to 100 using
 // triangular proportions: token[i] = round(100 * (nqps-i) / weightSum),
 // where weightSum = nqps*(nqps+1)/2; the last token absorbs rounding residual.
+// For nqps=1: sequence is trivially {100}; monotonic check is skipped.
 // Run exactly 100 sends (= totTokens). Verify:
-//   - initQpTokens are strictly decreasing
-//   - activeTotTokens == 0 after exactly totTokens sends (lazy refill not yet triggered)
-//   - activeQpTokens[i] == 0 for all i (every token consumed)
+//   - initQpTokens are strictly decreasing (nqps>1)
+//   - activeTotTokens == 0 after exactly totTokens sends
+//   - activeQpTokens[i] == 0 for all i
 // =============================================================================
 TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/4, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -530,9 +532,9 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    constexpr int    kNMsgs  = 100; // = totTokens; both ranks know this
+    constexpr int    kNMsgs  = 100;
     constexpr size_t kMsgSz  = 32;
-    constexpr size_t kBufSz  = (kNMsgs + 1) * kMsgSz; // +1 for warm-up
+    constexpr size_t kBufSz  = (kNMsgs + 1) * kMsgSz;
     constexpr int    kBaseTag = 1500;
 
     std::vector<char> sendBuf(kBufSz, 0);
@@ -545,72 +547,52 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
-    // Phase 0: warm-up send to learn the real nqps (NCCL_PARAM caches it; may be
-    // less than 4 on this hardware). Also consumes the stagedSchedParms epoch so
-    // SetTokens is the only thing that matters for subsequent sends.
-    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 998, mhandle);
+    // Warmup: learn real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, kMsgSz, 998, mhandle);
+    ASSERT_GT(actualNqps, 0);
 
-    int actualNqps = 0;
+    // Build strictly-decreasing token sequence summing to kNMsgs.
     if (rank == 1) {
-        struct ncclIbCastSchedState probe = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), 0);
-        actualNqps = probe.nqps;
-    }
-
-    // Build a strictly-decreasing token sequence summing to kNMsgs.
-    // token[i] = kNMsgs * (nqps - i) / weightSum, residual in last slot.
-    // For nqps=2: weights {2,1}/3 → tokens {67,33}; for nqps=4: {40,30,20,10}.
-    if (rank == 1) {
-        ASSERT_GT(actualNqps, 0);
-        int weightSum = actualNqps * (actualNqps + 1) / 2;
+        const int weightSum = actualNqps * (actualNqps + 1) / 2;
         std::vector<int> tokens(actualNqps);
         int allocated = 0;
         for (int i = 0; i < actualNqps - 1; i++) {
             tokens[i] = kNMsgs * (actualNqps - i) / weightSum;
             allocated += tokens[i];
         }
-        tokens[actualNqps - 1] = kNMsgs - allocated; // absorb rounding residual
+        tokens[actualNqps - 1] = kNMsgs - allocated;
 
-        // Guard: must be strictly decreasing (required for test validity).
-        bool isDecreasing = true;
-        for (int i = 0; i < actualNqps - 1; i++)
-            if (tokens[i] <= tokens[i + 1]) { isDecreasing = false; break; }
-        ASSERT_TRUE(isDecreasing)
-            << "Generated token sequence is not strictly decreasing for nqps=" << actualNqps
-            << "; increase kNMsgs or reduce nqps";
-
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), 0);
+        if (actualNqps > 1) {
+            bool isDecreasing = true;
+            for (int i = 0; i < actualNqps - 1; i++)
+                if (tokens[i] <= tokens[i + 1]) { isDecreasing = false; break; }
+            ASSERT_TRUE(isDecreasing)
+                << "Generated token sequence is not strictly decreasing for nqps=" << actualNqps;
+        }
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Verify initTokens immediately after SetTokens, before any send can trigger the
-    // periodic IbCastQpSchedUpdateTx timer that would overwrite them with RTT weights.
+    // Verify initTokens immediately after SetTokens (before timer can overwrite).
     if (rank == 1) {
         struct ncclIbCastSchedState probe = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), 0);
-
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &probe), ncclSuccess);
         ASSERT_TRUE(probe.schedInit);
-        // initTokens must be strictly decreasing right after we set them.
-        for (int i = 0; i < probe.nqps - 1; i++)
-            EXPECT_GT(probe.initQpTokens[i], probe.initQpTokens[i + 1])
-                << "initTokens not strictly decreasing at index " << i;
+        if (actualNqps > 1) {
+            for (int i = 0; i < probe.nqps - 1; i++)
+                EXPECT_GT(probe.initQpTokens[i], probe.initQpTokens[i + 1])
+                    << "initTokens not strictly decreasing at index " << i;
+        }
     }
 
-    // Phase 1: exactly kNMsgs sends = exactly one full WRR round.
-    // The periodic timer may fire during these sends and reset initTokens to RTT-based
-    // weights, but activeTokens are only reset at the START of the NEXT send after
-    // exhaustion. So after exactly kNMsgs sends, activeTotTokens == 0 regardless.
-    // Post all kNMsgs concurrently (offset by 1 slot to skip the warm-up message).
+    // Phase 1: exactly kNMsgs sends = one full WRR round.
     CastDoBatchSendRecv(rank, sendComm, recvComm,
                         sendBuf.data() + kMsgSz, recvBuf.data() + kMsgSz,
                         kMsgSz, kNMsgs, kBaseTag, mhandle);
 
     if (rank == 1) {
         struct ncclIbCastSchedState state = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), 0);
-
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &state), ncclSuccess);
         ASSERT_TRUE(state.schedInit);
-        // After exactly kNMsgs (= original totTokens) sends, all active tokens consumed.
-        // Refill is lazy (happens at start of next send), so activeTotTokens == 0 here.
         EXPECT_EQ(state.activeTotTokens, 0);
         for (int i = 0; i < state.nqps; i++)
             EXPECT_EQ(state.activeQpTokens[i], 0)
@@ -631,18 +613,20 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
 // =============================================================================
 // Test: CastSplitDataThresholdBoundary
 //
-// White-box: nqps=2, splitDataMin=65536. Per-QP threshold = 131072 bytes.
-//   size=131072 → dataPerQp=65536 >= 65536 → split path → 0 WRR tokens consumed
-//   size=131071 → dataPerQp=65535 <  65536 → WRR  path → 1 WRR token consumed
+// White-box: splitDataMin from env. Per-QP threshold = splitDataMin * nqps.
+//   size >= threshold → split path → 0 WRR tokens consumed
+//   size  < threshold → WRR  path → 1 WRR token consumed
+// Actual nqps determines threshold dynamically.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -650,11 +634,8 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // splitDataMin=65536, nqps=2 → threshold at size = 65536 * 2 = 131072
-    constexpr size_t kSplitSz = 131072; // dataPerQp = 65536 — split path
-    constexpr size_t kWrrSz   = 131071; // dataPerQp = 65535 — WRR  path
-    constexpr size_t kBufSz   = kSplitSz;
-
+    // Register a buffer large enough for the worst-case threshold.
+    constexpr size_t kBufSz = 262144;
     std::vector<char> sendBuf(kBufSz, 0x5A);
     std::vector<char> recvBuf(kBufSz, 0x00);
 
@@ -664,16 +645,27 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps to compute actual split threshold.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 1599, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    // threshold = splitDataMin * nqps (from net_ib_cast.cc: dataPerQp = size*nreqs/nqps)
+    const size_t kSplitDataMin = GetSplitDataMin();
+    const size_t kThreshold    = kSplitDataMin * static_cast<size_t>(actualNqps);
+    const size_t kSplitSz      = kThreshold;       // dataPerQp == splitDataMin → split
+    const size_t kWrrSz        = kThreshold - 1;   // dataPerQp <  splitDataMin → WRR
+    ASSERT_LE(kSplitSz, kBufSz) << "buffer too small for threshold=" << kThreshold;
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
     // Large send: split path — activeTotTokens must NOT change.
     int activeTotBeforeSplit = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBeforeSplit = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kSplitSz, 1600, mhandle);
@@ -681,7 +673,7 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     int activeTotAfterSplit = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         ASSERT_TRUE(st.schedInit);
         EXPECT_EQ(st.activeTotTokens, activeTotBeforeSplit)
             << "split path must not consume WRR tokens";
@@ -693,11 +685,10 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
 
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         ASSERT_TRUE(st.schedInit);
         int delta = activeTotAfterSplit - st.activeTotTokens;
-        EXPECT_EQ(delta, 1)
-            << "WRR path must consume exactly one token";
+        EXPECT_EQ(delta, 1) << "WRR path must consume exactly one token";
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -722,11 +713,12 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
 TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -747,12 +739,15 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, sizeof(sendBuf), NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, kMsgSz, 1699, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Post kPhase sends/recvs concurrently within each phase.
     auto doPhase = [&](int phaseBase) {
         CastDoBatchSendRecv(rank, sendComm, recvComm,
                             sendBuf + phaseBase * kMsgSz, recvBuf + phaseBase * kMsgSz,
@@ -763,48 +758,46 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     int activeTotBefore1 = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore1 = st.activeTotTokens;
     }
     doPhase(0);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         int consumed = activeTotBefore1 - st.activeTotTokens;
         ASSERT_TRUE(st.schedInit);
         EXPECT_EQ(consumed, kPhase) << "phase 1: expected " << kPhase << " WRR selections";
 
-        // Phase 2: WRR off
-        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, false, false, 65536), 0);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, false, false, GetSplitDataMin()), ncclSuccess);
     }
 
     int activeTotBefore2 = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore2 = st.activeTotTokens;
     }
     doPhase(kPhase);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         int consumed = activeTotBefore2 - st.activeTotTokens;
         EXPECT_EQ(consumed, 0) << "phase 2: doWrr=false must not consume WRR tokens";
 
-        // Phase 3: WRR on again
-        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, 65536), 0);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, GetSplitDataMin()), ncclSuccess);
     }
 
     int activeTotBefore3 = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore3 = st.activeTotTokens;
     }
     doPhase(kPhase * 2);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         int consumed = activeTotBefore3 - st.activeTotTokens;
         EXPECT_EQ(consumed, kPhase) << "phase 3: expected " << kPhase << " WRR selections";
     }
@@ -823,8 +816,8 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
 // =============================================================================
 // Test: CastEnableDisableSplitData
 //
-// White-box: Toggle splitData on an established connection using a 131072-byte
-// message (at the per-QP threshold boundary with nqps=2, splitDataMin=65536).
+// White-box: Toggle splitData on an established connection.
+// Message size = splitDataMin * nqps (at the per-QP threshold boundary).
 // Phase 1 (splitData=false): oneQp WRR → 1 token consumed
 // Phase 2 (splitData=true):  split path  → 0 tokens consumed
 // Phase 3 (splitData=false): oneQp WRR → 1 token consumed
@@ -832,12 +825,12 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
 TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    // Start with splitData=0 so we can verify the toggle
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -845,75 +838,76 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // 131072 bytes: dataPerQp=65536 ≥ splitDataMin → split path when splitData=true
-    //                                               → WRR  path when splitData=false
-    constexpr size_t kMsgSz = 131072;
-    std::vector<char> sendBuf(kMsgSz, 0xBC);
-    std::vector<char> recvBuf(kMsgSz, 0x00);
+    // Start with a warmup-sized buffer; we'll reuse it for all sends after learning nqps.
+    constexpr size_t kBufSz = 262144;
+    std::vector<char> sendBuf(kBufSz, 0xBC);
+    std::vector<char> recvBuf(kBufSz, 0x00);
 
     void* comm    = (rank == 0) ? recvComm : sendComm;
     void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
                                 : static_cast<void*>(sendBuf.data());
     void* mhandle = nullptr;
-    ASSERT_EQ(RegisterMemory(comm, baseBuf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
-    // Warm-up send: fires updateSchedParmsTry so epoch is consumed and future
-    // SetSchedParms calls are not overwritten by staged params on next isend.
-    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1799, mhandle);
+    // Warmup: fires updateSchedParmsTry epoch AND learns real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 1799, mhandle);
+    ASSERT_GT(actualNqps, 0);
 
-    // Now arm WRR tokens and force splitData=false via API (overrides any cached env).
+    // Message at the split threshold: dataPerQp = splitDataMin → split when splitData=true.
+    const size_t kSplitDataMin = GetSplitDataMin();
+    const size_t kMsgSz        = kSplitDataMin * static_cast<size_t>(actualNqps);
+    ASSERT_LE(kMsgSz, kBufSz) << "buffer too small for threshold=" << kMsgSz;
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
-        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, 65536), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, kSplitDataMin), ncclSuccess);
     }
 
     // Phase 1: splitData=false → oneQp WRR → 1 token consumed
     int activeTotBefore1ed = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore1ed = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1800, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         ASSERT_TRUE(st.schedInit);
-        int delta = activeTotBefore1ed - st.activeTotTokens;
-        EXPECT_EQ(delta, 1);
-        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, true, 65536), 0);
+        EXPECT_EQ(activeTotBefore1ed - st.activeTotTokens, 1);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, true, kSplitDataMin), ncclSuccess);
     }
 
     // Phase 2: splitData=true → split path → 0 tokens consumed
     int activeTotBefore2ed = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore2ed = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1801, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
-        int delta = activeTotBefore2ed - st.activeTotTokens;
-        EXPECT_EQ(delta, 0) << "split path must not consume tokens";
-        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, 65536), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
+        EXPECT_EQ(activeTotBefore2ed - st.activeTotTokens, 0)
+            << "split path must not consume tokens";
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, false, kSplitDataMin), ncclSuccess);
     }
 
     // Phase 3: splitData=false → oneQp WRR → 1 token consumed
     int activeTotBefore3ed = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore3ed = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 1802, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
-        int delta = activeTotBefore3ed - st.activeTotTokens;
-        EXPECT_EQ(delta, 1);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
+        EXPECT_EQ(activeTotBefore3ed - st.activeTotTokens, 1);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -931,7 +925,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
 // Test: CastEnableDisableSched
 //
 // White-box: Toggle schedEnable on an established connection.
-// With splitData=true and small messages (dataPerQp < splitDataMin):
+// Message is small (dataPerQp < splitDataMin) with splitData=true.
 //   enable=true  → WRR oneQp path → 1 token consumed
 //   enable=false → scheduler disabled, all-QP path → 0 tokens consumed
 //   enable=true  → WRR resumes → 1 token consumed
@@ -939,11 +933,12 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
 TEST_F(NetIbMPITest, CastEnableDisableSched) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -951,7 +946,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // 512 bytes: dataPerQp = 256 < 65536 → WRR when enable=true, bypass when enable=false
+    // 512 bytes: small enough to stay below split threshold → WRR when enable=true, bypass when enable=false
     constexpr size_t kMsgSz = 512;
     char sendBuf[kMsgSz], recvBuf[kMsgSz];
     memset(sendBuf, 0xCD, kMsgSz);
@@ -962,57 +957,59 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSz, 1899, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
     // Phase 1: enable=true → WRR path
     int activeTotBefore1es = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore1es = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSz, 1900, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         ASSERT_TRUE(st.schedInit);
-        int delta = activeTotBefore1es - st.activeTotTokens;
-        EXPECT_EQ(delta, 1);
-        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, false, true, true, 65536), 0);
+        EXPECT_EQ(activeTotBefore1es - st.activeTotTokens, 1);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, false, true, true, GetSplitDataMin()), ncclSuccess);
     }
 
     // Phase 2: enable=false → bypass (all-QP path)
     int activeTotBefore2es = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore2es = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSz, 1901, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
-        int delta = activeTotBefore2es - st.activeTotTokens;
-        EXPECT_EQ(delta, 0) << "enable=false must not consume WRR tokens";
-        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, true, 65536), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
+        EXPECT_EQ(activeTotBefore2es - st.activeTotTokens, 0)
+            << "enable=false must not consume WRR tokens";
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, true, GetSplitDataMin()), ncclSuccess);
     }
 
     // Phase 3: enable=true → WRR resumes
     int activeTotBefore3es = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBefore3es = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSz, 1902, mhandle);
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
-        int delta = activeTotBefore3es - st.activeTotTokens;
-        EXPECT_EQ(delta, 1);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
+        EXPECT_EQ(activeTotBefore3es - st.activeTotTokens, 1);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1029,20 +1026,20 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
 // =============================================================================
 // Test: CastSendRecvMultipleSizes
 //
-// nqps=2, splitData=true, splitDataMin=65536.
-// Per-QP threshold = 131072 bytes (dataPerQp = size / 2).
-// WRR  sizes (<131072): {512, 4096, 65536, 131071} → each consumes 1 WRR token
-// Split sizes (≥131072): {131072, 262144}           → 0 WRR tokens consumed
+// splitData=true, splitDataMin from env. Threshold = splitDataMin * nqps.
+// WRR  sizes (< threshold): each consumes 1 WRR token.
+// Split sizes (>= threshold): 0 WRR tokens consumed.
 // Data integrity verified for all sizes.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -1050,7 +1047,7 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    constexpr size_t kBufSz = 262144;
+    constexpr size_t kBufSz = 524288; // 512 KB — fits all test sizes
     std::vector<char> sendBuf(kBufSz);
     std::vector<char> recvBuf(kBufSz);
     for (size_t i = 0; i < kBufSz; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
@@ -1061,22 +1058,31 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, kBufSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps to compute split threshold.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 1999, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    const size_t kSplitDataMin = GetSplitDataMin();
+    const size_t kThreshold    = kSplitDataMin * static_cast<size_t>(actualNqps);
+    ASSERT_LE(kThreshold, kBufSz) << "buffer too small for threshold=" << kThreshold;
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Sizes below per-QP threshold → WRR path
-    const size_t kWrrSizes[]   = {512, 4096, 65536, 131071};
-    // Sizes at/above per-QP threshold → split path
-    const size_t kSplitSizes[] = {131072, 262144};
+    // Sizes below threshold → WRR path (1 token consumed each).
+    const std::vector<size_t> kWrrSizes   = {512, 4096, kSplitDataMin, kThreshold - 1};
+    // Sizes at/above threshold → split path (0 tokens consumed).
+    const std::vector<size_t> kSplitSizes = {kThreshold, kThreshold * 2};
     int baseTag = 2000;
 
     for (size_t sz : kWrrSizes) {
+        if (sz > kBufSz) continue; // skip if buffer too small (shouldn't happen)
         int prevActiveTot = 0;
         if (rank == 1) {
             struct ncclIbCastSchedState st = {};
-            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
             prevActiveTot = st.activeTotTokens;
         }
         CastDoSendRecv(rank, sendComm, recvComm, baseBuf, sz, baseTag++, mhandle);
@@ -1084,17 +1090,18 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
             EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), sz), 0) << "data mismatch at size " << sz;
         if (rank == 1) {
             struct ncclIbCastSchedState st = {};
-            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
-            int delta = prevActiveTot - st.activeTotTokens;
-            EXPECT_EQ(delta, 1) << "WRR path must consume exactly 1 token for size=" << sz;
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
+            EXPECT_EQ(prevActiveTot - st.activeTotTokens, 1)
+                << "WRR path must consume exactly 1 token for size=" << sz;
         }
     }
 
     for (size_t sz : kSplitSizes) {
+        if (sz > kBufSz) continue;
         int prevActiveTot = 0;
         if (rank == 1) {
             struct ncclIbCastSchedState st = {};
-            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
             prevActiveTot = st.activeTotTokens;
         }
         CastDoSendRecv(rank, sendComm, recvComm, baseBuf, sz, baseTag++, mhandle);
@@ -1102,9 +1109,9 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
             EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), sz), 0) << "data mismatch at size " << sz;
         if (rank == 1) {
             struct ncclIbCastSchedState st = {};
-            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
-            int delta = prevActiveTot - st.activeTotTokens;
-            EXPECT_EQ(delta, 0) << "split path must not consume WRR tokens for size=" << sz;
+            ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
+            EXPECT_EQ(prevActiveTot - st.activeTotTokens, 0)
+                << "split path must not consume WRR tokens for size=" << sz;
         }
     }
 
@@ -1122,18 +1129,19 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
 // =============================================================================
 // Test: CastLargeTransfer
 //
-// Black/white-box: 16 MB transfer with splitData=true, nqps=2.
-// dataPerQp = 8 MB >> splitDataMin(65536) → split path taken.
-// Verify: data integrity + 0 WRR tokens consumed (split path taken, WRR not entered).
+// Black/white-box: 16 MB transfer with splitData=true.
+// dataPerQp = 16MB / nqps >> splitDataMin → split path taken.
+// Verify: data integrity + 0 WRR tokens consumed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastLargeTransfer) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -1152,15 +1160,19 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, baseBuf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, baseBuf, 64, 2099, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
     int activeTotBeforeLarge = 0;
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         activeTotBeforeLarge = st.activeTotTokens;
     }
     CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 2100, mhandle);
@@ -1170,10 +1182,9 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
 
     if (rank == 1) {
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         ASSERT_TRUE(st.schedInit);
-        int delta = activeTotBeforeLarge - st.activeTotTokens;
-        EXPECT_EQ(delta, 0)
+        EXPECT_EQ(activeTotBeforeLarge - st.activeTotTokens, 0)
             << "16 MB transfer must use split path, not WRR";
     }
 
@@ -1191,18 +1202,19 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
 // =============================================================================
 // Test: CastSendRecvZeroSize
 //
-// White-box: Zero-byte send with splitData=true, nqps=2.
-// dataPerQp = 0 < splitDataMin → oneQp WRR path.
+// White-box: Zero-byte send with splitData=true.
+// dataPerQp = 0 < splitDataMin → oneQp WRR path (regardless of nqps).
 // Verify: send/recv complete with ncclSuccess, received size=0, 1 WRR token consumed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
     void* listenComm = nullptr;
@@ -1210,7 +1222,6 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     void* recvComm   = nullptr;
     SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
 
-    // Register a minimal buffer (size=0 sends still need a valid MR).
     constexpr size_t kRegSz = 64;
     char buf[kRegSz];
     memset(buf, 0, kRegSz);
@@ -1219,12 +1230,15 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     void* mhandle = nullptr;
     ASSERT_EQ(RegisterMemory(comm, buf, kRegSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
 
+    // Warmup: learn real nqps.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kRegSz, 2199, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+        const std::vector<int> tokens = EqualTokens(actualNqps);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Post recv for 0 bytes; send 0 bytes.
     void* req = nullptr;
     int   sz  = -1;
     if (rank == 0) {
@@ -1241,10 +1255,9 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
         ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
 
         struct ncclIbCastSchedState st = {};
-        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), ncclSuccess);
         ASSERT_TRUE(st.schedInit);
-        int delta = st.initTotTokens - st.activeTotTokens;
-        EXPECT_EQ(delta, 1)
+        EXPECT_EQ(st.initTotTokens - st.activeTotTokens, 1)
             << "zero-size send must still trigger WRR (dataPerQp=0 < splitDataMin)";
     }
 
@@ -1263,50 +1276,42 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
 // Test: CastStressMultiRoundTwoConns
 //
 // Stress test: two independent connections running concurrently, 500 sends each.
-// Goals:
-//   - Multiple token refill cycles (totTokens=100, kNMsgs=500 → 5 full rounds).
-//   - Timer (IbCastQpSchedUpdateTx, ~50ms interval) fires multiple times during
-//     the ~1KB * 500 run, changing initTokens mid-flight.
-//   - Active tokens exhaust at least 5 times per connection (lazy refill).
-//   - Sends and recvs for BOTH connections are posted before any waits (true
-//     parallelism between the two connections).
-//   - Data integrity verified on rank 0 via memcmp.
+// Actual nqps determined at runtime. Works with nqps=1 (no WRR timer check) or
+// nqps>1 (RTT timer fires and rewrites initTokens from asymmetric initial values).
 //
-// Invariants asserted (timer may alter initTokens so exact values not fixed):
-//   - schedInit == true on both connections after all sends complete.
+// Invariants asserted:
+//   - schedInit == true on both connections.
 //   - sum(activeQpTokens[i]) == activeTotTokens for both connections.
 //   - 0 <= activeTotTokens <= initTotTokens for both connections.
+//   - If nqps > 1: initQpTokens changed from asymmetric initial values (timer fired).
 // =============================================================================
 TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly 2 MPI processes";
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     const int rank = MPIEnvironment::world_rank;
 
-    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/0);
+    CAST_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
-    // ----- Connection 1 -----
-    void* listenComm1 = nullptr;
-    void* sendComm1   = nullptr;
-    void* recvComm1   = nullptr;
+    void* listenComm1 = nullptr, *sendComm1 = nullptr, *recvComm1 = nullptr;
+    void* listenComm2 = nullptr, *sendComm2 = nullptr, *recvComm2 = nullptr;
     SetupCastConnection(/*dev=*/0, &listenComm1, &sendComm1, &recvComm1);
-
-    // ----- Connection 2 -----
-    void* listenComm2 = nullptr;
-    void* sendComm2   = nullptr;
-    void* recvComm2   = nullptr;
     SetupCastConnection(/*dev=*/0, &listenComm2, &sendComm2, &recvComm2);
 
     constexpr int    kNMsgs  = 500;
-    constexpr size_t kMsgSz  = 1024; // 1KB — small enough for WRR, large enough for timer firings
+    // Keep kMsgSz strictly below splitDataMin so messages always take the WRR path
+    // (dataPerQp = kMsgSz/nqps < splitDataMin/nqps < splitDataMin).
+    // Without this, a small splitDataMin (e.g. 200) would push all messages to the
+    // split path, bypassing WRR token accounting and preventing the RTT timer from
+    // ever updating initQpTokens, which this test verifies.
+    const size_t kMsgSz  = std::max<size_t>(64, GetSplitDataMin() - 1);
     constexpr int    kBase1  = 4000;
     constexpr int    kBase2  = 5000;
-
     const size_t kBufSz = static_cast<size_t>(kNMsgs) * kMsgSz;
 
-    // Allocate send/recv buffers for both connections.
     std::vector<char> sendBuf1(kBufSz), recvBuf1(kBufSz);
     std::vector<char> sendBuf2(kBufSz), recvBuf2(kBufSz);
     for (size_t i = 0; i < kBufSz; i++) {
@@ -1316,33 +1321,42 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     memset(recvBuf1.data(), 0, kBufSz);
     memset(recvBuf2.data(), 0, kBufSz);
 
-    // Register memory: rank 0 registers recvComm, rank 1 registers sendComm.
-    void* comm1    = (rank == 0) ? recvComm1 : sendComm1;
-    void* comm2    = (rank == 0) ? recvComm2 : sendComm2;
-    char* regBuf1  = (rank == 0) ? recvBuf1.data() : sendBuf1.data();
-    char* regBuf2  = (rank == 0) ? recvBuf2.data() : sendBuf2.data();
-    void* mhandle1 = nullptr;
-    void* mhandle2 = nullptr;
+    void* comm1   = (rank == 0) ? recvComm1 : sendComm1;
+    void* comm2   = (rank == 0) ? recvComm2 : sendComm2;
+    char* regBuf1 = (rank == 0) ? recvBuf1.data() : sendBuf1.data();
+    char* regBuf2 = (rank == 0) ? recvBuf2.data() : sendBuf2.data();
+    void* mhandle1 = nullptr, *mhandle2 = nullptr;
     ASSERT_EQ(RegisterMemory(comm1, regBuf1, kBufSz, NCCL_PTR_HOST, &mhandle1), ncclSuccess);
     ASSERT_EQ(RegisterMemory(comm2, regBuf2, kBufSz, NCCL_PTR_HOST, &mhandle2), ncclSuccess);
 
-    // Arm tokens on both connections (rank 1 = sender).
+    // Warmup on conn1: learn real nqps. Conn2 shares same NCCL_PARAM → same nqps.
+    // Warmup uses a small slice of regBuf1 that's already registered.
+    const int actualNqps = GetActualNqps(sendComm1, recvComm1, regBuf1, kMsgSz, 3999, mhandle1);
+    ASSERT_GT(actualNqps, 0);
+
+    // Arm tokens asymmetrically only when nqps > 1 (otherwise equal single-QP).
+    // For nqps=1 {100} is the only valid token; for nqps>1 use {70,30,...} pattern.
     if (rank == 1) {
-        const int tokens[2] = {50, 50};
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm1, tokens, 2), 0);
-        ASSERT_EQ(ncclIbCastSetTokens(sendComm2, tokens, 2), 0);
+        std::vector<int> tokens(actualNqps);
+        if (actualNqps == 1) {
+            tokens[0] = 100;
+        } else {
+            // Fill proportionally: first QP gets 70% of first two slots, rest equal.
+            tokens[0] = 70;
+            tokens[1] = 30;
+            for (int i = 2; i < actualNqps; i++) tokens[i] = 50;
+        }
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm1, tokens.data(), actualNqps), ncclSuccess);
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm2, tokens.data(), actualNqps), ncclSuccess);
     }
 
-    // Process sends/recvs in batches to stay within NCCL_NET_MAX_REQUESTS (32)
-    // per comm. Both connections are pipelined within each batch for concurrency.
-    constexpr int kBatch = 16; // half of MAX_REQUESTS so conn1+conn2 fit simultaneously
+    constexpr int kBatch = 16;
 
     if (rank == 0) {
         for (int base = 0; base < kNMsgs; base += kBatch) {
             const int end = std::min(base + kBatch, kNMsgs);
             std::vector<void*> reqs1(end - base, nullptr);
             std::vector<void*> reqs2(end - base, nullptr);
-            // Post recvs for both connections.
             for (int i = base; i < end; i++) {
                 void*  bufs[1]    = {recvBuf1.data() + i * kMsgSz};
                 size_t sizes[1]   = {kMsgSz};
@@ -1359,7 +1373,6 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
                 ASSERT_EQ(PostRecv(recvComm2, 1, bufs, sizes, tags, handles, &reqs2[i - base]), ncclSuccess);
                 ASSERT_NE(reqs2[i - base], nullptr);
             }
-            // Wait for both connections.
             for (int i = 0; i < end - base; i++) {
                 int sz = 0;
                 ASSERT_EQ(WaitForCompletion(reqs1[i], &sz, 10000), ncclSuccess);
@@ -1370,26 +1383,52 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
             }
         }
 
-        // Data integrity: received bytes must match what rank 1 sent.
-        EXPECT_EQ(memcmp(recvBuf1.data(), sendBuf1.data(), kBufSz), 0)
-            << "conn1: data corruption detected";
-        EXPECT_EQ(memcmp(recvBuf2.data(), sendBuf2.data(), kBufSz), 0)
-            << "conn2: data corruption detected";
+        EXPECT_EQ(memcmp(recvBuf1.data(), sendBuf1.data(), kBufSz), 0) << "conn1: data corruption";
+        EXPECT_EQ(memcmp(recvBuf2.data(), sendBuf2.data(), kBufSz), 0) << "conn2: data corruption";
+
+        struct ncclIbCastSchedState st1 = {}, st2 = {};
+        MPI_Recv(&st1, sizeof(st1), MPI_BYTE, 1, 9870, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&st2, sizeof(st2), MPI_BYTE, 1, 9871, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // Also receive actualNqps from rank 1 (needed for timer-fired check).
+        int nqps = 0;
+        MPI_Recv(&nqps, 1, MPI_INT, 1, 9872, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // Consistency invariants (both nqps=1 and nqps>1).
+        EXPECT_TRUE(st1.schedInit) << "conn1: schedInit must be true";
+        {
+            int s = 0; for (int q = 0; q < st1.nqps; q++) s += st1.activeQpTokens[q];
+            EXPECT_EQ(s, st1.activeTotTokens) << "conn1: activeQpTokens sum mismatch";
+        }
+        EXPECT_GE(st1.activeTotTokens, 0);
+        EXPECT_LE(st1.activeTotTokens, st1.initTotTokens);
+
+        EXPECT_TRUE(st2.schedInit) << "conn2: schedInit must be true";
+        {
+            int s = 0; for (int q = 0; q < st2.nqps; q++) s += st2.activeQpTokens[q];
+            EXPECT_EQ(s, st2.activeTotTokens) << "conn2: activeQpTokens sum mismatch";
+        }
+        EXPECT_GE(st2.activeTotTokens, 0);
+        EXPECT_LE(st2.activeTotTokens, st2.initTotTokens);
+
+        // RTT timer check: only meaningful when nqps > 1.
+        if (nqps > 1) {
+            EXPECT_NE(st1.initQpTokens[0], 70) << "conn1: RTT timer did not fire";
+            EXPECT_NE(st1.initQpTokens[1], 30) << "conn1: RTT timer did not fire";
+            EXPECT_NE(st2.initQpTokens[0], 70) << "conn2: RTT timer did not fire";
+            EXPECT_NE(st2.initQpTokens[1], 30) << "conn2: RTT timer did not fire";
+        }
     } else {
         for (int base = 0; base < kNMsgs; base += kBatch) {
             const int end = std::min(base + kBatch, kNMsgs);
             std::vector<void*> reqs1(end - base, nullptr);
             std::vector<void*> reqs2(end - base, nullptr);
-            // Post sends for both connections.
-            for (int i = base; i < end; i++) {
+            for (int i = base; i < end; i++)
                 PostSendWithRetry(sendComm1, sendBuf1.data() + i * kMsgSz, kMsgSz,
                                   kBase1 + i, mhandle1, &reqs1[i - base]);
-            }
-            for (int i = base; i < end; i++) {
+            for (int i = base; i < end; i++)
                 PostSendWithRetry(sendComm2, sendBuf2.data() + i * kMsgSz, kMsgSz,
                                   kBase2 + i, mhandle2, &reqs2[i - base]);
-            }
-            // Wait for both connections.
             for (int i = 0; i < end - base; i++) {
                 int sz = 0;
                 ASSERT_EQ(WaitForCompletion(reqs1[i], &sz, 10000), ncclSuccess);
@@ -1400,40 +1439,16 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
             }
         }
 
-        // WRR consistency invariants for conn1.
-        {
-            struct ncclIbCastSchedState st = {};
-            ASSERT_EQ(ncclIbCastGetSchedState(sendComm1, &st), 0);
-            EXPECT_TRUE(st.schedInit) << "conn1: schedInit must be true after sends";
-            int qpSum = 0;
-            for (int q = 0; q < st.nqps; q++) qpSum += st.activeQpTokens[q];
-            EXPECT_EQ(qpSum, st.activeTotTokens)
-                << "conn1: sum(activeQpTokens) must equal activeTotTokens";
-            EXPECT_GE(st.activeTotTokens, 0)
-                << "conn1: activeTotTokens must be >= 0";
-            EXPECT_LE(st.activeTotTokens, st.initTotTokens)
-                << "conn1: activeTotTokens must not exceed initTotTokens";
-        }
-
-        // WRR consistency invariants for conn2.
-        {
-            struct ncclIbCastSchedState st = {};
-            ASSERT_EQ(ncclIbCastGetSchedState(sendComm2, &st), 0);
-            EXPECT_TRUE(st.schedInit) << "conn2: schedInit must be true after sends";
-            int qpSum = 0;
-            for (int q = 0; q < st.nqps; q++) qpSum += st.activeQpTokens[q];
-            EXPECT_EQ(qpSum, st.activeTotTokens)
-                << "conn2: sum(activeQpTokens) must equal activeTotTokens";
-            EXPECT_GE(st.activeTotTokens, 0)
-                << "conn2: activeTotTokens must be >= 0";
-            EXPECT_LE(st.activeTotTokens, st.initTotTokens)
-                << "conn2: activeTotTokens must not exceed initTotTokens";
-        }
+        struct ncclIbCastSchedState st1 = {}, st2 = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm1, &st1), ncclSuccess);
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm2, &st2), ncclSuccess);
+        MPI_Send(&st1, sizeof(st1), MPI_BYTE, 0, 9870, MPI_COMM_WORLD);
+        MPI_Send(&st2, sizeof(st2), MPI_BYTE, 0, 9871, MPI_COMM_WORLD);
+        MPI_Send(&actualNqps, 1, MPI_INT, 0, 9872, MPI_COMM_WORLD);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // Teardown conn1.
     ASSERT_EQ(DeregisterMemory(comm1, mhandle1), ncclSuccess);
     if (rank == 0) {
         ASSERT_EQ(CloseRecvComm(recvComm1), ncclSuccess);
@@ -1442,7 +1457,6 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
         ASSERT_EQ(CloseSendComm(sendComm1), ncclSuccess);
     }
 
-    // Teardown conn2.
     ASSERT_EQ(DeregisterMemory(comm2, mhandle2), ncclSuccess);
     if (rank == 0) {
         ASSERT_EQ(CloseRecvComm(recvComm2), ncclSuccess);

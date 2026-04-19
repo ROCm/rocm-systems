@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
+#include "NetIbCastInspect.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -28,6 +29,35 @@
 // Import helper namespaces
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+
+// Skip a Cast test when any required WRR scheduler env var is absent or wrong.
+// Must be called from the test body (not a helper), because GTEST_SKIP() only
+// interrupts execution when expanded inline in the test scope.
+// All vars below are set by the cast_base section in net_ib_transport.json.
+#define CAST_ENV_CHECK_OR_SKIP()                                                         \
+    do {                                                                                 \
+        struct { const char* name; const char* required; } _vars[] = {                  \
+            { "RCCL_IB_QP_SCHED_ENABLE",          "1"      },                           \
+            { "RCCL_IB_QP_SCHED_WRR_ENABLE",      "1"      },                           \
+            { "RCCL_IB_QP_SCHED_WEIGHT",          nullptr  },                           \
+            { "RCCL_IB_QP_SCHED_UPDATE_INTERVAL", nullptr  },                           \
+            { "RCCL_IB_QP_SCHED_RESET_INTERVAL",  nullptr  },                           \
+            { "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN",  nullptr  },                           \
+            { "NCCL_IB_QPS_PER_CONNECTION",        nullptr  },                           \
+            { "NCCL_IB_SPLIT_DATA_ON_QPS",         nullptr  },                           \
+        };                                                                               \
+        for (auto& _v : _vars) {                                                         \
+            const char* _val = getenv(_v.name);                                          \
+            bool _missing = !_val || _val[0] == '\0';                                    \
+            bool _wrong   = _v.required && (!_val || strcmp(_val, _v.required) != 0);   \
+            if (_missing || _wrong) {                                                    \
+                GTEST_SKIP() << "Cast tests require all WRR scheduler env vars. "       \
+                                "Missing or wrong: " << _v.name                         \
+                             << " (expected: " << (_v.required ? _v.required : "<any>") \
+                             << "). Use cast_* configs in net_ib_transport.json.";       \
+            }                                                                            \
+        }                                                                                \
+    } while (0)
 
 // External NET IB plugin
 extern ncclNet_t ncclNetIb;
@@ -420,27 +450,6 @@ protected:
         return outMergedDev;
     }
 
-    // Composite block: Configure CAST/WRR environment variables.
-    // Must be called before InitNetIb().
-    //   qpsPerConn  — NCCL_IB_QPS_PER_CONNECTION
-    //   schedWeight — RCCL_IB_QP_SCHED_WEIGHT string ("0" = equal, "0.8" = EWMA)
-    //   splitData   — NCCL_IB_SPLIT_DATA_ON_QPS (0 = WRR-only, 1 = split+WRR)
-    void SetupCastEnv(int qpsPerConn, const char* schedWeight, int splitData) {
-        // Switch net plugin to IB-CAST so sendComm is ncclIbSendComm from net_ib_cast.cc.
-        net_ = &netIbCast;
-        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_ENABLE",          "1",         1), 0);
-        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_WRR_ENABLE",      "1",         1), 0);
-        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_WEIGHT",          schedWeight, 1), 0);
-        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_UPDATE_INTERVAL", "50",        1), 0);
-        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_RESET_INTERVAL",  "60000",     1), 0);
-        ASSERT_EQ(setenv("RCCL_IB_QP_SCHED_SPLIT_DATA_MIN",  "65536",     1), 0);
-        char qpsBuf[16];
-        snprintf(qpsBuf, sizeof(qpsBuf), "%d", qpsPerConn);
-        ASSERT_EQ(setenv("NCCL_IB_QPS_PER_CONNECTION",       qpsBuf,      1), 0);
-        char splitBuf[4];
-        snprintf(splitBuf, sizeof(splitBuf), "%d", splitData);
-        ASSERT_EQ(setenv("NCCL_IB_SPLIT_DATA_ON_QPS",        splitBuf,    1), 0);
-    }
 
     // On return: rank 0 owns listenComm+recvComm, rank 1 owns sendComm.
     // Caller is responsible for closing all comms.
@@ -475,6 +484,39 @@ protected:
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // Composite block: Warmup send + read real nqps from sendComm on rank 1.
+    // Both ranks call this together. actualNqps is broadcast so rank 0 can coordinate.
+    // buf/mhandle must already be registered against the caller's comm.
+    int GetActualNqps(void* sendComm, void* recvComm,
+                      void* buf, size_t size, int tag, void* mhandle) {
+        const int rank = MPIEnvironment::world_rank;
+        CastDoSendRecv(rank, sendComm, recvComm, buf, size, tag, mhandle);
+        int nqps = 0;
+        if (rank == 1) {
+            struct ncclIbCastSchedState probe = {};
+            EXPECT_EQ(ncclIbCastGetSchedState(sendComm, &probe), ncclSuccess);
+            nqps = probe.nqps;
+        }
+        MPI_Bcast(&nqps, 1, MPI_INT, 1, MPI_COMM_WORLD);
+        EXPECT_GT(nqps, 0);
+        return nqps;
+    }
+
+    // Read RCCL_IB_QP_SCHED_SPLIT_DATA_MIN from the environment.
+    // Falls back to 65536 if unset (matches the RCCL default).
+    static uint32_t GetSplitDataMin() {
+        const char* v = getenv("RCCL_IB_QP_SCHED_SPLIT_DATA_MIN");
+        return (v && v[0]) ? static_cast<uint32_t>(std::stoul(v)) : 65536u;
+    }
+
+    // Build an equal-weight token vector summing to totTokens for nqps QPs.
+    // Remainder distributed to the first slots.
+    static std::vector<int> EqualTokens(int nqps, int totTokens = 100) {
+        std::vector<int> t(nqps, totTokens / nqps);
+        for (int i = 0; i < totTokens % nqps; i++) t[i]++;
+        return t;
     }
 
     // Composite block: Single-message send/recv pair for CAST tests.

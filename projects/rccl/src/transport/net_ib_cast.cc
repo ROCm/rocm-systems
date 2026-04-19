@@ -1973,7 +1973,7 @@ ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendCo
   int channel_id = 0;
   *sendComm = NULL;
 
-  if (rcclAinicRoce) {
+  if (rcclAinicRoce && sendDevComm) {
     channel_id = ((ncclNet_ctxt_t *)sendDevComm)->chId;
   }
 
@@ -2293,7 +2293,7 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   int channel_id = 0;
   *recvComm = NULL;
 
-  if (rcclAinicRoce) {
+  if (rcclAinicRoce && recvDevComm) {
     channel_id = ((ncclNet_ctxt_t *) recvDevComm)->chId;
   }
 
@@ -3944,12 +3944,21 @@ extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens,
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
   struct ncclIbNetCommBase* base = &comm->base;
 
+  // If the connection is already established, nqps must match the real QP count.
+  if (base->nqps > 0 && nqps != base->nqps)
+    return ncclInvalidArgument;
+
   struct ncclIbRrTokens* t = &base->rrQpTxSched.initTokens;
   t->totTokens = 0;
   for (int i = 0; i < nqps; i++) {
     t->qpTokens[i] = qpTokens[i];
     t->totTokens  += qpTokens[i];
   }
+  // Zero out entries beyond nqps so stale values from a previous call cannot
+  // be observed by the WRR cursor if base->nqps ever changes.
+  for (int i = nqps; i < NCCL_IB_CAST_INSPECT_MAX_QPS; i++)
+    t->qpTokens[i] = 0;
+
   base->rrQpTxSched.activeTokens = *t;
   base->rrQpTxSched.qpIndex      = 0;
   base->qpTxSchedInit = true;
