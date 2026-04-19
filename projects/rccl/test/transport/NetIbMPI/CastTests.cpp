@@ -1119,4 +1119,73 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastLargeTransfer
+//
+// Black/white-box: 16 MB transfer with splitData=true, nqps=2.
+// dataPerQp = 8 MB >> splitDataMin(65536) → split path taken.
+// Verify: data integrity + 0 WRR tokens consumed (split path taken, WRR not entered).
+// =============================================================================
+TEST_F(NetIbMPITest, CastLargeTransfer) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSz = kLargeBufferSize; // 16 MB
+    std::vector<char> sendBuf(kMsgSz);
+    std::vector<char> recvBuf(kMsgSz, 0);
+    for (size_t i = 0; i < kMsgSz; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* baseBuf = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, baseBuf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+    }
+
+    int activeTotBeforeLarge = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBeforeLarge = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, baseBuf, kMsgSz, 2100, mhandle);
+
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), kMsgSz), 0) << "data mismatch";
+
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_TRUE(st.schedInit);
+        int delta = activeTotBeforeLarge - st.activeTotTokens;
+        EXPECT_EQ(delta, 0)
+            << "16 MB transfer must use split path, not WRR";
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
