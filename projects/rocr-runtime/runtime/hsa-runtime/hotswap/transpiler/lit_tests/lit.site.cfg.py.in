@@ -190,6 +190,26 @@ config.fixtures = {
     # total, matching the FP8/BF8 shape exactly).
     "wmma_i32_16x16x64_iu8":
         r"@LIT_FIXTURE_WMMA_I32_16X16X64_IU8_CO@",
+    # VOPD extra sub-operations — pins three previously-unhandled
+    # shapes routed through `parseVOPDHalf` in
+    # transpiler/handle_vopd.cpp:
+    #   * v_dual_mov_b32 with an f32 inline-constant literal source
+    #     (the AMDGPU instruction printer surfaces these as their
+    #     decimal float spelling, e.g. `1.0`, rather than as the
+    #     hex bit pattern; the literal-parse fallback in the handler
+    #     maps the printed string back to its IEEE-754 32-bit
+    #     encoding via a finite enumeration mirrored from the
+    #     printer).
+    #   * v_dual_ashrrev_i32 — arithmetic right shift, reversed
+    #     operand order (sign-extension idiom in Triton kernels).
+    #   * v_dual_max_i32     — signed max via `llvm.smax.i32`.
+    # The fixture pins all three shapes in a single kernel; sibling
+    # ops added in the same pass (v_dual_min_i32, v_dual_max_u32,
+    # v_dual_min_u32, v_dual_xor_b32, v_dual_or_b32) follow the
+    # identical (s0, s1) -> intrinsic / IRBuilder dispatch pattern
+    # and are covered transitively.
+    "vopd_extra_subops":
+        r"@LIT_FIXTURE_VOPD_EXTRA_SUBOPS_CO@",
 }
 
 lit_config.load_config(

@@ -113,6 +113,39 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
         if (!name.getAsInteger(0, imm))
           v = ConstantInt::get(ctx.i32Ty, (uint32_t)(imm & 0xFFFFFFFF));
       }
+      // AMDGPU's instruction printer surfaces the f32 inline-constant
+      // pool (see `printImmediateFloat32` in
+      // llvm/lib/Target/AMDGPU/MCTargetDesc/AMDGPUInstPrinter.cpp) as
+      // their decimal float spelling rather than as the hex bit
+      // pattern.  The integer-literal path above can't parse them, so
+      // we map each printed literal back to its canonical IEEE-754
+      // 32-bit encoding here.  This is the same finite enumeration
+      // the printer uses; anything outside it surfaces as `0xNNNN...`
+      // and is already handled by the integer parse.  The negation /
+      // abs source modifiers were already stripped before this point.
+      if (!v) {
+        static const struct {
+          const char *txt;
+          uint32_t bits;
+        } kF32Inline[] = {
+            {"0.0", 0x00000000u},
+            {"1.0", 0x3f800000u},
+            {"-1.0", 0xbf800000u},
+            {"0.5", 0x3f000000u},
+            {"-0.5", 0xbf000000u},
+            {"2.0", 0x40000000u},
+            {"-2.0", 0xc0000000u},
+            {"4.0", 0x40800000u},
+            {"-4.0", 0xc0800000u},
+            {"0.15915494", 0x3e22f983u},
+        };
+        for (auto &e : kF32Inline) {
+          if (name == e.txt) {
+            v = ConstantInt::get(ctx.i32Ty, e.bits);
+            break;
+          }
+        }
+      }
       if (!v) return nullptr;
       if (neg || absmod) {
         v = ctx.B.CreateBitCast(v, ctx.f32Ty);
@@ -226,6 +259,96 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       Value *s1 = readVOPDSrc(operands[2], 1);
       if (!s0 || !s1) return false;
       ctx.storeVGPR32(dstIdx, ctx.B.CreateLShr(s1, s0, "vopd_lshr"));
+      return true;
+    }
+
+    // v_ashrrev_i32 mirrors v_lshrrev_b32 but with arithmetic (sign-
+    // preserving) right shift.  The "rev" suffix means the operand
+    // ordering in the printed text is `(shift_amount, value)` — i.e.
+    // operands[1] = shift amount, operands[2] = value to shift.
+    if (vopMn == "v_ashrrev_i32") {
+      if (operands.size() < 3) return false;
+      Value *s0 = readVOPDSrc(operands[1]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      if (!s0 || !s1) return false;
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateAShr(s1, s0, "vopd_ashr"));
+      return true;
+    }
+
+    // v_max_i32 (signed max).  Use llvm.smax for symmetry with the
+    // float min/max paths above; LLVM lowers it to the canonical
+    // `select (icmp sgt) ...` shape on AMDGPU.
+    if (vopMn == "v_max_i32") {
+      if (operands.size() < 3) return false;
+      Value *s0 = readVOPDSrc(operands[1]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      if (!s0 || !s1) return false;
+      Function *smaxFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::smax, {ctx.i32Ty});
+      ctx.storeVGPR32(dstIdx,
+                      ctx.B.CreateCall(smaxFn, {s0, s1}, "vopd_smax"));
+      return true;
+    }
+
+    // v_min_i32 (signed min).  Mirror of v_max_i32 above; included
+    // for completeness of the signed-integer dual-issue family even
+    // though the current corpus only exercises the smax variant.
+    if (vopMn == "v_min_i32") {
+      if (operands.size() < 3) return false;
+      Value *s0 = readVOPDSrc(operands[1]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      if (!s0 || !s1) return false;
+      Function *sminFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::smin, {ctx.i32Ty});
+      ctx.storeVGPR32(dstIdx,
+                      ctx.B.CreateCall(sminFn, {s0, s1}, "vopd_smin"));
+      return true;
+    }
+
+    // v_max_u32 / v_min_u32 (unsigned max/min).  Same shape as the
+    // signed variants but using llvm.umax / llvm.umin.  Included for
+    // completeness alongside the signed siblings.
+    if (vopMn == "v_max_u32") {
+      if (operands.size() < 3) return false;
+      Value *s0 = readVOPDSrc(operands[1]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      if (!s0 || !s1) return false;
+      Function *umaxFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::umax, {ctx.i32Ty});
+      ctx.storeVGPR32(dstIdx,
+                      ctx.B.CreateCall(umaxFn, {s0, s1}, "vopd_umax"));
+      return true;
+    }
+    if (vopMn == "v_min_u32") {
+      if (operands.size() < 3) return false;
+      Value *s0 = readVOPDSrc(operands[1]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      if (!s0 || !s1) return false;
+      Function *uminFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::umin, {ctx.i32Ty});
+      ctx.storeVGPR32(dstIdx,
+                      ctx.B.CreateCall(uminFn, {s0, s1}, "vopd_umin"));
+      return true;
+    }
+
+    // v_xor_b32 / v_or_b32 — bitwise siblings of v_and_b32 above.
+    // VOPD is a Wave32 dual-issue family for the most common simple
+    // VALU ops; rounding out the bitwise trio costs nothing and
+    // forecloses the next likely "unhandled sub-operation" surprise.
+    if (vopMn == "v_xor_b32") {
+      if (operands.size() < 3) return false;
+      Value *s0 = readVOPDSrc(operands[1]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      if (!s0 || !s1) return false;
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateXor(s0, s1, "vopd_xor"));
+      return true;
+    }
+    if (vopMn == "v_or_b32") {
+      if (operands.size() < 3) return false;
+      Value *s0 = readVOPDSrc(operands[1]);
+      Value *s1 = readVOPDSrc(operands[2], 1);
+      if (!s0 || !s1) return false;
+      ctx.storeVGPR32(dstIdx, ctx.B.CreateOr(s0, s1, "vopd_or"));
       return true;
     }
 
