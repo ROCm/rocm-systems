@@ -36,6 +36,7 @@ from perfxpert.cli._backend.codex import (
 from perfxpert.cli._backend.protocol import (
     BackendAdapter,
     ConfigClobber,
+    ConsentDenied,
     InstallReport,
     LiveCheckReport,
     Plan,
@@ -852,3 +853,46 @@ def test_structured_edit_refuses_git_tracked_project_config(
 
     with pytest.raises(ConfigClobber, match="tracked in a git repository"):
         CodexAdapter().install(project_cwd, scope="project")
+
+
+# ---------------------------------------------------------------------------
+# Finding #3: ConsentDenied leaves ~/.codex/ untouched.
+# ---------------------------------------------------------------------------
+
+
+def test_install_consent_denied_leaves_codex_home_untouched(
+    project_cwd: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_home: Path,
+) -> None:
+    """Declined consent prompt → ConsentDenied, and nothing under
+    ``~/.codex/`` is created or modified.
+
+    The isolated_home fixture sets PERFXPERT_ASSUME_CONSENT=1 — we
+    clear it here so the prompt actually runs, then patch
+    prompt_consent_interactive to return False. Must raise
+    ConsentDenied and must NOT create ``~/.codex/``.
+    """
+    monkeypatch.delenv("PERFXPERT_ASSUME_CONSENT", raising=False)
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.prompt_consent_interactive",
+        lambda *a, **kw: False,
+    )
+    # No binary → adapter would have taken the tomlkit fallback, but we
+    # never reach it because consent is denied first.
+    monkeypatch.setattr("shutil.which", lambda _: None)
+
+    codex_home = isolated_home / ".codex"
+    assert not codex_home.exists()  # baseline
+
+    with pytest.raises(ConsentDenied, match="declined"):
+        CodexAdapter().install(project_cwd, scope="project")
+
+    # Nothing under ~/.codex/ was created.
+    assert not codex_home.exists(), (
+        f"ConsentDenied path must not create ~/.codex/; found: "
+        f"{list(codex_home.rglob('*')) if codex_home.exists() else []}"
+    )
+    # Project-scope .codex/ also must not be created.
+    assert not (project_cwd / ".codex").exists()
+    assert not (project_cwd / ".perfxpert").exists()
