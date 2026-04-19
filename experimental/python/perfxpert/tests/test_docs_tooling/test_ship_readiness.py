@@ -7,17 +7,18 @@ docs gates post-merge — any new banned-string hit, dead internal link,
 or non-executable code sample will turn CI red here.
 
 All scanners live under ``experimental/python/perfxpert/scripts/``;
-the lint script searches relative paths (``experimental/python/perfxpert``
-+ ``docs``) while the python scanners take an explicit search root. We
-therefore invoke everything from the repo root (parents[2] from this
-test file).
+the lint script searches the relative path ``experimental/python/perfxpert``
+while the python scanners take an explicit search root. We therefore
+invoke everything from the rocm-systems repo root (parents[5] from this
+test file, since the file now lives at
+experimental/python/perfxpert/tests/test_docs_tooling/test_ship_readiness.py).
 """
 
 import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[5]
 _SCRIPTS = _REPO_ROOT / "experimental" / "python" / "perfxpert" / "scripts"
 _LINT_SH = _SCRIPTS / "lint.sh"
 _LINK_CHECKER = _SCRIPTS / "link-checker.py"
