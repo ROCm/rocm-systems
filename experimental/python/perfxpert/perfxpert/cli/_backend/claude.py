@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -287,19 +288,23 @@ class ClaudeCodeAdapter:
     def verify_mcp_live(
         self, cwd: Path, telemetry: bool = False
     ) -> LiveCheckReport:
-        """Spawn `claude mcp list --json`, assert perfxpert is listed + healthy.
+        """Spawn `claude mcp list`, assert perfxpert is listed + healthy.
 
-        Wraps the probe in `retry_mcp_handshake` (Task 4a) for the F2
-        bootstrap race: 3 attempts with exponential backoff 2/4/8
-        under `PERFXPERT_MCP_RETRY_BUDGET_S` budget.
+        Wraps the probe in `retry_mcp_handshake` for the MCP bootstrap
+        race: 3 attempts with exponential backoff 2/4/8 under
+        `PERFXPERT_MCP_RETRY_BUDGET_S` budget.
 
-        Gate probe (F1 / I-N1): if the gate hook is installed, run a
-        canned "list files" query and assert the hook rejected it.
-        When the gate surface is unsupported, `gate_hook_installed` is
-        `False` — documented-known-limit, not failure.
+        Gate probe: if the gate hook is installed, run a canned query
+        and assert the hook rejected it. When the gate surface is
+        unsupported, `gate_hook_installed` is `False` — documented
+        known-limit, not failure.
 
         `PERFXPERT_TELEMETRY=1` additionally probes perfxpert-mcp's
-        telemetry log for an `intent_classify` observation (I11).
+        telemetry log for an `intent_classify` observation.
+
+        Parses the plain-text `mcp list` output; recent Claude CLI
+        versions removed the `--json` flag so we scan line-by-line
+        for the ``<name>: <endpoint> - <status>`` form.
         """
         binary = shutil.which(self.binary_name)
         if binary is None:
@@ -314,7 +319,7 @@ class ClaudeCodeAdapter:
         def _list_probe() -> tuple[bool, tuple[str, ...]]:
             """Single attempt — raises on error so the retry helper can backoff."""
             result = subprocess.run(
-                [binary, "mcp", "list", "--json"],
+                [binary, "mcp", "list"],
                 cwd=str(cwd),
                 timeout=15,
                 capture_output=True,
@@ -322,22 +327,25 @@ class ClaudeCodeAdapter:
             )
             if result.returncode != 0:
                 raise PartialInstall(
-                    f"claude mcp list --json exit {result.returncode}: "
+                    f"claude mcp list exit {result.returncode}: "
                     f"{result.stderr.decode('utf-8', errors='replace')}"
                 )
-            try:
-                payload = json.loads(result.stdout.decode("utf-8"))
-            except json.JSONDecodeError as exc:
-                raise PartialInstall(
-                    f"claude mcp list --json produced unparseable JSON: {exc}"
-                ) from exc
-            tools = _extract_tool_names(payload)
-            if "perfxpert" not in _extract_server_names(payload):
+            stdout = result.stdout.decode("utf-8", errors="replace")
+            servers = _parse_mcp_list_text(stdout)
+            if "perfxpert" not in servers:
                 raise PartialInstall(
                     f"perfxpert entry missing from claude mcp list output "
-                    f"(observed: {sorted(_extract_server_names(payload))})"
+                    f"(observed: {sorted(servers)})"
                 )
-            return True, tools
+            status = servers["perfxpert"]
+            if not _is_healthy_status(status):
+                raise PartialInstall(
+                    f"perfxpert entry present but unhealthy: {status!r}"
+                )
+            # Plain-text `mcp list` does not expose per-server tool names;
+            # leave the observed list empty — consumers treat empty as
+            # "unavailable" rather than "zero tools".
+            return True, ()
 
         # Drive the probe through the retry helper.
         try:
@@ -712,6 +720,41 @@ def _version_at_or_above(line: str, minimum: str) -> bool:
         return True
     required = tuple(int(x) for x in mm.groups())
     return found >= required
+
+
+_HEALTHY_STATUS_MARKERS = ("✓", "Connected", "connected", "OK", "ok")
+_UNHEALTHY_STATUS_MARKERS = ("✘", "failed", "Failed", "error", "Error")
+_MCP_LIST_LINE_RE = re.compile(
+    r"^(?P<name>[^:]+):\s+(?P<endpoint>\S.*?)\s+-\s+(?P<status>.+?)\s*$"
+)
+
+
+def _parse_mcp_list_text(output: str) -> dict[str, str]:
+    """Parse `claude mcp list` plain-text output into {server_name: status}.
+
+    Recent Claude CLI dropped the `--json` flag. The text form is
+    ``<name>: <endpoint-or-command> - <status>``. Header and empty
+    lines are skipped.
+    """
+    servers: dict[str, str] = {}
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("Checking", "No MCP")):
+            continue
+        match = _MCP_LIST_LINE_RE.match(stripped)
+        if match:
+            servers[match.group("name").strip()] = match.group("status").strip()
+    return servers
+
+
+def _is_healthy_status(status: str) -> bool:
+    """Status line is healthy when it contains a known OK marker and no
+    explicit failure marker."""
+    if any(bad in status for bad in _UNHEALTHY_STATUS_MARKERS):
+        return False
+    return any(ok in status for ok in _HEALTHY_STATUS_MARKERS)
 
 
 def _extract_server_names(payload: object) -> set[str]:
