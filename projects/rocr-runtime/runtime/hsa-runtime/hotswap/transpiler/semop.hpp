@@ -656,6 +656,69 @@ enum class SemOp : uint16_t {
   TENSOR_LOAD_TO_LDS,
   TENSOR_STORE_FROM_LDS,
 
+  // -- gfx1250 async global → LDS load --
+  //
+  // FLAT async global-to-LDS load, four widths per the b8 / b32 / b64 /
+  // b128 family. Each width has both a plain VGPR_64 vaddr form and a
+  // SADDR (SReg_64 base + VGPR_32 vaddr offset) form, both of which
+  // collapse to the same SemOp per width; `handleFLAT` discriminates
+  // shape on `op.nSrcs()` exactly the same way `tensor_load_to_lds`
+  // discriminates `_d2` vs `_d4`. The pseudo InOperandList is
+  // documented in `FLATInstructions.td:391-417`
+  // (`FLAT_Global_Load_LDS_Pseudo<…, IsAsync=1>`):
+  //
+  //   plain : (vdst:VGPR_32, vaddr:VGPR_64,             offset, cpol)
+  //   SADDR : (vdst:VGPR_32, saddr:SReg_64, vaddr:VGPR_32, offset, cpol)
+  //
+  // `vdst` here is the per-lane LDS i32 OFFSET (TableGen `vdst` slot
+  // is in the *input* list because `IsAsync=1` enables `has_vdst`),
+  // not a written register: each lane uses its own VGPR_32 value as
+  // the LDS-base address for the burst write. The intrinsics
+  // `int_amdgcn_global_load_async_to_lds_b{8,32,64,128}`
+  // (IntrinsicsAMDGPU.td:3939-3946) all share signature
+  // `AMDGPUAsyncGlobalLoadToLDS` (line 3904) and take the LDS
+  // pointer as the second operand (`local_ptr_ty`); we materialise
+  // it via `inttoptr i32 -> ptr addrspace(3)` from the per-lane
+  // VGPR_32. The width is encoded only in the intrinsic ID — the
+  // operand bank is identical across all four widths.
+  //
+  // Separate SemOps per width (rather than a single
+  // `GLOBAL_LOAD_ASYNC_TO_LDS_BX` discriminated by mnemonic) so the
+  // SemOp ↔ intrinsic mapping is direct and the handler is a small
+  // switch instead of string parsing — the canonical opcode_map
+  // collapses each `_gfx1250` real onto its width-specific pseudo.
+  //
+  // === Same-target gfx1250 → gfx1250 contract ===
+  //
+  // gfx1250 has the asynccnt unit and the native intrinsic; the
+  // handler emits a direct call inside an `emitUnderExec` diamond
+  // (per-lane operation: each lane fires its own LDS write, inactive
+  // lanes do not). `IntrInaccessibleMemOrArgMemOnly` on the
+  // intrinsic prevents downstream passes from CSEing or reordering
+  // the asynchronous fetch across other memory sites — the
+  // user-visible barrier semantics live in companion
+  // `s_wait_asynccnt` instructions, not in this op. The intrinsic's
+  // `offset` immediate corresponds to the FLAT instruction's
+  // `flat_offset` slot; `cpol` is the gfx12+ cachepolicy bitfield
+  // (th, scope) carried as the trailing immediate.
+  //
+  // === Cross-target (gfx942 and earlier) contract ===
+  //
+  // The asynccnt unit and `int_amdgcn_global_load_async_to_lds_b*`
+  // are gfx1250-only (`SubtargetPredicate = isGFX1250Plus` on the
+  // VFLAT reals, `FeatureGFX1250Insts`). gfx942 has no asynchronous
+  // global→LDS DMA channel and no equivalent burst path. Refusing
+  // loudly via `RaiseFailure::unsupportedShape` is the only honest
+  // option; a synthesised synchronous global_load + ds_write pair
+  // would change the wave's memory-ordering and asynccnt observable
+  // state, which is exactly what gfx1250 producers (e.g. tensilelite
+  // f8 / bf16 GEMMs and triton block-pipelined matmul kernels) rely
+  // on for software pipelining.
+  GLOBAL_LOAD_ASYNC_TO_LDS_B8,
+  GLOBAL_LOAD_ASYNC_TO_LDS_B32,
+  GLOBAL_LOAD_ASYNC_TO_LDS_B64,
+  GLOBAL_LOAD_ASYNC_TO_LDS_B128,
+
   // -- AGPR --
   V_ACCVGPR_READ_B32, V_ACCVGPR_WRITE_B32,
 

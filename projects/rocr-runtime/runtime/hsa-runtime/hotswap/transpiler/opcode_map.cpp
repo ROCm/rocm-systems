@@ -890,6 +890,31 @@ static const Entry kCanonTable[] = {
     E(TENSOR_LOAD_TO_LDS_d4,    TENSOR_LOAD_TO_LDS),
     E(TENSOR_STORE_FROM_LDS_d2, TENSOR_STORE_FROM_LDS),
     E(TENSOR_STORE_FROM_LDS_d4, TENSOR_STORE_FROM_LDS),
+    // ---------------------------------------------------------------------
+    // FLAT async global → LDS (gfx1250 — VFLAT 0x60-0x62 reals).
+    // The disassembler's MC opcodes are the `_gfx1250` (or
+    // `_SADDR_gfx1250`) reals declared by
+    // `VFLAT_Real_AllAddr_gfx1250` (FLATInstructions.td:2003-2018)
+    // off the `FLAT_Global_Load_LDS_Pseudo<…, IsAsync=1>` family
+    // (FLATInstructions.td:391-417). The canonicalization chain in
+    // `OpcodeMap::canonicalize` collapses each real onto its pseudo
+    // (`GLOBAL_LOAD_ASYNC_TO_LDS_B{8,32,64,128}` / `_SADDR`
+    // sibling) via `buildMcToPseudoMap`; both the plain and SADDR
+    // variants per width share a SemOp because the lift differs
+    // only in the source-bank wiring (vaddr-only VGPR_64 vs
+    // saddr+voff SGPR_64+VGPR_32). `handleFLAT` uses `op.nSrcs()`
+    // (4 for plain, 5 for SADDR) to pick the operand-decoder path,
+    // exactly mirroring how `handleVIMAGE` discriminates
+    // `tensor_load_to_lds_d2` vs `_d4`.
+    // ---------------------------------------------------------------------
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B8,        GLOBAL_LOAD_ASYNC_TO_LDS_B8),
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B8_SADDR,  GLOBAL_LOAD_ASYNC_TO_LDS_B8),
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B32,       GLOBAL_LOAD_ASYNC_TO_LDS_B32),
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B32_SADDR, GLOBAL_LOAD_ASYNC_TO_LDS_B32),
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B64,       GLOBAL_LOAD_ASYNC_TO_LDS_B64),
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B64_SADDR, GLOBAL_LOAD_ASYNC_TO_LDS_B64),
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B128,      GLOBAL_LOAD_ASYNC_TO_LDS_B128),
+    E(GLOBAL_LOAD_ASYNC_TO_LDS_B128_SADDR,GLOBAL_LOAD_ASYNC_TO_LDS_B128),
 };
 
 #undef SMEM3

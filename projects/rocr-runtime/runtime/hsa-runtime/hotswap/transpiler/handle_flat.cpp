@@ -132,6 +132,150 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
+  // ---------------------------------------------------------------------
+  // gfx1250 async global → LDS load (FLAT VFLAT 0x5f-0x62 — b8 / b32 /
+  // b64 / b128).
+  //
+  // Operand layout from `FLAT_Global_Load_LDS_Pseudo<…, IsAsync=1>`
+  // (FLATInstructions.td:391-417) is identical across all four widths
+  // (only the data byte size — and so the intrinsic ID — varies):
+  //
+  //   plain (4 srcs): vdst:VGPR_32, vaddr:VGPR_64,            offset, cpol
+  //   SADDR (5 srcs): vdst:VGPR_32, saddr:SReg_64, vaddr:VGPR_32, offset, cpol
+  //
+  // `vdst` is in the *input* list (because `has_vdst = IsAsync = 1`)
+  // and carries the per-lane LDS i32 base offset. The intrinsics
+  // `int_amdgcn_global_load_async_to_lds_b{8,32,64,128}`
+  // (IntrinsicsAMDGPU.td:3939-3946) all share signature
+  // `AMDGPUAsyncGlobalLoadToLDS` (line 3904) and consume the LDS
+  // pointer as `local_ptr_ty`, so we materialise it via `inttoptr i32
+  // → ptr addrspace(3)`. Each lane fires its own write so the call
+  // is wrapped in `emitUnderExec`; the intrinsic's
+  // `IntrInaccessibleMemOrArgMemOnly` attribute keeps later passes
+  // from sinking it across companion `s_wait_asynccnt` barriers.
+  //
+  // gfx942 has no asynchronous global→LDS DMA channel, so a cross-
+  // target lift (gfx1250 → gfx942) is refused loudly. See the
+  // SemOp's docstring in `semop.hpp` for the design rationale.
+  if (sop == SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B8 ||
+      sop == SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B32 ||
+      sop == SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B64 ||
+      sop == SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B128) {
+    if (!ctx.targetIsa.hasTensorOps) {
+      llvm::errs()
+          << "transpiler: FLAT: " << di.mnemonic
+          << " has no equivalent on the compilation target "
+          << "(gfx1250 asynccnt unit; LLVM intrinsic "
+          << "amdgcn.global.load.async.to.lds.b{8,32,64,128} is gated "
+          << "by FeatureGFX1250Insts). A synthesised "
+          << "global_load + ds_write pair would alter the wave's "
+          << "memory ordering and asynccnt observable state — "
+          << "refusing to emit a fallback.\n";
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "FLAT",
+          "gfx1250-only async global→LDS DMA; no equivalent on "
+          "non-gfx1250 compilation target (no asynccnt unit, no "
+          "amdgcn.global.load.async.to.lds.b* intrinsic)");
+      return hr;
+    }
+
+    bool isSaddr = false;
+    if (op.nSrcs() == 5) {
+      isSaddr = true;
+    } else if (op.nSrcs() != 4) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "FLAT",
+          "global_load_async_to_lds_b*: expected 4 srcs (plain) or "
+          "5 srcs (SADDR) per FLAT_Global_Load_LDS_Pseudo<IsAsync=1>");
+      return hr;
+    }
+
+    ParsedReg vdstPr = op.srcReg(0);
+    if (vdstPr.kind != ParsedReg::VGPR) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "FLAT",
+          "global_load_async_to_lds_b*: vdst (LDS-base operand) is "
+          "not a VGPR");
+      return hr;
+    }
+    Value *ldsOff = ctx.regs.readReg32(ctx.B, vdstPr);
+    Type *ptrLDSTy = PointerType::get(ctx.C, /*addrspace=*/3);
+    Value *ldsPtr = ctx.B.CreateIntToPtr(ldsOff, ptrLDSTy, "lds_ptr");
+
+    Value *globalAddr = nullptr;
+    unsigned immStart = 0;
+    if (isSaddr) {
+      ParsedReg saddrPr = op.srcReg(1);
+      ParsedReg vaddrPr = op.srcReg(2);
+      if (saddrPr.kind != ParsedReg::SGPR ||
+          vaddrPr.kind != ParsedReg::VGPR) {
+        hr.failure = RaiseFailure::unsupportedShape(
+            di, "FLAT",
+            "global_load_async_to_lds_b* SADDR: expected "
+            "(SGPR_64, VGPR_32) for (saddr, vaddr)");
+        return hr;
+      }
+      Value *saddr = ctx.regs.readReg64(ctx.B, saddrPr);
+      Value *voff = ctx.B.CreateZExt(
+          ctx.regs.readReg32(ctx.B, vaddrPr), ctx.i64Ty, "voff_zext");
+      globalAddr = ctx.B.CreateAdd(saddr, voff, "saddr_vaddr");
+      immStart = 3;
+    } else {
+      ParsedReg vaddrPr = op.srcReg(1);
+      if (vaddrPr.kind != ParsedReg::VGPR) {
+        hr.failure = RaiseFailure::unsupportedShape(
+            di, "FLAT",
+            "global_load_async_to_lds_b* plain: expected VGPR_64 "
+            "for vaddr");
+        return hr;
+      }
+      globalAddr = ctx.regs.readReg64(ctx.B, vaddrPr);
+      immStart = 2;
+    }
+
+    int64_t flatOffset = 0;
+    int64_t cpolImm = 0;
+    bool sawOffset = false;
+    for (unsigned k = immStart; k < op.nSrcs(); ++k) {
+      if (!di.isImm(op.srcIdx(k))) continue;
+      int64_t v = di.getImm(op.srcIdx(k));
+      if (!sawOffset) {
+        flatOffset = v;
+        sawOffset = true;
+      } else {
+        cpolImm = v;
+      }
+    }
+
+    Value *globalPtr = globalAddr;
+    if (globalPtr->getType() != ctx.ptrGlobalTy)
+      globalPtr = ctx.B.CreateIntToPtr(globalPtr, ctx.ptrGlobalTy);
+
+    Intrinsic::ID iid;
+    switch (sop) {
+    case SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B8:
+      iid = Intrinsic::amdgcn_global_load_async_to_lds_b8; break;
+    case SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B32:
+      iid = Intrinsic::amdgcn_global_load_async_to_lds_b32; break;
+    case SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B64:
+      iid = Intrinsic::amdgcn_global_load_async_to_lds_b64; break;
+    case SemOp::GLOBAL_LOAD_ASYNC_TO_LDS_B128:
+      iid = Intrinsic::amdgcn_global_load_async_to_lds_b128; break;
+    default:
+      llvm_unreachable("dispatch matched async-to-LDS family but width SemOp "
+                       "fell through the switch");
+    }
+    Function *fn = Intrinsic::getOrInsertDeclaration(&ctx.M, iid);
+    Value *offsetArg = ConstantInt::get(ctx.i32Ty, flatOffset);
+    Value *cpolArg = ConstantInt::get(ctx.i32Ty, cpolImm);
+    ctx.emitUnderExec([&] {
+      ctx.B.CreateCall(fn, {globalPtr, ldsPtr, offsetArg, cpolArg});
+    });
+
+    hr.handled = true;
+    return hr;
+  }
+
   // flat_load/flat_store — same structure as global but uses flat address space
   if (sop == SemOp::FLAT_LOAD_USHORT || sop == SemOp::FLAT_LOAD_SSHORT ||
       sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_SBYTE) {

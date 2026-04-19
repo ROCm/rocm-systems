@@ -299,6 +299,30 @@ config.fixtures = {
     #     does NOT include this K=4 f32 intrinsic.
     "wmma_f32_16x16x4_f32":
         r"@LIT_FIXTURE_WMMA_F32_16X16X4_F32_CO@",
+    # global_load_async_to_lds_b{8,32,64,128} (FLAT, gfx1250-only) —
+    # single `.co` fixture shared by two complementary lit tests in
+    # the `global_load_async_to_lds/` directory:
+    #   * `global_load_async_to_lds.ll` — pins the cross-target
+    #     (gfx1250 → gfx942) loud refusal contract. The handler in
+    #     `handle_flat.cpp` refuses via
+    #     `RaiseFailure::unsupportedShape` because gfx942 has no
+    #     asynccnt unit and the matching LLVM intrinsic family
+    #     `int_amdgcn_global_load_async_to_lds_b{8,32,64,128}`
+    #     (IntrinsicsAMDGPU.td:3939-3946) is gated by
+    #     `FeatureGFX1250Insts`. A synthesised
+    #     `global_load + ds_write` pair would alter the wave's
+    #     memory-ordering and asynccnt observable state.
+    #   * `global_load_async_to_lds_same_target.ll` — pins the
+    #     same-target (gfx1250 → gfx1250) intrinsic-emit shape:
+    #     `inttoptr i32 → ptr addrspace(3)` for the per-lane VGPR_32
+    #     LDS base, and the canonical
+    #     `call void @llvm.amdgcn.global.load.async.to.lds.b{32,64,128}`
+    #     with the FLAT `offset` and `cpol` immediates threaded
+    #     through. The b8 sibling shares the identical handler shape
+    #     (only the trailing intrinsic ID differs) and is covered
+    #     transitively by the SemOp-keyed switch arm.
+    "global_load_async_to_lds":
+        r"@LIT_FIXTURE_GLOBAL_LOAD_ASYNC_TO_LDS_CO@",
 }
 
 lit_config.load_config(
