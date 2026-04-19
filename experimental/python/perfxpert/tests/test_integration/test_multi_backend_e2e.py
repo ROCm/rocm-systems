@@ -176,16 +176,11 @@ def test_live_gemini_dry_run(
 def test_live_codex_dry_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Codex ships in PR 2 (Task 10). This placeholder ensures the
-    skip-on-CI harness has coverage parity with claude/gemini.
+    """`perfxpert-code codex --dry-run hello` writes no files.
 
-    When Codex lands:
-
-    1. Install codex CLI.
-    2. `codex projects trust <tmp_path>` (Codex trust gate B3).
-    3. Run this test: should exit 0 with no writes under `tmp_path`.
-
-    Until Task 10 merges, the PR-1 stub returns 42.
+    Manual-recipe counterpart: reviewer installs codex CLI, marks the
+    project trusted (`PERFXPERT_AUTO_TRUST=1` or edit
+    `~/.codex/config.toml`), and runs this test on their machine.
     """
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -194,9 +189,12 @@ def test_live_codex_dry_run(
 
     from perfxpert.cli.opencode_launcher import main
 
+    before = set(proj.rglob("*"))
     rc = main(["codex", "--dry-run", "hello"])
-    # PR 1 stub returns 42 — promote to 0 once Codex lands.
-    assert rc in (0, 42)
+    after = set(proj.rglob("*"))
+
+    assert rc == 0
+    assert before == after, "dry-run must not create any files"
 
 
 # ---------------------------------------------------------------------------
