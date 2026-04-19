@@ -56,24 +56,38 @@ HandlerResult handleVALU_Vcmp(RaiseContext &ctx, const DecodedInst &di,
 
   // Fetch operands at the correct width. For 64-bit integer compares we
   // read as i64; for 64-bit float compares we read as i64 and bitcast.
-  // 16- and 32-bit values both come through the 32-bit reader; we only
-  // bitcast the 32-bit float case to f32 (matches prior behaviour: F16
-  // is left as whatever `srcF` returns so the low 16 bits drive the
-  // compare).
+  // For 32-bit float compares we read as i32 and bitcast to f32. For
+  // 16-bit float compares we read as i32, truncate to i16, and bitcast
+  // to half — required because srcF returns the raw 32-bit operand
+  // (e.g. an inline integer immediate -1 = 0xFFFFFFFF for `v_cmpx_lt_
+  // f16 vcc, -1, vN`) and CreateFCmp asserts on non-FP operand types.
   Value *s0 = nullptr, *s1 = nullptr;
   if (m->isFloat) {
     if (m->bits == 64) {
       auto *f64Ty = Type::getDoubleTy(ctx.C);
       s0 = ctx.B.CreateBitCast(op.src64(0), f64Ty);
       s1 = ctx.B.CreateBitCast(op.src64(1), f64Ty);
-    } else {
+    } else if (m->bits == 32) {
       s0 = op.srcF(0);
       s1 = op.srcF(1);
-      if (m->bits == 32) {
-        if (s0->getType() != ctx.f32Ty)
-          s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
-        if (s1->getType() != ctx.f32Ty)
-          s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+      if (s0->getType() != ctx.f32Ty)
+        s0 = ctx.B.CreateBitCast(s0, ctx.f32Ty);
+      if (s1->getType() != ctx.f32Ty)
+        s1 = ctx.B.CreateBitCast(s1, ctx.f32Ty);
+    } else {
+      auto *i16Ty = Type::getInt16Ty(ctx.C);
+      auto *f16Ty = Type::getHalfTy(ctx.C);
+      s0 = op.srcF(0);
+      s1 = op.srcF(1);
+      if (s0->getType() != f16Ty) {
+        if (s0->getType() != i16Ty)
+          s0 = ctx.B.CreateTrunc(s0, i16Ty, "vcmpf16_lo0");
+        s0 = ctx.B.CreateBitCast(s0, f16Ty, "vcmpf16_a");
+      }
+      if (s1->getType() != f16Ty) {
+        if (s1->getType() != i16Ty)
+          s1 = ctx.B.CreateTrunc(s1, i16Ty, "vcmpf16_lo1");
+        s1 = ctx.B.CreateBitCast(s1, f16Ty, "vcmpf16_b");
       }
     }
   } else {
