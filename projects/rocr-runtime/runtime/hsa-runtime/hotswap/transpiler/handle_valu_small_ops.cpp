@@ -7,6 +7,7 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 
 using namespace llvm;
 
@@ -280,6 +281,49 @@ HandlerResult handleVALU_SmallOps(RaiseContext &ctx, const DecodedInst &di,
   }
   case SemOp::V_NOT_B32: {
     ctx.writeReg32(op.dst(), ctx.B.CreateNot(op.src(0), "vnot"));
+    hr.handled = true;
+    return hr;
+  }
+
+  // ---- find-first-bit (VOP1, gfx7+) ----
+  // V_FFBH_U32 / V_FFBL_B32 use llvm.ctlz / llvm.cttz with
+  // is_zero_undef=false so LLVM returns the bitwidth (32) for input 0.
+  // Hardware instead returns -1 for input 0, so we explicitly cmov to
+  // -1 on the zero-input path. V_FFBH_I32 uses the dedicated
+  // llvm.amdgcn.sffbh intrinsic which selects directly back to
+  // v_ffbh_i32_e32 (no fixup needed — the intrinsic and the hardware
+  // share the "-1 on uniform-sign input" convention).
+  case SemOp::V_FFBH_U32: {
+    Function *ctlz = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::ctlz, {ctx.i32Ty});
+    Value *src = op.src(0);
+    Value *raw = ctx.B.CreateCall(
+        ctlz, {src, ConstantInt::getFalse(ctx.i1Ty)}, "ffbh_u32_raw");
+    Value *isZero = ctx.B.CreateICmpEQ(src, ctx.B.getInt32(0), "ffbh_u32_zero");
+    Value *res = ctx.B.CreateSelect(isZero, ctx.B.getInt32(-1), raw,
+                                    "ffbh_u32");
+    ctx.writeReg32(op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
+  case SemOp::V_FFBL_B32: {
+    Function *cttz = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::cttz, {ctx.i32Ty});
+    Value *src = op.src(0);
+    Value *raw = ctx.B.CreateCall(
+        cttz, {src, ConstantInt::getFalse(ctx.i1Ty)}, "ffbl_b32_raw");
+    Value *isZero = ctx.B.CreateICmpEQ(src, ctx.B.getInt32(0), "ffbl_b32_zero");
+    Value *res = ctx.B.CreateSelect(isZero, ctx.B.getInt32(-1), raw,
+                                    "ffbl_b32");
+    ctx.writeReg32(op.dst(), res);
+    hr.handled = true;
+    return hr;
+  }
+  case SemOp::V_FFBH_I32: {
+    Function *sffbh = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_sffbh, {ctx.i32Ty});
+    ctx.writeReg32(op.dst(),
+                   ctx.B.CreateCall(sffbh, {op.src(0)}, "ffbh_i32"));
     hr.handled = true;
     return hr;
   }

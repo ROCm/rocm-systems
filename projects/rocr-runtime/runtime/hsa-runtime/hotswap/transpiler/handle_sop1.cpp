@@ -283,6 +283,29 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // s_flbit_i32 / s_flbit_i32_i64 — signed find-leading-bit-not-equal-
+  // to-sign-bit. SOPInstructions.td:296-298. Lower via the dedicated
+  // llvm.amdgcn.sffbh intrinsic, which is overloaded on the source
+  // integer type and selects back to v_ffbh_i32_e32 (or its 64-bit
+  // pseudo equivalent) on AMDGPU. Hardware returns -1 for uniform-sign
+  // input (0 or all-ones) — the intrinsic shares the same convention,
+  // so no explicit zero-fixup is needed.
+  if (sop == SemOp::S_FLBIT_I32) {
+    Function *sffbh = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_sffbh, {ctx.i32Ty});
+    ctx.regs.writeReg32(ctx.B, op.dst(),
+                        ctx.B.CreateCall(sffbh, {op.src(0)}, "sflbit"));
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_FLBIT_I32_I64) {
+    Function *sffbh = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_sffbh, {ctx.i64Ty});
+    Value *r = ctx.B.CreateCall(sffbh, {op.src64(0)}, "sflbit64");
+    ctx.regs.writeReg32(ctx.B, op.dst(), ctx.B.CreateTrunc(r, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
   if (sop == SemOp::S_SEXT_I32_I8) {
     Value *v = ctx.B.CreateTrunc(op.src(0), ctx.i8Ty);
     ctx.regs.writeReg32(ctx.B, op.dst(),

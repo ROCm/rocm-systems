@@ -55,6 +55,12 @@ enum class SemOp : uint16_t {
   S_MOV_B32, S_MOV_B64, S_NOT_B32, S_NOT_B64,
   S_BREV_B32, S_FF1_I32_B32, S_FF1_I32_B64,
   S_FLBIT_I32_B32, S_FLBIT_I32_B64,
+  // s_flbit_i32 / s_flbit_i32_i64: signed find-leading-bit-not-equal-to-
+  // sign-bit. Lowers to llvm.amdgcn.sffbh, the dedicated AMDGPU
+  // intrinsic that selects directly back to v_ffbh_i32_e32 (or its
+  // i64-split lowering for the 64-bit variant). See
+  // SOPInstructions.td:296-298 / VOP1Instructions.td:373.
+  S_FLBIT_I32, S_FLBIT_I32_I64,
   S_SEXT_I32_I8, S_SEXT_I32_I16,
   S_CVT_F32_U32, S_CVT_F32_I32, S_CVT_U32_F32, S_CVT_I32_F32,
   S_AND_SAVEEXEC_B32, S_OR_SAVEEXEC_B32, S_XOR_SAVEEXEC_B32,
@@ -169,6 +175,18 @@ enum class SemOp : uint16_t {
   V_FLOOR_F32, V_CEIL_F32, V_TRUNC_F32, V_FRACT_F32,
   V_READFIRSTLANE_B32,
   V_CVT_PK_F32_FP8,
+  // VOP1 find-first-bit family (gfx7+, VOP1Instructions.td:371-373).
+  // V_FFBH_U32  -> AMDGPUffbh_u32 = ctlz_zero_undef but returns -1 on
+  //                input 0; lower with llvm.ctlz(x, false) — LLVM
+  //                returns the bitwidth (32) for input 0, so we cmov
+  //                to -1 explicitly to match hardware.
+  // V_FFBL_B32  -> AMDGPUffbl_b32 = cttz_zero_undef but returns -1 on
+  //                input 0; same pattern with llvm.cttz.
+  // V_FFBH_I32  -> AMDGPUffbh_i32 = position of highest non-sign bit;
+  //                returns -1 for input 0 or -1 (uniform sign). Lower
+  //                via the dedicated llvm.amdgcn.sffbh intrinsic which
+  //                selects directly back to v_ffbh_i32_e32.
+  V_FFBH_U32, V_FFBL_B32, V_FFBH_I32,
 
   // -- VOP2 / VOP3 --
   V_ADD_F32, V_SUB_F32, V_SUBREV_F32, V_MUL_F32,
