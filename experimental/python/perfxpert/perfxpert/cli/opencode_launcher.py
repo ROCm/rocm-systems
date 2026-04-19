@@ -208,7 +208,7 @@ def print_banner(stream=sys.stderr) -> None:
     banner = f"""
 \033[38;5;196m╔══════════════════════════════════════════════════════════╗
 ║                                                          ║
-║           AMD ROCm PerfXpert — opencode edition          ║
+║                  AMD ROCm PerfXpert                      ║
 ║                     version {version:<10s}                   ║
 ║                                                          ║
 ║   Interactive GPU performance analysis and optimization  ║
