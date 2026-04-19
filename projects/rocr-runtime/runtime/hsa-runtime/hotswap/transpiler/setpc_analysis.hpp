@@ -26,19 +26,53 @@ struct MCState;
 // loudly on Unresolvable — never silently emit a stub branch.
 
 struct SetPcSiteInfo {
-  enum class Kind { DirectA, IndirectB, Unresolvable };
+  enum class Kind {
+    // Statically resolvable single-target intra-kernel branch. Source
+    // SGPR pair was produced by a complete `s_get_pc_i64 + s_add_co_u32
+    // + s_add_co_ci_u32` chain in the same basic block as the
+    // s_set_pc_i64 / s_swap_pc_i64. Lowering emits `br label %BB_target`.
+    DirectA,
+    // Subroutine-return shape: the source SGPR pair is the ret-pair
+    // populated by a caller's chainTerminator hook. Lowering emits
+    // `indirectbr ptr %ret_pc, [list of resolved return targets]`.
+    // Pattern B is asymmetric — call-side and return-side participate
+    // through chainTerminators + pendingB enumeration in Pass 4.
+    IndirectB,
+    // Multi-target dispatch shape: source SGPR pair holds one of N
+    // statically-known absolute targets reaching the use site through
+    // distinct CFG paths (e.g. tensilelite's "activation function
+    // dispatcher" — each predecessor block writes a different chain
+    // target into the same pair, then a join block consumes it). The
+    // inter-block PC-chain dataflow in Pass 3 enumerates the targets;
+    // Pass 5 retains every contributing chain terminator so the raiser
+    // hook materialises `blockaddress(@kernel, %callee_BB)` into the
+    // pair at each predecessor (mirroring the IndirectB return-side
+    // mechanism). The lowering emits `indirectbr ptr %target, [list]`;
+    // for s_swap_pc_i64 it ALSO writes the return-PC blockaddress into
+    // sdst before the indirectbr (same as DirectA). Order is
+    // deterministic (ascending) so lit fixtures can pin shape.
+    DispatchSet,
+    // Refused. The handler converts this into
+    // `RaiseFailure::unsupportedShape` with `refusalReason`.
+    Unresolvable,
+  };
   Kind kind = Kind::Unresolvable;
-  // Pattern A: the absolute kernel offset to branch to. The lowering
+  // DirectA: the absolute kernel offset to branch to. The lowering
   // emits `br label %BB_<directTarget>`.
   uint64_t directTarget = 0;
-  // Pattern B: the enumerated set of possible return targets (each is
+  // IndirectB: the enumerated set of possible return targets (each is
   // the absolute kernel offset of a basic block following one of the
-  // identified call sites). The lowering emits
-  // `indirectbr ptr %ret_pc, [list]`. Order is deterministic
-  // (ascending) so lit fixtures can pin shape.
+  // identified call sites). Order is deterministic (ascending) so
+  // lit fixtures can pin shape.
+  // DispatchSet: the enumerated set of possible callee/branch targets
+  // (each is the absolute kernel offset of a basic block leader that
+  // is a chain-resolved value of the source pair on some incoming CFG
+  // path). Same ordering contract.
   llvm::SmallVector<uint64_t, 4> indirectTargets;
-  // Pattern B: the SGPR low index of the source pair (for diagnostics
+  // IndirectB: the SGPR low index of the source pair (for diagnostics
   // and so the handler can read the right pair).
+  // DispatchSet: same — the SGPR low index of the source pair the
+  // handler reads to drive the indirectbr.
   unsigned indirectRetPairLowReg = 0;
   // Unresolvable: human-readable reason for the refusal diagnostic.
   std::string refusalReason;

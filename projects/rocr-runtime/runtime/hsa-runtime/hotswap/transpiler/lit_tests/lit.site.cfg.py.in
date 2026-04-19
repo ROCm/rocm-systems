@@ -54,25 +54,37 @@ config.fixtures = {
     "v_mul_u64": r"@LIT_FIXTURE_V_MUL_U64_CO@",
     "c3_atomic_cas": r"@LIT_FIXTURE_C3_ATOMIC_CAS_CO@",
     "c4_lane_dep_cmpx": r"@LIT_FIXTURE_C4_LANE_DEP_CMPX_CO@",
-    # s_set_pc_i64 (SOP1) — three sibling fixtures, one per analysis
+    # s_set_pc_i64 (SOP1) — four sibling fixtures, one per analysis
     # outcome class. See setpc_analysis.cpp / handle_sop1.cpp for the
-    # Pattern A (br) / Pattern B (indirectbr) / Unresolvable
-    # (refusal) lowering contract documented on SemOp::S_SET_PC_I64.
+    # Pattern A (DirectA, br) / Pattern B (IndirectB, indirectbr) /
+    # DispatchSet (multi-target indirectbr enumerated by inter-block
+    # PC-chain dataflow — the tensilelite "activation function
+    # dispatcher" pattern) / Unresolvable (refusal) lowering contract
+    # documented on SemOp::S_SET_PC_I64.
     "s_set_pc_i64_pattern_a":
         r"@LIT_FIXTURE_S_SET_PC_I64_PATTERN_A_CO@",
     "s_set_pc_i64_pattern_b":
         r"@LIT_FIXTURE_S_SET_PC_I64_PATTERN_B_CO@",
+    "s_set_pc_i64_dispatch_set":
+        r"@LIT_FIXTURE_S_SET_PC_I64_DISPATCH_SET_CO@",
     "s_set_pc_i64_unresolvable":
         r"@LIT_FIXTURE_S_SET_PC_I64_UNRESOLVABLE_CO@",
-    # s_swap_pc_i64 (SOP1, branch-and-link) — two sibling fixtures.
+    # s_swap_pc_i64 (SOP1, branch-and-link) — three sibling fixtures.
     # Pattern A pins the chain-resolved direct lowering (swap_ret
-    # blockaddress + br label %callee). Unresolvable pins the loud
-    # refusal contract (RaiseFailure::unsupportedShape) for sites
-    # whose call target is not statically resolvable. See
+    # blockaddress + br label %callee). DispatchSet pins the
+    # multi-target indirect-call lowering (swap_ret blockaddress +
+    # indirectbr ptr %callee_ptr, [list]) emitted when the inter-
+    # block PC-chain dataflow enumerates a bounded set of in-kernel
+    # callees converging on the swap site (the tensilelite
+    # "activation function dispatcher" pattern). Unresolvable pins
+    # the loud refusal contract (RaiseFailure::unsupportedShape)
+    # for sites whose call target is not statically resolvable. See
     # SemOp::S_SWAP_PC_I64 in semop.hpp and the swap branch in
     # setpc_analysis.cpp / handle_sop1.cpp.
     "s_swap_pc_i64_pattern_a":
         r"@LIT_FIXTURE_S_SWAP_PC_I64_PATTERN_A_CO@",
+    "s_swap_pc_i64_dispatch_set":
+        r"@LIT_FIXTURE_S_SWAP_PC_I64_DISPATCH_SET_CO@",
     "s_swap_pc_i64_unresolvable":
         r"@LIT_FIXTURE_S_SWAP_PC_I64_UNRESOLVABLE_CO@",
     # ds_load_tr8_b64 (DS) — gfx1250 64-bit transposed LDS load with

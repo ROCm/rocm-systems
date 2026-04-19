@@ -79,23 +79,39 @@ enum class SemOp : uint16_t {
   // (SOPInstructions.td:323 declares `isBranch + isIndirectBranch`,
   // line 2208 renames the asm string to `s_set_pc_i64`). The source
   // SGPR pair holds an absolute 64-bit PC value. In our IR-on-LLVM
-  // setting we model two principled lowerings (see setpc_analysis.{hpp,
+  // setting we model three principled lowerings (see setpc_analysis.{hpp,
   // cpp} for the static analysis that classifies each site):
-  //   Pattern A — statically resolvable intra-kernel branch (the source
-  //               SGPR pair was produced by a local
-  //               `s_get_pc_i64 + s_add_co_u32 + s_add_co_ci_u32` chain).
-  //               Lowers to `br label %BB_target` since the target is a
-  //               known intra-function label.
-  //   Pattern B — subroutine return via an SGPR pair stashed at the call
-  //               site (the canonical s[30:31] return-PC idiom). Lowers
-  //               to `indirectbr ptr %ret_pc, [list of resolved return
-  //               targets]`. The corresponding call-site
-  //               `s_get_pc_i64 + s_add*` chains are rewritten by the
-  //               raiser to materialise a `blockaddress(@kernel, %ret_BB)`
-  //               into the ret-pair (via a post-handler hook in
-  //               raiser.cpp), so the i64 fed to indirectbr is a real
-  //               LLVM blockaddress constant rather than a binary PC.
-  // Sites the analysis cannot resolve refuse loudly via
+  //   DirectA      — statically resolvable intra-kernel branch (the
+  //                  source SGPR pair was produced by a local
+  //                  `s_get_pc_i64 + s_add_co_u32 + s_add_co_ci_u32`
+  //                  chain). Lowers to `br label %BB_target` since
+  //                  the target is a known intra-function label.
+  //   IndirectB    — subroutine return via an SGPR pair stashed at the
+  //                  call site (the canonical s[30:31] return-PC
+  //                  idiom). Lowers to `indirectbr ptr %ret_pc,
+  //                  [list of resolved return targets]`. The
+  //                  corresponding call-site
+  //                  `s_get_pc_i64 + s_add*` chains are rewritten by
+  //                  the raiser to materialise a
+  //                  `blockaddress(@kernel, %ret_BB)` into the
+  //                  ret-pair (via a post-handler hook in raiser.cpp),
+  //                  so the i64 fed to indirectbr is a real LLVM
+  //                  blockaddress constant rather than a binary PC.
+  //   DispatchSet  — multi-target dispatch via inter-block PC-chain
+  //                  dataflow: each predecessor block writes a
+  //                  different chain target into the same SGPR pair,
+  //                  then a join block consumes it through
+  //                  `s_set_pc_i64`. The dataflow in setpc_analysis
+  //                  enumerates the bounded set of targets reaching
+  //                  the use site through distinct CFG paths. Lowers
+  //                  to `indirectbr ptr %target, [list]`. Same chain-
+  //                  terminator hook as IndirectB writes a
+  //                  `blockaddress` constant on each contributing
+  //                  predecessor path so the indirectbr's source is
+  //                  a real LLVM constant.
+  // Sites the analysis cannot resolve (incomplete dataflow,
+  // unbounded fan-in past kMaxDispatchTargets, or pair killed by an
+  // unmodelled write before the use site) refuse loudly via
   // RaiseFailure::unsupportedShape — never silently emit a stub.
   S_SET_PC_I64,
   // SOP1 branch-and-link. gfx1250 asm rename for `S_SWAPPC_B64`
@@ -107,28 +123,40 @@ enum class SemOp : uint16_t {
   //   ssrc = sY:Y+1 holds the absolute call target PC.
   //   PC <- ssrc; sdst <- (return-PC)  (atomically)
   //
-  // Two raisings, mirroring S_SET_PC_I64:
-  //   Pattern A — call target ssrc was produced by a local
-  //               `s_get_pc_i64 + s_add_co_u32 + s_add_co_ci_u32` chain
-  //               that the SetPcAnalysis can resolve. Lowering writes
-  //               `blockaddress(@kernel, %BB_returnAddr)` cast to i64
-  //               into sdst and emits `br label %BB_callee`. The
-  //               return PC the callee will eventually consume via a
-  //               Pattern B `s_set_pc_i64 sdst` is therefore a real
-  //               LLVM blockaddress constant.
-  //   Otherwise — the call target is statically unresolvable
-  //               (typical tensilelite pattern: chain addend is a
-  //               runtime scalar derived from a kernarg, so the
-  //               target is dynamic-dispatch). Refuse loudly via
-  //               RaiseFailure::unsupportedShape — never emit a stub
-  //               branch. Cross-block scalar / kernarg-derived call
-  //               target resolution is tracked as a separate story
-  //               (see semop dispatch site for the link).
-  // Independent of the above, the analysis registers a synthetic
-  // chain-terminator at the swap site itself (key = swap.offset,
-  // value = {sdst-low-reg, swap.offset+swap.size}) so any downstream
-  // Pattern B `s_set_pc_i64` reading sdst enumerates the swap's
-  // return offset as one of its indirectbr targets.
+  // Three principled raisings, mirroring S_SET_PC_I64:
+  //   DirectA      — call target ssrc was produced by a local
+  //                  `s_get_pc_i64 + s_add_co_u32 + s_add_co_ci_u32`
+  //                  chain that resolves intra-block. Lowering writes
+  //                  `blockaddress(@kernel, %BB_returnAddr)` cast to
+  //                  i64 into sdst and emits `br label %BB_callee`.
+  //   DispatchSet  — call target reached via inter-block PC-chain
+  //                  dataflow (the tensilelite "activation function
+  //                  dispatcher" shape: each predecessor block
+  //                  computes a distinct callee target into the same
+  //                  pair via its own getpc+add chain, then a join
+  //                  block executes `s_swap_pc_i64`). Lowering writes
+  //                  the return-PC blockaddress into sdst as in
+  //                  DirectA, then emits `indirectbr ptr ssrc, [list
+  //                  of enumerated callee targets]`. The chain-
+  //                  terminator hook in raiser.cpp rewrites ssrc to
+  //                  hold a `blockaddress(@kernel, %BB_callee)` on
+  //                  every contributing predecessor path.
+  //   Unresolvable — call target cannot be statically enumerated
+  //                  (incomplete dataflow, fan-in past
+  //                  kMaxDispatchTargets, or runtime-derived value).
+  //                  Refuse loudly via RaiseFailure::unsupportedShape
+  //                  — never emit a stub branch.
+  //
+  // The analysis never produces IndirectB for a swap_pc site (a
+  // swap_pc's source pair is the call target, not a return slot;
+  // IndirectB describes the return-side use of such a pair).
+  //
+  // Independent of the call-target classification, the analysis
+  // registers a synthetic chain-terminator at the swap site itself
+  // (key = swap.offset, value = {sdst-low-reg, swap.offset+swap.size})
+  // so any downstream IndirectB `s_set_pc_i64` reading sdst
+  // enumerates the swap's return offset as one of its indirectbr
+  // targets.
   S_SWAP_PC_I64,
   S_ABS_I32,
   S_SET_VGPR_MSB,

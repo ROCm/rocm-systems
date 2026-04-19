@@ -137,11 +137,16 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
       hr.handled = true;
       return hr;
     }
-    case SetPcSiteInfo::Kind::IndirectB: {
-      // Read the ret-pair as i64, cast to ptr (the blockaddress LLVM
-      // type is `ptr addrspace(0)` for a BasicBlock; the call-site
-      // rewrite stored it via inttoptr → ptrtoint → store, so we mirror
-      // here with an inttoptr).
+    case SetPcSiteInfo::Kind::IndirectB:
+    case SetPcSiteInfo::Kind::DispatchSet: {
+      // Both shapes lower to the same `indirectbr` pattern: read the
+      // source SGPR pair as i64 (it holds a real LLVM BlockAddress
+      // constant — populated either by the call-site chain-terminator
+      // hook for IndirectB, or by the dispatch-target chain-terminator
+      // hook for DispatchSet), cast to ptr, and dispatch into the
+      // enumerated target list. The classification difference is
+      // purely semantic (return vs. forward dispatch); the lowering
+      // mechanism is identical.
       Value *retVal = ctx.regs.loadSGPR64(
           ctx.B, static_cast<int>(info.indirectRetPairLowReg));
       Value *retPtr = ctx.B.CreateIntToPtr(
@@ -158,8 +163,6 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
                                                   info.refusalReason);
       return hr;
     }
-    // Defensive: every Kind is handled above; reaching here means a
-    // future enum value was added without updating this switch.
     hr.failure = RaiseFailure::unsupportedShape(
         di, "SOP1", "s_set_pc_i64 SetPcSiteInfo::Kind not handled");
     return hr;
@@ -167,13 +170,34 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
   if (sop == SemOp::S_SWAP_PC_I64) {
     // Branch-and-link. setpc_analysis classifies the call-target
     // pair (ssrc) as DirectA (chain resolves the absolute callee
-    // offset) or Unresolvable (call target is dynamic-dispatch /
-    // chain doesn't reach here). For DirectA we materialise
+    // offset intra-block), DispatchSet (inter-block dataflow
+    // enumerates a bounded set of callee/branch targets reaching
+    // this site through distinct CFG paths — the tensilelite
+    // "activation function dispatcher" shape), or Unresolvable (the
+    // pair's value cannot be statically enumerated).
+    //
+    // For both DirectA and DispatchSet we materialise
     // `blockaddress(@kernel, %BB_returnAddr)` cast to i64 into sdst
-    // and then emit `br label %BB_callee`; the eventual Pattern B
-    // `s_set_pc_i64 sdst` in the callee will consume that
-    // blockaddress via its indirectbr enumeration. For everything
-    // else we refuse loudly — never silently emit a stub branch.
+    // BEFORE the terminator (so a downstream Pattern B
+    // `s_set_pc_i64 sdst` in the callee can consume that
+    // blockaddress via its indirectbr enumeration). The terminator
+    // itself is `br label %BB_callee` for DirectA or
+    // `indirectbr ptr ssrc, [list]` for DispatchSet. The
+    // chain-terminator hook in raiser.cpp has already rewritten
+    // ssrc to hold the matching BlockAddress on every contributing
+    // CFG path, so the indirectbr's source is a real LLVM
+    // BlockAddress constant rather than a binary PC.
+    //
+    // IndirectB on a swap_pc is NOT a valid classification: by
+    // construction, IndirectB describes a return-side use (the pair
+    // was written by some caller's chain terminator in a different
+    // block) and a swap_pc reading such a pair would be a
+    // function-pointer dispatch through a return slot. The analysis
+    // never produces IndirectB for a swap_pc site (the source pair
+    // is the call target, not a return address), so we refuse
+    // loudly if it ever appears.
+    //
+    // Unresolvable is refused loudly with the analysis's diagnostic.
     // See semop.hpp's S_SWAP_PC_I64 doc for the lowering contract.
     if (!ctx.setpcAnalysis) {
       hr.failure = RaiseFailure::unsupportedShape(
@@ -196,32 +220,48 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
       return hr;
     }
     if (info.kind == SetPcSiteInfo::Kind::IndirectB) {
-      // Indirect call target (e.g. function-pointer dispatch). We do
-      // not enumerate callee candidates today — that requires either
-      // a per-kernel subroutine-entry catalogue or cross-block scalar
-      // / kernarg-derived target resolution. Refuse loudly with a
-      // distinct reason so future work can pivot off this string.
+      // Defensive: the analysis should never produce IndirectB for
+      // a swap_pc site (a swap_pc's source pair is a call target,
+      // not a return slot — IndirectB is the return-side use of
+      // such a pair). If it ever does, refuse loudly so the
+      // mismatch surfaces rather than silently mis-lowering.
       hr.failure = RaiseFailure::unsupportedShape(
           di, "SOP1",
-          "s_swap_pc_i64 with an indirect call-target SGPR pair is "
-          "not yet supported (would require enumerating callee "
-          "candidates for `indirectbr`); track via the "
-          "swap_pc_dynamic_dispatch worklist item");
+          "s_swap_pc_i64 classified as IndirectB by setpc_analysis "
+          "(unexpected — IndirectB is the return-side classification "
+          "for s_set_pc_i64; a swap_pc reaching this code path "
+          "indicates an analysis invariant violation)");
       return hr;
     }
-    // DirectA path: write the return address (a real LLVM
-    // BlockAddress constant cast to i64) into sdst BEFORE the
-    // branch, then emit the unconditional br to the callee. Both
-    // operations land in the swap's own BB; the raiser's BB-layout
-    // phase has already promoted (di.offset + di.size) to a leader
-    // so subsequent linear instructions live in their own BB.
+    // Materialise the return address BlockAddress into sdst on both
+    // DirectA and DispatchSet paths. Both operations land in the
+    // swap's own BB; Phase 1 of setpc_analysis has already promoted
+    // (di.offset + di.size) to a leader so subsequent linear
+    // instructions live in their own BB.
     uint64_t returnAddr = di.offset + di.size;
     BasicBlock *retBB = ctx.lookupBB(returnAddr);
     Constant *ba = BlockAddress::get(ctx.kernel, retBB);
     Value *baInt = ctx.B.CreatePtrToInt(ba, ctx.i64Ty,
                                           "swap_ret_blockaddr");
     ctx.regs.writeReg64(ctx.B, op.dst(), baInt);
-    ctx.B.CreateBr(ctx.lookupBB(info.directTarget));
+
+    if (info.kind == SetPcSiteInfo::Kind::DirectA) {
+      ctx.B.CreateBr(ctx.lookupBB(info.directTarget));
+      hr.handled = true;
+      return hr;
+    }
+    // DispatchSet: emit indirectbr through the source pair into the
+    // enumerated targets. The source pair holds a BlockAddress
+    // constant (rewritten by the chain-terminator hook in raiser.cpp
+    // on each contributing predecessor path).
+    Value *callTarget = ctx.regs.loadSGPR64(
+        ctx.B, static_cast<int>(info.indirectRetPairLowReg));
+    Value *callPtr = ctx.B.CreateIntToPtr(
+        callTarget, PointerType::get(ctx.C, 0), "swap_call_target_ptr");
+    IndirectBrInst *ibr = ctx.B.CreateIndirectBr(
+        callPtr, info.indirectTargets.size());
+    for (uint64_t addr : info.indirectTargets)
+      ibr->addDestination(ctx.lookupBB(addr));
     hr.handled = true;
     return hr;
   }

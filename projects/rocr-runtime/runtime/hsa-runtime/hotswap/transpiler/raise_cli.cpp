@@ -211,14 +211,20 @@ int main(int argc, char **argv) {
       // diagnostics (abort-gate lit tests, etc.) FileCheck the raiser's
       // stderr — we leave that untouched.
       std::fprintf(stderr,
-                   "raise_cli: kernel '%s' failed to raise: %s [%s]\n",
+                   "raise_cli: kernel '%s' failed to raise: %s [%s]"
+                   " @offset=0x%llx%s%s\n",
                    target.c_str(),
                    raised.failure.mnemonic.empty()
                        ? "unknown"
                        : raised.failure.mnemonic.c_str(),
                    raised.failure.format.empty()
                        ? "unknown"
-                       : raised.failure.format.c_str());
+                       : raised.failure.format.c_str(),
+                   static_cast<unsigned long long>(raised.failure.offset),
+                   raised.failure.detail.empty() ? "" : " :: ",
+                   raised.failure.detail.empty()
+                       ? ""
+                       : raised.failure.detail.c_str());
       return 1;
     }
     std::fwrite(raised.irText.data(), 1, raised.irText.size(), stdout);
