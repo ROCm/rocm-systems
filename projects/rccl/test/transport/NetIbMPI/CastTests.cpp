@@ -1188,4 +1188,75 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastSendRecvZeroSize
+//
+// White-box: Zero-byte send with splitData=true, nqps=2.
+// dataPerQp = 0 < splitDataMin → oneQp WRR path.
+// Verify: send/recv complete with ncclSuccess, received size=0, 1 WRR token consumed.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    // Register a minimal buffer (size=0 sends still need a valid MR).
+    constexpr size_t kRegSz = 64;
+    char buf[kRegSz];
+    memset(buf, 0, kRegSz);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kRegSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+    }
+
+    // Post recv for 0 bytes; send 0 bytes.
+    void* req = nullptr;
+    int   sz  = -1;
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {0};
+        int    tags[1]    = {2200};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &req), ncclSuccess);
+        ASSERT_NE(req, nullptr);
+        ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+        EXPECT_EQ(sz, 0) << "received size must be 0";
+    } else {
+        PostSendWithRetry(sendComm, buf, 0, 2200, mhandle, &req);
+        ASSERT_EQ(WaitForCompletion(req, &sz, 10000), ncclSuccess);
+
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_TRUE(st.schedInit);
+        int delta = st.initTotTokens - st.activeTotTokens;
+        EXPECT_EQ(delta, 1)
+            << "zero-size send must still trigger WRR (dataPerQp=0 < splitDataMin)";
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
