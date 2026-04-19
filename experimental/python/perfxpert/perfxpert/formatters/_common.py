@@ -31,7 +31,7 @@ try:
 
     _PERFXPERT_VERSION = _pkg_version("perfxpert")
 except Exception:
-    _PERFXPERT_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
+    _PERFXPERT_VERSION = "0.2.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
 
 # Stable IDs for known recommendation categories.

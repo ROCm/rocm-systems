@@ -357,4 +357,4 @@ The checkpoint system tracks every code edit. Roll back to any prior state durin
 
 ---
 
-*Generated for PerfXpert v0.1.0 — AMD ROCm AI-Powered GPU Trace Analysis*
+*Generated for PerfXpert v0.2.0 — AMD ROCm AI-Powered GPU Trace Analysis*
