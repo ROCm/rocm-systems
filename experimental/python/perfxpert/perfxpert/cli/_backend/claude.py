@@ -100,8 +100,19 @@ class ClaudeCodeAdapter:
 
     # File targets (relative to cwd).
     _MCP_CONFIG_FILENAME = ".mcp.json"
-    _POINTER_DIR = ".claude"
-    _POINTER_FILE = "CLAUDE.md"  # inside _POINTER_DIR
+    # Pointer file — CLAUDE.local.md at project root is the canonical
+    # local-override context file that Claude Code auto-loads on top of
+    # any tracked CLAUDE.md. `.claude/CLAUDE.md` is NOT an auto-loaded
+    # location, so an earlier version of this adapter silently wrote a
+    # file the model never read. See uninstall path for the migration
+    # cleanup of that stale location.
+    _POINTER_DIR = ""
+    _POINTER_FILE = "CLAUDE.local.md"
+    # Legacy pointer locations we need to clean up on uninstall for users
+    # who installed before the CLAUDE.local.md fix.
+    _LEGACY_POINTER_PATHS = (
+        (".claude", "CLAUDE.md"),
+    )
     _PERFXPERT_DIR = ".perfxpert"
     _AGENTS_FILE = "AGENTS.md"
 
@@ -237,16 +248,17 @@ class ClaudeCodeAdapter:
         paths_written.append(agents_cache)
 
         # ---- Step 3/4: Write pointer -----------------------------------
-        self._log_step(quiet, "[3/4] Writing pointer at .claude/CLAUDE.md ...")
+        pointer_rel = pointer.relative_to(cwd)
+        self._log_step(quiet, f"[3/4] Writing pointer at {pointer_rel} ...")
         pointer_contents = self._make_pointer(agents_cache, cwd)
-        # Never touch a git-tracked CLAUDE.md unless explicit opt-in.
+        # Never touch a git-tracked CLAUDE.local.md unless explicit opt-in.
         if pointer.exists() and pa.is_git_tracked(
-            Path(pointer.relative_to(cwd)), cwd
+            Path(pointer_rel), cwd
         ) and not allow_agents_md_append:
             raise ConfigClobber(
                 f"{pointer} is tracked in git. Pass --allow-agents-md-append "
-                "to merge, remove the file, or accept the dedicated "
-                ".claude/CLAUDE.md pointer path."
+                "to merge, or remove the file first. CLAUDE.local.md is "
+                "conventionally gitignored as a local-only context file."
             )
         pa.atomic_write(pointer, pointer_contents)
         actions_done.append("wrote pointer")
@@ -446,24 +458,32 @@ class ClaudeCodeAdapter:
         removed: list[Path] = []
         drifted: list[Path] = []
 
-        # Pointer file — refuse on drift.
-        if pointer.exists():
+        # Pointer file(s) — current canonical CLAUDE.local.md + any legacy
+        # locations from older installs. Each is drift-checked independently
+        # so a user who hand-edited one doesn't block cleanup of the others.
+        pointer_candidates = [pointer]
+        for legacy_dir, legacy_name in self._LEGACY_POINTER_PATHS:
+            pointer_candidates.append(cwd / legacy_dir / legacy_name)
+        for candidate in pointer_candidates:
+            if not candidate.exists():
+                continue
             try:
-                body = pointer.read_text()
+                body = candidate.read_text()
             except OSError:
                 body = ""
-            # The pointer file we wrote is short + distinctive.
             if self._POINTER_FILE_SENTINEL in body:
                 try:
-                    pointer.unlink()
-                    removed.append(pointer)
-                    actions.append(f"removed pointer {pointer}")
+                    candidate.unlink()
+                    removed.append(candidate)
+                    actions.append(f"removed pointer {candidate}")
                 except OSError as exc:
-                    actions.append(f"failed to remove pointer {pointer}: {exc}")
+                    actions.append(
+                        f"failed to remove pointer {candidate}: {exc}"
+                    )
             else:
-                drifted.append(pointer)
+                drifted.append(candidate)
                 actions.append(
-                    f"refused to remove {pointer} — content drifted from "
+                    f"refused to remove {candidate} — content drifted from "
                     "managed sentinel"
                 )
 

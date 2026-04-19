@@ -124,7 +124,7 @@ def test_install_then_uninstall_round_trip_claude(
     adapter = ClaudeCodeAdapter()
     adapter.install(project_cwd, scope="project")
     mcp_config = project_cwd / ".mcp.json"
-    pointer = project_cwd / ".claude" / "CLAUDE.md"
+    pointer = project_cwd / "CLAUDE.local.md"
     agents_cache = project_cwd / ".perfxpert" / "AGENTS.md"
     assert mcp_config.is_file()
     assert pointer.is_file()
@@ -142,8 +142,7 @@ def test_uninstall_refuses_on_pointer_drift(
     project_cwd: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     # Pre-seed a user-edited pointer (no sentinel) so uninstall refuses it.
-    (project_cwd / ".claude").mkdir()
-    (project_cwd / ".claude" / "CLAUDE.md").write_text(
+    (project_cwd / "CLAUDE.local.md").write_text(
         "user's own content — no perfxpert reference\n"
     )
     monkeypatch.setattr("shutil.which", lambda _: None)
