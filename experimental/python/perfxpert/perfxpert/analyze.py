@@ -229,9 +229,11 @@ def add_args(parser: argparse.ArgumentParser):
         "--llm-model",
         type=str,
         default=None,
-        help="Override the LLM model name. Defaults to claude-sonnet-4-20250514 for Anthropic "
-        "and gpt-4-turbo-preview for OpenAI. Can also be set via PERFXPERT_LLM_MODEL environment "
-        "variable (--llm-model takes precedence). "
+        help="Override the LLM model name. Defaults to claude-sonnet-4-5 for Anthropic "
+        "and gpt-4o-mini for OpenAI. Can also be set via (in priority order): "
+        "PERFXPERT_AGENTS_MODEL_<PROVIDER>, PERFXPERT_<PROVIDER>_MODEL (e.g. "
+        "PERFXPERT_ANTHROPIC_MODEL, PERFXPERT_OPENAI_MODEL), or PERFXPERT_LLM_MODEL. "
+        "`--llm-model` takes precedence over every env var. "
         "Examples: --llm-model claude-opus-4-6, --llm-model gpt-4o",
     )
 
