@@ -159,6 +159,82 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
+  // ---- VOP3P packed-pair `<2 x i16>` int ops ----
+  // V_PK_ADD_U16 / V_PK_LSHLREV_B16. Operand profile is
+  // VOP_V2I16_V2I16_V2I16: 32-bit dst / 32-bit src0 / 32-bit src1, each
+  // bitcast to `<2 x i16>` for the lane-wise op and back to i32 for the
+  // VGPR write-back. Shared handler shape; per-SemOp dispatch picks the
+  // IR opcode (`add` vs the reversed `clshl_rev_16` shape — see notes
+  // on each case below). Inline literals encode a packed `<2 x i16>`
+  // directly (lo i16 = bits[15:0], hi i16 = bits[31:16]); there is NO
+  // broadcast analogue to the V_PK_F32 32-bit-element family because
+  // the literal width matches the operand width here. Sibling
+  // V_PK_LSHRREV_B16 / V_PK_ASHRREV_I16 / V_PK_SUB_U16 / V_PK_MUL_LO_U16
+  // share this exact shape — one extra `case` + IR-opcode dispatch in
+  // the inner switch and they're done — but they're held out per the
+  // "no fallback / design what the corpus exercises" discipline.
+  case SemOp::V_PK_ADD_U16:
+  case SemOp::V_PK_LSHLREV_B16: {
+    auto *i16Ty = Type::getInt16Ty(ctx.C);
+    auto *v2i16 = FixedVectorType::get(i16Ty, 2);
+
+    // op_sel/op_sel_hi defaults match natural lo->lo / hi->hi packing.
+    // op_sel[i]    == 1 → lane 0 reads HIGH i16 of source i.
+    // op_sel_hi[i] == 0 → lane 1 reads LOW  i16 of source i (broadcast).
+    int opSel[3]   = {0, 0, 0};
+    int opSelHi[3] = {1, 1, 1};
+    StringRef text(di.fullText);
+    parseBracketList3(text, "op_sel:", opSel);
+    parseBracketList3(text, "op_sel_hi:", opSelHi);
+
+    auto readPkI16Src = [&](unsigned i) -> Value * {
+      Value *raw = op.src(i);
+      if (raw->getType() != ctx.i32Ty)
+        raw = ctx.B.CreateBitCast(raw, ctx.i32Ty);
+      Value *vec = ctx.B.CreateBitCast(raw, v2i16);
+      Value *natLo = ctx.B.CreateExtractElement(vec, (uint64_t)0);
+      Value *natHi = ctx.B.CreateExtractElement(vec, (uint64_t)1);
+      Value *lo = (opSel[i] != 0) ? natHi : natLo;
+      Value *hi = (opSelHi[i] == 0) ? natLo : natHi;
+      Value *r = UndefValue::get(v2i16);
+      r = ctx.B.CreateInsertElement(r, lo, (uint64_t)0);
+      r = ctx.B.CreateInsertElement(r, hi, (uint64_t)1);
+      return r;
+    };
+
+    Value *s0 = readPkI16Src(0);
+    Value *s1 = readPkI16Src(1);
+
+    Value *res = nullptr;
+    switch (sop) {
+    case SemOp::V_PK_ADD_U16:
+      res = ctx.B.CreateAdd(s0, s1, "pk_add_u16");
+      break;
+    case SemOp::V_PK_LSHLREV_B16: {
+      // clshl_rev_16 SDAG: dst = src1 << (src0 & 15). Reversed-operand
+      // convention (shift count is src0, value is src1) AND a hardware
+      // clamp to the low 4 bits of the count. LLVM `shl` is poison for
+      // shifts >= bitwidth, the hardware masks instead — emit the AND
+      // explicitly so the LLVM semantics match the AMDGPU semantics for
+      // every legal hardware input. For constant shift counts the
+      // optimiser folds the AND away; for VGPR-sourced shift counts the
+      // mask is mandatory to preserve the corpus shift semantics.
+      Value *mask = ConstantVector::getSplat(
+          ElementCount::getFixed(2),
+          ConstantInt::get(i16Ty, 15));
+      Value *amt = ctx.B.CreateAnd(s0, mask, "pk_lshlrev_amt");
+      res = ctx.B.CreateShl(s1, amt, "pk_lshlrev");
+      break;
+    }
+    default: llvm_unreachable("filtered by outer switch");
+    }
+
+    ctx.writeReg32(op.dst(),
+                   ctx.B.CreateBitCast(res, ctx.i32Ty, "pk_i16_pack"));
+    hr.handled = true;
+    return hr;
+  }
+
   // ---- WMMA (gfx1250 RDNA4, VOP3P encoding) ----
   // 16x16xK WMMA family. Three K-families × accumulator-type
   // permutations covered today:

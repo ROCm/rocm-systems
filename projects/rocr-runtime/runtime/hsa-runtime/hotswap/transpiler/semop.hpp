@@ -382,6 +382,32 @@ enum class SemOp : uint16_t {
   V_PK_ADD_F32, V_PK_MUL_F32, V_PK_FMA_F32,
   V_PK_MAX_F32, V_PK_MIN_F32, V_PK_MOV_B32,
 
+  // VOP3P packed-pair `<2 x i16>` int ops (gfx9+, available on both
+  // gfx942 and gfx1250 — same MC encoding family). Operand profile is
+  // VOP_V2I16_V2I16_V2I16: 32-bit dst / 32-bit src0 / 32-bit src1, each
+  // bitcast to `<2 x i16>` before the op and back to i32 for the
+  // write-back. Inline literals encode a packed `<2 x i16>` directly
+  // (lo i16 = bits[15:0], hi i16 = bits[31:16]) — NO broadcast
+  // analogue to the V_PK_F32 32-bit-element family, because the
+  // literal width matches the operand width here.
+  //
+  // V_PK_ADD_U16:     dst = src0 + src1                (lane-wise i16 add)
+  // V_PK_LSHLREV_B16: dst = src1 << (src0 & 15)        (clshl_rev_16
+  //                   SDAG: shift count is src0, value is src1, low 4
+  //                   bits of the count select the shift amount per
+  //                   AMDGPU's hardware-clamp-to-element-width).
+  //
+  // op_sel / op_sel_hi modifiers select which i16 of each source feeds
+  // each output lane (defaults: op_sel=[0,0,0], op_sel_hi=[1,1,1] —
+  // natural lo->lo, hi->hi packing).
+  //
+  // Sibling V_PK_LSHRREV_B16 / V_PK_ASHRREV_I16 share the same handler
+  // shape (only the IR opcode differs: lshr / ashr); they are NOT
+  // enumerated here because the kerneldex corpus has zero producers
+  // for them today and adding them speculatively would violate the
+  // "no fallback / design what the corpus exercises" discipline.
+  V_PK_ADD_U16, V_PK_LSHLREV_B16,
+
   V_BITOP3_B32, V_BITOP3_B16,
 
   // GFX9 VOP3-only v_add/sub_i32 — plain add/sub when clamp=0,

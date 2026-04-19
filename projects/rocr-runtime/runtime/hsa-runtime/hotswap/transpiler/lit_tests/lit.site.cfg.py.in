@@ -429,6 +429,34 @@ config.fixtures = {
     # already pinned by v_cmpx_ballot.
     "v_cmp_class_f32":
         r"@LIT_FIXTURE_V_CMP_CLASS_F32_CO@",
+    # v_pk_int_b16 (VOP3P packed `<2 x i16>` int family) — pins both
+    # opcodes the kerneldex corpus exercises today (V_PK_LSHLREV_B16
+    # + V_PK_ADD_U16) under one fixture so the shared
+    # operand-decode + write-back shape is asserted from a single
+    # producer. Unblocks the scope_discovery `_upcast_from_mxfp`
+    # kernel in the kerneldex sweep.
+    #
+    # Fixture pins:
+    #   * Shared decode shape — `bitcast i32 -> <2 x i16>` + the
+    #     extract/insert round-trip the handler emits to encode the
+    #     op_sel / op_sel_hi default (lo->lo, hi->hi) permutation.
+    #   * V_PK_LSHLREV_B16: explicit `and <2 x i16> ..., <i16 15,
+    #     i16 15>` shift-count mask matching the AMDGPU clshl_rev_16
+    #     hardware clamp, then `shl <2 x i16>` in the reversed
+    #     (value, count) operand order.
+    #   * V_PK_ADD_U16: `add <2 x i16>`.
+    #   * Write-back via `bitcast <2 x i16> -> i32` named
+    #     `pk_i16_pack`.
+    #
+    # Sibling V_PK_LSHRREV_B16 / V_PK_ASHRREV_I16 / V_PK_SUB_U16 /
+    # V_PK_MUL_LO_U16 / V_PK_MAX_{I,U}16 / V_PK_MIN_{I,U}16 share
+    # this exact handler shape (one extra inner-switch case + IR
+    # opcode dispatch); they are intentionally NOT pre-enumerated
+    # in opcode_map.cpp / semop.hpp because the kerneldex corpus
+    # has zero producers for them today (no fallback / design what
+    # the corpus exercises).
+    "v_pk_int_b16":
+        r"@LIT_FIXTURE_V_PK_INT_B16_CO@",
 }
 
 lit_config.load_config(
