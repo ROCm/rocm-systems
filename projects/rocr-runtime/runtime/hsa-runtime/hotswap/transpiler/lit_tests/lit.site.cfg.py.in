@@ -147,6 +147,14 @@ config.fixtures = {
     # SCC-writeback shape and the s_cselect_b32 chain that
     # surfaces SCC into a normal SGPR write.
     "s_cmp_eq_u64": r"@LIT_FIXTURE_S_CMP_EQ_U64_CO@",
+    # ds_store_b16_d16_hi (DS, gfx8+ HasD16LoadStore D16_HI
+    # partial-store family) — pins the `lshr i32 %src, 16` then
+    # `trunc i32 ... to i16` chain that surfaces the UPPER half
+    # of the source VGPR for the LDS store. By handler-shape
+    # identity this fixture also pins ds_store_b8_d16_hi (the
+    # only delta is an extra trunc-to-i8 in the same code path).
+    "ds_store_b16_d16_hi":
+        r"@LIT_FIXTURE_DS_STORE_B16_D16_HI_CO@",
 }
 
 lit_config.load_config(

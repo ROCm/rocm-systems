@@ -581,6 +581,14 @@ static const Entry kCanonTable[] = {
     E(DS_WRITE_B128, DS_WRITE_B128),
     E(DS_WRITE2_B32, DS_WRITE2_B32), E(DS_WRITE2_B64, DS_WRITE2_B64),
     E(DS_WRITE_B16, DS_WRITE_B16), E(DS_WRITE_B8, DS_WRITE_B8),
+    // gfx8+ HasD16LoadStore D16_HI store family (DSInstructions.td
+    // §604-606). Stores bits [31:16] (B16_HI) or bits [23:16] (B8_HI)
+    // of the source VGPR to LDS — same VGPR/i32 source operand
+    // shape as their non-_HI siblings, so the canonical-table macro
+    // routes both encoding forks (gfx10 m0-based vs gfx11+ no-m0)
+    // through the same SemOp.
+    E(DS_WRITE_B16_D16_HI, DS_WRITE_B16_D16_HI),
+    E(DS_WRITE_B8_D16_HI, DS_WRITE_B8_D16_HI),
     E(DS_BPERMUTE_B32, DS_BPERMUTE_B32),
     // ds_swizzle_b32 — wave-width-specific cross-lane shuffle. The
     // handler refuses with `unsupportedShape` until CROSS_LANE_SURVEY

@@ -358,6 +358,54 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     return hr;
     }
   }
+  // D16_HI partial-store family: ds_store_b16_d16_hi /
+  // ds_store_b8_d16_hi (DSInstructions.td §604-606, gfx8+ behind
+  // SubtargetPredicate=HasD16LoadStore). Both shift the source
+  // VGPR right by 16 to surface its UPPER half, then truncate to
+  // 16 or 8 bits and store to LDS at addr=src(0)+immOffset.
+  //
+  // The corpus pattern (tensilelite gemm tile spill, 18 kernels)
+  // is `ds_store_b16_d16_hi v0, v1 offset:N`: pack the upper f16
+  // of a packed-bf16 register pair into LDS as part of the K-strip
+  // tile redistribution. A regression that wrote bits [15:0]
+  // instead of [31:16] would silently corrupt every other tile.
+  //
+  // Test back-reference: lit_tests/ds_store_b16_d16_hi/ pins the
+  // i32 → lshr 16 → trunc i16 → store-under-EXEC chain. The
+  // `ds_st_d16_hi` value-name on the trunc is the canonical
+  // breadcrumb a maintainer can grep for.
+  if (sop == SemOp::DS_WRITE_B16_D16_HI ||
+      sop == SemOp::DS_WRITE_B8_D16_HI) {
+    Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");
+    for (unsigned k = 1; k < op.nSrcs(); k++) {
+      if (di.isImm(op.srcIdx(k))) {
+        int64_t imm = di.getImm(op.srcIdx(k));
+        if (imm != 0)
+          addr = ctx.B.CreateAdd(addr, ConstantInt::get(ctx.i64Ty, imm),
+                                  "ds_off");
+        break;
+      }
+    }
+    Value *ptr = ctx.B.CreateIntToPtr(addr, PointerType::get(ctx.C, 3));
+
+    ParsedReg stData = op.srcReg(1);
+    Value *raw = ctx.regs.readReg32(ctx.B, stData);
+    // Surface the UPPER half of the source VGPR. For B16_D16_HI
+    // this is bits [31:16]; for B8_D16_HI this is bits [23:16].
+    // The lshr 16 + trunc-to-16 step is identical for both — the
+    // only difference is a further trunc to i8 for the B8 variant.
+    Value *hi16 = ctx.B.CreateTrunc(
+        ctx.B.CreateLShr(raw, ctx.B.getInt32(16), "ds_st_hi16_shr"),
+        Type::getInt16Ty(ctx.C), "ds_st_d16_hi");
+    Value *toStore = (sop == SemOp::DS_WRITE_B8_D16_HI)
+                          ? ctx.B.CreateTrunc(hi16, Type::getInt8Ty(ctx.C),
+                                              "ds_st_d8_hi")
+                          : hi16;
+    ctx.emitUnderExec([&] { ctx.B.CreateStore(toStore, ptr); });
+    hr.handled = true;
+    return hr;
+  }
+
   if (sop == SemOp::DS_BPERMUTE_B32) {
     // Backwards permute: per-lane GATHER. Each lane reads the `src1`
     // value from a *source* lane whose index is `src0 >> 2` (the

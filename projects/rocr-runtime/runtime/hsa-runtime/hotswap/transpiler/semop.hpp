@@ -343,6 +343,15 @@ enum class SemOp : uint16_t {
   DS_WRITE_B128,
   DS_WRITE2_B32, DS_WRITE2_B64,
   DS_WRITE_B16, DS_WRITE_B8,
+  // D16_HI partial-store family (gfx8+ HasD16LoadStore):
+  // store the upper 16 bits (B16_D16_HI) or bits [23:16] (B8_D16_HI)
+  // of the source VGPR to LDS. The "D16_HI" suffix names the
+  // *source* register half being stored, not a dest-merge — these
+  // are write-only and there is no tied dest_in operand. The
+  // companion D16 reads (DS_READ_U/I8_D16{,_HI}, DS_READ_U16_D16{,_HI})
+  // are not yet on the worklist; if they surface, add them here as
+  // a separate set with their own tied-source dest_in handling.
+  DS_WRITE_B16_D16_HI, DS_WRITE_B8_D16_HI,
   DS_BPERMUTE_B32,
   // SPE_DESIGN.md §3 Class 2 (DsSwizzle). Wave-width-specific
   // cross-lane shuffle. The handler refuses with `unsupportedShape`
