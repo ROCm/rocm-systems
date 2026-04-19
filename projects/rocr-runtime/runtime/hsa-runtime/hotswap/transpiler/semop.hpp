@@ -30,6 +30,11 @@ enum class SemOp : uint16_t {
   // -- SOPC --
   S_CMP_EQ_U32, S_CMP_LG_U32, S_CMP_GT_U32, S_CMP_GE_U32,
   S_CMP_LT_U32, S_CMP_LE_U32,
+  // gfx8+ 64-bit unsigned scalar compares (SOPC_CMP_64). Only EQ and
+  // LG (not equal) are defined in SOPInstructions.td; there are no
+  // ordered/strict 64-bit SOPC compares on any AMDGPU generation
+  // because the .td record `SOPC_CMP_64` is reserved for these two.
+  S_CMP_EQ_U64, S_CMP_LG_U64,
   S_CMP_EQ_I32, S_CMP_LG_I32, S_CMP_GT_I32, S_CMP_GE_I32,
   S_CMP_LT_I32, S_CMP_LE_I32,
   S_CMP_EQ_F32, S_CMP_LG_F32, S_CMP_GT_F32, S_CMP_GE_F32,

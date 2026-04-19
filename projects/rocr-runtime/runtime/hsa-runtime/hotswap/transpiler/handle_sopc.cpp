@@ -30,6 +30,35 @@ HandlerResult handleSOPC(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // 64-bit unsigned SOPC compares (gfx8+ S_CMP_EQ_U64 / S_CMP_LG_U64).
+  // Both operands are full 64-bit SGPR pairs per SOPInstructions.td's
+  // `SOPC_CMP_64` record (the only SOPC compare shape that takes
+  // 64-bit operands — there are no signed or ordered 64-bit SOPC
+  // compares on any AMDGPU generation). Read both with `op.src64`
+  // and emit a single `icmp eq/ne i64` into SCC.
+  //
+  // Test back-reference: lit_tests/s_cmp_eq_u64/ pins the `icmp eq
+  // i64` shape this lift produces. A regression that narrowed the
+  // operands to i32 (a common shortcut against 64-bit SGPR pairs)
+  // would break the corpus's per-thread-mask compares used in
+  // tensilelite gemm dispatch.
+  if (sop == SemOp::S_CMP_EQ_U64) {
+    Value *cmp64 =
+        ctx.B.CreateICmpEQ(op.src64(0), op.src64(1), "scmp64");
+    ctx.regs.storeSCC(ctx.B, cmp64);
+    hr.sccHandled = true;
+    hr.handled = true;
+    return hr;
+  }
+  if (sop == SemOp::S_CMP_LG_U64) {
+    Value *cmp64 =
+        ctx.B.CreateICmpNE(op.src64(0), op.src64(1), "scmp64");
+    ctx.regs.storeSCC(ctx.B, cmp64);
+    hr.sccHandled = true;
+    hr.handled = true;
+    return hr;
+  }
+
   Value *src0 = op.src(0);
   Value *src1 = op.src(1);
   Value *cmp = nullptr;

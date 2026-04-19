@@ -142,6 +142,11 @@ config.fixtures = {
     # extraction). Pins the i32→i64 zext of the shift amount
     # constant-folding away into a single `lshr i64 ..., 16`.
     "s_lshr_b64_imm": r"@LIT_FIXTURE_S_LSHR_B64_IMM_CO@",
+    # s_cmp_eq_u64 (SOPC_CMP_64 unsigned 64-bit equality) — the
+    # gfx8+ 64-bit sibling of s_cmp_eq_u32. Pins the icmp eq i64
+    # SCC-writeback shape and the s_cselect_b32 chain that
+    # surfaces SCC into a normal SGPR write.
+    "s_cmp_eq_u64": r"@LIT_FIXTURE_S_CMP_EQ_U64_CO@",
 }
 
 lit_config.load_config(
