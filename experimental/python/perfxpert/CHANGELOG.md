@@ -3,6 +3,24 @@
 All notable changes to perfxpert will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.3.1 — Codex backend
+
+### Added
+- **`perfxpert-code codex` subcommand** — full Codex CLI adapter.
+  Registers perfxpert under `[mcp_servers.perfxpert]` in
+  `~/.codex/config.toml` (writes via lazy-imported `tomlkit`,
+  comment-preserving), stages `.perfxpert/AGENTS.md`, and handles
+  Codex's `[projects."<cwd>"].trust_level = "trusted"` requirement
+  (interactive prompt, or `PERFXPERT_AUTO_TRUST=1` for CI with an
+  always-on stderr warning bypassing `--quiet`). Gate enforcement is
+  prompt-layer-only because Codex's native `PreToolUse` hook
+  intercepts Bash only as of April 2026 — see
+  [docs/decisions/2026-04-19-codex-hook-surface.md](../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+  `perfxpert-code uninstall codex` reverses the install (MCP table +
+  trust entry + staged `AGENTS.md`), with `ConfigClobber` /
+  `skipped_due_to_drift` protection against git-tracked or malformed
+  TOML.
+
 ## v0.3.0 — multi-backend launcher
 
 ### Added

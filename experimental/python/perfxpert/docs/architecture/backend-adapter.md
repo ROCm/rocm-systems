@@ -1,8 +1,8 @@
 # BackendAdapter Protocol (multi-backend contract)
 
 The `BackendAdapter` Protocol is the contract every `perfxpert-code
-<backend>` adapter satisfies. Claude Code, Gemini CLI, and (PR 2)
-Codex CLI each implement this Protocol; the dispatcher in
+<backend>` adapter satisfies. Claude Code, Gemini CLI, and Codex CLI
+each implement this Protocol; the dispatcher in
 `perfxpert/cli/_backend_dispatch.py` routes subcommands into the
 registered adapter by name.
 
@@ -83,7 +83,7 @@ mid-install, there is no partial MCP registration to clean up.
 | opencode (bundled) | `~/.cache/perfxpert/opencode/opencode.json` | Patched system prompt (AMD fork patches 0010+0020) | Fork patches 0010, 0012-0017 + STRICT-TOOL-DISCIPLINE stanza | N/A — state carried in opencode session |
 | Claude Code | `<cwd>/.mcp.json` (project scope) | `<cwd>/.perfxpert/AGENTS.md` + `<cwd>/.claude/CLAUDE.md` pointer | Native `PreToolUse` hook in `<cwd>/.claude/settings.json` | `<cwd>/.claude/.perfxpert-gate-state.<session_id>.json` |
 | Gemini CLI | `~/.gemini/settings.json` (user scope) | `<cwd>/.perfxpert/AGENTS.md` referenced via `context.fileName` list-append | `allowedTools` restriction in `~/.gemini/settings.json` | In-settings (session-ephemeral via `allowedTools`) |
-| Codex CLI (PR 2) | `~/.codex/config.toml` (TBD) | TBD | TBD | TBD |
+| Codex CLI | `~/.codex/config.toml` (user scope — `[mcp_servers.perfxpert]` table) | `<cwd>/.perfxpert/AGENTS.md` (no pointer; Codex loads project-local `AGENTS.md` natively) | **Prompt-layer-only** — rejection-language stanza in the staged `AGENTS.md`. `CodexGateHook.install()` always raises `GateHookUnsupported` because Codex's native `PreToolUse` intercepts Bash only (not MCP/Write/etc.) as of April 2026 | N/A (no persistent server-side session state; stanza re-emitted every session) |
 
 A NEW session (different `session_id`) always starts with the gate
 engaged — even in the same cwd. The sidecar file is keyed on
@@ -119,6 +119,39 @@ module per backend. Every gate-hook installer satisfies three rules:
 The three `LiveCheckReport.gate_hook_installed` states encode these
 outcomes: `None` = probe skipped, `False` = surface unsupported
 (known limit), `True` = installed AND effective.
+
+### Codex-specific notes (prompt-layer-only + TOML state)
+
+The `CodexAdapter` is the first adapter in-tree that relies on the
+rule-2 "raise `GateHookUnsupported`" path as its **normal** install
+outcome, not an error path. `CodexGateHook.install()` unconditionally
+raises `GateHookUnsupported` because Codex's native `PreToolUse` hook
+currently intercepts Bash only (not MCP/Write/WebSearch/etc.) and
+therefore cannot satisfy rule-3. The adapter catches the exception
+before MCP registration runs (I-N1), records
+`gate_hook_installed=False`, and leans on the rejection-language
+stanza inside the staged `.perfxpert/AGENTS.md` for enforcement.
+Full rationale + the Codex re-visit checklist live in
+[../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+
+Two Codex-specific state-handling conventions worth naming here:
+
+- **TOML, not JSON.** Codex's user-scope config is
+  `~/.codex/config.toml`. `CodexAdapter` reads it with stdlib
+  `tomllib` on the hot path; writes go through a **lazy-imported**
+  `tomlkit` (comment/key-order preserving). The `tomlkit` import
+  lives inside the write branch only — the read path never pays
+  the cost.
+- **Trust gate before MCP.** Codex refuses to run agents in a
+  project directory that isn't marked
+  `[projects."<abs-cwd>"].trust_level = "trusted"`. The adapter's
+  `install()` handles this as an explicit step before MCP
+  registration: prompts interactively, honors
+  `PERFXPERT_AUTO_TRUST=1` (with an always-on stderr warning — see
+  the user guide), and raises `TrustRequired` in non-interactive
+  contexts without the env var. `ConfigClobber` is raised if
+  `~/.codex/config.toml` is git-tracked or parse-fails (symmetric
+  with the Claude `.mcp.json` refuse-if-tracked rule).
 
 ## Adding a new backend
 
@@ -165,7 +198,10 @@ Steps to add a fifth backend (example: `aider`):
   `permissions.deny`)
 - [../../../../../docs/superpowers/plans/2026-04-19-perfxpert-code-multi-backend-plan.md](../../../../../docs/superpowers/plans/2026-04-19-perfxpert-code-multi-backend-plan.md)
   — the 14-task implementation plan (PR 1 + PR 2 breakdown)
+- [../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md)
+  — why the Codex adapter degrades to prompt-layer-only (native
+  `PreToolUse` is Bash-only)
 - Source: `perfxpert/cli/_backend/protocol.py`,
-  `perfxpert/cli/_backend/{claude,gemini}.py`,
-  `perfxpert/cli/_gate_hooks/{claude,gemini,opencode}.py`,
+  `perfxpert/cli/_backend/{claude,gemini,codex}.py`,
+  `perfxpert/cli/_gate_hooks/{claude,gemini,codex,opencode}.py`,
   `perfxpert/cli/_backend_dispatch.py`

@@ -398,7 +398,7 @@ session:
 |---|---|---|---|
 | `perfxpert-code claude`  | Claude Code | `.mcp.json` + `.claude/CLAUDE.md` + `.claude/settings.json` | `mcp__perfxpert__<tool>` |
 | `perfxpert-code gemini`  | Gemini CLI  | `~/.gemini/settings.json` (list-append, never touches `GEMINI.md`) | `mcp_perfxpert_<tool>` |
-| `perfxpert-code codex`   | Codex CLI   | (PR 2 — Task 10) | (probed live) |
+| `perfxpert-code codex`   | Codex CLI   | `~/.codex/config.toml` (trust gate + MCP) + `.perfxpert/AGENTS.md` | `mcp_perfxpert_<tool>` |
 
 All three subcommands accept the same dispatcher-owned flags:
 
@@ -446,6 +446,11 @@ Surfaces per backend:
 - **Gemini** — `allowedTools: ["mcp_perfxpert_*"]` in
   `~/.gemini/settings.json` + runtime sidecar at
   `~/.gemini/runtime/perfxpert-gate-<session_id>.json`.
+- **Codex** — prompt-layer-only (rejection-language stanza in
+  `.perfxpert/AGENTS.md`). Codex's native `PreToolUse` hook currently
+  intercepts Bash only, not MCP / Write / other tools, so it cannot
+  satisfy the event-based gate contract. See
+  [`docs/decisions/2026-04-19-codex-hook-surface.md`](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
 - **opencode** — `{block, retryWith}` from patched
   `tool.execute.before` plugin (fork-only — patch 0020).
 
