@@ -139,16 +139,11 @@ one-line rationale + optional follow-up tracking id.
 
 ### Zero-violation baseline
 
-None. All four scanners (`scripts/lint.sh`, `scripts/link-checker.py`,
-`scripts/test-samples.py`, `scripts/inventory.py`) report zero
-violations at the baseline snapshot. See `inventory-baseline.json`
-in this directory.
-
-### `inventory-baseline.json` — source of truth
-
-Single copy under `experimental/python/perfxpert/docs/inventory-baseline.json`
-— written by `scripts/inventory.py`. CI scans / compares against this
-file, which is the shipped source of truth.
+None. All three scanners (`scripts/lint.sh`, `scripts/link-checker.py`,
+`scripts/test-samples.py`) report zero violations live, enforced by
+`tests/test_docs_tooling/test_ship_readiness.py` — which runs each
+scanner in `--strict` mode and asserts `rc == 0`. Green test = zero
+violations today; no frozen JSON snapshot is kept in the repo.
 
 ### Scanner scope limitations
 
