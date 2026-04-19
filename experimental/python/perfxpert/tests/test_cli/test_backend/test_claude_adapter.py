@@ -155,7 +155,7 @@ def test_plan_lists_targets(project_cwd: Path) -> None:
     # Every file the installer will touch.
     target_names = {p.name for p in plan.targets}
     assert ".mcp.json" in target_names
-    assert "CLAUDE.md" in target_names
+    assert "CLAUDE.local.md" in target_names  # canonical local-override
     assert "AGENTS.md" in target_names
 
 
@@ -393,20 +393,18 @@ def test_install_adds_mcp_json_to_gitignore(
 
 
 # ---------------------------------------------------------------------------
-# install — git-tracked CLAUDE.md guardrail (I3).
+# install — git-tracked CLAUDE.local.md guardrail (I3).
 # ---------------------------------------------------------------------------
 
 
 def test_install_refuses_when_claude_md_tracked_without_flag(
     project_cwd: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """I3: never touch a git-tracked CLAUDE.md without --allow flag."""
-    # Create and commit a tracked CLAUDE.md inside .claude/.
-    claude_dir = project_cwd / ".claude"
-    claude_dir.mkdir()
-    tracked = claude_dir / "CLAUDE.md"
+    """I3: never touch a git-tracked CLAUDE.local.md without --allow flag."""
+    # Create and commit a tracked CLAUDE.local.md at project root.
+    tracked = project_cwd / "CLAUDE.local.md"
     tracked.write_text("user's own content\n")
-    subprocess.run(["git", "add", ".claude/CLAUDE.md"], cwd=str(project_cwd), check=True)
+    subprocess.run(["git", "add", "CLAUDE.local.md"], cwd=str(project_cwd), check=True)
     subprocess.run(
         ["git", "commit", "-q", "-m", "init"], cwd=str(project_cwd), check=True
     )
