@@ -41,27 +41,6 @@ def is_help_request(remaining_argv: list[str]) -> bool:
     return bool(remaining_argv) and remaining_argv[0] in ("--help", "-h")
 
 
-def _stub_backend(name: str, message: str | None = None) -> Callable[[list[str]], int]:
-    """Stub handler for a backend whose adapter has not landed yet.
-
-    All three initial backends (claude / gemini / codex) ship real
-    adapters as of PR 2; this helper is retained for future backends
-    that are added to the registry before their adapter code lands.
-    """
-
-    def _run(remaining_argv: list[str]) -> int:
-        sys.stderr.write(
-            message
-            or (
-                f"perfxpert-code {name}: adapter not yet implemented in this build.\n"
-                f"  The {name} adapter ships in a later task.\n"
-            )
-        )
-        return 42
-
-    return _run
-
-
 # Registry of backend-name → handler. Tests may monkeypatch the dict.
 # Codex adapter was wired in PR 2 (Task 10).
 def _claude_runner(argv: list[str]) -> int:
