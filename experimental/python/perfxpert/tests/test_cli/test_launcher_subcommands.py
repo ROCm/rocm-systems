@@ -8,8 +8,7 @@ Covers two distinct review findings:
 * Issue 2: `perfxpert-code doctor` errored with
   ``Failed to change directory to .../doctor`` because opencode
   interpreted ``doctor`` as a positional CWD. The launcher now routes
-  known subcommands explicitly. See
-  ``docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md``.
+  known subcommands explicitly.
 """
 
 from __future__ import annotations

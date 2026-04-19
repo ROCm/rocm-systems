@@ -316,7 +316,7 @@ def route_subcommand(argv: list[str]) -> tuple[str, list[str]]:
     The distinction matters because opencode treats a single unrecognized
     positional as a CWD override, which produced the
     "Failed to change directory to ...doctor" bug reported in session
-    ses_25e1. See docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md.
+    ses_25e1.
     """
     # Find the first non-flag positional token (flags start with '-').
     first_positional: str | None = None

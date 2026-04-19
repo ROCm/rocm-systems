@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # apply-opencode-patches.sh — apply .patches/*.patch to the opencode submodule.
 #
-# See .patches/README.md for the patch catalog and
-# docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md for
-# the motivation behind each patch.
+# See .patches/README.md for the patch catalog. Per-patch motivation is
+# summarized in the patch header and in each patch's docstring inside
+# the changed file.
 #
 # Every patch must `git apply --check` cleanly against its predecessor's
 # output. Any failure short-circuits with a non-zero exit and a message

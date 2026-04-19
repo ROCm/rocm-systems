@@ -1,8 +1,6 @@
 """Tests for perfxpert.providers._fallback.FallbackProvider.
 
-See issue 3 in
-docs/superpowers/plans/2026-04-18-perfxpert-phase8-pr2-user-issues.md:
-the user wanted a way to escape unending client-side rate-limit retries.
+The user wanted a way to escape unending client-side rate-limit retries.
 FallbackProvider cascades to the next registered provider on
 RateLimitError; the opencode patch (.patches/0011-rate-limit-retry-override.patch)
 handles the escape hatch in the opencode process.

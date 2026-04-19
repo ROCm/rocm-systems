@@ -4,8 +4,8 @@ Every EXECUTION tool in perfxpert.tools.* MUST funnel untrusted input
 through these helpers. Test coverage is in tests/test_tools/test_safety.py
 and tests/test_red_team/ (adversarial).
 
-See docs/superpowers/specs/2026-04-17-multi-agent-perfxpert-design.md §5.8
-for the complete attack-vector table.
+The complete attack-vector table is enumerated in the multi-agent
+design spec §5.8 (local contributor doc).
 """
 
 from __future__ import annotations
