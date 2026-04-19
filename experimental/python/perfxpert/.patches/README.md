@@ -102,6 +102,38 @@ identical PerfXpert framing — no single-model bias. Auxiliary prompts
 `copilot-gpt-5.txt`) are not patched: the first three are tactical inserts, and
 the last two are not imported by opencode v1.4.11.
 
+### Deep Rebrand (Phase 8 follow-up)
+
+Existing patches 0001/0003/0004/0005 only rebrand banner, tips, color, and
+footer. Patches 0030–0040 extend the rebrand to every remaining user-visible
+TUI/CLI surface — terminal titles, session window titles, command palette
+menu entries, help dialog, status dialog, home-footer version line,
+error-component text, uninstall + upgrade prompts, MCP server setup prompts,
+pr/run/serve/web/attach command descriptions, and an explicit attribution
+entry.
+
+Legal/compat invariants respected: opencode `LICENSE`, `NOTICE`,
+`package.json` fields, submodule tag, `opencode.ai` URLs (help links), and all
+`@opencode-ai/*` / `@opencode/*` imports are untouched.
+
+| # | File | What it does |
+|---|------|--------------|
+| 0030 | `0030-deep-rebrand-session-ui.patch` | `cli/cmd/tui/app.tsx` — terminal title `OpenCode` → `AMD ROCm PerfXpert`; session title prefix `OC |` → `PerfXpert |`. Upgrade-complete toast reads `AMD ROCm PerfXpert (opencode engine vX.Y.Z)`. |
+| 0031 | `0031-deep-rebrand-menus-help.patch` | Command `describe:` strings for `tui`, `run`, `attach`, `serve`, `web`, plus the `DialogHelp` component header/body — now show PerfXpert branding with attribution line `Built on opencode (MIT) by Sam Stephenson · https://github.com/sst/opencode`. |
+| 0032 | `0032-deep-rebrand-status-bar.patch` | `DialogStatus` header `Status` → `AMD ROCm PerfXpert — Status`; home-footer version pill shows `AMD ROCm PerfXpert · opencode vX.Y.Z (MIT)`; needs-auth hint suggests `perfxpert-code mcp auth`. |
+| 0033 | `0033-deep-rebrand-errors-toasts.patch` | `ErrorComponent` report banner + fatal-error copy rebranded to PerfXpert. |
+| 0034 | `0034-deep-rebrand-config-labels.patch` | `uninstall` + `upgrade` commands — prompt intros, warn/error log lines, and final thank-you message use PerfXpert branding. Underlying package-manager names (`opencode-ai`, `brew opencode`) are unchanged (real package IDs). |
+| 0035 | `0035-deep-rebrand-mcp-display-names.patch` | `mcp list` / `mcp auth` / `mcp auth list` / `mcp logout` prompt intros all prefix with `PerfXpert — ` / `AMD ROCm PerfXpert — `. |
+| 0036 | `0036-deep-rebrand-log-prefixes.patch` | `pr.ts` — `describe`, "Found opencode session", "Starting opencode..." rewritten to PerfXpert. The spawned `opencode` binary argv is unchanged. |
+| 0040 | `0040-about-perfxpert-attribution.patch` | Adds an `About PerfXpert` entry (slash `/about`) to the command palette. Selecting it shows a 10-second info toast with the full attribution. |
+
+**Deliberately NOT rebranded** (with reason):
+- `opencode` binary name passed to `Process.spawn` / `execvp` — renaming breaks install/upgrade.
+- npm package `opencode-ai`, brew formula `opencode`, scoop/choco IDs — real package IDs.
+- `opencode.ai/docs` and `opencode.ai/zen` URLs — link to the actual opencode service.
+- `OpenCode Zen` / `OpenCode Go` dialog copy — describes the commercial OpenCode products.
+- `@opencode/` Effect service tags, all `Flag.OPENCODE_*` env-var names, `.opencode/` config dir, `opencode.json` config file — internal identifiers / on-disk compat.
+
 ## Application
 
 ```bash
