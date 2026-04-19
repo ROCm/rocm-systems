@@ -246,6 +246,11 @@ enum class SemOp : uint16_t {
   V_MAX_F16, V_MIN_F16, V_LDEXP_F16, V_FLOOR_F16, V_CVT_F16_U16, V_CVT_U16_F16,
   V_ASHRREV_I16, V_LSHRREV_B16, V_LSHLREV_B16,
   V_MAX_U16, V_MIN_U16, V_MAX_I16, V_MIN_I16,
+  // 16-bit integer arith (gfx8+, VOP2Instructions.td). Plain i16
+  // add/sub/subrev with wrapping overflow (no carry-out — distinct
+  // from the rarely-used v_add_co_u16). v_mul_lo_u16 returns the low
+  // 16 bits of the multiply, naturally produced by `mul i16`.
+  V_ADD_U16, V_SUB_U16, V_SUBREV_U16, V_MUL_LO_U16,
   V_DOT2C_I32_I16, V_DOT4C_I32_I8, V_DOT8C_I32_I4,
   V_PK_FMAC_F16,
   V_PACK_B32_F16,

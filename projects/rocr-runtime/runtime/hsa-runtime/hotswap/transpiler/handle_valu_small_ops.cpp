@@ -241,6 +241,30 @@ HandlerResult handleVALU_SmallOps(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
+  // ---- 16-bit integer arith (no carry) ----
+  // Plain wrapping i16 add/sub/subrev/mul. v_mul_lo_u16 returns the
+  // low 16 bits, naturally produced by `mul i16` without an explicit
+  // truncate. The sign-agnostic v_*_u16 family uses `add`/`sub`/`mul`
+  // directly (per VOP2Instructions.td:add/sub/mul ARITH PatFrag).
+  case SemOp::V_ADD_U16:
+  case SemOp::V_SUB_U16:
+  case SemOp::V_SUBREV_U16:
+  case SemOp::V_MUL_LO_U16: {
+    Value *a = ctx.B.CreateTrunc(op.src(0), i16Ty);
+    Value *b = ctx.B.CreateTrunc(op.src(1), i16Ty);
+    Value *res = nullptr;
+    switch (di.semOp) {
+    case SemOp::V_ADD_U16:    res = ctx.B.CreateAdd(a, b, "vadd16"); break;
+    case SemOp::V_SUB_U16:    res = ctx.B.CreateSub(a, b, "vsub16"); break;
+    case SemOp::V_SUBREV_U16: res = ctx.B.CreateSub(b, a, "vsubrev16"); break;
+    case SemOp::V_MUL_LO_U16: res = ctx.B.CreateMul(a, b, "vmullo16"); break;
+    default: llvm_unreachable("filtered by outer switch");
+    }
+    ctx.writeReg32(op.dst(), ctx.B.CreateZExt(res, ctx.i32Ty));
+    hr.handled = true;
+    return hr;
+  }
+
   // ---- 16-bit reverse-operand shifts (HW uses src0[3:0]) ----
   case SemOp::V_ASHRREV_I16:
   case SemOp::V_LSHRREV_B16:
