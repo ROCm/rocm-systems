@@ -1,0 +1,381 @@
+# MCP Server (`perfxpert-mcp`)
+
+PerfXpert ships a stdio-transport MCP server (`perfxpert-mcp`) that
+re-exposes every `READ_ONLY` tool in `perfxpert.tools.*` to any
+MCP-compatible client (opencode, Claude Desktop, Cursor, etc.). The
+server never exposes `EXECUTION` tools; that split is enforced at
+startup and by CI (`tests/test_integration/test_mcp_exposure.py`).
+
+Cross-links:
+- [Agent hierarchy](../architecture/agent-hierarchy.md) — what the tools
+  are used for inside PerfXpert itself
+- [Gate cascade](../architecture/gate-cascade.md) — the correctness
+  guarantees MCP clients inherit for free when they call agent tools
+
+## Starting the server
+
+```bash
+# SKIP-SAMPLE — server is intended to be spawned by an MCP client, not run directly
+perfxpert-mcp
+```
+
+The entry point is registered in `pyproject.toml` (`perfxpert-mcp`). It
+requires the optional `mcp` Python package:
+
+```bash
+# SKIP-SAMPLE — pip install is in the destructive-skip list
+pip install "perfxpert[mcp]"
+```
+
+Under `PERFXPERT_AIRGAP=1`, the server still serves cached READ_ONLY
+tools — they're pure-Python lookups against knowledge YAMLs and
+structured DB queries and don't need network.
+
+## Tool classes (READ_ONLY vs EXECUTION)
+
+Every tool function is tagged with one of two classes via
+`@tool_class(ToolClass.READ_ONLY | ToolClass.EXECUTION)`:
+
+| Class | Purpose | Examples | MCP? |
+|-------|---------|----------|------|
+| READ_ONLY | Pure queries against fixed artifacts / knowledge | `bottleneck.classify_from_metrics`, `counters.lookup_info`, `regression.extract_kernel_runtimes_from_db` | Yes |
+| EXECUTION | Side-effecting (compile, profile, patch, anchor) | `compile.build`, `profile.run`, `patch.apply` | **No** |
+
+The `READ_ONLY` / `EXECUTION` split is the core of spec §5.8: an
+external client that connects to PerfXpert cannot cause side effects
+even if its prompt asks it to; the agent would need to drive an
+EXECUTION tool, and those stay in-process.
+
+## Naming convention (dot→underscore on the wire)
+
+Internally, PerfXpert tool names use a dotted namespace
+(`bottleneck.classify_from_metrics`). The MCP specification disallows
+dots in tool names, so the server rewrites every dotted internal name
+to an underscored wire name at registration time (see
+`mcp_server/server.py:69`, `name=name.replace(".", "_")`).
+
+Summary:
+
+- **Internal / Python API:** dotted — `bottleneck.classify_from_metrics`.
+- **MCP wire (`tools/list` response, `tools/call` request):** underscored
+  — `bottleneck_classify_from_metrics`.
+
+The server handles the reverse mapping on `tools/call` (it accepts both
+forms and looks the function up in its dotted registry), but external
+clients should always send the underscored form for forward
+compatibility. The tools-list snapshot in the next section is shown
+with **dotted** names because that's what `discover_read_only_tools()`
+returns; the equivalent wire names have the dots replaced by
+underscores.
+
+## Tools exposed (~34)
+
+Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
+every boot. The registry walks `perfxpert.tools.*` modules but skips
+`_class` and `_safety` (hardcoded in `_registry.py:21`) because they
+are machinery, not tools. Current set (enumerate yourself at any time
+by running the Python snippet below):
+
+```python
+# Print every READ_ONLY tool the MCP server exposes at boot time.
+from mcp_server._registry import discover_read_only_tools
+for name in sorted(discover_read_only_tools()):
+    print(name)
+```
+
+Snapshot at v0.2.0 (34 tools):
+
+```
+arch.lookup_peaks
+att.classify_stall_ratio
+att.classify_stall_reason
+bottleneck.classify_from_metrics
+bottleneck.lookup_signatures
+bottleneck.prioritize_by_amdahl
+compiler.explain_flag
+compiler.lookup_flags
+counters.lookup_info
+counters.validate_for_gpu
+intent.classify
+memory.classify_cache_performance
+metrics.compute_gpu_utilization
+metrics.compute_hbm_bandwidth
+metrics.compute_l1_miss_rate
+metrics.compute_l2_hit_rate
+metrics.compute_latency
+occupancy.lookup_waves_per_eu
+occupancy.suggest_vgpr_reduction
+plateau.check
+profiling.fill_gap
+regression.compare_runs
+regression.extract_kernel_runtimes_from_db
+regression.identify_hot_kernels
+roofline.classify
+roofline.lookup_peaks
+sol.classify_utilization
+sol.lookup_peaks
+sol.sanity_check
+topdown.classify_overhead
+trace_fingerprint.fingerprint
+tracelens.classify_overhead
+tracelens.lookup_metrics
+workflow.next_step
+```
+
+## Protocol examples
+
+### `tools/list`
+
+JSON-RPC request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list",
+  "params": {}
+}
+```
+
+Response (truncated; names are **underscored** on the wire — see the
+"Naming convention" section above):
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "bottleneck_classify_from_metrics",
+        "description": "Classify bottleneck from raw hardware metrics.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {"metrics": {"type": "object"}},
+          "required": ["metrics"]
+        }
+      },
+      {
+        "name": "regression_extract_kernel_runtimes_from_db",
+        "description": "Extract per-kernel runtimes from a rocpd .db file.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {"db_path": {"type": "string"}},
+          "required": ["db_path"]
+        }
+      }
+    ]
+  }
+}
+```
+
+### `tools/call`
+
+JSON-RPC request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "bottleneck_classify_from_metrics",
+    "arguments": {
+      "metrics": {
+        "gpu_utilization_percent": 94,
+        "memory_controller_percent_busy": 22
+      }
+    }
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"class\": \"compute_bound\", \"confidence\": 0.87}"
+      }
+    ]
+  }
+}
+```
+
+### Worked example: external client driving `get_hotspots`
+
+An external MCP client (e.g. Claude Desktop configured via
+`claude_desktop_config.json`) can compose the READ_ONLY tools to
+reproduce PerfXpert's hotspot view without ever importing the Python
+package. The sequence (using on-the-wire underscored names) is:
+
+1. `tools/call` → `regression_extract_kernel_runtimes_from_db` with
+   `db_path=/tmp/trace.db`
+2. `tools/call` → `regression_identify_hot_kernels` with the runtimes
+   returned in step 1
+3. `tools/call` → `bottleneck_classify_from_metrics` per hot kernel
+4. `tools/call` → `bottleneck_prioritize_by_amdahl` to rank results
+
+This sequence mirrors what the in-process Analysis agent runs during
+`session.run_root(...)` — external clients get the same answer because
+the underlying tools are identical (the agent calls the dotted
+in-process names; MCP clients call the underscored wire names; both
+resolve to the same Python function).
+
+## Adding a tool to the MCP surface
+
+See [contributing/mcp_tools.md](../contributing/mcp_tools.md) for the
+full procedure. The short version:
+
+1. Decorate the function with `@tool_class(ToolClass.READ_ONLY)`.
+2. Keep side effects out — the CI exposure test will reject the PR
+   otherwise.
+3. Add a unit test under `tests/test_mcp/test_<name>.py`.
+
+Adding an EXECUTION tool requires an RFC; the exposure invariant is
+load-bearing for the security posture in spec §5.8.
+
+## Client integration
+
+`perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
+any MCP-compatible client can consume the 34 READ_ONLY tools. The
+`command` field in every example below must resolve on the client's
+`PATH` — run `which perfxpert-mcp` to get an absolute path if your
+client launches with a narrower env than your login shell.
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`
+(macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows) and
+add a `perfxpert` entry under `mcpServers`:
+
+```json
+// SKIP-SAMPLE — client config, not executable
+{
+  "mcpServers": {
+    "perfxpert": {
+      "command": "perfxpert-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The 34 tools appear under the 🔌 panel with
+`perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
+convention").
+
+### Claude Code (`claude` CLI)
+
+Register the server with the `claude mcp add` command:
+
+```bash
+# SKIP-SAMPLE — requires a live claude CLI install
+claude mcp add perfxpert perfxpert-mcp
+```
+
+This writes to `~/.claude.json`. Verify with `claude mcp list`; the
+tools become available in any subsequent `claude` session under the
+`perfxpert_*` namespace.
+
+### Codex CLI (OpenAI)
+
+Edit `~/.codex/config.toml` and append an `[mcp_servers.perfxpert]`
+table:
+
+```toml
+# SKIP-SAMPLE — client config, not executable
+[mcp_servers.perfxpert]
+command = "perfxpert-mcp"
+args = []
+```
+
+Codex 0.7+ auto-discovers MCP servers from this file on startup. In
+an interactive session, `/mcp` lists the loaded servers and `/tools`
+shows the exposed tools.
+
+### Gemini CLI (Google)
+
+Gemini CLI reads MCP configuration from `~/.gemini/settings.json`.
+Add the server under `mcpServers`:
+
+```json
+// SKIP-SAMPLE — client config, not executable
+{
+  "mcpServers": {
+    "perfxpert": {
+      "command": "perfxpert-mcp",
+      "args": [],
+      "env": {},
+      "timeout": 30000
+    }
+  }
+}
+```
+
+Verify with `gemini mcp list` (Gemini CLI ≥ 0.2). Any tool named
+`perfxpert_*` is exposed; unprefixed names are reserved for built-in
+Gemini capabilities.
+
+### opencode (bundled with `perfxpert-code`)
+
+No manual step required — the bundled `opencode.json` already wires
+`perfxpert-mcp` as a local MCP server:
+
+```json
+// SKIP-SAMPLE — bundled config shown for reference
+{
+  "mcp": {
+    "perfxpert": {
+      "type": "local",
+      "command": ["perfxpert-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+If you run the upstream `opencode` binary directly (outside
+`perfxpert-code`), copy the `opencode.json` from
+`~/.cache/perfxpert/opencode/opencode.json` into your project or into
+`~/.config/opencode/opencode.json` so `perfxpert-mcp` is picked up.
+
+### Generic MCP clients (stdio JSON-RPC)
+
+Any client that spawns stdio subprocesses and speaks MCP can consume
+`perfxpert-mcp` directly. Minimum spawn spec:
+
+| Field | Value |
+|-------|-------|
+| command | `perfxpert-mcp` |
+| args | `[]` |
+| protocol | MCP stdio JSON-RPC, `2024-11-05` |
+| auth | none (READ_ONLY, no mutations) |
+| working dir | inherited from caller (server writes nothing) |
+| env needed | none (inherits caller's `PATH` to find `rocprofv3` if queried) |
+
+Send `initialize` → `tools/list` → `tools/call` in that order. See the
+`Protocol examples` section above for the exact JSON payloads.
+
+### Troubleshooting
+
+- **"command not found: perfxpert-mcp"** — the client's `PATH` is
+  narrower than your login shell. Use the absolute path returned by
+  `which perfxpert-mcp` in the `command` field.
+- **Tools list empty** — verify the server started correctly by
+  running `perfxpert-mcp </dev/null 2>&1 | head` manually; you should
+  see "discovered N read-only tools".
+- **"unknown tool: bottleneck.classify_from_metrics"** — you sent the
+  dotted in-process name. External clients must use the underscored
+  wire name (`bottleneck_classify_from_metrics`). See §"Naming
+  convention".
+- **EXECUTION tools missing** — by design. The MCP surface is
+  READ_ONLY-only per spec §5.8. If you need to run a profiler from a
+  client, use that client's own shell tool (opencode's `bash`, Claude
+  Desktop's `run_shell_command`, etc.), NOT an MCP call.
