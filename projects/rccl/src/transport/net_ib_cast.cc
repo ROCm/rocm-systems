@@ -3877,3 +3877,100 @@ ncclNet_t netIbCast = {
   ncclIbSetProperties,
   ncclIbRefreshDevices
 */
+
+// =============================================================================
+// Test introspection API — exposes internal WRR scheduler state from a
+// sendComm handle.  Only intended for unit tests; not part of the public net
+// plugin ABI.
+// =============================================================================
+
+#define NCCL_IB_CAST_INSPECT_MAX_QPS NCCL_IB_MAX_QPS
+
+struct ncclIbCastSchedState {
+  int      nqps;
+  bool     schedInit;        // true once IbCastQpSchedUpdateTx has fired
+  int      qpIndex;          // current cursor position
+
+  // initTokens snapshot
+  int      initTotTokens;
+  int      initQpTokens[NCCL_IB_CAST_INSPECT_MAX_QPS];
+
+  // activeTokens snapshot
+  int      activeTotTokens;
+  int      activeQpTokens[NCCL_IB_CAST_INSPECT_MAX_QPS];
+
+  // schedParms snapshot (subset most useful for tests)
+  bool     schedEnable;
+  bool     doWrr;
+  bool     splitData;
+  uint32_t splitDataMin;
+};
+
+// ncclIbCastGetSchedState — copy WRR scheduler state out of a sendComm.
+// sendComm must be a valid ncclIbSendComm* obtained from IbCastConnect/IbCastAccept.
+// Returns ncclInvalidArgument if sendComm or out is null.
+extern "C" ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out) {
+  if (!sendComm || !out) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbNetCommBase* base = &comm->base;
+
+  out->nqps      = base->nqps;
+  out->schedInit = base->qpTxSchedInit;
+  out->qpIndex   = base->rrQpTxSched.qpIndex;
+
+  out->initTotTokens   = base->rrQpTxSched.initTokens.totTokens;
+  out->activeTotTokens = base->rrQpTxSched.activeTokens.totTokens;
+
+  int n = (base->nqps < NCCL_IB_CAST_INSPECT_MAX_QPS) ? base->nqps : NCCL_IB_CAST_INSPECT_MAX_QPS;
+  for (int i = 0; i < n; i++) {
+    out->initQpTokens[i]   = base->rrQpTxSched.initTokens.qpTokens[i];
+    out->activeQpTokens[i] = base->rrQpTxSched.activeTokens.qpTokens[i];
+  }
+
+  out->schedEnable  = base->schedParms.enable;
+  out->doWrr        = base->schedParms.doWrr;
+  out->splitData    = base->schedParms.splitData;
+  out->splitDataMin = base->schedParms.splitDataMin;
+
+  return ncclSuccess;
+}
+
+// ncclIbCastSetTokens — force-initialize the WRR token table for testing.
+// Bypasses the RTT-based IbCastQpSchedUpdateTx; immediately arms the scheduler.
+// qpTokens must have nqps entries; totTokens is computed as their sum.
+extern "C" ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps) {
+  if (!sendComm || !qpTokens || nqps <= 0 || nqps > NCCL_IB_CAST_INSPECT_MAX_QPS)
+    return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbNetCommBase* base = &comm->base;
+
+  struct ncclIbRrTokens* t = &base->rrQpTxSched.initTokens;
+  t->totTokens = 0;
+  for (int i = 0; i < nqps; i++) {
+    t->qpTokens[i] = qpTokens[i];
+    t->totTokens  += qpTokens[i];
+  }
+  base->rrQpTxSched.activeTokens = *t;
+  base->rrQpTxSched.qpIndex      = 0;
+  base->qpTxSchedInit = true;
+
+  return ncclSuccess;
+}
+
+// ncclIbCastSetSchedParms — override schedParms fields for testing.
+// Takes effect on the very next isend; does not require re-connection.
+// Only the four fields most relevant to path-selection are exposed.
+extern "C" ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
+                                                 bool schedEnable,
+                                                 bool doWrr,
+                                                 bool splitData,
+                                                 uint32_t splitDataMin) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*) sendComm;
+  struct ncclIbNetCommBase* base = &comm->base;
+  base->schedParms.enable       = schedEnable;
+  base->schedParms.doWrr        = doWrr;
+  base->schedParms.splitData    = splitData;
+  base->schedParms.splitDataMin = splitDataMin;
+  return ncclSuccess;
+}
