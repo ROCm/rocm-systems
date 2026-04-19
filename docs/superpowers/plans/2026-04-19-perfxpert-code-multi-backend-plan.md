@@ -1,8 +1,11 @@
 # perfxpert-code Multi-Backend Mode — Implementation Plan
 
-Date: 2026-04-19
-Status: **Cycle-2 revision** (addresses all blockers + importants from
-cycle-1 design review; see brainstorm §13 for changelog)
+Date: 2026-04-19 (cycle-2 + post-cycle-1 E2E addendum 2026-04-18)
+Status: **Cycle-2 revision + post-cycle-1 E2E addendum** — addresses
+all blockers + importants from cycle-1 static design review PLUS the
+two live-E2E findings (F1 HIGH, F2 MEDIUM) surfaced against Haiku-4-5
+after the cycle-1 revision landed (commit 541f5cb6d7). See brainstorm
+§13 (E2E findings) and §14 (cycle-1 changelog).
 Branch: `users/aelwazir/perfxpert-code-multi-backend` (to be created
 from `users/aelwazir/perfxpert-phase8-opencode-fork`)
 Worktree: `/home/aelwazir/work/ai-analysis-rocpd/.worktrees/perfxpert-phase8`
@@ -25,6 +28,15 @@ handling). Swap rationale: Gemini is the safest backend by construction
 the trust-gate subplot and has an undocumented MCP tool-name wire
 format that needs live-probe de-risking separately.
 
+**Post-cycle-1 E2E addendum:** PR 1 ALSO ships (a) a server-side
+PreToolUse tool-gate hook per backend (Task 4.6; mechanical
+enforcement because prompt-layer gating is model-size sensitive —
+Haiku-4-5 live E2E confirmed the regression) and (b) `perfxpert-mcp`
+warmup during `install()` + 3-attempt handshake retry in
+`verify_mcp_live()` (Task 4.7; addresses observed first-run exit-124
+bootstrap hang). Escape hatches: `PERFXPERT_GATE_HOOK=0` and
+`PERFXPERT_MCP_WARMUP=0`. See brainstorm §13.
+
 ## Scope
 
 - **In scope (PR 1).** Subcommand dispatch, `BackendAdapter` Protocol
@@ -33,8 +45,11 @@ format that needs live-probe de-risking separately.
   shell-out (primary) / print-for-human (fallback) / structured edit
   (last resort only for small dedicated files), project-scoped prompt
   staging with never-touch-tracked-files default, tool-name rewrite
-  pipeline, `verify_mcp_live()` post-install probe, consent cache keyed
-  on `(backend, cwd-hash, file-set-hash)`, version floor warning, unit
+  pipeline, `verify_mcp_live()` post-install probe (with handshake
+  retry — F2), **server-side PreToolUse tool-gate hook per backend**
+  (F1 — Task 4.6), **`perfxpert-mcp` warmup during `install()`**
+  (F2 — Task 4.7), consent cache keyed on
+  `(backend, cwd-hash, file-set-hash)`, version floor warning, unit
   tests, skip-on-CI integration tests, tool-name length lint,
   platform-guardrail (POSIX-only) explicit.
 - **In scope (PR 2).** `CodexAdapter` + Codex project-trust detection +
@@ -63,6 +78,18 @@ format that needs live-probe de-risking separately.
   who never run `perfxpert-code codex` do not need it. (I7.)
 - POSIX target (macOS + Linux + WSL). Windows-native is out of scope.
   (I12.)
+- **Tool-priority gate is enforced mechanically.** Prompt-layer
+  gating is model-size sensitive (F1 — cycle-5 E2E on Haiku-4-5
+  confirmed). Primary enforcement is the server-side PreToolUse hook
+  installed by Task 4.6 per backend. Prompt-layer rejection-language
+  (Task 4) is secondary. `PERFXPERT_GATE_HOOK=0` env override
+  disables the hook for reviewer debugging.
+- **`perfxpert-mcp` handshake is occasionally racy on first run**
+  (F2 — cycle-5 E2E observed exit-124 that retry cleared). Adapter
+  `install()` warms `perfxpert-mcp` once to prime sqlite +
+  tool-registry cache. `verify_mcp_live()` retries the MCP handshake
+  up to 3 times with 2-second backoff. `PERFXPERT_MCP_WARMUP=0` env
+  override disables warmup if it becomes annoying on a platform.
 
 ---
 
@@ -276,6 +303,14 @@ the target file set changes (e.g. user just started tracking
       per-backend form using `tool_name_template`. (B1.)
     - Strip `<!--backend:NAME-->...<!--/backend:NAME-->` blocks not in
       the target backend.
+    - **Emit rejection-language gate stanza (F1 — brainstorm §13).**
+      The staged prompt MUST include a variant of the tool-priority
+      gate framed as a **consequence**, not advisory, e.g.
+      "Your response WILL BE REJECTED if you call bash/read/edit
+      before `<rendered>_intent_classify` returns." Prompt-layer gate
+      is the *secondary* enforcement; the primary is the server-side
+      hook from Task 4.6. A `reject_language: bool = True` kwarg
+      toggles the stanza (on by default).
   - `emit_marker_block(content_hash: str) -> tuple[str, str]`:
     - Returns `(begin, end)` sentinels with versioning + cache hash:
       `<!-- BEGIN perfxpert-managed v1 cache=<sha8> -->` /
@@ -344,6 +379,11 @@ the target file set changes (e.g. user just started tracking
     - `verify_mcp_live(cwd, telemetry=False)`:
       - `claude mcp list --json` (timeout 15s); parse output; assert
         `perfxpert` listed + healthy.
+      - **MCP handshake retry (F2 — brainstorm §13).** On handshake
+        failure or timeout, retry up to **3 attempts with 2-second
+        backoff** before raising `PartialInstall`. Addresses the
+        bootstrap exit-124 race where first-run handshake or sqlite
+        init occasionally times out and a retry clears it.
       - If `telemetry=True` (set via `PERFXPERT_TELEMETRY=1` in env):
         additionally send a structured probe prompt
         ("reply with only 'ack' after calling
@@ -351,6 +391,12 @@ the target file set changes (e.g. user just started tracking
         a short timeout, assert perfxpert-mcp saw `intent_classify`
         before any other tool (reads telemetry log from
         `$XDG_CACHE_HOME/perfxpert/mcp-telemetry.log`). (I11.)
+      - **Gate probe (F1 — brainstorm §13).** When the server-side
+        hook from Task 4.6 is installed, `verify_mcp_live` additionally
+        runs a canned non-perfxpert-first query (e.g. "list files in
+        this repo") against the backend and asserts the hook rejected
+        the first non-`perfxpert_*` tool call. Fails loudly if the
+        gate is installed but not effective.
       - Return `LiveCheckReport`.
     - `uninstall(cwd, scope="project")`:
       - Remove marker block from `.claude/CLAUDE.md` (or `CLAUDE.md` if
@@ -402,6 +448,160 @@ the target file set changes (e.g. user just started tracking
 
 ---
 
+### Task 4.6 — Server-side tool-gate hook per backend (F1; brainstorm §13)
+
+**Why.** Cycle-5 live E2E with Haiku-4-5 proved the prompt-layer
+tool-priority gate is insufficient for smaller LLMs: Haiku fired
+`read`/`glob` at positions 2–4 before `workflow_next_step` (H1), and
+skipped perfxpert tools entirely when profiling was asked for (H2).
+Prompt text alone is advisory to smaller models. The fix is
+**mechanical, server-side enforcement** — reject any non-`perfxpert_*`
+tool call in the first N turns of a session via each backend's
+PreToolUse hook API.
+
+This is a **new sub-task of Task 4** because it operates on the same
+`ClaudeCodeAdapter` and `GeminiAdapter` surfaces; the hook is shipped
+as part of each adapter's `install()`.
+
+**Per-backend research + implementation.**
+
+- **opencode** — starting point exists in phase 8 patch
+  `0020-perfxpert-tool-gate.patch` (and its README). The patch uses
+  `plugin.trigger("tool.execute.before", ...)` with a
+  `{ block: true, retryWith: <msg> }` extension. Port the pattern
+  into `perfxpert/cli/backends/_gate_hooks/opencode.py` as shared
+  content (staged at install time).
+- **Claude Code** — research required. Verify (via doc fetch) whether
+  `claude` exposes a pre-tool-call hook (plugin hook,
+  `PreToolUse` event, or settings-level allowedTools list). Two
+  acceptable shapes:
+  - Native hook: install at `.claude/hooks/pre-tool-use.<ext>` with
+    the rejection logic + `retryWith` message.
+  - Settings list: temporarily restrict `allowedTools` to
+    `["perfxpert_*"]` for the first N turns via
+    `.claude/settings.json`, clear after `intent_classify` fires.
+  Pick whichever claude actually supports; document in
+  `perfxpert/cli/backends/_gate_hooks/claude.py`.
+- **Gemini** — use per-tool policies or `allowedTools` list in
+  `.gemini/settings.json` to block non-perfxpert tools initially.
+  Settings-only (no hook surface needed at the CLI layer).
+- **Codex** — **deferred to PR 2**. Codex sandbox-level hooks land
+  alongside the `CodexAdapter` in Task 10.
+
+**Files.**
+- Create: `perfxpert/cli/backends/_gate_hooks/__init__.py` — shared
+  constants: `_FIRST_N_TURNS = 2`, rejection message template
+  (referencing the rendered `_intent_classify` tool name per backend),
+  gate-lift rule (clear after `intent_classify` is observed).
+- Create: `perfxpert/cli/backends/_gate_hooks/opencode.py` — port of
+  patch `0020-perfxpert-tool-gate.patch` shape.
+- Create: `perfxpert/cli/backends/_gate_hooks/claude.py` — research +
+  implement; defer structure decision to the live doc-fetch step.
+- Create: `perfxpert/cli/backends/_gate_hooks/gemini.py` —
+  `allowedTools` restriction + lift logic.
+- Modify: `perfxpert/cli/backends/claude.py` `install(...)` — new
+  Step between prompt-staging and verify: "Install PreToolUse gate
+  hook at `.claude/hooks/...` (or settings allowedTools)". Document
+  the actual shape after the claude research step.
+- Modify: `perfxpert/cli/backends/gemini.py` `install(...)` — write
+  initial `allowedTools: ["mcp_perfxpert_*"]` to
+  `.gemini/settings.json` (gate-ENFORCE) + emit the lift-logic
+  companion config.
+- Modify: `perfxpert/cli/backends/_prompt_adapter.py` — confirm the
+  `reject_language=True` stanza (from Task 4) is coherent with the
+  hook's `retryWith` message (shared text source).
+
+**Invariants.**
+- Gate must be LIFTABLE — once `intent_classify` is called, the hook
+  permits any tool. Failure to lift = false §5.8-style refusal. This
+  was the observed failure mode cycle-4 went through; cycle-2 design
+  retains the lift rule.
+- Gate ONLY applies to the first `_FIRST_N_TURNS` turns of a NEW
+  session. Recursion / resumed sessions are out of scope.
+- `PERFXPERT_GATE_HOOK=0` env override disables the hook entirely
+  (for reviewer debugging).
+
+**Tests.**
+- `tests/test_cli/test_backends/test_gate_hooks.py`:
+  - `test_opencode_gate_rejects_bash_before_intent_classify`
+  - `test_opencode_gate_lifts_after_intent_classify`
+  - `test_claude_gate_rejects_non_perfxpert_tools_first_n_turns`
+  - `test_gemini_gate_allowedtools_restricts_initial_turns`
+  - `test_env_override_PERFXPERT_GATE_HOOK_0_disables_hook`
+  - `test_verify_mcp_live_gate_probe_fails_when_gate_ineffective`
+    (couples to Task 4's `verify_mcp_live` gate-probe addition).
+
+**Acceptance gate.** After install, a canned query that asks the
+model to "list files" must receive a rejection + retry message on
+the first tool call; and a canned query that asks the model to
+"analyze this trace" must go through `perfxpert_intent_classify`
+first. Both assertions surfaced via telemetry log (I11).
+
+**Commit.** `feat(perfxpert/cli): server-side PreToolUse gate hook per backend (F1)`
+
+---
+
+### Task 4.7 — Adapter `install()` warms `perfxpert-mcp` (F2; brainstorm §13)
+
+**Why.** Cycle-5 E2E reviewer reported a reproducible exit-124 on the
+**first** `perfxpert-code run <query>` invocation after a stale
+server state. Single-line log; no traceback; retrying 1–2× cleared
+it. Root cause likely: MCP handshake timeout OR sqlite init race
+during `perfxpert-mcp` spawn. This is opencode-specific today but
+**every** backend will hit the same race on first run because they
+all spawn `perfxpert-mcp` on stdio similarly.
+
+Fix is three layered mitigations: warmup during `install()`, retry
+in `verify_mcp_live()` (already updated in Task 4 above), and a
+user-facing env hatch.
+
+**Files.**
+- Create: `perfxpert/cli/backends/_mcp_warmup.py`:
+  - `warmup_perfxpert_mcp(timeout: float = 10.0) -> WarmupReport`:
+    - Spawns `perfxpert-mcp` as a subprocess, sends an MCP `initialize`
+      handshake, waits for the tool-registry reply, closes the
+      subprocess cleanly.
+    - Primes: sqlite DB open, tool registry cache, any per-session
+      expensive imports.
+    - Returns `WarmupReport(success: bool, duration_s: float, error: str | None)`.
+    - Idempotent — safe to call multiple times.
+  - `PERFXPERT_MCP_WARMUP` env gate:
+    - `=1` (default when unset): warmup runs.
+    - `=0`: warmup skipped (escape hatch if it becomes annoying on a
+      platform).
+- Modify: `perfxpert/cli/backends/claude.py` `install(...)` — add
+  **Step 0.5/4**: "Warm perfxpert-mcp (sqlite init, tool-registry
+  cache) ... ok" via `warmup_perfxpert_mcp()`. Log the duration for
+  observability; on warmup failure print guidance but do NOT abort
+  install (warmup is an optimization, not a correctness gate).
+- Modify: `perfxpert/cli/backends/gemini.py` `install(...)` — same
+  warmup step.
+- Modify: `perfxpert/cli/backends/codex.py` `install(...)` (PR 2) —
+  same warmup step.
+- Modify: `perfxpert/cli/backends/_prompt_adapter.py` —
+  `verify_mcp_live` retry policy confirmed: **3 attempts, 2-second
+  linear backoff** (also the retry policy documented in Task 4).
+  Shared helper `retry_mcp_handshake(fn, *, attempts=3, backoff_s=2.0)`
+  so all adapters use the same numbers.
+- Document: `docs/integration/mcp-server.md` (ported in Task 0) gains
+  a "Known issue: first-run exit-124" subsection with the
+  `PERFXPERT_MCP_WARMUP=1` workaround note.
+
+**Tests.**
+- `tests/test_cli/test_backends/test_mcp_warmup.py`:
+  - `test_warmup_spawns_and_closes_perfxpert_mcp`
+  - `test_warmup_reports_duration`
+  - `test_warmup_idempotent_on_second_call`
+  - `test_warmup_skipped_when_env_PERFXPERT_MCP_WARMUP_is_0`
+  - `test_install_does_not_abort_on_warmup_failure` (graceful
+    degradation)
+  - `test_verify_mcp_live_retries_3x_on_handshake_timeout`
+  - `test_verify_mcp_live_succeeds_on_second_retry` (simulated race)
+
+**Commit.** `feat(perfxpert/cli): warm perfxpert-mcp in install() + 3x retry on handshake (F2)`
+
+---
+
 ### Task 5 — `GeminiAdapter` (PR 1, promoted from PR 2 per I9)
 
 **Why.** Cycle-2 promotes Gemini from PR 2 → PR 1. Rationale: Gemini is
@@ -420,16 +620,28 @@ never touches `GEMINI.md`).
       `.gemini/settings.json`, `.perfxpert/AGENTS.md`. GEMINI.md is
       NEVER in the file-set.
     - `install(...)`:
-      - Step 1/3: Register MCP by editing `<cwd>/.gemini/settings.json`
+      - Step 0/4: **Warm `perfxpert-mcp`** via
+        `warmup_perfxpert_mcp()` (F2 — see Task 4.7). Honors
+        `PERFXPERT_MCP_WARMUP=0` override. Warmup failure is
+        non-fatal.
+      - Step 1/4: Register MCP by editing `<cwd>/.gemini/settings.json`
         (atomic write, preserve all existing keys). No shell-out for
         Gemini — config-file only. File is small + user-owned; I4
         concern does not apply.
-      - Step 2/3: Stage rendered prompt at `.perfxpert/AGENTS.md`.
-      - Step 3/3: **List-merge `context.fileName`** (practical §3.3):
+      - Step 2/4: Stage rendered prompt at `.perfxpert/AGENTS.md`
+        (rejection-language stanza on; see Task 4
+        `_prompt_adapter.render_prompt(reject_language=True)`).
+      - Step 3/4: **List-merge `context.fileName`** (practical §3.3):
         read existing list; append `.perfxpert/AGENTS.md` only if not
         already present; preserve user order + other entries. Never
         overwrite.
-      - `verify_mcp_live(cwd)` → Step 4/4 (rename progress).
+      - Step 3.5/4: **Install server-side gate hook** (F1 — see
+        Task 4.6): write initial
+        `allowedTools: ["mcp_perfxpert_*"]` in
+        `.gemini/settings.json` + companion lift-logic config.
+        Honors `PERFXPERT_GATE_HOOK=0` override.
+      - `verify_mcp_live(cwd)` → Step 4/4 (with retry policy from
+        Task 4.7 and gate-probe from Task 4.6).
     - `verify_mcp_live(cwd, telemetry=False)`:
       - Best-effort: `gemini mcp list --json` if available. If
         unavailable, fall back to telemetry-probe-only when
@@ -613,6 +825,9 @@ subplots.
     - If untrusted and non-TTY: raise `TrustRequired`.
   - `install(...)`:
     - Step 0/4: `_check_trust(cwd)`.
+    - Step 0.5/4: **Warm `perfxpert-mcp`** via
+      `warmup_perfxpert_mcp()` (F2 — Task 4.7). Honors
+      `PERFXPERT_MCP_WARMUP=0` override.
     - Step 1/4: Register MCP.
       - Primary: `codex mcp add perfxpert -- perfxpert-mcp`.
       - Fallback: **lazy-import `tomlkit` INSIDE this branch only** (I7):
@@ -642,7 +857,16 @@ subplots.
         `export CODEX_HOME=.perfxpert/codex-home`).
       - If `allow_agents_md_append=True`: append marker block to
         `cwd/AGENTS.md`.
-    - Step 4/4: `verify_mcp_live(cwd)`.
+    - Step 3.5/4: **Install server-side gate hook** (F1 — Task 4.6
+      Codex portion). Research required: identify Codex's
+      sandbox-level hook surface (`codex` plugin API, allowed-tools
+      list, or config.toml policy key) and install the
+      first-N-turns rejection logic. If Codex does not expose a
+      hook surface, document the gap and fall back to prompt-layer
+      rejection-language only (accept the degraded model-size
+      sensitivity on Codex).
+    - Step 4/4: `verify_mcp_live(cwd)` (with retry policy from
+      Task 4.7 and gate-probe from Task 4.6).
       - Probe Codex's actual tool-name wire format, cache under
         `$XDG_CACHE_HOME/perfxpert/codex_tool_name_template.txt`.
       - If cached format differs from `tool_name_template`, refuse
@@ -709,13 +933,20 @@ recipe closes the gap.
 | 2 | Route backend subcommands + recursion guard + help passthrough | 1 |
 | 3 | Consent cache (backend, cwd, file-set) keyed | 1 |
 | 4 | ClaudeCodeAdapter — verify_mcp_live, never-touch-tracked, execvpe | 1 |
+| **4.6** | **Server-side PreToolUse gate hook per backend (F1)** | **1** |
+| **4.7** | **Warm perfxpert-mcp in install() + 3x retry on handshake (F2)** | **1** |
 | 5 | GeminiAdapter — context.fileName list-append, promoted to PR 1 | 1 |
 | 6 | Dispatcher flags (--dry-run / --force / --allow-agents-md-append / --quiet) | 1 |
 | 7 | `install` subcommand + deprecation of install-patches + docs | 1 |
 | 8 | Per-backend uninstall with drift detection | 1 |
 | 9 | MCP tool-name length CI lint (I8) | 1 |
-| 10 | CodexAdapter + trust gate + lazy tomlkit + live-probe | 2 |
+| 10 | CodexAdapter + trust gate + lazy tomlkit + live-probe + Codex hook | 2 |
 | 11 | E2E skip-on-CI + manual recipe + telemetry probe docs | 1 (test) / 2 (codex portion) |
+
+Decimal sub-task numbering (4.6, 4.7) is used to keep existing Task
+numbers stable; 4.6 and 4.7 operate on the same adapter surface as
+Task 4 and are shipped within PR 1. Tasks 5, 6, 7, 8, 9, 10, 11
+retain their original numbers.
 
 ---
 
@@ -745,6 +976,12 @@ recipe closes the gap.
   correct spawn strategy.
 - Git-tracking detection: `git ls-files --error-unmatch` behavior on
   tracked + untracked + missing files.
+- **Gate-hook enforcement (F1 — Task 4.6):** per-backend unit tests
+  that simulate non-perfxpert first tool call and assert rejection +
+  `retryWith`. Gate-lift after `intent_classify` also asserted.
+- **MCP warmup + retry (F2 — Task 4.7):** warmup idempotence, env
+  override honored, simulated handshake timeout retried 3× with 2s
+  backoff.
 
 ### Integration (runs on CI; no backend binaries required)
 - Mock `subprocess.run` for backend CLIs. Assert the launcher calls
@@ -785,6 +1022,8 @@ recipe closes the gap.
 | R13 | Windows user pip-installs perfxpert, hits CRLF / backslash issues | Low | Low | Explicit POSIX-only boundary documented (I12). Tracking issue for Windows. |
 | R14 | `tomlkit` ImportError at runtime when user didn't install `[backends]` extra | Low | Low | Lazy-import inside CodexAdapter's fallback branch; actionable error message. (I7.) |
 | R15 | Concurrency: two `perfxpert-code` processes race on `.mcp.json` | Low | Low | Atomic tmp-write-rename; worst case is latest wins. Document known issue. |
+| **R-new-4** | **Prompt-layer gate is model-size sensitive; smaller models (Haiku-class) bypass the "do NOT emit bash" advisory and fire non-perfxpert tools in positions 2–4 OR skip perfxpert entirely** | **Medium (re-verified live)** | **High — regresses to phase-8 observed behavior** | **Server-side PreToolUse hook per backend (Task 4.6) intercepts non-`perfxpert_*` calls in first N turns and rejects with `retryWith`. Prompt-layer rejection-language stanza (Task 4 `_prompt_adapter`) is secondary enforcement. `verify_mcp_live()` adds a gate-probe asserting the hook is effective. F1; brainstorm §13.** |
+| **R-new-5** | **`perfxpert-mcp` first-run bootstrap exit-124 (MCP handshake or sqlite init race)** | **Medium** | **Medium — single retry clears; user experience regression** | **Warmup during `install()` (Task 4.7); `verify_mcp_live()` retries handshake 3× with 2s backoff; `PERFXPERT_MCP_WARMUP=1` default-on env hatch. F2; brainstorm §13.** |
 
 ---
 
@@ -831,7 +1070,18 @@ recipe closes the gap.
    passes.
 8. `docs/integration/mcp-server.md` (ported in Task 0) + `docs/guides/multi-backend.md`
    (new) exist with invocation examples + `.gitignore` hints +
-   POSIX-only note.
+   POSIX-only note + known-issue note for first-run exit-124 with
+   `PERFXPERT_MCP_WARMUP=1` workaround (F2).
+9. **Server-side gate hook (F1).** For claude + gemini, a canned
+   "list files" query on a freshly installed session is rejected by
+   the hook with a `retryWith` message directing the model to call
+   `intent_classify` first. A canned "analyze this trace" query
+   routes through `intent_classify`. Both assertions covered by
+   `verify_mcp_live` gate-probe + telemetry log.
+10. **`perfxpert-mcp` warmup (F2).** Adapter `install()` reports a
+    successful `WarmupReport` (or a graceful-degradation log if
+    `PERFXPERT_MCP_WARMUP=0`). `verify_mcp_live()` retries handshake
+    up to 3× (test-verified via simulated race).
 
 **PR 2 is done when:**
 1. `perfxpert-code codex --dry-run` works end-to-end in a trusted
@@ -870,10 +1120,12 @@ recipe closes the gap.
 
 ## Estimated size
 
-- **PR 1: Medium-Large** (~1500 LOC across 14 files incl. tests;
-  ~10-12 work hours for a focused session; review in 2 passes).
-- **PR 2: Medium** (~600 LOC, parallels existing adapter pattern +
-  trust gate + live-probe; 4-5 work hours).
+- **PR 1: Medium-Large** (~1900 LOC across ~18 files incl. tests;
+  adds Task 4.6 gate-hook modules + Task 4.7 warmup module; ~13–15
+  work hours for a focused session; review in 2 passes).
+- **PR 2: Medium** (~700 LOC, parallels existing adapter pattern +
+  trust gate + live-probe + Codex-specific hook research; 5–6 work
+  hours).
 
 ---
 
@@ -916,5 +1168,10 @@ recipe closes the gap.
 | N1 | Protocol vs ABC | Brainstorm §12 N1 (documented, retained) |
 | N2 | Named logger per adapter | Task 1 `_backend_log.py` stub; full scaffold deferred |
 | N3 | Windows follow-up | Non-goals + tracking issue |
+| **F1** | **Prompt-layer gate insufficient for smaller LLMs (cycle-5 E2E)** | **New Task 4.6 (server-side PreToolUse hook per backend) + Task 4 `_prompt_adapter` rejection-language stanza + `verify_mcp_live` gate-probe + R-new-4 + Assumptions clause** |
+| **F2** | **`perfxpert-code run` bootstrap exit-124 (cycle-5 E2E)** | **New Task 4.7 (warmup during `install()`) + Task 4 `verify_mcp_live` 3× handshake retry + `PERFXPERT_MCP_WARMUP=1` env hatch + R-new-5 + Assumptions clause + docs known-issue note** |
 
 **Final count: 0 blockers, 0 importants, 3 documented-with-rationale nitpicks.**
+F1 (HIGH) and F2 (MEDIUM) — post-cycle-1 live E2E findings — are both
+resolved in this plan via Tasks 4.6 and 4.7 (decimal sub-tasks of
+Task 4; no renumbering of existing tasks). See brainstorm §13.
