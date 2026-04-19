@@ -241,20 +241,30 @@ config.fixtures = {
     # and are covered transitively.
     "vopd_extra_subops":
         r"@LIT_FIXTURE_VOPD_EXTRA_SUBOPS_CO@",
-    # tensor_load_to_lds (VIMAGE TENSOR, gfx1250-only) — pins the
-    # cross-target (gfx1250 -> gfx942) loud refusal contract for the
-    # gfx1250 TENSOR cnt unit (`MIMGInstructions.td:2049-2113`,
-    # `isGFX125xOnly`).  The handler in `handle_vimage.cpp` refuses
-    # via `RaiseFailure::unsupportedShape` because the per-dim
-    # addressing semantics of a Tensor Descriptor cannot be
-    # reconstructed from gfx9xx primitives, and the matching LLVM
-    # intrinsic `int_amdgcn_tensor_load_to_lds`
-    # (IntrinsicsAMDGPU.td:4213) is itself `isGFX125xOnly`.  Sibling
-    # `tensor_store_from_lds` and the `_d4` operand-shape variant
-    # follow the identical SemOp dispatch and are covered by
-    # handler-shape identity (only the trailing diagnostic intrinsic
-    # name differs); the corpus blockers we are unblocking here are
-    # all `_d2` loads.
+    # tensor_load_to_lds (VIMAGE TENSOR, gfx1250-only) — single
+    # `.co` fixture shared by two complementary lit tests in the
+    # `tensor_load_to_lds/` directory:
+    #   * `tensor_load_to_lds.ll` — pins the cross-target
+    #     (gfx1250 -> gfx942) loud refusal contract. The handler in
+    #     `handle_vimage.cpp` refuses via
+    #     `RaiseFailure::unsupportedShape` because the per-dim
+    #     addressing semantics of a Tensor Descriptor cannot be
+    #     reconstructed from gfx9xx primitives, and the matching LLVM
+    #     intrinsic `int_amdgcn_tensor_load_to_lds`
+    #     (IntrinsicsAMDGPU.td:4213) is itself `isGFX125xOnly`.
+    #   * `tensor_load_to_lds_same_target.ll` — pins the same-target
+    #     (gfx1250 -> gfx1250) intrinsic-emit path: marshalling of
+    #     vaddr0 / vaddr1 SGPR ranges into the `<4 x i32>` /
+    #     `<8 x i32>` D# group operands, zero-fill of the unused `_d2`
+    #     groups (2 and 3) and the always-reserved group 4, and the
+    #     `i32 0` cpol immediate, ending in a single
+    #     `llvm.amdgcn.tensor.load.to.lds` call.
+    # Sibling `tensor_store_from_lds` and the `_d4` operand-shape
+    # variant follow the identical SemOp dispatch (only the trailing
+    # intrinsic name and the operand-count branch differ); the
+    # corpus blockers we unblocked are all `_d2` loads, so we keep
+    # the fixture as a single `_d2` payload and exercise both
+    # contracts off it.
     "tensor_load_to_lds":
         r"@LIT_FIXTURE_TENSOR_LOAD_TO_LDS_CO@",
 }
