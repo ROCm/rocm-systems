@@ -36,6 +36,7 @@ __all__ = [
     "render_prompt",
     "emit_marker_block",
     "is_git_tracked",
+    "is_absolute_path_git_tracked",
     "atomic_write",
     "stage_cache_file",
     "retry_mcp_handshake",
@@ -194,6 +195,58 @@ def is_git_tracked(path: Path, cwd: Path) -> bool:
         result = subprocess.run(
             ["git", "ls-files", "--error-unmatch", str(path)],
             cwd=str(cwd),
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def is_absolute_path_git_tracked(path: Path) -> bool:
+    """Return True iff the absolute `path` is tracked in any git repo.
+
+    Unlike :func:`is_git_tracked` (which requires a caller-known repo
+    root as `cwd`), this helper walks upward from `path.parent`
+    looking for a `.git` directory, then asks git whether `path` is
+    tracked relative to that repo root. Used for absolute writes to
+    user-scope files (e.g. ``~/.codex/config.toml``) that may live
+    inside a dotfiles-style repo the caller doesn't know about.
+
+    Returns False on any of: git missing, no enclosing repo, git
+    errors. The critical case is "tracked == True" — we must refuse
+    to overwrite such a file.
+    """
+    if not shutil.which("git"):
+        return False
+    path = Path(path).expanduser()
+    # Absolute-path operands are required for the upward walk to be
+    # well-defined. A non-existent path is fine; we still walk its
+    # parents looking for the enclosing repo root.
+    if not path.is_absolute():
+        try:
+            path = path.resolve()
+        except OSError:
+            return False
+
+    # Walk upward looking for `.git` (file or dir — supports worktrees).
+    probe = path.parent if not path.is_dir() else path
+    repo_root: Path | None = None
+    while True:
+        if (probe / ".git").exists():
+            repo_root = probe
+            break
+        if probe.parent == probe:  # reached filesystem root
+            break
+        probe = probe.parent
+    if repo_root is None:
+        return False
+
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", str(path)],
+            cwd=str(repo_root),
             capture_output=True,
             check=False,
             timeout=5,

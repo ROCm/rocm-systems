@@ -764,3 +764,91 @@ def test_install_report_shape(
     # MCP config path present.
     names = {p.name for p in r.paths_written}
     assert "config.toml" in names
+
+
+# ---------------------------------------------------------------------------
+# Finding #2: refuse git-tracked ~/.codex/config.toml (dotfiles-style repos).
+# ---------------------------------------------------------------------------
+
+
+def test_mark_trusted_refuses_git_tracked_config(
+    isolated_home: Path, project_cwd: Path
+) -> None:
+    """Dotfiles-style: `~/.codex/config.toml` is git-tracked → ConfigClobber.
+
+    Initialise a repo at $HOME, commit an empty ~/.codex/config.toml, then
+    ask `_mark_trusted` to rewrite it. The adapter must refuse rather
+    than silently overwrite a versioned file.
+    """
+    cfg = isolated_home / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("")  # empty but present
+
+    # Make $HOME a git repo, track the file.
+    subprocess.run(
+        ["git", "init", "-q", "--initial-branch=main"],
+        cwd=str(isolated_home),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@e.com"],
+        cwd=str(isolated_home),
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=str(isolated_home),
+        check=True,
+    )
+    subprocess.run(
+        ["git", "add", ".codex/config.toml"],
+        cwd=str(isolated_home),
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "init"],
+        cwd=str(isolated_home),
+        check=True,
+    )
+
+    with pytest.raises(ConfigClobber, match="tracked in a git repository"):
+        CodexAdapter()._mark_trusted(project_cwd, home=isolated_home)
+
+
+def test_structured_edit_refuses_git_tracked_project_config(
+    isolated_home: Path, project_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Project-scope `.codex/config.toml` is git-tracked → ConfigClobber.
+
+    The project_cwd fixture already initialises a git repo. Add and
+    commit a `.codex/config.toml`, then force the install to fall
+    back to the structured TOML edit by making `codex mcp add` fail.
+    The fallback must refuse the tracked file.
+    """
+    _mark_trusted(isolated_home, project_cwd)
+
+    # Pre-create + commit a .codex/config.toml in the project repo.
+    cfg = project_cwd / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("# project-scoped codex config\n")
+    subprocess.run(
+        ["git", "add", ".codex/config.toml"],
+        cwd=str(project_cwd),
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add codex config"],
+        cwd=str(project_cwd),
+        check=True,
+    )
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    # `codex mcp add` returns non-zero → fallback structured edit runs.
+    monkeypatch.setattr(
+        "perfxpert.cli._backend.codex.subprocess.run",
+        _fake_codex_subprocess(add_exit=1, list_stdout=b""),
+    )
+
+    with pytest.raises(ConfigClobber, match="tracked in a git repository"):
+        CodexAdapter().install(project_cwd, scope="project")
