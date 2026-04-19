@@ -31,9 +31,8 @@ decided if the surface supported it.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from perfxpert.cli._backend.protocol import GateHookUnsupported
 from perfxpert.cli._gate_hooks import (
@@ -43,32 +42,13 @@ from perfxpert.cli._gate_hooks import (
 
 
 __all__ = [
-    "CodexGateHookResult",
     "install",
     "uninstall",
     "evaluate_gate_state",
 ]
 
 
-@dataclass(frozen=True)
-class CodexGateHookResult:
-    """Sentinel return type for Codex gate-hook callers.
-
-    We never return this today — `install()` always raises
-    `GateHookUnsupported`. The type exists so future Codex-versions
-    that expand PreToolUse to MCP can return it without an API
-    break (same shape as `ClaudeGateInstallResult`).
-    """
-
-    prompt_layer_only: bool = True
-    reason: str = (
-        "Codex PreToolUse only intercepts Bash as of April 2026; "
-        "MCP tool calls are not interceptable. See "
-        "docs/decisions/2026-04-19-codex-hook-surface.md."
-    )
-
-
-def install(cwd: Path, *, env: dict | None = None) -> CodexGateHookResult:
+def install(cwd: Path, *, env: dict | None = None) -> NoReturn:
     """Install the Codex gate hook.
 
     **Always raises `GateHookUnsupported`** on current Codex (April

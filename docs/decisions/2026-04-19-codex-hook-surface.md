@@ -94,8 +94,9 @@ Key findings:
    flip this decision to `native-hook` by implementing
    `CodexGateHook.install()` to write the `hooks.json` entry and
    removing the `GateHookUnsupported` in `_gate_hooks/codex.py`.
-   The `CodexGateHookResult` dataclass already exists for that
-   future shape.
+   At that point, re-introduce a return-value dataclass modelled on
+   `ClaudeGateInstallResult` (dropped in the PR 2 review cleanup
+   because nothing consumed it).
 
 ### Change set for Task 4.6 Codex-portion
 

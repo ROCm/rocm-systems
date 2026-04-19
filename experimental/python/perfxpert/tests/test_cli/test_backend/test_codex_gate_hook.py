@@ -22,7 +22,6 @@ from perfxpert.cli._backend.protocol import (
     InstallReport,
 )
 from perfxpert.cli._gate_hooks.codex import (
-    CodexGateHookResult,
     evaluate_gate_state,
     install,
     uninstall,
@@ -64,18 +63,6 @@ def test_uninstall_is_noop(tmp_path: Path) -> None:
     after = set(tmp_path.iterdir()) if tmp_path.is_dir() else set()
     assert result is None
     assert before == after
-
-
-def test_result_dataclass_shape() -> None:
-    """CodexGateHookResult.prompt_layer_only == True by default.
-
-    The class exists for future shape-compat when Codex expands
-    PreToolUse to MCP interception (see decision record re-visit
-    conditions).
-    """
-    r = CodexGateHookResult()
-    assert r.prompt_layer_only is True
-    assert "prompt-layer" in r.reason.lower() or "bash" in r.reason.lower()
 
 
 # ---------------------------------------------------------------------------
