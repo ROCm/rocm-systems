@@ -22,16 +22,20 @@
 // Register Layout Equations (from AMD Matrix Instruction Calculator)
 // ------------------------------------------------------------------
 //
-// gfx12 (RDNA4) v_wmma_f32_16x16x32_{f16,bf16}, Wave32:
+// gfx12 (RDNA4) v_wmma_f32_16x16x{32,64}_{f16,bf16,fp8_*,bf8_*}, Wave32:
 //
-// Both element types share the same lane layout because both are 16-bit
-// types — the K-distribution in the diagrams below is byte-position
-// agnostic between half and bfloat. The only divergence is the per-MFMA
-// intrinsic and bitcast (see `inputType` switch in `runGroupPass` and
-// `emitWMMAtoMFMA`).
+// All supported variants share the same per-Wave32-lane fragment shape:
+// 8 VGPRs (= 32 bytes) per A side, 8 VGPRs per B side, 8 VGPRs of f32
+// per C/D side. The K-dimension scales inversely with the element
+// width (K=32 for 16-bit elements, K=64 for 8-bit elements), so the
+// total bytes per lane stay constant. The lane redistribution math
+// below operates on dwords (32-bit cells); it is therefore byte-
+// identical across element widths — the only per-variant divergence
+// lives in (a) the MFMA intrinsic dispatched on the gfx942 side and
+// (b) the per-MFMA bitcast / pack type. See `runGroupPass` and the
+// `WMMAInputType` enum in `wmma_lowering.hpp` for the full enumeration.
 //
-//
-//   A input (8 VGPRs, <16 x half>):
+//   A input — 16-bit variants (8 VGPRs, <16 x {half|bfloat}>):
 //     i = lane % 16
 //     k = 8*floor(GPR/2) + 4*floor(lane/16) + 2*(GPR%2) + floor(bits/16)
 //
@@ -43,19 +47,33 @@
 //                     GPR 3→k={14,15} GPR 4→k={20,21} GPR 5→k={22,23}
 //                     GPR 6→k={28,29} GPR 7→k={30,31}
 //
-//   C/D output (8 VGPRs, <8 x float>):
+//   A input — 8-bit variants (8 VGPRs, <8 x i32> = 32 packed fp8/bf8):
+//     Same dword-grain layout as the 16-bit variants — a fp8/bf8 byte
+//     occupies the same byte slot inside its containing dword and
+//     across lanes/GPRs that the corresponding 16-bit element would
+//     have occupied. The K-stride doubles (each dword holds 4 fp8/bf8
+//     bytes vs 2 halves) so the per-GPR K-range is twice as wide, but
+//     the redistribution acts at dword granularity and does not see
+//     the element-level interpretation.
+//
+//   C/D output (8 VGPRs, <8 x float>) — invariant across variants:
 //     i = 8*floor(lane/16) + GPR
 //     j = lane % 16
 //     → Lanes 0-15: rows 0-7;  Lanes 16-31: rows 8-15
 //
-// gfx942 (CDNA3) v_mfma_f32_16x16x16_f16, Wave64:
+// gfx942 (CDNA3) MFMA targets:
 //
-//   A input (2 VGPRs, <4 x half>):
-//     i = lane % 16
-//     k = 4*floor(lane/16) + 2*GPR + floor(bits/16)
-//     → Lanes 0-15: k=0..3;  16-31: k=4..7;  32-47: k=8..11;  48-63: k=12..15
+//   16-bit MFMA (v_mfma_f32_16x16x16_{f16|bf16_1k}, K=16 per call):
+//     A input (2 VGPRs, <4 x {half|i16}>):
+//       i = lane % 16
+//       k = 4*floor(lane/16) + 2*GPR + floor(bits/16)
 //
-//   C/D output (4 VGPRs, <4 x float>):
+//   8-bit MFMA (v_mfma_f32_16x16x32_{fp8|bf8}_{fp8|bf8}, K=32 per call):
+//     A input (2 VGPRs, packed as i64 = 8 fp8/bf8 bytes):
+//       Same per-lane VGPR width (2 dwords) as the 16-bit MFMA. The
+//       K-fanout doubles to match the doubled WMMA K-range.
+//
+//   C/D output (4 VGPRs, <4 x float>) — invariant across variants:
 //     i = 4*floor(lane/16) + (GPR % 4)
 //     j = lane % 16
 //     → Lanes 0-15: rows 0-3; 16-31: rows 4-7; 32-47: rows 8-11; 48-63: rows 12-15
@@ -239,21 +257,27 @@ static void collectResult(IRBuilder<> &B, Module &M,
 }
 
 /// Run one full pass for a virtual Wave32 group:
-/// redistribute → 2× MFMA(K=16) → collect.
+/// redistribute → 2× MFMA → collect.
 ///
 /// \param groupBase  0 for group 0 (W64 lanes 0-31), 32 for group 1 (lanes 32-63)
-/// \param inputType  selects MFMA intrinsic + per-MFMA bitcast element type.
+/// \param inputType  selects MFMA intrinsic + per-MFMA pack/bitcast type.
 ///                   The lane-redistribution math is element-type-agnostic
-///                   for 16-bit element types (both gfx12 WMMA_F16 and
-///                   WMMA_BF16 use identical K-distribution); the divergence
-///                   is purely in the MFMA intrinsic name and the
-///                   per-MFMA-call bitcast vector type:
-///                     F16  → mfma_f32_16x16x16f16    , <4 x half>
-///                     BF16 → mfma_f32_16x16x16bf16_1k, <4 x i16>
-///                   The bf16 → i16 bitcast is principled: CDNA's bf16
-///                   MFMA intrinsic was defined before bfloat became a
-///                   first-class LLVM type, and bf16 and i16 share the
-///                   same in-memory storage container.
+///                   across the entire WMMAInputType enumeration because
+///                   every supported variant has the same per-Wave32-lane
+///                   fragment size (8 VGPRs of A, 8 VGPRs of B, 8 VGPRs of
+///                   f32 C/D) and the same K-decomposition factor (split
+///                   into 2 chained MFMA calls per Wave32 group). The only
+///                   per-variant divergence is the MFMA intrinsic name
+///                   and the per-MFMA-call pack type:
+///                     F16    → mfma_f32_16x16x16f16,        <4 x half>
+///                     BF16   → mfma_f32_16x16x16bf16_1k,    <4 x i16>
+///                     FP8_*  → mfma_f32_16x16x32_<a>_<b>,   i64
+///                     BF8_*  → mfma_f32_16x16x32_<a>_<b>,   i64
+///                   The bf16 → i16 and fp8/bf8 → i64 bitcasts are
+///                   principled: the matching CDNA MFMA intrinsics were
+///                   defined before the corresponding first-class LLVM
+///                   types existed, and the storage containers are
+///                   bit-for-bit identical.
 static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
                          unsigned groupBase, Value *laneId,
                          Value **aDwords, Value **bDwords, Value **cDwords,
@@ -278,21 +302,49 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   redistributeAcc(B, M, cDwords, addrLo, addrHi, laneGroup, mfmaC);
 
   // Per-MFMA bitcast type and intrinsic dispatch — the only point in
-  // the lowering where F16 and BF16 diverge.
-  Type *mfmaElemTy =
-      (inputType == WMMAInputType::BF16) ? Type::getInt16Ty(ctx.C)
-                                         : ctx.f16Ty;
-  auto *mfmaPackTy = FixedVectorType::get(mfmaElemTy, 4);
+  // the lowering where the WMMA variants diverge.
+  //
+  // 16-bit variants pack 2 redistributed dwords into a `<4 x t>` vector
+  // (4 elements per lane × 2 bytes = 8 bytes = 2 dwords). The 8-bit
+  // variants pack the same 2 dwords into a single `i64`; the CDNA fp8/
+  // bf8 MFMA intrinsics were defined before fp8 became a first-class
+  // LLVM type, so they take 8 packed fp8/bf8 bytes as i64 directly.
+  // Both packings are 64-bit and produced by the same 2-dword reduce
+  // (`packDwords`) — only the bitcast target type differs.
+  Type *mfmaPackTy = nullptr;
+  Intrinsic::ID mfmaId;
+  switch (inputType) {
+  case WMMAInputType::F16:
+    mfmaPackTy = FixedVectorType::get(ctx.f16Ty, 4);
+    mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x16f16;
+    break;
+  case WMMAInputType::BF16:
+    mfmaPackTy = FixedVectorType::get(Type::getInt16Ty(ctx.C), 4);
+    mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x16bf16_1k;
+    break;
+  case WMMAInputType::FP8_FP8:
+    mfmaPackTy = ctx.i64Ty;
+    mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_fp8_fp8;
+    break;
+  case WMMAInputType::FP8_BF8:
+    mfmaPackTy = ctx.i64Ty;
+    mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_fp8_bf8;
+    break;
+  case WMMAInputType::BF8_FP8:
+    mfmaPackTy = ctx.i64Ty;
+    mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_bf8_fp8;
+    break;
+  case WMMAInputType::BF8_BF8:
+    mfmaPackTy = ctx.i64Ty;
+    mfmaId = Intrinsic::amdgcn_mfma_f32_16x16x32_bf8_bf8;
+    break;
+  }
   auto *v4f32Ty = FixedVectorType::get(ctx.f32Ty, 4);
 
   Value *srcA_lo = packDwords(B, mfmaA_lo, 2, ctx.i32Ty, mfmaPackTy);
   Value *srcB_lo = packDwords(B, mfmaB_lo, 2, ctx.i32Ty, mfmaPackTy);
   Value *acc     = packDwords(B, mfmaC,    4, ctx.i32Ty, v4f32Ty);
 
-  Intrinsic::ID mfmaId =
-      (inputType == WMMAInputType::BF16)
-          ? Intrinsic::amdgcn_mfma_f32_16x16x16bf16_1k
-          : Intrinsic::amdgcn_mfma_f32_16x16x16f16;
   Function *mfmaFn = Intrinsic::getOrInsertDeclaration(&M, mfmaId);
   Value *cbsz = B.getInt32(0), *abid = B.getInt32(0), *blgp = B.getInt32(0);
 

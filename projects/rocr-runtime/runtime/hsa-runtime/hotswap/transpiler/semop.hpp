@@ -435,6 +435,23 @@ enum class SemOp : uint16_t {
   // (mfma_f32_16x16x16f16 vs mfma_f32_16x16x16bf16_1k).
   V_WMMA_F32_16x16x32_F16,
   V_WMMA_F32_16x16x32_BF16,
+  // 16x16x64 WMMA with f32 accumulator and 8-bit element types
+  // (fp8/bf8). The four AB combinations are distinct opcodes (and
+  // distinct CDNA3 MFMA intrinsics on gfx942) but share the same
+  // per-lane fragment shape (A,B: <8 x i32> = 32 fp8/bf8 bytes per
+  // Wave32 lane, C/D: <8 x f32>) and the same gfx942 MFMA decomposition
+  // path through `emitWMMAtoMFMA`. The K=64 dimension splits into
+  // 2 chained K=32 MFMAs per Wave32 group, mirroring the K=32→2×K=16
+  // split used for the 16-bit variants. The lane-redistribution math
+  // is byte-identical between the two K-families (32 bytes per lane
+  // either way), so the only divergence inside `emitWMMAtoMFMA` is the
+  // per-MFMA pack type (i64 vs <4 x half|i16>) and the dispatched
+  // intrinsic ID. See `WMMAInputType` in `wmma_lowering.hpp` for the
+  // full enumeration.
+  V_WMMA_F32_16x16x64_FP8_FP8,
+  V_WMMA_F32_16x16x64_FP8_BF8,
+  V_WMMA_F32_16x16x64_BF8_FP8,
+  V_WMMA_F32_16x16x64_BF8_BF8,
 
   // -- VOPD -- (handled via string parsing of fullText, not opcode)
   VOPD_GENERIC,

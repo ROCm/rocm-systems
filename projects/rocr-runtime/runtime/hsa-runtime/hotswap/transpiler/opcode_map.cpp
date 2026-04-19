@@ -809,6 +809,21 @@ static const Entry kCanonTable[] = {
     // amdgcn_wmma_f32_16x16x32_bf16 when the target supports WMMA12.
     E(V_WMMA_F32_16X16X32_BF16_w32_twoaddr, V_WMMA_F32_16x16x32_BF16),
     E(V_WMMA_F32_16X16X32_BF16_w32_threeaddr, V_WMMA_F32_16x16x32_BF16),
+    // 16x16x64 WMMA, 8-bit element types (gfx1250 RDNA4 VOP3P opcodes
+    // 0x06a..0x06d). All four AB combinations share the per-lane
+    // fragment shape (A,B: <8 x i32>, C/D: <8 x f32>) and route through
+    // the gfx942 MFMA lowering with a per-variant intrinsic dispatch
+    // (see `runGroupPass` in wmma_lowering.cpp). Both `_twoaddr` and
+    // `_threeaddr` MC pseudo variants represent the same semantic op,
+    // mirroring the F16/BF16 mapping above.
+    E(V_WMMA_F32_16X16X64_FP8_FP8_w32_twoaddr,   V_WMMA_F32_16x16x64_FP8_FP8),
+    E(V_WMMA_F32_16X16X64_FP8_FP8_w32_threeaddr, V_WMMA_F32_16x16x64_FP8_FP8),
+    E(V_WMMA_F32_16X16X64_FP8_BF8_w32_twoaddr,   V_WMMA_F32_16x16x64_FP8_BF8),
+    E(V_WMMA_F32_16X16X64_FP8_BF8_w32_threeaddr, V_WMMA_F32_16x16x64_FP8_BF8),
+    E(V_WMMA_F32_16X16X64_BF8_FP8_w32_twoaddr,   V_WMMA_F32_16x16x64_BF8_FP8),
+    E(V_WMMA_F32_16X16X64_BF8_FP8_w32_threeaddr, V_WMMA_F32_16x16x64_BF8_FP8),
+    E(V_WMMA_F32_16X16X64_BF8_BF8_w32_twoaddr,   V_WMMA_F32_16x16x64_BF8_BF8),
+    E(V_WMMA_F32_16X16X64_BF8_BF8_w32_threeaddr, V_WMMA_F32_16x16x64_BF8_BF8),
 };
 
 #undef SMEM3

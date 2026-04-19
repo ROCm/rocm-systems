@@ -164,6 +164,19 @@ config.fixtures = {
     # by the existing Gfx1250Gpu.Matmul128x128 GPU gtest.
     "wmma_f32_16x16x32_bf16":
         r"@LIT_FIXTURE_WMMA_F32_16X16X32_BF16_CO@",
+    # v_wmma_f32_16x16x64_fp8_fp8 (gfx1250 RDNA4 VOP3P opcode 0x06a)
+    # lowered to gfx942 (CDNA3) via the parameterised emitWMMAtoMFMA
+    # helper with WMMAInputType::FP8_FP8.  Pins the fp8_fp8-specific
+    # CDNA3 MFMA intrinsic (mfma.f32.16x16x32.fp8.fp8), the per-MFMA
+    # `bitcast <2 x i32> ... to i64` (CDNA3's pre-fp8-type intrinsic
+    # signature), and the 2x K=32 decomposition with chained
+    # accumulator over two virtual Wave32 groups (4 MFMA calls total).
+    # Sibling FP8_BF8 / BF8_FP8 / BF8_BF8 cases are covered
+    # transitively by handler-shape identity (only the trailing
+    # intrinsic name differs); see the wmmaInputType lambda + switch
+    # in handle_valu_vop3p.cpp.
+    "wmma_f32_16x16x64_fp8_fp8":
+        r"@LIT_FIXTURE_WMMA_F32_16X16X64_FP8_FP8_CO@",
 }
 
 lit_config.load_config(
