@@ -915,6 +915,30 @@ static const Entry kCanonTable[] = {
     E(GLOBAL_LOAD_ASYNC_TO_LDS_B64_SADDR, GLOBAL_LOAD_ASYNC_TO_LDS_B64),
     E(GLOBAL_LOAD_ASYNC_TO_LDS_B128,      GLOBAL_LOAD_ASYNC_TO_LDS_B128),
     E(GLOBAL_LOAD_ASYNC_TO_LDS_B128_SADDR,GLOBAL_LOAD_ASYNC_TO_LDS_B128),
+
+    // ---------------------------------------------------------------------
+    // FLAT VMEM prefetch (gfx1250 RDNA4 — VFLAT 0x05D, hint-class).
+    //
+    // The disassembler returns the gfx1250 reals
+    // `GLOBAL_PREFETCH_B8_gfx1250` (plain VGPR_64 vaddr) and
+    // `GLOBAL_PREFETCH_B8_SADDR_gfx1250` (SReg_64 + VGPR_32 SADDR;
+    // FLATInstructions.td:545-553 + FLATInstructions.td:3677-3678,
+    // `VFLAT_Real_AllAddr_gfx1250<0x05d>`). The canonicalization chain
+    // collapses each `_gfx1250` real onto its pseudo via
+    // `buildMcToPseudoMap`. The two addressing-mode pseudos share a
+    // single SemOp because they map onto the same intrinsic
+    // (`int_amdgcn_global_prefetch`, IntrinsicsAMDGPU.td:3211); the
+    // handler discriminates on `op.nSrcs()` (3 vs 4) the same way the
+    // GLOBAL_LOAD_ASYNC_TO_LDS_B* family above does.
+    //
+    // The matching `flat_prefetch_b8` (FLAT, not GLOBAL) is omitted —
+    // no kernel in the current corpus surfaces it. If one does, add a
+    // `FLAT_PREFETCH_B8{,_SADDR}` pair here (mapping to a separate
+    // SemOp, since the address space differs and the lift would use
+    // `int_amdgcn_flat_prefetch`).
+    // ---------------------------------------------------------------------
+    E(GLOBAL_PREFETCH_B8,       GLOBAL_PREFETCH_B8),
+    E(GLOBAL_PREFETCH_B8_SADDR, GLOBAL_PREFETCH_B8),
 };
 
 #undef SMEM3

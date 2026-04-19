@@ -719,6 +719,63 @@ enum class SemOp : uint16_t {
   GLOBAL_LOAD_ASYNC_TO_LDS_B64,
   GLOBAL_LOAD_ASYNC_TO_LDS_B128,
 
+  // -- gfx1250 VMEM prefetch (FLAT, hint-class) --
+  //
+  // FLAT advisory prefetch on a per-lane (divergent) VGPR pointer. The
+  // family is gated by `FeatureVmemPrefInsts` (AMDGPU.td:283) and is
+  // currently only enabled inside `FeatureISAVersion12_50_Common`
+  // (AMDGPU.td:2092), i.e. gfx1250 / RDNA4 — no earlier ISA exposes a
+  // matching VMEM-prefetch encoding. The companion
+  // `int_amdgcn_global_prefetch` intrinsic (IntrinsicsAMDGPU.td:3211)
+  // takes a global-address-space pointer + an i32 cachepolicy immarg
+  // (bits[2:0]=th, bits[4:3]=scope) and is annotated with
+  // `IntrInaccessibleMemOrArgMemOnly + IntrWillReturn + NoCapture +
+  // IntrNoCallback + IntrNoFree`, so the SDAG models it as a memory
+  // intrinsic that may overlap the load lattice but never publishes a
+  // value — exactly the hint contract the hardware promises.
+  //
+  // Operand layout (FLAT_Prefetch_Pseudo, FLATInstructions.td:525-553):
+  //
+  //   plain (3 srcs): vaddr:VGPR_64,            offset, cpol
+  //   SADDR (4 srcs): saddr:SReg_64, vaddr:VGPR_32, offset, cpol
+  //
+  // Note `has_vdst = 0`, so there is no destination and no LDS slot —
+  // distinct from the GLOBAL_LOAD_ASYNC_TO_LDS_B* family above. Width
+  // is fixed at 8 bytes (the `_b8` mnemonic refers to the request
+  // granularity, not data); a single SemOp suffices for both
+  // addressing-mode variants because `handleFLAT` discriminates on
+  // `op.nSrcs()` exactly the same way the async-to-LDS family does.
+  //
+  // === Same-target gfx1250 → gfx1250 contract ===
+  //
+  // Lift directly to `int_amdgcn_global_prefetch(globalPtr, cpol)`.
+  // The FLAT `flat_offset` is folded onto the address by GEP'ing
+  // `globalPtr += offset` before the call (the intrinsic itself
+  // takes no offset operand). The call sits OUTSIDE
+  // `emitUnderExec` because the intrinsic carries the EXEC mask
+  // implicitly through `IntrInaccessibleMemOrArgMemOnly` — wrapping
+  // it in a per-lane diamond would emit one prefetch per active
+  // lane, gratuitously inflating the IR for what the hardware
+  // executes as a single broadcast hint.
+  //
+  // === Cross-target (gfx942 and earlier) contract ===
+  //
+  // `int_amdgcn_global_prefetch` is gated by `HasVmemPrefInsts`
+  // (FLATInstructions.td:1367) and has no isel coverage on
+  // gfx942 — emitting the call would compile-fail downstream.
+  // The closest sibling, `int_amdgcn_s_prefetch_data`
+  // (IntrinsicsAMDGPU.td:3188), requires a UNIFORM (SGPR) pointer,
+  // which we cannot prove for the divergent VGPR address used here
+  // without divergence analysis. Per the user-rules (no silent
+  // fallbacks) and consistent with the gfx1250-only refusal contract
+  // applied to GLOBAL_LOAD_ASYNC_TO_LDS_B* and TENSOR_LOAD_TO_LDS
+  // above, we refuse loudly via `RaiseFailure::unsupportedShape`.
+  // Triton's TDM-pipelined GEMM kernels schedule prefetches at
+  // specific points in their software pipeline and a silent drop on
+  // gfx942 would mask both the cross-target capability gap and any
+  // performance-tuning regression downstream.
+  GLOBAL_PREFETCH_B8,
+
   // -- AGPR --
   V_ACCVGPR_READ_B32, V_ACCVGPR_WRITE_B32,
 

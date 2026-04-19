@@ -231,6 +231,8 @@ const char *semOpName(SemOp op) {
     // FLAT async global → LDS (gfx1250-only)
     S(GLOBAL_LOAD_ASYNC_TO_LDS_B8) S(GLOBAL_LOAD_ASYNC_TO_LDS_B32)
     S(GLOBAL_LOAD_ASYNC_TO_LDS_B64) S(GLOBAL_LOAD_ASYNC_TO_LDS_B128)
+    // FLAT VMEM prefetch (gfx1250-only, hint-class)
+    S(GLOBAL_PREFETCH_B8)
     // AGPR
     S(V_ACCVGPR_READ_B32) S(V_ACCVGPR_WRITE_B32)
 

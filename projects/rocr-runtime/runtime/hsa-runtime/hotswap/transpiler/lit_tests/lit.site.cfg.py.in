@@ -323,6 +323,46 @@ config.fixtures = {
     #     transitively by the SemOp-keyed switch arm.
     "global_load_async_to_lds":
         r"@LIT_FIXTURE_GLOBAL_LOAD_ASYNC_TO_LDS_CO@",
+    # global_prefetch_b8 (FLAT, gfx1250-only) — single `.co` fixture
+    # shared by two complementary lit tests in the
+    # `global_prefetch_b8/` directory:
+    #   * `global_prefetch_b8.ll` — pins the cross-target
+    #     (gfx1250 → gfx942) loud refusal contract. The handler in
+    #     `handle_flat.cpp` refuses via
+    #     `RaiseFailure::unsupportedShape` because gfx942 has no
+    #     VMEM-prefetch unit and the matching LLVM intrinsic
+    #     `int_amdgcn_global_prefetch` (IntrinsicsAMDGPU.td:3211,
+    #     LLVM PR #150466) is gated by `HasVmemPrefInsts`, only
+    #     set on gfx1250+.  The closest sibling
+    #     `int_amdgcn_s_prefetch_data` requires a UNIFORM SGPR
+    #     pointer, which we cannot prove at lift time for the
+    #     divergent VGPR address used here without a divergence
+    #     analysis pass.  Silently dropping the hint would mask
+    #     both the cross-target capability gap and the resulting
+    #     pipeline-stall regression in any software-pipelined
+    #     kernel that relied on the prefetch overlapping a prior
+    #     compute chain (the dominant Triton corpus shape).
+    #   * `global_prefetch_b8_same_target.ll` — pins the
+    #     same-target (gfx1250 → gfx1250) intrinsic-emit shape:
+    #     `add i64 saddr, zext i32 vaddr` named `saddr_vaddr`,
+    #     `inttoptr i64 ... to ptr addrspace(1)`, optional
+    #     non-inbounds `getelementptr i8, ..., i64 <offset>`
+    #     named `prefetch_addr` for the FLAT `flat_offset`
+    #     immediate, and the canonical
+    #     `call void @llvm.amdgcn.global.prefetch(ptr addrspace(1), i32)`
+    #     with the `cpol` immediate threaded through.  The call
+    #     is NOT wrapped in `ctx.emitUnderExec` because the
+    #     intrinsic carries the EXEC mask implicitly through
+    #     `IntrInaccessibleMemOrArgMemOnly` — semantically a hint
+    #     with no observable side effect on inactive lanes.
+    #
+    # Sibling `flat_prefetch_b8` (the generic-address-space
+    # sibling, lifted via `int_amdgcn_flat_prefetch`) is NOT in
+    # the corpus and so is intentionally omitted from
+    # `opcode_map.cpp` — adding it would be unprincipled (no
+    # corpus producer to validate the lifted shape against).
+    "global_prefetch_b8":
+        r"@LIT_FIXTURE_GLOBAL_PREFETCH_B8_CO@",
 }
 
 lit_config.load_config(

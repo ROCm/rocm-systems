@@ -276,6 +276,125 @@ HandlerResult handleFLAT(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
+  // ---------------------------------------------------------------------
+  // gfx1250 FLAT VMEM prefetch (VFLAT 0x05D — global_prefetch_b8).
+  //
+  // Operand layout from `FLAT_Prefetch_Pseudo` (FLATInstructions.td
+  // :525-553) — note `has_vdst = 0`, so there is no dst slot:
+  //
+  //   plain (3 srcs): vaddr:VGPR_64,            offset, cpol
+  //   SADDR (4 srcs): saddr:SReg_64, vaddr:VGPR_32, offset, cpol
+  //
+  // Lifts to `int_amdgcn_global_prefetch(globalPtr, cpol)`
+  // (IntrinsicsAMDGPU.td:3211); the FLAT `flat_offset` is folded
+  // onto the pointer via a non-inbounds GEP before the call (the
+  // intrinsic itself takes no offset operand). The call sits
+  // OUTSIDE `emitUnderExec` because the intrinsic carries the EXEC
+  // mask implicitly through `IntrInaccessibleMemOrArgMemOnly` — a
+  // hint with no observable side effect on inactive lanes, so an
+  // extra `if-spe-active` guard would gratuitously inflate IR for
+  // what hardware executes as a single broadcast hint.
+  //
+  // gfx942 has no VMEM-prefetch encoding (the intrinsic is gated by
+  // `HasVmemPrefInsts`, only set on gfx1250+), so a cross-target
+  // lift is refused loudly. See the SemOp's docstring in
+  // `semop.hpp` for the design rationale.
+  if (sop == SemOp::GLOBAL_PREFETCH_B8) {
+    if (!ctx.targetIsa.hasTensorOps) {
+      llvm::errs()
+          << "transpiler: FLAT: " << di.mnemonic
+          << " has no equivalent on the compilation target "
+          << "(gfx1250 VMEM-prefetch unit; LLVM intrinsic "
+          << "amdgcn.global.prefetch is gated by HasVmemPrefInsts, "
+          << "only set on gfx1250+). The closest sibling "
+          << "amdgcn.s.prefetch.data requires a uniform SGPR "
+          << "pointer which we cannot prove for the divergent "
+          << "VGPR address used here without divergence "
+          << "analysis — refusing to emit a fallback or silently "
+          << "drop the hint.\n";
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "FLAT",
+          "gfx1250-only VMEM prefetch (HasVmemPrefInsts); no "
+          "equivalent on non-gfx1250 compilation target. The "
+          "amdgcn.s.prefetch.data sibling requires a uniform "
+          "pointer (the VMEM prefetch is divergent), and a silent "
+          "drop would mask both the cross-target capability gap "
+          "and any pipeline-tuning regression downstream.");
+      return hr;
+    }
+
+    bool isSaddr = false;
+    if (op.nSrcs() == 4) {
+      isSaddr = true;
+    } else if (op.nSrcs() != 3) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "FLAT",
+          "global_prefetch_b8: expected 3 srcs (plain) or 4 srcs "
+          "(SADDR) per FLAT_Prefetch_Pseudo");
+      return hr;
+    }
+
+    Value *globalAddr = nullptr;
+    unsigned immStart = 0;
+    if (isSaddr) {
+      ParsedReg saddrPr = op.srcReg(0);
+      ParsedReg vaddrPr = op.srcReg(1);
+      if (saddrPr.kind != ParsedReg::SGPR ||
+          vaddrPr.kind != ParsedReg::VGPR) {
+        hr.failure = RaiseFailure::unsupportedShape(
+            di, "FLAT",
+            "global_prefetch_b8 SADDR: expected (SGPR_64, VGPR_32) "
+            "for (saddr, vaddr)");
+        return hr;
+      }
+      Value *saddr = ctx.regs.readReg64(ctx.B, saddrPr);
+      Value *voff = ctx.B.CreateZExt(
+          ctx.regs.readReg32(ctx.B, vaddrPr), ctx.i64Ty, "voff_zext");
+      globalAddr = ctx.B.CreateAdd(saddr, voff, "saddr_vaddr");
+      immStart = 2;
+    } else {
+      ParsedReg vaddrPr = op.srcReg(0);
+      if (vaddrPr.kind != ParsedReg::VGPR) {
+        hr.failure = RaiseFailure::unsupportedShape(
+            di, "FLAT",
+            "global_prefetch_b8 plain: expected VGPR_64 for vaddr");
+        return hr;
+      }
+      globalAddr = ctx.regs.readReg64(ctx.B, vaddrPr);
+      immStart = 1;
+    }
+
+    int64_t flatOffset = 0;
+    int64_t cpolImm = 0;
+    bool sawOffset = false;
+    for (unsigned k = immStart; k < op.nSrcs(); ++k) {
+      if (!di.isImm(op.srcIdx(k))) continue;
+      int64_t v = di.getImm(op.srcIdx(k));
+      if (!sawOffset) {
+        flatOffset = v;
+        sawOffset = true;
+      } else {
+        cpolImm = v;
+      }
+    }
+
+    Value *globalPtr = globalAddr;
+    if (globalPtr->getType() != ctx.ptrGlobalTy)
+      globalPtr = ctx.B.CreateIntToPtr(globalPtr, ctx.ptrGlobalTy);
+    if (flatOffset != 0)
+      globalPtr = ctx.B.CreateGEP(ctx.i8Ty, globalPtr,
+                                   ctx.B.getInt64(flatOffset),
+                                   "prefetch_addr");
+
+    Function *fn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_global_prefetch);
+    Value *cpolArg = ConstantInt::get(ctx.i32Ty, cpolImm);
+    ctx.B.CreateCall(fn, {globalPtr, cpolArg});
+
+    hr.handled = true;
+    return hr;
+  }
+
   // flat_load/flat_store — same structure as global but uses flat address space
   if (sop == SemOp::FLAT_LOAD_USHORT || sop == SemOp::FLAT_LOAD_SSHORT ||
       sop == SemOp::FLAT_LOAD_UBYTE || sop == SemOp::FLAT_LOAD_SBYTE) {
