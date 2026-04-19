@@ -570,10 +570,106 @@ separate issue. **Deferred with rationale.**
 
 ---
 
-## 13. Reviewer feedback incorporated (changelog)
+## 13. Post-cycle-1 E2E findings (new)
+
+The cycle-1 design review was a **static** review — it examined the
+plan and brainstorm on paper. It did NOT cover runtime behavior. A
+**live end-to-end (E2E)** exercise against the bundled opencode +
+Haiku-4-5 surfaced two additional findings AFTER the cycle-1-revision
+plan landed (commit 541f5cb6d7). Both are folded in here so the plan
+reflects them.
+
+### F1 (HIGH) — prompt-layer tool-priority gate is insufficient for smaller LLMs
+
+**Evidence** (cycle-5 live E2E, Haiku-4-5 against bundled opencode):
+- Scenario H1 "optimize multi_gpu_demo.cpp": first tool
+  `perfxpert_intent_classify` ✓, BUT `read`/`glob` fired at positions
+  2–4 **before** `perfxpert_workflow_next_step` (which came at
+  position 7). 40% non-perfxpert tool ratio in the first 10 calls.
+- Scenario H2 "profile with rocprofv3": **zero** `perfxpert_*` tools
+  called. Model went straight to `bash → hipcc → rocprofv3`. Gate
+  completely skipped. No false §5.8 refusal either, so the
+  **gate-LIFT** half of the prompt is not the problem — the
+  **gate-ENFORCE** half is ineffective on Haiku.
+
+**Root cause.** "Do NOT emit bash/read/edit before intent_classify"
+reads as advisory to smaller models. Larger models (Opus, Sonnet)
+respect it; Haiku does not. Prompt language under-penalizes
+non-compliance. Prompt-layer gating is inherently model-size
+sensitive.
+
+**Resolution — two mitigations:**
+
+1. **Server-side PreToolUse hook (primary).** Intercept tool-calls in
+   the first N turns of a session and reject any non-`perfxpert_*`
+   call with a synthetic tool_result instructing the model to call
+   `perfxpert_intent_classify` first. Mechanical enforcement,
+   model-size-insensitive. Each backend needs its own hook surface:
+   - **opencode**: `plugin.trigger("tool.execute.before", ...)` with
+     `{ block: true, retryWith: <msg> }` extension. Starting point
+     exists in phase 8 patch `0020-perfxpert-tool-gate.patch` README.
+   - **Claude Code**: research needed — does `claude` expose a
+     pre-tool-call hook? (Verify via docs fetch before Task 4.6.)
+   - **Gemini**: per-tool policies or `allowedTools` list may block
+     non-perfxpert tools for the first N turns.
+   - **Codex**: sandbox-level hooks (deferred to PR 2).
+2. **Prompt-layer reinforcement (secondary).** Strengthen AGENTS.md
+   with explicit rejection language — not "do not emit" but
+   "your response WILL BE REJECTED if you call bash before
+   `perfxpert_intent_classify` returns." Frame as **consequence**
+   not advisory.
+
+The `verify_mcp_live()` method (already in the plan from cycle-1
+fixes) gains an additional probe: after the prompt is staged, run a
+canned query and assert the backend's LLM actually gates. This
+catches the phase-8 regression class where the plumbing was correct
+but the model did not respect it.
+
+### F2 (MEDIUM) — `perfxpert-code run` bootstrap hang (exit-124)
+
+**Evidence** (cycle-5 E2E reviewer report):
+- Reproducible exit-124 on the **first** `perfxpert-code run <query>`
+  invocation after stale server state.
+- Single-line log; no traceback.
+- Retrying 1–2× clears it.
+- Likely MCP handshake timeout OR sqlite init race during
+  `perfxpert-mcp` spawn.
+
+**Why it matters for multi-backend.** This is an opencode-specific
+bug today, but it affects the multi-backend reliability story —
+every backend spawns `perfxpert-mcp` on stdio similarly. Claude,
+Gemini, and Codex will all hit the same handshake race on first run.
+
+**Resolution — three layered mitigations:**
+
+1. **Warmup during `install()`.** The adapter's `install()` starts
+   `perfxpert-mcp` once (warm up sqlite, cache tool registry) and
+   stops it before the real spawn. First-run initialization happens
+   on install, not on first model turn.
+2. **`verify_mcp_live()` retry.** Retry up to 3 attempts with 2-second
+   backoff on the MCP handshake, matching the bootstrap race.
+3. **User-facing escape hatch.** Document `PERFXPERT_MCP_WARMUP=1` as
+   an env override (default on) that users can set to `0` to skip
+   warmup if it becomes annoying on their platform.
+
+### Context: design-review scope vs E2E scope
+
+The cycle-1 review was **static**: 4 blockers + 12 important findings
+from reading the plan. It did not exercise runtime behavior. F1 and
+F2 are the first **live-run** findings. The §13 changelog below (was
+§13 in cycle-1 revision, now §14) documents cycle-1 findings; this
+section documents cycle-2 findings discovered AFTER the plan was
+drafted. Net effect: the plan now addresses both static-review issues
+and runtime issues.
+
+---
+
+## 14. Reviewer feedback incorporated (changelog)
 
 **Cycle-1 reviewers**: design-critic + practical engineer reviewer.
 Verdict: request-changes with 4 blockers + 12 important findings.
+**Cycle-5 E2E reviewer**: added F1 (HIGH) + F2 (MEDIUM) after the
+cycle-1-revision plan landed (commit 541f5cb6d7); see §13.
 
 | # | Finding | Resolved in §/Task |
 |---|---|---|
@@ -596,6 +692,8 @@ Verdict: request-changes with 4 blockers + 12 important findings.
 | N1 | Protocol vs ABC | §12 N1 |
 | N2 | Named logger | §12 N2 |
 | N3 | Windows follow-up | §12 N3 |
+| **F1** | **Prompt-layer gate insufficient for smaller LLMs** | **§13 F1 + Plan Task 4.6 (server-side PreToolUse hook per backend) + Plan Task 4 `_prompt_adapter` rejection-language stanza + R-new-4** |
+| **F2** | **`perfxpert-code run` bootstrap exit-124** | **§13 F2 + Plan Task 4.7 (adapter `install()` warms `perfxpert-mcp`) + Plan `verify_mcp_live()` 3-attempt retry + `PERFXPERT_MCP_WARMUP=1` env hatch** |
 
 Additional findings from the practical reviewer that were
 incorporated:
@@ -627,7 +725,7 @@ incorporated:
 
 ---
 
-## 14. Summary
+## 15. Summary
 
 **Approach A (subcommand) + Option X (single prompt, N adapters with
 tool-name rewrite + verify_mcp_live)**: smallest code footprint,
@@ -638,5 +736,7 @@ PR 1 covers **opencode + claude + gemini** (cycle-2 cut). PR 2 adds
 **codex** with trust-gate handling.
 
 Cycle-2 resolution summary: 4 blockers resolved, 12 important findings
-resolved, 3 nitpicks accepted as documented deferrals. Ready for
-cycle-2 review.
+resolved, 3 nitpicks accepted as documented deferrals. Post-cycle-1
+E2E findings F1 (HIGH — prompt-layer gate model-size sensitivity) and
+F2 (MEDIUM — MCP handshake bootstrap exit-124) also folded in via
+Plan Tasks 4.6 and 4.7. Ready for cycle-2 review.
