@@ -927,4 +927,103 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// =============================================================================
+// Test: CastEnableDisableSched
+//
+// White-box: Toggle schedEnable on an established connection.
+// With splitData=true and small messages (dataPerQp < splitDataMin):
+//   enable=true  → WRR oneQp path → 1 token consumed
+//   enable=false → scheduler disabled, all-QP path → 0 tokens consumed
+//   enable=true  → WRR resumes → 1 token consumed
+// =============================================================================
+TEST_F(NetIbMPITest, CastEnableDisableSched) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly 2 MPI processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    SetupCastEnv(/*qpsPerConn=*/2, /*schedWeight=*/"0", /*splitData=*/1);
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    // 512 bytes: dataPerQp = 256 < 65536 → WRR when enable=true, bypass when enable=false
+    constexpr size_t kMsgSz = 512;
+    char sendBuf[kMsgSz], recvBuf[kMsgSz];
+    memset(sendBuf, 0xCD, kMsgSz);
+    memset(recvBuf, 0,    kMsgSz);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSz, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    if (rank == 1) {
+        const int tokens[2] = {50, 50};
+        ASSERT_EQ(ncclIbCastSetTokens(sendComm, tokens, 2), 0);
+    }
+
+    // Phase 1: enable=true → WRR path
+    int activeTotBefore1es = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore1es = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSz, 1900, mhandle);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        ASSERT_TRUE(st.schedInit);
+        int delta = activeTotBefore1es - st.activeTotTokens;
+        EXPECT_EQ(delta, 1);
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, false, true, true, 65536), 0);
+    }
+
+    // Phase 2: enable=false → bypass (all-QP path)
+    int activeTotBefore2es = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore2es = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSz, 1901, mhandle);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        int delta = activeTotBefore2es - st.activeTotTokens;
+        EXPECT_EQ(delta, 0) << "enable=false must not consume WRR tokens";
+        ASSERT_EQ(ncclIbCastSetSchedParms(sendComm, true, true, true, 65536), 0);
+    }
+
+    // Phase 3: enable=true → WRR resumes
+    int activeTotBefore3es = 0;
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        activeTotBefore3es = st.activeTotTokens;
+    }
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSz, 1902, mhandle);
+    if (rank == 1) {
+        struct ncclIbCastSchedState st = {};
+        ASSERT_EQ(ncclIbCastGetSchedState(sendComm, &st), 0);
+        int delta = activeTotBefore3es - st.activeTotTokens;
+        EXPECT_EQ(delta, 1);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+    if (rank == 0) {
+        ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+        ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+    } else {
+        ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 #endif // MPI_TESTS_ENABLED
