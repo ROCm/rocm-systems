@@ -22,7 +22,14 @@
 // Register Layout Equations (from AMD Matrix Instruction Calculator)
 // ------------------------------------------------------------------
 //
-// gfx12 (RDNA4) v_wmma_f32_16x16x32_f16, Wave32:
+// gfx12 (RDNA4) v_wmma_f32_16x16x32_{f16,bf16}, Wave32:
+//
+// Both element types share the same lane layout because both are 16-bit
+// types — the K-distribution in the diagrams below is byte-position
+// agnostic between half and bfloat. The only divergence is the per-MFMA
+// intrinsic and bitcast (see `inputType` switch in `runGroupPass` and
+// `emitWMMAtoMFMA`).
+//
 //
 //   A input (8 VGPRs, <16 x half>):
 //     i = lane % 16
@@ -235,9 +242,22 @@ static void collectResult(IRBuilder<> &B, Module &M,
 /// redistribute → 2× MFMA(K=16) → collect.
 ///
 /// \param groupBase  0 for group 0 (W64 lanes 0-31), 32 for group 1 (lanes 32-63)
+/// \param inputType  selects MFMA intrinsic + per-MFMA bitcast element type.
+///                   The lane-redistribution math is element-type-agnostic
+///                   for 16-bit element types (both gfx12 WMMA_F16 and
+///                   WMMA_BF16 use identical K-distribution); the divergence
+///                   is purely in the MFMA intrinsic name and the
+///                   per-MFMA-call bitcast vector type:
+///                     F16  → mfma_f32_16x16x16f16    , <4 x half>
+///                     BF16 → mfma_f32_16x16x16bf16_1k, <4 x i16>
+///                   The bf16 → i16 bitcast is principled: CDNA's bf16
+///                   MFMA intrinsic was defined before bfloat became a
+///                   first-class LLVM type, and bf16 and i16 share the
+///                   same in-memory storage container.
 static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
                          unsigned groupBase, Value *laneId,
                          Value **aDwords, Value **bDwords, Value **cDwords,
+                         WMMAInputType inputType,
                          Value **resultDwords) {
   Value *laneMod16 = B.CreateAnd(laneId, B.getInt32(15), "lane16");
   Value *loLane = B.CreateAdd(laneMod16, B.getInt32(groupBase), "lo_lane");
@@ -257,22 +277,30 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   Value *mfmaC[4];
   redistributeAcc(B, M, cDwords, addrLo, addrHi, laneGroup, mfmaC);
 
-  auto *v4f16Ty = FixedVectorType::get(ctx.f16Ty, 4);
+  // Per-MFMA bitcast type and intrinsic dispatch — the only point in
+  // the lowering where F16 and BF16 diverge.
+  Type *mfmaElemTy =
+      (inputType == WMMAInputType::BF16) ? Type::getInt16Ty(ctx.C)
+                                         : ctx.f16Ty;
+  auto *mfmaPackTy = FixedVectorType::get(mfmaElemTy, 4);
   auto *v4f32Ty = FixedVectorType::get(ctx.f32Ty, 4);
 
-  Value *srcA_lo = packDwords(B, mfmaA_lo, 2, ctx.i32Ty, v4f16Ty);
-  Value *srcB_lo = packDwords(B, mfmaB_lo, 2, ctx.i32Ty, v4f16Ty);
+  Value *srcA_lo = packDwords(B, mfmaA_lo, 2, ctx.i32Ty, mfmaPackTy);
+  Value *srcB_lo = packDwords(B, mfmaB_lo, 2, ctx.i32Ty, mfmaPackTy);
   Value *acc     = packDwords(B, mfmaC,    4, ctx.i32Ty, v4f32Ty);
 
-  Function *mfmaFn = Intrinsic::getOrInsertDeclaration(
-      &M, Intrinsic::amdgcn_mfma_f32_16x16x16f16);
+  Intrinsic::ID mfmaId =
+      (inputType == WMMAInputType::BF16)
+          ? Intrinsic::amdgcn_mfma_f32_16x16x16bf16_1k
+          : Intrinsic::amdgcn_mfma_f32_16x16x16f16;
+  Function *mfmaFn = Intrinsic::getOrInsertDeclaration(&M, mfmaId);
   Value *cbsz = B.getInt32(0), *abid = B.getInt32(0), *blgp = B.getInt32(0);
 
   Value *mfma1 = B.CreateCall(mfmaFn,
       {srcA_lo, srcB_lo, acc, cbsz, abid, blgp}, "mfma1");
 
-  Value *srcA_hi = packDwords(B, mfmaA_hi, 2, ctx.i32Ty, v4f16Ty);
-  Value *srcB_hi = packDwords(B, mfmaB_hi, 2, ctx.i32Ty, v4f16Ty);
+  Value *srcA_hi = packDwords(B, mfmaA_hi, 2, ctx.i32Ty, mfmaPackTy);
+  Value *srcB_hi = packDwords(B, mfmaB_hi, 2, ctx.i32Ty, mfmaPackTy);
 
   Value *mfma2 = B.CreateCall(mfmaFn,
       {srcA_hi, srcB_hi, mfma1, cbsz, abid, blgp}, "mfma2");
@@ -284,7 +312,8 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
   collectResult(B, M, mfmaDst, w32Lane, resultDwords);
 }
 
-Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c) {
+Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
+                       WMMAInputType inputType) {
   IRBuilder<> &B = ctx.B;
   Module &M = ctx.M;
 
@@ -297,8 +326,10 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c) {
   Value *laneId = emitLaneId(B, M, ctx.i32Ty);
 
   Value *result0[8], *result1[8];
-  runGroupPass(B, M, ctx, 0,  laneId, aDwords, bDwords, cDwords, result0);
-  runGroupPass(B, M, ctx, 32, laneId, aDwords, bDwords, cDwords, result1);
+  runGroupPass(B, M, ctx, 0,  laneId, aDwords, bDwords, cDwords, inputType,
+               result0);
+  runGroupPass(B, M, ctx, 32, laneId, aDwords, bDwords, cDwords, inputType,
+               result1);
 
   Value *isGroup1 = B.CreateICmpUGE(laneId, B.getInt32(32), "is_group1");
   auto *v8f32Ty = FixedVectorType::get(ctx.f32Ty, 8);

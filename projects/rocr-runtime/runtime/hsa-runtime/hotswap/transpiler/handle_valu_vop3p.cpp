@@ -159,24 +159,40 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
   }
 
   // ---- WMMA (gfx1250 RDNA4, VOP3P encoding) ----
-  // v_wmma_f32_16x16x32_f16: A and B are v16f16, C/D are v8f32
-  case SemOp::V_WMMA_F32_16x16x32_F16: {
-    Type *v16f16Ty = FixedVectorType::get(Type::getHalfTy(ctx.C), 16);
+  // 16x16x32 WMMA family with f32 accumulator and 16-bit inputs:
+  //   * v_wmma_f32_16x16x32_f16  — A/B = <16 x half>,   C/D = <8 x f32>
+  //   * v_wmma_f32_16x16x32_bf16 — A/B = <16 x bfloat>, C/D = <8 x f32>
+  //
+  // Both share the per-lane fragment layout, the WMMA12 native-intrinsic
+  // path (when target supports it), and the gfx942 MFMA lowering path
+  // (`emitWMMAtoMFMA` is parameterised on input element type and the
+  // lane-redistribution math is element-type-agnostic for 16-bit
+  // elements). The local element-type Type* + intrinsic ID + WMMAInputType
+  // triple is the only delta between the two variants — "design the
+  // operation, not the opcode".
+  case SemOp::V_WMMA_F32_16x16x32_F16:
+  case SemOp::V_WMMA_F32_16x16x32_BF16: {
+    bool isBF16 = (di.semOp == SemOp::V_WMMA_F32_16x16x32_BF16);
+    Type *elemTy = isBF16 ? Type::getBFloatTy(ctx.C)
+                          : Type::getHalfTy(ctx.C);
+    Type *v16ElemTy = FixedVectorType::get(elemTy, 16);
     Type *v8f32Ty = FixedVectorType::get(ctx.f32Ty, 8);
 
     ParsedReg dest = op.dst();
     ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
     ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
 
-    Value *a = ctx.regs.readRegVec(ctx.B, srcA, v16f16Ty);
-    Value *b = ctx.regs.readRegVec(ctx.B, srcB, v16f16Ty);
+    Value *a = ctx.regs.readRegVec(ctx.B, srcA, v16ElemTy);
+    Value *b = ctx.regs.readRegVec(ctx.B, srcB, v16ElemTy);
     Value *c = ctx.regs.readRegVec(ctx.B, srcC, v8f32Ty);
 
     Value *result_val;
     if (ctx.targetIsa.hasWMMA12) {
+      Intrinsic::ID wmmaId =
+          isBF16 ? Intrinsic::amdgcn_wmma_f32_16x16x32_bf16
+                 : Intrinsic::amdgcn_wmma_f32_16x16x32_f16;
       Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
-          &ctx.M, Intrinsic::amdgcn_wmma_f32_16x16x32_f16,
-          {v8f32Ty, v16f16Ty});
+          &ctx.M, wmmaId, {v8f32Ty, v16ElemTy});
       result_val = ctx.B.CreateCall(wmmaFn, {
           ctx.B.getFalse(), a,
           ctx.B.getFalse(), b,
@@ -184,7 +200,9 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
           ctx.B.getFalse(), ctx.B.getFalse()
       }, "wmma");
     } else {
-      result_val = emitWMMAtoMFMA(ctx, a, b, c);
+      result_val = emitWMMAtoMFMA(
+          ctx, a, b, c,
+          isBF16 ? WMMAInputType::BF16 : WMMAInputType::F16);
     }
 
     ctx.writeRegVec(dest, result_val);

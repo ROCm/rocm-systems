@@ -427,7 +427,14 @@ enum class SemOp : uint16_t {
   V_MFMA_F32_32x32x16_BF8_FP8, V_MFMA_F32_32x32x16_BF8_BF8,
 
   // -- WMMA (gfx1250) --
+  // 16x16x32 WMMA with f32 accumulator and 16-bit element types. Both
+  // share the same per-lane fragment shape (A,B: <16 x t>, C/D:
+  // <8 x f32>) and same K-decomposition path through the gfx942 MFMA
+  // lowering — `emitWMMAtoMFMA` is parameterised on input element
+  // type and routes to the matching CDNA3 MFMA intrinsic
+  // (mfma_f32_16x16x16f16 vs mfma_f32_16x16x16bf16_1k).
   V_WMMA_F32_16x16x32_F16,
+  V_WMMA_F32_16x16x32_BF16,
 
   // -- VOPD -- (handled via string parsing of fullText, not opcode)
   VOPD_GENERIC,

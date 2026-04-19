@@ -155,6 +155,15 @@ config.fixtures = {
     # only delta is an extra trunc-to-i8 in the same code path).
     "ds_store_b16_d16_hi":
         r"@LIT_FIXTURE_DS_STORE_B16_D16_HI_CO@",
+    # v_wmma_f32_16x16x32_bf16 (gfx1250 RDNA4 VOP3P opcode 0x062)
+    # lowered to gfx942 (CDNA3) via the parameterised emitWMMAtoMFMA
+    # helper. Pins the bf16-specific CDNA3 MFMA intrinsic
+    # (mfma.f32.16x16x16bf16.1k), the per-MFMA <4 x i16> bitcast,
+    # and the 2x K=16 decomposition with chained accumulator.
+    # Sibling V_WMMA_F32_16x16x32_F16 case is covered transitively
+    # by the existing Gfx1250Gpu.Matmul128x128 GPU gtest.
+    "wmma_f32_16x16x32_bf16":
+        r"@LIT_FIXTURE_WMMA_F32_16X16X32_BF16_CO@",
 }
 
 lit_config.load_config(

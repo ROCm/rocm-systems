@@ -802,6 +802,13 @@ static const Entry kCanonTable[] = {
     // ---------------------------------------------------------------------
     E(V_WMMA_F32_16X16X32_F16_w32_twoaddr, V_WMMA_F32_16x16x32_F16),
     E(V_WMMA_F32_16X16X32_F16_w32_threeaddr, V_WMMA_F32_16x16x32_F16),
+    // 16x16x32 WMMA, BF16 inputs, F32 accumulator (gfx1250 RDNA4 VOP3P
+    // opcode 0x062). Same fragment shape as the F16 variant — the only
+    // delta is the input element type, which routes to the bf16 MFMA
+    // intrinsic on gfx942 (mfma_f32_16x16x16bf16_1k) and to
+    // amdgcn_wmma_f32_16x16x32_bf16 when the target supports WMMA12.
+    E(V_WMMA_F32_16X16X32_BF16_w32_twoaddr, V_WMMA_F32_16x16x32_BF16),
+    E(V_WMMA_F32_16X16X32_BF16_w32_threeaddr, V_WMMA_F32_16x16x32_BF16),
 };
 
 #undef SMEM3
