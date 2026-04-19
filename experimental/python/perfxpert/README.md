@@ -13,6 +13,12 @@ perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 # Interactive agentic TUI (AMD-themed opencode, replaces the old --interactive flag)
 perfxpert-code
 
+# Multi-backend dispatch (PR 1 — claude + gemini; codex ships in PR 2):
+perfxpert-code claude   # installs perfxpert MCP + gate into Claude Code, execs claude
+perfxpert-code gemini   # same flow for Gemini CLI
+perfxpert-code claude --dry-run "analyze this trace"   # preview, write nothing
+perfxpert-code uninstall claude   # reverses install (refuses on marker drift)
+
 # Air-gap mode (no LLM; deterministic rule-based analysis only)
 perfxpert analyze -i trace.db --format markdown -o report.md
 
