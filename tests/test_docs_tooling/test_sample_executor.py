@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for docs/test-samples.py."""
+"""Unit tests for scripts/test-samples.py."""
 
 import subprocess
 import tempfile
@@ -7,10 +7,15 @@ import json
 from pathlib import Path
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TEST_SAMPLES = (
+    _REPO_ROOT / "experimental" / "python" / "perfxpert" / "scripts" / "test-samples.py"
+)
+
+
 def test_sample_executor_exists():
     """Sample executor script must exist."""
-    executor = Path("docs/test-samples.py")
-    assert executor.exists(), "docs/test-samples.py does not exist"
+    assert _TEST_SAMPLES.exists(), f"{_TEST_SAMPLES} does not exist"
 
 
 def test_sample_executor_runs_bash():
@@ -31,7 +36,7 @@ exit 0
 """)
 
         result = subprocess.run(
-            ["python3", "docs/test-samples.py", str(tmpdir)],
+            ["python3", str(_TEST_SAMPLES), str(tmpdir)],
             capture_output=True,
             text=True,
         )
@@ -58,7 +63,7 @@ exit 999
 """)
 
         result = subprocess.run(
-            ["python3", "docs/test-samples.py", str(tmpdir)],
+            ["python3", str(_TEST_SAMPLES), str(tmpdir)],
             capture_output=True,
             text=True,
         )
@@ -84,7 +89,7 @@ exit 1
 """)
 
         result = subprocess.run(
-            ["python3", "docs/test-samples.py", str(tmpdir)],
+            ["python3", str(_TEST_SAMPLES), str(tmpdir)],
             capture_output=True,
             text=True,
         )
@@ -109,7 +114,7 @@ echo "test"
 """)
 
         result = subprocess.run(
-            ["python3", "docs/test-samples.py", str(tmpdir)],
+            ["python3", str(_TEST_SAMPLES), str(tmpdir)],
             capture_output=True,
             text=True,
         )
@@ -140,7 +145,7 @@ print("Hello from Python")
 """)
 
         result = subprocess.run(
-            ["python3", "docs/test-samples.py", str(tmpdir)],
+            ["python3", str(_TEST_SAMPLES), str(tmpdir)],
             capture_output=True,
             text=True,
         )

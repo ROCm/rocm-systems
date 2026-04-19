@@ -1,5 +1,5 @@
 #!/bin/bash
-# docs/lint.sh — Scan all .md files for banned API strings
+# scripts/lint.sh — Scan all .md files for banned API strings
 # Part of the docs-audit tooling
 
 set +e
@@ -53,12 +53,10 @@ SEARCH_DIRS=(
 
 VIOLATION_COUNT=0
 
-# Scan all .md files (excluding plan/spec/audit directories and git directories).
+# Scan all .md files (excluding audit directories and git directories).
 # Exclusion list is documented in experimental/python/perfxpert/docs/
-# known-issues.md under "Scanner scope limitations → docs/lint.sh".
+# known-issues.md under "Scanner scope limitations → scripts/lint.sh".
 # Rationale for each path:
-#   - docs/superpowers/specs: plan-stage specs (historical reference)
-#   - docs/superpowers/plans: plan-stage plans (historical reference)
 #   - docs/confluence: Confluence-amendment audit artifacts that
 #     describe what was removed / renamed (must reference the old
 #     symbol names to explain what was scrubbed). Not shipped docs.
@@ -85,8 +83,6 @@ for dir in "${SEARCH_DIRS[@]}"; do
       fi
     done
   done < <(find "$dir" -name "*.md" \
-    -not -path "*docs/superpowers/specs/*" \
-    -not -path "*docs/superpowers/plans/*" \
     -not -path "*docs/confluence/*" \
     -not -path "*.git/*" \
     -not -path "*.pytest_cache/*" \

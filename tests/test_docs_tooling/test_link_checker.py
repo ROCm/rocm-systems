@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for docs/link-checker.py."""
+"""Unit tests for scripts/link-checker.py."""
 
 import subprocess
 import tempfile
@@ -7,10 +7,15 @@ import json
 from pathlib import Path
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_LINK_CHECKER = (
+    _REPO_ROOT / "experimental" / "python" / "perfxpert" / "scripts" / "link-checker.py"
+)
+
+
 def test_link_checker_exists():
     """Link checker script must exist."""
-    link_checker = Path("docs/link-checker.py")
-    assert link_checker.exists(), "docs/link-checker.py does not exist"
+    assert _LINK_CHECKER.exists(), f"{_LINK_CHECKER} does not exist"
 
 
 def test_link_checker_detects_broken_internal_link():
@@ -26,7 +31,7 @@ def test_link_checker_detects_broken_internal_link():
         )
 
         result = subprocess.run(
-            ["python3", "docs/link-checker.py", str(tmpdir)],
+            ["python3", str(_LINK_CHECKER), str(tmpdir)],
             capture_output=True,
             text=True,
         )
@@ -47,7 +52,7 @@ def test_link_checker_validates_internal_link():
         test_doc.write_text("# Test\n\nSee [Guide](./guide.md) for details.")
 
         result = subprocess.run(
-            ["python3", "docs/link-checker.py", str(tmpdir)],
+            ["python3", str(_LINK_CHECKER), str(tmpdir)],
             capture_output=True,
             text=True,
         )
@@ -66,7 +71,7 @@ def test_link_checker_output_format():
         test_doc.write_text("# Test\n\nSee [Link](./bad.md)")
 
         result = subprocess.run(
-            ["python3", "docs/link-checker.py", str(tmpdir)],
+            ["python3", str(_LINK_CHECKER), str(tmpdir)],
             capture_output=True,
             text=True,
         )
@@ -88,7 +93,7 @@ def test_link_checker_skip_external_urls():
         )
 
         result = subprocess.run(
-            ["python3", "docs/link-checker.py", str(tmpdir)],
+            ["python3", str(_LINK_CHECKER), str(tmpdir)],
             capture_output=True,
             text=True,
         )

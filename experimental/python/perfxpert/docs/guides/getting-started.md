@@ -24,7 +24,7 @@ build the bundled patched opencode (one-time, requires `bun`).
 ### Step 1: pip install
 
 ```bash
-# SKIP-SAMPLE — destructive pattern filtered by docs/test-samples.py
+# SKIP-SAMPLE — destructive pattern filtered by scripts/test-samples.py
 pip install -e "experimental/python/perfxpert[all]"
 ```
 

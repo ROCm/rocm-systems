@@ -131,8 +131,8 @@ therefore cannot satisfy rule-3. The adapter catches the exception
 before MCP registration runs (I-N1), records
 `gate_hook_installed=False`, and leans on the rejection-language
 stanza inside the staged `.perfxpert/AGENTS.md` for enforcement.
-Full rationale + the Codex re-visit checklist live in
-[../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+Full rationale + the Codex re-visit checklist are captured in the
+local Codex hook-surface decision record.
 
 Two Codex-specific state-handling conventions worth naming here:
 
@@ -193,14 +193,12 @@ Steps to add a fifth backend (example: `aider`):
   install/uninstall recipes
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
   the 34 READ_ONLY tools every adapter exposes to its backend
-- [../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md)
-  — the Claude PreToolUse decision record (why native hook, not
-  `permissions.deny`)
-- [../../../../../docs/superpowers/plans/2026-04-19-perfxpert-code-multi-backend-plan.md](../../../../../docs/superpowers/plans/2026-04-19-perfxpert-code-multi-backend-plan.md)
-  — the 14-task implementation plan (PR 1 + PR 2 breakdown)
-- [../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md)
-  — why the Codex adapter degrades to prompt-layer-only (native
-  `PreToolUse` is Bash-only)
+- Local Claude hook-surface decision record — why the Claude adapter
+  uses the native `PreToolUse` hook instead of `permissions.deny`.
+- Local multi-backend implementation plan — the 14-task PR 1 + PR 2
+  breakdown.
+- Local Codex hook-surface decision record — why the Codex adapter
+  degrades to prompt-layer-only (native `PreToolUse` is Bash-only).
 - Source: `perfxpert/cli/_backend/protocol.py`,
   `perfxpert/cli/_backend/{claude,gemini,codex}.py`,
   `perfxpert/cli/_gate_hooks/{claude,gemini,codex,opencode}.py`,

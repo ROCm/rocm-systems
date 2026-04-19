@@ -14,8 +14,8 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (interactive prompt, or `PERFXPERT_AUTO_TRUST=1` for CI with an
   always-on stderr warning bypassing `--quiet`). Gate enforcement is
   prompt-layer-only because Codex's native `PreToolUse` hook
-  intercepts Bash only as of April 2026 — see
-  [docs/decisions/2026-04-19-codex-hook-surface.md](../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+  intercepts Bash only as of April 2026 (rationale in the local Codex
+  hook-surface decision record).
   `perfxpert-code uninstall codex` reverses the install (MCP table +
   trust entry + staged `AGENTS.md`), with `ConfigClobber` /
   `skipped_due_to_drift` protection against git-tracked or malformed
@@ -57,9 +57,8 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Decisions
 - Claude Code gate hook uses the native `PreToolUse` surface (not
-  `permissions.deny`). See
-  [docs/decisions/2026-04-19-claude-hook-surface.md](../../../docs/decisions/2026-04-19-claude-hook-surface.md)
-  for the doc-fetch evidence + rationale.
+  `permissions.deny`). Doc-fetch evidence + rationale are captured in
+  the local Claude hook-surface decision record.
 
 ### Docs
 - `docs/guides/getting-started.md` §"Choosing a backend" —

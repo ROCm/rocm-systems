@@ -449,8 +449,8 @@ Surfaces per backend:
 - **Codex** — prompt-layer-only (rejection-language stanza in
   `.perfxpert/AGENTS.md`). Codex's native `PreToolUse` hook currently
   intercepts Bash only, not MCP / Write / other tools, so it cannot
-  satisfy the event-based gate contract. See
-  [`docs/decisions/2026-04-19-codex-hook-surface.md`](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+  satisfy the event-based gate contract. Rationale is captured in the
+  local Codex hook-surface decision record.
 - **opencode** — `{block, retryWith}` from patched
   `tool.execute.before` plugin (fork-only — patch 0020).
 

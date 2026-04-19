@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""Unit tests for docs/inventory.py."""
+"""Unit tests for scripts/inventory.py."""
 
 import subprocess
 import json
 from pathlib import Path
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_INVENTORY = (
+    _REPO_ROOT / "experimental" / "python" / "perfxpert" / "scripts" / "inventory.py"
+)
+
+
 def test_inventory_exists():
     """Inventory script must exist."""
-    inventory_script = Path("docs/inventory.py")
-    assert inventory_script.exists(), "docs/inventory.py does not exist"
+    assert _INVENTORY.exists(), f"{_INVENTORY} does not exist"
 
 
 def test_inventory_output_valid_json():
     """Inventory output must be valid JSON."""
     result = subprocess.run(
-        ["python3", "docs/inventory.py"],
+        ["python3", str(_INVENTORY)],
+        cwd=str(_REPO_ROOT),
         capture_output=True,
         text=True,
     )
@@ -39,7 +45,8 @@ def test_inventory_output_valid_json():
 def test_inventory_has_required_fields():
     """Inventory must have required fields."""
     result = subprocess.run(
-        ["python3", "docs/inventory.py"],
+        ["python3", str(_INVENTORY)],
+        cwd=str(_REPO_ROOT),
         capture_output=True,
         text=True,
     )
@@ -74,7 +81,8 @@ def test_inventory_has_required_fields():
 def test_inventory_summary_counts():
     """Inventory summary counts should be non-negative."""
     result = subprocess.run(
-        ["python3", "docs/inventory.py"],
+        ["python3", str(_INVENTORY)],
+        cwd=str(_REPO_ROOT),
         capture_output=True,
         text=True,
     )

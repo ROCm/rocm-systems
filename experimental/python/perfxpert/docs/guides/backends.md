@@ -13,10 +13,9 @@ contract every adapter satisfies, see
 [../architecture/backend-adapter.md](../architecture/backend-adapter.md).
 For the underlying MCP server (34 READ_ONLY tools), see
 [../integration/mcp-server.md](../integration/mcp-server.md). The
-rationale for the Claude PreToolUse choice is recorded in
-[../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md);
-the (different) decision for Codex lives in
-[../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+rationale for the Claude PreToolUse choice is captured in the local
+Claude hook-surface decision record; the (different) decision for
+Codex is captured in the local Codex hook-surface decision record.
 
 ## Why multi-backend?
 
@@ -156,8 +155,8 @@ enforcement). Smaller models may bypass advisory language; if
 mechanical enforcement matters for your workflow, use
 `perfxpert-code claude` or the bundled `opencode` default (both
 have server-side mechanical gates). The full rationale + re-visit
-conditions are in
-[../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md).
+conditions are captured in the local Codex hook-surface decision
+record.
 
 #### Git-tracked config refused
 
@@ -300,10 +299,8 @@ Symptom: an older build prints
 
 Cause: cycle-2 pre-PR-1 builds raised `GateHookUnsupported` if the
 hook-surface decision record was missing. The decision is now
-recorded — update to the PR 1 build (cycle-3 or later), or link to
-the decision record at
-[../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md)
-and retry.
+recorded (see the local Claude hook-surface decision record) —
+update to the PR 1 build (cycle-3 or later) and retry.
 
 ### Codex refuses to run ("project not trusted")
 
@@ -377,7 +374,7 @@ the specific models used are:
 | opencode | opencode-default                | patched `{block, retryWith}` gate (bundled patch 0020). |
 | claude   | `claude-haiku-4-5`              | native `PreToolUse` hook. R-new-4 scope: verified on haiku-4-5; other small models require independent re-verification at acceptance time. |
 | gemini   | `gemini-2.5-flash`              | `allowedTools` restriction + runtime-state file for event-based lift. |
-| codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only). `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs its connectivity checks (e.g. `codex mcp list`) but skips the gate-probe canary. See the [Codex hook-surface decision record](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md). |
+| codex    | *not probed*                    | Gate is prompt-layer-only (Codex `PreToolUse` is Bash-only). `install()` emits a warning-level log (`codex gate hook unsupported on this backend`) and records `gate_hook_installed=False`; `verify_mcp_live` still runs its connectivity checks (e.g. `codex mcp list`) but skips the gate-probe canary. Rationale is captured in the local Codex hook-surface decision record. |
 
 If you re-verify against a different small model for a non-Codex
 backend (for example `claude-haiku-5` when it ships, or
@@ -394,10 +391,9 @@ here.
   — the `BackendAdapter` protocol + lifecycle contract (contributors)
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
   underlying MCP server + 34 READ_ONLY tool list
-- [../../../../../docs/decisions/2026-04-19-claude-hook-surface.md](../../../../../docs/decisions/2026-04-19-claude-hook-surface.md)
-  — why Claude uses the native `PreToolUse` hook surface
-- [../../../../../docs/decisions/2026-04-19-codex-hook-surface.md](../../../../../docs/decisions/2026-04-19-codex-hook-surface.md)
-  — why Codex uses prompt-layer-only enforcement (PreToolUse is
-  Bash-only)
+- Local Claude hook-surface decision record — why Claude uses the
+  native `PreToolUse` hook surface.
+- Local Codex hook-surface decision record — why Codex uses
+  prompt-layer-only enforcement (PreToolUse is Bash-only).
 - [getting-started.md](getting-started.md) — §"Choosing a backend"
   for the short recipe

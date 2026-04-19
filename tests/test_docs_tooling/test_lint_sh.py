@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Unit tests for docs/lint.sh.
+"""Unit tests for scripts/lint.sh.
 
 Covers:
 - Existence / executability
 - Original 9 banned strings (Dimension 1)
 - 10 total-legacy-scrub additions
 - Historical-anchor exception ("removed in Phase 7.1" — load-bearing
-  literal string; see docs/lint.sh for why the phrase is load-bearing)
+  literal string; see scripts/lint.sh for why the phrase is load-bearing)
 - Exact-phrase-match semantics of the anchor filter
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 # Absolute path to the lint.sh we're testing. Using an absolute path
 # avoids cwd ambiguity when the subprocess is invoked from a tmpdir.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_LINT_SH = _REPO_ROOT / "docs" / "lint.sh"
+_LINT_SH = _REPO_ROOT / "experimental" / "python" / "perfxpert" / "scripts" / "lint.sh"
 
 
 def _run_lint_on_doc(md_body: str) -> subprocess.CompletedProcess:
@@ -43,59 +43,39 @@ def _run_lint_on_doc(md_body: str) -> subprocess.CompletedProcess:
 
 def test_lint_sh_exists():
     """Lint script must exist and be executable."""
-    lint_script = Path("docs/lint.sh")
-    assert lint_script.exists(), "docs/lint.sh does not exist"
-    assert os.access(lint_script, os.X_OK), "docs/lint.sh is not executable"
+    lint_script = _LINT_SH
+    assert lint_script.exists(), f"{lint_script} does not exist"
+    assert os.access(lint_script, os.X_OK), f"{lint_script} is not executable"
 
 
 def test_lint_sh_detects_interactive_py():
     """Lint script must detect 'interactive.py' references."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        test_doc = tmpdir / "test.md"
-        test_doc.write_text("# Test\nSee `interactive.py` for details.")
-
-        result = subprocess.run(
-            ["bash", "docs/lint.sh"],
-            cwd=str(tmpdir.parent),
-            capture_output=True,
-            text=True,
-        )
-        # Should find at least one violation
-        assert result.returncode != 0 or "interactive.py" in result.stdout
+    result = _run_lint_on_doc("# Test\nSee `interactive.py` for details.")
+    assert result.returncode != 0, (
+        f"lint.sh should flag 'interactive.py'; stdout={result.stdout!r}"
+    )
+    # BANNED patterns are regex-escaped in lint.sh output ('interactive\\.py');
+    # match on a fragment that survives the escaping.
+    assert "interactive" in result.stdout
 
 
 def test_lint_sh_detects_llm_conversation():
     """Lint script must detect 'LLMConversation' references."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        test_doc = tmpdir / "test.md"
-        test_doc.write_text("# API\nUse `LLMConversation` class.")
-
-        result = subprocess.run(
-            ["bash", "docs/lint.sh"],
-            cwd=str(tmpdir.parent),
-            capture_output=True,
-            text=True,
-        )
-        # Should find violation
-        assert result.returncode != 0 or "LLMConversation" in result.stdout
+    result = _run_lint_on_doc("# API\nUse `LLMConversation` class.")
+    assert result.returncode != 0, (
+        f"lint.sh should flag 'LLMConversation'; stdout={result.stdout!r}"
+    )
+    assert "LLMConversation" in result.stdout
 
 
 def test_lint_sh_detects_interactive_flag():
     """Lint script must detect '--interactive' flag references."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        test_doc = tmpdir / "test.md"
-        test_doc.write_text("# CLI\nRun with `--interactive` flag.")
-
-        result = subprocess.run(
-            ["bash", "docs/lint.sh"],
-            cwd=str(tmpdir.parent),
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0 or "--interactive" in result.stdout
+    result = _run_lint_on_doc("# CLI\nRun with `--interactive` flag.")
+    assert result.returncode != 0, (
+        f"lint.sh should flag '--interactive'; stdout={result.stdout!r}"
+    )
+    # BANNED patterns are regex-escaped in lint.sh output ('\\-\\-interactive').
+    assert "interactive" in result.stdout
 
 
 def test_lint_sh_detects_all_banned_strings():
@@ -122,7 +102,7 @@ def test_lint_sh_detects_all_banned_strings():
             test_doc.write_text(f"# Test\nContains {banned_str}")
 
         result = subprocess.run(
-            ["bash", "docs/lint.sh"],
+            ["bash", str(_LINT_SH)],
             cwd=str(tmpdir),
             capture_output=True,
             text=True,
