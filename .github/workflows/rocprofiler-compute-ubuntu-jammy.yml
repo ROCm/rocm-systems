@@ -52,9 +52,9 @@ jobs:
           apt-get install -y cmake
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
-          submodules: true
+          submodules: recursive
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
