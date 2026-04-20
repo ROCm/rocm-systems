@@ -23,6 +23,11 @@ dependencies = [
     # aggregation math; loaded eagerly during `perfxpert doctor` and any
     # `perfxpert analyze` invocation. Required (not optional).
     "numpy>=1.24",
+    # openai-agents is the agentic-runtime SDK (imported as `agents`) that
+    # perfxpert.agents.framework lazily loads whenever the agentic path
+    # dispatches an LLM-backed action. `perfxpert doctor` also reports
+    # its install status, so keep it as a required runtime dep.
+    "openai-agents>=0.1",
     # tomlkit is used by the Codex backend adapter to round-trip edits
     # to ~/.codex/config.toml while preserving user comments/formatting.
     # Required (not optional) so `perfxpert-code codex` works out of the box.
