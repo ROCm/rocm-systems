@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #ifndef _COMPILER_HIPCLASSKERNEL_H_
 #define _COMPILER_HIPCLASSKERNEL_H_
 

@@ -49,7 +49,7 @@ class HeapBlock : public amd::HeapObject {
 class VmHeap {
  public:
   friend VmHeapArray;
-  static const size_t kChunkSize = 32 * Mi;  //!< Chunk size, must be power of 2
+  static const size_t kChunkSize = 128 * Mi;  //!< Chunk size, must be power of 2
   static const size_t kMinBlockAlignment = 256;
   typedef std::function<amd::HostQueue&()> GetQueueFunc;
 
@@ -153,7 +153,7 @@ class VmHeap {
   uint64_t mapped_size_ = 0;            //!< Size of mapped memory
   uint64_t max_mapped_size_ = 0;        //!< Max size of mapped memory in this heap
   bool created_ = false;                //!< Used for deferred VM heap allocation
-  amd::Monitor lock_;                   //!< Lock to serialise heap accesses
+  std::recursive_mutex lock_;           //!< Lock to serialise heap accesses
   Device* device_;                      //!< Device that owns this heap
   GetQueueFunc get_vm_queue_;           //!< Queue for VM operations
 

@@ -28,13 +28,14 @@
 #include <hip/hip_runtime_api.h>
 
 #include "envvar.hpp"
+#include "log.hpp"
 #include "hip_allocator.hpp"
 
     // the using statements remain in the code until we commit
     // the change to make the default allocator a runtime decision.
 #if defined USE_HEAP_DEVICE_COARSEGRAIN
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorCoarsegrained;
-#endif    
+#endif
 #if defined USE_HEAP_DEVICE_FINEGRAIN
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorFinegrained;
 #endif
@@ -47,6 +48,14 @@ using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorUncached;
 #endif
 #endif
 
+#if defined USE_HEAP_DEVICE_VMM_POSIX
+#if HIP_VERSION >= 70000000
+using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMPosixFd;
+#else
+#error "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
+#endif
+#endif
+
 namespace rocshmem {
   extern HIPAllocator *default_allocator_;
 
@@ -55,22 +64,20 @@ namespace rocshmem {
     int hip_dev_id{};
     hipError_t err = hipGetDevice(&hip_dev_id);
     if (err != hipSuccess) {
-      printf("Could not get current device. Aborting\n");
-      abort();
+      LOG_ERROR_ABORT("Could not get current device. Aborting");
     }
 
     char arch_name[256];
     hipDeviceProp_t prop;
     err = hipGetDeviceProperties(&prop, hip_dev_id);
     if (err != hipSuccess) {
-      printf("Could not get device properties. Aborting\n");
-      abort();
+      LOG_ERROR_ABORT("Could not get device properties. Aborting");
     }
     std::snprintf(arch_name, sizeof(arch_name), "%s",prop.gcnArchName);
 
 #if defined USE_HEAP_DEVICE_COARSEGRAIN
     default_allocator_ = new HIPAllocatorCoarsegrained();
-#endif    
+#endif
 #if defined USE_HEAP_DEVICE_FINEGRAIN
     default_allocator_ = new HIPAllocatorFinegrained();
 #endif
@@ -79,7 +86,7 @@ namespace rocshmem {
     // Temporary hack that will be fixed when we add the ability
     // to use an environment variable to set the Heap Allocatory Type.
     // With that commit we will introduce also a generic 'default'
-    // setting that can be adjusted for differnt architectures.
+    // setting that can be adjusted for different architectures.
     // This is to avoid failures with rocSHMEM on gfx1201 if using
     // Uncached allocator with ROCm 7.2.0
     if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
@@ -89,9 +96,14 @@ namespace rocshmem {
     }
 #endif
 #endif
+#if defined USE_HEAP_DEVICE_VMM_POSIX
+#if HIP_VERSION >= 70000000
+    default_allocator_ = new HIPAllocatorVMMPosixFd();
+#endif
+#endif
   }
 
-  static HIPAllocator* get_default_allocator()
+  [[maybe_unused]] static HIPAllocator* get_default_allocator()
   {
     if (default_allocator_ == nullptr) {
       set_default_allocator();
@@ -100,7 +112,7 @@ namespace rocshmem {
     return default_allocator_;
   }
 
-  static void delete_default_allocator()
+  [[maybe_unused]] static void delete_default_allocator()
   {
     if (default_allocator_ != nullptr) {
       delete default_allocator_;

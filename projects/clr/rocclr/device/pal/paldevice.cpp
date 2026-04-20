@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
@@ -183,14 +169,10 @@ bool NullDevice::init() {
         (isa->xnack() == amd::Isa::Feature::Any)) {
       continue;
     }
-    bool isOnline = false;
+
     // Check if the particular device is online
-    for (size_t i = 0; i < devices.size(); i++) {
-      if (&(devices[i]->isa()) == isa) {
-        isOnline = true;
-        break;
-      }
-    }
+    bool isOnline = std::any_of(devices.begin(), devices.end(),
+                                [isa](Device* device) { return &(device->isa()) == isa; });
     if (isOnline) {
       continue;
     }
@@ -626,6 +608,8 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #endif  // _WIN64
   }
   info_.virtualMemoryManagement_ = true;
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
   info_.virtualMemAllocGranularityMinimum_ =
       static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
   info_.virtualMemAllocGranularityRecommended_ =
@@ -647,6 +631,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
       }
     }
   }
+  info_.hasExpertSchedMode_ = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
 }
 
 Device::XferBuffers::~XferBuffers() {
@@ -688,7 +673,7 @@ Memory& Device::XferBuffers::acquire() {
   size_t listSize;
 
   // Lock the operations with the staged buffer list
-  amd::ScopedLock l(lock_);
+  std::scoped_lock l(lock_);
   listSize = freeBuffers_.size();
 
   // If the list is empty, then attempt to allocate a staged buffer
@@ -724,7 +709,7 @@ void Device::XferBuffers::release(VirtualGPU& gpu, Memory& buffer) {
   // the next aquire can come from different queue
   buffer.wait(gpu);
   // Lock the operations with the staged buffer list
-  amd::ScopedLock l(lock_);
+  std::scoped_lock l(lock_);
   freeBuffers_.push_back(&buffer);
   --acquiredCnt_;
 }
@@ -755,13 +740,6 @@ Device::ScopedLockVgpus::~ScopedLockVgpus() {
 Device::Device()
     : NullDevice(),
       numOfVgpus_(0),
-      lockAsyncOps_(true),    /* Device Async Ops Lock */
-      lockForInitHeap_(true), /* Initialization of Heap Resource */
-      lockPAL_(true),         /* PAL Ops Lock */
-      vgpusAccess_(true),     /* Virtual GPU List Ops Lock */
-      scratchAlloc_(true),    /* Scratch Allocation Lock */
-      mapCacheOps_(true),     /* Map Cache Lock */
-      lockResourceOps_(true), /* Resource List Ops Lock */
       xferRead_(nullptr),
       mapCache_(nullptr),
       resourceCache_(nullptr),
@@ -990,8 +968,7 @@ bool Device::create(Pal::IDevice* device) {
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));
 
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -1088,7 +1065,7 @@ void PAL_STDCALL Device::PalDeveloperCallback(void* pPrivateData, const Pal::uin
 
 // ================================================================================================
 bool Device::initializeHeapResources() {
-  amd::ScopedLock k(lockForInitHeap_);
+  std::scoped_lock k(lockForInitHeap_);
   if (!heapInitComplete_) {
     Pal::DeviceFinalizeInfo finalizeInfo = {};
 
@@ -1219,8 +1196,8 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
   }
 
   // Not safe to add a queue. So lock the device
-  amd::ScopedLock k(lockAsyncOps());
-  amd::ScopedLock lock(vgpusAccess());
+  std::scoped_lock k(lockAsyncOps());
+  std::scoped_lock lock(vgpusAccess());
 
   // Initialization of heap and other resources occur during the command queue creation time.
   if (!initializeHeapResources()) {
@@ -1512,7 +1489,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
       amd::Memory* amdParent = owner.parent();
       {
         // Lock memory object, so only one commitment will occur
-        amd::ScopedLock lock(amdParent->lockMemoryOps());
+        std::scoped_lock lock(amdParent->lockMemoryOps());
         amdParent->commitSvmMemory();
         amdParent->setHostMem(amdParent->getSvmPtr());
       }
@@ -2074,7 +2051,7 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
 
 amd::Memory* Device::findMapTarget(size_t size) const {
   // Must be serialised for access
-  amd::ScopedLock lk(mapCacheOps_);
+  std::scoped_lock lk(mapCacheOps_);
 
   amd::Memory* map = nullptr;
   size_t minSize = 0;
@@ -2129,7 +2106,7 @@ amd::Memory* Device::findMapTarget(size_t size) const {
 
 bool Device::addMapTarget(amd::Memory* memory) const {
   // Must be serialised for access
-  amd::ScopedLock lk(mapCacheOps_);
+  std::scoped_lock lk(mapCacheOps_);
 
   // the svm memory shouldn't be cached
   if (!memory->canBeCached()) {
@@ -2160,7 +2137,7 @@ void Device::ScratchBuffer::destroyMemory() {
 bool Device::allocScratch(uint regNum, const VirtualGPU* vgpu, uint vgprs) {
   if (regNum > 0 && vgprs > 0) {
     // Serialize the scratch buffer allocation code
-    amd::ScopedLock lk(scratchAlloc_);
+    std::scoped_lock lk(scratchAlloc_);
     uint sb = vgpu->hwRing();
     static const uint WaveSizeLimit = ((1 << 21) - 256);
     const uint threadSizeLimit = WaveSizeLimit / info().wavefrontWidth_;
@@ -2356,7 +2333,7 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 }
 
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agentInfo, bool allowAllAgentsAccess) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
@@ -2729,8 +2706,7 @@ bool Device::createBlitProgram() {
   // note: It's not critical for runtime functionality to fail trap handler initialization
   auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
   if (asm_program != nullptr) {
-    std::vector<amd::Device*> devices;
-    devices.push_back(this);
+    std::vector<amd::Device*> devices{this};
     std::string opt = "-cl-internal-kernel ";
     if (auto retval =
             asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {

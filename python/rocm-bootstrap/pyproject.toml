@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocm-bootstrap"
+version = "0.1.0"
+description = "GPU detection and target groupings for the ROCm Python ecosystem"
+authors = [{ name = "Advanced Micro Devices, Inc." }]
+requires-python = ">=3.10"
+license = { text = "MIT" }
+readme = "README.md"
+# Zero runtime dependencies. This must install cleanly in uv's isolated
+# variant provider environments without access to the ROCm package index.
+dependencies = []
+
+[tool.setuptools]
+packages = ["rocm_bootstrap", "rocm_bootstrap.tests"]
+
+[tool.setuptools.package-dir]
+"" = "python"
+
+[project.entry-points.variant_plugins]
+amd = "rocm_bootstrap.variant_provider:AMDVariantPlugin"
+
+[project.scripts]
+rocm-bootstrap-detect = "rocm_bootstrap.detect:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/rocm_bootstrap/tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"

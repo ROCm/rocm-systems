@@ -41,26 +41,27 @@ set(${ROCM_SMI}_VERSION_HASH "${PKG_VERSION_HASH}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
 # Create a configure file to get version info from within library
-configure_file("src/${ROCM_SMI_TARGET}Config.in"
-               "${CMAKE_CURRENT_SOURCE_DIR}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h")
+configure_file(
+    "src/${ROCM_SMI_TARGET}Config.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h"
+)
 
 add_library(${ROCM_SMI_TARGET} ${CMN_SRC_LIST} ${CMN_INC_LIST})
-target_link_libraries(${ROCM_SMI_TARGET} PRIVATE
-    rt
-    Threads::Threads
-    ${CMAKE_DL_LIBS}
-    ${FILESYSTEM_LIB}
-)
-target_include_directories(${ROCM_SMI_TARGET} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_SOURCE_DIR}/common/shared_mutex
-    ${DRM_INCLUDE_DIRS}
-    ${DRM_AMDGPU_INCLUDE_DIRS}
+target_link_libraries(${ROCM_SMI_TARGET} PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} ${FILESYSTEM_LIB})
+target_include_directories(
+    ${ROCM_SMI_TARGET}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/common/shared_mutex
+        ${DRM_INCLUDE_DIRS}
+        ${DRM_AMDGPU_INCLUDE_DIRS}
 )
 
 # use the target_include_directories() command to specify the include directories for the target
-target_include_directories(${ROCM_SMI_TARGET} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                                                     "$<INSTALL_INTERFACE:${ROCM_SMI}/include>")
+target_include_directories(
+    ${ROCM_SMI_TARGET}
+    PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${ROCM_SMI}/include>"
+)
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
@@ -69,7 +70,10 @@ set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
 ## If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     if(${BUILD_SHARED_LIBS}) #stripping only for .so
-        add_custom_command(TARGET ${ROCM_SMI_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP}
-                                                                        lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING})
+        add_custom_command(
+            TARGET ${ROCM_SMI_TARGET}
+            POST_BUILD
+            COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING}
+        )
     endif()
 endif()

@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #define HIP_ENABLE_WARP_SYNC_BUILTINS
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
@@ -109,13 +97,16 @@ void opToString(std::string& scalarName, std::string& intrinsicName) {
     scalarName = "MaxOp";
     intrinsicName = "__reduce_max_sync";
   } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
-    scalarName = "std::logical_and";
+    scalarName = "std::bit_and";
     intrinsicName = "__reduce_and_sync";
   } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
-    scalarName = "std::logical_or";
+    scalarName = "std::bit_or";
     intrinsicName = "__reduce_or_sync";
   } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-    scalarName = "LogicalXor";
+    scalarName = "std::bit_xor";
+    intrinsicName = "__reduce_xor_sync";
+  } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
+    scalarName = "std::bit_xor";
     intrinsicName = "__reduce_xor_sync";
   } else
     static_assert(std::is_void<T>::value, "Unexpected operator");
@@ -154,13 +145,15 @@ void runAndCompileTest(const std::tuple<Types...> types) {
     __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)
     {
       int tid = threadIdx.x;
+      int laneId = tid % warpSize;
 
       for (int i = 0; i < *numReduces; i++) {
+        int idx = warpSize * i + laneId;
         if (masks[i] & (1ul << tid)) {
           // call the operator only if the lane is mentioned in the mask
-          T& result = output[warpSize * i + tid];
+          T& result = output[idx];
           result = )" +
-              intrinsicName + R"((masks[i], input[tid]);
+              intrinsicName + R"((masks[i], input[idx]);
         }
       }
    })";
@@ -172,7 +165,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-TEST_CASE("Unit_Rtc_ReduceRandom") {
+HIP_TEST_CASE(Unit_Rtc_ReduceRandom) {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 

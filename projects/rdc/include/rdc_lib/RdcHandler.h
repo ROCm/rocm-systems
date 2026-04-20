@@ -56,7 +56,7 @@ class RdcHandler {
                                               const char* field_group_name,
                                               rdc_field_grp_t* rdc_field_group_id) = 0;
   virtual rdc_status_t rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
-                                                 rdc_field_t field_id) = 0;              
+                                                 rdc_field_t field_id) = 0;
   virtual rdc_status_t rdc_group_field_get_info(rdc_field_grp_t rdc_field_group_id,
                                                 rdc_field_group_info_t* field_group_info) = 0;
   virtual rdc_status_t rdc_group_gpu_get_info(rdc_gpu_group_t p_rdc_group_id,

@@ -12,11 +12,11 @@ The log level can be changed by either setting the log level through the ``ROCDE
 
 The logging levels are:
 
-| 0: Critical (Default level)
-| 1: Error
-| 2: Warning
-| 3: Info
-| 4: Debug
+| 0: Critical (Default level, Only output critical messages)
+| 1: Error (Output critical and error messages)
+| 2: Warning (Output critical, error and warning messages)
+| 3: Info (Output critical, error, warning and info messages)
+| 4: Debug (Output critical, error, warning, info and debug messages)
 
 The log level defines the maximum severity of log messages to output. For example, to output warning and error messages as well as critical messages, ``ROCDEC_LOG_LEVEL`` would need to be set to 2:
 

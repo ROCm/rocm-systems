@@ -98,3 +98,12 @@ set_target_properties(
     memcopy
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
+
+add_custom_target(
+    simple_net
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/sample/simple_net.py
+        ${CMAKE_SOURCE_DIR}/tests/simple_net.py
+    COMMENT "Copying simple_net.py to tests directory"
+)

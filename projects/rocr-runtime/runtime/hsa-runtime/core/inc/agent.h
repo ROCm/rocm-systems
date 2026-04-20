@@ -302,6 +302,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
+                                   bool metadata_prefetch,
                                    Queue** queue) = 0;
 
   // @brief Query the value of an attribute.
@@ -313,6 +314,9 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // attribute.
   virtual hsa_status_t GetInfo(hsa_agent_info_t attribute,
                                void* value) const = 0;
+
+  // @brief Initialize secondary CUID for this agent.
+  virtual void InitDerivedCuid() = 0;
 
   // @brief Returns an array of regions owned by the agent.
   virtual const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const = 0;

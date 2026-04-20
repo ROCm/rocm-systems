@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 
@@ -73,7 +60,6 @@ constexpr unsigned threadsPerBlock = 256;
     constexpr int blocks =
         (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 size_t Nbytes = N * sizeof(float);
-constexpr int LAUNCH_ITERS = 1;
 
 /*
  * Create 2 streams s1 and s2. Start capturing s1. Record event e1 on s1 and
@@ -84,7 +70,7 @@ constexpr int LAUNCH_ITERS = 1;
  * capture info (status and id) of both s1 and s2 are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus") {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus) {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
@@ -216,7 +202,7 @@ static void thread_func(hipStream_t stream, unsigned long long capSequenceID1,  
  * thread is same as capture id in main function. Exit the thread and end the capture
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread") {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
 
@@ -246,7 +232,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread") {
  * capture info. Verify that all the capture info are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture") {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
   float *A_d, *B_d, *C_d, *D_d;
@@ -340,7 +326,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture") {
  * graph and verify the output from the operations.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo") {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo) {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;

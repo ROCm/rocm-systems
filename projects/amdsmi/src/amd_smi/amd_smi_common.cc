@@ -20,67 +20,64 @@
  * THE SOFTWARE.
  */
 
-#include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_common.h"
 
-
+#include "amd_smi/amdsmi.h"
 
 namespace amd::smi {
 
 amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
-    amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
+  amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
 
-    // Look for it in the map
-    // If found: use the mapped value
-    // If not found: return the map error established above
-    auto search = amd::smi::rsmi_status_map.find(status);
-    if (search != amd::smi::rsmi_status_map.end()) {
-        amdsmi_status = search->second;
-    }
+  // Look for it in the map
+  // If found: use the mapped value
+  // If not found: return the map error established above
+  auto search = amd::smi::rsmi_status_map.find(status);
+  if (search != amd::smi::rsmi_status_map.end()) {
+    amdsmi_status = search->second;
+  }
 
-    return amdsmi_status;
+  return amdsmi_status;
 }
 
 amdsmi_vram_type_t vram_type_value(unsigned type) {
-    amdsmi_vram_type_t value = AMDSMI_VRAM_TYPE_UNKNOWN;
+  amdsmi_vram_type_t value = AMDSMI_VRAM_TYPE_UNKNOWN;
 
-    auto search = amd::smi::vram_type_map.find(type);
-    if (search != amd::smi::vram_type_map.end()) {
-        value = search->second;
-    }
+  auto search = amd::smi::vram_type_map.find(type);
+  if (search != amd::smi::vram_type_map.end()) {
+    value = search->second;
+  }
 
-    return value;
+  return value;
 }
-
 
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status) {
-    amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
+  amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
 
-    // Look for it in the map
-    // If found: use the mapped value
-    // If not found: return the map error established above
-    auto search = amd::smi::esmi_status_map.find(status);
-    if (search != amd::smi::esmi_status_map.end()) {
-        amdsmi_status = search->second;
-    }
+  // Look for it in the map
+  // If found: use the mapped value
+  // If not found: return the map error established above
+  auto search = amd::smi::esmi_status_map.find(status);
+  if (search != amd::smi::esmi_status_map.end()) {
+    amdsmi_status = search->second;
+  }
 
-    return amdsmi_status;
+  return amdsmi_status;
 }
 #endif
 
 amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status) {
-    amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
+  amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
 
-    // Look for it in the map
-    // If found: use the mapped value
-    // If not found: return the map error established above
-    if (auto search_itr = ainic_status_map.find(status); search_itr != ainic_status_map.end()) {
-        amdsmi_status = search_itr->second;
-    }
+  // Look for it in the map
+  // If found: use the mapped value
+  // If not found: return the map error established above
+  if (auto search_itr = ainic_status_map.find(status); search_itr != ainic_status_map.end()) {
+    amdsmi_status = search_itr->second;
+  }
 
-    return amdsmi_status;
+  return amdsmi_status;
 }
 
-} // namespace amd::smi
-
+}  // namespace amd::smi

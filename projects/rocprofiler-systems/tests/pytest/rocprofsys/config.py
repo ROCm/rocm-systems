@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -243,6 +243,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_LOG_LEVEL": "trace",
             "ROCPROFSYS_SAMPLING_FREQ": "300",
             "ROCPROFSYS_SAMPLING_DELAY": "0.05",
+            "ROCPROFSYS_SAMPLING_GPUS": "all",
             "OMP_PROC_BIND": "spread",
             "OMP_PLACES": "threads",
             "OMP_NUM_THREADS": "2",
@@ -320,9 +321,6 @@ class RocprofsysConfig:
 
 def _find_rocm_path() -> Optional[Path]:
     """Find ROCm installation path."""
-    if os.environ.get("ROCPROFSYS_USE_ROCM") == "OFF":
-        return None
-
     for candidate in [
         os.environ.get("ROCM_PATH"),
         "/opt/rocm",
@@ -533,9 +531,6 @@ def discover_install_config(
     Raises:
         FileNotFoundError: If build/installation dirs and executables are not found
     """
-
-    if os.environ.get("ROCPROFSYS_USE_ROCM") == "OFF":
-        raise FileNotFoundError("Install mode does not support ROCPROFSYS_USE_ROCM=OFF")
 
     if install_dir is None:
         env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")

@@ -30,6 +30,7 @@
 #include "src/cuid_nic.h"
 #include "src/cuid_platform.h"
 #include "src/hmac.h"
+#include <climits>
 #include <cstring>
 #include <dirent.h>
 #include <sys/types.h>
@@ -127,6 +128,27 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t *handles, uint32_t *count)
 DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type) {
     DevicePtr device = nullptr;
     amdcuid_status_t status;
+
+    // CPU sysfs paths (e.g., /sys/devices/system/cpu/cpu0) are directories,
+    // not character/block devices, so real_dev_path_from_fd() cannot resolve
+    // them via /sys/dev/char or /sys/dev/block. Use the path directly,
+    // resolving symlinks with realpath but without appending "/device".
+    if (device_type == AMDCUID_DEVICE_TYPE_CPU) {
+        char buf[PATH_MAX];
+        std::string resolved_path;
+        if (realpath(dev_path, buf) != nullptr) {
+            resolved_path = std::string(buf);
+        } else {
+            resolved_path = dev_path;
+        }
+        amdcuid_cpu_info cpu_info = {};
+        status = CuidCpu::discover_single(&cpu_info, resolved_path);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return nullptr;
+        }
+        return std::make_shared<CuidCpu>(cpu_info);
+    }
+
     int fd = open(dev_path, O_RDONLY);
     if (fd < 0) {
         // unable to open device path
@@ -140,15 +162,6 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
         return nullptr;
     }
     switch (device_type) {
-        case AMDCUID_DEVICE_TYPE_CPU: {
-            amdcuid_cpu_info cpu_info = {};
-            status = CuidCpu::discover_single(&cpu_info, real_dev_path);
-            if (status != AMDCUID_STATUS_SUCCESS) {
-                return nullptr;
-            }
-            device = std::make_shared<CuidCpu>(cpu_info);
-            break;
-        }
         case AMDCUID_DEVICE_TYPE_GPU: {
             amdcuid_gpu_info gpu_info = {};
             status = CuidGpu::discover_single(&gpu_info, real_dev_path);
@@ -180,15 +193,21 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
 
     const std::string input_dev_path(dev_path);
     std::string real_dev_path;
-    // For NIC paths (e.g., /sys/class/net/eth0) and GPU paths
-    // (e.g., /sys/class/drm/renderD128), use the path as-is since
+    // For NIC paths (e.g., /sys/class/net/eth0), GPU paths
+    // (e.g., /sys/class/drm/renderD128), and CPU paths
+    // (e.g., /sys/devices/system/cpu/cpu0), use the path as-is since
     // get_real_path resolves symlinks and appends "/device" which does not
     // match how device_node paths are stored in CUID files.
+    // CPU and Platform sysfs paths are directories without a /device
+    // subdirectory, so the /device suffix would produce an invalid path.
     std::string dev_path_str(dev_path);
     if (device_type == AMDCUID_DEVICE_TYPE_NIC
         || device_type == AMDCUID_DEVICE_TYPE_GPU
+        || device_type == AMDCUID_DEVICE_TYPE_CPU
+        || device_type == AMDCUID_DEVICE_TYPE_PLATFORM
         || dev_path_str.find("/sys/class/net/") != std::string::npos
-        || dev_path_str.find("/sys/class/drm/") != std::string::npos) {
+        || dev_path_str.find("/sys/class/drm/") != std::string::npos
+        || dev_path_str.find("/sys/devices/system/cpu/") != std::string::npos) {
         real_dev_path = dev_path_str;
     } else {
         real_dev_path = CuidUtilities::get_real_path(dev_path);

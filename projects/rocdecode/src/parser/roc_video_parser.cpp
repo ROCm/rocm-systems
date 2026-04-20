@@ -55,8 +55,10 @@ RocVideoParser::~RocVideoParser() {
  * @return rocDecStatus : ROCDEC_SUCCESS on success
  */
 rocDecStatus RocVideoParser::Initialize(RocdecParserParams *pParams) {
+    FunctionEntryLog(g_rocdec_logger);
     if(pParams == nullptr) {
-        logger_.CriticalLog(STR("Parser parameters are not set for the parser"));
+        CriticalLog(g_rocdec_logger, STR("Parser parameters are not set for the parser"));
+        FunctionExitLog(g_rocdec_logger);
         return ROCDEC_NOT_INITIALIZED;
     }
     // Initialize callback function pointers
@@ -72,6 +74,7 @@ rocDecStatus RocVideoParser::Initialize(RocdecParserParams *pParams) {
     output_pic_list_.resize(dec_buf_pool_size_, 0xFF);
     InitDecBufPool();
 
+    FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
@@ -95,6 +98,7 @@ void RocVideoParser::CheckAndAdjustDecBufPoolSize(int dpb_size) {
 }
 
 ParserResult RocVideoParser::OutputDecodedPictures(bool no_delay) {
+    FunctionEntryLog(g_rocdec_logger);
     RocdecParserDispInfo disp_info = {0};
     disp_info.progressive_frame = 1; // not used
     disp_info.top_field_first = 1; // not used
@@ -116,6 +120,7 @@ ParserResult RocVideoParser::OutputDecodedPictures(bool no_delay) {
             }
         }
     }
+    FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
 

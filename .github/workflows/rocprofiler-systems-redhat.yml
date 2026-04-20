@@ -57,13 +57,15 @@ jobs:
       matrix:
         compiler: ['g++']
         os-release: [ '8.10', '9' ]
-        rocm-version: [ '0.0', '6.3', '6.4', '7.0', '7.1', '7.2' ]
+        rocm-version: [ '6.3', '6.4', '7.0', '7.1', '7.2' ]
         build-type: ['Release']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          .gitmodules
 
     - name: Configure Env
       shell: bash
@@ -84,11 +86,10 @@ jobs:
           fi
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
+          python3 -m pip install 'cmake==3.25' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
-      if: ${{ matrix.rocm-version > 0 }}
       timeout-minutes: 30
       uses: nick-fields/retry@v3
       with:
@@ -122,12 +123,10 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
-        TAG="${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-${{ matrix.compiler }}-python-mpip" &&
-        USE_HIP=OFF &&
-        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_HIP=ON; TAG="${TAG}-rocm-${{ matrix.rocm-version }}"; fi &&
+        TAG="${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-${{ matrix.compiler }}-python-mpip-rocm-${{ matrix.rocm-version }}" &&
         python3 ./scripts/run-ci.py -B build
           --name ${TAG}
-          --build-jobs 2
+          --build-jobs $(nproc)
           --site GitHub
           --
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
@@ -136,7 +135,6 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_ROCM=${USE_HIP}
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
           -DROCPROFSYS_BUILD_DYNINST=ON
@@ -181,7 +179,7 @@ jobs:
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
       run:
-        cmake --build build --target install --parallel 2
+        cmake --build build --target install --parallel $(nproc)
 
     - name: Test Install
       timeout-minutes: 10
@@ -202,7 +200,7 @@ jobs:
     - name: CTest Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
@@ -211,7 +209,7 @@ jobs:
     - name: Data Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |

@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #pragma once
 
 #define INTERNAL_BUFFER_SIZE 8

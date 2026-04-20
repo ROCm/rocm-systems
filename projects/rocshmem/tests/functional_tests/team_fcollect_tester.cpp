@@ -24,8 +24,8 @@
 
 /* Declare the template with a generic implementation */
 template <typename T>
-__device__ void wg_team_fcollect(rocshmem_ctx_t ctx, rocshmem_team_t team,
-                                 T *dest, const T *source, int nelems) {
+__device__ void wg_team_fcollect([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
+                                 [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems) {
   return;
 }
 
@@ -171,8 +171,8 @@ void TeamFcollectTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
   int num_elems = size / sizeof(T1);
 
-  int my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
-  int n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
+  [[maybe_unused]] int my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
+  [[maybe_unused]] int n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   hipLaunchKernelGGL(TeamFcollectTest<T1>, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
@@ -205,9 +205,9 @@ void TeamFcollectTester<T1>::verifyResults(size_t size) {
   int idx = 0;
   T1 expected;
 
-  for(int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+  for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
-      for(int i = 0; i < num_elems; i++) {
+      for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
         idx = (wg_id * n_pes + pe) * num_elems + i;
         if constexpr (std::is_same<T1, char>::value ||
               std::is_same<T1, signed char>::value ||

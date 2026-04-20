@@ -32,3 +32,12 @@ target_sources(
     memory_allocator.cpp
     dlmalloc.cpp
 )
+
+# Add VMM POSIX allocator for ROCm 7.0+
+if(USE_HEAP_DEVICE_VMM_POSIX)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      hip_allocator_vmm_posix.cpp
+  )
+endif()

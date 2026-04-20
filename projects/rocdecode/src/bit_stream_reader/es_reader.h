@@ -101,8 +101,6 @@ class RocVideoESParser {
 
         bool ivf_file_header_read_; // indicator if IVF file header has been checked
 
-        RocDecLogger logger_;
-
         /*! \brief Function to retrieve the bitstream of a picture for AVC/HEVC
          * \param [out] p_pic_data Pointer to the picture data
          * \param [out] pic_size Size of the picture in bytes
@@ -129,7 +127,7 @@ class RocVideoESParser {
         /*! \brief Function to check the remaining data size in the ring buffer
          * \return Number of bytes still available in the ring
          */
-        int GetDataSizeInRB();
+        uint32_t GetDataSizeInRB();
 
         /*! \brief Function to read one byte from the ring buffer without advancing the read pointer
          * \param [in] offset The byte offset to read

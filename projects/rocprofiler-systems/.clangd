@@ -1,0 +1,93 @@
+CompileFlags:
+  Add:
+    - -Wno-unknown-warning-option
+    - -Wdouble-promotion
+    - -Werror=double-promotion
+    - -Wshadow
+    - -Werror=shadow
+    - -Wextra
+    - -Wpedantic
+    - -Werror=pedantic
+    - -Wstack-usage=524288
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  ClangTidy:
+    FastCheckFilter: None
+    Add:
+      - bugprone-*
+      - cert-*
+      - concurrency-*
+      - cppcoreguidelines-*
+      - google-*
+      - misc-*
+      - modernize-*
+      - performance-*
+      - readability-*
+    Remove:
+      # bugprone
+      - bugprone-easily-swappable-parameters
+      # cert
+      - cert-dcl37-c
+      - cert-dcl51-cpp
+      - cert-err58-cpp
+      # cppcoreguidelines
+      - cppcoreguidelines-avoid-do-while
+      - cppcoreguidelines-avoid-non-const-global-variables
+      - cppcoreguidelines-macro-usage
+      - cppcoreguidelines-non-private-member-variables-in-classes
+      - cppcoreguidelines-owning-memory
+      - cppcoreguidelines-pro-bounds-array-to-pointer-decay
+      - cppcoreguidelines-pro-bounds-constant-array-index
+      - cppcoreguidelines-pro-bounds-pointer-arithmetic
+      - cppcoreguidelines-pro-type-reinterpret-cast
+      - cppcoreguidelines-pro-type-union-access
+      - cppcoreguidelines-pro-type-vararg
+      # google
+      - google-objc-*
+      - google-readability-todo
+      # misc
+      - misc-no-recursion
+      - misc-non-private-member-variables-in-classes
+      # modernize
+      - modernize-use-trailing-return-type
+      # readability
+      - readability-function-size
+      - readability-redundant-access-specifiers
+      - readability-redundant-member-init
+    CheckOptions:
+      readability-braces-around-statements.ShortStatementLines: "1"
+      readability-implicit-bool-conversion.AllowPointerConditions: "1"
+      cppcoreguidelines-init-variables.IncludeStyle: llvm
+      readability-identifier-naming.ClassCase: lower_case
+      readability-identifier-naming.StructCase: lower_case
+      readability-identifier-naming.UnionCase: lower_case
+      readability-identifier-naming.EnumCase: lower_case
+      readability-identifier-naming.EnumConstantCase: UPPER_CASE
+      readability-identifier-naming.FunctionCase: lower_case
+      readability-identifier-naming.MethodCase: lower_case
+      readability-identifier-naming.VariableCase: lower_case
+      readability-identifier-naming.ParameterCase: lower_case
+      readability-identifier-naming.MemberCase: lower_case
+      readability-identifier-naming.PrivateMemberPrefix: m_
+      readability-identifier-naming.ProtectedMemberPrefix: m_
+      readability-identifier-naming.PublicMemberPrefix: m_
+      readability-identifier-naming.GlobalConstantCase: UPPER_CASE
+      readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+      readability-identifier-naming.TemplateParameterCase: CamelCase
+      readability-identifier-naming.NamespaceCase: lower_case
+      readability-identifier-naming.TypeAliasCase: lower_case
+      readability-identifier-naming.TypedefCase: lower_case
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+  Designators: Yes
+
+Hover:
+  ShowAKA: Yes
+
+Completion:
+  AllScopes: Yes

@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.20)
 
 if (HIP_PLATFORM MATCHES "nvidia")
@@ -26,6 +30,8 @@ option(BUILD_STRESS_TESTS "Build stress tests" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
+option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
+option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -66,8 +72,6 @@ else() # Win32
                  PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
 
-find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
-             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 
 # used by clang to find hip
@@ -77,8 +81,9 @@ if(TEST_CLOCK_CYCLE)
   add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
 
-# flag to generate standalone exe per src file.
-message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
+if(ENABLE_YAML_TAGS)
+    add_definitions(-DENABLE_YAML_TAGS)
+endif()
 
 if(NOT WIN32)
   set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
@@ -198,15 +203,6 @@ if (RTC_TESTING)
 endif()
 add_definitions(-DKERNELS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/kernels/")
 
-# old config
-set(HIP_TEST_CONFIG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/config)
-file(MAKE_DIRECTORY ${HIP_TEST_CONFIG_BINARY_DIR})
-file(GLOB JSON_FILES "./hipTestMain/config/*.json")
-foreach(json IN LISTS JSON_FILES)
-  file(COPY ${json}
-         DESTINATION ${HIP_TEST_CONFIG_BINARY_DIR})
-endforeach()
-
 if (WIN32)
   configure_file(catchProp_in_rc.in ${CMAKE_CURRENT_BINARY_DIR}/catchProp.rc @ONLY)
 
@@ -307,6 +303,11 @@ if(DEFINED OFFLOAD_ARCH_STR)
   set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
 endif()
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+
 # get hip-tests commit short hash
 execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -331,30 +332,6 @@ endforeach()
 
 # config generation
 add_subdirectory(config)
-
-# old config
-if(WIN32)
-  set(configToUse "config_amd_windows")
-  set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
-  set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
-
-  set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
-  message(${cmd})
-  execute_process(COMMAND cmd.exe /C ${cmd}
-    RESULT_VARIABLE json_result)
-  message(STATUS "${configToUse}.json file generation result: ${json_result}")
-else()
-    set(configToUse "config_amd_linux")
-    foreach(arch ${HIP_GPU_ARCH_LIST})
-        set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
-        set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
-        message(${cmd})
-        execute_process(COMMAND bash -c ${cmd}
-        RESULT_VARIABLE json_result)
-    message(STATUS "${configToUse}_${arch}.json file generation result: ${json_result}")
-  endforeach()
-endif()
 
 # prints the catch info to a file
 string(TIMESTAMP _timestamp UTC)

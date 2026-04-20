@@ -246,16 +246,22 @@ union CopyMetadata {
     kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
   };
 
-  //! Copy operation type for batch copies (maps to hipMemcpyFlagsExt op bits)
-  enum CopyOpType { kCopyOpLinear = 0, kCopyOpBroadcast = 1, kCopyOpSwap = 2, kCopyOpIndirect = 3 };
+  enum CopyOpType {
+    kCopyOpLinear          = 0,
+    kCopyOpBroadcast       = 1,
+    kCopyOpSwap            = 2,
+    kCopyOpIndirectSrc     = 3,
+    kCopyOpIndirectDst     = 4,
+    kCopyOpIndirectSrcDst  = 5,
+  };
 
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
     uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
-    uint32_t copyOpType_ : 2;           //!< Operation type (CopyOpType)
-    uint32_t reserved_ : 24;            //!< Reserved for future use
+    uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
+    uint32_t reserved_ : 23;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -395,6 +401,7 @@ class Command : public Event {
 
   //! Update with the list of events this command needs to wait on before dispatch
   void updateEventWaitList(const EventWaitList& waitList) {
+    eventWaitList_.reserve(eventWaitList_.size() + waitList.size());
     for (auto event : waitList) {
       event->retain();
       eventWaitList_.push_back(event);
@@ -1273,6 +1280,7 @@ class MigrateMemObjectsCommand : public Command {
                            const std::vector<amd::Memory*>& memObjects,
                            cl_mem_migration_flags flags)
       : Command(queue, type, eventWaitList), migrationFlags_(flags) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -1402,10 +1410,10 @@ class NDRangeKernelCommand : public Command {
   }
 
   // Capture kernel parameters and validate
-  int32_t captureAndValidate();
+  int32_t captureOpenCLArgsAndValidate();
 
   // Allocate, capture and set kernel parameters
-  int32_t AllocCaptureSetValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
+  int32_t captureHIPArgsAndValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
 };
 
 class NativeFnCommand : public Command {
@@ -1493,12 +1501,14 @@ class AccumulateCommand : public Command {
   //! Destructor - release all retained HW events
   virtual ~AccumulateCommand();
 
-  //! Add HW event to the list for later cleanup
+  //! Add HW event to the list for later cleanup.
+  //! Does not retain — caller owns the reference. Attached events are
+  //! released via ReleaseGlobalSignal in ~AccumulateCommand when the
+  //! profiling signals are destroyed after graph completion.
   void addHwEvent(void* hw_event, Device* device = nullptr) {
     if (hw_event != nullptr) {
       Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
       if (dev != nullptr) {
-        dev->RetainGlobalSignal(hw_event);
         hw_events_[dev].push_back(hw_event);
       }
     }
@@ -1547,6 +1557,7 @@ class ExtObjectsCommand : public Command {
   ExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList, uint32_t num_objects,
                     const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
       : Command(queue, type, eventWaitList) {
+    memObjects_.reserve(memoryObjects.size());
     for (const auto& it : memoryObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -1778,6 +1789,7 @@ class MakeBuffersResidentCommand : public Command {
                              const std::vector<amd::Memory*>& memObjects,
                              cl_bus_address_amd* busAddr)
       : Command(queue, type, eventWaitList), busAddresses_(busAddr) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -2008,6 +2020,38 @@ class SvmPrefetchAsyncCommand : public Command {
   int numa_id() const { return numa_id_; }
 };
 
+/*! \brief      Batch prefetch command for SVM memory
+ *
+ *  \details    Prefetches multiple SVM memory ranges into their destination devices or CPU
+ */
+class SvmPrefetchBatchAsyncCommand : public Command {
+ public:
+  SvmPrefetchBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                               std::vector<size_t>& sizes,
+                               std::vector<amd::Device*>& target_devices)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        target_devices_(std::move(target_devices)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+    assert(target_devices_.size() == count_ && "target_devices vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmPrefetchBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+  amd::Device* const* TargetDevices() const { return target_devices_.data(); }
+
+ private:
+  std::vector<void*> dev_ptrs_;               //!< Array of device pointers to memory for prefetch
+  std::vector<size_t> sizes_;                 //!< Array of sizes for prefetch
+  std::vector<amd::Device*> target_devices_;  //!< Array of device pointers (one per operation)
+  size_t count_;                              //!< Number of prefetch operations
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
@@ -2079,6 +2123,7 @@ union ComputeCommand {
   SvmPrefetchAsyncCommand cmd26;
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
+  SvmPrefetchBatchAsyncCommand cmd29;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

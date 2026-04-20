@@ -9,7 +9,7 @@
 #
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-#``
+# ``
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
 # FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
@@ -36,7 +36,8 @@ from .amdsmi_interface import amdsmi_get_npm_info
 
 # ESMI Dependent Functions
 try:
-    from .amdsmi_interface import amdsmi_get_cpusocket_handles
+    from .amdsmi_interface import amdsmi_get_cpu_handles
+    from .amdsmi_interface import amdsmi_get_cpusocket_handles  # Deprecate in 8.0
     from .amdsmi_interface import amdsmi_get_cpucore_handles
     from .amdsmi_interface import amdsmi_get_processor_info
     from .amdsmi_interface import amdsmi_get_cpu_hsmp_proto_ver
@@ -83,7 +84,6 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_family
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
-    from .amdsmi_interface import amdsmi_get_cpu_handles
     from .amdsmi_interface import amdsmi_set_cpu_xgmi_pstate_range
     from .amdsmi_interface import amdsmi_get_cpu_xgmi_pstate_range
     from .amdsmi_interface import amdsmi_set_cpu_rail_isofreq_policy

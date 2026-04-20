@@ -80,9 +80,10 @@ bool for_each_compatible_target(const char* agent_isa, Fn&& callback) {
     return callback(parsed.processor);
   }
 
-  // Iterate power set of features, descending cardinality (most specific first).
-  // Bit (n-1-i) corresponds to features[i], so descending mask order drops
-  // features from the right first — preserving the original feature ordering.
+  // Iterate power set of features, descending cardinality (most specific
+  // first). Bit (n-1-i) corresponds to features[i], so descending mask order
+  // drops features from the right first — preserving the original feature
+  // ordering.
   const unsigned full_mask = (1u << n) - 1;
   for (unsigned mask = full_mask;; --mask) {
     std::string candidate = parsed.processor;

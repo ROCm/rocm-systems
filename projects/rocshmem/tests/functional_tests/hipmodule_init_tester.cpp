@@ -157,7 +157,7 @@ HipModuleInitTester::~HipModuleInitTester() {
   }
 }
 
-void HipModuleInitTester::resetBuffers(size_t size) {
+void HipModuleInitTester::resetBuffers([[maybe_unused]] size_t size) {
   // Reset device result to 0
   CHECK_HIP(hipMemset(device_result, 0, sizeof(int)));
 }

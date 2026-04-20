@@ -283,6 +283,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Counter collection support for `gfx1150` and `gfx1151`.
 - HSA Extension API v8 support.
 - `hipStreamCopyAttributes` API implementation.
+- `--profile-mpi-ranks` option in `rocprofv3` to selectively profile specific MPI ranks. Supports comma-separated ranges and individual ranks (e.g., `--profile-mpi-ranks 0-3,8,10-15`).
 
 ### Optimized
 

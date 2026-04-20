@@ -5632,9 +5632,9 @@ typedef _Check_return_ NTSTATUS (APIENTRY *PFND3DKMT_ENUMADAPTERS3)(_Inout_ D3DK
 
 typedef _Check_return_ NTSTATUS (APIENTRY *PFND3DKMT_PINRESOURCES)(_Inout_ D3DKMT_PINRESOURCES*);
 typedef _Check_return_ NTSTATUS (APIENTRY *PFND3DKMT_UNPINRESOURCES)(_In_ CONST D3DKMT_UNPINRESOURCES*);
-#if defined(WIN32) && !defined(__MINGW32__)
+#if defined(__linux__)
 typedef _Check_return_ NTSTATUS (APIENTRY *PFND3DKMT_DISPLAYPORT_OPERATION)(_Inout_ D3DKMT_DISPLAYPORT_OPERATION_HEADER*);
-#endif // _WIN32 && !__MINGW32__
+#endif // __linux__
 
 #endif
 

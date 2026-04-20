@@ -58,9 +58,11 @@
 # target that can be invoked to execute the tests. Alternatively the tests
 # can be invoked by hand.
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.21)
 
-project(rocm-debug-agent-test)
+project(rocm-debug-agent-test LANGUAGES CXX HIP)
+
+include(GNUInstallDirs)
 
 # By default do not include the testing target.
 option(ENABLE_TESTS "Enable building Debug Agent testing target" OFF)
@@ -68,177 +70,184 @@ option(ENABLE_TESTS "Enable building Debug Agent testing target" OFF)
 set(Python3_FIND_VIRTUALENV "FIRST")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# Start by trying to locate the HIP module that will tell us where all the
-# HIP dependencies are.
-find_package(HIP MODULE QUIET)
-
-# Check if we managed to set a particular variable that means our HIP module
-# discovery call above worked.
-if(NOT HIP_CXX_COMPILER)
-  # We have not found the HIP module. Try doing it differently.
-
-  # Try setting CMAKE_MODULE_PATH to the default installation path.
-  set(CMAKE_MODULE_PATH "/opt/rocm/lib/cmake/hip" CACHE STRING "HIP CMAKE Module Path")
-  find_package(HIP MODULE QUIET)
-
-  # Mandate correct CMAKE_MODULE_PATH to be provided if the HIP module could not
-  # be found in the default installation path.
-  if( NOT HIP_FOUND )
-    message(FATAL_ERROR
-            "HIP Module not found in Module Path ${CMAKE_MODULE_PATH}, \
-             Please pass the correct Module search Path \
-             'cmake -DCMAKE_MODULE_PATH=/opt/rocm-<version>/lib/cmake/hip'")
-    return()
-  endif()
+# Try CONFIG mode first (TheRock), then fall back to discovery (standalone).
+find_package(hip CONFIG QUIET)
+if(NOT hip_FOUND)
+    # Auto-discover HIP cmake files in standard ROCm installation paths
+    find_package(
+        hip
+        REQUIRED
+        CONFIG
+        PATHS /opt/rocm
+        PATH_SUFFIXES cmake/hip lib/cmake/hip hip/cmake
+    )
 endif()
-
-# cmake 3.21+ has support for HIP constructs.
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.21.0)
-  # Enable the HIP language.
-  enable_language(HIP)
-endif()
-
-# This sets the global default architecture list to nothing/OFF.
-set(CMAKE_HIP_ARCHITECTURES OFF)
-
-# Set the HIP language runtime link flags as FindHIP does not set them.
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG})
-set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG_SEP ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG_SEP})
-set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_FLAG})
 
 set(MAIN_SOURCES
-  debug_agent_test.cpp
-  vector_add_assert_trap.cpp
-  sigquit.cpp
-  print_all_waves.cpp
-  snapshot_objfile_on_load.cpp
-  vector_add_normal.cpp
-  vector_add_memory_fault.cpp
-  save_code_objects.cpp)
+    debug_agent_test.cpp
+    vector_add_assert_trap.cpp
+    sigquit.cpp
+    print_all_waves.cpp
+    snapshot_objfile_on_load.cpp
+    vector_add_normal.cpp
+    vector_add_memory_fault.cpp
+    save_code_objects.cpp
+)
 set(NO_DEBUG_SOURCES vector_add_assert_trap_no_debug_info.cpp)
-set(SOURCES ${MAIN_SOURCES} ${NO_DEBUG_SOURCES})
+set(HEADERS util.h)
 
-set_source_files_properties(${SOURCES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+# Source files required for testing.
+set(TEST_SOURCE_FILES vector_add_assert_trap.cpp)
 
-# If we have a list of GPU targets, cycle through them and build tests for
-# each specific target.
-if (GPU_TARGETS)
-  set(OFFLOAD_STR "")
+# Mark source files as HIP.
+set_source_files_properties(
+    ${MAIN_SOURCES}
+    ${NO_DEBUG_SOURCES}
+    PROPERTIES LANGUAGE HIP
+)
 
-  # NOTE
-  # Some debug agent tests rely on being able to find the source files by using
-  # the DWARF information, but those can no longer be found after installation
-  # takes place. The paths to the source files are lost and the installation
-  # directory of the tests is unknown. Therefore we need to make these source
-  # file paths relative.  Overcome this by adjusting the DW_AT_comp_dir and
-  # the DW_AT_name to be relative to the installation path of the test
-  # executable.
-  set(DWARF_INSTALL_PATH "-fdebug-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=../src/rocm-debug-agent-test -fdebug-compilation-dir=.")
-
-  foreach(ARCH_TARGET IN LISTS GPU_TARGETS)
-    message(STATUS "Setting up tests for GPU target: ${ARCH_TARGET}")
-
-    # Define the offload command for hipcc. Accumulate all architectures that
-    # were requested.
-    list(APPEND OFFLOAD_STR "--offload-arch=${ARCH_TARGET}")
-  endforeach()
-
-  # Define a directory for the generated files.
-  set(GENERATED_HIPFB_DIR ${CMAKE_CURRENT_BINARY_DIR}/hipfb_artifacts)
-  file(MAKE_DIRECTORY ${GENERATED_HIPFB_DIR})
-
-  add_custom_command(
-    OUTPUT "snapshot_objfile_on_load.hipfb"
-    COMMAND ${HIP_HIPCC_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/snapshot_objfile_on_load.cpp --genco ${OFFLOAD_STR} -o ${GENERATED_HIPFB_DIR}/snapshot_objfile_on_load.hipfb
-    DEPENDS "snapshot_objfile_on_load.cpp"
-    COMMENT "Building snapshot_objfile_on_load.hipfb for ${GPU_TARGETS}"
-    VERBATIM
-  )
-
-  add_custom_command(
-    OUTPUT "save_code_objects.hipfb"
-    COMMAND ${HIP_HIPCC_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/save_code_objects.cpp --genco ${OFFLOAD_STR} -o ${GENERATED_HIPFB_DIR}/save_code_objects.hipfb
-    DEPENDS "save_code_objects.cpp"
-    COMMENT "Building save_code_objects.hipfb for ${GPU_TARGETS}"
-    VERBATIM
-  )
-
-  # Define targets to manage dependencies.
-  add_custom_target(snapshot_objfile_on_load-tgt ALL DEPENDS snapshot_objfile_on_load.hipfb)
-  add_custom_target(save_code_objects-tgt ALL DEPENDS save_code_objects.hipfb)
-
-  # Build the library with no debug info.
-  hip_add_library(rocm-debug-agent-no-dbginfo ${NO_DEBUG_SOURCES} HIPCC_OPTIONS ${OFFLOAD_STR})
-
-  # Build the test executable with debug info.
-  hip_add_executable(rocm-debug-agent-test ${MAIN_SOURCES} ${NODEBUG_OBJ} CLANG_OPTIONS -ggdb ${DWARF_INSTALL_PATH} HIPCC_OPTIONS ${OFFLOAD_STR})
-  target_link_libraries(rocm-debug-agent-test rocm-debug-agent-no-dbginfo)
-
-  add_dependencies(rocm-debug-agent-test snapshot_objfile_on_load-tgt save_code_objects-tgt)
-
-  # Install the library.
-  install(TARGETS rocm-debug-agent-no-dbginfo
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-    COMPONENT tests
-  )
-
-  # Install the executable.
-  install(TARGETS rocm-debug-agent-test
-    RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
-    COMPONENT tests
-  )
-
-  # Install the hipfb object files used for testing.
-  install(FILES
-    ${GENERATED_HIPFB_DIR}/snapshot_objfile_on_load.hipfb
-    ${GENERATED_HIPFB_DIR}/save_code_objects.hipfb
-    # Destination is the same as the executable's destination path.
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
-    COMPONENT tests
-  )
+# Build offload args ONLY for .hipfb custom commands.
+if(CMAKE_HIP_ARCHITECTURES AND NOT CMAKE_HIP_ARCHITECTURES STREQUAL "OFF")
+    set(OFFLOAD_ARGS "")
+    foreach(ARCH IN LISTS CMAKE_HIP_ARCHITECTURES)
+        list(APPEND OFFLOAD_ARGS "--offload-arch=${ARCH}")
+    endforeach()
+    message(STATUS "Building for HIP architectures: ${CMAKE_HIP_ARCHITECTURES}")
 else()
-  message(STATUS "Setting up tests for system GPU target")
-
-  add_custom_command(
-    OUTPUT "snapshot_objfile_on_load.hipfb"
-    COMMAND ${HIP_HIPCC_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/snapshot_objfile_on_load.cpp --genco -o snapshot_objfile_on_load.hipfb
-    DEPENDS "snapshot_objfile_on_load.cpp"
-    COMMENT "Building snapshot_objfile_on_load.hipfb for system GPU"
-    VERBATIM)
-
-  add_custom_command(
-    OUTPUT "save_code_objects.hipfb"
-    COMMAND ${HIP_HIPCC_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/save_code_objects.cpp --genco -o save_code_objects.hipfb
-    DEPENDS "save_code_objects.cpp"
-    COMMENT "Building save_code_objects.hipfb for system GPU"
-    VERBATIM)
-
-  # Define targets to manage dependencies
-  add_custom_target(snapshot_objfile_on_load-tgt ALL DEPENDS snapshot_objfile_on_load.hipfb)
-  add_custom_target(save_code_objects-tgt ALL DEPENDS save_code_objects.hipfb)
-
-  hip_add_library(rocm-debug-agent-no-dbginfo ${NO_DEBUG_SOURCES})
-
-  hip_add_executable(rocm-debug-agent-test ${MAIN_SOURCES} ${NODEBUG_OBJ} CLANG_OPTIONS -ggdb)
-  target_link_libraries(rocm-debug-agent-test rocm-debug-agent-no-dbginfo)
-
-  add_dependencies(rocm-debug-agent-test snapshot_objfile_on_load-tgt save_code_objects-tgt)
-
-  if(ENABLE_TESTS)
-    enable_testing()
-    add_test(NAME rocm-debug-agent-test
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run-test.py ${CMAKE_CURRENT_BINARY_DIR})
-  endif()
-
-# Install the CMakeLists.txt file for the standalone build path.
-install(FILES CMakeLists.txt
-  DESTINATION ${CMAKE_INSTALL_PREFIX}/src/rocm-debug-agent-test
-  COMPONENT tests)
+    # CMake's HIP support should take care of picking up a fallback HIP
+    # architecture in case no GPU is found on the system. The default is
+    # usually gfx906.
+    message(
+        FATAL_ERROR
+        "Could not determine HIP architecture for building device code."
+        "Please set CMAKE_HIP_ARCHITECTURES to the desired architecture."
+    )
 endif()
 
-file(GLOB HEADERS "*.h")
+# Set HIP_FLAGS for compilation of hipfb files.
+#
+# "-x hip" because we are using clang++ instead of hipcc.
+#
+# OFFLOAD_ARGS for the offloading architectures.
+#
+# "-O3" because test 3 of debug agent requires it.
+#
+# -cuda-device-only to generate hipfb files.
+#
+set(HIP_FLAGS
+    -x
+    hip
+    ${OFFLOAD_ARGS}
+    -O3
+    --cuda-device-only
+)
 
-# Install the source files and the python script for running tests.
-install(FILES run-test.py ${SOURCES} ${HEADERS}
-  DESTINATION ${CMAKE_INSTALL_PREFIX}/src/rocm-debug-agent-test
-  COMPONENT tests)
+# This is needed because some debug agent tests rely on looking up the source
+# files through DWARF entries. Since the test files and executable may be
+# installed elsewhere and the original source files may not be available
+# anymore, we have to adjust the source file path in DWARF to be the same
+# directory of the test executable.
+set(DWARF_FLAGS
+    -fdebug-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
+    -fdebug-compilation-dir=.
+)
+
+# Output directory for the HIPFB files.
+set(HIPFB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
+
+# Generate the hipfb files we use for testing.
+add_custom_command(
+    OUTPUT "${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb"
+    COMMAND
+        ${CMAKE_HIP_COMPILER} ${HIP_FLAGS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/snapshot_objfile_on_load.cpp -o
+        ${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb
+    DEPENDS snapshot_objfile_on_load.cpp
+    COMMENT "Building snapshot_objfile_on_load.hipfb"
+    VERBATIM
+)
+
+add_custom_command(
+    OUTPUT "${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb"
+    COMMAND
+        ${CMAKE_HIP_COMPILER} ${HIP_FLAGS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/save_code_objects.cpp -o
+        ${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb
+    DEPENDS save_code_objects.cpp
+    COMMENT "Building save_code_objects.hipfb"
+    VERBATIM
+)
+
+# Define targets to manage dependencies.
+add_custom_target(
+    snapshot_objfile_on_load-tgt
+    ALL
+    DEPENDS ${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb
+)
+add_custom_target(
+    save_code_objects-tgt
+    ALL
+    DEPENDS ${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb
+)
+
+# Build the library with no debug info.
+add_library(rocm-debug-agent-no-dbginfo ${NO_DEBUG_SOURCES})
+target_compile_options(rocm-debug-agent-no-dbginfo PRIVATE)
+
+# Build the test executable with debug info.
+add_executable(rocm-debug-agent-test ${MAIN_SOURCES})
+target_compile_options(rocm-debug-agent-test PRIVATE -ggdb ${DWARF_FLAGS})
+target_link_libraries(rocm-debug-agent-test PRIVATE rocm-debug-agent-no-dbginfo)
+add_dependencies(
+    rocm-debug-agent-test
+    snapshot_objfile_on_load-tgt
+    save_code_objects-tgt
+)
+
+# Enable the testing target if requested. This enables running debug agent
+# tests from the build tree with ctest.
+#
+# Tests can also be executed using the prebuilt test executable that is
+# installed alongside the debug agent library.
+if(ENABLE_TESTS)
+    # In order to keep our ability to run tests within the build tree, we need
+    # to copy the required source files over for tests to run properly.
+    foreach(source_file IN LISTS TEST_SOURCE_FILES)
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}"
+            "${CMAKE_CURRENT_BINARY_DIR}/${source_file}"
+            COPYONLY
+        )
+    endforeach()
+
+    enable_testing()
+    add_test(
+        NAME rocm-debug-agent-test
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run-test.py
+            ${CMAKE_CURRENT_BINARY_DIR}
+    )
+endif()
+
+# Install the test executable.
+install(
+    TARGETS rocm-debug-agent-test
+    DESTINATION tests/rocm-debug-agent
+    COMPONENT tests
+)
+
+# Install the shared objects used by testing.
+install(
+    FILES
+        ${HIPFB_OUTPUT_DIR}/snapshot_objfile_on_load.hipfb
+        ${HIPFB_OUTPUT_DIR}/save_code_objects.hipfb
+    DESTINATION tests/rocm-debug-agent
+    COMPONENT tests
+)
+
+# Install the required source files and the testing script.
+install(
+    FILES run-test.py ${TEST_SOURCE_FILES}
+    DESTINATION tests/rocm-debug-agent
+    COMPONENT tests
+)

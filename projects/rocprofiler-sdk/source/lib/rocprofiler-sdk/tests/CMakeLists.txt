@@ -36,12 +36,15 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main)
 
+file(GLOB _NODE_PROPERTIES ${CMAKE_CURRENT_LIST_DIR}/data/topology/nodes/*/properties)
 rocprofiler_add_unit_test(
     TARGET rocprofiler-sdk-lib-tests
     SOURCES ${rocprofiler_lib_sources}
     TEST_LIST lib_TESTS
     TIMEOUT 30
     LABELS "unittests"
+    DATA "data/topology/nodes" # copy over and install
+    CONFIGURE_FILES "${_NODE_PROPERTIES}" # ensure cmake re-runs when files are updated
     ENVIRONMENT
         "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

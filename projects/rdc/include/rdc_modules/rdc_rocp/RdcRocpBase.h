@@ -127,11 +127,10 @@ class RdcRocpBase {
    *
    * @retval ::RDC_ST_OK Transformation successful
    */
-  rdc_status_t apply_field_transformation(rdc_field_t field, uint32_t agent_index,
-                                          double raw_value, double elapsed_time_ms,
+  rdc_status_t apply_field_transformation(rdc_field_t field, uint32_t agent_index, double raw_value,
+                                          double elapsed_time_ms,
                                           const std::map<std::string, double>& sampled_values,
-                                          rdc_field_value_data* output,
-                                          rdc_field_type_t* type);
+                                          rdc_field_value_data* output, rdc_field_type_t* type);
 
   /**
    * @brief Convert from profiler status into RDC status

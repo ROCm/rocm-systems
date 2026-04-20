@@ -300,3 +300,56 @@ TEST(codeobj_library, codeobj_table_test)
     ASSERT_EQ(map.removeDecoderbyId(3), true);
     ASSERT_EQ(map.removeDecoderbyId(1), false);
 }
+
+/**
+ * Verifies that DWARF inline annotation produces " -> " separators.
+ * The test kernel calls a __device__ function that calls __syncthreads(),
+ * which inlines through HIP headers.  This guarantees at least 3 call stack
+ * levels (kernel -> device func -> HIP header), i.e. at least two " -> "
+ * separators in the comment of the s_barrier instruction.
+ */
+TEST(codeobj_library, inline_annotation)
+{
+    std::string path = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(path.empty()) << "syncthreads_kernel.bin not found";
+
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    CodeobjDecoderComponent comp(objdata.data(), objdata.size());
+    ASSERT_FALSE(comp.m_symbol_map.empty());
+
+    constexpr size_t min_depth = 3;  // kernel -> barrier_wrapper -> HIP header(s)
+    size_t           max_depth = 0;
+    for(auto& [kaddr, sym] : comp.m_symbol_map)
+    {
+        size_t vaddr = kaddr;
+        while(vaddr < kaddr + sym.mem_size)
+        {
+            auto faddr = comp.va2fo(vaddr);
+            ASSERT_TRUE(faddr.has_value());
+
+            auto inst = comp.disassemble_instruction(*faddr, vaddr);
+            ASSERT_NE(inst, nullptr);
+            ASSERT_NE(inst->size, 0u);
+
+            // Count separators to determine call stack depth
+            size_t depth = 1;
+            size_t pos   = 0;
+            while((pos = inst->comment.find(disassembly::Instruction::separator, pos)) !=
+                  std::string::npos)
+            {
+                depth++;
+                pos += disassembly::Instruction::separator.size();
+            }
+            max_depth = std::max(max_depth, depth);
+
+            vaddr += inst->size;
+        }
+    }
+    EXPECT_GE(max_depth, min_depth)
+        << "Deepest inline call stack was " << max_depth << " levels (expected >= " << min_depth
+        << "). DWARF inlined subroutine traversal may be broken.";
+}

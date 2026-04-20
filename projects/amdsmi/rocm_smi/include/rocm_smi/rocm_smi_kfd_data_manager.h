@@ -101,15 +101,12 @@ struct KFDManagerConfig {
 };
 
 /// Supported KFD operation types
-enum class OpType : uint32_t {
-  kQueryAvailableVram = 0,
-  kOpTypeCount
-};
+enum class OpType : uint32_t { kQueryAvailableVram = 0, kOpTypeCount };
 
 /// Result container for KFD operations
 struct QueryResult {
-  int err_code = 0;     ///< 0 on success, errno on failure
-  uint64_t value = 0;   ///< Operation result (interpretation depends on OpType)
+  int err_code = 0;    ///< 0 on success, errno on failure
+  uint64_t value = 0;  ///< Operation result (interpretation depends on OpType)
 };
 
 /// Load configuration from environment variables into cfg
@@ -127,9 +124,8 @@ KFDManagerConfig GetCurrentConfig();
 /// Batch query with caching - O(1) cache lookup by gpu_id
 /// If target's cache is valid, returns immediately
 /// Otherwise, refreshes cache for ALL gpu_ids in one fork
-[[nodiscard]] QueryResult ExecuteBatchQueryCached(OpType op,
-                                    const std::vector<uint32_t>& gpu_ids,
-                                    uint32_t target_gpu_id);
+[[nodiscard]] QueryResult ExecuteBatchQueryCached(OpType op, const std::vector<uint32_t>& gpu_ids,
+                                                  uint32_t target_gpu_id);
 
 /// Purge cache entries (gpu_id < 0 means all entries for the operation)
 void PurgeCacheEntries(OpType op, int32_t gpu_id = -1);
@@ -142,8 +138,7 @@ void PurgeAllCacheEntries();
 
 /// Convenience wrapper for batched VRAM query (with caching)
 [[nodiscard]] int QueryAvailableVramBatch(const std::vector<uint32_t>& gpu_ids,
-                            uint32_t target_gpu_id,
-                            uint64_t* out_available);
+                                          uint32_t target_gpu_id, uint64_t* out_available);
 
 /// Forcefully terminate any active helper processes
 void TerminateActiveHelpers();

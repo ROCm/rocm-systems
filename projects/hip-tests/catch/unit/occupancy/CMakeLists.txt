@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
   hipOccupancyMaxActiveBlocksPerMultiprocessor.cc
@@ -13,7 +17,7 @@ set(TEST_SRC
 
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
                    -o simple_kernel.code
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}

@@ -53,7 +53,7 @@ class Program : public amd::HeapObject {
  public:
   typedef std::pair<const void* /* binary_image */, size_t /* binary size */> binary_t;
   typedef std::pair<amd::Os::FileDesc /* file_desc */, size_t /* file_offset */> finfo_t;
-  typedef std::unordered_map<std::string, Kernel*> kernels_t;
+  typedef std::unordered_map<std::string_view, Kernel*> kernels_t;
   // type of the program
   typedef enum {
     TYPE_NONE = 0,     // uncompiled
@@ -131,7 +131,7 @@ class Program : public amd::HeapObject {
   uint32_t codeObjectVer_;                                              //!< version of code object
   std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_;  //!< Map of kernel metadata
   //! Sanitizer lock - lock when launching init/fini kernels
-  static amd::Monitor initFiniLock_;
+  static std::recursive_mutex initFiniLock_;
 
  public:
   //! Construct a section.

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
@@ -18,6 +18,8 @@ endif()
 if(POLICY CMP0144)
     cmake_policy(SET CMP0144 NEW)
 endif()
+
+set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 if(NOT UNIX OR APPLE)
     message(
@@ -93,9 +95,7 @@ set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries")
 set(BUILD_STATIC_LIBS OFF CACHE BOOL "Build static libraries")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Build position independent code")
 
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
-    cmake_policy(SET CMP0135 NEW)
-endif()
+cmake_policy(SET CMP0135 NEW)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -138,10 +138,10 @@ include(MacroUtilities) # various functions and macros
 
 if(CI_BUILD)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CI "Enable internal asserts, etc." ON
-                                   ADVANCED NO_FEATURE
+        ADVANCED NO_FEATURE
     )
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
-                                   "Enable building the testing suite" ON ADVANCED
+        "Enable building the testing suite" ON ADVANCED
     )
     rocprofiler_systems_add_option(
         ROCPROFSYS_BUILD_DEBUG "Enable building with extensive debug symbols" OFF
@@ -152,34 +152,34 @@ if(CI_BUILD)
         "Build with hidden visibility (disable for Debug builds)" OFF ADVANCED
     )
     rocprofiler_systems_add_option(ROCPROFSYS_STRIP_LIBRARIES "Strip the libraries" OFF
-                                   ADVANCED
+        ADVANCED
     )
 else()
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CI "Enable internal asserts, etc."
-    OFF ADVANCED NO_FEATURE
+        OFF ADVANCED NO_FEATURE
     )
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_EXAMPLES
-    "Enable building the examples" OFF ADVANCED
+        "Enable building the examples" OFF ADVANCED
     )
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
-    "Install the examples" OFF
+        "Install the examples" OFF
     )
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
-    "Enable building the testing suite" OFF ADVANCED
+        "Enable building the testing suite" OFF ADVANCED
     )
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTING
-    "Install the test suite" OFF
+        "Install the test suite" OFF
     )
     rocprofiler_systems_add_option(
-    ROCPROFSYS_BUILD_DEBUG "Enable building with extensive debug symbols" OFF
-    ADVANCED
+        ROCPROFSYS_BUILD_DEBUG "Enable building with extensive debug symbols" OFF
+        ADVANCED
     )
     rocprofiler_systems_add_option(
-    ROCPROFSYS_BUILD_HIDDEN_VISIBILITY
-    "Build with hidden visibility (disable for Debug builds)" ON ADVANCED
+        ROCPROFSYS_BUILD_HIDDEN_VISIBILITY
+        "Build with hidden visibility (disable for Debug builds)" ON ADVANCED
     )
     rocprofiler_systems_add_option(ROCPROFSYS_STRIP_LIBRARIES "Strip the libraries"
-    ${_STRIP_LIBRARIES_DEFAULT} ADVANCED
+        ${_STRIP_LIBRARIES_DEFAULT} ADVANCED
     )
 endif()
 
@@ -188,6 +188,10 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 )
 
 if(ROCPROFSYS_BUILD_FOR_THEROCK)
+    # TheRock injects these variables, which takes precedence over our
+    # own python discovery, even when versions differ. Unset them to prevent this.
+    unset(Python3_EXECUTABLE CACHE)
+
     set(ROCPROFSYS_INSTALL_TESTING
         ON
         CACHE BOOL
@@ -221,28 +225,27 @@ rocprofiler_systems_add_feature(CMAKE_INSTALL_PREFIX "Installation prefix")
 rocprofiler_systems_add_feature(CMAKE_CXX_COMPILER "C++ compiler")
 rocprofiler_systems_add_feature(CMAKE_CXX_STANDARD "CXX language standard")
 rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
-                               "Require C++ language standard" ON
+    "Require C++ language standard" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
-                               "Enable AI NIC profiling through AMD SMI" ON
+    "Enable AI NIC profiling through AMD SMI" ON
 )
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
-                               "Compiler specific language extensions" OFF
+    "Compiler specific language extensions" OFF
 )
 rocprofiler_systems_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH
-                               "Enable rpath to linked libraries" OFF
+    "Enable rpath to linked libraries" OFF
 )
 set(CMAKE_INSTALL_MESSAGE "LAZY" CACHE STRING "Installation message")
 mark_as_advanced(CMAKE_INSTALL_MESSAGE)
 
 rocprofiler_systems_add_option(ROCPROFSYS_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_BFD
-                               "Enable BFD support (map call-stack samples to LOC)" ON
+    "Enable BFD support (map call-stack samples to LOC)" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_MPI "Enable MPI support" OFF)
-rocprofiler_systems_add_option(ROCPROFSYS_USE_ROCM "Enable ROCm support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PAPI "Enable HW counter support via PAPI"
-                               ON
+    ON
 )
 rocprofiler_systems_add_option(
     ROCPROFSYS_USE_MPI_HEADERS
@@ -251,41 +254,41 @@ rocprofiler_systems_add_option(
 rocprofiler_systems_add_option(ROCPROFSYS_USE_OMPT "Enable OpenMP tools support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from submodule"
-                               OFF
+    OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
-                               OFF
+    OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
-                               OFF
+    OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_BOOST "Build boost from submodule"
-                               OFF
+    OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
-                               OFF
+    OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
-                               "Build libunwind from submodule" ON
+    "Build libunwind from submodule" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_NLOHMANN_JSON
-                               "Build nlohmann/json from submodule" ON
+    "Build nlohmann/json from submodule" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
-                               "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
+    "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
-                               "Enable building spdlog library internally" ON
+    "Enable building spdlog library internally" ON
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
-                               "Enable building sqlite3 library internally" ON
+    "Enable building sqlite3 library internally" ON
 )
 
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
-                               "Enable building googletest library internally" ON
+    "Enable building googletest library internally" ON
 )
 
 if(ROCPROFSYS_USE_PAPI)
@@ -294,7 +297,7 @@ endif()
 
 if(ROCPROFSYS_USE_PYTHON)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PYTHON
-                                   "Build python bindings with internal pybind11" ON
+        "Build python bindings with internal pybind11" ON
     )
 elseif("$ENV{ROCPROFSYS_CI}")
     # quiet warnings in dashboard
@@ -307,8 +310,8 @@ elseif("$ENV{ROCPROFSYS_CI}")
 endif()
 
 if(ROCPROFSYS_INSTALL_TESTING)
-    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
     set(ROCPROFSYS_BUILD_TESTING ON CACHE BOOL "Enable building the testing suite" FORCE)
+    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
@@ -390,6 +393,14 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN
 )
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# symlink compile_commands.json to source root for clangd and clang-tidy
+file(
+    CREATE_LINK
+        "${CMAKE_BINARY_DIR}/compile_commands.json"
+        "${CMAKE_SOURCE_DIR}/compile_commands.json"
+    SYMBOLIC
+)
+
 include(Formatting) # format target
 include(Packages) # finds third-party libraries
 
@@ -417,12 +428,12 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME core)
 
 if(ROCPROFSYS_BUILD_CODECOV)
     rocprofiler_systems_save_variables(CODECOV_FLAGS VARIABLES CMAKE_C_FLAGS
-                                                               CMAKE_CXX_FLAGS
+        CMAKE_CXX_FLAGS
     )
     foreach(_BUILD_TYPE DEBUG MINSIZEREL RELWITHDEBINFO RELEASE)
         rocprofiler_systems_save_variables(
             CODECOV_FLAGS VARIABLES CMAKE_C_FLAGS_${_BUILD_TYPE}
-                                    CMAKE_CXX_FLAGS_${_BUILD_TYPE}
+            CMAKE_CXX_FLAGS_${_BUILD_TYPE}
         )
     endforeach()
 
@@ -443,13 +454,13 @@ add_subdirectory(source)
 
 if(ROCPROFSYS_BUILD_CODECOV)
     rocprofiler_systems_restore_variables(CODECOV_FLAGS VARIABLES CMAKE_C_FLAGS
-                                                                  CMAKE_CXX_FLAGS
+        CMAKE_CXX_FLAGS
     )
 
     foreach(_BUILD_TYPE DEBUG MINSIZEREL RELWITHDEBINFO RELEASE)
         rocprofiler_systems_restore_variables(
             CODECOV_FLAGS VARIABLES CMAKE_C_FLAGS_${_BUILD_TYPE}
-                                    CMAKE_CXX_FLAGS_${_BUILD_TYPE}
+            CMAKE_CXX_FLAGS_${_BUILD_TYPE}
         )
     endforeach()
 endif()
@@ -516,6 +527,22 @@ install(
     PROGRAMS
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/rocprof-sys-merge-output.sh
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT setup
+)
+
+# Preset JSON files are embedded into the binary at build time (see
+# source/bin/common/CMakeLists.txt). The source files in
+# share/rocprofiler-systems/presets/ remain as the source of truth.
+# Schema.json is installed for documentation/validation purposes only.
+configure_file(
+    ${PROJECT_SOURCE_DIR}/source/bin/common/presets/schema.json
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets/schema.json
+    COPYONLY
+)
+
+install(
+    FILES "${PROJECT_SOURCE_DIR}/source/bin/common/presets/schema.json"
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets
     COMPONENT setup
 )
 

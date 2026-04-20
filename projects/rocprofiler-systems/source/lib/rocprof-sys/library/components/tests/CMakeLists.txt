@@ -15,6 +15,7 @@ target_link_libraries(
         rocprofiler-systems-perfetto
         rocprofiler-systems-core-library
         rocprofiler-systems-logger # spdlog for headers pulled in via category_region -> trace_cache
+        rocprofiler-systems-rocm # needed for rocprofiler-sdk headers
 )
 
 target_include_directories(

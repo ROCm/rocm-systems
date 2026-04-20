@@ -27,6 +27,8 @@ subtrees:
       - entries:
         - file: how-to/sampling-call-stack.rst
           title: Sampling the call stack
+        - file: how-to/attaching-to-running-process.rst
+          title: Attaching to a running process
         - file: how-to/instrumenting-rewriting-binary-application.rst
           title: Instrumenting and rewriting a binary application
         - file: how-to/performing-causal-profiling.rst

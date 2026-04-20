@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -95,29 +95,10 @@ class Queue;
 
 namespace AMD {
 
-// @brief: Used to transform an address into a device address
-constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
-constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
-
-/// @brief: The driver places a structure before each command in a command chain.
-/// Need to increase the size of the command by the size of this structure.
-/// In the following xdna driver source can see where this is implemented:
-/// Commit hash: eddd92c0f61592c576a500f16efa24eb23667c23
-/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_msg_priv.h#L387-L391
-/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_message.c#L637
-constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 3;
-
-/// @brief: The size of an instruction in bytes
-constexpr uint32_t INSTR_SIZE_BYTES = 4;
-
-/// @brief: Index of command payload where the instruction sequence
-/// address is located
-constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_IDX = 2;
-constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_SIZE_IDX = 4;
-
-/// @brief Environment variable to define job submission timeout
-constexpr uint32_t DEFAULT_TIMEOUT_VAL = 50;
-
+/// @brief AMD XDNA Driver for AMD AIE agents.
+///
+/// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
+/// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
   /// @brief BO handle information.
   struct BOHandle {
@@ -136,26 +117,35 @@ class XdnaDriver final : public core::Driver {
     constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
   };
 
-  /// @brief CU mask size.
-  static constexpr size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
 
   /// @brief Per hardware context PDI cache.
   class PDICache {
+   private:
+    /// @brief CU mask size.
+    constexpr static size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
+
+   public:
+    using size_type = uint32_t;
+
+   private:
     std::array<BOHandle, cu_mask_size> entries = {};
-    size_t entry_count = 0;
+    size_type entry_count = 0;
 
    public:
     /// @brief Sentinel value for entries not found.
-    constexpr static size_t NotFound = cu_mask_size;
+    constexpr static size_type NotFound = cu_mask_size;
+
+    /// @brief Returns if the cache is empty.
+    constexpr bool empty() const { return entry_count == 0; }
 
     /// @brief Returns the size of the cache.
-    constexpr size_t size() const { return entry_count; }
+    constexpr size_type size() const { return entry_count; }
 
     /// @brief Returns the index of the BO handle if it is the cache, otherwise @ref NotFound.
     ///
     /// This function does a linear search because the mask is small (32 elements).
-    size_t GetIndex(uint32_t pdi_handle) const {
-      for (size_t i = 0; i < entry_count; ++i) {
+    size_type GetIndex(uint32_t pdi_handle) const {
+      for (size_type i = 0; i < entry_count; ++i) {
         if (entries[i].handle == pdi_handle) {
           return i;
         }
@@ -164,7 +154,7 @@ class XdnaDriver final : public core::Driver {
     }
 
     /// @brief Sets the next cache entry.
-    hsa_status_t SetNext(const BOHandle& pdi_bo_handle, size_t& index) {
+    hsa_status_t SetNext(const BOHandle& pdi_bo_handle, size_type& index) {
       if (entry_count == entries.size()) {
         // cache is full
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -175,7 +165,7 @@ class XdnaDriver final : public core::Driver {
       return HSA_STATUS_SUCCESS;
     }
 
-    constexpr const BOHandle& operator[](size_t index) const { return entries[index]; }
+    constexpr const BOHandle& operator[](size_type index) const { return entries[index]; }
   };
 
 public:
@@ -207,7 +197,7 @@ public:
   hsa_status_t FreeMemory(void *mem, size_t size) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
-                           uint64_t queue_size_bytes, HsaEvent* event,
+                           uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
                            HsaQueueResource& queue_resource) const override;
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
@@ -304,8 +294,8 @@ public:
 
   std::map<void*, BOHandle> vmem_addr_mappings;
 
-  /// @brief Hardware context to PDI cache mapping.
-  std::unordered_map<uint32_t, PDICache> hw_ctx_pdi_cache_map;
+  /// @brief Queue to PDI cache map.
+  std::unordered_map<HSA_QUEUEID, PDICache> queue_pdi_map_;
 
   /// @brief Virtual address range allocated for the device heap.
   ///

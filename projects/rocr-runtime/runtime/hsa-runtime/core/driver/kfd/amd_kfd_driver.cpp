@@ -141,7 +141,7 @@ hsa_status_t KfdDriver::Init() {
 
 hsa_status_t KfdDriver::ShutDown() {
   HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
 
   ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
 
@@ -176,8 +176,11 @@ hsa_status_t KfdDriver::Close() {
 }
 
 hsa_status_t KfdDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
-  if (HSAKMT_CALL(hsaKmtReleaseSystemProperties()) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-
+  // Note: We intentionally do NOT call hsaKmtReleaseSystemProperties() here.
+  // hsaKmtRuntimeEnable (called from Init) already acquired system properties.
+  // Releasing and re-acquiring would tear down FMM apertures and fail to
+  // re-acquire the VM because the kernel-side VM binding persists.
+  // hsaKmtAcquireSystemProperties handles the cached-snapshot case internally.
   if (HSAKMT_CALL(hsaKmtAcquireSystemProperties(&sys_props)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
@@ -386,14 +389,14 @@ hsa_status_t KfdDriver::FreeMemory(void *mem, size_t size) {
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
-                                    void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                    HsaQueueResource& queue_resource) const {
+                                    void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                    HsaEvent* event, HsaQueueResource& queue_resource) const {
   // Convert from ROCR internal priority type to KFD type
   HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
-                                       queue_addr, queue_size_bytes, event, &queue_resource)) !=
-      HSAKMT_STATUS_SUCCESS) {
+  if (HSAKMT_CALL(hsaKmtCreateQueueV2(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
+                                         queue_addr, queue_size_bytes, queue_metadata_size_bytes,
+                                         event, &queue_resource)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   return HSA_STATUS_SUCCESS;
@@ -449,8 +452,6 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  assert(offset_res == 0);
-
   *dmabuf_fd = dmabuf_fd_res;
   *offset = offset_res;
 
@@ -462,7 +463,7 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
   const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
-  desc.fd = static_cast<HSAint32>(dmabuf_fd);
+  desc.fd = static_cast<HSAint64>(dmabuf_fd);
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
   desc.mem = mem;
   desc.metadata = 0;
@@ -751,7 +752,9 @@ hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
 hsa_status_t KfdDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const {
   assert(frequency);
 
-  HSAKMT_CALL(hsaKmtGetNodeWallclockFrequency(node_id, frequency));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetNodeWallclockFrequency(node_id, frequency));
+  if (status != HSAKMT_STATUS_SUCCESS)
+     return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }

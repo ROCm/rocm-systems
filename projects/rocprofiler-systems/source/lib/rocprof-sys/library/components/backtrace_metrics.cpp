@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
 #include "core/common.hpp"
@@ -29,7 +10,6 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/components/ensure_storage.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
@@ -261,9 +241,9 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
     size_t      stack_id        = 0;
     size_t      parent_stack_id = 0;
     size_t      correlation_id  = 0;
-    const auto* event_metadata  = "";
-    const auto* call_stack      = "";
-    const auto* line_info       = "";
+    const auto* event_metadata  = "{}";
+    const auto* call_stack      = "{}";
+    const auto* line_info       = "{}";
 
     std::optional<int64_t> _system_tid{ std::nullopt };
     const auto&            _thread_info = thread_info::get(_tid, SequentTID);
@@ -599,10 +579,8 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 }
 
 void
-backtrace_metrics::cache_backtrace_data([[maybe_unused]] int64_t  _tid,
-                                        [[maybe_unused]] uint64_t _ts) const
+backtrace_metrics::cache_backtrace_data(int64_t _tid, uint64_t _ts) const
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto is_category_enabled = [&](const auto& _category) { return (*this)(_category); };
 
     if(is_category_enabled(category::thread_cpu_time{}))
@@ -634,7 +612,6 @@ backtrace_metrics::cache_backtrace_data([[maybe_unused]] int64_t  _tid,
         cache_backtrace_metrics_events<category::thread_hardware_counter,
                                        hw_counter_data_t>(0, _ts, m_hw_counter, _tid);
     }
-#endif
 }
 }  // namespace component
 }  // namespace rocprofsys

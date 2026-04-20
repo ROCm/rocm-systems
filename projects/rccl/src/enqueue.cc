@@ -157,7 +157,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   case ncclFuncAllReduce: return 2;
   case ncclFuncAllGather: return nRanks;
   case ncclFuncReduceScatter: return nRanks;
-  case ncclFuncAlltoAllvGda: return nRanks;			      
+  case ncclFuncAlltoAllvGda: return nRanks;
   default: return 1;
   }
 }
@@ -244,8 +244,8 @@ static void addWorkBatchToPlan(
   batch->offsetBitset |= 1ull<<(offset/workSize);
   chan->wipBatch.workBytes += workSize;
   if (workType == ncclDevWorkTypeP2p) {
-    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1), 
-    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes), 
+    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1),
+    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes),
     // mark eligibility/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
     if(chan->wipBatch.nP2ps == 0)
       chan->wipBatch.batchP2P = batchP2P;
@@ -344,7 +344,11 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   }
 }
 
-NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 0); // LWPCOMMLIBS-632: off by default for RCCL as unsupported feature.
+#if ROCM_VERSION >= 71200
+NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 1);
+#else
+NCCL_PARAM(GraphRegister, "GRAPH_REGISTER", 0);
+#endif
 
 static ncclResult_t getCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
 rccl_static ncclResult_t getAlgoInfo(
@@ -435,8 +439,14 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
       int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
       if (directReduceScatterLimit >= 0) {
-        // set threshold to 2MiB hard limit
-        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        // set threshold to 8MiB hard limit
+        if (comm->nNodes == 8 || comm->nNodes == 16) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)8388608);
+        } else if (comm->nNodes == 4) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)4194304);
+        } else if (comm->nNodes == 2) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        }
         devWork.directReduceScatterLimitBytes = (uint32_t) directReduceScatterLimit;
       } else {
         devWork.directReduceScatterLimitBytes = (uint32_t)0;
@@ -445,15 +455,15 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.currentRank = comm->rank;
       devWork.count = task->count;
     }
-    
+
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
-    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
     devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
     if (task->regBufType & NCCL_NET_REG_BUFFER)
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
+    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
@@ -746,6 +756,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       NCCLCHECK(calcCollChunking(comm, task, nChannels, nBytes, &chunkSize, &directFlags, &proxyOp));
       devWork->channelLo = 0;
       devWork->channelHi = nChannels-1;
+      // RCCL: CollNet path never set task->nChannels; profiler received 0.
+      // Clamp to UINT8_MAX: ENABLE_WARP_SPEED pushes MAXCHANNELS to 512 which wraps uint8.
+      task->nChannels = (nChannels <= UINT8_MAX) ? (uint8_t)nChannels : UINT8_MAX;
       devWork->collnet.count = task->count;
       devWork->collnet.chunkCount = chunkSize/ncclTypeSize(task->datatype);
       devWork->direct = directFlags;
@@ -1006,7 +1019,7 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
 // previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
 // we want to enable by default only for gfx950, so we use rcclEffectiveP2pBatchEnable helper to branch based on arch
-RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
+RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", 0);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
 
 
@@ -1868,8 +1881,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   for (int i = 0; i < MAXCHANNELS/64; i++)
     nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
-  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
 #ifdef ENABLE_WARP_SPEED
+  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
   nChannels = rcclWarpSpeedSupported(comm, plan) ? (nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0)) : nChannels; // each CU can handle warpsPerBlock
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
@@ -2119,6 +2132,7 @@ static void initCollCostTable(float** collCostTable) {
 static ncclResult_t updateCollCostTable(
     struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
     int collNetSupport, int nvlsSupport, int numPipeOps,
+    int userAlgoInput,
     float** collCostTable) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
@@ -2138,6 +2152,20 @@ static ncclResult_t updateCollCostTable(
     /* Tree reduceScatter doesn't support scaling yet */
     if (a == NCCL_ALGO_PAT && info->func == ncclFuncReduceScatter
         && (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv)) continue;
+    if (a == NCCL_ALGO_PAT && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
+      if (!userAlgoInput) {
+        int nNodes = comm->nNodes;
+        bool inRange = false;
+        if (nNodes <= 4) {
+          inRange = (nBytes >= (512 << 10) && nBytes <= (2 << 20));
+        } else if (nNodes <= 8) {
+          inRange = (nBytes >= (32 << 10) && nBytes <= (4 << 20));
+        } else {
+          inRange = (nBytes <= (32 << 20));
+        }
+        if (!inRange) continue;
+      }
+    }
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
@@ -2249,17 +2277,28 @@ static ncclResult_t topoGetAlgoInfo(
     } else {
       nc = comm->nvlsChannels;
     }
+  } else if (info->algorithm == NCCL_ALGO_PAT) {
+    nc = (nBytes <= (32 << 10)) ? 1 : (nBytes <= (64 << 10)) ? 2 : (nBytes <= (1 << 20)) ? 4 : comm->nChannels;
+
+    int minNChannels = ncclParamMinNchannels();
+    int maxNChannels = ncclParamMaxNchannels();
+    if (minNChannels > 0) {
+      nc = std::max(minNChannels, nc);
+    }
+    if (maxNChannels > 0) {
+      nc = std::min(maxNChannels, nc);
+    }
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
-    INFO(NCCL_INIT, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
 
     int minNChannels = ncclParamMinNchannels();
     // Ring/Tree channel tuning
-    INFO(NCCL_INIT, "minNChannels:%i", minNChannels);
+    INFO(NCCL_TUNING, "minNChannels:%i", minNChannels);
     if(nBytes < nc * nt * threadThreshold && nc > minNChannels){
       nc = std::max(1,std::max(minNChannels,(int)(nBytes/std::max(1,nt * threadThreshold))));
     }
-    INFO(NCCL_INIT, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
+    INFO(NCCL_TUNING, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
 
@@ -2329,7 +2368,7 @@ static ncclResult_t topoGetAlgoInfo(
   rcclOverrideAlgorithm(ncclAlgoStr, table, info);
   rcclOverrideProtocol(ncclProtoStr, table, info);
 #ifdef ENABLE_WARP_SPEED
-  rcclSetWarpSpeedAuto(comm, info, nBytes);
+  NCCLCHECK(rcclSetWarpSpeedAuto(comm, info, nBytes));
   if(info->useWarpSpeed) {
     rcclSetWarpSpeedCUs(comm, info->algorithm, info->nWarps * comm->WarpSize, nc);
   }
@@ -2358,8 +2397,14 @@ rccl_static ncclResult_t getAlgoInfo(
   info->protocol = NCCL_PROTO_UNDEF;
   int nMaxChannels = 0;
   float collCostTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+
+  static int userAlgoInput = -2;
+  if (userAlgoInput == -2) {
+    const char* algoEnv = ncclGetEnv("NCCL_ALGO");
+    userAlgoInput = !algoEnv ? 0 : 1;
+  }
   initCollCostTable((float **)collCostTable);
-  NCCLCHECK(updateCollCostTable(comm, info, nBytes, collNetSupport, nvlsSupport, numPipeOps, (float **)collCostTable));
+  NCCLCHECK(updateCollCostTable(comm, info, nBytes, collNetSupport, nvlsSupport, numPipeOps, userAlgoInput, (float **)collCostTable));
   if (comm->tuner != NULL) {
     NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &regSendBuf));
     NCCLCHECK(ncclRegFind(comm, info->recvbuff, recvbuffSize, &regRecvBuf));
@@ -2374,16 +2419,13 @@ rccl_static ncclResult_t getAlgoInfo(
   } else {
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo));
     //override algo, tree doesn't work with fewer than 64 bytes
-    static int userAlgoInput = -2;
-    const char *algoStr = getenv("NCCL_ALGO");
-    userAlgoInput = !algoStr ? 0 : 1;
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
     if (!userAlgoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144){
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
     }
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
-    if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && ncclGetEnv("NCCL_ALGO") == NULL && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
+    if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
       // make algorithm selection based on buffer registration
       // there can be other specialized policies for algorithms and protocols pickup in the future
       NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &regSendBuf));
@@ -2944,6 +2986,10 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
 
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
+  // RCCL: ncclMemoryPoolAlloc does not zero-initialize; default to 0 so
+  // scheduleCollTasksToPlan overwrites with the correct value and the inspector plugin
+  // never sees garbage in eDescr->coll.nChannels.
+  t->nChannels = 0;
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
   t->recvbuff = info->recvbuff;
@@ -3057,7 +3103,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
 
     if (comm->nRanks == 1) {
-      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream));
+      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream, info->acc));
       return ncclSuccess;
     } else {
       struct ncclDevrWindow* sendWin;

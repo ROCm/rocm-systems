@@ -873,7 +873,14 @@ ncclResult_t ret = ncclSuccess;
 
         if (baseAddr == NULL) {
           CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr*)&baseAddr, &baseSize, (CUdeviceptr)userbuff), ret, fail);
+#if HIP_VERSION >= 71260540
           CUCHECKGOTO(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr)baseAddr), ret, fail);
+#else
+          // Legacy CUDA IPC support
+          if (ncclParamLegacyCudaRegister()) {
+            legacyIpcCap = 1;
+          }
+#endif
         }
         if (comm->gproxyConn[peerRank].initialized == false)
           NCCLCHECKGOTO(ncclProxyConnect(comm, TRANSPORT_P2P, 1, peerRank, &comm->gproxyConn[peerRank]), ret, fail);
@@ -1086,7 +1093,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   struct p2pIpcExpInfo* ipcExpInfo = (struct p2pIpcExpInfo*)reqBuff;
   void* regAddr = NULL;
   ncclResult_t ret = ncclSuccess;
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
   bool mapped = false;
   bool imported = false;
   CUmemGenericAllocationHandle handle;

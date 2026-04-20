@@ -139,6 +139,7 @@ struct config : output_config
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", false);
     bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
+    bool   selected_regions_ref_count  = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
     bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
     bool   pc_sampling_host_trap       = false;
     bool   pc_sampling_stochastic      = false;
@@ -146,9 +147,11 @@ struct config : output_config
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
-    int      mpi_size = get_mpi_size();
-    int      mpi_rank = get_mpi_rank();
-    uint64_t att_param_shader_engine_mask =
+    int         mpi_size              = get_mpi_size();
+    int         mpi_rank              = get_mpi_rank();
+    std::string mpi_rank_env_variable = get_env(mpi_rank_env_var_name, "");
+    std::string mpi_size_env_variable = get_env(mpi_size_env_var_name, "");
+    uint64_t    att_param_shader_engine_mask =
         get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
     // 256MB
     uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x10000000);
@@ -280,6 +283,8 @@ config::save(ArchiveT& ar) const
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);
+    CFG_SERIALIZE_MEMBER(mpi_rank_env_variable);
+    CFG_SERIALIZE_MEMBER(mpi_size_env_variable);
     CFG_SERIALIZE_MEMBER(collection_periods);
     CFG_SERIALIZE_MEMBER(counters);
     CFG_SERIALIZE_MEMBER(extra_counters_contents);
@@ -292,6 +297,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(enable_signal_handlers);
     CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
+    CFG_SERIALIZE_MEMBER(selected_regions_ref_count);
 
     CFG_SERIALIZE_MEMBER(counter_groups_random_seed);
     CFG_SERIALIZE_MEMBER(counter_groups_interval);

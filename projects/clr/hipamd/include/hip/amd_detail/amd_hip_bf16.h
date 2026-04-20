@@ -1681,7 +1681,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp(const __hip_bfloat16 h) {
  * \brief Calculate exponential 10 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp10(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp10_f32(__bfloat162float(h)));
+  return __float2bfloat16(__builtin_elementwise_exp10(__bfloat162float(h)));
 }
 
 /**

@@ -223,7 +223,7 @@ panels:
     title: Aggregate Stats (All channels)
   - type: metric_table
     id: 2
-    title: L2 Cache Hit Rate (pct)
+    title: L2 Cache Hit Rate (Percent)
   - type: metric_table
     id: 3
     title: L2 Requests (per normUnit)

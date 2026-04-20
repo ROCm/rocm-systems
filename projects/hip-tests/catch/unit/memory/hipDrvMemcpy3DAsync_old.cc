@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipDrvMemcpy3DAsync hipDrvMemcpy3DAsync
@@ -320,7 +307,7 @@ void DrvMemcpy3DAsync<T>::HostDevice_DrvMemcpy3DAsync(bool device_context_change
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -394,7 +381,7 @@ void DrvMemcpy3DAsync<T>::HostArray_DrvMemcpy3DAsync(bool device_context_change)
   if (device_context_change) {
     HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
     if (!peerAccess) {
-      WARN("skipped the testcase as no peer access");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
       skip_test = true;
     } else {
       HIP_CHECK(hipSetDevice(1));
@@ -459,7 +446,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -467,7 +454,8 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostDevice_DrvMemcpy3DAsync(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -484,8 +472,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -493,7 +480,8 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
     DrvMemcpy3DAsync<float> memcpy3d(10, 10, 10, HIP_AD_FORMAT_FLOAT);
     memcpy3d.HostArray_DrvMemcpy3DAsync(true);
   } else {
-    SUCCEED("skipped testcase as Device count is < 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -513,8 +501,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /* Test Case Description:
    Scenario-1: The following function tests the count parameter(last param) to
@@ -54,18 +41,14 @@ static int HmmAttrPrint() {
 // hipMemRangeGetAttribute api by passing possible extreme values.
 // Curently the only way to test if count param working properly is to verify
 // the first parameter of hipMemRangeGetAttribute() api has value 1 stored
-TEST_CASE("Unit_hipMemRangeGetAttribute_TstCountParam") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_TstCountParam) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
 #if HT_AMD
     int isPageableHMM = 0;
     HIP_CHECK(hipDeviceGetAttribute(&isPageableHMM, hipDeviceAttributePageableMemoryAccess, 0));
     if (!isPageableHMM) {
-      SUCCEED(
-          "Running on a system  where all the memory requested in hipMallocManaged "
-          "is allocated on the host.\nThis can cause instability because of out-of-memory "
-          "failures.\n"
-          "Hence skipping the test with Pass result.\n");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPageableMemoryAccessUnsupported);
       return;
     }
 #endif
@@ -108,15 +91,13 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_TstCountParam") {
 
     REQUIRE(IfTestPassed);
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
 /* This test case checks the behavior of hipMemRangeGetAttribute() with
    AccessedBy flag is consistent with cuda's counter part*/
-TEST_CASE("Unit_hipMemRangeGetAttribute_AccessedBy1") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_AccessedBy1) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0, *Hmm = NULL, MEM_SZ = 4096, RND_NUM = 999;
@@ -163,9 +144,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_AccessedBy1") {
     }
     HIP_CHECK(hipFree(Hmm));
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }
 
@@ -173,7 +152,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_AccessedBy1") {
    by hipMemAdvise() but being probed using hipMemRangeGetAttribute() should
    not result in a crash*/
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_4") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_4) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, PageSz = 4096, Ngpus, RND_NUM = 999;
@@ -210,8 +189,6 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_4") {
     HIP_CHECK(hipFree(Hmm));
     delete[] OutData;
   } else {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
 }

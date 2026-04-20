@@ -387,9 +387,8 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
 // MNNVL: Check whether peers are in the same fabric cluster and clique
 ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerInfo* info1, struct ncclPeerInfo* info2, int* ret) {
   *ret = 0;
-
-  nvmlGpuFabricInfoV_t *fabricInfo1 = &info1->fabricInfo;
-  nvmlGpuFabricInfoV_t *fabricInfo2 = &info2->fabricInfo;
+  auto fabricInfo1 = &info1->fabricInfo;
+  auto fabricInfo2 = &info2->fabricInfo;
   // A zero UUID means we don't have MNNVL fabric info
   unsigned long uuid0 = 0;
   unsigned long uuid1 = 0;

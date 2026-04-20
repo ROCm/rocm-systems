@@ -76,6 +76,13 @@ the provided mode and attributes.
 The parameter ``flags`` can be either
 ``ROCSHMEM_INIT_WITH_UNIQUEID`` or ``ROCSHMEM_INIT_WITH_MPI_COMM``.
 
+.. note::
+
+  When using the VMM POSIX memory allocator (``USE_HEAP_DEVICE_VMM_POSIX``),
+  you must use ``ROCSHMEM_INIT_WITH_UNIQUEID`` initialization.
+  MPI-based initialization (``ROCSHMEM_INIT_WITH_MPI_COMM``) is not compatible
+  with the VMM POSIX allocator and will result in a runtime error.
+
 ROCSHMEM_GET_UNIQUEID
 ---------------------
 .. cpp:function:: __host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid)

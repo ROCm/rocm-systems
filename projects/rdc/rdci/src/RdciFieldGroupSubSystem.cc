@@ -103,9 +103,8 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char** argv) {
         is_group_set_ = true;
         break;
       case '?':
-        if ((optopt == 'f') ||
-            (optind > 0 && argv[optind - 1] != nullptr &&
-             std::string(argv[optind - 1]) == "--fieldids")) {
+        if ((optopt == 'f') || (optind > 0 && argv[optind - 1] != nullptr &&
+                                std::string(argv[optind - 1]) == "--fieldids")) {
           show_help();
           throw RdcException(RDC_ST_BAD_PARAMETER, "Field id required with -f/--fieldids");
         }
@@ -179,7 +178,7 @@ void RdciFieldGroupSubSystem::process() {
         show_help();
         throw RdcException(RDC_ST_BAD_PARAMETER, "Field id required with -f/--fieldids");
       }
-      
+
       std::vector<std::string> fields = split_string(field_ids_, ',');
       for (uint32_t i = 0; i < fields.size(); i++) {
         rdc_field_t field_id;
@@ -200,16 +199,16 @@ void RdciFieldGroupSubSystem::process() {
 
         result = rdc_group_field_add_field(rdc_handle_, group_id_, field_id);
         if (result != RDC_ST_OK) {
-          throw RdcException(result, "Failed to add field " + std::to_string(field_id) + 
-                             " to group " + std::to_string(group_id_));
+          throw RdcException(result, "Failed to add field " + std::to_string(field_id) +
+                                         " to group " + std::to_string(group_id_));
         }
       }
-      
+
       if (is_json_output()) {
         std::cout << "\"field_group_id\": \"" << group_id_ << "\", \"status\": \"ok\"";
       } else {
-        std::cout << "Successfully added " << fields.size() << " field(s) to group " 
-                  << group_id_ << std::endl;
+        std::cout << "Successfully added " << fields.size() << " field(s) to group " << group_id_
+                  << std::endl;
       }
       return;
     }

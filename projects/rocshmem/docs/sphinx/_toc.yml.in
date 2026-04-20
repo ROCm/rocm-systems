@@ -17,6 +17,8 @@ subtrees:
   entries:
   - file: compile_and_run.rst
     title: Compile and run applications
+  - file: docker.rst
+    title: Deploy with Docker
 
 - caption: API reference
   entries:

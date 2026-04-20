@@ -48,7 +48,7 @@ THE SOFTWARE.
 // The following need to be made configurable (e.g., from YAML):
 //  * location of ssl keys and certificates
 //  * which method of authentication to use (with root CA or not)
-//  * wether server accepts only unauthenticated connections or only
+//  * whether server accepts only unauthenticated connections or only
 //    authenticated
 //  * rsmi_init flags
 //  * which RDC grpc services to start
@@ -416,7 +416,7 @@ static void MakeDaemon(bool is_root) {
   // Instead rely on serviced to make it a daemon.
 #if 0
   pid_t pid;
-  // We want to dissassociate with calling process, so fork, and let
+  // We want to disassociate with calling process, so fork, and let
   // daemon live in child process. Parent will exit.
   if ((pid = fork()) < 0) {
     std::cerr << "Failed to fork rdcd daemon." << std::endl;
@@ -544,7 +544,8 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts, int arg_cnt, char** arg_list
 
       case 'v':
 #ifdef CURRENT_GIT_HASH
-        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH) << std::endl;
+        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH)
+                  << std::endl;
 #else
         std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << std::endl;
 #endif
@@ -590,7 +591,7 @@ int main(int argc, char** argv) {
   auto result = ProcessCmdline(&cmd_line_opts, argc, argv);
 
   if (result != 0) {
-    std::cerr << "Error occured during ProcessCmdline." << std::endl;
+    std::cerr << "Error occurred during ProcessCmdline." << std::endl;
     return 1;
   }
 
@@ -668,7 +669,7 @@ int main(int argc, char** argv) {
   // Detach the thread, sys will recycle the resource
   thr_ret = pthread_detach(sig_listen_thread);
   // Don't fail if detach is not successful
-  if (thr_ret !=0) {
+  if (thr_ret != 0) {
     std::cerr << "Failed to detach ProcessSignalLoop. pthread_detach() returned " << thr_ret;
   }
 

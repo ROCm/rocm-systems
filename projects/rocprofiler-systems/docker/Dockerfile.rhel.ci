@@ -26,7 +26,8 @@ RUN yum groupinstall -y "Development Tools" && \
         iproute json-devel ninja-build numactl-devel openmpi-devel papi-devel \
         python3-devel python3-pip sqlite-devel texinfo wget which vim zlib-devel ucx-devel && \
     yum clean all && \
-    python3 -m pip install 'cmake==3.21' perfetto
+    python3 -m pip install --upgrade pip && \
+    python3 -m pip install 'cmake==3.25' perfetto
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 

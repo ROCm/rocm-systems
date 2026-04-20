@@ -199,7 +199,11 @@ class KernelParameters : protected HeapObject {
   size_t localMemSize(size_t minDataTypeAlignment) const;
 
   //! Capture the state of the parameters and return the stack base pointer.
-  address capture(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error);
+  address captureOpenCLArgs(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error);
+
+  //! Capture the arguments from signature and set.
+  bool captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize, address mem);
+
   //! Release the captured state of the parameters.
   void release(address parameters) const;
 
@@ -229,9 +233,7 @@ class KernelParameters : protected HeapObject {
   //! add the svmPtr execInfo into container
   void addSvmPtr(void* const* execInfoArray, size_t count) {
     execSvmPtr_.clear();
-    for (size_t i = 0; i < count; i++) {
-      execSvmPtr_.push_back(execInfoArray[i]);
-    }
+    execSvmPtr_.insert(execSvmPtr_.end(), execInfoArray, execInfoArray + count);
   }
   //! get the number of svmPtr in the execInfo container
   size_t getNumberOfSvmPtr() const { return execSvmPtr_.size(); }
@@ -273,9 +275,6 @@ class KernelParameters : protected HeapObject {
 
   //! Allocate memory for kernel arguments to be set.
   address alloc(device::VirtualDevice& vDev);
-
-  //! Capture the arguments from signature and set.
-  bool captureAndSet(void** kernelParams, address kernArgs, size_t kernArgsSize, address mem);
 };
 
 /*! \brief Encapsulates a __kernel function and the argument values

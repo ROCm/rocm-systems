@@ -87,7 +87,7 @@ class CodeObject {
 // Dynamic Code Object
 class DynCO : public CodeObject {
   // Guards Dynamic Code object
-  amd::Monitor dclock_{true};
+  std::recursive_mutex dclock_;
 
  public:
   DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
@@ -101,16 +101,17 @@ class DynCO : public CodeObject {
   hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
   bool isValidDynFunc(const void* hfunc);
-  hipError_t getDeviceVar(DeviceVar** dvar, const std::string& var_name);
+  hipError_t GetDeviceVar(amd::Memory** mem, const std::string& var_name);
+  hip::Var* getVar(const std::string& var_name);
 
   hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) const {
     auto it = vars_.find(name);
-    if (it != vars_.end() && it->second->getVarKind() == Var::DVK_Managed) {
+    if (it != vars_.end() && it->second->GetVarKind() == Var::DVK_Managed) {
       if (pointer != nullptr) {
-        *pointer = it->second->getManagedVarPtr();
+        *pointer = it->second->GetManagedVarPtr();
       }
       if (size_ptr != nullptr) {
-        *size_ptr = it->second->getSize();
+        *size_ptr = it->second->GetSize();
       }
     }
     return hipSuccess;
@@ -165,7 +166,7 @@ class StatCO : public CodeObject {
   void ResizeForDevices(size_t device_count);
 
  private:
-  amd::Monitor sclock_{true};              //!< Guards Static Code object
+  std::recursive_mutex sclock_;            //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;

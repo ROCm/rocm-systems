@@ -394,6 +394,15 @@ int query_device(const std::string& identifier, bool show_primary, const std::st
             std::cerr << "Valid types: platform, cpu, gpu, nic" << std::endl;
             return 1;
         }
+    } else {
+        // Infer device type from device path when --type is not specified
+        if (identifier.find("/sys/devices/system/cpu/") != std::string::npos) {
+            device_type = AMDCUID_DEVICE_TYPE_CPU;
+        } else if (identifier.find("/sys/class/net/") != std::string::npos) {
+            device_type = AMDCUID_DEVICE_TYPE_NIC;
+        } else if (identifier.find("/sys/class/drm/") != std::string::npos) {
+            device_type = AMDCUID_DEVICE_TYPE_GPU;
+        }
     }
     
     // Check if identifier looks like a BDF (contains ':' and '.')

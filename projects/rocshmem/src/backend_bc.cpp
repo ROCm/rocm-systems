@@ -37,17 +37,17 @@
 #include "ipc/backend_ipc.hpp"
 #endif
 
+#include "log.hpp"
+
 #include <cassert>
 
 namespace rocshmem {
 
-#define NET_CHECK(cmd)                                       \
-  {                                                          \
-    if (cmd != MPI_SUCCESS) {                                \
-      fprintf(stderr, "Unrecoverable error: MPI Failure\n"); \
-      abort() ;                                              \
-    }                                                        \
-  }
+#define NET_CHECK(cmd) do {                                  \
+  if (cmd != MPI_SUCCESS) {                                  \
+    LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");     \
+  }                                                          \
+} while(0)
 
 Backend::Backend(MPI_Comm comm) : heap(comm, nullptr) {
   init();
@@ -78,16 +78,20 @@ void Backend::init(void) {
   CHECK_HIP(hipDeviceGetAttribute(&num_cus, hipDeviceAttributeMultiprocessorCount, hip_dev_id));
 
   /*
-   * Initialize 'print_lock' global and copy to the device memory space.
+   * Copy log state to device constant memory for device-side logging.
    */
-  CHECK_HIP(hipMalloc(&print_lock, sizeof(*print_lock)));
-  *print_lock = 0;
-
-  int* print_lock_addr{nullptr};
-  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&print_lock_addr),
-                                HIP_SYMBOL(print_lock)));
-
-  CHECK_HIP(hipMemcpy(print_lock_addr, &print_lock, sizeof(print_lock),
+  uint32_t log_flags = 0;
+  if (envvar::log_flags.show_error) log_flags |= logd_constants::SHOW_ERROR;
+  if (envvar::log_flags.show_warn)  log_flags |= logd_constants::SHOW_WARN;
+  if (envvar::log_flags.show_info)  log_flags |= logd_constants::SHOW_INFO;
+  if (envvar::log_flags.show_api)   log_flags |= logd_constants::SHOW_API;
+  if (envvar::log_flags.show_trace) log_flags |= logd_constants::SHOW_TRACE;
+  if (envvar::log_flags.show_color) log_flags |= logd_constants::SHOW_COLOR;
+  struct logd_constants host_logd_constants{log_pe_number, log_flags};
+  struct logd_constants* logd_constants_addr{nullptr};
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&logd_constants_addr),
+                                HIP_SYMBOL(logd_constants)));
+  CHECK_HIP(hipMemcpy(logd_constants_addr, &host_logd_constants, sizeof(host_logd_constants),
                       hipMemcpyDefault));
 
   /*
@@ -143,7 +147,6 @@ void Backend::destroy_remaining_ctxs() {
 }
 
 Backend::~Backend() {
-  CHECK_HIP(hipFree(print_lock));
   if (backend_comm != MPI_COMM_NULL)
     NET_CHECK(mpilib_ftable_.Comm_free(&backend_comm));
 }
@@ -252,52 +255,6 @@ void Backend::reset_stats() {
   globalHostStats.resetStats();
 
   reset_backend_stats();
-}
-
-__device__ bool Backend::create_ctx(int64_t option, rocshmem_ctx_t* ctx) {
-#if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-  switch(this->type) {
-  case BackendType::GDA_BACKEND:
-    return static_cast<GDABackend*>(this)->create_ctx(option, ctx);
-    break;
-  case BackendType::RO_BACKEND:
-    return static_cast<ROBackend*>(this)->create_ctx(option, ctx);
-    break;
-  case BackendType::IPC_BACKEND:
-  default:
-      return static_cast<IPCBackend*>(this)->create_ctx(option, ctx);
-      break;
-  }
-#elif defined(USE_GDA)
-  return static_cast<GDABackend*>(this)->create_ctx(option, ctx);
-#elif defined(USE_RO)
-  return static_cast<ROBackend*>(this)->create_ctx(option, ctx);
-#elif defined(USE_IPC)
-  return static_cast<IPCBackend*>(this)->create_ctx(option, ctx);
-#endif
-}
-
-__device__ void Backend::destroy_ctx(rocshmem_ctx_t* ctx) {
-#if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
-  switch(this->type) {
-  case BackendType::GDA_BACKEND:
-    static_cast<GDABackend*>(this)->destroy_ctx(ctx);
-    break;
-  case BackendType::RO_BACKEND:
-    static_cast<ROBackend*>(this)->destroy_ctx(ctx);
-    break;
-  case BackendType::IPC_BACKEND:
-  default:
-    static_cast<IPCBackend*>(this)->destroy_ctx(ctx);
-    break;
-  }
-#elif defined(USE_GDA)
-  static_cast<GDABackend*>(this)->destroy_ctx(ctx);
-#elif defined(USE_RO)
-  static_cast<ROBackend*>(this)->destroy_ctx(ctx);
-#elif defined(USE_IPC)
-  static_cast<IPCBackend*>(this)->destroy_ctx(ctx);
-#endif
 }
 
 }  // namespace rocshmem

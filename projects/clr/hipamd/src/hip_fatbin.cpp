@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip/hip_runtime_api.h"
 #include "hip_fatbin.hpp"
@@ -165,7 +149,7 @@ static std::string TargetGenericMap(const std::string& input) {
 }
 
 // For sramecc and xnack
-static std::string TargetFeatureCheck(const std::string& input, std::string feature) {
+static std::string TargetFeatureCheck(const std::string& input, const std::string &feature) {
   if (input.find(feature) != std::string::npos) {
     auto feature_p = feature + "+";  // feature present eg: xnack+
     auto feature_m = feature + "-";  // feature absent eg: xnack-
@@ -178,7 +162,7 @@ static std::string TargetFeatureCheck(const std::string& input, std::string feat
   return "";
 }
 
-static std::string TargetToGeneric(std::string input) {
+static std::string TargetToGeneric(const std::string &input) {
   auto sramecc = TargetFeatureCheck(input, "sramecc");
   auto xnack = TargetFeatureCheck(input, "xnack");
 
@@ -231,16 +215,13 @@ static bool UncompressAndPopulateCodeObject(
   };
 
   std::vector<std::string> bundle_ids_str;
-  std::set<std::string> unique_ids;
-
-  for (const auto& isa_name : unique_isa_names) {
-    bundle_ids_str.push_back(std::string(symbols::kOffloadKindHipv4_) + isa_name);
-  }
-
   std::vector<const char*> bundle_ids;
-  bundle_ids.reserve(bundle_ids_str.size());
-  for (auto& bundle_id_str : bundle_ids_str) {
-    bundle_ids.push_back(bundle_id_str.c_str());
+  bundle_ids_str.reserve(unique_isa_names.size());
+  bundle_ids.reserve(unique_isa_names.size());
+  for (const auto& isa_name : unique_isa_names) {
+    const std::string& bis =
+        bundle_ids_str.emplace_back(std::string(symbols::kOffloadKindHipv4_) + isa_name);
+    bundle_ids.push_back(bis.c_str());
   }
 
   const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
@@ -458,9 +439,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (IsCodeObjectElf(image_)) {
       // Load the binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
-      for (size_t i = 0; i < devices.size(); i++) {
-        if (hipSuccess != AddDevProgram(devices[i], image_, elf_size, 0))
-          return hipErrorInvalidImage;
+      for (auto* device : devices) {
+        if (hipSuccess != AddDevProgram(device, image_, elf_size, 0)) return hipErrorInvalidImage;
       }
       return hipSuccess;  // We are done since it was already ELF
     } else {
@@ -514,21 +494,16 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using native code object for device: %s co: %s", device_name.c_str(),
-                      native_co->first.c_str());
         hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using generic code object for device: %s co: %s", device_name.c_str(),
-                      generic_co->first.c_str());
         hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (spirv_isa_found) {
-        LogPrintfInfo("Using spirv code object for device: %s", device_name.c_str());
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
 
@@ -695,8 +670,11 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
   }
 
   // Build architecture priority list from devices
-  // For each device, add native ISA first, then generic fallback
+  // For each device, add native ISA first, then generic fallback.
+  // Reservation in the list is pessimistically assuming there is a generic fallback for each
+  // device.
   std::vector<std::string> arch_list;
+  arch_list.reserve(devices.size() * 2);
   for (auto device : devices) {
     std::string device_name = device->devices()[0]->isa().isaName();
     arch_list.push_back(device_name);
@@ -710,6 +688,7 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
 
   // Convert to C-style array for kpack API
   std::vector<const char*> arch_ptrs;
+  arch_ptrs.reserve(arch_list.size());
   for (const auto& arch : arch_list) {
     arch_ptrs.push_back(arch.c_str());
   }
@@ -775,6 +754,8 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
 
   // If Program was already built skip this step and return success
   if (dev_programs_[device_id]->IsProgramBuilt(*g_devices[device_id]->devices()[0]) == false) {
+    constexpr bool kOptionChangeable = true;
+    constexpr bool kNewDevProg = false;
     if (CL_SUCCESS != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
                                                       nullptr, nullptr, kOptionChangeable,
                                                       kNewDevProg)) {

@@ -1,179 +1,152 @@
-#!/usr/bin/env python3
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 """
-RDNA3.5 (gfx1152) Memory Architecture Diagram - CLI Visualization
+RDNA3.5 Memory Architecture Diagram - CLI Visualization
 =============================================================================
 
 USAGE:
-    python mem_chart_gfx11.py [--data metrics.json] [--debug] [--txt file.txt] [--svg file.svg]
+    python mem_chart_gfx11.py [--data metrics.json] [--debug]
+        [--txt file.txt] [--svg file.svg]
 
 API:
-    plot_mem_chart(arch, normal_unit, metric_dict) -> str
+    normalize_mem_chart_metrics(metric_dict) -> flat ordered dict for UIs
+    plot_mem_chart(..., *, chart_title=...) -> str
+    format_mem_chart_heading(normal_unit, *, panel_id=300, section_label=...) -> str
 
-RDNA3.5 MEMORY HIERARCHY:
+Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
+
+    src/rocprof_compute_soc/analysis_configs/gfx1151/0300_Memory_Chart.yaml
+
+Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
+(If a future gfx target adds ``0300_memory_chart.yaml``, keep keys aligned there.)
+
+Bandwidth values are **Bytes/s**, matching the YAML ``unit: Bytes/s`` rows.
+
+RDNA3.5 MEMORY HIERARCHY (GCEA = Graphics Core Efficiency Arbiter):
    Kernel -> TCP (L0 Vector Cache) -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
          -> SQC (ICache/DCache)   -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
          -> LDS (Local Data Share) [stays on CU, no GL1C connection]
 """
 
-import os
-os.environ['COLUMNS'] = '200'
-
 import argparse
 import json
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Union
+import re
+from io import StringIO
+from typing import Any, Optional, Union
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from utils.utils_analysis import format_bw_human_readable
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Keys = ``metric:`` names under each ``metric_table`` in
+# ``analysis_configs/gfx1151/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
+# Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
+_MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
+    # Table 301: Instruction Cache
+    ("ICache Requests", 450),
+    ("ICache Utilization", 45.2),
+    ("ICache Hit Rate", 98.5),
+    ("ICache Miss Rate", 1.5),
+    ("ICache Request Stall Rate", 2.1),
+    ("ICache-GL1 Read Bandwidth", 57.6e9),
+    # Table 302: Scalar Data Cache
+    ("Dcache Requests", 225),
+    ("Dcache Utilization", 38.7),
+    ("Dcache Hit Rate", 95.3),
+    ("Dcache Request Stall Rate", 1.8),
+    ("Dcache-GL1 Read Bandwidth", 28.8e9),
+    # Table 303: TCP Cache (Vector L0)
+    ("TCP Total Requests", 1_250_000),
+    ("TCP Read Requests", 875_000),
+    ("TCP Write Requests", 375_000),
+    ("TCP Miss Requests", 150_000),
+    ("TCP Hit Rate", 88.0),
+    ("TCP Request Bandwidth", 80e9),
+    # Table 304: LDS
+    ("LDS Instructions", 125_000),
+    ("LDS Atomic Instructions", 10_000),
+    ("LDS Instruction Cycles", 250_000),
+    ("LDS Wait Cycles", 12_500),
+    ("LDS Bank Conflict Rate", 4.0),
+    ("LDS Estimated Bandwidth", 256e9),
+    # Table 305: TCP-GL1 Interface
+    ("TCP-GL1 Read Requests", 150_000),
+    ("TCP-GL1 Write Requests", 50_000),
+    ("TCP-GL1 Read Bandwidth", 96e9),
+    ("TCP-GL1 Write Bandwidth", 32e9),
+    # Table 306: GL1C Cache (L1)
+    ("GL1C Utilization", 65.2),
+    ("GL1C Total Requests", 200_000),
+    ("GL1C Read Requests", 150_000),
+    ("GL1C Write Requests", 50_000),
+    ("GL1C Miss Requests", 30_000),
+    ("GL1C Hit Rate", 85.0),
+    ("GL1C Starve Rate", 5.2),
+    ("GL1C Stall GL2 Backpressure", 8.5),
+    # Table 307: GL1C-GL2 Interface
+    ("GL1-GL2 Read Requests", 30_000),
+    ("GL1-GL2 Write Requests", 10_000),
+    ("GL1-GL2 Read Bandwidth", 48e9),
+    ("GL1-GL2 Write Bandwidth", 16e9),
+    ("GL1-GL2 Read Latency", 85.2),
+    ("GL1-GL2 Write Latency", 62.4),
+    # Table 308: GL2C Cache (L2)
+    ("GL2C Utilization", 74.2),
+    ("GL2C Total Requests", 40_000),
+    ("GL2C Read Requests", 30_000),
+    ("GL2C Write Requests", 10_000),
+    ("GL2C Atomic Requests", 1_000),
+    ("GL2C Hit Rate", 82.5),
+    ("GL2C Read Bandwidth", 64e9),
+    ("GL2C Write Bandwidth", 24e9),
+    # Table 309: Graphics Core Efficiency Arbiter (GCEA) to System Memory
+    ("SARB Utilization", 52.3),
+    ("SARB Stall Rate", 12.4),
+    ("DRAM Read Requests", 25_000),
+    ("DRAM Write Requests", 8_000),
+    ("DRAM Read Bandwidth", 100e9),
+    ("DRAM Write Bandwidth", 60e9),
+    ("Read Returns", 25_000),
+    ("Write Returns", 8_000),
+)
+
+MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
+    k for k, _ in _MEM_CHART_DEFAULT_ROWS
+)
+
+DEFAULT_SAMPLE_METRICS: dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_ROWS)
 
 COLORS = {
-    'kernel': 'green',
-    'block': 'blue',
-    'tcp': 'cyan',
-    'lds': 'magenta',
-    'sqc': 'yellow',
-    'read': 'bright_cyan',
-    'write': 'bright_yellow',
-    'atomic': 'bright_magenta',
-    'util': 'bright_green',
-    'hit': 'yellow',
-    'stall': 'indian_red',
-    'bw': 'bright_cyan',
+    "kernel": "green",
+    "block": "blue",
+    "tcp": "cyan",
+    "lds": "magenta",
+    "sqc": "yellow",
+    "read": "bright_cyan",
+    "write": "bright_yellow",
+    "atomic": "bright_magenta",
+    "util": "bright_green",
+    "hit": "yellow",
+    "stall": "indian_red",
+    "bw": "bright_cyan",
 }
 
-
-@dataclass
-class RectBlock:
-    label: str
-    x_min: int = 0
-    x_max: int = 0
-    y_min: int = 1
-    y_max: int = 1
-
-    @property
-    def width(self) -> int:
-        return self.x_max - self.x_min
-
-    @property
-    def height(self) -> int:
-        return self.y_max - self.y_min
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
 
 
-@dataclass
-class Edge:
-    label: str
-    arrow: str
-    y_offset: int = 0
-    color: str = "dim"
-
-
-@dataclass
-class AlignedEdgesGroup(RectBlock):
-    edges: List[Edge] = field(default_factory=list)
-    top_padding: int = 0
-    compact: bool = False
-
-    def render_text(self) -> Text:
-        lines = []
-        for _ in range(self.top_padding):
-            lines.append("")
-        for edge in self.edges:
-            lines.append(f"[{edge.color}]{edge.label}[/{edge.color}]")
-            lines.append(f"[{edge.color}]{edge.arrow}[/{edge.color}]")
-            lines.append("")
-        return Text.from_markup("\n".join(lines))
-
-
-@dataclass
-class SubBlock:
-    label: str
-    attributes: List[str] = field(default_factory=list)
-    y_offset: int = 0
-    height: int = 5
-    show_border: bool = True
-    vertical_position: str = "middle"
-    border_color: str = "blue"
-
-
-@dataclass
-class RegularBlock(RectBlock):
-    sub_blocks: List[SubBlock] = field(default_factory=list)
-    content_text: str = ""
-    vertical_position: str = "middle"
-    color: str = "blue"
-
-    def render(self) -> Panel:
-        import re
-        temp_content = []
-
-        if self.content_text:
-            temp_content.append(f"[dim]{self.content_text}[/dim]")
-            temp_content.append("")
-
-        for i, sub in enumerate(self.sub_blocks):
-            if sub.show_border and sub.label:
-                box_width = self.width - 6
-                inner_width = box_width - 4
-                bc = sub.border_color
-                top_line = f"[{bc}]┌" + "─" * (box_width - 2) + f"┐[/{bc}]"
-                bottom_line = f"[{bc}]└" + "─" * (box_width - 2) + f"┘[/{bc}]"
-                temp_content.append(top_line)
-                label_clean = sub.label
-                label_pad = " " * max(0, inner_width - len(label_clean))
-                temp_content.append(f"[{bc}]│[/{bc}] [bold]{sub.label}[/bold]{label_pad} [{bc}]│[/{bc}]")
-                for attr in sub.attributes:
-                    if not attr:
-                        continue
-                    clean = re.sub(r'\[.*?\]', '', attr)
-                    pad_len = max(0, inner_width - len(clean))
-                    pad = " " * pad_len
-                    temp_content.append(f"[{bc}]│[/{bc}] {attr}{pad} [{bc}]│[/{bc}]")
-                temp_content.append(bottom_line)
-            else:
-                if sub.label:
-                    temp_content.append(f"[bold]{sub.label}[/bold]")
-                for attr in sub.attributes:
-                    temp_content.append(attr)
-            if i < len(self.sub_blocks) - 1:
-                temp_content.append("")
-
-        content = "\n".join(temp_content)
-        return Panel(
-            content,
-            title=f"[bold {self.color}]{self.label}[/bold {self.color}]",
-            border_style=self.color,
-            width=self.width,
-            height=self.height
-        )
-
-
-def format_value(value: Union[int, float, str, None], unit: str = '', precision: int = 1) -> str:
+def format_value(
+    value: Union[int, float, str, None], unit: str = "", precision: int = 1
+) -> str:
     if value is None:
         return "N/A"
     if isinstance(value, str):
@@ -181,10 +154,10 @@ def format_value(value: Union[int, float, str, None], unit: str = '', precision:
             value = float(value)
         except (ValueError, TypeError):
             return value
-    if unit == '%':
+    if unit == "%":
         return f"{value:.{precision}f}%"
-    elif unit == 'GB/s':
-        return f"{value:.1f} GB/s"
+    elif unit in ("GB/s", "Bytes/s"):
+        return format_bw_human_readable(value, unit, precision)
     else:
         return f"{value:.{precision}f}{unit}"
 
@@ -201,219 +174,262 @@ def format_sci(value: Union[int, float, str, None], precision: int = 2) -> str:
     return f"{value:.{precision}e}"
 
 
-def format_bw_gbps(value: Union[int, float, str, None], precision: int = 1) -> str:
-    if value is None:
-        return "N/A"
-    try:
-        value = float(value)
-    except (ValueError, TypeError):
-        return "N/A"
-    gbps = value / 1e9
-    if gbps >= 1000:
-        return f"{gbps/1000:.{precision}f} TB/s"
-    elif gbps >= 1:
-        return f"{gbps:.{precision}f} GB/s"
-    else:
-        return f"{gbps*1000:.{precision}f} MB/s"
-
-
-def get_metric(d: Dict[str, Any], key: str, default: Any = None) -> Any:
-    return d.get(key, default)
-
-
-def metric_line(label: str, value: Any, unit: str = '%', color: str = 'bright_green') -> str:
+def metric_line(
+    label: str,
+    value: Any,  # noqa: ANN401
+    unit: str = "%",
+    color: str = "bright_green",
+) -> str:
     formatted = format_value(value, unit)
     return f"{label} [{color}]{formatted}[/{color}]"
 
 
 def bar(pct: float, w: int = 10) -> str:
     if pct is None:
-        return '░' * w
+        return "░" * w
     try:
         pct = float(pct)
     except (ValueError, TypeError):
-        return '░' * w
+        return "░" * w
     filled = int(w * min(100, max(0, pct)) / 100)
-    return '█' * filled + '░' * (w - filled)
+    return "█" * filled + "░" * (w - filled)
 
 
-def create_mem_chart_diagram(
-    arch: str,
-    normal_unit: str,
-    metric_dict: Dict[str, Any],
-    console: Console,
-    show_debug: bool = False,
-    compact: bool = False
-) -> None:
-    """Create the RDNA3.5 memory architecture diagram with separate TCP, LDS, SQC blocks"""
+def _safe_float_sum(
+    *values: Union[int, float, str, None],
+) -> Optional[float]:
+    """Sum non-None numeric values. Returns None if no value is valid."""
+    total = 0.0
+    any_valid = False
+    for v in values:
+        if v is not None:
+            try:
+                total += float(v)
+                any_valid = True
+            except (ValueError, TypeError):
+                pass
+    return total if any_valid else None
 
-    # Extract metrics
-    icache_req = get_metric(metric_dict, 'ICache Requests')
-    icache_hit = get_metric(metric_dict, 'ICache Hit Rate')
-    icache_gl1_bw = get_metric(metric_dict, 'ICache-GL1 Read Bandwidth')
 
-    dcache_req = get_metric(metric_dict, 'Dcache Requests')
-    dcache_hit = get_metric(metric_dict, 'Dcache Hit Rate')
-    dcache_gl1_bw = get_metric(metric_dict, 'Dcache-GL1 Read Bandwidth')
+def _fmt_edge(
+    label: str,
+    value: Any,  # noqa: ANN401
+    width: int = 7,
+) -> str:
+    label_str = f"{label:<{width}}"
+    if value is not None:
+        value_str = f": {format_sci(value):>7}"
+    else:
+        value_str = ""
+    return f"{label_str}{value_str}"
 
-    tcp_read_req = get_metric(metric_dict, 'TCP Read Requests')
-    tcp_write_req = get_metric(metric_dict, 'TCP Write Requests')
-    tcp_atomic_req = get_metric(metric_dict, 'TCP Atomic Requests')
-    tcp_hit = get_metric(metric_dict, 'TCP Hit Rate')
-    tcp_bw = get_metric(metric_dict, 'TCP Request Bandwidth')
 
-    lds_insts = get_metric(metric_dict, 'LDS Instructions')
-    lds_read_insts = get_metric(metric_dict, 'LDS Read Instructions')
-    lds_write_insts = get_metric(metric_dict, 'LDS Write Instructions')
-    lds_atomic_insts = get_metric(metric_dict, 'LDS Atomic Instructions')
-    lds_bw = get_metric(metric_dict, 'LDS Estimated Bandwidth')
-    lds_bank_conflict = get_metric(metric_dict, 'LDS Bank Conflict Rate')
+# ---------------------------------------------------------------------------
+# Public API: heading, normalization, sample data
+# ---------------------------------------------------------------------------
 
-    tcp_gl1_read_bw = get_metric(metric_dict, 'TCP-GL1 Read Bandwidth')
-    tcp_gl1_write_bw = get_metric(metric_dict, 'TCP-GL1 Write Bandwidth')
 
-    # Calculate combined SQC-GL1 bandwidth
-    sqc_gl1_read_bw = None
-    if icache_gl1_bw is not None and dcache_gl1_bw is not None:
-        sqc_gl1_read_bw = icache_gl1_bw + dcache_gl1_bw
-    elif icache_gl1_bw is not None:
-        sqc_gl1_read_bw = icache_gl1_bw
-    elif dcache_gl1_bw is not None:
-        sqc_gl1_read_bw = dcache_gl1_bw
-
-    gl1c_util = get_metric(metric_dict, 'GL1C Utilization')
-    gl1c_hit = get_metric(metric_dict, 'GL1C Hit Rate')
-    gl1c_stall_gl2 = get_metric(metric_dict, 'GL1C Stall GL2 Backpressure')
-
-    gl1_gl2_read_bw = get_metric(metric_dict, 'GL1-GL2 Read Bandwidth')
-    gl1_gl2_write_bw = get_metric(metric_dict, 'GL1-GL2 Write Bandwidth')
-
-    gl2c_util = get_metric(metric_dict, 'GL2C Utilization')
-    gl2c_hit = get_metric(metric_dict, 'GL2C Hit Rate')
-    gl2c_read_bw = get_metric(metric_dict, 'GL2C Read Bandwidth')
-    gl2c_write_bw = get_metric(metric_dict, 'GL2C Write Bandwidth')
-
-    sarb_util = get_metric(metric_dict, 'SARB Utilization')
-    sarb_stall = get_metric(metric_dict, 'SARB Stall Rate')
-    dram_read_bw = get_metric(metric_dict, 'DRAM Read Bandwidth', 0)
-    dram_write_bw = get_metric(metric_dict, 'DRAM Write Bandwidth', 0)
-
-    total_bw = (dram_read_bw or 0) + (dram_write_bw or 0)
-
-    # Print header
-    console.print()
-    console.print(f"[bold]RDNA3.5 Memory Chart[/bold] [dim](Normalization: {normal_unit})[/dim]")
-    console.print("|" + "-" * 62 + " [dim]GPU[/dim] " + "-" * 62 + "|" + "-" * 4 + " [dim]System Memory[/dim] " + "-" * 4 + "|")
-    console.print()
-
-    # Arrow constants
-    std_arrow_len = 8
-    std_arrow_left = "<" + "-" * std_arrow_len
-    std_arrow_right = "-" * std_arrow_len + ">"
-    std_arrow_both = "<" + "-" * (std_arrow_len - 1) + ">"
-
-    kernel_edge_width = 16
-    kernel_arrow_left = "<" + "-" * (kernel_edge_width - 1)
-    kernel_arrow_right = "-" * (kernel_edge_width - 1) + ">"
-    kernel_arrow_both = "<" + "-" * (kernel_edge_width - 2) + ">"
-
-    def fmt_edge(label, value, width=7):
-        label_str = f"{label:<{width}}"
-        if value is not None:
-            value_str = f": {format_sci(value):>7}"
-        else:
-            value_str = ""
-        return f"{label_str}{value_str}"
-
-    # =========================================================================
-    # Build the layout with separate TCP, LDS, SQC blocks
-    # =========================================================================
-    
-    # Create main layout table
-    main_layout = Table.grid(padding=0)
-    main_layout.add_column()  # Kernel
-    main_layout.add_column()  # Kernel edges
-    main_layout.add_column()  # TCP/LDS/SQC stacked
-    main_layout.add_column()  # Edges to GL1
-    main_layout.add_column()  # GL1C
-    main_layout.add_column()  # GL1-GL2 edges
-    main_layout.add_column()  # GL2C
-    main_layout.add_column()  # GL2-GCEA edges
-    main_layout.add_column()  # GCEA
-    main_layout.add_column()  # GCEA-DRAM edges
-    main_layout.add_column()  # DRAM
-
-    # Kernel panel - height matches total of TCP+LDS+SQC stack (10+10+10=30)
-    kernel_panel = Panel(
-        "\n" * 11 + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]",
-        title=f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]",
-        border_style=COLORS['kernel'],
-        width=14,
-        height=30
+def _print_mem_chart_scope_bar(console: Console) -> None:
+    """Horizontal rule: GPU span vs System Memory (above the diagram body)."""
+    console.print(
+        "|"
+        + "-" * 62
+        + " [dim]GPU[/dim] "
+        + "-" * 62
+        + "|"
+        + "-" * 4
+        + " [dim]System Memory[/dim] "
+        + "-" * 4
+        + "|"
     )
 
-    # Kernel edges (showing all operations grouped by destination)
-    # Order: LDS, TCP, SQC (swapped LDS and TCP)
+
+def format_mem_chart_heading(
+    normal_unit: str,
+    *,
+    panel_id: int = 300,
+    section_label: str = "Memory Chart",
+) -> str:
+    """Build CLI diagram title: ``{panel_id//100}. {label} (Normalization: …)``.
+
+    Matches other panels (e.g. ``3. System Speed-of-Light``) where the leading
+    number is ``Panel Config id // 100`` (panel 300 → ``3.``).
+    """
+    section = max(0, int(panel_id)) // 100
+    return f"{section}. {section_label} (Normalization: {normal_unit})"
+
+
+def normalize_mem_chart_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
+    """Return a single flat map: YAML metric name -> value, panel order.
+
+    All keys in ``MEM_CHART_PANEL_METRIC_KEYS`` are present; unknown input keys
+    are dropped. Use before rendering or serializing for front-ends.
+    """
+    return {k: metric_dict.get(k) for k in MEM_CHART_PANEL_METRIC_KEYS}
+
+
+def get_sample_metrics() -> dict[str, Any]:
+    """Return sample metrics (flat panel order) for testing or demos."""
+    return normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
+
+
+# ---------------------------------------------------------------------------
+# Diagram construction: _extract_metrics, _build_kernel_and_l0,
+#   _build_cache_columns, _build_memory_columns, create_mem_chart_diagram
+# ---------------------------------------------------------------------------
+
+
+def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
+    """Pull all needed values from the flat metric dict."""
+    m: dict[str, Any] = {}
+
+    m["icache_req"] = metric_dict.get("ICache Requests")
+    m["icache_hit"] = metric_dict.get("ICache Hit Rate")
+    m["icache_gl1_bw"] = metric_dict.get("ICache-GL1 Read Bandwidth")
+
+    m["dcache_req"] = metric_dict.get("Dcache Requests")
+    m["dcache_hit"] = metric_dict.get("Dcache Hit Rate")
+    m["dcache_gl1_bw"] = metric_dict.get("Dcache-GL1 Read Bandwidth")
+
+    m["tcp_read_req"] = metric_dict.get("TCP Read Requests")
+    m["tcp_write_req"] = metric_dict.get("TCP Write Requests")
+    m["tcp_hit"] = metric_dict.get("TCP Hit Rate")
+    m["tcp_bw"] = metric_dict.get("TCP Request Bandwidth")
+
+    m["lds_insts"] = metric_dict.get("LDS Instructions")
+    m["lds_inst_cycles"] = metric_dict.get("LDS Instruction Cycles")
+    m["lds_atomic_insts"] = metric_dict.get("LDS Atomic Instructions")
+    m["lds_bw"] = metric_dict.get("LDS Estimated Bandwidth")
+    m["lds_bank_conflict"] = metric_dict.get("LDS Bank Conflict Rate")
+
+    m["tcp_gl1_read_bw"] = metric_dict.get("TCP-GL1 Read Bandwidth")
+    m["tcp_gl1_write_bw"] = metric_dict.get("TCP-GL1 Write Bandwidth")
+
+    m["sqc_gl1_read_bw"] = _safe_float_sum(m["icache_gl1_bw"], m["dcache_gl1_bw"])
+
+    m["gl1c_util"] = metric_dict.get("GL1C Utilization")
+    m["gl1c_hit"] = metric_dict.get("GL1C Hit Rate")
+    m["gl1c_stall_gl2"] = metric_dict.get("GL1C Stall GL2 Backpressure")
+
+    m["gl1_gl2_read_bw"] = metric_dict.get("GL1-GL2 Read Bandwidth")
+    m["gl1_gl2_write_bw"] = metric_dict.get("GL1-GL2 Write Bandwidth")
+
+    m["gl2c_util"] = metric_dict.get("GL2C Utilization")
+    m["gl2c_hit"] = metric_dict.get("GL2C Hit Rate")
+    m["gl2c_read_bw"] = metric_dict.get("GL2C Read Bandwidth")
+    m["gl2c_write_bw"] = metric_dict.get("GL2C Write Bandwidth")
+
+    m["sarb_util"] = metric_dict.get("SARB Utilization")
+    m["sarb_stall"] = metric_dict.get("SARB Stall Rate")
+    m["dram_read_bw"] = metric_dict.get("DRAM Read Bandwidth", 0)
+    m["dram_write_bw"] = metric_dict.get("DRAM Write Bandwidth", 0)
+
+    m["total_bw"] = (m["dram_read_bw"] or 0) + (m["dram_write_bw"] or 0)
+
+    return m
+
+
+def _build_kernel_and_l0(
+    m: dict[str, Any],
+    kernel_arrows: dict[str, str],
+    std_arrows: dict[str, str],
+) -> tuple[Panel, Text, Table, Text]:
+    """Build the Kernel panel, kernel edges, LDS/TCP/SQC stack, and GL1 edges.
+
+    Returns (kernel_panel, kernel_edges_text, l0_stack, gl1_edges_text).
+    """
+    fmt_bw = format_bw_human_readable
+    c_rd = COLORS["read"]
+    c_wr = COLORS["write"]
+    c_at = COLORS["atomic"]
+    c_bl = COLORS["block"]
+
+    # Kernel panel (height = 10+10+10 = 30 to match L0 stack)
+    kernel_panel = Panel(
+        "\n" * 11 + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]",
+        title=(f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]"),
+        border_style=COLORS["kernel"],
+        width=14,
+        height=30,
+    )
+
+    # Kernel edges — LDS, TCP, SQC groups
+    ka_l = kernel_arrows["left"]
+    ka_r = kernel_arrows["right"]
+    ka_b = kernel_arrows["both"]
     kernel_edges_lines = [
         "",
-        "     [white]Request[/white]",  # Label between Kernel and LDS (5 spaces)
+        "     [white]Request[/white]",
         "",
-        f"[{COLORS['read']}]{fmt_edge('Read', lds_read_insts)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
-        f"[{COLORS['write']}]{fmt_edge('Write', lds_write_insts)}[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
-        f"[{COLORS['atomic']}]{fmt_edge('Atomic', lds_atomic_insts)}[/{COLORS['atomic']}]",
-        f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
-        "",
-        "",  # 2 empty lines before TCP edges
+        f"[{c_rd}]{_fmt_edge('Read', m['lds_insts'])}[/{c_rd}]",
+        f"[{c_rd}]{ka_l}[/{c_rd}]",
+        f"[{c_wr}]{_fmt_edge('Write', m['lds_inst_cycles'])}[/{c_wr}]",
+        f"[{c_wr}]{ka_r}[/{c_wr}]",
+        f"[{c_at}]{_fmt_edge('Atomic', m['lds_atomic_insts'])}[/{c_at}]",
+        f"[{c_at}]{ka_b}[/{c_at}]",
         "",
         "",
-        f"[{COLORS['read']}]{fmt_edge('Read', tcp_read_req)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
-        f"[{COLORS['write']}]{fmt_edge('Write', tcp_write_req)}[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
-        f"[{COLORS['atomic']}]{fmt_edge('Atomic', tcp_atomic_req)}[/{COLORS['atomic']}]",
-        f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
         "",
         "",
-        "",  # 2 more empty lines before SQC edges
+        f"[{c_rd}]{_fmt_edge('Read', m['tcp_read_req'])}[/{c_rd}]",
+        f"[{c_rd}]{ka_l}[/{c_rd}]",
+        f"[{c_wr}]{_fmt_edge('Write', m['tcp_write_req'])}[/{c_wr}]",
+        f"[{c_wr}]{ka_r}[/{c_wr}]",
         "",
-        f"[{COLORS['read']}]{fmt_edge('ICache', icache_req)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{fmt_edge('DCache', dcache_req)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        f"[{c_rd}]{_fmt_edge('ICache', m['icache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{ka_l}[/{c_rd}]",
+        f"[{c_rd}]{_fmt_edge('DCache', m['dcache_req'])}[/{c_rd}]",
+        f"[{c_rd}]{ka_l}[/{c_rd}]",
     ]
     kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
 
-    # Create stacked TCP/LDS/SQC panels - each height=10, total=30
-    tcp_panel = Panel(
-        f"{metric_line('Hit Rate', tcp_hit, '%', COLORS['hit'])}\n"
-        f"{metric_line('BW', tcp_bw, 'GB/s', COLORS['bw']) if tcp_bw else ''}",
-        title=f"[bold {COLORS['block']}]TCP (L0)[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
-        width=20,
-        height=10
+    # LDS panel
+    lds_bw_line = (
+        metric_line("BW", m["lds_bw"], "Bytes/s", COLORS["bw"]) if m["lds_bw"] else ""
     )
-    
+    lds_conflict_line = (
+        metric_line("Bank Conflict", m["lds_bank_conflict"], "%", COLORS["stall"])
+        if m["lds_bank_conflict"]
+        else ""
+    )
     lds_panel = Panel(
-        f"{metric_line('BW', lds_bw, 'GB/s', COLORS['bw']) if lds_bw else ''}\n"
-        f"{metric_line('Bank Conflict', lds_bank_conflict, '%', COLORS['stall']) if lds_bank_conflict else ''}",
-        title=f"[bold {COLORS['block']}]LDS[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        f"{lds_bw_line}\n{lds_conflict_line}",
+        title=f"[bold {c_bl}]LDS[/bold {c_bl}]",
+        border_style=c_bl,
         width=20,
-        height=10
-    )
-    
-    sqc_panel = Panel(
-        f"{metric_line('ICache', icache_hit, '%', COLORS['hit'])}\n"
-        f"{metric_line('DCache', dcache_hit, '%', COLORS['hit'])}",
-        title=f"[bold {COLORS['block']}]SQC[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
-        width=20,
-        height=10
+        height=10,
     )
 
-    # Stack LDS, TCP, SQC vertically (swapped LDS and TCP)
+    # TCP panel
+    tcp_bw_line = (
+        metric_line("BW", m["tcp_bw"], "Bytes/s", COLORS["bw"]) if m["tcp_bw"] else ""
+    )
+    tcp_panel = Panel(
+        f"{metric_line('Hit Rate', m['tcp_hit'], '%', COLORS['hit'])}\n{tcp_bw_line}",
+        title=f"[bold {c_bl}]TCP (L0)[/bold {c_bl}]",
+        border_style=c_bl,
+        width=20,
+        height=10,
+    )
+
+    # SQC panel
+    sqc_panel = Panel(
+        f"{metric_line('ICache', m['icache_hit'], '%', COLORS['hit'])}\n"
+        f"{metric_line('DCache', m['dcache_hit'], '%', COLORS['hit'])}",
+        title=f"[bold {c_bl}]SQC[/bold {c_bl}]",
+        border_style=c_bl,
+        width=20,
+        height=10,
+    )
+
+    # Stack LDS, TCP, SQC vertically
     l0_stack = Table.grid(padding=0)
     l0_stack.add_column()
     l0_stack.add_row(lds_panel)
@@ -421,10 +437,13 @@ def create_mem_chart_diagram(
     l0_stack.add_row(sqc_panel)
 
     # Edges to GL1C (TCP and SQC connect, LDS does NOT)
-    # Order: LDS (no connection), TCP, SQC (swapped LDS and TCP)
+    sa_l = std_arrows["left"]
+    sa_r = std_arrows["right"]
+    tcp_gl1_rd = fmt_bw(m["tcp_gl1_read_bw"], precision=1)
+    tcp_gl1_wr = fmt_bw(m["tcp_gl1_write_bw"], precision=1)
+    sqc_gl1_rd = fmt_bw(m["sqc_gl1_read_bw"], precision=1)
     gl1_edges_lines = [
         "",
-        "",  # Empty space for LDS block (no GL1 connection)
         "",
         "",
         "",
@@ -434,38 +453,57 @@ def create_mem_chart_diagram(
         "",
         "",
         "",
-        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{format_bw_gbps(tcp_gl1_read_bw)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
         "",
-        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{format_bw_gbps(tcp_gl1_write_bw)}[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        f"[{c_rd}]Read BW[/{c_rd}]",
+        f"[{c_rd}]{tcp_gl1_rd}[/{c_rd}]",
+        f"[{c_rd}]{sa_l}[/{c_rd}]",
+        "",
+        f"[{c_wr}]Write BW[/{c_wr}]",
+        f"[{c_wr}]{tcp_gl1_wr}[/{c_wr}]",
+        f"[{c_wr}]{sa_r}[/{c_wr}]",
         "",
         "",
         "",
-        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{format_bw_gbps(sqc_gl1_read_bw)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
+        f"[{c_rd}]Read BW[/{c_rd}]",
+        f"[{c_rd}]{sqc_gl1_rd}[/{c_rd}]",
+        f"[{c_rd}]{sa_l}[/{c_rd}]",
     ]
     gl1_edges_text = Text.from_markup("\n".join(gl1_edges_lines))
 
-    # GL1C panel - height=30 to match stack
+    return kernel_panel, kernel_edges_text, l0_stack, gl1_edges_text
+
+
+def _build_cache_columns(
+    m: dict[str, Any],
+    std_arrows: dict[str, str],
+) -> tuple[Panel, Text, Panel]:
+    """Build GL1C panel, GL1-GL2 edges, GL2C panel.
+
+    Returns (gl1_panel, gl1_gl2_edges_text, gl2_panel).
+    """
+    fmt_bw = format_bw_human_readable
+    c_rd = COLORS["read"]
+    c_wr = COLORS["write"]
+    c_bl = COLORS["block"]
+    sa_l = std_arrows["left"]
+    sa_r = std_arrows["right"]
+
     gl1_panel = Panel(
-        f"{metric_line('Util', gl1c_util, '%', COLORS['util'])}\n"
-        f"[dim]{bar(gl1c_util)}[/dim]\n"
+        f"{metric_line('Util', m['gl1c_util'], '%', COLORS['util'])}\n"
+        f"[dim]{bar(m['gl1c_util'])}[/dim]\n"
         "\n"
-        f"{metric_line('Hit Rate', gl1c_hit, '%', COLORS['hit'])}\n"
-        f"[dim]{bar(gl1c_hit)}[/dim]\n"
+        f"{metric_line('Hit Rate', m['gl1c_hit'], '%', COLORS['hit'])}\n"
+        f"[dim]{bar(m['gl1c_hit'])}[/dim]\n"
         "\n"
-        f"{metric_line('GL2 Stall', gl1c_stall_gl2, '%', COLORS['stall'])}",
-        title=f"[bold {COLORS['block']}]GL1C[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        f"{metric_line('GL2 Stall', m['gl1c_stall_gl2'], '%', COLORS['stall'])}",
+        title=f"[bold {c_bl}]GL1C[/bold {c_bl}]",
+        border_style=c_bl,
         width=16,
-        height=30
+        height=30,
     )
 
-    # GL1-GL2 edges - more padding to center vertically
+    rd_bw = fmt_bw(m["gl1_gl2_read_bw"], precision=1)
+    wr_bw = fmt_bw(m["gl1_gl2_write_bw"], precision=1)
     gl1_gl2_edges_lines = [
         "",
         "",
@@ -473,18 +511,18 @@ def create_mem_chart_diagram(
         "",
         "",
         "",
-        "",  # 5 more empty lines
         "",
         "",
         "",
         "",
-        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{format_bw_gbps(gl1_gl2_read_bw)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
         "",
-        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{format_bw_gbps(gl1_gl2_write_bw)}[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        f"[{c_rd}]Read BW[/{c_rd}]",
+        f"[{c_rd}]{rd_bw}[/{c_rd}]",
+        f"[{c_rd}]{sa_l}[/{c_rd}]",
+        "",
+        f"[{c_wr}]Write BW[/{c_wr}]",
+        f"[{c_wr}]{wr_bw}[/{c_wr}]",
+        f"[{c_wr}]{sa_r}[/{c_wr}]",
         "",
         "",
         "",
@@ -492,20 +530,38 @@ def create_mem_chart_diagram(
     ]
     gl1_gl2_edges_text = Text.from_markup("\n".join(gl1_gl2_edges_lines))
 
-    # GL2C panel - height=30 to match
     gl2_panel = Panel(
-        f"{metric_line('Util', gl2c_util, '%', COLORS['util'])}\n"
-        f"[dim]{bar(gl2c_util)}[/dim]\n"
+        f"{metric_line('Util', m['gl2c_util'], '%', COLORS['util'])}\n"
+        f"[dim]{bar(m['gl2c_util'])}[/dim]\n"
         "\n"
-        f"{metric_line('Hit Rate', gl2c_hit, '%', COLORS['hit'])}\n"
-        f"[dim]{bar(gl2c_hit)}[/dim]",
-        title=f"[bold {COLORS['block']}]GL2C[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        f"{metric_line('Hit Rate', m['gl2c_hit'], '%', COLORS['hit'])}\n"
+        f"[dim]{bar(m['gl2c_hit'])}[/dim]",
+        title=f"[bold {c_bl}]GL2C[/bold {c_bl}]",
+        border_style=c_bl,
         width=16,
-        height=30
+        height=30,
     )
 
-    # GL2-GCEA edges - more padding to center vertically
+    return gl1_panel, gl1_gl2_edges_text, gl2_panel
+
+
+def _build_memory_columns(
+    m: dict[str, Any],
+    std_arrows: dict[str, str],
+) -> tuple[Text, Panel, Text, Panel]:
+    """Build GL2-GCEA edges, GCEA panel, DRAM edges, DRAM panel.
+
+    Returns (gl2_gcea_edges_text, gcea_panel, dram_edges_text, dram_panel).
+    """
+    fmt_bw = format_bw_human_readable
+    c_rd = COLORS["read"]
+    c_wr = COLORS["write"]
+    c_bl = COLORS["block"]
+    sa_l = std_arrows["left"]
+    sa_r = std_arrows["right"]
+
+    gl2_rd = fmt_bw(m["gl2c_read_bw"], precision=1)
+    gl2_wr = fmt_bw(m["gl2c_write_bw"], precision=1)
     gl2_gcea_edges_lines = [
         "",
         "",
@@ -513,18 +569,18 @@ def create_mem_chart_diagram(
         "",
         "",
         "",
-        "",  # 5 more empty lines
         "",
         "",
         "",
         "",
-        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{format_bw_gbps(gl2c_read_bw)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
         "",
-        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{format_bw_gbps(gl2c_write_bw)}[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        f"[{c_rd}]Read BW[/{c_rd}]",
+        f"[{c_rd}]{gl2_rd}[/{c_rd}]",
+        f"[{c_rd}]{sa_l}[/{c_rd}]",
+        "",
+        f"[{c_wr}]Write BW[/{c_wr}]",
+        f"[{c_wr}]{gl2_wr}[/{c_wr}]",
+        f"[{c_wr}]{sa_r}[/{c_wr}]",
         "",
         "",
         "",
@@ -532,19 +588,19 @@ def create_mem_chart_diagram(
     ]
     gl2_gcea_edges_text = Text.from_markup("\n".join(gl2_gcea_edges_lines))
 
-    # GCEA panel - height=30 to match
     gcea_panel = Panel(
-        f"{metric_line('SARB Util', sarb_util, '%', COLORS['util'])}\n"
-        f"[dim]{bar(sarb_util)}[/dim]\n"
+        f"{metric_line('SysArb Util', m['sarb_util'], '%', COLORS['util'])}\n"
+        f"[dim]{bar(m['sarb_util'])}[/dim]\n"
         "\n"
-        f"{metric_line('Stall', sarb_stall, '%', COLORS['stall'])}",
-        title=f"[bold {COLORS['block']}]GCEA[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        f"{metric_line('Stall', m['sarb_stall'], '%', COLORS['stall'])}",
+        title=f"[bold {c_bl}]GCEA[/bold {c_bl}]",
+        border_style=c_bl,
         width=16,
-        height=30
+        height=30,
     )
 
-    # GCEA-DRAM edges - more padding to center vertically
+    dram_rd = fmt_bw(m["dram_read_bw"], precision=1)
+    dram_wr = fmt_bw(m["dram_write_bw"], precision=1)
     dram_edges_lines = [
         "",
         "",
@@ -552,18 +608,18 @@ def create_mem_chart_diagram(
         "",
         "",
         "",
-        "",  # 5 more empty lines
         "",
         "",
         "",
         "",
-        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{format_bw_gbps(dram_read_bw)}[/{COLORS['read']}]",
-        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
         "",
-        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{format_bw_gbps(dram_write_bw)}[/{COLORS['write']}]",
-        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        f"[{c_rd}]Read BW[/{c_rd}]",
+        f"[{c_rd}]{dram_rd}[/{c_rd}]",
+        f"[{c_rd}]{sa_l}[/{c_rd}]",
+        "",
+        f"[{c_wr}]Write BW[/{c_wr}]",
+        f"[{c_wr}]{dram_wr}[/{c_wr}]",
+        f"[{c_wr}]{sa_r}[/{c_wr}]",
         "",
         "",
         "",
@@ -571,35 +627,98 @@ def create_mem_chart_diagram(
     ]
     dram_edges_text = Text.from_markup("\n".join(dram_edges_lines))
 
-    # DRAM panel - height=30 to match
+    total = fmt_bw(m["total_bw"], precision=1)
     dram_panel = Panel(
-        f"[dim]DDR5/LPDDR5[/dim]\n"
+        "[dim]DDR5/LPDDR5[/dim]\n"
         "\n"
-        f"Total: [bold bright_green]{format_bw_gbps(total_bw)}[/bold bright_green]",
-        title=f"[bold {COLORS['block']}]DRAM[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        f"Total: [bold bright_green]{total}[/bold bright_green]",
+        title=f"[bold {c_bl}]DRAM[/bold {c_bl}]",
+        border_style=c_bl,
         width=16,
-        height=30
+        height=30,
     )
 
-    # Add the main row
+    return gl2_gcea_edges_text, gcea_panel, dram_edges_text, dram_panel
+
+
+# ---------------------------------------------------------------------------
+# Main diagram assembly
+# ---------------------------------------------------------------------------
+
+
+def create_mem_chart_diagram(
+    metric_dict: dict[str, Any],
+    console: Console,
+    show_debug: bool = False,
+    chart_title: str = "",
+) -> None:
+    """Create the RDNA3.5 memory diagram (TCP, LDS, SQC blocks).
+
+    ``chart_title``: printed once above the diagram (e.g. from YAML panel title +
+    normalization unit).
+    """
+    m = _extract_metrics(metric_dict)
+
+    console.print()
+    if chart_title:
+        console.print(f"[bold]{chart_title}[/bold]")
+    _print_mem_chart_scope_bar(console)
+    console.print()
+
+    # Arrow constants
+    std_arrow_len = 8
+    std_arrows = {
+        "left": "<" + "-" * std_arrow_len,
+        "right": "-" * std_arrow_len + ">",
+    }
+
+    kernel_edge_width = 16
+    kernel_arrows = {
+        "left": "<" + "-" * (kernel_edge_width - 1),
+        "right": "-" * (kernel_edge_width - 1) + ">",
+        "both": "<" + "-" * (kernel_edge_width - 2) + ">",
+    }
+
+    # Build layout columns
+    kernel_panel, kernel_edges, l0_stack, gl1_edges = _build_kernel_and_l0(
+        m, kernel_arrows, std_arrows
+    )
+    gl1_panel, gl1_gl2_edges, gl2_panel = _build_cache_columns(m, std_arrows)
+    gl2_gcea_edges, gcea_panel, dram_edges, dram_panel = _build_memory_columns(
+        m, std_arrows
+    )
+
+    # Assemble 11-column grid
+    main_layout = Table.grid(padding=0)
+    for _ in range(11):
+        main_layout.add_column()
+
     main_layout.add_row(
         kernel_panel,
-        kernel_edges_text,
+        kernel_edges,
         l0_stack,
-        gl1_edges_text,
+        gl1_edges,
         gl1_panel,
-        gl1_gl2_edges_text,
+        gl1_gl2_edges,
         gl2_panel,
-        gl2_gcea_edges_text,
+        gl2_gcea_edges,
         gcea_panel,
-        dram_edges_text,
-        dram_panel
+        dram_edges,
+        dram_panel,
     )
 
     console.print(main_layout)
     console.print()
-    console.print(f"[dim]Legend:[/dim] [{COLORS['read']}]<----[/{COLORS['read']}] Read  [{COLORS['write']}]---->[/{COLORS['write']}] Write  [{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  [{COLORS['util']}]█[/{COLORS['util']}] Util  [{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  [{COLORS['stall']}]█[/{COLORS['stall']}] Stall")
+    legend = (
+        f"[dim]Legend:[/dim] "
+        f"[{COLORS['read']}]<----[/{COLORS['read']}] Read  "
+        f"[{COLORS['write']}]---->[/{COLORS['write']}] Write  "
+        f"[{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  "
+        f"[{COLORS['util']}]█[/{COLORS['util']}] Util  "
+        f"[{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  "
+        f"[{COLORS['stall']}]█[/{COLORS['stall']}] Stall"
+    )
+    console.print(legend)
     console.print()
 
     if show_debug:
@@ -610,150 +729,117 @@ def create_mem_chart_diagram(
         console.print()
 
 
-def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> str:
-    """Plot the memory chart and return as string."""
-    class FakeFile:
-        def __init__(self):
-            self.data = []
-        def write(self, s):
-            self.data.append(s)
-        def flush(self):
-            pass
-        def isatty(self):
-            return True
-        def getvalue(self):
-            return ''.join(self.data)
-
-    fake_file = FakeFile()
-    console = Console(file=fake_file, force_terminal=True, width=200, height=80)
-    create_mem_chart_diagram(arch, normal_unit, metric_dict, console, show_debug=False, compact=False)
-    return fake_file.getvalue()
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 
-# Default sample metrics
-DEFAULT_SAMPLE_METRICS = {
-    'ICache Requests': 450,
-    'ICache Utilization': 45.2,
-    'ICache Hit Rate': 98.5,
-    'ICache Miss Rate': 1.5,
-    'ICache Request Stall Rate': 2.1,
-    'ICache-GL1 Read Bandwidth': 57600000,
-    'Dcache Requests': 225,
-    'Dcache Utilization': 38.7,
-    'Dcache Hit Rate': 95.3,
-    'Dcache Request Stall Rate': 1.8,
-    'Dcache-GL1 Read Bandwidth': 28800000,
-    'TCP Total Requests': 1250000,
-    'TCP Read Requests': 875000,
-    'TCP Write Requests': 375000,
-    'TCP Atomic Requests': 25000,
-    'TCP Miss Requests': 150000,
-    'TCP Hit Rate': 88.0,
-    'TCP Request Bandwidth': 80.0,
-    'LDS Instructions': 125000,
-    'LDS Read Instructions': 65000,
-    'LDS Write Instructions': 50000,
-    'LDS Atomic Instructions': 10000,
-    'LDS Instruction Cycles': 250000,
-    'LDS Wait Cycles': 12500,
-    'LDS Bank Conflict Rate': 4.0,
-    'LDS Estimated Bandwidth': 256.0,
-    'TCP-GL1 Read Requests': 150000,
-    'TCP-GL1 Write Requests': 50000,
-    'TCP-GL1 Read Bandwidth': 96e9,
-    'TCP-GL1 Write Bandwidth': 32e9,
-    'GL1C Utilization': 65.2,
-    'GL1C Total Requests': 200000,
-    'GL1C Read Requests': 150000,
-    'GL1C Write Requests': 50000,
-    'GL1C Miss Requests': 30000,
-    'GL1C Hit Rate': 85.0,
-    'GL1C Starve Rate': 5.2,
-    'GL1C Stall GL2 Backpressure': 8.5,
-    'GL1-GL2 Read Requests': 30000,
-    'GL1-GL2 Write Requests': 10000,
-    'GL1-GL2 Read Bandwidth': 48e9,
-    'GL1-GL2 Write Bandwidth': 16e9,
-    'GL1-GL2 Read Latency': 85.2,
-    'GL1-GL2 Write Latency': 62.4,
-    'GL2C Utilization': 74.2,
-    'GL2C Total Requests': 40000,
-    'GL2C Read Requests': 30000,
-    'GL2C Write Requests': 10000,
-    'GL2C Atomic Requests': 1000,
-    'GL2C Hit Rate': 82.5,
-    'GL2C Read Bandwidth': 64e9,
-    'GL2C Write Bandwidth': 24e9,
-    'SARB Utilization': 52.3,
-    'SARB Stall Rate': 12.4,
-    'DRAM Read Requests': 25000,
-    'DRAM Write Requests': 8000,
-    'DRAM Read Bandwidth': 100e9,
-    'DRAM Write Bandwidth': 60e9,
-    'Read Returns': 25000,
-    'Write Returns': 8000,
-}
+def plot_mem_chart(
+    arch: str,
+    normal_unit: str,
+    metric_dict: dict[str, Any],
+    *,
+    chart_title: Optional[str] = None,
+) -> str:
+    """Plot the memory chart and return as string.
+
+    ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1151), i.e.
+    ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
+    Input is normalized to a flat ordered dict before rendering.
+
+    ``chart_title``: full heading line; if omitted, uses ``format_mem_chart_heading``
+    with ``panel_id=300`` (section ``3.``).
+    """
+    flat = normalize_mem_chart_metrics(metric_dict)
+    resolved_heading = (
+        format_mem_chart_heading(normal_unit, panel_id=300)
+        if chart_title is None
+        else chart_title
+    )
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=200, height=80)
+    create_mem_chart_diagram(
+        flat,
+        console,
+        show_debug=False,
+        chart_title=resolved_heading,
+    )
+    return buf.getvalue()
 
 
-def get_sample_metrics() -> Dict[str, Any]:
-    """Return sample metrics data for testing"""
-    return DEFAULT_SAMPLE_METRICS.copy()
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
 
 
-def main():
-    parser = argparse.ArgumentParser(description='RDNA3.5 Memory Chart - CLI Visualization')
-    parser.add_argument('--data', '-d', help='JSON file with metrics data')
-    parser.add_argument('--debug', action='store_true', help='Show debug info')
-    parser.add_argument('--arch', default='gfx1152', help='Architecture name')
-    parser.add_argument('--norm', default='per_kernel', help='Normalization unit')
-    parser.add_argument('--txt', '-t', help='Output to plain text file')
-    parser.add_argument('--svg', help='Output to SVG file')
-    parser.add_argument('--compact', '-c', action='store_true', help='Compact mode')
-    args = parser.parse_args()
+def main() -> None:
+    arg_parser = argparse.ArgumentParser(
+        description="RDNA3.5 Memory Chart - CLI Visualization"
+    )
+    arg_parser.add_argument("--data", "-d", help="JSON file with metrics data")
+    arg_parser.add_argument("--debug", action="store_true", help="Show debug info")
+    arg_parser.add_argument("--arch", default="gfx1151", help="Architecture name")
+    arg_parser.add_argument("--norm", default="per_kernel", help="Normalization unit")
+    arg_parser.add_argument("--txt", "-t", help="Output to plain text file")
+    arg_parser.add_argument("--svg", help="Output to SVG file")
+    args = arg_parser.parse_args()
 
-    # Load or use default data
     if args.data:
-        with open(args.data, 'r') as f:
-            metric_dict = json.load(f)
+        with open(args.data) as f:
+            metric_dict = normalize_mem_chart_metrics(json.load(f))
     else:
-        metric_dict = DEFAULT_SAMPLE_METRICS.copy()
+        metric_dict = normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
 
-    # Create console
-    class FakeFile:
-        def __init__(self):
-            self.data = []
-        def write(self, s):
-            self.data.append(s)
-        def flush(self):
-            pass
-        def isatty(self):
-            return True
-        def getvalue(self):
-            return ''.join(self.data)
+    heading = format_mem_chart_heading(args.norm, panel_id=300)
 
     if args.txt:
-        fake_file = FakeFile()
-        console = Console(file=fake_file, force_terminal=True, width=200, height=80, no_color=True)
-        create_mem_chart_diagram(args.arch, args.norm, metric_dict, console, args.debug, args.compact)
-        import re
-        output = fake_file.getvalue()
-        plain = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', output)
-        with open(args.txt, 'w') as f:
+        buf = StringIO()
+        console = Console(
+            file=buf,
+            force_terminal=True,
+            width=200,
+            height=80,
+            no_color=True,
+        )
+        create_mem_chart_diagram(
+            metric_dict,
+            console,
+            args.debug,
+            chart_title=heading,
+        )
+        output = buf.getvalue()
+        plain = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", output)
+        with open(args.txt, "w") as f:
             f.write(plain)
         print(f"Output written to {args.txt}")
     elif args.svg:
-        from io import StringIO
-        svg_console = Console(file=StringIO(), force_terminal=True, width=200, height=80, record=True)
-        create_mem_chart_diagram(args.arch, args.norm, metric_dict, svg_console, args.debug, args.compact)
-        svg_output = svg_console.export_svg(title="RDNA3.5 Memory Chart")
-        with open(args.svg, 'w') as f:
+        svg_console = Console(
+            file=StringIO(),
+            force_terminal=True,
+            width=200,
+            height=80,
+            record=True,
+        )
+        create_mem_chart_diagram(
+            metric_dict,
+            svg_console,
+            args.debug,
+            chart_title=heading,
+        )
+        svg_output = svg_console.export_svg(title=heading)
+        with open(args.svg, "w") as f:
             f.write(svg_output)
         print(f"SVG saved to {args.svg}")
     else:
-        fake_file = FakeFile()
-        console = Console(file=fake_file, force_terminal=True, width=200, height=80)
-        create_mem_chart_diagram(args.arch, args.norm, metric_dict, console, args.debug, args.compact)
-        print(fake_file.getvalue())
+        buf = StringIO()
+        console = Console(file=buf, force_terminal=True, width=200, height=80)
+        create_mem_chart_diagram(
+            metric_dict,
+            console,
+            args.debug,
+            chart_title=heading,
+        )
+        print(buf.getvalue())
 
 
 if __name__ == "__main__":

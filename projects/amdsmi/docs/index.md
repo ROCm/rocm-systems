@@ -64,7 +64,7 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
 :::
 ::::
 
-To learn about contributing to AMD SMI, see [Contibuting to AMD
+To learn about contributing to AMD SMI, see [Contributing to AMD
 SMI](https://github.com/ROCm/amdsmi/blob/amd-mainline/.github/CONTRIBUTING.md).
 To contribute to the documentation, see
 {doc}`Contributing to ROCm documentation <rocm:contribute/contributing>`.

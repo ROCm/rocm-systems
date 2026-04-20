@@ -68,8 +68,7 @@ class CounterSampler {
 
   // Sample multiple counters using greedy packing to minimize profiles
   void sample_counters_with_packing(const std::vector<std::string>& counters,
-                                    std::map<std::string, double>& out_values,
-                                    uint64_t duration);
+                                    std::map<std::string, double>& out_values, uint64_t duration);
 
   // Get the supported counters for an agent
   static std::unordered_map<std::string, rocprofiler_counter_id_t> get_supported_counters(
@@ -89,7 +88,7 @@ class CounterSampler {
   std::map<uint64_t, uint64_t> counter_sizes_;
   std::map<std::vector<std::string>, ProfileSet> cached_profile_sets_;
   mutable std::map<uint64_t, std::string> id_to_name_;  // Per-instance counter ID to name map
-  mutable std::mutex id_to_name_mutex_;  // Protects id_to_name_
+  mutable std::mutex id_to_name_mutex_;                 // Protects id_to_name_
 
   // Internal function used to set the profile for the agent when start_context is called
   void set_profile(rocprofiler_context_id_t ctx, rocprofiler_device_counting_agent_cb_t cb) const;

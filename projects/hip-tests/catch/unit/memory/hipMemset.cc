@@ -1,20 +1,7 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -133,7 +120,7 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
  * Test hipMemset, hipMemsetD8, hipMemsetD16, hipMemsetD32 apis with unique
  * number of elements and memset values.
  */
-TEST_CASE("Unit_hipMemset_SetMemoryWithOffset") {
+HIP_TEST_CASE(Unit_hipMemset_SetMemoryWithOffset) {
   char memsetval;
   int memsetD32val;
   int16_t memsetD16val;
@@ -175,7 +162,7 @@ TEST_CASE("Unit_hipMemset_SetMemoryWithOffset") {
  * Test hipMemsetAsync, hipMemsetD8Async, hipMemsetD16Async, hipMemsetD32Async
  * apis with unique number of elements and memset values.
  */
-TEST_CASE("Unit_hipMemsetAsync_SetMemoryWithOffset") {
+HIP_TEST_CASE(Unit_hipMemsetAsync_SetMemoryWithOffset) {
   char memsetval;
   int memsetD32val;
   int16_t memsetD16val;
@@ -215,7 +202,7 @@ TEST_CASE("Unit_hipMemsetAsync_SetMemoryWithOffset") {
 /**
  * Test hipMemset small size buffers with unique memset values.
  */
-TEST_CASE("Unit_hipMemset_SmallBufferSizes") {
+HIP_TEST_CASE(Unit_hipMemset_SmallBufferSizes) {
   char *A_d, *A_h;
   constexpr int memsetval = 0x24;
 
@@ -243,7 +230,7 @@ TEST_CASE("Unit_hipMemset_SmallBufferSizes") {
 /**
  * Test two memset async operations at the same time.
  */
-TEST_CASE("Unit_hipMemset_2AsyncOperations") {
+HIP_TEST_CASE(Unit_hipMemset_2AsyncOperations) {
   std::vector<float> v;
   v.resize(2048);
   float *p2, *p3;
@@ -281,7 +268,7 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemset_Capture") {
+HIP_TEST_CASE(Unit_hipMemset_Capture) {
   const size_t N = 1024;
   void* dst = nullptr;
   HIP_CHECK(hipMalloc(&dst, N));
@@ -305,7 +292,7 @@ TEST_CASE("Unit_hipMemset_Capture") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemsetD8_Capture") {
+HIP_TEST_CASE(Unit_hipMemsetD8_Capture) {
   const size_t N = 512;
   void* dst = nullptr;
   HIP_CHECK(hipMalloc(&dst, N * sizeof(uint8_t)));

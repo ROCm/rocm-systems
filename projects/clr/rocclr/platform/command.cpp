@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/activity.hpp"
 #include "platform/command.hpp"
@@ -163,7 +149,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
       releaseResources();
     }
 
-    if (profilingInfo().enabled_ && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+    if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());
     }
 
@@ -310,10 +296,19 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
 
 const Event::EventWaitList Event::nullWaitList(0);
 
+static bool IsActivityEnabledAndCommit(cl_command_type type) {
+  auto op = amd::activity_prof::OperationId(type);
+  if (amd::activity_prof::IsEnabled(op)) {
+    amd::activity_prof::CommitRecord(op);
+    return true;
+  }
+  return false;
+}
+
 // ================================================================================================
 Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
-    : Event(queue, amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
+    : Event(queue, IsActivityEnabledAndCommit(type) ||
                        queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
                        Agent::shouldPostEventEvents()),
       queue_(&queue),
@@ -390,7 +385,7 @@ void Command::enqueue() {
 
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    ScopedLock sl(queue_->vdev()->execution());
+    std::scoped_lock sl(queue_->vdev()->execution());
     queue_->FormSubmissionBatch(this);
 
     // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
@@ -408,7 +403,7 @@ void Command::enqueue() {
       queue_->ResetSubmissionBatch();
     } else {
       submit(*queue_->vdev());
-      queue_->FlushSubmissionBatch(this);
+      queue_->FlushSubmissionBatch();
     }
   } else {
     queue_->append(*this);
@@ -671,7 +666,7 @@ bool MigrateMemObjectsCommand::validateMemory() {
 }
 
 // =================================================================================================
-int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, address kernArgs,
+int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
                                                       size_t kernArgsSize) {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
@@ -685,14 +680,14 @@ int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, addre
     return CL_OUT_OF_RESOURCES;
   }
 
-  if (!kernel().parameters().captureAndSet(kernelParams, kernArgs, kernArgsSize, parameters_)) {
+  if (!kernel().parameters().captureHIPArgs(kernelParams, kernArgs, kernArgsSize, parameters_)) {
     LogError("Cannot capture and set the kernel parameters");
     return CL_OUT_OF_RESOURCES;
   }
   return CL_SUCCESS;
 }
 
-int32_t NDRangeKernelCommand::captureAndValidate() {
+int32_t NDRangeKernelCommand::captureOpenCLArgsAndValidate() {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
@@ -701,8 +696,8 @@ int32_t NDRangeKernelCommand::captureAndValidate() {
 
   int32_t error;
   uint64_t lclMemSize = kernel().getDeviceKernel(device)->workGroupInfo()->localMemSize_;
-  parameters_ =
-      kernel().parameters().capture(*queue()->vdev(), sharedMemBytes_ + lclMemSize, &error);
+  parameters_ = kernel().parameters().captureOpenCLArgs(*queue()->vdev(),
+                                                        sharedMemBytes_ + lclMemSize, &error);
   return error;
 }
 
@@ -802,7 +797,7 @@ bool CopyMemoryP2PCommand::validateMemory() {
   }
 
   if (devices[0]->P2PStage() != nullptr && p2pStaging) {
-    amd::ScopedLock lock(devices[0]->P2PStageOps());
+    std::scoped_lock lock(devices[0]->P2PStageOps());
     // Make sure runtime allocates memory on every device
     for (uint d = 0; d < devices[0]->GlbCtx().devices().size(); ++d) {
       device::Memory* mem =

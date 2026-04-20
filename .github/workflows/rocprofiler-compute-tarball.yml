@@ -57,8 +57,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          sparse-checkout: projects/rocprofiler-compute
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
           ref: ${{ steps.sha-mode.sha }}
+          set-safe-directory: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
+
       - name: Install ROCm Dependencies
         shell: bash
         run: |

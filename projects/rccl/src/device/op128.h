@@ -12,13 +12,27 @@
 #include "device/rccl_ptr.h"
 
 inline __device__ void load128(const uint64_t* ptr, uint64_t &v0, uint64_t &v1) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  union { v4u v; uint64_t u64[2]; } u;
+  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr) ptr, RCCL_SYSTEM_SYNCSCOPE);
+  v0 = u.u64[0];
+  v1 = u.u64[1];
+#else
   v0 = __builtin_nontemporal_load((u64_gptr) ptr);
   v1 = __builtin_nontemporal_load((u64_gptr) ptr+1);
+#endif
 }
 
 inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  union { v4u v; uint64_t u64[2]; } u;
+  u.u64[0] = v0;
+  u.u64[1] = v1;
+  __builtin_amdgcn_global_store_b128((v4u_gptr) ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
+#else
   *((u64_gptr) ptr) = v0;
   *((u64_gptr) ptr + 1) = v1;
+#endif
 }
 
 inline __device__ uint64_t* shmemCvtPtr(volatile uint64_t* shmemGenericPtr) {
@@ -240,11 +254,11 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
 // template<> __device__ __forceinline__ void st_relaxed_gpu_global<0>(uintptr_t addr, BytePack<0> value) {}
 
 // Used to define implementations for above prototypes.
-#define DEFINE_ld_st__size_space(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
+#define DEFINE_ld_st__size_space_hip_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp = *((data_cxx_ty *)addr); \
+    tmp = *((__attribute__((address_space(1))) data_cxx_ty *)addr); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
@@ -252,15 +266,45 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp =  __builtin_nontemporal_load((data_cxx_ty *)addr); \
+    tmp =  __hip_atomic_load((__attribute__((address_space(1))) data_cxx_ty *)addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
   } \
   template<> \
   __device__ __forceinline__ void st_##space<bytes>(addr_cxx_ty addr, BytePack<bytes> value) { \
-    __builtin_nontemporal_store(value.native, (data_cxx_ty *)addr); \
+    __hip_atomic_store((__attribute__((address_space(1))) data_cxx_ty *)addr, value.native, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
   }
+
+#define DEFINE_ld_st__size_space_fallback(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
+  template<> \
+  __device__ __forceinline__ BytePack<bytes> ld_##space<bytes>(addr_cxx_ty addr) { \
+    data_cxx_ty tmp; \
+    tmp = *((__attribute__((address_space(1))) data_cxx_ty *)addr); \
+    BytePack<bytes> ans; \
+    ans.native = tmp; \
+    return ans; \
+  } \
+  template<> \
+  __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
+    data_cxx_ty tmp; \
+    tmp = __builtin_nontemporal_load((__attribute__((address_space(1))) data_cxx_ty *)addr); \
+    BytePack<bytes> ans; \
+    ans.native = tmp; \
+    return ans; \
+  } \
+  template<> \
+  __device__ __forceinline__ void st_##space<bytes>(addr_cxx_ty addr, BytePack<bytes> value) { \
+    __builtin_nontemporal_store(value.native, (__attribute__((address_space(1))) data_cxx_ty *)addr); \
+  }
+
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define DEFINE_ld_st__size_space(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
+  DEFINE_ld_st__size_space_hip_atomic(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty)
+#else
+#define DEFINE_ld_st__size_space(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
+  DEFINE_ld_st__size_space_fallback(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty)
+#endif
 
 // #if __CUDA_ARCH__ >= 700
 //   #define PTX_relaxed_gpu "relaxed.gpu"
@@ -296,6 +340,8 @@ DEFINE_ld_st__size(4, uint32_t, b32, r)
 DEFINE_ld_st__size(8, uint64_t, b64, l)
 
 #undef DEFINE_ld_st__size_space
+#undef DEFINE_ld_st__size_space_hip_atomic
+#undef DEFINE_ld_st__size_space_fallback
 #undef DEFINE_ld_st__size
 
 
@@ -362,12 +408,20 @@ DEFINE_ld_st_16__space(global, uintptr_t, l)
 
 __device__ __forceinline__ uint64_t ld_volatile_global(uint64_t *ptr) {
   uint64_t ans;
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  #else
   ans = __builtin_nontemporal_load(ptr);
+  #endif
   return ans;
 }
 __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t *ptr) {
   uint64_t ans;
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  #else
   ans = __builtin_nontemporal_load(ptr);
+  #endif
   return ans;
 }
 
@@ -383,18 +437,34 @@ __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t *ptr) {
 
 __device__ __forceinline__ uint64_t ld_acquire_sys_global(uint64_t *ptr) {
   uint64_t ans;
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+  #else
   ans = __atomic_load_n(ptr ,__ATOMIC_SEQ_CST);
+  #endif
   return ans;
 }
 
 __device__ __forceinline__ void st_volatile_global(uint64_t *ptr, uint64_t val) {
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  #else
   __builtin_nontemporal_store(val, ptr);
+  #endif
 }
 __device__ __forceinline__ void st_relaxed_sys_global(uint64_t *ptr, uint64_t val) {
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  #else
   __builtin_nontemporal_store(val, ptr);
+  #endif
 }
 __device__ __forceinline__ void st_release_sys_global(uint64_t *ptr, uint64_t val) {
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  #else
   __atomic_store_n(ptr, val, __ATOMIC_SEQ_CST);
+  #endif
 }
 
 __device__ __forceinline__ void fence_acq_rel_sys() {

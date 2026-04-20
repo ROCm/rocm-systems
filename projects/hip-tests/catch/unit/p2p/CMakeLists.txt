@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 # moved hipDeviceGetP2PAttribute.cc from /catch/unit/device to
 # /catch/unit/p2p folder and its dependent files.

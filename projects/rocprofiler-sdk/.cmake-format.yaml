@@ -307,6 +307,8 @@ parse:
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'
         SOURCES: '*'
+        CONFIGURE_FILES: '*'
+        DATA: '*'
     rocprofiler_add_integration_execute_test:
       flags:
         - WILL_FAIL

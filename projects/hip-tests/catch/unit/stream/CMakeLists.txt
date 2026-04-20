@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 set(COMMON_SHARED_SRC streamCommon.cc)
 
 set(TEST_SRC

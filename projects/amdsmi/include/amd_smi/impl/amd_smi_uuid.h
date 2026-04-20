@@ -23,6 +23,10 @@
 #ifndef GPUVSMI_UUID_H_
 #define GPUVSMI_UUID_H_
 
+#include <cstdint>
+
+#include "amd_smi/amdsmi.h"
+
 /**
  *  \brief  Generates uuid for device with specified parameters
  *
@@ -36,6 +40,6 @@
  *
  *  \return SMI_RET_CODE indicating result.
  */
-amdsmi_status_t amdsmi_uuid_gen(char *str, uint64_t serial, uint16_t did, uint8_t idx);
+amdsmi_status_t amdsmi_uuid_gen(char* str, uint64_t serial, uint16_t did, uint8_t idx);
 
 #endif

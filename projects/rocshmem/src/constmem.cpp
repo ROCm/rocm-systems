@@ -3,8 +3,6 @@
 
 namespace rocshmem {
 
-__constant__ constmem_t constmem;
-
 void init_constant_memory(void) {
   std::string envstr;
   constmem_t constmem_values;

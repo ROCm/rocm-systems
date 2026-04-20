@@ -45,7 +45,7 @@ THE SOFTWARE.
 #define CHECK_HIP(call) {\
     hipError_t hip_status = call;\
     if (hip_status != hipSuccess) {\
-        logger_.CriticalLog(MakeMsg("HIP failure: " + #call + " failed with 'status: " + STR(hipGetErrorName(hip_status)) + "' at " + __FILE__ + ":" + TOSTR(__LINE__)));\
+        CriticalLog(g_rocdec_logger, STR("HIP failure: ") + #call + " failed with 'status: " + STR(hipGetErrorName(hip_status)) + "' at " + __FILE__ + ":" + TOSTR(__LINE__));\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }
@@ -53,7 +53,7 @@ THE SOFTWARE.
 #define CHECK_VAAPI(call) {\
     VAStatus va_status = call;\
     if (va_status != VA_STATUS_SUCCESS) {\
-        logger_.CriticalLog(MakeMsg("VAAPI failure: " + #call + " failed with 'status: " + TOSTR(va_status) + ": " + vaErrorStr(va_status) + "' at " + __FILE__ + ":" + TOSTR(__LINE__)));\
+        CriticalLog(g_rocdec_logger, STR("VAAPI failure: ") + #call + " failed with 'status: " + TOSTR(va_status) + ": " + STR(vaErrorStr(va_status)) + "' at " + __FILE__ + ":" + TOSTR(__LINE__));\
         return ROCDEC_RUNTIME_ERROR;\
     }\
 }
@@ -101,6 +101,7 @@ public:
 
 private:
     RocDecoderCreateInfo decoder_create_info_;
+    bool output_surface_format_override_;
     VADisplay va_display_;
     VAConfigAttrib va_config_attrib_;
     VAConfigID va_config_id_;
@@ -115,8 +116,9 @@ private:
     uint32_t num_slices_;
     VABufferID slice_data_buf_id_;
 
-    RocDecLogger logger_;
-
+    void SetNativeOutputFormat();
+    void ValidateOutputFormat();
+    void CheckOutputFormat();
     bool IsCodecConfigSupported(int device_id, rocDecVideoCodec codec_type, rocDecVideoChromaFormat chroma_format, uint32_t bit_depth_minus8, rocDecVideoSurfaceFormat output_format);
     rocDecStatus CreateDecoderConfig();
     rocDecStatus CreateSurfaces();
@@ -153,8 +155,6 @@ private:
     VaContext(const VaContext&) = delete;
     VaContext& operator = (const VaContext) = delete;
     ~VaContext();
-
-    RocDecLogger logger_;
 
     rocDecStatus InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop);
     rocDecStatus InitVAAPI(int va_ctx_idx, std::string drm_node);

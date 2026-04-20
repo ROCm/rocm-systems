@@ -48,15 +48,11 @@ The attach function performs the entire attachment process, including attaching 
 **Parameters**
 
 - **pid**: Required - PID of process to attach to
-   - Defaults to environment variable ROCPROF_ATTACH_PID
 - **attach_tool_library**: Colon delimited list of tool libraries to use
-   - Defaults to environment variable ROCPROF_ATTACH_TOOL_LIBRARY
 - **attach_duration_msec**: Optional - Length of time in milliseconds to profile for
-   - Defaults to environment variable ROCPROF_ATTACH_DURATION
    - If unspecified, attachment will run until Enter is pressed or SIGINT (Ctrl+C) is received
 - **attach_library**: Optional - Tool library to use for attachment and detachment
    - Default will work for nearly all applications
-   - Defaults to environment variable ROCPROF_ATTACH_LIBRARY
    - If unspecified, defaults to the absolute path of librocprofiler-sdk-rocattach.so
 
 C Functions
@@ -79,7 +75,6 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines an attach and detach f
 - **rocattach_attach(int pid)**: Main entry point for starting attachment to a process
    - Takes the target process ID as parameter
    - Initiates ptrace-based attachment sequence
-   - Custom tool libraries can be specified in a colon delimited list with the environment variable ROCPROF_ATTACH_TOOL_LIBRARY
 
 - **rocattach_detach(int pid)**: Entry point for detaching from the target process
    - Takes the target process ID as a parameter

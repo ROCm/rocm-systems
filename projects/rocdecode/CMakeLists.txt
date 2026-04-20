@@ -47,7 +47,7 @@ if (NOT DEFINED CMAKE_CXX_COMPILER)
 endif()
 
 # rocdecode Version
-set(VERSION "1.7.0")
+set(VERSION "1.8.0")
 
 # Set Project Version and Language
 project(rocdecode VERSION ${VERSION} LANGUAGES CXX)
@@ -59,10 +59,6 @@ include(GNUInstallDirs)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR})
-
-find_program(MAKE_NSIS_EXE makensis)
-find_program(RPMBUILD_EXE rpmbuild)
-find_program(DPKG_EXE dpkg)
 
 # avoid setting the default installation path to /usr/local
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -118,29 +114,13 @@ find_package(HIP QUIET)
 find_package(Libva QUIET)
 find_package(Libdrm_amdgpu QUIET)
 
-# Find Ubuntu 22.04
-file(READ "/etc/os-release" OS_RELEASE)
-string(REGEX MATCH "22.04" UBUNTU_22_FOUND ${OS_RELEASE})
-
-# Check Libva version compatibility based on installation method and OS:
-# - Ubuntu 22.04 with standard ROCm installation: requires libva >= 1.16
-# - TheRock installation (any OS): libva >= 1.8 is sufficient
-# - Other OS versions with standard ROCm: libva >= 1.8 is sufficient
+# Check Libva version compatibility: requires libva >= 1.22
 if(Libva_FOUND)
-  if(UBUNTU_22_FOUND AND NOT USING_THE_ROCK)
-    if((${Libva_VERSION_MAJOR} GREATER_EQUAL 1) AND (${Libva_VERSION_MINOR} GREATER_EQUAL 16))
-      message("-- ${White}\tLibva Version Supported${ColourReset}")
-    else()
-      set(Libva_FOUND FALSE)
-      message("-- ${Yellow}\tLibva Version Not Supported${ColourReset}")
-    endif()
+  if("${Libva_VERSION}" VERSION_GREATER_EQUAL "1.22")
+    message("-- ${White}\tLibva Version Supported${ColourReset}")
   else()
-    if((${Libva_VERSION_MAJOR} GREATER_EQUAL 1) AND (${Libva_VERSION_MINOR} GREATER_EQUAL 8))
-      message("-- ${White}\tLibva Version Supported${ColourReset}")
-    else()
-      set(Libva_FOUND FALSE)
-      message("-- ${Yellow}\tLibva Version Not Supported${ColourReset}")
-    endif()
+    set(Libva_FOUND FALSE)
+    message("-- ${Yellow}\tLibva Version Not Supported (found ${Libva_VERSION}, need >= 1.22)${ColourReset}")
   endif()
 endif()
 
@@ -216,47 +196,44 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/api/rocdecode_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocdecode_version.h @ONLY )
 
   # install rocdecode libs -- {ROCM_PATH}/lib
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP)
-  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_ONLY)
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
+  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
   # install rocdecode include files -- {ROCM_PATH}/include/rocdecode
   install(FILES api/rocdecode/rocdecode.h api/rocdecode/rocparser.h api/rocdecode/roc_bitstream_reader.h
-          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME} COMPONENT dev)
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/rocdecode_version.h
-          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME} COMPONENT dev)
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
   # install rocdecode api trace include file -- {ROCM_PATH}/include/rocdecode/amd_detail
   install(FILES api/amd_detail/rocdecode_api_trace.h
-          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/amd_detail COMPONENT dev)
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/amd_detail)
 
   # install rocdecode samples -- {ROCM_PATH}/share/rocdecode
-  install(DIRECTORY cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME} COMPONENT dev)
-  install(DIRECTORY utils/rocvideodecode DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES samples/videoDecode/CMakeLists.txt samples/videoDecode/README.md samples/videoDecode/videodecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecode COMPONENT dev)
-  install(FILES samples/videoDecodeRaw/CMakeLists.txt samples/videoDecodeRaw/README.md samples/videoDecodeRaw/videodecoderaw.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRaw COMPONENT dev)
-  install(FILES samples/videoDecodeMem/CMakeLists.txt samples/videoDecodeMem/README.md samples/videoDecodeMem/videodecodemem.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeMem COMPONENT dev)
-  install(FILES samples/videoDecodePerf/CMakeLists.txt samples/videoDecodePerf/README.md samples/videoDecodePerf/videodecodeperf.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodePerf COMPONENT dev)
-  install(FILES samples/videoDecodeRGB/CMakeLists.txt samples/videoDecodeRGB/README.md samples/videoDecodeRGB/videodecrgb.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRGB COMPONENT dev)
-  install(FILES samples/videoDecodeBatch/CMakeLists.txt samples/videoDecodeBatch/README.md samples/videoDecodeBatch/videodecodebatch.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeBatch COMPONENT dev)
-  install(FILES samples/rocdecDecode/CMakeLists.txt samples/rocdecDecode/README.md samples/rocdecDecode/rocdecdecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/rocdecDecode COMPONENT dev)
-  install(FILES samples/videoDecodePicFiles/CMakeLists.txt samples/videoDecodePicFiles/README.md samples/videoDecodePicFiles/videodecodepicfiles.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodePicFiles COMPONENT dev)
-  install(FILES samples/common.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples COMPONENT dev)
-  install(FILES utils/md5.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES utils/video_demuxer.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES utils/colorspace_kernels.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES utils/colorspace_kernels.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES utils/resize_kernels.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES utils/resize_kernels.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES utils/video_post_process.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils COMPONENT dev)
-  install(FILES data/videos/AMD_driving_virtual_20-H265.mp4 data/videos/AMD_driving_virtual_20-H265.265 data/videos/AMD_driving_virtual_20-H264.mp4 data/videos/AMD_driving_virtual_20-H264.264 data/videos/AMD_driving_virtual_20-AV1.mp4 data/videos/AMD_driving_virtual_20-AV1.ivf data/videos/AMD_driving_virtual_20-VP9.ivf DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/video COMPONENT dev)
-  install(DIRECTORY data/frames/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/frames COMPONENT dev)
+  install(DIRECTORY cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
+  install(DIRECTORY utils/rocvideodecode DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES samples/videoDecode/CMakeLists.txt samples/videoDecode/README.md samples/videoDecode/videodecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecode)
+  install(FILES samples/videoDecodeRaw/CMakeLists.txt samples/videoDecodeRaw/README.md samples/videoDecodeRaw/videodecoderaw.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRaw)
+  install(FILES samples/videoDecodeMem/CMakeLists.txt samples/videoDecodeMem/README.md samples/videoDecodeMem/videodecodemem.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeMem)
+  install(FILES samples/videoDecodePerf/CMakeLists.txt samples/videoDecodePerf/README.md samples/videoDecodePerf/videodecodeperf.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodePerf)
+  install(FILES samples/videoDecodeRGB/CMakeLists.txt samples/videoDecodeRGB/README.md samples/videoDecodeRGB/videodecrgb.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRGB)
+  install(FILES samples/videoDecodeBatch/CMakeLists.txt samples/videoDecodeBatch/README.md samples/videoDecodeBatch/videodecodebatch.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeBatch)
+  install(FILES samples/rocdecDecode/CMakeLists.txt samples/rocdecDecode/README.md samples/rocdecDecode/rocdecdecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/rocdecDecode)
+  install(FILES samples/videoDecodePicFiles/CMakeLists.txt samples/videoDecodePicFiles/README.md samples/videoDecodePicFiles/videodecodepicfiles.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodePicFiles)
+  install(FILES samples/common.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples)
+  install(FILES utils/md5.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES utils/video_demuxer.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES utils/colorspace_kernels.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES utils/colorspace_kernels.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES utils/resize_kernels.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES utils/resize_kernels.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES utils/video_post_process.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
+  install(FILES data/videos/AMD_driving_virtual_20-H265.mp4 data/videos/AMD_driving_virtual_20-H265.265 data/videos/AMD_driving_virtual_20-H264.mp4 data/videos/AMD_driving_virtual_20-H264.264 data/videos/AMD_driving_virtual_20-AV1.mp4 data/videos/AMD_driving_virtual_20-AV1.ivf data/videos/AMD_driving_virtual_20-VP9.ivf DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/video)
+  install(DIRECTORY data/frames/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/frames)
   # install license information - {ROCM_PATH}/share/doc/rocdecode
-  set(CPACK_RESOURCE_FILE_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-  install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
-  install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
   # install test cmake
-  install(FILES test/CMakeLists.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
-  install(DIRECTORY test/testScripts DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test COMPONENT test)
-  install(FILES test/rocDecodeNegativeApiTests/CMakeLists.txt test/rocDecodeNegativeApiTests/README.md test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.cpp test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.h test/rocDecodeNegativeApiTests/rocdecodenegativetest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeNegativeApiTests COMPONENT dev)
+  install(FILES test/CMakeLists.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test)
+  install(DIRECTORY test/testScripts DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test)
+  install(FILES test/rocDecodeNegativeApiTests/CMakeLists.txt test/rocDecodeNegativeApiTests/README.md test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.cpp test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.h test/rocDecodeNegativeApiTests/rocdecodenegativetest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeNegativeApiTests)
 
   message("-- ${White}AMD ROCm ${PROJECT_NAME} -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")
   message("-- ${White}AMD ROCm ${PROJECT_NAME} -- Link Libraries: ${LINK_LIBRARY_LIST}${ColourReset}")
@@ -296,15 +273,13 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config.cmake"
     "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
-    COMPONENT dev
   )
 
   # Install the export set for use with the install-tree
   install(EXPORT ${PROJECT_NAME}-targets 
     FILE ${PROJECT_NAME}-targets.cmake
     NAMESPACE ${PROJECT_NAME}::
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}" 
-    COMPONENT dev
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
   )
 
   # make test with CTest
@@ -313,180 +288,15 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND)
   include(CTest)
   add_subdirectory(test)
 
-  # set package information
-  set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
-  set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
-  set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
-  set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-  set(CPACK_PACKAGE_LICENSE "MIT")
-  # TBD: Change to generic support email
-  set(CPACK_PACKAGE_CONTACT "rocdecode Support <mivisionx.support@amd.com>")
-  set(CPACK_PACKAGE_VENDOR "AMD ROCm")
-  set(CPACK_PACKAGE_GROUP "Development/Tools")
-  set(CPACK_PACKAGE_HOMEPAGE "https://github.com/ROCm/rocDecode")
-
-  if(ENABLE_ASAN_PACKAGING)
-    set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "AMD rocdecode address sanitizer libraries")
-    set(CPACK_RPM_PACKAGE_SUMMARY "AMD rocdecode address sanitizer libraries")
-  else()
-    set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "AMD rocdecode is a high performance video decode SDK for AMD GPUs")
-    set(CPACK_RPM_PACKAGE_SUMMARY "AMD rocdecode is a high performance video decode SDK for AMD GPUs")
-  endif()
-
-  if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-    set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
-  endif()
-
-  # Set the dependent packages
-  # libva 2.16 (API 1.16) is needed to use mesa-amdgpu-va-drivers, libva-amdgpu
-  # (AMD build of libva 2.16) should be used if distro's libva is too old
-  set(ROCDECODE_DEBIAN_RUNTIME_PACKAGE_LIST  "hip-runtime-amd, libva-drm2 (>= 2.16.0) | libva-amdgpu-drm2, mesa-amdgpu-va-drivers")
-  # Unfortunately RPM has a mix of naming schemes; RHEL has "libva", SLE has "libva2-drm2"
-  set(ROCDECODE_RPM_RUNTIME_PACKAGE_LIST  "hip-runtime-amd, (libva or libva-drm2), mesa-amdgpu-va-drivers")
-  # Add rocprofiler-register dependencies
-  if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
-    set(ROCDECODE_DEBIAN_RUNTIME_PACKAGE_LIST "${ROCDECODE_DEBIAN_RUNTIME_PACKAGE_LIST}, rocprofiler-register")
-    set(ROCDECODE_RPM_RUNTIME_PACKAGE_LIST "${ROCDECODE_RPM_RUNTIME_PACKAGE_LIST}, rocprofiler-register")
-  endif()
-
-  # Set the dev dependent packages
-  set(ROCDECODE_DEBIAN_DEV_PACKAGE_LIST  "hip-dev, libva-dev (>= 2.16.0) | libva-amdgpu-dev, pkg-config, libavcodec-dev, libavformat-dev, libavutil-dev")
-  if(UBUNTU_22_FOUND)
-    set(ROCDECODE_DEBIAN_DEV_PACKAGE_LIST "${ROCDECODE_DEBIAN_DEV_PACKAGE_LIST}, libstdc++-12-dev")
-  endif()
-  # TBD - RPM packages need Fusion Packages - "libavcodec-devel, libavformat-devel, libavutil-devel"
-  set(ROCDECODE_RPM_DEV_PACKAGE_LIST  "hip-devel, libva-devel, pkg-config")
-  
-  # '%{?dist}' breaks manual builds on debian systems due to empty Provides
-  execute_process(
-    COMMAND rpm --eval %{?dist}
-    RESULT_VARIABLE PROC_RESULT
-    OUTPUT_VARIABLE EVAL_RESULT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  if(PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "")
-    string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
-  endif()
-
-  # set package 
-  set(CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
-  set(CPACK_DEBIAN_PACKAGE_HOMEPAGE ${CPACK_PACKAGE_HOMEPAGE})
-  set(CPACK_RPM_PACKAGE_URL ${CPACK_PACKAGE_HOMEPAGE})
-  set(CPACK_RPM_PACKAGE_AUTOREQPROV "no")
-  # Debian package
-  set(CPACK_DEB_COMPONENT_INSTALL ON)
-  set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
-  set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "rocm-core, ${ROCDECODE_DEBIAN_RUNTIME_PACKAGE_LIST}")
-  set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${PROJECT_NAME}-dev")
-  set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS 
-  "rocm-core, ${PROJECT_NAME}, ${ROCDECODE_DEBIAN_DEV_PACKAGE_LIST}")
-  # Debian package - specific variable for ASAN
-  set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${PROJECT_NAME}-asan" )
-  set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "rocm-core-asan, ${ROCDECODE_DEBIAN_RUNTIME_PACKAGE_LIST}" )
-  # Debian package - Test
-  set(CPACK_DEBIAN_TEST_PACKAGE_NAME "${PROJECT_NAME}-test" )
-  set(CPACK_DEBIAN_TEST_PACKAGE_DEPENDS "rocm-core, ${CPACK_DEBIAN_DEV_PACKAGE_NAME}" )
-  # Debian package - Host
-  set(CPACK_DEBIAN_HOST_PACKAGE_NAME "${PROJECT_NAME}-host" )
-  set(CPACK_DEBIAN_HOST_PACKAGE_DEPENDS "rocm-core, ${CPACK_DEBIAN_DEV_PACKAGE_NAME}" )
-  # RPM package
-  set(CPACK_RPM_COMPONENT_INSTALL ON)
-  set(CPACK_RPM_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
-  set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "rocm-core, ${ROCDECODE_RPM_RUNTIME_PACKAGE_LIST}")
-  set(CPACK_RPM_DEV_PACKAGE_NAME "${PROJECT_NAME}-devel")
-  set(CPACK_RPM_DEV_PACKAGE_REQUIRES "rocm-core, ${PROJECT_NAME}, ${ROCDECODE_RPM_DEV_PACKAGE_LIST}")
-  set(CPACK_RPM_PACKAGE_LICENSE "MIT" )
-  # RPM package specific variable for ASAN
-  set(CPACK_RPM_ASAN_PACKAGE_NAME "${PROJECT_NAME}-asan" )
-  set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "rocm-core-asan, ${ROCDECODE_RPM_RUNTIME_PACKAGE_LIST}" )
-  # RPM package specific variable for Test
-  set(CPACK_RPM_TEST_PACKAGE_NAME "${PROJECT_NAME}-test" )
-  set(CPACK_RPM_TEST_PACKAGE_REQUIRES "rocm-core, ${CPACK_RPM_DEV_PACKAGE_NAME}" )
-  # RPM package specific variable for Host
-  set(CPACK_RPM_HOST_PACKAGE_NAME "${PROJECT_NAME}-host" )
-  set(CPACK_RPM_HOST_PACKAGE_REQUIRES "rocm-core, ${CPACK_RPM_DEV_PACKAGE_NAME}" )
-
-  if(NOT ROCM_DEP_ROCMCORE)
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES ${CPACK_RPM_RUNTIME_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core-asan," "" CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_ASAN_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_DEV_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_RPM_TEST_PACKAGE_REQUIRES ${CPACK_RPM_TEST_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_RPM_HOST_PACKAGE_REQUIRES ${CPACK_RPM_TEST_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS ${CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core-asan," "" CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_DEV_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_DEBIAN_TEST_PACKAGE_DEPENDS ${CPACK_DEBIAN_TEST_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core," "" CPACK_DEBIAN_HOST_PACKAGE_DEPENDS ${CPACK_DEBIAN_TEST_PACKAGE_DEPENDS})
-  endif()
-
-  if(ENABLE_ASAN_PACKAGING)
-    # ASAN Package requires asan component with only libraries and license file
-    set(CPACK_COMPONENTS_ALL asan)
-  else()
-    set(CPACK_COMPONENTS_ALL runtime dev test host)
-  endif()
-
-  set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
-  set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-  set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
-  set(CPACK_RPM_PACKAGE_RELEASE "local")
-
-  if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-  endif()
-  if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
-    set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
-  endif()
-
-  set(CPACK_GENERATOR "TGZ;ZIP")
-  if(EXISTS ${MAKE_NSIS_EXE})
-    list(APPEND CPACK_GENERATOR "NSIS")
-  endif()
-  if(EXISTS ${RPMBUILD_EXE})
-    list(APPEND CPACK_GENERATOR "RPM")
-    message("-- ${White}${PROJECT_NAME}: .rpm RunTime Package Requirements -- ${CPACK_RPM_RUNTIME_PACKAGE_REQUIRES}${ColourReset}")
-    message("-- ${White}${PROJECT_NAME}: .rpm Devel Package Requirements -- ${CPACK_RPM_DEV_PACKAGE_REQUIRES}${ColourReset}")
-  endif()
-  if(EXISTS ${DPKG_EXE})
-    list(APPEND CPACK_GENERATOR "DEB")
-    message("-- ${White}${PROJECT_NAME}: .deb RunTime Package Requirements -- ${CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS}${ColourReset}")
-    message("-- ${White}${PROJECT_NAME}: .deb Dev Package Requirements -- ${CPACK_DEBIAN_DEV_PACKAGE_DEPENDS}${ColourReset}")
-  endif()
-
-  include(CPack)
-
-  cpack_add_component(runtime
-                    DISPLAY_NAME "rocdecode Runtime Package"
-                    DESCRIPTION "High perf video decode SDK for AMD GPUs. Rocdecode library and license.txt")
-
-  cpack_add_component(dev
-                    DISPLAY_NAME "rocdecode Develop Package"
-                    DESCRIPTION "High perf video decode SDK for AMD GPUs. Rocdecode header files, and samples")
-
-  cpack_add_component(asan
-                    DISPLAY_NAME "rocdecode ASAN Package"
-                    DESCRIPTION "High perf video decode SDK for AMD GPUs. rocdecode ASAN libraries")
-
-  cpack_add_component(test
-                    DISPLAY_NAME "rocdecode Test Package"
-                    DESCRIPTION "High perf video decode SDK for AMD GPUs. rocdecode test")
-  
-    # make rocdecode-host for decoding on HOST only if FFMPEG is available
-  if(ROCDECODE_ENABLE_HOST_DECODER AND FFMPEG_FOUND)
-    cpack_add_component(host
-                      DISPLAY_NAME "rocdecode host package"
-                      DESCRIPTION "High perf video decode host SDK for AMD GPUs")
-  endif()
-
 else()
   message("-- ${Red}AMD ROCm ${PROJECT_NAME} -- unmet dependencies${ColourReset}")
   if(NOT HIP_FOUND)
-    message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install rocm-hip-runtime-dev!")
+    message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
   endif()
   if(NOT Libva_FOUND)
-    message(FATAL_ERROR "-- ERROR!: libva Not Found - please install libva-dev/libva-devel!")
+    message(FATAL_ERROR "-- ERROR!: libva Not Found!")
   endif()
   if(NOT Libdrm_amdgpu_FOUND)
-    message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found - please install libdrm-dev(DEBIAN)/libdrm-devel(RPM) package!")
+    message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
   endif()
 endif()

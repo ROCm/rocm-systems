@@ -41,24 +41,25 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/err_cnt_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/err_cnt_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestErrCntRead::TestErrCntRead() : TestBase() {
   set_title("RSMI Error Count Read Test");
-  set_description("The Error Count Read tests verifies that error counts"
-                                                 " can be read properly.");
+  set_description(
+      "The Error Count Read tests verifies that error counts"
+      " can be read properly.");
 }
 
-TestErrCntRead::~TestErrCntRead(void) {
-}
+TestErrCntRead::~TestErrCntRead(void) {}
 
 void TestErrCntRead::SetUp(void) {
   TestBase::SetUp();
@@ -66,9 +67,7 @@ void TestErrCntRead::SetUp(void) {
   return;
 }
 
-void TestErrCntRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestErrCntRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestErrCntRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -81,7 +80,6 @@ void TestErrCntRead::Close() {
   TestBase::Close();
 }
 
-
 void TestErrCntRead::Run(void) {
   rsmi_status_t err;
   rsmi_error_count_t ec;
@@ -90,9 +88,7 @@ void TestErrCntRead::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -103,9 +99,8 @@ void TestErrCntRead::Run(void) {
       err = rsmi_dev_ecc_enabled_get(i, &enabled_mask);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
-          std::cout <<
-            "\t**Error Count Enabled Mask get is not supported on this machine"
-                                                                   << std::endl;
+          std::cout << "\t**Error Count Enabled Mask get is not supported on this machine"
+                    << std::endl;
         }
         // Verify api support checking functionality is working
         err = rsmi_dev_ecc_enabled_get(i, nullptr);
@@ -120,53 +115,44 @@ void TestErrCntRead::Run(void) {
         ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
         IF_VERB(STANDARD) {
-          std::cout << "Block Error Mask: 0x" << std::hex << enabled_mask <<
-                                                                    std::endl;
+          std::cout << "Block Error Mask: 0x" << std::hex << enabled_mask << std::endl;
         }
       }
-      for (uint32_t b = RSMI_GPU_BLOCK_FIRST;
-                                            b <= RSMI_GPU_BLOCK_LAST; b = b*2) {
-        err = rsmi_dev_ecc_status_get(i, static_cast<rsmi_gpu_block_t>(b),
-                                                                    &err_state);
+      for (uint32_t b = RSMI_GPU_BLOCK_FIRST; b <= RSMI_GPU_BLOCK_LAST; b = b * 2) {
+        err = rsmi_dev_ecc_status_get(i, static_cast<rsmi_gpu_block_t>(b), &err_state);
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
-          std::cout << "\t**Error Count status for " <<
-            GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
-                   " block: " << GetErrStateNameStr(err_state) << std::endl;
+          std::cout << "\t**Error Count status for "
+                    << GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b))
+                    << " block: " << GetErrStateNameStr(err_state) << std::endl;
         }
         // Verify api support checking functionality is working
-        err = rsmi_dev_ecc_status_get(i, static_cast<rsmi_gpu_block_t>(b),
-                                                                       nullptr);
+        err = rsmi_dev_ecc_status_get(i, static_cast<rsmi_gpu_block_t>(b), nullptr);
         ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
         err = rsmi_dev_ecc_count_get(i, static_cast<rsmi_gpu_block_t>(b), &ec);
 
         if (err == RSMI_STATUS_NOT_SUPPORTED) {
           IF_VERB(STANDARD) {
-            std::cout << "\t**Error Count for " <<
-                        GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
-                                 ": Not supported for this device" << std::endl;
+            std::cout << "\t**Error Count for " << GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b))
+                      << ": Not supported for this device" << std::endl;
           }
           // Verify api support checking functionality is working
-          err = rsmi_dev_ecc_count_get(i, static_cast<rsmi_gpu_block_t>(b),
-                                                                       nullptr);
+          err = rsmi_dev_ecc_count_get(i, static_cast<rsmi_gpu_block_t>(b), nullptr);
           ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
 
         } else {
-            CHK_ERR_ASRT(err)
-            IF_VERB(STANDARD) {
-              std::cout << "\t**Error counts for " <<
-                 GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) << " block: "
-                                                                   << std::endl;
-              std::cout << "\t\tCorrectable errors: " << ec.correctable_err
-                                                                   << std::endl;
-              std::cout << "\t\tUncorrectable errors: " << ec.uncorrectable_err
-                                                                   << std::endl;
-            }
-            // Verify api support checking functionality is working
-            err = rsmi_dev_ecc_count_get(i, static_cast<rsmi_gpu_block_t>(b),
-                                                                       nullptr);
-            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+          CHK_ERR_ASRT(err)
+          IF_VERB(STANDARD) {
+            std::cout << "\t**Error counts for "
+                      << GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b))
+                      << " block: " << std::endl;
+            std::cout << "\t\tCorrectable errors: " << ec.correctable_err << std::endl;
+            std::cout << "\t\tUncorrectable errors: " << ec.uncorrectable_err << std::endl;
+          }
+          // Verify api support checking functionality is working
+          err = rsmi_dev_ecc_count_get(i, static_cast<rsmi_gpu_block_t>(b), nullptr);
+          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
         }
       }
     }

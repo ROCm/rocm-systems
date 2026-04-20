@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipMemcpy2DAsync hipMemcpy2DAsync
@@ -57,8 +44,7 @@ static constexpr auto ROWS{6};
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host_N_PinnedMem", "", int, float, double) {
-  CHECK_IMAGE_SUPPORT
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, double) {
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
   auto memcpy_d2d_type = GENERATE(0, 1);
@@ -133,9 +119,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host_N_PinnedMem", "", int, float, dou
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
-                   "[multigpu]", int, float, double) {
-  CHECK_IMAGE_SUPPORT
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int, float, double) {
   auto mem_type = GENERATE(0, 1);
   int numDevices = 0;
   int canAccessPeer = 0;
@@ -196,10 +180,11 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
       HIP_CHECK(hipFree(X_d));
       HIP_CHECK(hipStreamDestroy(stream));
     } else {
-      SUCCEED("Machine does not seem to have P2P");
+      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    SUCCEED("skipped the testcase as no of devices is less than 2");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    return;
   }
 }
 
@@ -266,8 +251,7 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test", "[multigpu]") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test) {
   size_t input = 1 << 20;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

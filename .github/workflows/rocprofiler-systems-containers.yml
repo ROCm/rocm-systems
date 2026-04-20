@@ -50,7 +50,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
 
@@ -71,19 +71,19 @@ jobs:
         include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
           submodules: recursive
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Login to DockerHub
-        uses: docker/login-action@v2
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
@@ -132,7 +132,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_release.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems
 
@@ -153,18 +153,18 @@ jobs:
         include: ${{ fromJSON(needs.prepare_matrix_release.outputs.matrix_data) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Login to DockerHub
-        uses: docker/login-action@v2
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           username: ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }}
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}

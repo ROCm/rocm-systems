@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #ifndef CATCH_UNIT_RTC_HEADERS_PRINTF_COMMON_H_
 #define CATCH_UNIT_RTC_HEADERS_PRINTF_COMMON_H_
 #include <sys/stat.h>

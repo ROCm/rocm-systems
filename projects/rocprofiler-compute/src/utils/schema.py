@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -68,58 +46,8 @@ class Workload:
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
-    torch_operators: dict[str, pd.DataFrame] = field(default_factory=dict)
-    filter_torch_operators: list[str] = field(default_factory=list)
+    matched_torch_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
 
-
-# Metrics will be calculated ONLY when the header(key) is in below list
-SUPPORTED_FIELD = [
-    "Value",
-    "Minimum",
-    "Maximum",
-    "Average",
-    "Median",
-    "Min",
-    "Max",
-    "Avg",
-    "Pct of Peak",
-    "Peak",
-    "Peak (Empirical)",
-    "Count",
-    "Mean",
-    "Pct",
-    "Std Dev",
-    "Q1",
-    "Q3",
-    "Expression",
-    # Special keywords for L2 channel
-    "Channel",
-    "L2 Cache Hit Rate",
-    "Requests",
-    "L2 Read",
-    "L2 Write",
-    "L2 Atomic",
-    "L2-Fabric Requests",
-    "L2-Fabric Read",
-    "L2-Fabric Write and Atomic",
-    "L2-Fabric Atomic",
-    "L2 Read Req",
-    "L2 Write Req",
-    "L2 Atomic Req",
-    "L2-Fabric Read Req",
-    "L2-Fabric Write and Atomic Req",
-    "L2-Fabric Atomic Req",
-    "L2-Fabric Read Latency",
-    "L2-Fabric Write Latency",
-    "L2-Fabric Atomic Latency",
-    "L2-Fabric Read Stall (PCIe)",
-    "L2-Fabric Read Stall (Infinity Fabric™)",
-    "L2-Fabric Read Stall (HBM)",
-    "L2-Fabric Write Stall (PCIe)",
-    "L2-Fabric Write Stall (Infinity Fabric™)",
-    "L2-Fabric Write Stall (HBM)",
-    "L2-Fabric Write Starve",
-]
 
 # The prefix of raw pmc_perf.csv
 PMC_PERF_FILE_PREFIX = "pmc_perf"

@@ -180,7 +180,7 @@ class VirtualGPU : public device::VirtualDevice {
 
     static uint32_t AllocedQueues(const VirtualGPU& gpu, Pal::EngineType type);
 
-    amd::Monitor* lock_;                       //!< Lock PAL queue for access
+    std::recursive_mutex* lock_;               //!< Lock PAL queue for access
     Pal::IQueue* iQueue_;                      //!< PAL queue object
     std::vector<Pal::ICmdBuffer*> iCmdBuffs_;  //!< PAL command buffers
     std::vector<Pal::IFence*> iCmdFences_;     //!< PAL fences, associated with CMD
@@ -348,13 +348,6 @@ class VirtualGPU : public device::VirtualDevice {
   bool isFenceDirty() const { return false; }
 
   void HiddenHeapInit() {}
-
-  //! Dispatches multiple AQL packets in a single batch operation
-  bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                              const std::vector<const std::string*>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr, bool attach_signal = false) {
-    return false;
-  }
 
   void resetFenceDirty() {}
 

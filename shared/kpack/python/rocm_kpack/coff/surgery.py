@@ -179,6 +179,54 @@ class CoffSurgery:
         data = bytearray(path.read_bytes())
         return cls(data, path)
 
+    @staticmethod
+    def has_fatbin_section(file_path: Path) -> bool:
+        """Fast check for .hip_fat section without loading the full binary.
+
+        Reads only the DOS header, PE signature, COFF header, and section
+        headers — a few KB total even for large binaries.
+        Returns False for non-PE files (wrong magic).
+        Raises on I/O errors or corrupt PE headers.
+        """
+        with open(file_path, "rb") as f:
+            dos = f.read(DOS_HEADER_SIZE)
+            if len(dos) < DOS_HEADER_SIZE:
+                return False
+            if dos[:2] != b"MZ":
+                return False
+
+            pe_offset = struct.unpack_from("<I", dos, 0x3C)[0]
+            f.seek(pe_offset)
+            pe_sig = f.read(4)
+            if pe_sig != PE_SIGNATURE:
+                return False
+
+            # COFF header: NumberOfSections at offset 2
+            coff = f.read(COFF_HEADER_SIZE)
+            if len(coff) < COFF_HEADER_SIZE:
+                return False
+            num_sections = struct.unpack_from("<H", coff, 2)[0]
+            opt_hdr_size = struct.unpack_from("<H", coff, 16)[0]
+
+            # Section headers start after optional header
+            section_offset = pe_offset + 4 + COFF_HEADER_SIZE + opt_hdr_size
+            f.seek(section_offset)
+            section_data = f.read(num_sections * SECTION_HEADER_SIZE)
+            if len(section_data) < num_sections * SECTION_HEADER_SIZE:
+                return False
+
+            # Check each section name for ".hip_fat"
+            target = b".hip_fat"
+            for i in range(num_sections):
+                name = section_data[
+                    i * SECTION_HEADER_SIZE : i * SECTION_HEADER_SIZE + 8
+                ]
+                # Section names are 8 bytes, null-padded
+                if name == target or name.rstrip(b"\x00") == target:
+                    return True
+
+            return False
+
     # =========================================================================
     # Properties
     # =========================================================================
