@@ -35,9 +35,12 @@
 // AMD vendor ID used to filter for AMD NPU devices
 static const uint16_t AMD_VENDOR_ID = 0x1022;
 
-// PCI class for "Processing accelerators" (class 0x12)
-static const uint16_t PCI_CLASS_PROCESSING_ACCEL = 0x1200;
-static const uint16_t PCI_CLASS_MASK = 0xFF00;
+// PCI base classes that AMD NPUs may present as:
+//   0x11 = Signal processing controller (e.g., Strix/Strix Halo NPU 0x1180)
+//   0x12 = Processing accelerators
+static const uint16_t PCI_CLASS_SIGNAL_PROCESSING = 0x1100;
+static const uint16_t PCI_CLASS_PROCESSING_ACCEL  = 0x1200;
+static const uint16_t PCI_CLASS_BASE_MASK = 0xFF00;
 
 CuidNpu::CuidNpu(const amdcuid_npu_info& i) : m_info(i) {}
 
@@ -123,7 +126,9 @@ static amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
         // sysfs class is 24-bit (class:subclass:prog_if), shift to get class:subclass
         uint16_t pci_class =
             static_cast<uint16_t>(strtol(class_str.c_str(), nullptr, 16) >> 8);
-        if ((pci_class & PCI_CLASS_MASK) != PCI_CLASS_PROCESSING_ACCEL)
+        uint16_t base_class = pci_class & PCI_CLASS_BASE_MASK;
+        if (base_class != PCI_CLASS_PROCESSING_ACCEL &&
+            base_class != PCI_CLASS_SIGNAL_PROCESSING)
             continue;
 
         amdcuid_npu_info info = {};

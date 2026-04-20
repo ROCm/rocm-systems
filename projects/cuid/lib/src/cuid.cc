@@ -150,6 +150,27 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
         return std::make_shared<CuidCpu>(cpu_info);
     }
 
+    // NPU sysfs paths may be PCI device directories (e.g.,
+    // /sys/bus/pci/devices/0000:c6:00.1) when /sys/class/accel/ is not
+    // populated. These are directories, not char/block devices, so the
+    // fd-based real path resolution below would fail. Pass directly to
+    // discover_single() which knows how to read PCI sysfs attributes.
+    if (device_type == AMDCUID_DEVICE_TYPE_NPU) {
+        char buf[PATH_MAX];
+        std::string resolved_path;
+        if (realpath(dev_path, buf) != nullptr) {
+            resolved_path = std::string(buf);
+        } else {
+            resolved_path = dev_path;
+        }
+        amdcuid_npu_info npu_info = {};
+        status = CuidNpu::discover_single(&npu_info, resolved_path);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            return nullptr;
+        }
+        return std::make_shared<CuidNpu>(npu_info);
+    }
+
     int fd = open(dev_path, O_RDONLY);
     if (fd < 0) {
         // unable to open device path
@@ -334,9 +355,12 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
     std::string real_dev_path = device_path;
-    // if device is not a nic, attempt to resolve real device path in case of symlink for more reliable matching
-    if (device_type != AMDCUID_DEVICE_TYPE_NIC
-        || device_path.find("net") == std::string::npos) {
+    // if device is not a nic or npu, attempt to resolve real device path in case of symlink for more reliable matching.
+    // NPU paths from bdf_to_device_path may be PCI device directories (not char/block devices),
+    // so the fd-based real path resolution would fail.
+    if ((device_type != AMDCUID_DEVICE_TYPE_NIC
+         || device_path.find("net") == std::string::npos)
+        && device_type != AMDCUID_DEVICE_TYPE_NPU) {
         int fd = open(device_path.c_str(), O_RDONLY);
         if (fd < 0) {
             return AMDCUID_STATUS_DEVICE_NOT_FOUND;

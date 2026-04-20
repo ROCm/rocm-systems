@@ -179,6 +179,11 @@ CuidUtilities::bdf_to_device_path(const std::string &bdf,
       }
       closedir(dir);
     }
+    // Fallback: when /sys/class/accel/ is not populated (e.g., amdxdna
+    // driver not loaded), return the PCI device path itself if it exists.
+    if (access(pci_device_path.c_str(), F_OK) == 0) {
+      return pci_device_path;
+    }
   }
 
   return "";

@@ -409,8 +409,11 @@ int query_device(const std::string& identifier, bool show_primary, const std::st
         }
     }
     
-    // Check if identifier looks like a BDF (contains ':' and '.')
-    bool is_bdf = (identifier.find(':') != std::string::npos && identifier.find('.') != std::string::npos);
+    // Check if identifier looks like a BDF (e.g., "0000:c6:00.1" or "c6:00.1").
+    // Must not start with '/' (which would indicate a sysfs path).
+    bool is_bdf = (!identifier.empty() && identifier[0] != '/' &&
+                   identifier.find(':') != std::string::npos &&
+                   identifier.find('.') != std::string::npos);
     
     if (is_bdf) {
         // Try as BDF
