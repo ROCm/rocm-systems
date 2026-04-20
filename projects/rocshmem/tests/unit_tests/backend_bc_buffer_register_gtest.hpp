@@ -42,42 +42,42 @@ namespace rocshmem {
  * pure virtual methods to make the class concrete.
  */
 class MockBackend : public Backend {
- public:
-  MockBackend(MPI_Comm comm) : Backend(comm) {}
+  public:
+    MockBackend(MPI_Comm comm) : Backend(comm) {}
 
-  void create_new_team(Team* parent_team,
-                       const TeamInfo& team_info_wrt_parent,
-                       const TeamInfo& team_info_wrt_world,
-                       int num_pes, int my_pe_in_new_team,
-                       MPI_Comm team_comm,
-                       rocshmem_team_t* new_team) override {}
+    void create_new_team(Team* parent_team,
+                         const TeamInfo& team_info_wrt_parent,
+                         const TeamInfo& team_info_wrt_world,
+                         int num_pes, int my_pe_in_new_team,
+                         MPI_Comm team_comm,
+                         rocshmem_team_t* new_team) override {}
 
-  void team_destroy(rocshmem_team_t team) override {}
+    void team_destroy(rocshmem_team_t team) override {}
 
-  void global_exit(int status) override {}
+    void global_exit(int status) override {}
 
-  void ctx_create(int64_t options, void** ctx) override {}
+    void ctx_create(int64_t options, void** ctx) override {}
 
-  void ctx_destroy(Context* ctx) override {}
+    void ctx_destroy(Context* ctx) override {}
 
- protected:
-  void dump_backend_stats() override {}
-  void reset_backend_stats() override {}
+  protected:
+    void dump_backend_stats() override {}
+    void reset_backend_stats() override {}
 };
 
 class BufferRegisterTestFixture : public ::testing::Test {
- protected:
-  MockBackend* backend_;
+  protected:
+    MockBackend* backend_;
 
-  void SetUp() override {
-    MPIInstance::mpilib_dl_init();
-    backend_ = new MockBackend(MPI_COMM_WORLD);
-  }
+    void SetUp() override {
+      MPIInstance::mpilib_dl_init();
+      backend_ = new MockBackend(MPI_COMM_WORLD);
+    }
 
-  void TearDown() override {
-    delete backend_;
-    MPIInstance::mpilib_dl_close();
-  }
+    void TearDown() override {
+      delete backend_;
+      MPIInstance::mpilib_dl_close();
+    }
 };
 
 }  // namespace rocshmem

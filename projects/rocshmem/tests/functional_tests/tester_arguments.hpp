@@ -39,6 +39,15 @@ enum TeamSplitType {
   ROCSHMEM_TEST_TEAM_ODDEVEN,    // odd-even splitting
 };
 
+enum UserBufType {
+  USER_BUF_TYPE_HOST,
+  USER_BUF_TYPE_DEVICE,
+  USER_BUF_TYPE_FINE,
+  USER_BUF_TYPE_UNCACHED,
+  USER_BUF_TYPE_MANAGED,
+  USER_BUF_TYPE_HEAP,
+};
+
 /*-----------------------------------------
  * Atomics Addressing modes (contention model)
  *-----------------------------------------*/
@@ -84,6 +93,7 @@ public:
   unsigned op_type = 0;
   unsigned shmem_context = rocshmem::ROCSHMEM_CTX_WG_PRIVATE;
   AddrMode addr_mode = AddrMode::PerBlock;
+  enum UserBufType local_buf_type = USER_BUF_TYPE_HEAP;
 
   /**
    * Arguments obtained from rocshmem
