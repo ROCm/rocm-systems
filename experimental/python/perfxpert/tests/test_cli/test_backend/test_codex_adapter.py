@@ -10,7 +10,9 @@ Covers:
     - PERFXPERT_AUTO_TRUST=1 → auto-marks trusted.
     - declined prompt → falls back to user scope with warning.
 * Lazy import of `tomlkit` — the primary `codex mcp add` path must
-  NEVER import tomlkit (cycle-2 I7).
+  NEVER import tomlkit at module-load time (supersedes cycle-2 I7;
+  commit 3547736829 made tomlkit a required dep but the import is
+  still deferred to keep the primary path import-cost-free).
 * Never touches tracked `AGENTS.md`.
 * `spawn()` uses `os.execvpe`, not `subprocess.run`.
 * `uninstall()` removes only our managed `[mcp_servers.perfxpert]`
