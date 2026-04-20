@@ -56,5 +56,12 @@ get_tmp_file_name_callback()
     };
     return val;
 }
+
+counter_collection_offload_callback_t&
+get_counter_collection_offload_callback()
+{
+    static counter_collection_offload_callback_t val = {};
+    return val;
+}
 }  // namespace tool
 }  // namespace rocprofiler

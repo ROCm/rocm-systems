@@ -67,6 +67,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -1588,15 +1589,22 @@ write_rocpd(
                     auto        dispatch_id = info.dispatch_id;
 
                     auto evt_id = dispatch_evt_ids.at(dispatch_id);
+
+                    // Aggregate counter values per counter ID before inserting
+                    auto aggregated = std::map<uint64_t, double>{};
                     for(const auto& count : record.read())
+                    {
+                        aggregated[count.id.handle] += count.value;
+                    }
+                    for(const auto& [pmc_id, value] : aggregated)
                     {
                         get_insert_statement(db,
                                              "rocpd_pmc_event{{uuid}}",
                                              {
                                                  insert_value("id", idx++),
                                                  insert_value("event_id", evt_id),
-                                                 insert_value("pmc_id", count.id.handle),
-                                                 insert_value("value", count.value),
+                                                 insert_value("pmc_id", pmc_id),
+                                                 insert_value("value", value),
                                              });
                     }
                 }

@@ -41,6 +41,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 
 namespace rocprofiler
@@ -584,35 +585,38 @@ generate_csv(const output_config&                    cfg,
     if(cfg.stats && stats)
         write_stats(get_stats_output_file(cfg, domain_type::COUNTER_COLLECTION), stats.entries);
 
-    auto ofs = tool::csv_output_file{cfg,
-                                     domain_type::COUNTER_COLLECTION,
-                                     tool::csv::counter_collection_csv_encoder{},
-                                     {"Correlation_Id",
-                                      "Dispatch_Id",
-                                      "Agent_Id",
-                                      "Queue_Id",
-                                      "Process_Id",
-                                      "Thread_Id",
-                                      "Grid_Size",
-                                      "Kernel_Id",
-                                      "Kernel_Name",
-                                      "Workgroup_Size",
-                                      "LDS_Block_Size",
-                                      "Scratch_Size",
-                                      "VGPR_Count",
-                                      "Accum_VGPR_Count",
-                                      "SGPR_Count",
-                                      "Counter_Name",
-                                      "Counter_Value",
-                                      "Start_Timestamp",
-                                      "End_Timestamp"}};
-
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
     {
-        // Use counter ID from metadata as the map key
         counter_id_to_name.emplace(itr.id, itr.name);
     }
+
+    // Build stable ordered set of counter names across all dispatches.
+    // Use a vector + set to preserve insertion order (first-seen order from metadata).
+    auto counter_name_order = std::vector<std::string_view>{};
+    auto counter_name_set   = std::unordered_set<std::string_view>{};
+    for(const auto& itr : tool_metadata.get_counter_info())
+    {
+        if(counter_name_set.insert(itr.name).second)
+            counter_name_order.push_back(itr.name);
+    }
+
+    auto ofs = get_output_stream(cfg, get_domain_trace_file_name(domain_type::COUNTER_COLLECTION), ".csv");
+    if(!ofs) return;
+
+    // Write wide-format header: fixed columns then one column per counter name
+    auto hdr = std::stringstream{};
+    hdr << "\"Correlation_Id\",\"Dispatch_Id\",\"Agent_Id\",\"Queue_Id\","
+        << "\"Process_Id\",\"Thread_Id\",\"Grid_Size\",\"Kernel_Id\","
+        << "\"Kernel_Name\",\"Workgroup_Size\",\"LDS_Block_Size\","
+        << "\"Scratch_Size\",\"VGPR_Count\",\"Accum_VGPR_Count\","
+        << "\"SGPR_Count\",\"Start_Timestamp\",\"End_Timestamp\"";
+    for(const auto& cname : counter_name_order)
+        hdr << ",\"" << cname << "\"";
+    hdr << '\n';
+    ofs << hdr.str();
+
+    auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
 
     for(auto ditr : data)
     {
@@ -622,10 +626,18 @@ generate_csv(const output_config&                    cfg,
             auto counter_id_value = std::map<rocprofiler_counter_id_t, double>{};
             auto record_vector    = record.read();
 
-            // Accumulate counters based on ID
             for(auto& count : record_vector)
             {
                 counter_id_value[count.id] += count.value;
+            }
+
+            // Pivot: map counter name -> aggregated value for this dispatch
+            auto counter_values = std::unordered_map<std::string_view, double>{};
+            for(auto& [cid, cval] : counter_id_value)
+            {
+                auto it = counter_id_to_name.find(cid);
+                if(it != counter_id_to_name.end())
+                    counter_values[it->second] += cval;
             }
 
             const auto& correlation_id = record.dispatch_data.correlation_id;
@@ -633,36 +645,45 @@ generate_csv(const output_config&                    cfg,
             auto        lds_block_size_v =
                 (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
 
-            auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
-            auto row_ss    = std::stringstream{};
-            for(auto& [counter_id, counter_value] : counter_id_value)
+            auto row_ss = std::stringstream{};
+            row_ss << correlation_id.internal << ","
+                   << record.dispatch_data.dispatch_info.dispatch_id << ","
+                   << "\"" << tool_metadata
+                                  .get_agent_index(record.dispatch_data.dispatch_info.agent_id,
+                                                   cfg.agent_index_value)
+                                  .as_string()
+                   << "\","
+                   << record.dispatch_data.dispatch_info.queue_id.handle << ","
+                   << tool_metadata.process_id << ","
+                   << record.thread_id << ","
+                   << magnitude(record.dispatch_data.dispatch_info.grid_size) << ","
+                   << record.dispatch_data.dispatch_info.kernel_id << ","
+                   << "\"" << tool_metadata.get_kernel_name(
+                                  kernel_id, cfg.kernel_rename, correlation_id.external.value)
+                   << "\","
+                   << magnitude(record.dispatch_data.dispatch_info.workgroup_size) << ","
+                   << lds_block_size_v << ","
+                   << record.dispatch_data.dispatch_info.private_segment_size << ","
+                   << kernel_info->arch_vgpr_count << ","
+                   << kernel_info->accum_vgpr_count << ","
+                   << kernel_info->sgpr_count << ","
+                   << record.dispatch_data.start_timestamp << ","
+                   << record.dispatch_data.end_timestamp;
+
+            for(const auto& cname : counter_name_order)
             {
-                tool::csv::counter_collection_csv_encoder::write_row(
-                    row_ss,
-                    correlation_id.internal,
-                    record.dispatch_data.dispatch_info.dispatch_id,
-                    tool_metadata
-                        .get_agent_index(record.dispatch_data.dispatch_info.agent_id,
-                                         cfg.agent_index_value)
-                        .as_string(),
-                    record.dispatch_data.dispatch_info.queue_id.handle,
-                    tool_metadata.process_id,
-                    record.thread_id,
-                    magnitude(record.dispatch_data.dispatch_info.grid_size),
-                    record.dispatch_data.dispatch_info.kernel_id,
-                    tool_metadata.get_kernel_name(
-                        kernel_id, cfg.kernel_rename, correlation_id.external.value),
-                    magnitude(record.dispatch_data.dispatch_info.workgroup_size),
-                    lds_block_size_v,
-                    record.dispatch_data.dispatch_info.private_segment_size,
-                    kernel_info->arch_vgpr_count,
-                    kernel_info->accum_vgpr_count,
-                    kernel_info->sgpr_count,
-                    counter_id_to_name.at(counter_id),
-                    counter_value,
-                    record.dispatch_data.start_timestamp,
-                    record.dispatch_data.end_timestamp);
+                auto it = counter_values.find(cname);
+                row_ss << ",";
+                if(it != counter_values.end())
+                {
+                    auto val = it->second;
+                    if(val >= 1.0)
+                        row_ss << std::setprecision(6) << std::fixed << val;
+                    else
+                        row_ss << std::setprecision(8) << std::scientific << val;
+                }
             }
+            row_ss << '\n';
             ofs << row_ss.str();
         }
     }

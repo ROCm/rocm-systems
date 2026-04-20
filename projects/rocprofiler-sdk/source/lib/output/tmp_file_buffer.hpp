@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "counter_info.hpp"
 #include "domain_type.hpp"
 #include "output_config.hpp"
 #include "tmp_file.hpp"
@@ -33,11 +34,13 @@
 #include <fmt/format.h>
 
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -47,12 +50,45 @@ template <typename Tp>
 using ring_buffer_t = rocprofiler::common::container::ring_buffer<Tp>;
 
 using tmp_file_name_callback_t = std::function<std::string(domain_type)>;
+using counter_collection_offload_callback_t =
+    std::function<void(std::vector<tool_counter_record_t>&&, uint64_t)>;
 
 std::string
 compose_tmp_file_name(const output_config& cfg, domain_type buffer_type);
 
 tmp_file_name_callback_t&
 get_tmp_file_name_callback();
+
+counter_collection_offload_callback_t&
+get_counter_collection_offload_callback();
+
+template <typename Tp>
+struct file_buffer;
+
+template <typename Tp>
+void
+offload_buffer_to_tmp_file(domain_type type, file_buffer<Tp>* filebuf)
+{
+    auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
+    [[maybe_unused]] auto _success = filebuf->file.open();
+    auto&                 _fs      = filebuf->file.stream;
+
+    ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
+        << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
+
+    auto _nbytes = (filebuf->buffer.count() * filebuf->buffer.data_size());
+
+    ROCP_TRACE << fmt::format(
+        "offloading {} B from {} buffer to tmp file", _nbytes, get_domain_column_name(type));
+
+    filebuf->file.file_pos.emplace(_fs.tellp());
+    filebuf->nbytes += _nbytes;
+    filebuf->buffer.save(_fs);
+    filebuf->buffer.clear();
+
+    ROCP_CI_LOG_IF(ERROR, !filebuf->buffer.is_empty())
+        << "buffer is not empty after offload: count=" << filebuf->buffer.count();
+}
 
 template <typename Tp>
 struct file_buffer
@@ -118,22 +154,47 @@ offload_buffer(domain_type type)
         return;
     }
 
-    auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
-    [[maybe_unused]] auto _success = filebuf->file.open();
-    auto&                 _fs      = filebuf->file.stream;
+    offload_buffer_to_tmp_file(type, filebuf);
+}
 
-    ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
-        << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
+template <>
+inline void
+offload_buffer<tool_counter_record_t>(domain_type type)
+{
+    auto* filebuf = get_tmp_file_buffer<tool_counter_record_t>(type);
+
+    if(!filebuf)
+    {
+        ROCP_CI_LOG(WARNING) << "rocprofv3 cannot offload buffer for "
+                             << get_domain_column_name(type) << ". Buffer has been destroyed.";
+        return;
+    }
+
+    auto& callback = get_counter_collection_offload_callback();
+    if(type != domain_type::COUNTER_COLLECTION || !callback)
+    {
+        offload_buffer_to_tmp_file(type, filebuf);
+        return;
+    }
 
     auto _nbytes = (filebuf->buffer.count() * filebuf->buffer.data_size());
-
     ROCP_TRACE << fmt::format(
-        "offloading {} B from {} buffer to tmp file", _nbytes, get_domain_column_name(type));
+        "offloading {} B from {} buffer to csv output", _nbytes, get_domain_column_name(type));
 
-    filebuf->file.file_pos.emplace(_fs.tellp());
+    auto moved_buffer = ring_buffer_t<tool_counter_record_t>{std::move(filebuf->buffer)};
+    filebuf->buffer = ring_buffer_t<tool_counter_record_t>{
+        16 * static_cast<uint64_t>(::rocprofiler::common::units::get_page_size())};
+
+    auto records = std::vector<tool_counter_record_t>{};
+    records.reserve(moved_buffer.count());
+    for(auto* record = moved_buffer.retrieve(); record != nullptr;
+        record       = moved_buffer.retrieve())
+    {
+        records.emplace_back(*record);
+    }
+
     filebuf->nbytes += _nbytes;
-    filebuf->buffer.save(_fs);
-    filebuf->buffer.clear();
+    callback(std::move(records), _nbytes);
 
     ROCP_CI_LOG_IF(ERROR, !filebuf->buffer.is_empty())
         << "buffer is not empty after offload: count=" << filebuf->buffer.count();

@@ -289,6 +289,233 @@ struct kernel_rename_and_stream_data
     rocprofiler_stream_id_t stream_id = {.handle = 0};
 };
 
+struct counter_collection_csv_flush_state
+{
+    std::mutex                                            mutex = {};
+    tool::output_stream                                   stream = {};
+    std::vector<rocprofiler_counter_id_t>                counter_id_order = {};
+    std::unordered_map<rocprofiler_counter_id_t, std::string_view> counter_id_to_name = {};
+    uint64_t                                              offloaded_rows   = 0;
+    uint64_t                                              offloaded_bytes  = 0;
+    double                                                write_sec        = 0.0;
+    bool                                                  header_written   = false;
+};
+
+counter_collection_csv_flush_state&
+get_counter_collection_csv_flush_state()
+{
+    static auto _state = counter_collection_csv_flush_state{};
+    return _state;
+}
+
+bool
+init_counter_collection_csv_columns(counter_collection_csv_flush_state& state)
+{
+    if(!state.counter_id_order.empty()) return true;
+
+    for(const auto& itr : CHECK_NOTNULL(tool_metadata)->get_counter_info())
+    {
+        if(state.counter_id_to_name.emplace(itr.id, itr.name).second)
+        {
+            state.counter_id_order.emplace_back(itr.id);
+        }
+    }
+
+    return !state.counter_id_order.empty();
+}
+
+bool
+open_counter_collection_csv_stream(counter_collection_csv_flush_state& state)
+{
+    if(state.stream) return true;
+
+    state.stream = get_output_stream(
+        tool::get_config(), get_domain_trace_file_name(domain_type::COUNTER_COLLECTION), ".csv");
+    if(!state.stream)
+    {
+        ROCP_WARNING << "failed to open counter collection csv output stream";
+        return false;
+    }
+
+    return true;
+}
+
+bool
+ensure_counter_collection_csv_header(counter_collection_csv_flush_state& state)
+{
+    if(state.header_written) return true;
+    if(!open_counter_collection_csv_stream(state)) return false;
+    if(!init_counter_collection_csv_columns(state)) return false;
+
+    auto hdr = std::stringstream{};
+    hdr << "\"Correlation_Id\",\"Dispatch_Id\",\"Agent_Id\",\"Queue_Id\","
+        << "\"Process_Id\",\"Thread_Id\",\"Grid_Size\",\"Kernel_Id\","
+        << "\"Kernel_Name\",\"Workgroup_Size\",\"LDS_Block_Size\","
+        << "\"Scratch_Size\",\"VGPR_Count\",\"Accum_VGPR_Count\","
+        << "\"SGPR_Count\",\"Start_Timestamp\",\"End_Timestamp\"";
+
+    for(const auto& counter_id : state.counter_id_order)
+    {
+        auto counter_itr = state.counter_id_to_name.find(counter_id);
+        if(counter_itr != state.counter_id_to_name.end())
+            hdr << ",\"" << counter_itr->second << "\"";
+    }
+    hdr << '\n';
+
+    state.stream << hdr.str();
+    state.header_written = true;
+    return true;
+}
+
+void
+write_counter_collection_csv_rows(counter_collection_csv_flush_state&             state,
+                                  const std::vector<tool::tool_counter_record_t>& records)
+{
+    auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
+
+    for(const auto& record : records)
+    {
+        auto        kernel_id        = record.dispatch_data.dispatch_info.kernel_id;
+        const auto* kernel_info      = tool_metadata->get_kernel_symbol(kernel_id);
+        auto        counter_id_value = std::unordered_map<rocprofiler_counter_id_t, double>{};
+
+        if(kernel_info == nullptr)
+        {
+            ROCP_WARNING << "missing kernel symbol metadata for kernel_id " << kernel_id;
+            continue;
+        }
+
+        for(const auto& count : record.read())
+            counter_id_value[count.id] += count.value;
+
+        const auto& correlation_id = record.dispatch_data.correlation_id;
+        auto        lds_block_size_v =
+            (kernel_info->group_segment_size + (tool::lds_block_size - 1)) &
+            ~(tool::lds_block_size - 1);
+
+        auto row_ss = std::stringstream{};
+        row_ss << correlation_id.internal << ","
+               << record.dispatch_data.dispatch_info.dispatch_id << ","
+               << "\""
+               << tool_metadata
+                      ->get_agent_index(record.dispatch_data.dispatch_info.agent_id,
+                                        tool::get_config().agent_index_value)
+                      .as_string()
+               << "\","
+               << record.dispatch_data.dispatch_info.queue_id.handle << ","
+               << tool_metadata->process_id << ","
+               << record.thread_id << ","
+               << magnitude(record.dispatch_data.dispatch_info.grid_size) << ","
+               << record.dispatch_data.dispatch_info.kernel_id << ","
+               << "\""
+               << tool_metadata->get_kernel_name(
+                      kernel_id, tool::get_config().kernel_rename, correlation_id.external.value)
+               << "\","
+               << magnitude(record.dispatch_data.dispatch_info.workgroup_size) << ","
+               << lds_block_size_v << ","
+               << record.dispatch_data.dispatch_info.private_segment_size << ","
+               << kernel_info->arch_vgpr_count << ","
+               << kernel_info->accum_vgpr_count << ","
+               << kernel_info->sgpr_count << ","
+               << record.dispatch_data.start_timestamp << ","
+               << record.dispatch_data.end_timestamp;
+
+        for(const auto& counter_id : state.counter_id_order)
+        {
+            row_ss << ",";
+            auto counter_itr = counter_id_value.find(counter_id);
+            if(counter_itr != counter_id_value.end())
+            {
+                auto val = counter_itr->second;
+                if(val >= 1.0)
+                    row_ss << std::setprecision(6) << std::fixed << val;
+                else
+                    row_ss << std::setprecision(8) << std::scientific << val;
+            }
+        }
+
+        row_ss << '\n';
+        state.stream << row_ss.str();
+        state.offloaded_rows += 1;
+    }
+}
+
+void
+flush_counter_collection_records_to_csv(std::vector<tool::tool_counter_record_t>&& records,
+                                        uint64_t                                   offloaded_bytes)
+{
+    if(records.empty()) return;
+    if(!tool::get_config().csv_output || !tool::get_config().counter_collection) return;
+
+    auto _write_timer = common::simple_timer{"[rocprofv3] counter csv buffered flush"};
+    auto& state       = get_counter_collection_csv_flush_state();
+    auto  _lk         = std::lock_guard<std::mutex>{state.mutex};
+
+    if(!ensure_counter_collection_csv_header(state)) return;
+
+    write_counter_collection_csv_rows(state, records);
+    state.offloaded_bytes += offloaded_bytes;
+
+    _write_timer.stop();
+    _write_timer.set_quiet(true);
+    state.write_sec += _write_timer.get();
+}
+
+void
+register_counter_collection_offload_callback()
+{
+    tool::get_counter_collection_offload_callback() =
+        [](std::vector<tool::tool_counter_record_t>&& records, uint64_t offloaded_bytes) {
+            flush_counter_collection_records_to_csv(std::move(records), offloaded_bytes);
+        };
+}
+
+void
+clear_counter_collection_offload_callback()
+{
+    tool::get_counter_collection_offload_callback() = {};
+}
+
+void
+flush_counter_collection_tail_to_csv()
+{
+    if(!tool::get_counter_collection_offload_callback()) return;
+    tool::flush_tmp_buffer<tool::tool_counter_record_t>(domain_type::COUNTER_COLLECTION);
+}
+
+std::pair<uint64_t, uint64_t>
+get_counter_collection_offload_totals()
+{
+    auto& state = get_counter_collection_csv_flush_state();
+    auto  _lk   = std::lock_guard<std::mutex>{state.mutex};
+    return {state.offloaded_rows, state.offloaded_bytes};
+}
+
+double
+consume_counter_collection_offload_write_sec()
+{
+    auto& state = get_counter_collection_csv_flush_state();
+    auto  _lk   = std::lock_guard<std::mutex>{state.mutex};
+    auto  ret   = state.write_sec;
+    state.write_sec = 0.0;
+    return ret;
+}
+
+void
+reset_counter_collection_csv_flush_state()
+{
+    auto& state = get_counter_collection_csv_flush_state();
+    auto  _lk   = std::lock_guard<std::mutex>{state.mutex};
+    state.stream.close();
+    state.stream = {};
+    state.counter_id_order.clear();
+    state.counter_id_to_name.clear();
+    state.offloaded_rows  = 0;
+    state.offloaded_bytes = 0;
+    state.write_sec       = 0.0;
+    state.header_written  = false;
+}
+
 bool
 add_kernel_target(uint64_t _kern_id, const std::unordered_set<size_t>& range)
 {
@@ -2132,6 +2359,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
+    reset_counter_collection_csv_flush_state();
+    register_counter_collection_offload_callback();
+
     tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
 
     auto create_pause_resume_ctx = [](rocprofiler_context_id_t& ctx, std::string_view msg) {
@@ -2935,6 +3165,7 @@ generate_output(cleanup_mode _cleanup_mode)
     generate_output(kfd_output, outdata, contributions, cleanups);
     generate_output(marker_output, outdata, contributions, cleanups);
     generate_output(rccl_output, outdata, contributions, cleanups);
+    flush_counter_collection_tail_to_csv();
     generate_output(counters_output, outdata, contributions, cleanups);
     generate_output(scratch_memory_output, outdata, contributions, cleanups);
     generate_output(rocdecode_output, outdata, contributions, cleanups);
@@ -2947,20 +3178,38 @@ generate_output(cleanup_mode _cleanup_mode)
         outdata.num_output += 1;
     }
 
+    auto [counter_csv_rows, counter_csv_bytes] = get_counter_collection_offload_totals();
+    if(counter_csv_rows > 0)
+    {
+        outdata.num_output += 1;
+        outdata.num_bytes += counter_csv_bytes;
+    }
+
     ROCP_INFO << fmt::format("Number of services generating output: {} ({} kB)",
                              outdata.num_output,
                              (outdata.num_bytes / 1024));
 
+    double csv_write_sec   = consume_counter_collection_offload_write_sec();
+    double rocpd_write_sec = 0.0;
+
     if(tool::get_config().csv_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _csv_write_timer = common::simple_timer{"[rocprofv3] csv write"};
         tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
+        _csv_write_timer.stop();
+        _csv_write_timer.set_quiet(true);
+        csv_write_sec += _csv_write_timer.get();
     }
 
     if(tool::get_config().stats && tool::get_config().csv_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _csv_stats_write_timer = common::simple_timer{"[rocprofv3] csv stats write"};
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
+        _csv_stats_write_timer.stop();
+        _csv_stats_write_timer.set_quiet(true);
+        csv_write_sec += _csv_stats_write_timer.get();
     }
 
     if(tool::get_config().json_output && outdata.num_output > 0 &&
@@ -3015,6 +3264,7 @@ generate_output(cleanup_mode _cleanup_mode)
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _rocpd_write_timer = common::simple_timer{"[rocprofv3] rocpd write"};
         tool::write_rocpd(tool::get_config(),
                           *tool_metadata,
                           agents_output,
@@ -3029,6 +3279,9 @@ generate_output(cleanup_mode _cleanup_mode)
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
                           counters_output.get_generator());
+        _rocpd_write_timer.stop();
+        _rocpd_write_timer.set_quiet(true);
+        rocpd_write_sec += _rocpd_write_timer.get();
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -3101,6 +3354,23 @@ generate_output(cleanup_mode _cleanup_mode)
         }
     }
 
+    const auto write_timing_path =
+        fs::path{tool::format_path(tool::get_config().output_path)} / "write_timing.json";
+    auto write_timing_stream = std::ofstream{write_timing_path};
+    if(!write_timing_stream)
+    {
+        ROCP_WARNING << "Failed to open write timing output file: " << write_timing_path.string();
+    }
+    else
+    {
+        write_timing_stream << "{\n"
+                            << fmt::format(R"(  "csv_write_sec": {:.9f},)", csv_write_sec)
+                            << "\n"
+                            << fmt::format(R"(  "rocpd_write_sec": {:.9f})", rocpd_write_sec)
+                            << "\n}\n";
+    }
+
+    reset_counter_collection_csv_flush_state();
     run_cleanup();
 }
 
@@ -3121,6 +3391,7 @@ tool_detach(void* /*tool_data*/)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
     generate_output(cleanup_mode::reset);
+    clear_counter_collection_offload_callback();
 }
 
 void
@@ -3145,6 +3416,7 @@ tool_fini(void* /*tool_data*/)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
     generate_output(cleanup_mode::destroy);
+    clear_counter_collection_offload_callback();
 
     if(destructors)
     {
