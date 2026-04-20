@@ -66,6 +66,8 @@ from .analysis import (  # noqa: F401 -- re-exports for backward compat
     analyze_memory_copies,
     analyze_hardware_counters,
     detect_warmup_issues,
+    analyze_kernel_resources,
+    analyze_api_overhead,
     analyze_thread_trace,
     generate_recommendations,
     _split_pmc_into_passes,
@@ -281,6 +283,8 @@ def analyze_performance(
         memory_analysis = analyze_memory_copies(connection)
         hardware_counters = analyze_hardware_counters(connection)  # Tier 2
         warmup_issues = detect_warmup_issues(connection, hotspots)
+        kernel_resources = analyze_kernel_resources(connection, hotspots)
+        api_overhead_data = analyze_api_overhead(connection)
         already_collected = _detect_already_collected(connection)
         # Tier 3: ATT thread trace (optional — only when --att-dir is provided)
         att_analysis: Dict[str, Any] = {}
@@ -308,6 +312,7 @@ def analyze_performance(
             interval_timeline=interval_timeline,
             att_analysis=att_analysis if att_dir else None,
             warmup_issues=warmup_issues,
+            api_overhead=api_overhead_data,
         )
     else:
         time_breakdown = {}
@@ -320,6 +325,8 @@ def analyze_performance(
         kernel_categories = []
         short_kernels_data = {}
         warmup_issues = None
+        kernel_resources = {"arch": None, "arch_specs": None, "kernels": []}
+        api_overhead_data = {}
         recommendations = tier0_result.recommendations if tier0_result else []
 
     # Format output
@@ -338,6 +345,8 @@ def analyze_performance(
         short_kernels=short_kernels_data,
         att_analysis=att_analysis if att_analysis else None,
         custom_prompt=prompt,
+        kernel_resources=kernel_resources,
+        api_overhead=api_overhead_data,
     )
 
     # Expose structured results to caller (used by interactive mode)
@@ -345,6 +354,8 @@ def analyze_performance(
         _collect_result["recommendations"] = recommendations
         _collect_result["tier0_result"] = tier0_result
         _collect_result["database_path"] = database_path
+        _collect_result["kernel_resources"] = kernel_resources
+        _collect_result["api_overhead"] = api_overhead_data
         _collect_result["att_analysis"] = att_analysis
 
     # LLM enhancement (if enabled) — only for Tier 1/2; Tier 0 LLM runs in analyze_source_code()

@@ -466,8 +466,9 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
   }
 
   if (itKernelField != KernelField::ReqdWorkGroupSize &&
-      itKernelField != KernelField::WorkGroupSizeHint) {
-    status = getMetaBuf(value, &buf);
+      itKernelField != KernelField::WorkGroupSizeHint &&
+      itKernelField != KernelField::ClusterDims) {
+       status = getMetaBuf(value, &buf);
   }
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     return AMD_COMGR_STATUS_ERROR;
@@ -510,6 +511,24 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
         }
         if (!hintSize.empty()) {
           kernel->setWorkGroupSizeHint(hintSize[0], hintSize[1], hintSize[2]);
+        }
+      }
+      break;
+    case KernelField::ClusterDims:
+      status = amd::Comgr::get_metadata_list_size(value, &size);
+      if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
+        std::vector<size_t> clusterSize;
+        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
+          amd_comgr_metadata_node_t clusterSizeNode;
+          status = amd::Comgr::index_list_metadata(value, i, &clusterSizeNode);
+          if (status == AMD_COMGR_STATUS_SUCCESS &&
+              getMetaBuf(clusterSizeNode, &buf) == AMD_COMGR_STATUS_SUCCESS) {
+            clusterSize.push_back(atoi(buf.c_str()));
+          }
+          amd::Comgr::destroy_metadata(clusterSizeNode);
+        }
+        if (!clusterSize.empty()) {
+          kernel->setClusterSize(clusterSize[0], clusterSize[1], clusterSize[2]);
         }
       }
       break;
@@ -579,6 +598,9 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.compileSize_[0] = 0;
   workGroupInfo_.compileSize_[1] = 0;
   workGroupInfo_.compileSize_[2] = 0;
+  workGroupInfo_.clusterSize_[0] = 1;
+  workGroupInfo_.clusterSize_[1] = 1;
+  workGroupInfo_.clusterSize_[2] = 1;
   workGroupInfo_.localMemSize_ = 0;
   workGroupInfo_.preferredSizeMultiple_ = 0;
   workGroupInfo_.privateMemSize_ = 0;
@@ -604,6 +626,7 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.wavesPerSimdHint_ = 0;
   workGroupInfo_.constMemSize_ = 0;
   workGroupInfo_.maxDynamicSharedSizeBytes_ = 0;
+  workGroupInfo_.hasClusterAttr_ = false;
 }
 
 // ================================================================================================
@@ -617,6 +640,16 @@ bool Kernel::createSignature(const parameters_t& params, uint32_t numParameters,
       }
 
       attribs << workGroupInfo_.compileSize_[i];
+    }
+    attribs << ")";
+  }
+  if (workGroupInfo_.clusterSize_[0] != 0) {
+    attribs << "cluster_dims(";
+    for (size_t i = 0; i < 3; ++i) {
+      if (i != 0) {
+        attribs << ",";
+      }
+      attribs << workGroupInfo_.clusterSize_[i];
     }
     attribs << ")";
   }

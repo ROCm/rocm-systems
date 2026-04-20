@@ -1195,16 +1195,16 @@ def test_filter_pmc_description_note_added():
 
 
 def test_filter_pmc_kernel_names_alone_not_meaningful():
-    """--kernel-names is a scope filter; command with only scope+output args is dropped."""
+    """--kernel-include-regex is a scope filter; command with only scope+output args is dropped."""
     from rocinsight.analyze import _filter_rec_commands
 
     cmd = _pmc_cmd(
         counters="GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
-        extra_args=[{"name": "--kernel-names", "value": "my_kernel"}],
+        extra_args=[{"name": "--kernel-include-regex", "value": "my_kernel"}],
     )
     cmd["full_command"] = (
         "rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"
-        ' --kernel-names "my_kernel" -d ./output -o profile -- ./app'
+        ' --kernel-include-regex "my_kernel" -d ./output -o profile -- ./app'
     )
     # All three counters already collected + sys-trace → nothing new
     already = frozenset(

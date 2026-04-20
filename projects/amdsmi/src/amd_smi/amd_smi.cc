@@ -2761,7 +2761,7 @@ amdsmi_status_t amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t* num_
 
   // Get the rsmi data
   std::vector<rsmi_evt_notification_data_t> r_data(*num_elem);
-  rsmi_status_t r = rsmi_event_notification_get(timeout_ms, num_elem, &r_data[0]);
+  rsmi_status_t r = rsmi_event_notification_get(timeout_ms, num_elem, r_data.data());
   if (r != RSMI_STATUS_SUCCESS) {
     return amd::smi::rsmi_to_amdsmi_status(r);
   }
@@ -5611,7 +5611,7 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
 
   std::vector<amdsmi_socket_handle> sockets(socket_count);
 
-  status = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  status = amdsmi_get_socket_handles(&socket_count, sockets.data());
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
@@ -5634,7 +5634,7 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(processor_count);
     // Get all processors of the socket
-    status = amdsmi_get_processor_handles(sockets[i], &processor_count, &processor_handles[0]);
+    status = amdsmi_get_processor_handles(sockets[i], &processor_count, processor_handles.data());
     if (status != AMDSMI_STATUS_SUCCESS) {
       return status;
     }
@@ -5716,8 +5716,8 @@ amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle process
     return api_status;
   }
 
-  amdsmi_socket_handle socket_list[socket_counter];
-  if (auto api_status = amdsmi_get_socket_handles(&socket_counter, &socket_list[0]);
+  std::vector<amdsmi_socket_handle> socket_list(socket_counter);
+  if (auto api_status = amdsmi_get_socket_handles(&socket_counter, socket_list.data());
       (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
     return api_status;
   }
@@ -7291,7 +7291,7 @@ amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
   // Allocate the memory for the sockets
   std::vector<amdsmi_socket_handle> sockets(soc_count);
   // Get the sockets of the system
-  status = amdsmi_get_socket_handles(&soc_count, &sockets[0]);
+  status = amdsmi_get_socket_handles(&soc_count, sockets.data());
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 
   for (index = 0; index < soc_count; index++) {
@@ -7304,7 +7304,7 @@ amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
     // Allocate the memory for the cpus
     std::vector<amdsmi_processor_handle> plist(cpu_per_soc);
     // Get the cpus for each socket
-    status = amdsmi_get_processor_handles_by_type(sockets[index], processor_type, &plist[0],
+    status = amdsmi_get_processor_handles_by_type(sockets[index], processor_type, plist.data(),
                                                   &cpu_per_soc);
     if (status != AMDSMI_STATUS_SUCCESS) return status;
     cpu_handles.insert(cpu_handles.end(), plist.begin(), plist.end());
@@ -7343,7 +7343,7 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t* cores_count,
   // Allocate the memory for the sockets
   std::vector<amdsmi_socket_handle> sockets(soc_count);
   // Get the sockets of the system
-  status = amdsmi_get_socket_handles(&soc_count, &sockets[0]);
+  status = amdsmi_get_socket_handles(&soc_count, sockets.data());
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 
   for (index = 0; index < soc_count; index++) {
@@ -7355,7 +7355,7 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t* cores_count,
     // Allocate the memory for the cores
     std::vector<amdsmi_processor_handle> plist(cores_per_soc);
     // Get the coress for each socket
-    status = amdsmi_get_processor_handles_by_type(sockets[index], processor_type, &plist[0],
+    status = amdsmi_get_processor_handles_by_type(sockets[index], processor_type, plist.data(),
                                                   &cores_per_soc);
     if (status != AMDSMI_STATUS_SUCCESS) {
       return status;

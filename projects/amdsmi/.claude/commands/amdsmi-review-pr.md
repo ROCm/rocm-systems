@@ -84,8 +84,8 @@ By default, comprehensive reviews include a rebuttal round (Round 2) with the sk
 ## Examples
 
 ``` bash
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 style
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 tests security performance
-/amdsmi-review-pr https://github.com/ROCm/amdsmi/pull/123 fast
+/amdsmi-review-pr https://github.com/ROCm/rocm-systems/pull/123
+/amdsmi-review-pr https://github.com/ROCm/rocm-systems/pull/123 style
+/amdsmi-review-pr https://github.com/ROCm/rocm-systems/pull/123 tests security performance
+/amdsmi-review-pr https://github.com/ROCm/rocm-systems/pull/123 fast
 ```

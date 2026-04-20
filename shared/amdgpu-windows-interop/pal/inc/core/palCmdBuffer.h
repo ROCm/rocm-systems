@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -32,13 +32,14 @@
 #pragma once
 
 #include "pal.h"
+#include "palCmdTracking.h"
 #include "palDevice.h"
 #include "palGpuMemory.h"
 #include "palImage.h"
 #include "palMsaaState.h"
 #include "palPipeline.h"
 #include "palQueryPool.h"
-#include "palCmdTracking.h"
+#include "palStringView.h"
 
 /// HSA kernel dispatch packet typedef
 typedef struct hsa_kernel_dispatch_packet_s hsa_kernel_dispatch_packet_t;
@@ -157,6 +158,7 @@ enum class IndexType : uint32
     Count
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 973
 /// Specifies a memory atomic operation that can be performed from command buffers with ICmdBuffer::CmdMemoryAtomic().
 enum class AtomicOp : uint32
 {
@@ -184,6 +186,7 @@ enum class AtomicOp : uint32
     DecUint64 = 0x15,
     Count
 };
+#endif
 
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 928
 /// Specifies the point in the GPU pipeline where an action should take place.
@@ -339,7 +342,18 @@ enum CacheCoherencyUsageFlags : uint32
     CoherDepthStencilTarget = 0x00000040,     ///< Depth stencil target.
     CoherResolveSrc         = 0x00000080,     ///< Source of a CmdResolveImage() call.
     CoherResolveDst         = 0x00000100,     ///< Destination of a CmdResolveImage() call.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 967
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 973
+    CoherIndirectArgs       = 0x00000200,     ///< Source argument data read by CmdDrawIndirect() and similar functions.
+    CoherIndexData          = 0x00000400,     ///< Index buffer data.
+    CoherTimestamp          = 0x00000800,     ///< Destination of a CmdWriteTimestamp() call.
+    CoherStreamOut          = 0x00001000,     ///< Data written as stream output.
+    CoherMemory             = 0x00002000,     ///< Data read or written directly from/to memory
+    CoherSampleRate         = 0x00004000,     ///< CmdBindSampleRateImage() source.
+    CoherPresent            = 0x00008000,     ///< Source of present.
+    CoherCp                 = 0x00020000,     ///< HW Command Processor (CP) encompassing the front - end command
+                                              ///< processing of any queue, including SDMA.
+    CoherAllUsages          = 0x0003FFFF,
+#elif PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 967
     CoherIndirectArgs       = 0x00000200,     ///< Source argument data read by CmdDrawIndirect() and similar functions.
     CoherIndexData          = 0x00000400,     ///< Index buffer data.
     CoherQueueAtomic        = 0x00000800,     ///< Destination of a CmdMemoryAtomic() call.
@@ -351,7 +365,7 @@ enum CacheCoherencyUsageFlags : uint32
     CoherCp                 = 0x00040000,     ///< HW Command Processor (CP) encompassing the front - end command
                                               ///< processing of any queue, including SDMA.
     CoherAllUsages          = 0x0007FFFF,
-#elif PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 914
+#else // if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 967
     CoherClear              = 0x00000200,     ///< Destination of a CmdClear() call.
     CoherIndirectArgs       = 0x00000400,     ///< Source argument data read by CmdDrawIndirect() and similar functions.
     CoherIndexData          = 0x00000800,     ///< Index buffer data.
@@ -364,21 +378,6 @@ enum CacheCoherencyUsageFlags : uint32
     CoherCp                 = 0x00080000,     ///< HW Command Processor (CP) encompassing the front - end command
                                               ///< processing of any queue, including SDMA.
     CoherAllUsages          = 0x000FFFFF,
-#else // PAL_CLIENT_INTERFACE_MAJOR_VERSION
-    CoherClear              = 0x00000200,     ///< Destination of a CmdClear() call.
-    CoherIndirectArgs       = 0x00000400,     ///< Source argument data read by CmdDrawIndirect() and similar functions.
-    CoherIndexData          = 0x00000800,     ///< Index buffer data.
-    CoherQueueAtomic        = 0x00001000,     ///< Destination of a CmdMemoryAtomic() call.
-    CoherTimestamp          = 0x00002000,     ///< Destination of a CmdWriteTimestamp() call.
-    CoherCeLoad             = 0x00004000,     ///< Source of a CmdLoadCeRam() call.
-    CoherCeDump             = 0x00008000,     ///< Destination of CmdDumpCeRam() call.
-    CoherStreamOut          = 0x00010000,     ///< Data written as stream output.
-    CoherMemory             = 0x00020000,     ///< Data read or written directly from/to memory
-    CoherSampleRate         = 0x00040000,     ///< CmdBindSampleRateImage() source.
-    CoherPresent            = 0x00080000,     ///< Source of present.
-    CoherCp                 = 0x00200000,     ///< HW Command Processor (CP) encompassing the front - end command
-                                              ///< processing of any queue, including SDMA.
-    CoherAllUsages          = 0x003FFFFF,
 #endif
 
     CoherShader             = CoherShaderRead | CoherShaderWrite,
@@ -512,15 +511,7 @@ union InheritedStateFlags
 /// Specifies parameters inherited from primary command buffer into nested command buffer.
 struct InheritedStateParams
 {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 891
-    uint32                      colorTargetCount;                            ///< Number of color targets bound in the
-                                                                             ///  root-level command buffer.
-    SwizzledFormat              colorTargetSwizzledFormats[MaxColorTargets]; ///< Format and swizzle for each color
-                                                                             ///  target.
-    uint32                      sampleCount[MaxColorTargets];                ///< Sample count for each color target.
-#endif
-    InheritedStateFlags         stateFlags;                                  ///< States that are inherited from the
-                                                                             ///  calling root-level command buffer.
+    InheritedStateFlags stateFlags; ///< States that are inherited from the calling root-level command buffer.
 };
 
 /// Specifies optional hints to control command buffer building optimizations.
@@ -558,14 +549,6 @@ union CmdBufferBuildFlags
         /// This optimization might slightly increase the overhead of some GPU copies and other front-end reads/writes.
         uint32 prefetchCommands                :  1;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 914
-        /// Indicates the command buffer will use one or more constant engine commands: CmdLoadCeRam(), CmdDumpCeRam(),
-        /// or CmdWriteCeRam()
-        uint32 usesCeRamCmds                   :  1;
-#else
-        uint32 placeholder914                  :  1;
-#endif
-
         /// Indicates that the client would prefer that this nested command buffer not be launched using an IB2 packet.
         /// The calling command buffer will either inline this command buffer into itself or use IB chaining based on if
         /// the optimizeExclusiveSubmit flag is also set. This flag is ignored for root command buffers.
@@ -593,7 +576,7 @@ union CmdBufferBuildFlags
         uint32 optimizePersistentStatesPerBin  :  1;
 
         /// Reserved for future use.
-        uint32 reserved                        :  16;
+        uint32 reserved                        :  17;
     };
 
     /// Flags packed as 32-bit uint.
@@ -980,39 +963,15 @@ struct BarrierInfo
 /// This struct is used by @ref AcquireReleaseInfo.
 struct MemBarrier
 {
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 914
-    union
-    {
-        struct
-        {
-            uint32 globallyAvailable :  1; ///< Normally, data made available is in the GPU LLC.  When this bit is
-                                           ///  set, available means in memory, available to all clients in the
-                                           ///  system.  This is useful for rare cases like mid command buffer
-                                           ///  synchronization with the CPU or another external device.
-            uint32 reserved          : 31; ///< Reserved for future use.
-        };
-        uint32 u32All;                     ///< Flags packed as a 32-bit uint.
-    } flags;                               ///< Flags controlling the memory barrier.
-#endif
+    uint32 srcStageMask;  ///< PipelineStageFlag mask defining the synchronization scope to confirm complete with the
+                          ///  release. Must be 0 when passed in to CmdAcquire or CmdAcquireEvent.
+    uint32 dstStageMask;  ///< PipelineStageFlag mask defining the synchronization scope of future operations after the
+                          ///  acquire. Must be 0 when passed in to CmdRelease or CmdReleaseEvent.
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 880
-    GpuMemSubAllocInfo memory;             ///< Specifies a portion of an IGpuMemory object this memory barrier affects.
-                                           ///  Zero values of memory structure indicate full range barrier operations.
-#endif
-
-    uint32             srcStageMask;       ///< Bitmask of PipelineStageFlag values defining the synchronization
-                                           ///  scope that must be confirmed complete as part of a release.  Must be
-                                           ///  0 when passed in to CmdAcquire or CmdAcquireEvent.
-    uint32             dstStageMask;       ///< Bitmask of PipelineStageFlag values defining the synchronization
-                                           ///  scope of operations to be performed after the acquire.  Must be
-                                           ///  0 when passed in to CmdRelease or CmdReleaseEvent.
-
-    uint32             srcAccessMask;      ///< CacheCoherencyUsageFlags mask which defines the access scope for the
-                                           ///  availability operation, as defined in the struct comment header.
-                                           ///  This mask must be 0 when passed to CmdAcquire or CmdAcquireEvent.
-    uint32             dstAccessMask;      ///< CacheCoherencyUsageFlags mask which defines the access scope for the
-                                           ///  visibility operation, as defined in the struct comment header.
-                                           ///  This must be 0 when passed to CmdRelease or CmdReleaseEvent.
+    uint32 srcAccessMask; ///< CacheCoherencyUsageFlags mask defining the access scope for the availability operation.
+                          ///  This mask must be 0 when passed to CmdAcquire or CmdAcquireEvent.
+    uint32 dstAccessMask; ///< CacheCoherencyUsageFlags mask defining the access scope for the visibility operation.
+                          ///  This must be 0 when passed to CmdRelease or CmdReleaseEvent.
 };
 
 /// Specifies required layout transition, execution dependencies, *availability*, and/or *visibility* operations on a
@@ -1029,17 +988,6 @@ struct ImgBarrier
     SubresRange   subresRange;   ///< Selects a range of planes/slices/mips the barrier affects.  If newLayout
                                  ///  includes @ref LayoutUninitializedTarget this range must cover all subresources of
                                  ///  pImage unless the perSubresInit image create flag was specified.
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 880
-    Box           box;           ///< Restricts the barrier to a sub-section of each subresource.  The Z offset/extent
-                                 ///  must be 0 for 1D/2D images, and the Y offset/extent must be 0 for 1D images.  A
-                                 ///  box with zero extents will be ignored, and the barrier will affect the entire
-                                 ///  subresource range.  This box may be used to restrict ranges of cache flushes or
-                                 ///  invalidations, or may restrict what data is decompressed.  However, the
-                                 ///  implementation may not be able to optimize particular cases and may expand the
-                                 ///  barrier to cover the entire subresource range.  Specifying a subregion with a box
-                                 ///  when newLayout includes @ref LayoutUninitializedTarget is not supported.
-#endif
 
     uint32        srcStageMask;  ///< Bitmask of PipelineStageFlag values defining the synchronization
                                  ///  scope that must be confirmed complete as part of a release.  Must be
@@ -1243,9 +1191,8 @@ struct TypedBufferImageScaledCopyRegion
 struct ImageScaledCopyRegion
 {
     SubresId           srcSubres;      ///< Selects the source subresource.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 887
     uint32             srcSlices;      ///< Number of source image slices to read across.
-#endif
+
     union
     {
         Offset3d       srcOffset;      ///< Offset to the start of the chosen region in the source subresource.
@@ -1259,9 +1206,8 @@ struct ImageScaledCopyRegion
     };
 
     SubresId           dstSubres;      ///< Selects the destination subresource.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 887
     uint32             dstSlices;      ///< Number of destination image slices to write.
-#endif
+
     union
     {
         Offset3d       dstOffset;      ///< Offset to the start of the chosen region in the destination subresource.
@@ -1274,9 +1220,6 @@ struct ImageScaledCopyRegion
         Extent3dFloat  dstExtentFloat; ///< Alternative representation in floating point.
     };
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 887
-    uint32             numSlices;      ///< Number of slices the copy will span.
-#endif
     SwizzledFormat     swizzledFormat; ///< If not Undefined, reinterpret both subresources using this format and swizzle.
                                        ///  The specified format needs to have been included in the "pViewFormats" list
                                        ///  specified at image-creation time, otherwise the result might be incorrect.
@@ -1436,9 +1379,10 @@ struct PrtPlusBufferToImageResolveRegion
 /// sample destination image.  Used as an input to ICmdBuffer::CmdResolveImage().
 enum class ResolveMode : uint32
 {
-    Average     = 0x0,   ///< Resolve result is an average of all the individual samples
+    Average     = 0x0,   ///< Resolve result is an average of all the individual samples (not valid for Stencil)
     Minimum     = 0x1,   ///< Resolve result is the minimum value of all individual samples
     Maximum     = 0x2,   ///< Resolve result is the maximum value of all individual samples
+    SampleZero  = 0x3,   ///< Resolve result is the value of sample zero
     Count       = 0x4,
 };
 
@@ -2200,6 +2144,10 @@ struct CmdBufInfo
     const IGpuMemory*  pDepthMemory;        ///< The depth gpu memory object for the DirectCapture feature.
     const IGpuMemory*  pCameraMemory;       ///< The camera gpu memory object for the DirectCapture feature.
     const IGpuMemory*  pHudLessImageMemory; ///< The HUD less image gpu memory object for DirectCapture.
+
+    // The following fields are ignored unless llmDecodeStart or llmDecodeStop is set.
+    uint32 llmDecodeComputeGiOps;           ///< Total ops for the whole shader, in units of 1024-based giga-ops.
+    uint32 llmDecodeMemoryMiB;              ///< Total memory for the whole shader, in units of 1024-based MB.
 };
 
 /// Specifies rotation angle between two images.  Used as input to ICmdBuffer::CmdScaledCopyImage.
@@ -2356,8 +2304,10 @@ struct PrimeGpuCacheRange
 /// Magic number tag for payloads in command buffer dumps
 constexpr uint32 CmdBufferPayloadSignature = 0x1337F77D;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 972
 /// Maximum size, in DWORDs, of payload data in command buffer dumps.
 constexpr uint32 MaxPayloadSize = 254;
+#endif
 
 /// Payload types used in special embedded NOP packets.
 enum class CmdBufferPayloadType : uint32
@@ -2379,9 +2329,7 @@ struct CmdBufferPayload
 {
     uint32               signature;     ///< Magic number tag indicating the structure to follow.
     uint32               payloadSize;   ///< Size of the NOP packet (one DWORD) plus the sizeof this structure and the
-                                        ///  payload data to follow.
-                                        ///  This value is in DWORDs. Payload size is expected to be under
-                                        ///  MaxPayloadSize.
+                                        ///  payload data to follow. This value is in DWORDs.
     CmdBufferPayloadType type;          ///< The type of payload.
     uint32               payload[1];    ///< Initial DWORD of payload data with the other data to follow.
 };
@@ -2409,6 +2357,99 @@ enum GpuVaHintFlags : uint32
                                       ///< Only used in CmdCopyMemoryFromGpuVa on DMA queues.
     GpuVaHintAllFlags         = 0x01  ///< Clients should NOT use it, for internal static_assert purpose only.
 };
+
+#if PAL_DEVELOPER_BUILD
+union CaptureFlags
+{
+    struct
+    {
+        uint32 createEmptyFile : 1; ///< If set, create empty files without writing actual resource data.
+        uint32 cacheFlushInv   : 1; ///< If set, CacheFlush/Invalidate be performed before capturing resources.
+        uint32 reserved        : 30;
+    };
+    uint32  u32All; ///< Flags packed into a uint32
+};
+
+enum class CaptureFileFormat : uint32
+{
+    Binary = 0,         ///< Dump targeted resource as binary file (.bin).
+                        ///  if the targeted resource is image, The dumped data includes metadata.
+    DecompressedBinary, ///< Dump targeted resource as binary file (.decomp.bin).
+                        ///  A barrier would be issued to decompress the image before
+                        ///  dumpping. The content includes metadata, metadata header, etc.
+    DDS,                ///< Dump targeted resource as DDS file (.dds)
+    Count
+};
+
+enum class CaptureType : uint32
+{
+    GpuVa = 0, ///< The targeted resource is specified by GPU virual address.
+    GpuMemory, ///< The targeted resource is specified by IGpuMemory*.
+    Image,     ///< The targeted resource is specified by IImage*.
+    Count
+};
+
+struct CaptureResourceInfo
+{
+    const char*       pResourceName;        ///< String that is specified by caller which
+                                            ///  would be a part of dumped file name to identify the resource.
+    CaptureFileFormat fileFormat;           ///< The format of dumped files. fileFormat only applied to Image.
+                                            ///  GpuVa and GpuMemory resources would always be dumped as binary files.
+                                            ///  see @ref CaptureFileFormat.
+    CaptureType       resourceType;         ///< The type of targeted resource. see @ref CaptureType.
+    uint32            cacheCoherencyUsage;  ///< The current CacheCoherency usage.
+                                            ///  Resource Capture would perform
+                                            ///  CacheCoherencyUsage transition to CopySrc usage
+                                            ///  and transited back to this usage at the end of
+                                            ///  Resource Capture.
+
+    union
+    {
+        struct
+        {
+            // The dumped range is [gpuVa, gpuVa + size].
+            gpusize gpuVa;          ///< The start virtual address of targetd GPU memory.
+            gpusize size;           ///< The size of GPU memory to be dumped.
+            uint32  gpuVaHintFlags; ///< see @ref GpuVaHintFlags.
+        } gpuVaInfo;
+
+        struct
+        {
+            // The dumped range is [GpuMemory start address + offset, GpuMemory start address + offset + size].
+            const IGpuMemory* pGpuMemory; ///< The pointer to the targeted GpuMemory object.
+            gpusize           offset;     ///< The offset in bytes from the start address of the targeted GpuMemory.
+            gpusize           size;       ///< The size of GPU memory to be dumped.
+        } gpuMemoryInfo;
+
+        struct
+        {
+            const IImage*  pImage;          ///< The pointer to the targeted Image object.
+            SubresRange    subresRange;     ///< The subresource range to be captured.
+                                            ///  Only takes effect when fileFormat is DDS.
+            SwizzledFormat formatOverride;  ///< Format override for the dumped image file.
+                                            ///  If specified, the image will be interpreted
+                                            ///  using this format instead of its native format.
+                                            ///  UndefinedSwizzledFormat to use the native format.
+                                            ///  Only takes effect when fileFormat is DDS.
+            ImageLayout    imageLayout;     ///< The current image Layout.
+                                            ///  Resource Capture would perform ImageLayout transition
+                                            ///  to CopySrc layout
+                                            ///  and transited back to this layout at the end of
+                                            ///  Resource Capture.
+        } imageInfo;
+    };
+};
+
+struct CaptureInfo
+{
+    const char*          pCaptureName;  ///< Resource Capture will create a folder with this string to store
+                                        ///  all dumped files.
+    uint32               resourceCount; ///< Count of GPU resources to include in this Resource Capture.
+    CaptureResourceInfo* pResourceInfo; ///< The pointer to a array of targted resource info.
+                                        ///  see @ref CaptureResourceInfo.
+    CaptureFlags         flags;         ///< see @ref CaptureFlags.
+};
+#endif
 
 /**
  ***********************************************************************************************************************
@@ -2669,23 +2710,6 @@ public:
     virtual void CmdSetVertexBuffers(
         const VertexBufferViews& bufferViews) = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 877
-    void CmdSetVertexBuffers(
-        uint32                firstBuffer,
-        uint32                bufferCount,
-        const BufferViewInfo* pBuffers)
-    {
-        const VertexBufferViews bufferViews =
-        {
-            .firstBuffer = firstBuffer,
-            .bufferCount = bufferCount,
-            .offsetMode = false,
-            .pBufferViewInfos = pBuffers
-        };
-        CmdSetVertexBuffers(bufferViews);
-    }
-#endif
-
     /// Binds a range of memory for use as index data (i.e., binds an index buffer).
     ///
     /// The GPU virtual address must be index element aligned: 2-byte aligned for 16-bit indices or 4-byte aligned for
@@ -2893,11 +2917,7 @@ public:
     /// @param [in]  releaseInfo  Describes the synchronization scope, availability operations, and required layout
     ///                           transitions.
     /// @returns Synchronization token for the release operation.  Pass this token to CmdAcquire to confirm completion.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 885
-    virtual uint32 CmdRelease(
-#else
     virtual ReleaseToken CmdRelease(
-#endif
         const AcquireReleaseInfo& releaseInfo) = 0;
 
     /// Performs the acquire portion of an acquire/release-based barrier.  This acquire a set of resources for a new
@@ -2918,11 +2938,7 @@ public:
     virtual void CmdAcquire(
         const AcquireReleaseInfo& acquireInfo,
         uint32                    syncTokenCount,
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 885
-        const uint32*             pSyncTokens) = 0;
-#else
         const ReleaseToken*       pSyncTokens) = 0;
-#endif
 
     /// Performs the release portion of an acquire/release event-based barrier.  This releases a set of resources from
     /// their current usage, while CmdAcquireEvent() is expected to be called to acquire access to the resources for
@@ -3125,21 +3141,6 @@ public:
         m_funcTable.pfnCmdDrawIndexedIndirectMulti(this, gpuVirtAddrAndStride, maximumCount, countGpuAddr);
     }
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 909
-    /// Dispatches a compute workload of the given dimensions using the command buffer's currently bound compute state.
-    ///
-    /// The thread group size is defined in the compute shader.
-    ///
-    /// Supports PAL ABI and HSA ABI pipelines.
-    ///
-    /// @param [in] size Thread groups to dispatch. If any components are zero the dispatch will be discarded.
-    inline void CmdDispatch(
-        DispatchDims size)
-    {
-        m_funcTable.pfnCmdDispatch(this, size, {});
-    }
-#endif
-
     /// Dispatches a compute workload of the given dimensions using the command buffer's currently bound compute state.
     ///
     /// The thread group size is defined in the compute shader.
@@ -3288,7 +3289,7 @@ public:
     /// - PipelineStage:  @ref PipelineStageBlt
     /// - CacheCoherency: @ref CoherCopySrc for the source and @ref CoherCopyDst for the destination.
     ///
-    /// @param [in] srcGpuVirtAddr  GPU memory vitrual address where the source regions are located.
+    /// @param [in] srcGpuVirtAddr  GPU memory virtual address where the source regions are located.
     /// @param [in] dstGpuVirtAddr  GPU memory virtual address where the destination regions are located.
     /// @param [in] regionCount     Number of regions to copy; size of the pRegions array.
     /// @param [in] pRegions        Array of copy regions, each entry specifynig a source offset, destination offset,
@@ -3447,7 +3448,7 @@ public:
     /// - CacheCoherency: @ref CoherCopySrc for the source and @ref CoherCopyDst for the destination.
     /// - ImageLayout:    @ref LayoutCopyDst
     ///
-    /// @param [in] srcGpuVirtAddr GPU memory vitrual address where the source regions are located.
+    /// @param [in] srcGpuVirtAddr GPU memory virtual address where the source regions are located.
     /// @param [in] dstImage       Image where destination data will be written.
     /// @param [in] dstImageLayout Current allowed usages and engines for the destination image.  These masks must
     ///                            include LayoutCopyDst and the ImageLayoutEngineFlags corresponding to the engine
@@ -3519,7 +3520,7 @@ public:
     /// @param [in] srcImageLayout Current allowed usages and engines for the source image.  These masks must
     ///                            include LayoutCopySrc and the ImageLayoutEngineFlags corresponding to the engine
     ///                            this function is being called on.
-    /// @param [in] dstGpuVirtAddr GPU memory vitrual address where the destination data will be written.
+    /// @param [in] dstGpuVirtAddr GPU memory virtual address where the destination data will be written.
     /// @param [in] regionCount    Number of regions to copy; size of the pRegions array.
     /// @param [in] pRegions       Array of copy regions, each entry specifying a destination offset, a source
     ///                            subresource, source x/y/z offset, and copy size in the x/y/z dimensions.
@@ -3655,6 +3656,7 @@ public:
         uint32                                  regionCount,
         const TypedBufferImageScaledCopyRegion* pRegions) = 0;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 973
     /// Copies a GPU register content to a GPU memory location.
     ///
     /// The destination memory offset has to be aligned to 4 bytes.
@@ -3670,6 +3672,7 @@ public:
         uint32            srcRegisterOffset,
         const IGpuMemory& dstGpuMemory,
         gpusize           dstOffset) = 0;
+#endif
 
     /// Copies multiple scaled regions from one image to another.
     ///
@@ -3785,6 +3788,26 @@ public:
         gpusize           dataSize,
         const uint32*     pData) = 0;
 
+    /// Directly updates a range of GPU memory through virtual address with a small amount of host data.
+    ///
+    /// @note  The CmdUpdateMemory() path should be preferred because it contains more optimizations due to more
+    ///        knowledge about the memory itself that is lost when only virtual addresses are passed in.
+    ///
+    /// This function requires use of the following barrier flags:
+    /// - PipelineStage:  @ref PipelineStageBlt
+    /// - CacheCoherency: @ref CoherCopyDst
+    ///
+    /// The client is responsible for choosing the proper method for optimal performance. If updating data size is less
+    /// equal than 8 bytes, CmdWriteImmediate() is preferred.
+    ///
+    /// @param [in] dstGpuVirtAddr  GPU memory virtual address to be updated.  Must be a multiple of 4.
+    /// @param [in] dataSize        Amount of data to write, in bytes.  Must be a multiple of 4.
+    /// @param [in] pData           Pointer to host data to be copied into the GPU memory.
+    virtual void CmdUpdateMemoryByGpuVa(
+        gpusize       dstGpuVirtAddr,
+        gpusize       dataSize,
+        const uint32* pData) = 0;
+
     /// Updates marker surface with a DWORD value to indicate an event completion.
     ///
     /// This function requires use of the following barrier flags:
@@ -3814,6 +3837,23 @@ public:
         gpusize           dstOffset,
         gpusize           fillSize,
         uint32            data) = 0;
+
+    /// Fills a range of GPU memory through virtual address with the provided 32-bit data.
+    ///
+    /// @note  The CmdFillMemory() path should be preferred because it contains more optimizations due to more
+    ///        knowledge about the memory itself that is lost when only virtual addresses are passed in.
+    ///
+    /// This function requires use of the following barrier flags:
+    /// - PipelineStage:  @ref PipelineStageBlt
+    /// - CacheCoherency: @ref CoherCopyDst
+    ///
+    /// @param [in] dstGpuVirtAddr  GPU memory virtual address to be filled.  Must be a multiple of 4.
+    /// @param [in] fillSize        Size to fill, in bytes.  Must be a multiple of 4.
+    /// @param [in] data            32-bit value to be repeated in the filled range.
+    virtual void CmdFillMemoryByGpuVa(
+        gpusize dstGpuVirtAddr,
+        gpusize fillSize,
+        uint32  data) = 0;
 
     /// Interprets a range of GPU memory as a color buffer and clears it to the specified clear color.
     ///
@@ -3993,59 +4033,6 @@ public:
         const Rect*        pRects,
         uint32             flags) = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 910
-    /// Clears a range of GPU memory to the specified clear color using the specified buffer view SRD.
-    ///
-    /// The maximum clear range is determined by the view; if any Ranges are specified they must fit within the view's
-    /// range. The view must support shader writes.
-    ///
-    /// This function requires use of the following barrier flags:
-    /// - PipelineStage:  @ref PipelineStageCs
-    /// - CacheCoherency: @ref CoherShader
-    ///
-    /// @note You may use the more general @ref PipelineStageBlt and @ref CoherClear if you wish but they may result in
-    ///       higher barrier overhead.
-    ///
-    /// @param [in] gpuMemory      GPU memory to be cleared.
-    /// @param [in] color          Specifies the clear color data and how to interpret it.
-    /// @param [in] pBufferViewSrd The image view SRD that will be used to interpret the image.
-    /// @param [in] rangeCount     Number of ranges within the GPU memory to clear; size of the pRanges array.
-    ///                            If zero, the entire view will be cleared and pRanges will be ignored.
-    /// @param [in] pRanges        Array of ranges within the GPU memory to clear.
-    virtual void CmdClearBufferView(
-        const IGpuMemory& gpuMemory,
-        const ClearColor& color,
-        const void*       pBufferViewSrd,
-        uint32            rangeCount = 0,
-        const Range*      pRanges    = nullptr) = 0;
-
-    /// Clears an image to the specified clear color using the specified image view SRD.
-    ///
-    /// The clear subresouce range is determined by the view; if any Rects have been specified, the image view must
-    /// contain a single mip level. The view must support shader writes.
-    ///
-    /// This function requires use of the following barrier flags:
-    /// - PipelineStage:  @ref PipelineStageCs but the more general @ref PipelineStageBlt is also OK.
-    /// - CacheCoherency: @ref CoherShader but the more general @ref CoherClear is also OK.
-    /// - ImageLayout:    @ref LayoutShaderWrite
-    ///
-    /// @param [in] image         Image to be cleared.
-    /// @param [in] imageLayout   Current allowed usages and engines for the image, must include LayoutShaderWrite.
-    /// @param [in] color         Specifies the clear color data and how to interpret it.
-    /// @param [in] pImageViewSrd The image view SRD that will be used to interpret the image.
-    /// @param [in] rectCount     Number of volumes within the image to clear; size of the pRects array.
-    ///                           If zero, entire subresources will be cleared and pRects will be ignored.
-    /// @param [in] pRects        Array of volumes within the subresources to clear. The begin and end slices to be
-    ///                           cleard are from SubresRange in pImageViewSrd.
-    virtual void CmdClearImageView(
-        const IImage&     image,
-        ImageLayout       imageLayout,
-        const ClearColor& color,
-        const void*       pImageViewSrd,
-        uint32            rectCount = 0,
-        const Rect*       pRects    = nullptr) = 0;
-#endif
-
     /// Resolves multiple regions of a multisampled image to a single-sampled image.
     ///
     /// The source image must be a 2D multisampled image and the destination must be a single-sampled image.
@@ -4198,44 +4185,13 @@ public:
         const IGpuEvent& gpuEvent,
         uint32           stageMask) = 0;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 900
-    /// Puts the specified GPU event into the _set_ state when all previous GPU work reaches the specified point in the
-    /// pipeline.
-    ///
-    /// @note Clients may use this version if they're using the legacy @ref CmdBarrier API.
-    ///
-    /// @param [in] gpuEvent GPU event to be set.
-    /// @param [in] setPoint Point in the graphics pipeline where the GPU event will be _set_, indicating all prior
-    ///                      issued GPU work has reached at least this point in the pipeline.  If the GPU doesn't
-    ///                      support this operation at the exact specified point, the set will be performed at the
-    ///                      earliest possible point _after_ the specified point.
-    inline void CmdSetEvent(
-        const IGpuEvent& gpuEvent,
-        HwPipePoint      setPoint)
-        { CmdSetEvent(gpuEvent, HwPipePointToStage[setPoint]); }
-
-    /// Puts the specified GPU event into the _reset_ state when all previous GPU work reaches the specified point in
-    /// the pipeline.
-    ///
-    /// @note Clients may use this version if they're using the legacy @ref CmdBarrier API.
-    ///
-    /// @param [in] gpuEvent   GPU event to be reset.
-    /// @param [in] resetPoint Point in the graphics pipeline where the GPU event will be _reset_, indicating all prior
-    ///                        issued GPU work has reached at least this point in the pipeline.  If the GPU doesn't
-    ///                        support this operation at the exact specified point, the reset will be performed at the
-    ///                        earliest possible point _after_ the specified point.
-    inline void CmdResetEvent(
-        const IGpuEvent& gpuEvent,
-        HwPipePoint      resetPoint)
-        { CmdResetEvent(gpuEvent, HwPipePointToStage[resetPoint]); }
-#endif
-
     /// Predicate the subsequent jobs in the command buffer if the event is set.
     ///
     /// @param [in] gpuEvent   GPU event to be checked.
     virtual void CmdPredicateEvent(
         const IGpuEvent&  gpuEvent) = 0;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 973
     /// Performs the specified 32- or 64-bit memory operation.  These operations are atomic with respect to shader
     /// atomic operations.
     ///
@@ -4258,6 +4214,7 @@ public:
         gpusize           dstOffset,
         uint64            srcData,
         AtomicOp          atomicOp) = 0;
+#endif
 
     /// Starts a query operation for the given slot of a query pool.
     ///
@@ -4303,6 +4260,8 @@ public:
     /// @param [in] dstGpuMemory  Destination GPU memory object.
     /// @param [in] dstOffset     4-byte aligned offset into pDstGpuMemory where the results should be written.
     /// @param [in] dstStride     4-byte aligned stride between where results are written into pDstGpuMemory.
+    ///                           The dstStride is ignored if the queryCount is one. Otherwise it must be at least
+    ///                           as large as one query result.
     virtual void CmdResolveQuery(
         const IQueryPool& queryPool,
         QueryResultFlags  flags,
@@ -4311,6 +4270,35 @@ public:
         uint32            queryCount,
         const IGpuMemory& dstGpuMemory,
         gpusize           dstOffset,
+        gpusize           dstStride) = 0;
+
+    /// Resolves the results of a range of queries to the specified query type into the specified GPU memory virtual
+    /// address.
+    ///
+    /// @note  The CmdResolveQuery() path should be preferred because it contains more optimizations due to more
+    ///        knowledge about the memory itself that is lost when only virtual addresses are passed in.
+    ///
+    /// This function requires use of the following barrier flags on @ref dstGpuVirtAddr:
+    /// - PipelineStage:  @ref PipelineStageBlt
+    /// - CacheCoherency: @ref CoherCopyDst
+    ///
+    /// This operation does not honor the command buffer's predication state, if active.
+    ///
+    /// @param [in] queryPool       Query pool holding the source queries.
+    /// @param [in] flags           Flags that control the result data layout and how the results are retrieved.
+    /// @param [in] queryType       The type of queries this resolve will produce.
+    /// @param [in] startQuery      First slot in pQueryPool to resolve.
+    /// @param [in] queryCount      Number of query pool slots to resolve.
+    /// @param [in] dstGpuVirtAddr  Destination GPU memory virtual address.  Must be a multiple of 4.
+    /// @param [in] dstStride       4-byte aligned stride between where results are written into dstGpuVirtAddr.
+    ///                             The dstStride could be 0 only if the queryCount is not greater than 1.
+    virtual void CmdResolveQueryByGpuVa(
+        const IQueryPool& queryPool,
+        QueryResultFlags  flags,
+        QueryType         queryType,
+        uint32            startQuery,
+        uint32            queryCount,
+        gpusize           dstGpuVirtAddr,
         gpusize           dstStride) = 0;
 
     /// Rests a range of slots in a query pool.  A query slot must be reset each time before a query can be started
@@ -4368,56 +4356,6 @@ public:
         uint64             data,
         ImmediateDataWidth dataSize,
         gpusize            address) = 0;
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 900
-    /// Writes a HwPipePostPrefetch or HwPipeBottom timestamp to the specified memory location.
-    ///
-    /// The timestamp data is a 64-bit value that increments once per clock.  timestampFrequency in DeviceProperties
-    /// reports the frequency the timestamps are clocked at.
-    ///
-    /// Timestamps are only supported by engines that report supportsTimestamps in DeviceProperties.
-    ///
-    /// This function requires use of the following barrier flags:
-    /// - PipelineStage:  the same flag specified in @ref pipePoint.
-    /// - CacheCoherency: @ref CoherTimestamp
-    ///
-    /// @note Clients may use this version if they're using the legacy @ref CmdBarrier API.
-    ///
-    /// @param [in] pipePoint    Specifies where in the pipeline the timestamp should be sampled and written. The only
-    ///                          valid choices are HwPipePostPrefetch and HwPipeBottom. HwPipePostPrefetch timestamps
-    ///                          are not supported on the SDMA engine, so all timestamps will be executed as
-    ///                          bottom-of-pipe.
-    /// @param [in] dstGpuMemory GPU memory object where timestamp should be written.
-    /// @param [in] dstOffset    Offset into pDstGpuMemory where the timestamp should be written.  Must be aligned to
-    ///                          minTimestampAlignment in DeviceProperties.
-    inline void CmdWriteTimestamp(
-        HwPipePoint       pipePoint,
-        const IGpuMemory& dstGpuMemory,
-        gpusize           dstOffset)
-        { CmdWriteTimestamp(HwPipePointToStage[pipePoint], dstGpuMemory, dstOffset); }
-
-    /// Writes a top-of-pipe or bottom-of-pipe immediate value to the specified memory location.
-    ///
-    /// This function requires use of the following barrier flags:
-    /// - PipelineStage:  the same flag specified in @ref pipePoint.
-    /// - CacheCoherency: @ref CoherCp
-    ///
-    /// @note Clients may use this version if they're using the legacy @ref CmdBarrier API.
-    ///
-    /// @param [in] pipePoint          Specifies where in the pipeline the timestamp should be sampled and written.
-    ///                                The only valid choices are HwPipeTop, HwPipePostPrefetch and HwPipeBottom.
-    ///                                Top-of-pipe timestamps are not supported on the SDMA engine, so all timestamps
-    ///                                will be executed as bottom-of-pipe.
-    /// @param [in] data               Value to be written to gpu address.
-    /// @param [in] ImmediateDataWidth Size of the data to be written out.
-    /// @param [in] address            GPU address where immediate value should be written.
-    inline void CmdWriteImmediate(
-        HwPipePoint        pipePoint,
-        uint64             data,
-        ImmediateDataWidth dataSize,
-        gpusize            address)
-        { CmdWriteImmediate(HwPipePointToStage[pipePoint], data, dataSize, address); }
-#endif
 
     /// Loads the current stream-out buffer-filled-sizes stored on the GPU from memory, typically from a target of a
     /// prior CmdSaveBufferFilledSizes() call.
@@ -4496,6 +4434,43 @@ public:
         bool                waitResults,
         bool                accumulateData) = 0;
 
+    /// Sets predication for this command buffer to use the specified GPU memory virtual address. Any draw, dispatch or
+    /// copy operation between this command and the corresponding reset/disable call will be skipped if the value in
+    /// specified location matches the passed-in predicated value
+    ///
+    /// @note  The CmdSetPredication() path should be preferred because it contains more optimizations due to more
+    ///        knowledge about the memory itself that is lost when only virtual addresses are passed in.
+    ///
+    /// This function requires use of the following barrier flags on @ref gpuMemVirtAddr:
+    /// - PipelineStage:  @ref PipelineStageFetchIndirectArgs
+    /// - CacheCoherency: @ref CoherIndirectArgs
+    ///
+    /// @param [in] pQueryPool     pointer to QueryPool obj, not-nullptr means this is a QueryPool based predication
+    ///                                - Zpass/Occlusion based predication
+    ///                                - or PrimCount/Streamout based predication
+    /// @param [in] slot           Slot to use for setting occlusion predication, valid when pQueryPool is not nullptr
+    /// @param [in] gpuMemVirtAddr GPU memory virtual address for the predication value, only valid when pQueryPool is
+    ///                            nullptr
+    /// @param [in] predType       Predication type.
+    /// @param [in] predPolarity   Controls the polarity of the predication test
+    ///                                true  = draw_if_visible_or_no_overflow
+    ///                                false = draw_if_not_visible_or_overflow
+    /// @param [in] waitResults    Hint only valid for Zpass/Occlusion.
+    ///                                false = wait_until_final_zpass_written
+    ///                                true  = draw_if_not_final_zpass_written
+    /// @param [in] accumulateData true(1) = allow_accumulation of Zpass and PrimCount across command buffer boundaries.
+    ///
+    /// pQueryPool and gpuMemVirtAddr should be exclusively set, when both are nullptr/0, other params will be ignored
+    /// and it means to reset/disable predication so that the following commands can perform normally.
+    virtual void CmdSetPredicationByGpuVa(
+        IQueryPool*         pQueryPool,
+        uint32              slot,
+        gpusize             gpuMemVirtAddr,
+        PredicateType       predType,
+        bool                predPolarity,
+        bool                waitResults,
+        bool                accumulateData) = 0;
+
     /// Suspend/resume any active predication for this command buffer
     ///
     /// @param [in] suspend     Controls if predication should be paused
@@ -4507,6 +4482,7 @@ public:
     virtual void CmdSuspendPredication(
         bool suspend) = 0;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 973
     /// Begins a conditional block in the current command buffer. All commands between this and the corresponding
     /// CmdEndIf() (or CmdElse() if it is present) command are executed if the specified condition is true.
     ///
@@ -4571,6 +4547,7 @@ public:
         uint32      data,
         uint32      mask,
         CompareFunc compareFunc) = 0;
+#endif
 
     /// Stalls a command buffer execution based on a condition that compares an immediate value with value coming from a
     /// GPU memory location.
@@ -4696,53 +4673,6 @@ public:
         const IPerfExperiment& perfExperiment,
         const IGpuMemory&      dstGpuMemory,
         gpusize                dstOffset) = 0;
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 914
-    /// Loads data from the provided GPU Memory object into Constant Engine RAM.
-    ///
-    /// @param [in] srcGpuMemory  GPU Memory object containing the source data to be loaded to CE RAM.
-    /// @param [in] memOffset     Offset within the memory object where the source data is located,
-    ///                           must be 32-byte aligned.
-    /// @param [in] ramOffset     Byte offset destination in CE RAM where the data should be loaded,
-    ///                           must be 32-byte aligned.
-    /// @param [in] dwordSize     Number of DWORDs that should be loaded into CE RAM, must be a multiple of 8.
-    void CmdLoadCeRam(
-        const IGpuMemory& srcGpuMemory,
-        gpusize           memOffset,
-        uint32            ramOffset,
-        uint32            dwordSize) {}
-
-    /// Dumps data from Constant Engine RAM to the provided GPU Memory address which may be located in a GPU ring buffer
-    /// managed by the CE. The CE can be used to automatically handle the synchronization between the DE and CE when
-    /// manipulating a GPU ring buffer. In order for PAL to instruct the CE to handle this, we need to know the current
-    /// position (entry) within the ring buffer being dumped to, as well as the total size (in entries) of the ring.
-    ///
-    /// @param [in] dstGpuMemory  GPU Memory object destination where the data should be dumped from CE RAM.
-    /// @param [in] memOffset     Offset within the memory object where data should be dumped, must be 4 byte aligned.
-    /// @param [in] ramOffset     Byte offset source in CE RAM for data that should be dumped, must be 4 byte aligned.
-    /// @param [in] dwordSize     Number of DWORDs that should be dumped from CE RAM into GPU Memory
-    /// @param [in] currRingPos   Current position (ring entry) in the GPU ring buffer being managed by the CE which the
-    ///                           dump location corresponds to.
-    /// @param [in] ringSize      Number of entries in the GPU ring buffer being managed by the CE. If the memory being
-    ///                           dumped into is not managed in a ring-like fashion, this should be set to zero.
-    void CmdDumpCeRam(
-        const IGpuMemory& dstGpuMemory,
-        gpusize           memOffset,
-        uint32            ramOffset,
-        uint32            dwordSize,
-        uint32            currRingPos,
-        uint32            ringSize) {}
-
-    /// Writes CPU data to Constant Engine RAM
-    ///
-    /// @param [in] pSrcData   Pointer to the source CPU data to be written to CE RAM.
-    /// @param [in] ramOffset  Byte offset in CE RAM where the data should be written, must be 4 byte aligned.
-    /// @param [in] dwordSize  Number of DWORDs that should be written from pSrcData into CE RAM.
-    virtual void CmdWriteCeRam(
-        const void* pSrcData,
-        uint32      ramOffset,
-        uint32      dwordSize) {}
-#endif
 
     /// Allocates a chunk of command space that the client can use to embed constant data directly in the command
     /// buffer's backing memory. The returned CPU address is valid until ICmdBuffer::End() is called. The GPU address
@@ -4947,19 +4877,28 @@ public:
     /// inside a command buffer disassembly. Note that this is a real NOP that will really be submitted to the GPU
     /// and executed (skipped over) by CP. It will be visible in kernel debugging as well as offline debug dumps.
     ///
-    /// The maximum length of a string that may be embedded in the command buffer is currently 128 characters,
-    /// including the NUL-terminator. This is defined in the internal command buffer class in MaxCommentStringLength.
+    /// There is no maximum comment length, the comment will be split over multiple NOP packets if necessary.
     ///
-    /// @param [in] pComment        Pointer to NUL-terminated string that will be inserted into the command buffer.
+    /// @param [in] comment  The string to insert into the command buffer. It doesn't need to be NULL-terminated.
     virtual void CmdCommentString(
-        const char* pComment) = 0;
+        Util::StringView<char> comment) = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 972
+   inline void CmdCommentString(
+       const char* pComment)
+    {
+        CmdCommentString(Util::StringView<char>(pComment));
+    }
+#endif
 
     /// Inserts the specified payload embedded inside a NOP packet. Note that this is a real NOP that will be submitted
     /// to the GPU and executed (skipped over) by CP. It will be visible in kernel debugging as well as offline debug
     /// dumps.
     ///
-    /// @param [in] pPayload    Pointer to binary data to embed.
-    /// @param [in] payloadSize Size of the payload in DWORDs, expected to be under MaxPayloadSize.
+    /// There is no maximum payload size, the payload will be split over multiple NOP packets if necessary.
+    ///
+    /// @param [in] pPayload      Pointer to binary data to embed.
+    /// @param [in] payloadSize   Size of the payload in DWORDs.
     virtual void CmdNop(
         const void* pPayload,
         uint32      payloadSize) = 0;
@@ -5053,11 +4992,6 @@ public:
     {
         CmdDispatchAql(dispatchInfo, nullptr);
     }
-#endif
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 888
-    /// XDMA was retired starting in gfx10 so this function has no use anymore.
-    inline void CmdXdmaWaitFlipPending() {}
 #endif
 
     /// Starts thread-trace/counter-collection - used by GPS Shim's OpenShimInterface via DXCP
@@ -5289,6 +5223,27 @@ public:
         uint64 clientId,
         uint64 clientEventId) = 0;
 
+#if PAL_DEVELOPER_BUILD
+    /// Issued a request to dump the resource referenced by a provided IGpuMemory, GPUVA or IImage to a disk file with
+    /// specified format.
+    /// Caller is responsible for ensuring that the memory of is in Device Gpu memory reference list.
+    ///
+    /// @param [in]  captureInfo      See @ref CaptureInfo for detailed information.
+    /// @param [out] pCountOfRequests Count of pending requests in this command buffer. return 1 if the first request is
+    ///                                 successfully issued. Too many requests in a command buffer may cause GPU TDR.
+    ///                                 Clients can check this value and decide whether it's time to submit the
+    ///                                 cmdbuffer to avoid TDR.
+    ///
+    /// @return
+    ///     Result::Success          if the dump request is successfully issued.
+    ///                              The result will be generated in the folder of AMD_DEBUG_DIR.
+    ///     Result::Unsupported      if CaptureResource is not supported in this cmdbuffer.
+
+    virtual Result CaptureResource(
+        const CaptureInfo& captureInfo,
+        uint64*            pCountOfRequests) = 0;
+#endif
+
 protected:
     /// @internal Constructor. Prevent use of new operator on this interface. Client must create objects by explicitly
     /// called the proper create method.
@@ -5325,21 +5280,6 @@ private:
     /// and set via SetClientData().
     /// For non-top-layer objects, this will point to the layer above the current object.
     void* m_pClientData;
-
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 900
-    /// @internal Some back-compat glue for some of the HwPipePoint interfaces in this file.
-    static constexpr uint32 HwPipePointToStage[] =
-    {
-            PipelineStageTopOfPipe,    // HwPipeTop              = 0x0
-            PipelineStagePostPrefetch, // HwPipePostPrefetch     = 0x1
-            PipelineStageVs,           // HwPipePreRasterization = 0x2
-            PipelineStagePs,           // HwPipePostPs           = 0x3
-            PipelineStageLateDsTarget, // HwPipePreColorTarget   = 0x4
-            PipelineStageCs,           // HwPipePostCs           = 0x5
-            PipelineStageBlt,          // HwPipePostBlt          = 0x6
-            PipelineStageBottomOfPipe, // HwPipeBottom           = 0x7
-    };
-#endif
 };
 
 } // Pal

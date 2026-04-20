@@ -4436,7 +4436,8 @@ class WorkflowSession:
                         # hallucinate non-existent names — strip defensively.
                         # (a) --hip-api-trace: invalid; correct flag is --hip-trace:
                         fc = re.sub(r"\s*--hip-api-trace\b", "", fc)
-                        # (b) --kernel-names <value> — value-taking invalid flag:
+                        # (b) --kernel-names <value> — invalid flag, replaced by
+                        #     --kernel-include-regex in AMD docs:
                         fc = re.sub(
                             r"--kernel-names\s+(?:'[^']*'|\"[^\"]*\"|\S+)",
                             "",
