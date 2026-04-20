@@ -167,7 +167,7 @@ jobs:
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }} \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
@@ -348,7 +348,7 @@ jobs:
           -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11" \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_STRIP_LIBRARIES=OFF \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
