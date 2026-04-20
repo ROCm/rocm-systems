@@ -96,6 +96,133 @@ static void doTestVecadd() {
 }
 
 // ============================================================================
+// WMMA probe: scaled-down chained/parallel WMMA matmul probes.
+//
+// Ladder probes for isolating the gfx1250 → gfx942 `v_wmma_f32_16x16x32_f16`
+// lowering failure seen in `Gfx1250Gpu.Matmul128x128` (the large 128×128
+// Triton matmul). Each probe pins one specific (tiles × chain) topology so
+// the first failing step localizes the root cause in the (tile count, chain
+// depth, VGPR-MSB usage) axis (see
+// `test_data/gfx1250/wmma_chain_probe_kernel.hip` for the probe sources).
+//
+// All probes seed A = B = <half 1.0>×16 per lane. Per WMMA: 32 (K-dim).
+// Expected per output element = 32 * chainDepth, independent of tile.
+// CPU check is a single-scalar compare over every output element.
+// ============================================================================
+static void doTestWmmaProbe(const char *kernelName, int numTiles,
+                              int chainDepth, int numABuffers,
+                              int numBBuffers) {
+  printf("--- %s (numTiles=%d chainDepth=%d) ---\n", kernelName, numTiles,
+         chainDepth);
+  std::string path = std::string(GFX1250_DATA_DIR) +
+                     "/wmma_chain_probe_gfx1250.hsaco";
+  auto data = transpiler::readFile(path);
+  ASSERT_FALSE(data.empty()) << "Cannot read " << path;
+
+  auto result = transpiler::runPipeline(data, "gfx1250", "gfx942", kernelName);
+  ASSERT_TRUE(result.success) << "Pipeline failed for " << kernelName;
+  printf("  Pipeline: raised %d/%d insts, HSACO=%zu bytes\n",
+         result.liftedCount, result.totalCount, result.hsaco.size());
+
+  auto meta = transpiler::extractKernelMeta(data, kernelName);
+
+  // A/B buffers: seed with <half 1.0>×16 per 16-half vector, one vector per
+  // buffer slot. The probe kernels index a_ptr[0..numABuffers-1] and
+  // b_ptr[0..numBBuffers-1]; each caller passes both counts explicitly to
+  // match exactly what the specific kernel reads (wmma_parallel2 reads
+  // b_ptr[0..1], wmma_parallel4 reads b_ptr[0..3], etc.). Under-sizing
+  // either buffer causes the kernel to read out-of-bounds memory, which
+  // manifests as zeroed-out tiles and was previously misdiagnosed as a
+  // transpiler numerical bug.
+  ASSERT_GT(numABuffers, 0);
+  ASSERT_GT(numBBuffers, 0);
+  std::vector<__half> hA(numABuffers * 16);
+  std::vector<__half> hB(numBBuffers * 16);
+  for (size_t i = 0; i < hA.size(); i++) hA[i] = __float2half(1.0f);
+  for (size_t i = 0; i < hB.size(); i++) hB[i] = __float2half(1.0f);
+
+  __half *dA, *dB;
+  float *dC;
+  HIP_ASSERT(hipMalloc(&dA, hA.size() * sizeof(__half)));
+  HIP_ASSERT(hipMalloc(&dB, hB.size() * sizeof(__half)));
+  HIP_ASSERT(hipMalloc(&dC, numTiles * 8 * sizeof(float)));
+  HIP_ASSERT(hipMemcpy(dA, hA.data(), hA.size() * sizeof(__half),
+                        hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemcpy(dB, hB.data(), hB.size() * sizeof(__half),
+                        hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemset(dC, 0, numTiles * 8 * sizeof(float)));
+
+  hipModule_t mod;
+  HIP_ASSERT(hipModuleLoadData(&mod, result.hsaco.data()));
+  hipFunction_t func;
+  HIP_ASSERT(hipModuleGetFunction(&func, mod, kernelName));
+
+  // Kernarg layout: a_ptr, b_ptr, c_ptr  (hipcc packs pointers at offsets
+  // 0, 8, 16 before the hidden pads).
+  std::vector<uint8_t> argBuf(meta.kernargSegmentSize, 0);
+  memcpy(argBuf.data() + 0,  &dA, 8);
+  memcpy(argBuf.data() + 8,  &dB, 8);
+  memcpy(argBuf.data() + 16, &dC, 8);
+  size_t argSz = argBuf.size();
+  void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argBuf.data(),
+                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &argSz,
+                    HIP_LAUNCH_PARAM_END};
+
+  // The probe kernels use __launch_bounds__(32); on gfx942 that still
+  // projects to one wave64 per block, so a grid of (1,1,1) exercises the
+  // full WMMA → MFMA lowering path.
+  int wgSize = meta.maxFlatWorkgroupSize > 0 ? meta.maxFlatWorkgroupSize : 32;
+  HIP_ASSERT(hipModuleLaunchKernel(func, 1, 1, 1, wgSize, 1, 1,
+                                    meta.groupSegmentFixedSize, nullptr,
+                                    nullptr, config));
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::vector<float> hC(numTiles * 8);
+  HIP_ASSERT(hipMemcpy(hC.data(), dC, numTiles * 8 * sizeof(float),
+                        hipMemcpyDeviceToHost));
+
+  // Expected: every per-lane dword of the accumulator equals
+  // 32 * chainDepth (K-dim × chain depth).  WMMA output is 8 dwords
+  // per lane × 32 Wave32 lanes = a 16×16 f32 tile where EVERY element
+  // is 32 * chainDepth.  The probe writes the lane-local v8f back to
+  // consecutive memory slots per wave, so hC holds one full v8f (8
+  // floats) per thread per tile.  numTiles iterates across tiles.
+  float expected = 32.0f * (float)chainDepth;
+  int errors = 0;
+  float maxErr = 0.0f;
+  printf("  per-tile summary (showing dw0 of each tile):\n   ");
+  for (int t = 0; t < numTiles; t++) {
+    printf(" [%d]%.3f", t, hC[t * 8]);
+  }
+  printf("\n");
+  for (int t = 0; t < numTiles; t++) {
+    int tileErrs = 0;
+    for (int i = 0; i < 8; i++) {
+      float got = hC[t * 8 + i];
+      float diff = std::fabs(got - expected);
+      if (diff > maxErr) maxErr = diff;
+      if (diff > 1e-3f) {
+        if (errors < 3)
+          fprintf(stderr, "  tile %d dw %d: got=%f exp=%f\n", t, i, got,
+                  expected);
+        errors++;
+        tileErrs++;
+      }
+    }
+    if (tileErrs > 0)
+      printf("  tile %d: %d/8 dw wrong  (dw0=%f)\n", t, tileErrs,
+             hC[t * 8]);
+  }
+
+  (void)hipFree(dA); (void)hipFree(dB); (void)hipFree(dC);
+  (void)hipModuleUnload(mod);
+  printf("  Result: %d errors over %d tiles × 8 dwords, maxErr=%e\n",
+         errors, numTiles, maxErr);
+  EXPECT_EQ(errors, 0) << errors << " per-lane dword mismatches in "
+                        << kernelName;
+}
+
+// ============================================================================
 // Matmul: C = A @ B, A/B fp16, C fp32
 // ============================================================================
 static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
@@ -207,7 +334,6 @@ static void doTestMatmul(const char *hsacoFile, int M, int N, int K,
       errors++;
     }
   }
-
   (void)hipFree(dA); (void)hipFree(dB); (void)hipFree(dC); (void)hipModuleUnload(mod);
   printf("  Result: %d errors, maxErr=%e\n", errors, maxErr);
   EXPECT_EQ(errors, 0) << errors << " mismatches in matmul " << label;
@@ -592,6 +718,39 @@ TEST_F(Gfx1250Gpu, DsSwizzle)      { doTestDsSwizzle(); }      // P6 explicit
 
 // Elementwise.
 TEST_F(Gfx1250Gpu, Vecadd)         { doTestVecadd(); }
+
+// WMMA probe ladder (see doTestWmmaProbe / wmma_chain_probe_kernel.hip).
+// One probe per (tiles × chain) combination; first failing probe localizes
+// the root cause of the `Matmul128x128` numerical mismatch on the
+// gfx1250 → gfx942 WMMA → MFMA lowering path.
+TEST_F(Gfx1250Gpu, WmmaProbe_Chain1) {
+  doTestWmmaProbe("wmma_chain1_kernel", /*numTiles=*/1,
+                   /*chainDepth=*/1, /*numABuffers=*/1, /*numBBuffers=*/1);
+}
+TEST_F(Gfx1250Gpu, WmmaProbe_Chain2) {
+  doTestWmmaProbe("wmma_chain2_kernel", /*numTiles=*/1,
+                   /*chainDepth=*/2, /*numABuffers=*/1, /*numBBuffers=*/1);
+}
+TEST_F(Gfx1250Gpu, WmmaProbe_Chain4) {
+  doTestWmmaProbe("wmma_chain4_kernel", /*numTiles=*/1,
+                   /*chainDepth=*/4, /*numABuffers=*/1, /*numBBuffers=*/1);
+}
+TEST_F(Gfx1250Gpu, WmmaProbe_Parallel2) {
+  doTestWmmaProbe("wmma_parallel2_kernel", /*numTiles=*/2,
+                   /*chainDepth=*/1, /*numABuffers=*/1, /*numBBuffers=*/2);
+}
+TEST_F(Gfx1250Gpu, WmmaProbe_Parallel4) {
+  doTestWmmaProbe("wmma_parallel4_kernel", /*numTiles=*/4,
+                   /*chainDepth=*/1, /*numABuffers=*/1, /*numBBuffers=*/4);
+}
+TEST_F(Gfx1250Gpu, WmmaProbe_Parallel16) {
+  doTestWmmaProbe("wmma_parallel16_kernel", /*numTiles=*/16,
+                   /*chainDepth=*/1, /*numABuffers=*/4, /*numBBuffers=*/4);
+}
+TEST_F(Gfx1250Gpu, WmmaProbe_Parallel16_Chain4) {
+  doTestWmmaProbe("wmma_parallel16_chain4_kernel", /*numTiles=*/16,
+                   /*chainDepth=*/4, /*numABuffers=*/4, /*numBBuffers=*/4);
+}
 
 // Matmul (XFAIL block, see tests/xfail.cmake).
 TEST_F(Gfx1250Gpu, Matmul64x64) {
