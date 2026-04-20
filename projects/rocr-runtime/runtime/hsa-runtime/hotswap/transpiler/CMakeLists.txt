@@ -94,6 +94,7 @@ add_library(hotswap-transpiler STATIC
   pipeline.cpp
   code_object_utils.cpp
   kernarg_layout.cpp
+  user_sgpr_layout.cpp
 )
 
 # AMDGPU target-private headers (not installed by `ninja install`).
