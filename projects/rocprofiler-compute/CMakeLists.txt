@@ -604,8 +604,8 @@ add_test(
     NAME test_torch_trace_coverage
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --suppress-no-test-exit-code --junitxml=tests/test_torch_trace_coverage.xml
-        ${COV_OPTION} tests/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_torch_trace_coverage.xml ${COV_OPTION}
+        tests/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
 )
 
 set_tests_properties(
