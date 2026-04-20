@@ -66,6 +66,10 @@ def find_broken_links(search_root="."):
         # Skip legacy ai_analysis tree — being deleted by the agentic refactor
         if 'ai_analysis' in md_file.parts:
             continue
+        # Skip the upstream opencode submodule (MIT). Its .md files +
+        # bun node_modules tree are third-party and out of our scope.
+        if 'opencode' in md_file.parts or 'node_modules' in md_file.parts:
+            continue
 
         try:
             content = md_file.read_text(encoding='utf-8')

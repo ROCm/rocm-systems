@@ -62,6 +62,10 @@ VIOLATION_COUNT=0
 #   - docs/confluence: Confluence-amendment audit artifacts that
 #     describe what was removed / renamed (must reference the old
 #     symbol names to explain what was scrubbed). Not shipped docs.
+#   - opencode/: upstream opencode submodule (MIT). Its tree + bun
+#     node_modules contain unrelated third-party `.resume()` / READMEs
+#     that would false-positive our brand-scrub list.
+#   - node_modules: JS dep tree under any nested path; not ours.
 #   - .git: internals
 #   - .pytest_cache: test runner artifacts
 #   - perfxpert/ai_analysis: the pre-agentic module tree; the
@@ -86,6 +90,8 @@ for dir in "${SEARCH_DIRS[@]}"; do
     done
   done < <(find "$dir" -name "*.md" \
     -not -path "*docs/confluence/*" \
+    -not -path "*/opencode/*" \
+    -not -path "*/node_modules/*" \
     -not -path "*.git/*" \
     -not -path "*.pytest_cache/*" \
     -not -path "*perfxpert/ai_analysis/*")
