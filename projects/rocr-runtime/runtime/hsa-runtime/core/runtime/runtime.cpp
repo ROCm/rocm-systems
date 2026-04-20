@@ -2416,7 +2416,16 @@ hsa_status_t Runtime::Load() {
 
   BindErrorHandlers();
 
+#if defined(__APPLE__)
+  // TODO(macos-port): AmdHsaCodeLoader's ReaderWriterLock member null-derefs
+  // inside std::make_shared<std::mutex> during construction (likely an
+  // interaction between -fno-rtti and libc++ condition_variable_any on
+  // macOS 26). Skip loader init on Darwin for now — we can't actually
+  // load code objects without a GPU agent anyway.
+  loader_ = nullptr;
+#else
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
+#endif
 
   // Load extensions
   LoadExtensions();

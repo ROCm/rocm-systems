@@ -276,31 +276,21 @@ void* GetExportAddress(LibHandle lib, std::string export_name) {
 
 bool CloseLib(LibHandle lib) { return (dlclose(*(void**)&lib) == 0) ? true : false; }
 
-// Enumerate loaded Mach-O images and find any that export a
-// "HSA_AMD_TOOL_PRIORITY" symbol. Mirrors the Linux dl_iterate_phdr path.
+// Tool library enumeration on Darwin.
+//
+// The Linux implementation uses dl_iterate_phdr to walk each loaded
+// object's ELF symbol table directly, checking for HSA_AMD_TOOL_PRIORITY.
+// The equivalent on Darwin would walk Mach-O LC_SYMTAB load commands.
+// A naive port (iterate _dyld_image_count + dlsym per image) is unsafe
+// because dyld's dlsym recursively traverses the target image's
+// re-export tree; some Apple-provided frameworks (SwiftBridging,
+// os_log, ...) have crashing trie walks when queried for an unknown
+// symbol. Rather than ship that footgun, return an empty list until a
+// direct Mach-O symbol-table walk is implemented. ROCR profilers
+// aren't yet usable on macOS anyway (requires aqlprofile + agent
+// registration).
 std::vector<LibHandle> GetLoadedToolsLib() {
-  std::vector<LibHandle> ret;
-  const char* kSymbol = "HSA_AMD_TOOL_PRIORITY";
-
-  for (uint32_t i = 0; i < _dyld_image_count(); ++i) {
-    const char* name = _dyld_get_image_name(i);
-    if (!name || name[0] == '\0') continue;
-
-    // dlopen with RTLD_NOLOAD returns a handle to an already-loaded image
-    // without creating a new mapping. If the image isn't already loaded, we
-    // get NULL and skip.
-    void* h = dlopen(name, RTLD_NOLOAD | RTLD_LAZY);
-    if (!h) continue;
-
-    if (dlsym(h, kSymbol) != nullptr) {
-      // Record as a library handle; caller holds the reference.
-      ret.push_back(*(LibHandle*)&h);
-    } else {
-      // Not a tool library — drop the refcount we just took.
-      dlclose(h);
-    }
-  }
-  return ret;
+  return {};
 }
 
 std::string GetLibraryName(LibHandle lib) {
