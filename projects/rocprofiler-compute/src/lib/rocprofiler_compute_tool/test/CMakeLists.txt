@@ -14,7 +14,6 @@ add_executable(
     test_sdk_callbacks.h
 )
 
-
 target_link_libraries(
     ${target}
     PRIVATE rocprofiler-compute-tool gtest_main gmock gsl_assert fmt::fmt
