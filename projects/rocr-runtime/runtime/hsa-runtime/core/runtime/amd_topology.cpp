@@ -90,9 +90,8 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #elif __linux__
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #elif __APPLE__
-                 // Darwin has no KFD/XDNA backends compiled in; MacOsDriver
-                 // (follow-up commit) will plug into the same array.
-                 0
+                 // Darwin has only MacOsDriver compiled in (no KFD/XDNA).
+                 1
 #endif
                  >
     discover_driver_funcs = {
@@ -104,6 +103,8 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #ifdef HSAKMT_VIRTIO_ENABLED
         , KfdVirtioDriver::DiscoverDriver
 #endif
+#elif __APPLE__
+        MacOsDriver::DiscoverDriver
 #endif
 };
 

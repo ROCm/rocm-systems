@@ -43,7 +43,13 @@
 #ifndef HSA_RUNTME_CORE_INC_AMD_AVAILABLE_DRIVERS_H_
 #define HSA_RUNTME_CORE_INC_AMD_AVAILABLE_DRIVERS_H_
 
+#if defined(__APPLE__)
+// On Darwin the KFD backend isn't built (no /dev/kfd); MacOsDriver is the
+// only driver the topology layer sees.
+#include "core/inc/amd_macos_driver.h"
+#else
 #include "core/inc/amd_kfd_driver.h"
+#endif
 
 #ifdef __linux__
 #include "core/inc/amd_xdna_driver.h"
