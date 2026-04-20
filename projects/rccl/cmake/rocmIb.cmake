@@ -59,7 +59,11 @@ execute_process(
   COMMAND ${CMAKE_COMMAND} -E echo "Applying RCCL ROCM NetIB patch to staging area: ${ROCM_NETIB_FILE}"
   COMMAND bash -c "patch -p1 -i ${ROCM_NETIB_PATCH_FILE} -o ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${RCCL_SRC_DIR}
+  RESULT_VARIABLE _rocm_netib_patch_rc
 )
+if(NOT _rocm_netib_patch_rc EQUAL 0)
+  message(FATAL_ERROR "Failed to apply RCCL ROCM NetIB patch.")
+endif()
 execute_process(
   COMMAND bash -c "sed -i 's/NCCL_PARAM(Ib/NCCL_PARAM(RocmIb/g' ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${ROCM_NETIB_STAGING_DIR}
@@ -258,6 +262,18 @@ execute_process(
 )
 execute_process(
   COMMAND bash -c "sed -i 's/ncclIbSetNetAttr/rocmNetIbSetNetAttr/g' ${ROCM_NETIB_FILE}"
+  WORKING_DIRECTORY ${RCCL_SRC_DIR}
+)
+execute_process(
+  COMMAND bash -c "sed -i 's/cuMemGetHandleForAddressRange/hipMemGetHandleForAddressRange/g' ${ROCM_NETIB_FILE}"
+  WORKING_DIRECTORY ${RCCL_SRC_DIR}
+)
+execute_process(
+  COMMAND bash -c "sed -i 's/(CUdeviceptr)/(hipDeviceptr_t)/g' ${ROCM_NETIB_FILE}"
+  WORKING_DIRECTORY ${RCCL_SRC_DIR}
+)
+execute_process(
+  COMMAND bash -c "sed -i 's/CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD/hipMemRangeHandleTypeDmaBufFd/g' ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${RCCL_SRC_DIR}
 )
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

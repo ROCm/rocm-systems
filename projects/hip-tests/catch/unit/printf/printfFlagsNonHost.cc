@@ -33,21 +33,22 @@ HIP_TEST_CASE(Unit_Buffered_Printf_Flags) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
-    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPcieAtomicUnsupported);
     return;
   }
-  std::string reference(R"here(00000042
+  std::string reference =
+      std::string(R"here(00000042
 -0000042
 00000042
 0123.456
 +0000042
 -42
 +0000042
-xyzzy
--42
-00000042
-        00000042
-)here");
+)here") +
+      std::string("xyzzy") + std::string(3, ' ') + "\n" +
+      std::string("-42\n") +
+      std::string("00000042") + std::string(8, ' ') + "\n" +
+      std::string("        00000042\n");
 
   hip::SpawnProc proc("printfFlagsNonHost_exe", true);
   REQUIRE(proc.run() == 0);

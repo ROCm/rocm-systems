@@ -311,8 +311,24 @@ def generate_domain_query(
     return (view_name, domain_select)
 
 
-def create_summary_queries(connection: RocpdImportData, by_rank=False):
-    """Create summary queries for eligible temporary views in the database."""
+def _view_matches_category(view_name: str, category: str) -> bool:
+    """Return True if view name matches the category."""
+    v = view_name.lower()
+    c = category.lower()
+    plural_map = (c, f"{c}s")
+    return v in plural_map or any(v.startswith(f"{itr}_") for itr in plural_map)
+
+
+def create_summary_queries(
+    connection: RocpdImportData,
+    by_rank=False,
+    only_view_categories=None,
+):
+    """Create summary queries for eligible temporary views in the database.
+
+    When only_view_categories is set (e.g. ["kernel"]), only include views whose
+    name matches one of the categories (e.g. "kernels" matches "kernel").
+    """
 
     NAME_COLUMN_MAP = {
         "memory_allocations": "type",
@@ -329,6 +345,12 @@ def create_summary_queries(connection: RocpdImportData, by_rank=False):
     for view_name in views:
         if any(pattern in view_name for pattern in avoid_view_pattern):
             continue
+
+        if only_view_categories is not None:
+            if not any(
+                _view_matches_category(view_name, cat) for cat in only_view_categories
+            ):
+                continue
 
         columns = get_temp_view_columns(connection, view_name)
         if not required_columns.issubset(columns):
@@ -477,8 +499,24 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
 
     summary_queries = {}
 
-    # Create the summary queries
-    summary_queries.update(create_summary_queries(connection, by_rank))
+    # Create the summary queries.
+    # When region_categories is specified (and not NONE), only include view-based
+    # summaries that match those categories and only region summaries for those categories.
+    # With --region-categories NONE we only skip region summaries and still include
+    # all view-based summaries.
+    is_none_categories = (
+        region_categories is not None
+        and len(region_categories) == 1
+        and str(region_categories[0]).strip().upper() == "NONE"
+    )
+    if region_categories is None or is_none_categories:
+        summary_queries.update(create_summary_queries(connection, by_rank))
+    else:
+        summary_queries.update(
+            create_summary_queries(
+                connection, by_rank, only_view_categories=region_categories
+            )
+        )
     summary_queries.update(
         create_summary_region_queries(
             connection, by_rank, region_categories=region_categories

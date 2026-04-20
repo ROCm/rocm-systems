@@ -137,10 +137,10 @@ struct agent_info_t {
   uint32_t simds_per_cu;
   uint32_t shader_engs;
   uint32_t shader_arrs_per_sh_eng;
+  uint32_t bdf_id;
   hsa_isa_t agent_isa;
   hsa_dim3_t grid_max_dim;
   uint16_t workgroup_max_dim[3];
-  uint16_t bdf_id;
   bool fast_f16;
   bool coherent_host_access;
   uint32_t pkt_processor_ucode_ver;

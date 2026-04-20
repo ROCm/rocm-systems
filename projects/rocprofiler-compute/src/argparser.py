@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import os
@@ -29,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import console_warning
-from utils.utils import METRIC_ID_RE, resolve_rocm_library_path
+from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 
 class ExperimentalAction(argparse.Action):
@@ -543,8 +521,9 @@ Examples:
         default=False,
         action="store_true",
         help=(
-            "\t\t\tRetain the large raw rocpd database in workload directory.\n"
-            "\t\t\tThis option requires --format-rocprof-output rocpd."
+            "\t\t\t(DEPRECATED) Retain the large raw rocpd database in workload directory.\n"
+            "\t\t\tThis option requires --format-rocprof-output rocpd.\n"
+            "\t\t\t --retain-rocpd-output is deprecated. .db files will be retained by default in a future release."  # noqa: E501
         ),
     )
 
@@ -924,6 +903,19 @@ Examples:
     )
     analyze_advanced_group.add_argument(
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
+    )
+    analyze_advanced_group.add_argument(
+        "--view",
+        dest="view",
+        metavar="NAME",
+        choices=["table"],  # future: e.g. "bar" for additional TTY views
+        default=None,
+        help=(
+            "\t\tTTY output view. "
+            "table: force plain tables and ignore cli_style from YAML "
+            "(e.g. mem_chart, Roofline charts as tables). "
+            "Additional views may be added in future releases."
+        ),
     )
     analyze_advanced_group.add_argument(
         "--dependency",

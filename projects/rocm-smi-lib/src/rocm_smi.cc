@@ -1679,7 +1679,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind, uint32_t* nu
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
+    ss << __PRETTY_FUNCTION__ << " | Issue: could not retrieve kDevPowerODVoltage" << "; returning "
        << getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
@@ -2542,10 +2542,22 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   int32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
   //
-  // NOTE:  kDevPCIEClk sysfs file maybe not exist for all cases.
+  // NOTE:  kDevPCIEClk sysfs file may not exist for all cases.
   //        If it doesn't exist (pp_dpm_pcie), it shouldn't be an error
   //        and will get translated to RSMI_STATUS_NOT_SUPPORTED.
-  return amd::smi::ErrnoToRsmiStatus(ret_i);
+  //        On some devices, writing to pp_dpm_pcie may fail
+  //        with EOPNOTSUPP or an unmapped errno because the kernel driver
+  //        exposes the file but does not support PCIe bandwidth control.
+  ret = amd::smi::ErrnoToRsmiStatus(ret_i);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    // Restore perf level to AUTO since we set it to MANUAL above
+    rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    if (ret == RSMI_STATUS_UNKNOWN_ERROR) {
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+    return ret;
+  }
+  return ret;
 
   CATCH
 }
@@ -4996,7 +5008,7 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Cause: issue writing requested setting of " + newMemoryPartition
        << " | Returning = " << getRSMIStatusString(err, false);
     LOG_ERROR(ss);
     return err;
@@ -5016,7 +5028,7 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail - restart AMD GPU detected"
        << " | Device #: " << dv_ind
        << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Cause: issue writing requested setting of " + newMemoryPartition
        << " | Returning = " << getRSMIStatusString(restartRet, false);
     LOG_ERROR(ss);
     return restartRet;

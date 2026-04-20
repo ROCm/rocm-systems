@@ -355,7 +355,7 @@ void hipPerfMandelBrot::open(int deviceId) {
   int nGpu = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
   HIP_CHECK(hipSetDevice(deviceId));

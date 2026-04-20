@@ -281,11 +281,7 @@ class HostQueue : public CommandQueue {
   }
 
   //! Flushes submitted commands if the batch size significantly grew
-  void FlushSubmissionBatch(Command* command) {
-    if (size_ > DEBUG_CLR_MAX_BATCH_SIZE) {
-      command->notifyCmdQueue();
-    }
-  }
+  void FlushSubmissionBatch();
   //! Reset the command batch list
   void ResetSubmissionBatch() {
     head_ = nullptr;

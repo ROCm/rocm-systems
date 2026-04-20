@@ -493,7 +493,7 @@ static std::vector<uint64_t> get_intersection(std::vector<uint64_t>* v1,
 }
 
 // Use this enum to encode the monitor type into the monitor ID.
-// We can later use this to convert to rsmi-api sensor types; for exampple,
+// We can later use this to convert to rsmi-api sensor types; for example,
 // rsmi_temperature_type_t, which is what the caller will expect. Add
 // new types as needed.
 

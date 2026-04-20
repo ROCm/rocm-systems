@@ -153,7 +153,7 @@ static void checkPartitionIdChanges(uint32_t dev, const std::string current_part
   // re-initialize to ensure new device ordering is followed
   if (reinitialize) {
     if (isVerbose) {
-      std::cout << "\t**Reinitializing device list due to parition changes.\n";
+      std::cout << "\t**Reinitializing device list due to partition changes.\n";
     }
     rsmi_shut_down();
     rsmi_init(0);
@@ -271,7 +271,7 @@ void TestComputePartitionReadWrite::Run(void) {
     system_wait(15);
   }
 
-  // initial_num_devices - keep this value static, due to parition changes
+  // initial_num_devices - keep this value static, due to partition changes
   // fluctuating # of devices. We should end up with same # of devices at
   // end of test.
   uint32_t initial_num_devices = num_monitor_devs();

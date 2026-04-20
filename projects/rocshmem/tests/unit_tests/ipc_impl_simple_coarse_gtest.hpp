@@ -101,7 +101,7 @@ class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int,
         WRITE = 1
     };
 
-    virtual void copy(TestType test, dim3 grid, dim3 block) {
+    virtual void copy([[maybe_unused]] TestType test, [[maybe_unused]] dim3 grid, [[maybe_unused]] dim3 block) {
         FAIL();
     }
 

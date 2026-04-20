@@ -1,7 +1,14 @@
-# - How to use:
+# - How to use (install as git hook — only runs on staged files):
 #     python3 -m pip install pre-commit
-#     pre-commit install --install hooks
-# Upon a new commit - the hooks should automagically run
+#     cd <repo-root>
+#     pre-commit install -c projects/amdsmi/.pre-commit-config.yaml
+#
+# - How to run manually on branch changes only (vs develop):
+#     pre-commit run --config projects/amdsmi/.pre-commit-config.yaml \
+#       --from-ref develop --to-ref HEAD
+#
+# - How to run on all files (CAUTION: reformats everything):
+#     pre-commit run --all-files --config projects/amdsmi/.pre-commit-config.yaml
 #
 # - How to skip:
 #     git commit --no-verify
@@ -18,8 +25,16 @@ exclude: |
     | build/
     | build-.*/
     | _build/
+    | esmi_ib_library/
+    | third_party/
 fail_fast: false
 repos:
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
+    hooks:
+      - id: codespell
+        args: ["-w", "--config", "projects/amdsmi/.codespellrc"]
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

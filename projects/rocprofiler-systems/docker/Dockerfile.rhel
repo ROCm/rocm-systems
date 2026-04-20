@@ -19,7 +19,8 @@ RUN yum groupinstall -y "Development Tools" && \
         iproute json-devel libdrm-devel ninja-build numactl-devel openmpi-devel \
         papi-devel python3-pip sqlite-devel texinfo wget which zlib-devel ucx-devel && \
     yum clean all && \
-    python3 -m pip install 'cmake==3.21' && \
+    python3 -m pip install --upgrade pip && \
+    python3 -m pip install 'cmake==3.25' && \
     python3 -m pip install 'perfetto'
 
 ARG ROCM_VERSION=0.0

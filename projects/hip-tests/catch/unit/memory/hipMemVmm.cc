@@ -29,9 +29,7 @@ HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeVirtualMemoryManagement "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
     return;
   }
 
@@ -89,9 +87,7 @@ HIP_TEST_CASE(Unit_hipMemVmm_Uncached) {
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
-    SUCCEED(
-        "GPU 0 doesn't support hipDeviceAttributeVirtualMemoryManagement "
-        "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
     return;
   }
 

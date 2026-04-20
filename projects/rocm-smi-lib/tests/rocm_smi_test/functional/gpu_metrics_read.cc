@@ -221,7 +221,7 @@ void TestGpuMetricsRead::Run(void) {
         std::cout << std::dec << "current_dclk1=" << smu.current_dclk1 << "\n";
 
         std::cout << "\n";
-        std::cout << "TROTTLE STATUS:\n";
+        std::cout << "THROTTLE STATUS:\n";
         std::cout << std::dec << "throttle_status=" << smu.throttle_status << "\n";
 
         std::cout << "\n";

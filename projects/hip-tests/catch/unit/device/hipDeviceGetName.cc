@@ -130,10 +130,6 @@ HIP_TEST_CASE(Unit_hipDeviceGetName_CheckPropName) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipDeviceGetName_PartialFill) {
-#if HT_AMD
-  HipTest::HIP_SKIP_TEST("EXSWCPHIPT-108");
-  return;
-#endif
   std::array<char, LEN> name;
 
   int numDevices = 0;
@@ -201,14 +197,14 @@ HIP_TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount <= 0) {
-    HipTest::HIP_SKIP_TEST("No device found, skipping the test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kNoGpuDevice);
     return;
   }
 
   FILE* fpipe;
   fpipe = popen("rocm_agent_enumerator", "r");
   if (fpipe == nullptr) {
-    HipTest::HIP_SKIP_TEST("Unable to create command file.\n");
+    HipTest::HIP_SKIP_TEST("unable to create command file.");
     return;
   }
   char command_op[BUFFER_LEN];

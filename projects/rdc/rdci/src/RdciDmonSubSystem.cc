@@ -629,7 +629,7 @@ void RdciDmonSubSystem::process() {
   std::vector<uint64_t> notif_ts(notif_fields.size());
   field_pq_t notif_pq;
 
-  // Call this once without printing out notfications to initialize
+  // Call this once without printing out notifications to initialize
   // timestamps. There may be very stale timestamps in cache.
   collect_new_notifs(rdc_handle_, group_info, notif_fields, &notif_ts, nullptr);
 

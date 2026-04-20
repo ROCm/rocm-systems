@@ -66,7 +66,7 @@ __global__ void broadcast_test(int *source, int *dest, size_t nelem,
     int64_t ctx_type = 0;
 
     rocshmem_wg_ctx_create(ctx_type, &ctx);
-    int num_pes = rocshmem_ctx_n_pes(ctx);
+    [[maybe_unused]] int num_pes = rocshmem_ctx_n_pes(ctx);
 
     rocshmem_ctx_int_broadcast_wg(ctx, team, dest, source, nelem, root);
 
@@ -76,14 +76,14 @@ __global__ void broadcast_test(int *source, int *dest, size_t nelem,
     rocshmem_wg_ctx_destroy(&ctx);
 }
 
-static void init_sendbuf(int *source, int nelem, int my_pe)
+static void init_sendbuf(int *source, int nelem, [[maybe_unused]] int my_pe)
 {
     for (int i = 0; i < nelem; i++) {
         source[i] = i;
     }
 }
 
-static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes)
+static bool check_recvbuf(int *dest, [[maybe_unused]] int nelem, [[maybe_unused]] int my_pe, int npes)
 {
     bool res=true;
 

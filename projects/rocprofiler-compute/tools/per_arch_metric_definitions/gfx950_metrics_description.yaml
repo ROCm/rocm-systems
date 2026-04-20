@@ -464,7 +464,7 @@ VALU arithmetic instruction mix:
     plain: The total number of type conversion instructions (such as converting data to or from F32\u2194F64) issued to the VALU per normalization unit.
     rst: The total number of type conversion instructions (such as converting data to or from F32\u2194F64) issued to the VALU per :ref:`normalization unit <normalization-units>`.
     unit: Instructions per Normalization Unit
-MFMA instruction mix:
+Matrix instruction mix:
   MFMA-I8:
     plain: The total number of 8-bit integer MFMA instructions issued per normalization unit.
     rst: The total number of 8-bit integer :ref:`MFMA <desc-mfma>` instructions issued per :ref:`normalization unit <normalization-units>`.

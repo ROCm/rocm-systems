@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "platform/command_utils.hpp"
 #include "platform/perfctr.hpp"
 #include "platform/threadtrace.hpp"
 #include "platform/kernel.hpp"
@@ -269,10 +270,11 @@ VirtualGPU::Queue::~Queue() {
 
   // Remove all memory references
   std::vector<Pal::IGpuMemory*> memRef;
+  memRef.reserve(memReferences_.size());
   for (auto it : memReferences_) {
     memRef.push_back(it.first->iMem());
   }
-  if (memRef.size() != 0) {
+  if (!memRef.empty()) {
     iDev_->RemoveGpuMemoryReferences(memRef.size(), &memRef[0], iQueue_);
   }
   memReferences_.clear();
@@ -2293,9 +2295,26 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       LogError("submitStreamOperation: Wait failed!");
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
-    bool result = static_cast<KernelBlitManager&>(blitMgr()).streamOpsWrite(*memory, value, offset,
-                                                                            sizeBytes);
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
+    bool result;
+    switch (flags) {
+      case ROCCLR_STREAM_WRITE_VALUE_DEFAULT: {
+        result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_INCREMENT: {
+        result = blitMgr().streamOpsIncrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      case ROCCLR_STREAM_WRITE_VALUE_DECREMENT: {
+        result = blitMgr().streamOpsDecrement(*memory, value, offset, sizeBytes);
+        break;
+      }
+      default: {
+        ShouldNotReachHere();
+        break;
+      }
+    }
+
     if (!result) {
       LogError("submitStreamOperation: Write failed!");
     }
@@ -3182,7 +3201,7 @@ void VirtualGPU::submitMakeBuffersResident(amd::MakeBuffersResidentCommand& vcmd
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
 
-  std::vector<amd::Memory*> memObjects = vcmd.memObjects();
+  const std::vector<amd::Memory*>& memObjects = vcmd.memObjects();
   uint32_t numObjects = memObjects.size();
   Pal::GpuMemoryRef* pGpuMemRef = new Pal::GpuMemoryRef[numObjects];
   Pal::IGpuMemory** pGpuMems = new Pal::IGpuMemory*[numObjects];

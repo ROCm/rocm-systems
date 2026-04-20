@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import copy
@@ -45,12 +23,16 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.roofline_calc import validate_roofline_csv
-from utils.utils import (
-    get_uuid,
+from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
+)
+from utils.utils_common import (
+    get_uuid,
+    is_only_pc_sampling,
+    load_panel_configs,
+    validate_roofline_csv,
 )
 
 # the build-in config to list kernel names purpose only
@@ -104,7 +86,10 @@ def detect_missing_counters(
     if join_type == "grid":
         group_labels.append("Grid_Size")
 
-    num_files = len(list(workload_dir.glob("perfmon/*.txt")))
+    # Old workloads have *.txt, new workloads have pmc_perf_*.yaml
+    num_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
+        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
+    )
     kernels_with_missing_counters = []
     for _, groups in df.groupby(group_labels):
         if groups["Dispatch_ID"].nunique() < num_files:
@@ -141,6 +126,11 @@ class OmniAnalyze_Base:
 
     def get_profiling_config(self) -> dict[str, Any]:
         return self._profiling_config
+
+    def pc_sampling_only(self) -> bool:
+        """True when profiling collected only PC sampling (block 21)."""
+        config = getattr(self, "_profiling_config", {})
+        return is_only_pc_sampling(config.get("filter_blocks", []))
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
@@ -188,7 +178,7 @@ class OmniAnalyze_Base:
                         / arch
                     )
                 )
-            ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
+            ac.panel_configs = load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
         parser.build_dfs(
@@ -352,6 +342,7 @@ class OmniAnalyze_Base:
                 args.list_nodes,
                 args.spatial_multiplexing,
                 profiling_config.get("iteration_multiplexing"),
+                self.pc_sampling_only(),
             ]):
                 is_workload_empty(dir_info[0])
 
@@ -462,6 +453,11 @@ class OmniAnalyze_Base:
         if format_rocprof == "rocpd":
             # Vertically concat (by rows) results_*.csv into pmc_perf.csv
             result_files = list(workload_dir.glob("results_*.csv"))
+
+            console_warning(
+                "Reading intermediate results_*.csv files is deprecated and "
+                "will be removed in a future release."
+            )
 
             with open(output_file, "w", newline="") as outfile:
                 writer = None
@@ -752,10 +748,11 @@ class OmniAnalyze_Base:
             for path_info, filter_value in zip(args.path, filter_list):
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
-        # Join pmc_perf_*.csv or results_*.csv files if needed
-        for path_info in args.path:
-            workload_dir = Path(path_info[0])
-            self.join_workload_csvs(workload_dir)
+        if not self.pc_sampling_only():
+            # Join pmc_perf_*.csv or results_*.csv files if needed
+            for path_info in args.path:
+                workload_dir = Path(path_info[0])
+                self.join_workload_csvs(workload_dir)
 
     @abstractmethod
     def run_analysis(self) -> None:

@@ -12,13 +12,14 @@
 #include "transport.h"
 #include "group.h"
 #include "api_trace.h"
-#ifdef ENABLE_MSCCLPP
-#include "mscclpp/mscclpp_nccl.h"
-#endif
 
 using namespace rccl;
 
-NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0); // LWPCOMMLIBS-632: off by default for RCCL as unsupported feature.
+#if HIP_VERSION >= 71260540
+NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
+#else
+NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
+#endif
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid) {
   if (reg && isValid) {
@@ -126,21 +127,6 @@ ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t siz
   if (!ncclParamLocalRegister())
     *handle = NULL;
   else {
-    #ifdef ENABLE_MSCCLPP
-    if (comm->mscclppCompatible) {
-      if (comm->mscclCompatible && size > 0){
-        bool isManagedBuffer = false; 
-        CUDACHECK(hipPointerGetAttribute(&isManagedBuffer, HIP_POINTER_ATTRIBUTE_IS_MANAGED, const_cast<void*>(buff)));
-        if(!isManagedBuffer){
-          INFO(NCCL_INIT, "MSCCL++: ncclCommRegister");
-          NCCLCHECKGOTO(mscclpp_ncclCommRegister(comm->mscclpp_comm, buff, size, handle), ret, end);
-        }
-        else{
-          WARN("MSCCL++: Cannot register user-buffers on managed memory. RCCL user-buffer registration will occur.");
-        }
-      }
-    }
-    #endif
     INFO(NCCL_INIT, "RCCL: ncclCommRegister");
     NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
@@ -183,16 +169,6 @@ exit:
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void *handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
-
-  #ifdef ENABLE_MSCCLPP
-  if (comm->mscclppCompatible) {
-    const size_t size = mscclpp_BufferSize(comm->mscclpp_comm, handle);
-    if (comm->mscclCompatible && size > 0) {
-        NCCLCHECK(mscclpp_ncclCommDeregister(comm->mscclpp_comm, handle));
-      return ncclSuccess;
-    }
-  }
-  #endif
 
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;

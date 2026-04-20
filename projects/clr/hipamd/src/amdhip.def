@@ -509,6 +509,7 @@ hipMemcpy3DPeerAsync
 hipGetDriverEntryPoint
 hipGetDriverEntryPoint_spt
 hipMemPrefetchAsync_v2
+hipMemPrefetchBatchAsync
 hipMemAdvise_v2
 hipStreamGetId
 hipLibraryLoadData
@@ -532,3 +533,5 @@ hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
+hipOccupancyMaxPotentialClusterSize
+hipOccupancyMaxActiveClusters

@@ -27,9 +27,6 @@ install_dependencies=false
 install_library=false
 install_prefix="${ROCM_PATH}"
 log_trace=false
-msccl_kernel_enabled=false
-mscclpp_enabled=false
-enable_mscclpp_clip=false
 num_parallel_jobs=$(nproc)
 npkit_enabled=false
 openmp_test_enabled=false
@@ -44,6 +41,7 @@ generate_sym_kernels=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
+rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
 custom_cmake_options=""
 
 # #################################################
@@ -60,10 +58,7 @@ function display_help()
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --disable-colltrace     Build without collective trace"
-    echo "       --enable-msccl-kernel   Build with MSCCL kernels"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
-    echo "       --enable-mscclpp        Build with MSCCL++ support"
-    echo "       --enable-mscclpp-clip   Build MSCCL++ with clip wrapper on bfloat16 and half addition routines"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)"
     echo "    -h|--help                  Prints this help message"
@@ -93,9 +88,6 @@ function display_help()
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
     echo "    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)"
-    echo "    -DENABLE_MSCCLPP_EXECUTOR=ON          Enable MSCCL++ Executor (default: OFF)"
-    echo "    -DENABLE_MSCCLPP_FORMAT_CHECKS=ON     Enable formatting checks in MSCCL++ (default: OFF)"
-    echo "    -DMSCCLPP_APPLY_PATCHES=OFF           Disable source code patches for MSCCL++ (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DPROFILE=ON                          Enable profiling (default: OFF)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
@@ -105,6 +97,7 @@ function display_help()
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo ""
     echo "  Environment variables:"
+    echo "    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)"
     echo "    ONLY_FUNCS                 Build only specified collective functions (debug builds only)."
     echo "                               Restricts GPU kernel generation to the listed collectives, significantly"
     echo "                               reducing build time during development. Use '|' to separate multiple functions."
@@ -122,7 +115,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -144,13 +137,10 @@ while true; do
          --debug-fast)		     build_release=false; debug_fast=true;							       shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
-         --disable-msccl-kernel)     msccl_kernel_enabled=false;                                                                       shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
-         --enable-mscclpp)           mscclpp_enabled=true;                                                                             shift ;;
-         --enable-mscclpp-clip)      enable_mscclpp_clip=true;                                                                         shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
-    -f | --fast)                     build_local_gpu_only=true; collective_trace=false; msccl_kernel_enabled=false;                    shift ;;
+    -f | --fast)                     build_local_gpu_only=true; collective_trace=false;                                                shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
     -i | --install)                  install_library=true;                                                                             shift ;;
     -j | --jobs)                     num_parallel_jobs=${2};                                                                           shift 2 ;;
@@ -214,6 +204,58 @@ check_exit_code( )
     fi
 }
 
+# Set up a git worktree of the rocm-systems mono-repo so that
+# projects/rocshmem is checked out at a pinned commit hash while the
+# main working tree (which contains rccl at HEAD) stays untouched.
+setup_rocshmem_worktree()
+{
+    local mono_root
+    mono_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [[ -z "$mono_root" ]]; then
+        echo "ERROR: Not inside a git repository. Cannot set up rocSHMEM worktree."
+        echo "       Use ROCSHMEM_INSTALL_DIR to point to a pre-built rocSHMEM instead."
+        exit 1
+    fi
+
+    local pinned_hash="${rocshmem_mono_hash}"
+    local worktree_dir="${mono_root}/.rocshmem-worktree"
+
+    echo "=== Setting up rocSHMEM from mono-repo worktree ==="
+    echo "  Pinned hash  : ${pinned_hash:0:12}"
+    echo "  Worktree dir : ${worktree_dir}"
+
+    if [[ -d "$worktree_dir" ]]; then
+        local current_hash
+        current_hash=$(git -C "$worktree_dir" rev-parse HEAD 2>/dev/null)
+        if [[ "${current_hash}" == "${pinned_hash}"* ]] || [[ "${pinned_hash}" == "${current_hash}"* ]]; then
+            echo "  Worktree already at the correct hash — reusing."
+            rocshmem_source_dir="${worktree_dir}/projects/rocshmem"
+            return 0
+        fi
+        echo "  Removing stale worktree..."
+        git -C "$mono_root" worktree remove "$worktree_dir" --force 2>/dev/null || rm -rf "$worktree_dir"
+    fi
+
+    git -C "$mono_root" worktree add --no-checkout "$worktree_dir" "$pinned_hash"
+    check_exit_code "$?"
+
+    git -C "$worktree_dir" sparse-checkout init --cone
+    git -C "$worktree_dir" sparse-checkout set projects/rocshmem
+    check_exit_code "$?"
+
+    git -C "$worktree_dir" checkout
+    check_exit_code "$?"
+
+    if [[ ! -d "${worktree_dir}/projects/rocshmem" ]]; then
+        echo "ERROR: projects/rocshmem not found in worktree."
+        exit 1
+    fi
+
+    rocshmem_source_dir="${worktree_dir}/projects/rocshmem"
+    echo "  rocSHMEM source ready at: ${rocshmem_source_dir}"
+    echo "=================================================="
+}
+
 # set RCCL-UnitTests path
 if [[ "${build_release}" == true ]]; then
     unit_test_path="./build/release/test/rccl-UnitTests"
@@ -225,6 +267,14 @@ if [[ "${run_tests}" == true ]] && [[ -f "${unit_test_path}" ]]; then
     if [[ "${build_tests}" == false ]]; then
         clean_build=false
     fi
+fi
+
+# #################################################
+# rocSHMEM worktree setup (must run before cd-ing into the build directory)
+# #################################################
+rocshmem_source_dir=""
+if [[ "${build_rocshmem_support}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
+    setup_rocshmem_worktree
 fi
 
 # #################################################
@@ -293,19 +343,6 @@ fi
 # Disable collective trace
 if [[ "${collective_trace}" == false ]]; then
     cmake_common_options="${cmake_common_options} -DCOLLTRACE=OFF"
-fi
-
-# Disable msccl kernel
-if [[ "${msccl_kernel_enabled}" == false ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_MSCCL_KERNEL=OFF"
-fi
-
-if [[ "${mscclpp_enabled}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_MSCCLPP=ON"
-fi
-
-if [[ "${enable_mscclpp_clip}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DENABLE_MSCCLPP_CLIP=ON"
 fi
 
 # Install dependencies
@@ -380,7 +417,11 @@ fi
 # Enable rocSHMEM support
 if [[ "${build_rocshmem_support}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=ON"
-    cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    if [[ -n "${ROCSHMEM_INSTALL_DIR}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    elif [[ -n "${rocshmem_source_dir}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
+    fi
 else
     cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF"
 fi
