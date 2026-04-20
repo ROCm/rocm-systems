@@ -310,6 +310,17 @@ def _build_warnings_json(has_counters: bool) -> List[Dict[str, Any]]:
 
 def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
     """Convert SourceAnalysisResult to a JSON-serializable dict for the tier0 field."""
+    # Bug 3: expose profiling_plan + profiling_plan_actions + code_patterns
+    # alongside the legacy `recommendations` key so downstream consumers can
+    # render the two buckets in a dedicated Tier-0 section. Fallback to
+    # empty dicts when a pre-refactor tier0 dict is supplied.
+    profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
+    profiling_plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
+    code_patterns = (
+        getattr(tier0_result, "code_patterns", None)
+        or tier0_result.recommendations
+        or []
+    )
     return {
         "source_dir": tier0_result.source_dir,
         "analysis_timestamp": tier0_result.analysis_timestamp,
@@ -322,7 +333,13 @@ def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
         "risk_areas": tier0_result.risk_areas,
         "already_instrumented": tier0_result.already_instrumented,
         "roctx_marker_count": tier0_result.roctx_marker_count,
-        "recommendations": _build_recommendations_json(tier0_result.recommendations),
+        # Legacy keys — kept for backwards-compat; ``recommendations`` now
+        # holds ONLY code-level patterns after Bug 3 (profiling-plan
+        # actions live under ``profiling_plan`` / ``profiling_plan_actions``).
+        "recommendations": _build_recommendations_json(code_patterns),
+        "code_patterns": _build_recommendations_json(code_patterns),
+        "profiling_plan": profiling_plan if isinstance(profiling_plan, dict) else {},
+        "profiling_plan_actions": _build_recommendations_json(profiling_plan_actions),
         "suggested_counters": tier0_result.suggested_counters,
         "suggested_first_command": tier0_result.suggested_first_command,
         "llm_explanation": tier0_result.llm_explanation,
@@ -365,7 +382,13 @@ def _format_tier0_json(tier0_result: Any) -> str:
         "hotspots": [],
         "memory_analysis": {},
         "hardware_counters": {"has_counters": False, "metrics": None, "counters": None},
-        "recommendations": _build_recommendations_json(tier0_result.recommendations),
+        # Main recommendations list — Bug 3: code-level items only; the
+        # profiling-plan actions live under `tier0.profiling_plan`.
+        "recommendations": _build_recommendations_json(
+            getattr(tier0_result, "code_patterns", None)
+            or tier0_result.recommendations
+            or []
+        ),
         "warnings": [],
         "errors": [],
         "llm_enhanced_explanation": tier0_result.llm_explanation,

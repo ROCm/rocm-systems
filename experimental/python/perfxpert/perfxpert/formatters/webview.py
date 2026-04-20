@@ -880,7 +880,13 @@ def _format_tier0_webview(tier0_result: Any) -> str:
     src_display = src_dir[-45:] if len(src_dir) > 45 else src_dir
 
     # -- Counts --
-    recs = tier0_result.recommendations or []
+    # Bug 3: render the code-level patterns list here, NOT the
+    # profiling-plan actions. The plan has its own block below.
+    recs = (
+        getattr(tier0_result, "code_patterns", None)
+        or tier0_result.recommendations
+        or []
+    )
     n_high = sum(1 for r in recs if r.get("priority") == "HIGH")
     n_medium = sum(1 for r in recs if r.get("priority") == "MEDIUM")
     n_low = sum(1 for r in recs if r.get("priority") == "LOW")
@@ -1098,24 +1104,61 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             "</div></section>"
         )
 
-    # -- Start Here --
+    # -- Profiling Plan --
+    # Bug 3: dedicated section containing the instrumentation advice (first
+    # command + description) so it never leaks into the main code-patterns
+    # list. `<h3>Profiling Plan</h3>` is the anchor the CLI test suite
+    # searches for to confirm separation from the main recs table.
+    profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
+    suggested_cmd = (
+        (profiling_plan.get("suggested_first_command") if isinstance(profiling_plan, dict) else None)
+        or tier0_result.suggested_first_command
+    )
     start_here_section = ""
-    if tier0_result.suggested_first_command:
-        fc = tier0_result.suggested_first_command
+    if suggested_cmd or profiling_plan:
+        desc = (
+            profiling_plan.get("description")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or "Run this command to collect profiling data for Tier 1/2 analysis:"
+        cmd_block = ""
+        if suggested_cmd:
+            cmd_block = (
+                f'<div class="cmd-row" id="cmd-start">'
+                f"<code>{_h(suggested_cmd)}</code>"
+                f'<button class="cp-btn" onclick="cpCmd(\'cmd-start\')">Copy</button>'
+                "</div>"
+            )
+        actions_list = (
+            profiling_plan.get("actions")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or []
+        extra_actions = [a for a in actions_list if a and a != suggested_cmd]
+        extras_html = ""
+        if extra_actions:
+            extras_html = (
+                '<p style="margin-top:1rem;margin-bottom:.5rem;color:var(--sub);font-size:.9rem">'
+                "Additional actions:</p>"
+            )
+            for idx, act in enumerate(extra_actions):
+                extras_html += (
+                    f'<div class="cmd-row" id="cmd-plan-{idx}">'
+                    f"<code>{_h(act)}</code>"
+                    f'<button class="cp-btn" onclick="cpCmd(\'cmd-plan-{idx}\')">Copy</button>'
+                    "</div>"
+                )
         start_here_section = (
-            '<section class="scard">'
+            '<section class="scard" id="tier0-profiling-plan">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#9654;</span>'
-            "<h2>Start Here</h2>"
-            '<span class="shdr-badge sbadge-info">Recommended First Step</span>'
+            "<h3>Profiling Plan</h3>"
+            '<span class="shdr-badge sbadge-info">Instrumentation Advice</span>'
             "</div>"
             '<div class="sbody">'
-            '<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">'
-            "Run this command to collect profiling data for Tier 1/2 analysis:</p>"
-            f'<div class="cmd-row" id="cmd-start">'
-            f"<code>{_h(fc)}</code>"
-            f'<button class="cp-btn" onclick="cpCmd(\'cmd-start\')">Copy</button>'
-            "</div>"
+            f'<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">{_h(desc)}</p>'
+            f"{cmd_block}"
+            f"{extras_html}"
             "</div></section>"
         )
 

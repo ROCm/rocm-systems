@@ -293,14 +293,57 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
         lines.append("```")
         lines.append("")
 
-    lines.append("## Profiling Recommendations")
+    # Bug 3 — Profiling Plan subsection (instrumentation advice).
+    profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
+    plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
+    if profiling_plan or plan_actions or getattr(tier0_result, "suggested_first_command", ""):
+        lines.append("### Profiling Plan")
+        lines.append("")
+        desc = profiling_plan.get("description") if isinstance(profiling_plan, dict) else None
+        if desc:
+            lines.append(desc)
+            lines.append("")
+        suggested_cmd = (
+            profiling_plan.get("suggested_first_command")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or tier0_result.suggested_first_command
+        if suggested_cmd:
+            lines.append("**Suggested first command:**")
+            lines.append("")
+            lines.append("```bash")
+            lines.append(suggested_cmd)
+            lines.append("```")
+            lines.append("")
+        actions_list = (
+            profiling_plan.get("actions")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or []
+        extra_actions = [a for a in actions_list if a and a != suggested_cmd]
+        if extra_actions:
+            lines.append("**Additional actions:**")
+            lines.append("")
+            for a in extra_actions:
+                lines.append(f"- `{a}`")
+            lines.append("")
+
+    lines.append("### Detected Code Patterns")
     lines.append("")
     priority_emoji = {"HIGH": "\U0001f534", "MEDIUM": "\U0001f7e1", "LOW": "\U0001f7e2", "INFO": "\U0001f535"}
-    for rec in tier0_result.recommendations:
+    code_recs = (
+        getattr(tier0_result, "code_patterns", None)
+        or tier0_result.recommendations
+        or []
+    )
+    if not code_recs:
+        lines.append("*No code-level performance patterns detected.*")
+        lines.append("")
+    for rec in code_recs:
         pri = rec.get("priority", "INFO")
         cat = rec.get("category", "")
         emoji = priority_emoji.get(pri, "\u2022")
-        lines.append(f"### {emoji} [{pri}] {cat}")
+        lines.append(f"#### {emoji} [{pri}] {cat}")
         lines.append("")
         lines.append(f"**Issue:** {rec.get('issue', '')}")
         lines.append("")
@@ -338,14 +381,6 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
                 if full_command:
                     lines.append(f"```bash\n{full_command}\n```")
                 lines.append("")
-        lines.append("")
-
-    if tier0_result.suggested_first_command:
-        lines.append("## Start Here \u2014 Suggested First Command")
-        lines.append("")
-        lines.append("```bash")
-        lines.append(tier0_result.suggested_first_command)
-        lines.append("```")
         lines.append("")
 
     if tier0_result.llm_explanation:

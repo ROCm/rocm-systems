@@ -636,6 +636,25 @@ def _format_agentic_output(
                 html = html.replace("</body>", narrative_panel + "</body>", 1)
             else:
                 html = html + "\n" + narrative_panel
+        # Bug 3 — when tier-0 findings are present in the combined path
+        # (-i + --source-dir), splice in a dedicated "Tier-0 Source Scan"
+        # section BEFORE the main report ends. The section lives under
+        # id="tier0" so tests + users can target it directly.
+        if tier0_findings is not None:
+            tier0_ns = tier0_dict_to_ns(tier0_findings)
+            tier0_html_body = _format_tier0_webview(tier0_ns)
+            tier0_wrapper = (
+                '<section class="card" id="tier0">'
+                '<h2>Tier-0 Source Scan</h2>'
+                f'{tier0_html_body}'
+                '</section>'
+            )
+            if "</main>" in html:
+                html = html.replace("</main>", tier0_wrapper + "</main>", 1)
+            elif "</body>" in html:
+                html = html.replace("</body>", tier0_wrapper + "</body>", 1)
+            else:
+                html = html + "\n" + tier0_wrapper
         return html
 
     # Default: structured text — dispatch to the legacy text formatter for

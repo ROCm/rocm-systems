@@ -152,20 +152,58 @@ def _format_tier0_text(tier0_result: Any) -> str:
         lines.append("  " + "  ".join(tier0_result.suggested_counters))
         lines.append("")
 
-    # Recommendations
-    lines.append("\u2501" * width)
-    lines.append("PROFILING RECOMMENDATIONS".center(width))
-    lines.append("\u2501" * width)
-    lines.append("")
-    lines.extend(_tier0_recommendations_text(tier0_result.recommendations, width))
-
-    # Suggested first command
-    if tier0_result.suggested_first_command:
+    # Profiling plan (instrumentation advice — separate from code patterns).
+    # Bug 3: this block is the ONLY place profiling-plan entries appear in
+    # the report; they never leak into the main recommendations table.
+    profiling_plan = getattr(tier0_result, "profiling_plan", None) or {}
+    plan_actions = getattr(tier0_result, "profiling_plan_actions", None) or []
+    if profiling_plan or plan_actions:
         lines.append("\u2501" * width)
-        lines.append("START HERE \u2014 SUGGESTED FIRST COMMAND".center(width))
+        lines.append("TIER-0: PROFILING PLAN".center(width))
         lines.append("\u2501" * width)
         lines.append("")
-        lines.append(f"  $ {tier0_result.suggested_first_command}")
+        desc = profiling_plan.get("description") if isinstance(profiling_plan, dict) else None
+        if desc:
+            lines.append(f"  {desc}")
+            lines.append("")
+        suggested_cmd = (
+            profiling_plan.get("suggested_first_command")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or getattr(tier0_result, "suggested_first_command", "")
+        if suggested_cmd:
+            lines.append("  Suggested first command:")
+            lines.append(f"    $ {suggested_cmd}")
+            lines.append("")
+        plan_actions_list = (
+            profiling_plan.get("actions")
+            if isinstance(profiling_plan, dict)
+            else None
+        ) or []
+        # Pretty-print any raw action lines that aren't already the
+        # suggested-first-command (avoid duplicating it).
+        extra_actions = [a for a in plan_actions_list if a and a != suggested_cmd]
+        if extra_actions:
+            lines.append("  Additional actions:")
+            for a in extra_actions:
+                lines.append(f"    $ {a}")
+            lines.append("")
+
+    # Recommendations — after Bug 3 this list holds code-level patterns only;
+    # profiling-plan actions live in the block above.
+    lines.append("\u2501" * width)
+    lines.append("DETECTED CODE PATTERNS".center(width))
+    lines.append("\u2501" * width)
+    lines.append("")
+    code_recs = (
+        getattr(tier0_result, "code_patterns", None)
+        or tier0_result.recommendations
+        or []
+    )
+    if code_recs:
+        lines.extend(_tier0_recommendations_text(code_recs, width))
+    else:
+        lines.append("  No code-level performance patterns detected.")
         lines.append("")
 
     # LLM explanation
