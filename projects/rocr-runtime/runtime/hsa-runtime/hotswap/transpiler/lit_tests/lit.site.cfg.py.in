@@ -146,6 +146,17 @@ config.fixtures = {
     # the (0,1) offset pair.
     "ds_load_2addr_b32":
         r"@LIT_FIXTURE_DS_LOAD_2ADDR_B32_CO@",
+    # s_bitcmp family (SOPC, SOPInstructions.td:1411-1414) — one
+    # fixture covers all four variants
+    # (s_bitcmp{0,1}_{b32,b64}) because the handler in
+    # handle_sopc.cpp folds them through a single
+    # {is64 || isB32}-parameterised block (only the source-operand
+    # width and the final icmp predicate differ).  Closes the
+    # kerneldex corpus blocker on scope_discovery `_attn_fwd`
+    # (one `s_bitcmp0_b32 s68, 1` that the pre-fix handler dropped
+    # on the floor, leaving the downstream SCC-dependent branch
+    # undef-driven).
+    "s_bitcmp": r"@LIT_FIXTURE_S_BITCMP_CO@",
     # buffer_atomic_add_u32 (MUBUF/VBUFFER) — gfx11+/gfx1250 VBUFFER
     # encoding for what the legacy MUBUF named BUFFER_ATOMIC_ADD.  The
     # SemOp + handler already existed for the legacy MUBUF addressing

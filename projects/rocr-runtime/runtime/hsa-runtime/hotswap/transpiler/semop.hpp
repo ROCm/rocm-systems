@@ -171,6 +171,21 @@ enum class SemOp : uint16_t {
   // B64 variants index into 64 bits (bit index is still an SReg_32).
   S_BITSET0_B32, S_BITSET1_B32,
   S_BITSET0_B64, S_BITSET1_B64,
+  // SOPC bit-test family (SOPInstructions.td:1411-1414; gfx6+ on every
+  // AMDGPU generation, so fully cross-target viable).  Tests a single
+  // bit of src0 selected by src1 (src1's lower 5 bits for _B32, lower
+  // 6 bits for _B64) and writes the result into SCC:
+  //   S_BITCMP0_B32  SCC = (src0 & (1u << (src1 & 0x1F))) == 0
+  //   S_BITCMP1_B32  SCC = (src0 & (1u << (src1 & 0x1F))) != 0
+  //   S_BITCMP0_B64  SCC = (src0 & (1ull << (src1 & 0x3F))) == 0
+  //   S_BITCMP1_B64  SCC = (src0 & (1ull << (src1 & 0x3F))) != 0
+  // For _B64, src0 is a 64-bit SGPR pair; src1 remains a 32-bit SReg
+  // whose high 26/27 bits are ignored by the hardware (we apply the
+  // mask in IR to preserve that invariant exactly instead of relying
+  // on undef-width behaviour).  The handler lives in handle_sopc.cpp
+  // next to the SOPC compares it mirrors.
+  S_BITCMP0_B32, S_BITCMP1_B32,
+  S_BITCMP0_B64, S_BITCMP1_B64,
   // Conditional move on SCC. `if (SCC) sdst = src; else sdst stays
   // unchanged.` The dst-on-SCC=0 read-modify is NOT modeled by LLVM
   // as a tied sdst_in operand on the MCInst (SOP1_32/SOP1_64 just

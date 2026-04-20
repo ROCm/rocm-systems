@@ -219,6 +219,18 @@ static const Entry kCanonTable[] = {
     E(S_BITSET1_B32, S_BITSET1_B32),
     E(S_BITSET0_B64, S_BITSET0_B64),
     E(S_BITSET1_B64, S_BITSET1_B64),
+    // SOPC bit-test family (SOPInstructions.td:1411-1414).  Each LLVM
+    // MC opcode is a pseudo that every real-subtarget form
+    // (S_BITCMP0_B32_gfx{10,11,12,13}, etc.) is canonicalised onto
+    // during the MC->pseudo step in `OpcodeMap::canonicalize`, so a
+    // single entry per variant covers every AMDGPU generation back to
+    // gfx6.  Writes SCC only — no scalar destination register — which
+    // matches the SOPC compare shape already implemented alongside in
+    // handle_sopc.cpp.
+    E(S_BITCMP0_B32, S_BITCMP0_B32),
+    E(S_BITCMP1_B32, S_BITCMP1_B32),
+    E(S_BITCMP0_B64, S_BITCMP0_B64),
+    E(S_BITCMP1_B64, S_BITCMP1_B64),
     // S_CMOV uses [SCC] but does not write SCC, and has no _e64 form
     // (SOP1 has only one encoding). The B64 alias is included even
     // though the corpus first surfaced only the B32 form, because

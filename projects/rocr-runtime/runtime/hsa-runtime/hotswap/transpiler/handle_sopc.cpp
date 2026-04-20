@@ -59,6 +59,61 @@ HandlerResult handleSOPC(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
+  // SOPC bit-test family (SOPInstructions.td:1411-1414; gfx6+).
+  // Shape per the GCN3/RDNA/CDNA ISA references
+  // (e.g. RDNA3 ISA ref §4.3.2 "Scalar ALU Operations"):
+  //
+  //   S_BITCMP0_B32  SCC = (src0 & (1u  << (src1 & 0x1F))) == 0
+  //   S_BITCMP1_B32  SCC = (src0 & (1u  << (src1 & 0x1F))) != 0
+  //   S_BITCMP0_B64  SCC = (src0 & (1ul << (src1 & 0x3F))) == 0
+  //   S_BITCMP1_B64  SCC = (src0 & (1ul << (src1 & 0x3F))) != 0
+  //
+  // We mask src1 explicitly (rather than relying on shift-wraparound
+  // behaviour) so that the IR matches the hardware invariant
+  // bit-exactly on every generation — `shl i32 _, N` for N>=32 and
+  // `shl i64 _, N` for N>=64 are UB in LLVM IR, and a corpus kernel
+  // that feeds an SGPR with garbage in the high bits would otherwise
+  // lift to poison under LLVM's IR rules while the hardware produces
+  // a well-defined SCC.
+  //
+  // Both _0 and _1 variants share the shift-and-mask chain; only the
+  // final icmp predicate differs.  A single classifier keeps the
+  // parity with the SOPC compare family above (`S_CMP_*`) and makes
+  // the four opcodes share exactly one code path.
+  {
+    bool is64 = (sop == SemOp::S_BITCMP0_B64 || sop == SemOp::S_BITCMP1_B64);
+    bool isB32 = (sop == SemOp::S_BITCMP0_B32 || sop == SemOp::S_BITCMP1_B32);
+    if (is64 || isB32) {
+      Value *src0 = is64 ? op.src64(0) : op.src(0);
+      Type *intTy = is64 ? ctx.i64Ty : ctx.i32Ty;
+      uint64_t mask = is64 ? 0x3F : 0x1F;
+
+      // Shift amount: src1 is always an SReg_32; mask to 5/6 bits and
+      // widen to the src0 width before shifting to keep `shl` in
+      // range.
+      Value *shamt = op.src(1);
+      if (shamt->getType() != ctx.i32Ty)
+        shamt = ctx.B.CreateBitOrPointerCast(shamt, ctx.i32Ty);
+      shamt = ctx.B.CreateAnd(shamt, ConstantInt::get(ctx.i32Ty, mask),
+                              "bitcmp_shamt");
+      if (is64) shamt = ctx.B.CreateZExt(shamt, ctx.i64Ty, "bitcmp_shamt64");
+
+      Value *bit = ctx.B.CreateShl(ConstantInt::get(intTy, 1), shamt,
+                                    "bitcmp_bit");
+      Value *masked = ctx.B.CreateAnd(src0, bit, "bitcmp_mask");
+      Value *zero = ConstantInt::get(intTy, 0);
+      bool isZeroPred =
+          (sop == SemOp::S_BITCMP0_B32 || sop == SemOp::S_BITCMP0_B64);
+      Value *scc = isZeroPred
+                       ? ctx.B.CreateICmpEQ(masked, zero, "bitcmp0")
+                       : ctx.B.CreateICmpNE(masked, zero, "bitcmp1");
+      ctx.regs.storeSCC(ctx.B, scc);
+      hr.sccHandled = true;
+      hr.handled = true;
+      return hr;
+    }
+  }
+
   Value *src0 = op.src(0);
   Value *src1 = op.src(1);
   Value *cmp = nullptr;
