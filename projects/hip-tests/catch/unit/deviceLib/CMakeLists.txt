@@ -42,8 +42,6 @@ set(TEST_SRC
     hipTestDeviceDouble.cc
     hipTestHost.cc
     hadd.cc
-    bfloat16_atomic_test.cc
-    fp16_atomic_test.cc
 )
 if(HIP_PLATFORM MATCHES "nvidia")
   set_source_files_properties(hipTestHost.cc PROPERTIES COMPILE_OPTIONS "--expt-relaxed-constexpr")
@@ -75,6 +73,8 @@ set(AMD_TEST_SRC
     fp6_ocp.cc
     fp4_ocp.cc
     memcpy_async.cc
+    bfloat16_atomic_test.cc
+    fp16_atomic_test.cc
 )
 
 set(AMD_ARCH_SPEC_TEST_SRC
