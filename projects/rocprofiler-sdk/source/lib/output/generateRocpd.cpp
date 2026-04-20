@@ -67,6 +67,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -1587,16 +1588,22 @@ write_rocpd(
                     const auto& info        = record.dispatch_data.dispatch_info;
                     auto        dispatch_id = info.dispatch_id;
 
-                    auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                    auto evt_id           = dispatch_evt_ids.at(dispatch_id);
+                    auto counter_id_value = std::map<uint64_t, double>{};
                     for(const auto& count : record.read())
+                    {
+                        counter_id_value[count.id.handle] += count.value;
+                    }
+
+                    for(const auto& [pmc_id, value] : counter_id_value)
                     {
                         get_insert_statement(db,
                                              "rocpd_pmc_event{{uuid}}",
                                              {
                                                  insert_value("id", idx++),
                                                  insert_value("event_id", evt_id),
-                                                 insert_value("pmc_id", count.id.handle),
-                                                 insert_value("value", count.value),
+                                                 insert_value("pmc_id", pmc_id),
+                                                 insert_value("value", value),
                                              });
                     }
                 }
