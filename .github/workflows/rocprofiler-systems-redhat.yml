@@ -188,6 +188,9 @@ jobs:
       run: |
         set -v
         source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        # System python on RHEL 8 is 3.6, which does not work with test suite
+        export PYTHON_EXECUTABLE=/opt/conda/envs/py3.8/bin/python
+        export PATH=/opt/conda/envs/py3.8/bin:${PATH}
         ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1
 
     - name: Test User API
