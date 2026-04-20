@@ -75,7 +75,15 @@ enum class WMMAInputType {
 /// the whole-wave-mode wrapper, which forces EXEC = -1 across the
 /// collective so every lane's MFMA input / MFMA output / collected
 /// result VGPR is written and subsequent cross-lane reads see fresh
-/// data rather than stale / poison bits.
+/// data rather than stale / poison bits. We emit the WWM marker as
+/// eight `strict.wwm.i32` calls (one per result dword), NOT one
+/// `strict.wwm.v8i32` call on the packed vector: the backend's
+/// `SIPreAllocateWWMRegs` pass reserves an aligned physical VGPR
+/// per WWM virtual register, and a `<8 x i32>` WWM operand cannot
+/// always be satisfied (`physreg not found for WWM expression`
+/// llvm_unreachable) in WMMA-heavy kernels. Per-dword wrapping
+/// only needs single-VGPR slots. See the "Whole-wave mode" header
+/// in wmma_lowering.cpp for the full argument.
 ///
 /// Source fragment shapes (Wave32, 8 VGPRs per side either way):
 ///   16-bit (F16 / BF16):  A/B = <16 x {half|bfloat}> per lane

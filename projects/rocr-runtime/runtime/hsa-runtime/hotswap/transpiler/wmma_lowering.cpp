@@ -146,6 +146,22 @@
 // writes to the WMMA destination VGPRs — which is exactly the
 // semantics of the source Wave32 WMMA.
 //
+// We emit the WWM marker per dword (8× `strict.wwm.i32` on the 8
+// result VGPRs), NOT once on a packed `<8 x i32>`.  Register-allocator
+// scalability: `SIPreAllocateWWMRegs` reserves a dedicated physical
+// VGPR per WWM virtual register, and a `<8 x i32>` WWM operand would
+// need an 8-VGPR aligned physreg that is free of interference with
+// all concurrently-live intervals.  In non-trivial WMMA-heavy
+// kernels (e.g. a 128×128 f16 matmul tile) no such aligned block
+// exists and the allocator aborts via the `physreg not found for
+// WWM expression` llvm_unreachable in SIPreAllocateWWMRegs.cpp.
+// Eight single-VGPR WWM operands only need eight independent
+// 1-VGPR slots, which are always findable, and the backend
+// coalesces back-to-back WWM regions with no intervening
+// EXEC-dependent code so the emitted machine code is typically the
+// same single `s_or_saveexec` / `s_mov_b64 exec, saved` bracket
+// either way.
+//
 // `mbcnt_lo/hi` with mask=-1 stays outside the WWM region: it takes
 // an explicit lane mask operand and ignores EXEC, so its per-lane
 // result (0..63) is correct under either EXEC setting.
@@ -185,28 +201,33 @@ static Value *wrapStrictWWM(IRBuilder<> &B, Module &M, Value *val) {
   return B.CreateCall(fn, {val}, "wwm");
 }
 
-/// Pack an array of 8 i32 dwords into `<8 x i32>`, wrap that single
-/// vector in `@llvm.amdgcn.strict.wwm`, and unpack back to individual
-/// dwords.
+/// Wrap each of the 8 result dwords in its own
+/// `@llvm.amdgcn.strict.wwm.i32` call.
 ///
-/// One vector-grained wwm marker is intentional. Wrapping each of the
-/// 8 dwords in its own `strict.wwm` call would let the backend split
-/// them across eight independent WWM regions — with redundant
-/// EXEC-save / restore sequences and (worse) the risk of duplicated
-/// cross-lane work feeding each region separately. Packing into a
-/// single vector gives the backend exactly one "WWM ends here" marker
-/// for the whole group pass, so the redistribute → MFMA → collect
-/// def-chain coalesces into ONE region bracketed by a single
-/// `s_or_saveexec` / `s_mov_b64 exec, saved` pair.
-static void wwmWrap8Dwords(IRBuilder<> &B, Module &M, Type *i32Ty,
+/// Per-dword wrapping (vs. a single `<8 x i32>` marker) is deliberate.
+/// `SIPreAllocateWWMRegs` allocates a dedicated physical VGPR for each
+/// virtual register that becomes a WWM operand. A `<8 x i32>` WWM
+/// operand requires an 8-VGPR aligned physreg that is simultaneously
+/// unused and free of interference with other live intervals. In
+/// non-trivial kernels (e.g. a 128×128 f16 matmul tile chaining many
+/// WMMAs across a large accumulator residency) there is no such
+/// 8-VGPR block available, and the allocator aborts via the
+/// `physreg not found for WWM expression` llvm_unreachable in
+/// `SIPreAllocateWWMRegs.cpp`. Splitting into 8 i32-grained WWM
+/// operands only needs 8 independent single-VGPR slots — which are
+/// always findable — and preserves the semantic we care about: every
+/// dword carrying redistribute → MFMA → collect output is produced
+/// under WWM so lanes 32-63 execute it even on a partial-wave launch.
+///
+/// The backend is free to coalesce the 8 adjacent WWM regions into a
+/// single `s_or_saveexec` / `s_mov_b64 exec, saved` bracket when the
+/// regions are back-to-back with no EXEC-dependent code between them,
+/// so the emitted machine code is typically identical to the
+/// single-vector version while remaining register-allocatable.
+static void wwmWrap8Dwords(IRBuilder<> &B, Module &M, Type * /*i32Ty*/,
                             Value **dwords) {
-  auto *vecTy = FixedVectorType::get(i32Ty, 8);
-  Value *packed = PoisonValue::get(vecTy);
   for (unsigned i = 0; i < 8; ++i)
-    packed = B.CreateInsertElement(packed, dwords[i], i, "wwm_pack");
-  Value *wwm = wrapStrictWWM(B, M, packed);
-  for (unsigned i = 0; i < 8; ++i)
-    dwords[i] = B.CreateExtractElement(wwm, i, "wwm_unpack");
+    dwords[i] = wrapStrictWWM(B, M, dwords[i]);
 }
 
 static Value *emitLaneId(IRBuilder<> &B, Module &M, Type *i32Ty) {

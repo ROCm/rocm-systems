@@ -37,16 +37,19 @@
 ;      match — same pack type as the FP8/BF8 siblings, divergent
 ;      only in the dispatched intrinsic name.
 ;
-;   5. Each Wave32 group pass is wrapped in ONE
-;      `@llvm.amdgcn.strict.wwm.v8i32` call fencing the whole
-;      redistribute -> MFMA1 -> MFMA2 -> collect chain in
-;      Whole-Wave Mode, so lanes 32-63 execute the lower-half
-;      group even when the kernel is launched at blockDim == 32
-;      (partial-wave Wave32 launch on gfx942 Wave64). Same WWM
-;      pattern as the f32-acc siblings — the WWM vector type
-;      stays `<8 x i32>` regardless of the accumulator element
-;      type (the fence is over per-lane dword packing, NOT over
-;      the accumulator itself).
+;   5. Each Wave32 group pass is wrapped in EIGHT
+;      `@llvm.amdgcn.strict.wwm.i32` calls — one per result
+;      dword — fencing the redistribute -> MFMA1 -> MFMA2 -> collect
+;      chain in Whole-Wave Mode, so lanes 32-63 execute the
+;      lower-half group even when the kernel is launched at
+;      blockDim == 32 (partial-wave Wave32 launch on gfx942 Wave64).
+;      Same WWM pattern as the f32-acc siblings — the per-dword
+;      i32 shape is independent of the accumulator element type
+;      (the fence is over per-lane dword packing, NOT over the
+;      accumulator itself). Per-dword rather than
+;      `strict.wwm.v8i32` on the packed vector because
+;      `SIPreAllocateWWMRegs` cannot always find an 8-VGPR aligned
+;      physreg in WMMA-heavy kernels.
 ;
 ; NEGATIVE PINS:
 ;
@@ -72,15 +75,20 @@
 ; First group pass:
 ; CHECK: %mfma1 = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %{{[^,]+}}, i32 0, i32 0, i32 0)
 ; CHECK: %mfma2 = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %mfma1, i32 0, i32 0, i32 0)
-; CHECK: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(<8 x i32> %{{[^)]+}})
+; First group's 8 per-dword WWM markers.
+; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
 
 ; Second group pass (lane indices 32..63):
 ; CHECK: %mfma1{{[0-9]+}} = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %{{[^,]+}}, i32 0, i32 0, i32 0)
 ; CHECK: %mfma2{{[0-9]+}} = call <4 x i32> @llvm.amdgcn.mfma.i32.16x16x32.i8(i64 %{{[^,]+}}, i64 %{{[^,]+}}, <4 x i32> %mfma1{{[0-9]+}}, i32 0, i32 0, i32 0)
-; CHECK: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(<8 x i32> %{{[^)]+}})
+; Second group's 8 per-dword WWM markers.
+; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
 
-; Exactly 2 strict.wwm fences (one per Wave32 virtual group).
-; CHECK-NOT: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(
+; Exactly 16 strict.wwm.i32 calls total (2 groups × 8 dwords); no
+; more after the per-group markers above, and no vector-typed
+; markers anywhere in the kernel.
+; CHECK-NOT: call i32 @llvm.amdgcn.strict.wwm.i32(
+; CHECK-NOT: call {{.*}} @llvm.amdgcn.strict.wwm.v8i32(
 
 ; Negative pin: NO f32-accumulator MFMA in this kernel. A regression
 ; that routed IU8 through the f32-accumulator switch arm would

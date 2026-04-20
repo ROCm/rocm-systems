@@ -65,16 +65,19 @@
 ;      per-Wave32-lane fragment via the shared `redistributeAcc`
 ;      path.
 ;
-;   5. Each Wave32 group pass is wrapped in ONE
-;      `@llvm.amdgcn.strict.wwm.v8i32` call that packs the 8
-;      result dwords into a single `<8 x i32>` vector and fences
-;      the entire redistribute -> MFMA -> collect chain in
-;      Whole-Wave Mode. This guarantees all 64 W64 lanes execute
-;      the MFMA pipeline regardless of the caller's EXEC mask,
-;      so partial-wave Wave32 launches (blockDim == 32) do not
-;      leave lanes 32-63 inactive and feed garbage into MFMA
+;   5. Each Wave32 group pass is wrapped in EIGHT
+;      `@llvm.amdgcn.strict.wwm.i32` calls — one per result
+;      dword — fencing the entire redistribute -> MFMA -> collect
+;      chain in Whole-Wave Mode. This guarantees all 64 W64 lanes
+;      execute the MFMA pipeline regardless of the caller's EXEC
+;      mask, so partial-wave Wave32 launches (blockDim == 32) do
+;      not leave lanes 32-63 inactive and feed garbage into MFMA
 ;      (see "Whole-wave mode" section in wmma_lowering.cpp /
-;      .hpp for the full correctness argument).
+;      .hpp for the full correctness argument). Per-dword (not
+;      `strict.wwm.v8i32` on the packed vector) because the
+;      backend's `SIPreAllocateWWMRegs` pass cannot always find
+;      an 8-VGPR aligned physreg for a vector WWM operand in
+;      WMMA-heavy kernels.
 ;
 ; NEGATIVE PINS:
 ;
@@ -88,10 +91,9 @@
 ;     the K=4 SemOp fell through to the K=32/K=64 path.
 ;   * Exactly 2 `mfma.f32.16x16x4f32` calls (not 4) — the K=4
 ;     decomposition is 1 MFMA per Wave32 virtual group.
-;   * Exactly 2 `@llvm.amdgcn.strict.wwm.v8i32` calls (one per
-;     Wave32 virtual group). Any other count would mean the WWM
-;     fencing is not per-group (too few) or got duplicated / is
-;     wrapping per-dword rather than per-group (too many).
+;   * Exactly 16 `@llvm.amdgcn.strict.wwm.i32` calls (8 result
+;     dwords × 2 Wave32 virtual groups). Any other count would
+;     indicate an incorrect WWM-wrap count.
 
 ; CHECK-LABEL: define amdgpu_kernel void @wmma_f32_16x16x4_f32_kernel(
 
@@ -100,26 +102,30 @@
 ; for the accumulator. Pin that shape explicitly.
 ; CHECK: %mfma = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(float %{{[^,]+}}, float %{{[^,]+}}, <4 x float> %{{[^,]+}}, i32 0, i32 0, i32 0)
 
-; The first group's 8 result dwords are packed into a single
-; `<8 x i32>` and handed to `@llvm.amdgcn.strict.wwm` so the
-; whole redistribute -> MFMA -> collect chain runs in WWM.
-; CHECK: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(<8 x i32> %{{[^)]+}})
+; The first group's 8 result dwords are each wrapped in their own
+; `@llvm.amdgcn.strict.wwm.i32` call. Per-dword (not vector-packed)
+; so `SIPreAllocateWWMRegs` sees single-VGPR operands and never
+; runs out of aligned physregs.
+; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
 
 ; Second group pass (Wave32 group 1: W64 lanes 32-63). LLVM
 ; uniquifies the value name because `%mfma` is in use, so we
 ; allow any integer suffix.
 ; CHECK: %mfma{{[0-9]+}} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(float %{{[^,]+}}, float %{{[^,]+}}, <4 x float> %{{[^,]+}}, i32 0, i32 0, i32 0)
 
-; Second group's WWM fence (same <8 x i32> shape).
-; CHECK: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(<8 x i32> %{{[^)]+}})
+; Second group's 8 per-dword WWM markers.
+; CHECK-COUNT-8: call i32 @llvm.amdgcn.strict.wwm.i32(i32 %{{[^)]+}})
 
 ; Exactly 2 MFMA calls (one per Wave32 virtual group) — NOT 4.
 ; Anchored AFTER the per-group positive checks above, so any extra
 ; call would surface here as an unexpected match.
 ; CHECK-NOT: call <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32(
 
-; Exactly 2 strict.wwm calls (one per Wave32 virtual group).
-; CHECK-NOT: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(
+; Exactly 16 strict.wwm.i32 calls (8 result dwords × 2 groups);
+; no more after the per-group markers above, and no vector-typed
+; wwm markers anywhere in the kernel.
+; CHECK-NOT: call i32 @llvm.amdgcn.strict.wwm.i32(
+; CHECK-NOT: call {{.*}} @llvm.amdgcn.strict.wwm.v8i32(
 
 ; Negative: no native gfx1250 WMMA intrinsic (we are on gfx942).
 ; CHECK-NOT: @llvm.amdgcn.wmma.f32.16x16x4.f32
