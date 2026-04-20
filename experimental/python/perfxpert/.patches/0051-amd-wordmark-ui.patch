@@ -3,16 +3,16 @@ diff --git a/packages/opencode/src/cli/ui.ts b/packages/opencode/src/cli/ui.ts
 +++ b/packages/opencode/src/cli/ui.ts
 @@ -4,10 +4,10 @@ import { NamedError } from "@opencode-ai/shared/util/error"
  import { logo as glyphs } from "./logo"
- 
+
  const wordmark = [
 -  `⠀                                ▄     `,
 -  `█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█`,
 -  `█  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀`,
 -  `▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀`,
 +  `                                            `,
-+  `█▀▀█ █▀▀█ █▀▀█ █▀▀▀ █  █ █▀▀█ █▀▀█ █▀▀█ ▀▀▀▀`,
-+  `█▀▀█ █▀▀  █▀▀█ █▀▀  ▀██▀ █▀▀█ █▀▀  █▀▀█  ██ `,
-+  `█    ▀▀▀▀ ▀  ▀ ▀    █  █ █    ▀▀▀▀ ▀  ▀   █ `,
++  `█▀▀█ █▀▀█ █▀▀▀ █▀▀▀ █  █ █▀▀█ █▀▀█ █▀▀▀ ▀█▀▀`,
++  `█▀▀█ █▀▀▀ █    █▀▀   ██  █▀▀█ █▀▀▀ █     █  `,
++  `█    ▀▀▀▀ ▀    ▀    █  █ █    ▀▀▀▀ ▀     ▀  `,
  ]
- 
+
  // AMD ROCm PerfXpert footer — surfaced by the perfxpert-code wrapper's
