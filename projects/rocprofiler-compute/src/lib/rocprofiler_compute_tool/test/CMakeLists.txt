@@ -10,13 +10,14 @@ add_executable(${target}
     mocks.h
     mocks.cpp
     main.cpp
- "test_sdk_callbacks.h")
+    test_sdk_callbacks.h
+)
 
-target_link_libraries(${target} PRIVATE 
+
+target_link_libraries(${target} PRIVATE
     rocprofiler-compute-tool
     gtest_main
     gmock
     gsl_assert
     fmt::fmt
 )
-

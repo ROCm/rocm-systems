@@ -8,12 +8,12 @@ add_library(${target} SHARED
     counters_writer.cpp
     sdk_callbacks.h
     sdk_callbacks.cpp
-    
     input_parameters.h
     input_parameters.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
- "counters_writer.h")
+    counters_writer.h
+)
 
 target_include_directories(${target} PUBLIC .)
 target_link_libraries(${target} PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert)
