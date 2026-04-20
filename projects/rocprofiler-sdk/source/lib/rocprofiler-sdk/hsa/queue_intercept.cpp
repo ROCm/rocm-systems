@@ -88,6 +88,32 @@ unregister_doorbell(hsa_signal_t doorbell)
     get_doorbell_map().wlock([&](auto& doorbell_map) { doorbell_map.erase(doorbell.handle); });
 }
 
+uint64_t
+add_write_index_impl(QueueState* state, uint64_t value)
+{
+    return state->virtual_wptr.fetch_add(value, std::memory_order_relaxed);
+}
+
+void
+store_write_index_impl(QueueState* state, uint64_t value)
+{
+    state->virtual_wptr.store(value, std::memory_order_relaxed);
+}
+
+uint64_t
+cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value)
+{
+    uint64_t prev = expected;
+    state->virtual_wptr.compare_exchange_strong(prev, value, std::memory_order_relaxed);
+    return prev;
+}
+
+uint64_t
+load_write_index_impl(const QueueState* state)
+{
+    return state->virtual_wptr.load(std::memory_order_relaxed);
+}
+
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -119,6 +119,52 @@ TEST(QueueIntercept, DoorbellMapInsertAndLookup)
     get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
 }
 
+TEST(QueueIntercept, AddWriteIndexAdvancesVirtualWptr)
+{
+    QueueState state{};
+    uint64_t   idx0 = add_write_index_impl(&state, 1);
+    EXPECT_EQ(idx0, 0u);
+    EXPECT_EQ(state.virtual_wptr.load(), 1u);
+
+    uint64_t idx1 = add_write_index_impl(&state, 3);
+    EXPECT_EQ(idx1, 1u);
+    EXPECT_EQ(state.virtual_wptr.load(), 4u);
+}
+
+TEST(QueueIntercept, StoreWriteIndexSetsVirtualWptr)
+{
+    QueueState state{};
+    store_write_index_impl(&state, 42);
+    EXPECT_EQ(state.virtual_wptr.load(), 42u);
+    store_write_index_impl(&state, 0);
+    EXPECT_EQ(state.virtual_wptr.load(), 0u);
+}
+
+TEST(QueueIntercept, CasWriteIndexSuccess)
+{
+    QueueState state{};
+    state.virtual_wptr.store(10);
+    uint64_t prev = cas_write_index_impl(&state, 10, 20);
+    EXPECT_EQ(prev, 10u);
+    EXPECT_EQ(state.virtual_wptr.load(), 20u);
+}
+
+TEST(QueueIntercept, CasWriteIndexFailure)
+{
+    QueueState state{};
+    state.virtual_wptr.store(10);
+    uint64_t prev = cas_write_index_impl(&state, 5, 20);
+    EXPECT_EQ(prev, 10u);
+    EXPECT_EQ(state.virtual_wptr.load(), 10u);
+}
+
+TEST(QueueIntercept, LoadWriteIndexReturnsVirtualWptr)
+{
+    QueueState state{};
+    state.virtual_wptr.store(99);
+    EXPECT_EQ(load_write_index_impl(&state), 99u);
+}
+
 }  // namespace
 }  // namespace queue_intercept
 }  // namespace hsa
