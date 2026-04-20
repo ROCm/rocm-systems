@@ -22,40 +22,26 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine PROFILE
-#cmakedefine BUILD_DEBUG_TRACE_HOST
-#cmakedefine BUILD_DEBUG_TRACE_DEVICE
-#cmakedefine BUILD_DEBUG_DEVICE
-#cmakedefine USE_RO
-#cmakedefine USE_IPC
-#cmakedefine USE_GDA
-#cmakedefine USE_THREADS
-#cmakedefine USE_SHARED_CTX
-#cmakedefine USE_WF_COAL
-#cmakedefine USE_HEAP_DEVICE_FINEGRAIN
-#cmakedefine USE_HEAP_DEVICE_UNCACHED
-#cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
-#cmakedefine USE_HEAP_DEVICE_VMM_POSIX
-#cmakedefine USE_HEAP_DEVICE_VMM_FABRIC
-#cmakedefine HAVE_AMDSMI_GPU_FABRIC_INFO
-#cmakedefine USE_FUNC_CALL
-#cmakedefine USE_SINGLE_NODE
-#cmakedefine USE_HDP_FLUSH
-#cmakedefine USE_HDP_FLUSH_HOST_SIDE
-#cmakedefine GDA_IONIC
-#cmakedefine GDA_BNXT
-#cmakedefine GDA_MLX5
-#cmakedefine HAVE_EXTERNAL_MPI
-#cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
+#ifndef _LIBRARY_INFO_TESTER_HPP
+#define _LIBRARY_INFO_TESTER_HPP
 
-#define ROCSHMEM_VENDOR_MAJOR_VERSION @PROJECT_VERSION_MAJOR@
-#define ROCSHMEM_VENDOR_MINOR_VERSION @PROJECT_VERSION_MINOR@
-#define ROCSHMEM_VENDOR_PATCH_VERSION @PROJECT_VERSION_PATCH@
-#define ROCSHMEM_VERSION              "@PROJECT_VERSION@"
+#include "tester.hpp"
 
-#define ROCSHMEM_VENDOR_STRING   "@ROCSHMEM_VENDOR_STRING@"
+/******************************************************************************
+ * HOST TESTER CLASS
+ *****************************************************************************/
+class LibraryInfoTester : public Tester {
+ public:
+  explicit LibraryInfoTester(TesterArguments args);
+  virtual ~LibraryInfoTester();
 
-#define ROCSHMEM_GIT_HASH        "@ROCSHMEM_GIT_HASH@"
-#define ROCSHMEM_INSTALL_PREFIX  "@CMAKE_INSTALL_PREFIX@"
-#define ROCSHMEM_OFFLOAD_TARGETS "@ROCSHMEM_OFFLOAD_TARGETS@"
-#define ROCSHMEM_BUILD_TYPE      "@CMAKE_BUILD_TYPE@"
+ protected:
+  virtual void resetBuffers(size_t size) override;
+
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                            size_t size) override;
+
+  virtual void verifyResults(size_t size) override;
+};
+
+#endif  // _LIBRARY_INFO_TESTER_HPP
