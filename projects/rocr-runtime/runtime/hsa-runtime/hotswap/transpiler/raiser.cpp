@@ -471,7 +471,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
     auto bbIt = offsetToBB.find(di.offset);
     if (bbIt != offsetToBB.end() && bbIt->second != B.GetInsertBlock()) {
       BasicBlock *insertBB = B.GetInsertBlock();
-      if (insertBB->empty() || !insertBB->getTerminator())
+      if (!insertBB->hasTerminator())
         B.CreateBr(bbIt->second);
       B.SetInsertPoint(bbIt->second);
       // LLVM's AMDGPULowerVGPREncoding pass resets VGPR MSB mode at every
@@ -640,7 +640,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
 
   // Ensure all BBs have terminators
   for (auto &BB : *F) {
-    if (BB.empty() || !BB.getTerminator()) {
+    if (!BB.hasTerminator()) {
       B.SetInsertPoint(&BB);
       B.CreateUnreachable();
     }

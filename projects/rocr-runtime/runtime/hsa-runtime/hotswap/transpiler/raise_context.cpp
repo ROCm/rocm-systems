@@ -596,7 +596,7 @@ void RaiseContext::emitUnderExec(llvm::function_ref<void()> body) {
   // ends its emission with an unconditional control-flow op (shouldn't
   // happen for the side-effectful ops we wrap, but defensively handled),
   // don't double-terminate doBB.
-  if (!B.GetInsertBlock()->getTerminator())
+  if (!B.GetInsertBlock()->hasTerminator())
     B.CreateBr(skipBB);
 
   B.SetInsertPoint(skipBB);
