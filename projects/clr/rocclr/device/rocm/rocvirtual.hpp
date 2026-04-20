@@ -560,6 +560,8 @@ class VirtualGPU : public device::VirtualDevice {
     return assigned_sdma_engine_ != 0;
   }
 
+  void* getOrCreateHostcallBuffer();
+
  private:
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
@@ -751,6 +753,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
+
+  void* hostcallBuffer_;  //!< Hostcall buffer
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };

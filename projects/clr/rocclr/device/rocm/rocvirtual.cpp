@@ -281,6 +281,14 @@ void Timestamp::checkGpuTime(ProfilingSignal* single_signal) {
 
     if (single_signal != nullptr) {
       process_signal(single_signal);
+      // Remove the signal from the list after extracting its timing.
+      // This prevents a stale entry when ActiveSignal() recycles and re-adds
+      // the same ProfilingSignal — without this, the recycled signal appears
+      // twice in signals_ and the first (stale) entry re-reads wrong HW timestamps.
+      auto it = std::find(signals_.begin(), signals_.end(), single_signal);
+      if (it != signals_.end()) {
+        signals_.erase(it);
+      }
     } else {
       for (auto it : signals_) {
         process_signal(it);
@@ -323,6 +331,16 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
   // Lock signal for accessing engine_ and flags_
   std::scoped_lock sig_lock(signal->LockSignalOps());
 
+  // Guard against invalid timestamps from GPU (e.g. HW didn't write start_ts/end_ts).
+  // TranslateTime returns 0 for these cases. Skip accumulation to avoid corrupting timing.
+  if (sig_start == 0 || sig_end == 0 || sig_end < sig_start) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_TS,
+            "Invalid signal timing: start=%lu, end=%lu, signal=0x%lx",
+            sig_start, sig_end, signal->signal_.handle);
+    signal->flags_.done_ = true;
+    return;
+  }
+
   // Update appropriate accumulators based on engine type
   if (IsSdmaEngine(signal->engine_)) {
     sdmaStart = std::min(sig_start, sdmaStart);
@@ -332,9 +350,11 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
     end = std::max(sig_end, end);
   }
 
-  // Handle AccumulateCommand timestamps
+  // Handle AccumulateCommand timestamps (convert ticks to system time)
   if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
-    static_cast<amd::AccumulateCommand&>(command()).addTimestamps(sig_start, sig_end);
+    static_cast<amd::AccumulateCommand&>(command()).addTimestamps(
+        static_cast<uint64_t>(sig_start * ticksToTime_),
+        static_cast<uint64_t>(sig_end * ticksToTime_));
   }
 
   signal->flags_.done_ = true;
@@ -1719,7 +1739,8 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       fence_state_(Device::CacheState::kCacheStateInvalid),
       fence_dirty_(false),
       dedicated_queue_(dedicated_queue),
-      schedulerQueueThreadRunning_(false) {
+      schedulerQueueThreadRunning_(false),
+      hostcallBuffer_(nullptr) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -1843,6 +1864,12 @@ VirtualGPU::~VirtualGPU() {
 
   if (gpu_queue_ != nullptr) {
     roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
+  }
+
+  if (hostcallBuffer_) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hostcall buffer %p", hostcallBuffer_);
+    amd::disableHostcalls(hostcallBuffer_);
+    roc_device_.svmFree(hostcallBuffer_);
   }
 }
 
@@ -3924,8 +3951,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       case amd::KernelParameterDescriptor::HiddenHostcallBuffer: {
         if (amd::IS_HIP) {
           if (dev().info().pcie_atomics_) {
-            uintptr_t buffer = reinterpret_cast<uintptr_t>(
-                roc_device_.getOrCreateHostcallBuffer(gpu_queue_, coopGroups, cuMask_));
+            uintptr_t buffer = reinterpret_cast<uintptr_t>(getOrCreateHostcallBuffer());
             if (!buffer) {
               LogError("Kernel expects a hostcall buffer, but none found");
               return false;
@@ -4537,6 +4563,44 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
     LogError("Unsupported performance counter state");
     vcmd.setStatus(CL_INVALID_OPERATION);
   }
+}
+
+// ================================================================================================
+void *VirtualGPU::getOrCreateHostcallBuffer() {
+  if (hostcallBuffer_ != nullptr) {
+    return hostcallBuffer_;
+  }
+
+  // The number of packets required in each buffer is at least equal to the
+  // maximum number of waves supported by the device.
+  auto wavesPerCu =
+      dev().info().maxThreadsPerCU_ / dev().info().wavefrontWidth_;
+  auto numPackets = dev().info().maxComputeUnits_ * wavesPerCu;
+
+  auto size = amd::getHostcallBufferSize(numPackets);
+  auto align = amd::getHostcallBufferAlignment();
+
+  hostcallBuffer_ = dev().hostAlloc(
+      size, align, Device::MemorySegment::kAtomics, nullptr, false);
+  if (!hostcallBuffer_) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create hostcall buffer");
+    return nullptr;
+  }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+          "Created hostcall buffer %p (numPackets == %d, size == %d, align == "
+          "%d) for virtual "
+          "queue %p\n",
+          hostcallBuffer_, numPackets, size, align, this);
+
+  if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to register hostcall buffer %p with listener",
+            hostcallBuffer_);
+    dev().svmFree(hostcallBuffer_);
+    return nullptr;
+  }
+  return hostcallBuffer_;
 }
 
 // ================================================================================================

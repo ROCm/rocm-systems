@@ -60,12 +60,13 @@ enum HIPAllocatorType {
   AllocatorTypeCoarsegrained = 0,
   AllocatorTypeFinegrained,
   AllocatorTypeUncached,
-  AllocatorTypeVMM,
+  AllocatorTypeVMMPosix,
+  AllocatorTypeVMMFabric,
   AllocatorTypeLast
 };
 
 #if HIP_VERSION >= 70000000
-struct hipIpcMemHandlePosix_t {
+struct HIPIpcMemHandlePosix_t {
   uint64_t fd;
   uint32_t pid;
   size_t size;
@@ -109,7 +110,7 @@ public:
   }
 
 protected:
-  std::vector<hipIpcMemHandlePosix_t> handle;
+  std::vector<HIPIpcMemHandlePosix_t> handle;
 
 };
 #endif
@@ -220,6 +221,74 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
 
  public:
   HIPAllocatorVMMPosixFd();
+
+  hipError_t GetIpcHandle(void *dev_ptr, void *handle) override;
+  hipError_t OpenIpcHandle(void **dev_ptr, void *handle) override;
+  hipError_t CloseIpcHandle(void *dev_ptr) override;
+  size_t GetIpcHandleSize() override;
+  HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
+  hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
+};
+
+// Forward declarations for fabric handle support (part of future HIP releases)
+#ifndef hipMemFabricHandle_t
+typedef uint64_t hipMemFabricHandle_t;
+#endif
+
+#ifndef hipMemHandleTypeFabric
+#define hipMemHandleTypeFabric (hipMemAllocationHandleType)3
+#endif
+
+#ifndef hipDeviceAttributeHandleTypeFabricSupported
+#define hipDeviceAttributeHandleTypeFabricSupported (hipDeviceAttribute_t)999
+#endif
+
+/**
+ * Fabric handle structure for IPC
+ */
+struct HIPIpcMemHandleFabric_t {
+  hipMemFabricHandle_t fabric_handle;
+  size_t size;
+  size_t offset;
+};
+
+/**
+ * IPC handle vector for fabric handles
+ */
+class HIPIpcHandleFabricVec : public HIPIpcHandleVec {
+public:
+  friend class HIPAllocatorVMMFabric;
+
+  HIPIpcHandleType GetIpcHandleType() override { return HandleTypeFabric; }
+
+  void* GetHandleVecElem(int elem) override
+  {
+    return reinterpret_cast<void*>(&this->handle[elem]);
+  }
+
+protected:
+  std::vector<HIPIpcMemHandleFabric_t> handle;
+};
+
+/**
+ * HIP VMM allocator using fabric handles for IPC
+ */
+class HIPAllocatorVMMFabric : public HIPAllocator {
+ private:
+  struct VMMFabricAllocationInfo {
+    hipMemGenericAllocationHandle_t handle;
+    size_t size;
+    uint64_t fabric_id;  // Fabric handle ID, 0 if not exported
+  };
+
+  static std::map<void*, VMMFabricAllocationInfo> allocations_;
+  static std::map<void*, VMMFabricAllocationInfo> imported_allocations_;
+
+  static hipError_t VMMAlloc(void** ptr, size_t size);
+  static hipError_t VMMFree(void* ptr);
+
+ public:
+  HIPAllocatorVMMFabric();
 
   hipError_t GetIpcHandle(void *dev_ptr, void *handle) override;
   hipError_t OpenIpcHandle(void **dev_ptr, void *handle) override;

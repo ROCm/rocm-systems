@@ -742,6 +742,14 @@ __host__ int rocshmem_ctx_double_prod_reduce(
 __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
 
 /**
+ * @brief kernel for performing a sync_all operation.
+ * Caller enqueues the kernel on given stream
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
+
+/**
  * @brief kernel for performing an alltoall collective operation.
  * Caller enqueues the kernel on given stream
  *

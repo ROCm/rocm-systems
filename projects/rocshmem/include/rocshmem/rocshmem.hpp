@@ -360,6 +360,15 @@ __host__ void rocshmem_ctx_quiet(rocshmem_ctx_t ctx);
 __host__ void rocshmem_quiet();
 
 /**
+ * @brief enqueues a quiet operation on given stream.
+ *
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_quiet_on_stream(hipStream_t stream);
+
+/**
  * @brief perform a collective barrier between all PEs in the system.
  * The caller is blocked until the barrier is resolved.
  *
@@ -373,6 +382,15 @@ __host__ void rocshmem_barrier_all();
  * @return void
  */
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a sync_all operation on given stream.
+ *
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
 
 /**
  * @brief enqueues an alltoall collective operation on given stream.
