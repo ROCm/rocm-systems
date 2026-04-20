@@ -54,8 +54,18 @@ _KNOWN_TOOLS: tuple[str, ...] = (
     "report",
     "analyze",
     "classify",
-    "run_root_analysis",
     "workflow_next_step",
+    # Agent tools — perfxpert/tools/agents/*.py, one per agent in the
+    # Root → Analysis → Recommendation → Correctness + 3 specialists
+    # hierarchy. Each is READ_ONLY and routes through build_session so
+    # the airgap + provider + fallback-chain semantics apply.
+    "agents_root_agent_root",
+    "agents_analysis_agent_analysis",
+    "agents_recommendation_agent_recommendation",
+    "agents_correctness_agent_correctness",
+    "agents_compute_agent_compute_specialist",
+    "agents_memory_agent_memory_specialist",
+    "agents_latency_agent_latency_specialist",
 )
 
 

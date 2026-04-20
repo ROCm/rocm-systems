@@ -14,10 +14,10 @@ standing up an MCP server.
 """
 
 from perfxpert.tools.agents.analysis import agent_analysis
-from perfxpert.tools.agents.compute_specialist import agent_compute_specialist
+from perfxpert.tools.agents.compute import agent_compute_specialist
 from perfxpert.tools.agents.correctness import agent_correctness
-from perfxpert.tools.agents.latency_specialist import agent_latency_specialist
-from perfxpert.tools.agents.memory_specialist import agent_memory_specialist
+from perfxpert.tools.agents.latency import agent_latency_specialist
+from perfxpert.tools.agents.memory import agent_memory_specialist
 from perfxpert.tools.agents.recommendation import agent_recommendation
 from perfxpert.tools.agents.root import agent_root
 

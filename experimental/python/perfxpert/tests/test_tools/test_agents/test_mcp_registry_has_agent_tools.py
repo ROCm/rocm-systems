@@ -22,9 +22,13 @@ _EXPECTED_AGENT_TOOLS = {
     "agents.analysis.agent_analysis",
     "agents.recommendation.agent_recommendation",
     "agents.correctness.agent_correctness",
-    "agents.compute_specialist.agent_compute_specialist",
-    "agents.memory_specialist.agent_memory_specialist",
-    "agents.latency_specialist.agent_latency_specialist",
+    # Specialist module filenames are shortened (``compute.py`` /
+    # ``memory.py`` / ``latency.py``) so the MCP wire names fit inside
+    # the 64-char cap Claude Code enforces; the function names keep the
+    # ``_specialist`` suffix for readability.
+    "agents.compute.agent_compute_specialist",
+    "agents.memory.agent_memory_specialist",
+    "agents.latency.agent_latency_specialist",
 }
 
 
