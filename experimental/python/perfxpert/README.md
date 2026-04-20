@@ -18,11 +18,39 @@ AI-powered AMD ROCm GPU trace analysis.
 ```bash
 # SKIP-SAMPLE — install from PyPI (when published)
 pip install "perfxpert[all]"
-
-# OR install the latest development build direct from GitHub:
-# SKIP-SAMPLE — install latest dev from source
-pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
 ```
+
+To install the latest development build direct from the rocm-systems
+monorepo on GitHub, use the wrapper script (~5 sec instead of
+~5 min — details below):
+
+```bash
+# SKIP-SAMPLE — first clone the repo (no recursive submodules), then run
+git clone --depth 1 --no-recurse-submodules https://github.com/ROCm/rocm-systems.git
+bash rocm-systems/experimental/python/perfxpert/scripts/pip-install-from-git.sh
+# Pass a ref / pip flags as positional args:
+#   scripts/pip-install-from-git.sh v0.2.0
+#   scripts/pip-install-from-git.sh <SHA> --user
+```
+
+Or invoke pip directly with the submodule-scope env vars set
+(equivalent to the wrapper, just verbose):
+
+```bash
+# SKIP-SAMPLE — pip directly, scoped submodule init
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0=submodule.active \
+GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode \
+  pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
+```
+
+The plain `pip install "perfxpert @ git+…"` one-liner still works but
+triggers pip's full recursive submodule init over the ~34 unrelated
+submodules declared at the rocm-systems repo root — 3-6 min of wasted
+network on stock `rocm/dev-ubuntu-22.04`. The wrapper script scopes
+the init down to just the opencode submodule perfxpert's build hook
+actually needs; see `docs/guides/getting-started.md` §1.2 for the
+measurements.
 
 `[all]` pulls in the optional LLM providers (anthropic, openai,
 claude-agent-sdk) plus rich for pretty terminal output.

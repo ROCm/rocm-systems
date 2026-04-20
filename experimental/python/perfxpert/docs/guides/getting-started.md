@@ -91,16 +91,73 @@ native backend CLIs and work anywhere.
 pip install -e "experimental/python/perfxpert[all]"
 ```
 
-…or pull the latest build straight from GitHub:
+…or pull the latest build straight from GitHub using the fast-install
+wrapper (see §1.2 for why):
 
 ```bash
-# SKIP-SAMPLE — install latest dev build from GitHub
-pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
+# SKIP-SAMPLE — clone root without recursing submodules, then run wrapper
+git clone --depth 1 --no-recurse-submodules https://github.com/ROCm/rocm-systems.git
+bash rocm-systems/experimental/python/perfxpert/scripts/pip-install-from-git.sh
 ```
 
 The `[all]` extra pulls in `anthropic`, `openai`, `rich`, and
 `litellm` so every LLM provider works out of the box. Omit it if you
-only want deterministic air-gap analysis.
+only want deterministic air-gap analysis (wrapper: pass
+`--extras ''` to skip extras entirely).
+
+### 1.2 Why the wrapper: scoped submodule init
+
+`pip install "perfxpert @ git+https://...rocm-systems.git#subdirectory=..."`
+triggers pip's built-in `git submodule update --init --recursive -q`
+on the cloned work-tree BEFORE the perfxpert build hook ever runs.
+The rocm-systems root `.gitmodules` declares ~34 submodules (mscclpp,
+perfetto, glog, fmt, gtest, dyninst, sqlite, …) shared by the other
+projects in the monorepo; pip dutifully fetches every one of them.
+PerfXpert itself only needs ONE of them — the `opencode` submodule at
+`experimental/python/perfxpert/opencode`, used by the build hook to
+compile the bundled AMD-branded opencode binary.
+
+Measured on a fast host against the live rocm-systems repo:
+
+| Step                                                  | Time      |
+|-------------------------------------------------------|-----------|
+| `git clone --filter=blob:none --depth 1` of rocm-systems | ~15 sec   |
+| `git submodule update --init --recursive -q` (pip default) | **141 sec** |
+| `git -c submodule.active=…/opencode submodule update --init --recursive -q` | **0.03 sec** |
+
+On stock `rocm/dev-ubuntu-22.04` with corporate-grade bandwidth the
+default step regularly runs 3-6 minutes — and the first 99% of that
+time is downloading dependencies of projects the PerfXpert wheel
+never touches.
+
+`scripts/pip-install-from-git.sh` wraps pip with these env vars set:
+
+```bash
+GIT_CONFIG_COUNT=1
+GIT_CONFIG_KEY_0=submodule.active
+GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode
+```
+
+pip uses `os.environ.copy()` when it spawns git subprocesses, so
+those env vars propagate into `git submodule update --init
+--recursive -q` and the `submodule.active` config restricts init to
+the single path listed. All other submodules stay at zero bytes on
+disk. Documented under `git-config(1) "GIT_CONFIG_COUNT"` and
+`gitmodules(5) "submodule.<name>.active"`.
+
+If the user insists on the plain one-liner without the wrapper, pip
+still works — they just pay the 3-6 min submodule-init penalty once.
+The `setup.py` build hook notices if the opencode submodule is still
+empty after pip's checkout (i.e. the user scoped submodule init out
+manually without including opencode) and falls back to a direct
+shallow clone of `sst/opencode` at the pinned tag — so the install
+always completes regardless of how the user configured git.
+
+Opt-outs:
+
+- `PERFXPERT_SKIP_OPENCODE_FETCH=1` — don't attempt the fallback
+  clone; air-gap CI that intentionally skips the bundled opencode
+  build should set this AND `PERFXPERT_SKIP_BUNDLED_BUILD=1`.
 
 ### What the build hook does
 
