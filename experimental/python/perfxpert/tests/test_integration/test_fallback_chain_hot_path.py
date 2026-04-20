@@ -192,7 +192,7 @@ def test_run_root_cascades_on_primary_rate_limit(
 
     seen_providers: List[str] = []
 
-    def fake_run_root(payload: Any, *, provider: str = "anthropic", airgap: Any = None) -> Any:
+    def fake_run_root(payload: Any, *, provider: str = "anthropic", airgap: Any = None, **_kw: Any) -> Any:
         seen_providers.append(provider)
         if provider == "openai":
             raise RuntimeError("framework: SDK failed: 429 rate limit")
@@ -221,7 +221,7 @@ def test_run_root_no_fallback_propagates_original_error() -> None:
         fallback_provider=None,
     )
 
-    def fake_run_root(payload: Any, *, provider: str = "anthropic", airgap: Any = None) -> Any:
+    def fake_run_root(payload: Any, *, provider: str = "anthropic", airgap: Any = None, **_kw: Any) -> Any:
         raise RuntimeError("429 rate limit")
 
     payload = schemas.RootInput(user_query="hi", provider="openai", airgap=False, session_id="sid")
@@ -251,7 +251,7 @@ def test_build_session_from_env_wires_fallback_through_run_root(
 
     seen: List[str] = []
 
-    def fake_run_root(payload: Any, *, provider: str = "anthropic", airgap: Any = None) -> Any:
+    def fake_run_root(payload: Any, *, provider: str = "anthropic", airgap: Any = None, **_kw: Any) -> Any:
         seen.append(provider)
         if provider == "openai":
             raise RuntimeError("429 Too Many Requests")

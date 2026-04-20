@@ -45,7 +45,7 @@ def test_cli_api_key_flag_overrides_env(monkeypatch, tmp_path):
 
     seen: dict = {}
 
-    def _capture_root(payload, provider="anthropic"):
+    def _capture_root(payload, provider="anthropic", **_kw):
         # Inside the cascade the env override is active; record what
         # the provider layer would read.
         seen["ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY")
@@ -236,7 +236,7 @@ def test_empty_llm_response_raises_fatal(monkeypatch, tmp_path):
     from perfxpert.agents import runtime as runtime_mod
     from perfxpert.agents import schemas
 
-    def _empty_root(payload, provider="anthropic"):
+    def _empty_root(payload, provider="anthropic", **_kw):
         return schemas.RootOutput(
             narrative="",
             recommendations=[],

@@ -319,10 +319,17 @@ class AnalysisSession:
     ) -> schemas.RootOutput:
         self._emit(progress_callback, "Routing your query (Root agent)")
         try:
+            # Forward the progress callback into root.run_root so the
+            # "Consulting <Agent>…" phase strings fire as Root delegates
+            # to the sub-agents. A per-call callback always wins over the
+            # session-level default.
+            cb = progress_callback if progress_callback is not None else self.progress_callback
             if self.airgap:
-                return root.run_root(payload, airgap=True)
+                return root.run_root(payload, airgap=True, progress_callback=cb)
             out = self._cascade(
-                lambda prov: root.run_root(payload, provider=prov),
+                lambda prov: root.run_root(
+                    payload, provider=prov, progress_callback=cb,
+                ),
                 op_name="run_root",
                 progress_callback=progress_callback,
             )
