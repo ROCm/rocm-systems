@@ -245,6 +245,77 @@ script itself (or the local AITER install) and the summary calls
 those out separately so they don't pollute the salmon-coverage
 signal.
 
+## Triaging a HANG / CRASH / FAIL
+
+When a run ends in a verdict other than `PASS` the stderr tail in
+the Failures section only shows the last 16KB — enough to see
+where the run was when it died, usually not enough to diff two
+full transcripts or to single-step the actual kernel.  Three
+flags are there to close that gap.
+
+### `--tee-stderr` — live child output
+
+```bash
+python3 runner.py --modes salmon ... --tee-stderr
+```
+
+Streams every child's stderr to the runner's stderr **as it's
+emitted**, prefixed with `[<script>::<mode>]` on each line so
+multi-script runs stay legible.  No more "blinking cursor for
+180s while salmon hangs" — you see the last `hotswap:
+LoadCodeObject ...` line land in your terminal and can Ctrl-C
+the runner the moment you have enough.  Adds zero overhead to a
+clean-pass run; the pump threads only ever read what the child
+already wrote.
+
+### `--log-dir DIR` — full per-run transcripts
+
+```bash
+python3 runner.py --modes native,legacy,salmon ... --log-dir _logs
+```
+
+Writes every child's **complete unbuffered stdout+stderr** to
+`<DIR>/<script>__<mode>__<YYYYMMDD-HHMMSS>.log`.  Each file has
+a short header with the exact `python -m _bootstrap` command
+used, the child cwd, and the start timestamp, and a footer with
+the return code + elapsed time + timed-out flag.  Ideal for
+diffing a hung salmon run against a clean legacy one:
+
+```bash
+diff -u _logs/test_moeTopkSoftmax.py__legacy__*.log \
+        _logs/test_moeTopkSoftmax.py__salmon__*.log \
+  | less
+```
+
+The first divergent line is almost always the `LoadCodeObject`
+call that tripped the bug.
+
+### `--print-command` — paste-ready reproduction
+
+```bash
+python3 runner.py --modes salmon ... --print-command > repro.sh
+```
+
+For every `(script, mode)` pair in the matrix, emits the exact
+env + argv the runner **would have** used, as a paste-ready bash
+block with every runner-specific env var `shlex.quote`d.
+Nothing is spawned; the runner exits 0.  Then you can wrap the
+child manually:
+
+```bash
+# Run under rocgdb
+bash repro.sh                                     # normal
+AMD_LOG_LEVEL=5 bash repro.sh                     # with HIP-side logs
+gdb --args $(tail -1 repro.sh | tr -d '()\\')     # under gdb
+strace -f -e trace=futex bash repro.sh            # to chase a hang
+```
+
+The printed block diffs the child env against the runner's own
+parent shell, so you only see the vars the runner actually
+added/changed; everything else (HOME, DISPLAY, PATH, ...) is
+inherited verbatim from your interactive environment, which
+matches what the runner itself does.
+
 ## Reference & isolation — what's actually being compared
 
 This section is non-optional reading.  AITER's op-tests use

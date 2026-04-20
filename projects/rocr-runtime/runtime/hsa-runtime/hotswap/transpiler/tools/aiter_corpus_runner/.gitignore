@@ -18,6 +18,14 @@ __pycache__/
 # Runtime / transient outputs
 out.json
 
+# Default home for --log-dir (Triaging-a-hang section in README).
+# Any path the user passes via --log-dir is likely to start with
+# ``_logs`` by convention; none of the log files belong in version
+# control.  Anything genuinely useful from a triage run should move
+# into a docs/ artefact instead.
+_logs/
+_logs_*/
+
 # Auto-cloned AITER checkout (pulled by `python3 runner.py --setup`;
 # see README).  We deliberately don't vendor it — --setup reclones on
 # demand and the upstream repo is the source of truth.

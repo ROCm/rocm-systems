@@ -51,9 +51,11 @@ import functools
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -470,6 +472,116 @@ def _tail(text: str, n: int = 16000) -> str:
     return "...[truncated]\n" + text[-n:]
 
 
+def _build_run_spec(
+    script: str,
+    mode: ModeSpec,
+    aiter_root: str,
+    triton_venv: str,
+    libsalmon: str,
+    libhsa: str,
+    libamdhip: str,
+    libarch_spoof: str,
+    spoof_arch: str,
+    native_gfx: str,
+    strict_tol: float,
+    perftest_iters: int,
+    jit_cache: str,
+    visible_devices: Optional[str],
+    script_args: List[str],
+    rng_seed: str,
+) -> tuple[List[str], Dict[str, str]]:
+    """Compute the argv + env for one (script, mode) run, without
+    actually spawning anything.  Factored out of ``_run_one`` so that
+    ``--print-command`` can emit a byte-identical reproduction recipe
+    for a user who wants to re-run the child manually under gdb /
+    strace / rocgdb / AMD_LOG_LEVEL=5, with zero risk of drift
+    between the printed command and the one the runner uses."""
+    env = _build_env(
+        mode, aiter_root, triton_venv, libsalmon, libhsa, libamdhip,
+        libarch_spoof, spoof_arch, native_gfx,
+        strict_tol, perftest_iters, jit_cache, visible_devices,
+        rng_seed,
+    )
+    env["AITER_CORPUS_SCRIPT"] = os.path.abspath(script)
+    # ``script_args`` is forwarded to the user op-test as if it had
+    # been invoked directly: ``python <script> arg1 arg2 ...``.  See
+    # _bootstrap._run_user_script for how this is reconstructed onto
+    # ``sys.argv``.  We use a shlex-quoted single-string envelope —
+    # POSIX env values cannot contain NUL bytes, and shlex round-trips
+    # cleanly for any whitespace / quoting an op-test arg might need.
+    if script_args:
+        env["AITER_CORPUS_SCRIPT_ARGS"] = shlex.join(script_args)
+    else:
+        env.pop("AITER_CORPUS_SCRIPT_ARGS", None)
+
+    python = os.path.join(triton_venv, "bin", "python")
+    if not os.path.exists(python):
+        raise RuntimeError(
+            f"venv python not found at {python}; "
+            f"override --triton-venv if your venv lives elsewhere"
+        )
+    cmd = [python, "-m", "_bootstrap"]
+    return cmd, env
+
+
+def _format_print_command(
+    script_label: str,
+    mode_name: str,
+    cmd: List[str],
+    env: Dict[str, str],
+    cwd: str,
+) -> str:
+    """Render (cmd, env) as a paste-ready multi-line shell command.
+    Only the env vars that *differ* from the parent runner's
+    environment are emitted — the parent env is inherited verbatim
+    via ``dict(os.environ)`` in ``_build_env`` anyway, so printing
+    every inherited DISPLAY / XDG_* / PATH would drown the actual
+    runner-specific variables.  We additionally *include* any
+    runner-specific variable that the parent happens to have set to
+    the same value (e.g. AITER_CORPUS_FORCE_GFX would be inherited
+    if the user set it manually), because those are load-bearing
+    for reproducibility and a reader shouldn't have to know which
+    env vars belong to which layer.
+
+    Returns a string ready for stdout.  Uses shlex.quote for every
+    value so it's safe to paste into bash even with shell
+    metacharacters.
+    """
+    runner_keys_prefixes = (
+        "AITER_", "HSA_", "HIP_", "GPU_ARCHS", "LD_PRELOAD",
+        "LD_LIBRARY_PATH", "PYTHONPATH", "MPLBACKEND",
+    )
+
+    def _is_runner_owned(k: str) -> bool:
+        if k == "GPU_ARCHS":
+            return True
+        return any(k.startswith(p) for p in runner_keys_prefixes)
+
+    parent = os.environ
+    interesting = {}
+    for k, v in env.items():
+        if _is_runner_owned(k) or parent.get(k) != v:
+            interesting[k] = v
+
+    lines = [
+        f"# aiter_corpus_runner :: script={script_label!r} mode={mode_name!r}",
+        f"#   — {len(interesting)} env var(s) different from the runner's "
+        f"parent shell; inherit everything else",
+        f"(cd {shlex.quote(cwd)} && \\",
+    ]
+    for k in sorted(interesting):
+        lines.append(f"  {k}={shlex.quote(interesting[k])} \\")
+    lines.append("  " + " ".join(shlex.quote(c) for c in cmd) + ")")
+    return "\n".join(lines)
+
+
+def _sanitize_log_component(s: str) -> str:
+    """Make a path component safe for log filenames — AITER scripts
+    can contain double underscores, nested dirs, unicode-shaped
+    labels, etc.  Collapse to ``[A-Za-z0-9._-]``."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("._-") or "unnamed"
+
+
 def _run_one(
     script: str,
     mode: ModeSpec,
@@ -488,35 +600,58 @@ def _run_one(
     visible_devices: Optional[str],
     script_args: List[str],
     rng_seed: str,
+    tee_stderr: bool,
+    log_dir: Optional[str],
+    script_label: str,
 ) -> RunResult:
-    """Spawn one child process for one (script, mode) and wait."""
-    env = _build_env(
-        mode, aiter_root, triton_venv, libsalmon, libhsa, libamdhip,
-        libarch_spoof, spoof_arch, native_gfx,
+    """Spawn one child process for one (script, mode) and wait.
+
+    Streams the child's stdout+stderr via threaded pumps instead of
+    ``proc.communicate()`` so we can tee to the parent terminal in
+    real time (``tee_stderr``) and write the full unbuffered stream
+    to a per-run log file (``log_dir``) without blowing memory or
+    risking the child blocking on a full pipe buffer.  The in-memory
+    tail we return in ``stderr_tail`` is kept bounded — see ``_tail``
+    for the cutoff."""
+    cmd, env = _build_run_spec(
+        script, mode, aiter_root, triton_venv, libsalmon, libhsa,
+        libamdhip, libarch_spoof, spoof_arch, native_gfx,
         strict_tol, perftest_iters, jit_cache, visible_devices,
-        rng_seed,
+        script_args, rng_seed,
     )
-    env["AITER_CORPUS_SCRIPT"] = os.path.abspath(script)
-    # ``script_args`` is forwarded to the user op-test as if it had
-    # been invoked directly: ``python <script> arg1 arg2 ...``.  See
-    # _bootstrap._run_user_script for how this is reconstructed onto
-    # ``sys.argv``.  We use a shlex-quoted single-string envelope —
-    # POSIX env values cannot contain NUL bytes, and shlex round-trips
-    # cleanly for any whitespace / quoting an op-test arg might need.
-    import shlex
-    if script_args:
-        env["AITER_CORPUS_SCRIPT_ARGS"] = shlex.join(script_args)
-    else:
-        env.pop("AITER_CORPUS_SCRIPT_ARGS", None)
 
-    python = os.path.join(triton_venv, "bin", "python")
-    if not os.path.exists(python):
-        raise RuntimeError(
-            f"venv python not found at {python}; "
-            f"override --triton-venv if your venv lives elsewhere"
+    # Per-run log file.  Open before spawn so a setup failure here
+    # (bad log-dir path, no disk space) raises before we've started
+    # anything expensive.  The filename is
+    # <script>__<mode>__<ts>__<pid>.log with all non-safe chars
+    # collapsed; PID suffix prevents collision between two
+    # same-mode runs that finish inside the same one-second
+    # ``%Y%m%d-%H%M%S`` bucket.  Timestamps are *local* time
+    # because the runner is serial (two consecutive log files
+    # from the same process sort the same regardless of TZ) and
+    # a local timestamp is easier to correlate against kernel
+    # logs / dmesg output during triage.
+    log_fh = None
+    log_path: Optional[str] = None
+    if log_dir is not None:
+        os.makedirs(log_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        fname = (
+            f"{_sanitize_log_component(script_label)}"
+            f"__{mode.name}__{ts}__pid{os.getpid()}.log"
         )
-
-    cmd = [python, "-m", "_bootstrap"]
+        log_path = os.path.join(log_dir, fname)
+        log_fh = open(log_path, "wb", buffering=0)
+        header = (
+            f"# aiter_corpus_runner log\n"
+            f"# script: {script}\n"
+            f"# mode:   {mode.name}\n"
+            f"# cmd:    {' '.join(shlex.quote(c) for c in cmd)}\n"
+            f"# cwd:    {HERE}\n"
+            f"# time:   {datetime.datetime.now().isoformat()}\n"
+            f"# ---- child stdout+stderr (interleaved) ----\n"
+        ).encode()
+        log_fh.write(header)
 
     t0 = time.monotonic()
     try:
@@ -531,6 +666,9 @@ def _run_one(
             start_new_session=True,
         )
     except OSError as e:
+        if log_fh is not None:
+            log_fh.write(f"spawn failed: {e}\n".encode())
+            log_fh.close()
         return RunResult(
             script=script, mode=mode.name,
             verdict="SPAWN_FAIL",
@@ -539,9 +677,157 @@ def _run_one(
             elapsed_s=0.0, stderr_tail="",
         )
 
+    # Pumps.  One thread per stream so a flood on one side (e.g.
+    # hipcc emitting MB of compile output on stdout) can't starve
+    # the other and mask a critical stderr line.  Each pump:
+    #   * drains its stream into an in-memory bytearray (stderr
+    #     only — the main-thread RunResult needs a tail of it),
+    #   * writes every chunk immediately to the log file (if any),
+    #   * writes stderr chunks immediately to sys.stderr.buffer
+    #     when tee_stderr is on — critically, with the same prefix
+    #     the per-run header announces, so multi-script runs can
+    #     still be told apart in the merged live stream.
+    #
+    # Two subtle things this code has to get right:
+    #
+    #   1. Line-accurate prefixing across chunk boundaries.
+    #      ``stream.read(4096)`` returns whatever the kernel has
+    #      buffered, which has zero relationship to '\n'
+    #      boundaries.  A naive ``chunk.splitlines()`` would
+    #      split child line ``"abcdef\n"`` arriving in chunks
+    #      ``b"abc"`` and ``b"def\n"`` into two prefixed lines
+    #      ``[pfx] abc`` and ``[pfx] def`` — a correctness bug
+    #      for any log consumer that searches by line.  We keep
+    #      a per-pump ``pending`` bytearray that holds the
+    #      trailing partial line across chunks, and only emit
+    #      complete (newline-terminated) lines.  On EOF we flush
+    #      any remaining partial as one last prefixed line.
+    #
+    #   2. Narrow exception handling.  The ``except Exception:
+    #      pass`` idiom is a rule violation (we're explicitly
+    #      asked never to silently swallow errors).  For tee we
+    #      catch ``BrokenPipeError`` specifically — that's the
+    #      only failure mode a correctly-sized parent stderr
+    #      should ever produce, and it means the downstream
+    #      pipe reader (``| head``, ``| tee``) closed.  On that
+    #      signal we print a one-time notice and disable tee;
+    #      anything else propagates.  For log-file writes we
+    #      catch OSError, print it (once), close the handle,
+    #      and NULL it out so we don't keep retrying against a
+    #      broken FD.
+    #
+    # Memory note (same behavior as pre-refactor
+    # ``proc.communicate()``): ``stderr_buf`` is unbounded.  A
+    # child that emits multi-GB to stderr would exhaust the
+    # runner's RAM.  In practice AITER op-tests emit a few
+    # hundred KB max.  The log file (when enabled) writes
+    # straight through and does not keep a memory copy.
+    stderr_buf = bytearray()
+    stderr_lock = threading.Lock()
+    tee_prefix = (
+        f"[{_sanitize_log_component(script_label)}::{mode.name}] "
+    ).encode() if tee_stderr else b""
+
+    # ``log_state`` and ``tee_state`` are mutable cells driven by
+    # the pump threads — they let us disable a broken sink
+    # exactly once across both pumps without hoisting the logic
+    # out of the closure.  ``nonlocal`` doesn't apply because
+    # ``log_fh`` is bound at outer-function scope; we use a list
+    # cell instead of ``nonlocal`` for clarity.
+    log_state = {"fh": log_fh, "disabled": False}
+    tee_state = {"enabled": tee_stderr, "warned": False}
+    sink_lock = threading.Lock()
+
+    def _disable_log(reason: str) -> None:
+        with sink_lock:
+            if log_state["disabled"]:
+                return
+            log_state["disabled"] = True
+            fh = log_state["fh"]
+            log_state["fh"] = None
+        sys.stderr.write(
+            f"[aiter_corpus_runner] log-file write disabled "
+            f"after error: {reason}\n"
+        )
+        sys.stderr.flush()
+        if fh is not None:
+            try:
+                fh.close()
+            except OSError:
+                pass
+
+    def _disable_tee(reason: str) -> None:
+        with sink_lock:
+            if not tee_state["enabled"]:
+                return
+            tee_state["enabled"] = False
+            already = tee_state["warned"]
+            tee_state["warned"] = True
+        if not already:
+            # Can't print this to sys.stderr — that's what just
+            # broke.  Write direct to fd 2 via os.write; if
+            # even that fails we let it raise (it won't in
+            # practice because BrokenPipeError is a downstream
+            # issue, fd 2 itself is still open).
+            try:
+                os.write(2, (
+                    f"[aiter_corpus_runner] tee-stderr disabled "
+                    f"for rest of run: {reason}\n"
+                ).encode())
+            except OSError:
+                pass
+
+    def _pump(stream, is_stderr: bool) -> None:
+        pending = bytearray()  # partial trailing line across chunks
+        while True:
+            chunk = stream.read(4096)
+            if not chunk:
+                break
+            if log_state["fh"] is not None:
+                try:
+                    log_state["fh"].write(chunk)
+                except OSError as e:
+                    _disable_log(str(e))
+            if is_stderr:
+                with stderr_lock:
+                    stderr_buf.extend(chunk)
+                if tee_state["enabled"]:
+                    pending.extend(chunk)
+                    nl = pending.rfind(b"\n")
+                    if nl >= 0:
+                        complete = bytes(pending[:nl + 1])
+                        del pending[:nl + 1]
+                        prefixed = b"".join(
+                            tee_prefix + line + b"\n"
+                            for line in complete.splitlines()
+                        )
+                        try:
+                            sys.stderr.buffer.write(prefixed)
+                            sys.stderr.buffer.flush()
+                        except BrokenPipeError as e:
+                            _disable_tee(str(e))
+        # EOF — flush any trailing partial line so the user
+        # doesn't lose the child's last line just because it
+        # lacked a terminating newline.
+        if is_stderr and tee_state["enabled"] and pending:
+            try:
+                sys.stderr.buffer.write(tee_prefix + bytes(pending) + b"\n")
+                sys.stderr.buffer.flush()
+            except BrokenPipeError as e:
+                _disable_tee(str(e))
+
+    t_err = threading.Thread(
+        target=_pump, args=(proc.stderr, True), daemon=True,
+    )
+    t_out = threading.Thread(
+        target=_pump, args=(proc.stdout, False), daemon=True,
+    )
+    t_err.start()
+    t_out.start()
+
     timed_out = False
     try:
-        _stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
+        proc.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         timed_out = True
         try:
@@ -549,12 +835,49 @@ def _run_one(
         except ProcessLookupError:
             pass
         try:
-            _stdout_b, stderr_b = proc.communicate(timeout=10)
+            proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            _stdout_b, stderr_b = b"", b""
+            pass
+
+    # Drain the pumps.  Short join timeout because by this point
+    # the child is either exited (EOF on the pipes, pumps return)
+    # or SIGKILLed (same).
+    t_err.join(timeout=10)
+    t_out.join(timeout=10)
 
     elapsed = time.monotonic() - t0
-    stderr = (stderr_b or b"").decode("utf-8", errors="replace")
+
+    with stderr_lock:
+        stderr_bytes = bytes(stderr_buf)
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+
+    # Footer goes to whichever log handle the pumps left behind.
+    # ``_disable_log`` may have already closed it and nulled the
+    # cell on a write error; in that case there's nothing to do.
+    # We take ``sink_lock`` so we can't race a pump thread that
+    # is still trying to disable-and-close the same FD.
+    with sink_lock:
+        final_fh = log_state["fh"]
+        log_state["fh"] = None
+    if final_fh is not None:
+        footer = (
+            f"\n# ---- child terminated ----\n"
+            f"# returncode: {proc.returncode!r}\n"
+            f"# elapsed_s:  {elapsed:.3f}\n"
+            f"# timed_out:  {timed_out}\n"
+        ).encode()
+        try:
+            final_fh.write(footer)
+        except OSError as e:
+            sys.stderr.write(
+                f"[aiter_corpus_runner] log-file footer write "
+                f"failed: {e}\n"
+            )
+        finally:
+            try:
+                final_fh.close()
+            except OSError:
+                pass
 
     if timed_out:
         verdict, sig_name = "HANG", None
@@ -567,6 +890,8 @@ def _run_one(
             detail = f"exit {proc.returncode}"
         else:
             detail = "ok"
+    if log_path is not None:
+        detail = f"{detail}; log={log_path}"
 
     return RunResult(
         script=script,
@@ -1005,6 +1330,37 @@ def main() -> int:
         "--json", default="",
         help="also write a machine-readable JSON record here",
     )
+    ap.add_argument(
+        "--tee-stderr", action="store_true",
+        help="stream every child's stderr to this runner's stderr "
+             "in real time (prefixed with [script::mode]).  Without "
+             "this flag the runner waits until each child exits "
+             "before surfacing any output, which makes it impossible "
+             "to see *where* a hanging run stopped emitting.  On by "
+             "default in interactive use only when you're triaging; "
+             "add it for every run where you want live progress.",
+    )
+    ap.add_argument(
+        "--log-dir", default="",
+        help="write every child's complete unbuffered stdout+stderr "
+             "to a per-run log file under this directory "
+             "(<script>__<mode>__<timestamp>.log).  Empty default "
+             "disables the feature.  Unlike the bounded stderr tail "
+             "in the final report, these logs preserve the *entire* "
+             "transcript — ideal for diffing a hung salmon run "
+             "against a clean legacy one and spotting the divergent "
+             "LoadCodeObject call.",
+    )
+    ap.add_argument(
+        "--print-command", action="store_true",
+        help="do not spawn any child; for every (script, mode) in "
+             "the run matrix, print the exact env+argv the runner "
+             "would have used, as a paste-ready bash block, then "
+             "exit 0.  Useful for wrapping the child manually under "
+             "gdb / rocgdb / strace / AMD_LOG_LEVEL=5 without having "
+             "to reverse-engineer LD_PRELOAD ordering and the full "
+             "AITER_CORPUS_* env set.",
+    )
     args = ap.parse_args()
 
     if args.setup:
@@ -1039,6 +1395,64 @@ def main() -> int:
         except RuntimeError as e:
             print(f"native gfx detection failed: {e}", file=sys.stderr)
             return 2
+    log_dir: Optional[str] = args.log_dir.strip() or None
+    if log_dir is not None:
+        log_dir = os.path.abspath(log_dir)
+
+    # --print-command: no spawning, no work, just emit the exact
+    # invocation the runner *would* use for each (script, mode)
+    # pair in the current matrix.  We run the native-gfx +
+    # spoof_arch resolution above so the printed block is a true
+    # byte-identical reproduction of what the runner would run.
+    if args.print_command:
+        # --print-command is a "dry-run, print and exit" mode.
+        # Silently ignoring --log-dir / --tee-stderr would be
+        # confusing — the user asked for those sinks and none
+        # will ever exist.  Warn loudly instead of swallowing.
+        ignored = []
+        if log_dir is not None:
+            ignored.append("--log-dir")
+        if args.tee_stderr:
+            ignored.append("--tee-stderr")
+        if ignored:
+            print(
+                f"[aiter_corpus_runner] note: {', '.join(ignored)} "
+                f"is ignored under --print-command (no child is "
+                f"actually spawned).",
+                file=sys.stderr,
+            )
+        for s in scripts:
+            for m in args.modes:
+                mode = MODES[m]
+                cmd, env = _build_run_spec(
+                    script=s, mode=mode,
+                    aiter_root=args.aiter_root,
+                    triton_venv=args.triton_venv,
+                    libsalmon=args.libsalmon,
+                    libhsa=args.libhsa,
+                    libamdhip=args.libamdhip,
+                    libarch_spoof=args.libarch_spoof,
+                    spoof_arch=spoof_arch,
+                    native_gfx=native_gfx,
+                    strict_tol=args.strict_tolerance,
+                    perftest_iters=args.perftest_iters,
+                    jit_cache=args.jit_cache,
+                    visible_devices=args.gpu,
+                    script_args=args.script_arg,
+                    rng_seed=args.rng_seed,
+                )
+                # ``_build_run_spec`` has already set
+                # ``AITER_CORPUS_SCRIPT`` to ``os.path.abspath(s)``;
+                # don't re-assign it (dead write hides intent).
+                block = _format_print_command(
+                    script_label=_short_label(s, base_dirs),
+                    mode_name=mode.name,
+                    cmd=cmd, env=env, cwd=HERE,
+                )
+                print(block)
+                print()
+        return 0
+
     print(
         f"aiter corpus runner: {len(scripts)} script(s), "
         f"modes={args.modes}, native_gfx={native_gfx!r}, "
@@ -1046,7 +1460,9 @@ def main() -> int:
         f"spoof_arch={spoof_arch!r} (legacy/salmon only), "
         f"strict_tol={args.strict_tolerance}, "
         f"rng_seed={args.rng_seed!r}, "
-        f"timeout={args.timeout:.0f}s, jit_cache={args.jit_cache}",
+        f"timeout={args.timeout:.0f}s, jit_cache={args.jit_cache}, "
+        f"tee_stderr={args.tee_stderr}, "
+        f"log_dir={log_dir or '<off>'}",
         file=sys.stderr,
     )
     for s in scripts:
@@ -1059,6 +1475,13 @@ def main() -> int:
             mode = MODES[m]
             print(f"[run] {_short_label(s, base_dirs)} :: {m} ... ",
                   end="", flush=True, file=sys.stderr)
+            # With --tee-stderr the child's live output will appear
+            # *after* this "[run] ..." line but *before* the verdict
+            # line.  Flush a trailing newline now so the tee lands
+            # on fresh rows instead of smearing onto the "..." —
+            # readability > terseness during active triage.
+            if args.tee_stderr:
+                print("", file=sys.stderr, flush=True)
             r = _run_one(
                 script=s, mode=mode,
                 aiter_root=args.aiter_root,
@@ -1076,10 +1499,21 @@ def main() -> int:
                 visible_devices=args.gpu,
                 script_args=args.script_arg,
                 rng_seed=args.rng_seed,
+                tee_stderr=args.tee_stderr,
+                log_dir=log_dir,
+                script_label=_short_label(s, base_dirs),
             )
             results.append(r)
-            print(f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)",
-                  file=sys.stderr)
+            # When tee was on, the "[run] ... " prefix is now long
+            # scrolled off; re-print the script::mode so the verdict
+            # line is self-contained.
+            verdict_line = (
+                f"[verdict] {_short_label(s, base_dirs)} :: {m} ... "
+                f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)"
+                if args.tee_stderr else
+                f"{r.verdict} ({r.detail}, {r.elapsed_s:.1f}s)"
+            )
+            print(verdict_line, file=sys.stderr)
 
     _print_grid(results, args.modes, base_dirs)
     _print_failures(results, args.modes, base_dirs)
