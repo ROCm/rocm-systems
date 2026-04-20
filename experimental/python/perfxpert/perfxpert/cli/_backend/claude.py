@@ -777,60 +777,6 @@ def _is_healthy_status(status: str) -> bool:
     return any(ok in status for ok in _HEALTHY_STATUS_MARKERS)
 
 
-def _extract_server_names(payload: object) -> set[str]:
-    """Claude's `mcp list --json` shape isn't formally stable; try a few
-    nested forms."""
-    names: set[str] = set()
-    if isinstance(payload, dict):
-        # Shape 1: { "servers": [ {"name": "..."} ] }
-        servers = payload.get("servers")
-        if isinstance(servers, list):
-            for s in servers:
-                if isinstance(s, dict) and isinstance(s.get("name"), str):
-                    names.add(s["name"])
-        # Shape 2: { "mcpServers": { "name": {...} } }
-        mcp = payload.get("mcpServers")
-        if isinstance(mcp, dict):
-            names.update(k for k in mcp.keys() if isinstance(k, str))
-        # Shape 3: top-level keys are server names.
-        for k, v in payload.items():
-            if k in {"servers", "mcpServers"}:
-                continue
-            if isinstance(v, dict) and ("command" in v or "tools" in v):
-                names.add(k)
-    return names
-
-
-def _extract_tool_names(payload: object) -> tuple[str, ...]:
-    """Return every tool name mentioned anywhere in the JSON payload."""
-    out: list[str] = []
-
-    def _walk(node: object) -> None:
-        if isinstance(node, dict):
-            tools = node.get("tools")
-            if isinstance(tools, list):
-                for t in tools:
-                    if isinstance(t, str):
-                        out.append(t)
-                    elif isinstance(t, dict) and isinstance(t.get("name"), str):
-                        out.append(t["name"])
-            for v in node.values():
-                _walk(v)
-        elif isinstance(node, list):
-            for v in node:
-                _walk(v)
-
-    _walk(payload)
-    # Deduplicate while preserving order.
-    seen: set[str] = set()
-    unique: list[str] = []
-    for name in out:
-        if name not in seen:
-            seen.add(name)
-            unique.append(name)
-    return tuple(unique)
-
-
 def _find_bundled_agents_md() -> Path | None:
     """Find the bundled opencode AGENTS.md to use as the prompt source."""
     here = Path(__file__).resolve()
