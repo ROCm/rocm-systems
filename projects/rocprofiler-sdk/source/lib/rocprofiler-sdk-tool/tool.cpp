@@ -82,6 +82,9 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
+#include <rocksdb/db.h>
+#include <rocksdb/options.h>
+
 #include <time.h>
 #include <unistd.h>
 #include <algorithm>
@@ -95,6 +98,8 @@
 #include <future>
 #include <iomanip>
 #include <limits>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
@@ -281,6 +286,143 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
 
 // any context that needs to support pause/resume functionality should add itself to this list
 auto pause_resume_contexts = context_id_set_t{};
+
+struct rocksdb_runtime_data
+{
+    std::unique_ptr<rocksdb::DB> db             = {};
+    rocksdb::WriteOptions         write_options = {};
+    std::atomic<uint64_t>         write_time_ns = {0};
+    fs::path                      db_path       = {};
+};
+
+auto&
+get_rocksdb_runtime()
+{
+    static auto _v = rocksdb_runtime_data{};
+    return _v;
+}
+
+template <typename Tp>
+void
+append_bytes(std::string& _buffer, const Tp& _value)
+{
+    static_assert(std::is_trivially_copyable_v<Tp>, "append_bytes requires POD data");
+    auto _offset = _buffer.size();
+    _buffer.resize(_offset + sizeof(Tp));
+    std::memcpy(_buffer.data() + _offset, &_value, sizeof(Tp));
+}
+
+std::string
+serialize_rocksdb_key(rocprofiler_dispatch_id_t dispatch_id)
+{
+    auto key = std::string(sizeof(rocprofiler_dispatch_id_t), '\0');
+    for(size_t idx = 0; idx < sizeof(rocprofiler_dispatch_id_t); ++idx)
+    {
+        auto shift = (sizeof(rocprofiler_dispatch_id_t) - idx - 1) * 8;
+        key.at(idx) = static_cast<char>((dispatch_id >> shift) & 0xFF);
+    }
+    return key;
+}
+
+std::string
+serialize_rocksdb_value(const rocprofiler_dispatch_counting_service_data_t& dispatch_data,
+                        rocprofiler_stream_id_t                             stream_id,
+                        uint64_t                                            thread_id,
+                        const std::vector<tool::tool_counter_value_t>&      values)
+{
+    constexpr uint32_t format_version = 1;
+    auto               payload        = std::string{};
+    payload.reserve((8 * sizeof(uint64_t)) + sizeof(uint32_t) +
+                    (values.size() * (sizeof(uint64_t) + sizeof(double))));
+
+    append_bytes(payload, format_version);
+    append_bytes(payload, thread_id);
+    append_bytes(payload, stream_id.handle);
+    append_bytes(payload, dispatch_data.correlation_id.internal);
+    append_bytes(payload, dispatch_data.start_timestamp);
+    append_bytes(payload, dispatch_data.end_timestamp);
+    append_bytes(payload, dispatch_data.dispatch_info.dispatch_id);
+    append_bytes(payload, dispatch_data.dispatch_info.agent_id.handle);
+    append_bytes(payload, dispatch_data.dispatch_info.queue_id.handle);
+    append_bytes(payload, dispatch_data.dispatch_info.kernel_id);
+
+    auto count = static_cast<uint32_t>(values.size());
+    append_bytes(payload, count);
+
+    for(const auto& itr : values)
+    {
+        append_bytes(payload, itr.id.handle);
+        append_bytes(payload, itr.value);
+    }
+
+    return payload;
+}
+
+void
+initialize_rocksdb_output()
+{
+    if(!tool::get_config().rocksdb_output) return;
+
+    auto& rocksdb_data = get_rocksdb_runtime();
+    if(rocksdb_data.db) return;
+
+    auto output_root = fs::path{tool::format_path(tool::get_config().output_path)};
+    auto output_name = tool::format_path(tool::get_config().output_file);
+
+    rocksdb_data.db_path = output_root / fmt::format("{}.rocksdb", output_name);
+    fs::create_directories(rocksdb_data.db_path.parent_path());
+
+    auto options               = rocksdb::Options{};
+    options.create_if_missing  = true;
+    options.compression        = rocksdb::CompressionType::kLZ4Compression;
+    options.bottommost_compression = rocksdb::CompressionType::kLZ4Compression;
+    options.write_buffer_size  = 64 * 1024 * 1024;
+    options.IncreaseParallelism();
+    options.OptimizeLevelStyleCompaction();
+
+    rocksdb::DB* db_raw = nullptr;
+    auto status = rocksdb::DB::Open(options, rocksdb_data.db_path.string(), &db_raw);
+    ROCP_FATAL_IF(!status.ok()) << "failed to open RocksDB output at "
+                                << rocksdb_data.db_path.string() << ": " << status.ToString();
+
+    rocksdb_data.db.reset(db_raw);
+    rocksdb_data.write_options            = rocksdb::WriteOptions{};
+    rocksdb_data.write_options.disableWAL = false;
+    rocksdb_data.write_options.sync       = false;
+    rocksdb_data.write_time_ns.store(0, std::memory_order_relaxed);
+
+    ROCP_INFO << "rocksdb output enabled at: " << rocksdb_data.db_path.string();
+}
+
+void
+finalize_rocksdb_output()
+{
+    auto& rocksdb_data = get_rocksdb_runtime();
+    if(!rocksdb_data.db) return;
+
+    auto flush_status = rocksdb_data.db->FlushWAL(true);
+    if(!flush_status.ok())
+    {
+        ROCP_WARNING << "failed to flush RocksDB WAL at " << rocksdb_data.db_path.string()
+                     << ": " << flush_status.ToString();
+    }
+
+    auto close_status = rocksdb_data.db->Close();
+    if(!close_status.ok())
+    {
+        ROCP_WARNING << "failed to close RocksDB output at " << rocksdb_data.db_path.string()
+                     << ": " << close_status.ToString();
+    }
+
+    rocksdb_data.db.reset();
+}
+
+double
+get_rocksdb_write_seconds()
+{
+    auto& rocksdb_data = get_rocksdb_runtime();
+    return static_cast<double>(rocksdb_data.write_time_ns.load(std::memory_order_relaxed)) / 1.0e9;
+}
 
 // Stores stream ids and kernel region ids for kernel-rename service and hip stream display service
 struct kernel_rename_and_stream_data
@@ -1776,11 +1918,54 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             tool::tool_counter_value_t{_counter_id, record_data[count].counter_value});
     }
 
-    if(!serialized_records.empty())
+    if(serialized_records.empty()) return;
+
+    if(tool::get_config().rocksdb_output)
     {
-        counter_record.write(serialized_records);
-        tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
+        auto& rocksdb_data = get_rocksdb_runtime();
+        if(!rocksdb_data.db)
+        {
+            ROCP_WARNING << "rocksdb output is enabled but database handle is not initialized";
+            return;
+        }
+
+        auto counter_id_value = std::map<uint64_t, double>{};
+        for(const auto& itr : serialized_records)
+        {
+            counter_id_value[itr.id.handle] += itr.value;
+        }
+
+        auto aggregated_records = std::vector<tool::tool_counter_value_t>{};
+        aggregated_records.reserve(counter_id_value.size());
+        for(const auto& [pmc_id, value] : counter_id_value)
+        {
+            aggregated_records.emplace_back(
+                tool::tool_counter_value_t{rocprofiler_counter_id_t{pmc_id}, value});
+        }
+
+        auto key = serialize_rocksdb_key(dispatch_data.dispatch_info.dispatch_id);
+        auto value = serialize_rocksdb_value(
+            dispatch_data, counter_record.stream_id, counter_record.thread_id, aggregated_records);
+
+        auto write_begin = std::chrono::steady_clock::now();
+        auto status =
+            rocksdb_data.db->Put(rocksdb_data.write_options, rocksdb::Slice{key}, rocksdb::Slice{value});
+        auto write_end = std::chrono::steady_clock::now();
+
+        auto elapsed = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(write_end - write_begin).count());
+        rocksdb_data.write_time_ns.fetch_add(elapsed, std::memory_order_relaxed);
+
+        if(!status.ok())
+        {
+            ROCP_WARNING << "failed to write RocksDB counter record for dispatch "
+                         << dispatch_data.dispatch_info.dispatch_id << ": " << status.ToString();
+        }
+        return;
     }
+
+    counter_record.write(serialized_records);
+    tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
 }
 
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
@@ -2133,6 +2318,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
     tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
+    initialize_rocksdb_output();
 
     auto create_pause_resume_ctx = [](rocprofiler_context_id_t& ctx, std::string_view msg) {
         if(ctx == null_context_id)
@@ -2951,16 +3137,28 @@ generate_output(cleanup_mode _cleanup_mode)
                              outdata.num_output,
                              (outdata.num_bytes / 1024));
 
+    double csv_write_sec     = 0.0;
+    double rocpd_write_sec   = 0.0;
+    double rocksdb_write_sec = get_rocksdb_write_seconds();
+
     if(tool::get_config().csv_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _csv_write_timer = common::simple_timer{"[rocprofv3] csv write"};
         tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
+        _csv_write_timer.stop();
+        _csv_write_timer.set_quiet(true);
+        csv_write_sec += _csv_write_timer.get();
     }
 
     if(tool::get_config().stats && tool::get_config().csv_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _csv_stats_write_timer = common::simple_timer{"[rocprofv3] csv stats write"};
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
+        _csv_stats_write_timer.stop();
+        _csv_stats_write_timer.set_quiet(true);
+        csv_write_sec += _csv_stats_write_timer.get();
     }
 
     if(tool::get_config().json_output && outdata.num_output > 0 &&
@@ -3015,6 +3213,7 @@ generate_output(cleanup_mode _cleanup_mode)
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _rocpd_write_timer = common::simple_timer{"[rocprofv3] rocpd write"};
         tool::write_rocpd(tool::get_config(),
                           *tool_metadata,
                           agents_output,
@@ -3029,6 +3228,9 @@ generate_output(cleanup_mode _cleanup_mode)
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
                           counters_output.get_generator());
+        _rocpd_write_timer.stop();
+        _rocpd_write_timer.set_quiet(true);
+        rocpd_write_sec += _rocpd_write_timer.get();
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -3101,6 +3303,24 @@ generate_output(cleanup_mode _cleanup_mode)
         }
     }
 
+    const auto write_timing_path =
+        fs::path{tool::format_path(tool::get_config().output_path)} / "write_timing.json";
+    auto write_timing_stream = std::ofstream{write_timing_path};
+    if(!write_timing_stream)
+    {
+        ROCP_WARNING << "Failed to open write timing output file: " << write_timing_path.string();
+    }
+    else
+    {
+        write_timing_stream << "{\n"
+                            << fmt::format(R"(  "csv_write_sec": {:.9f},)", csv_write_sec)
+                            << "\n"
+                            << fmt::format(R"(  "rocpd_write_sec": {:.9f},)", rocpd_write_sec)
+                            << "\n"
+                            << fmt::format(R"(  "rocksdb_write_sec": {:.9f})", rocksdb_write_sec)
+                            << "\n}\n";
+    }
+
     run_cleanup();
 }
 
@@ -3143,6 +3363,8 @@ tool_fini(void* /*tool_data*/)
     // reflects when profiling actually stopped.
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    if(tool::get_config().rocksdb_output) finalize_rocksdb_output();
 
     generate_output(cleanup_mode::destroy);
 

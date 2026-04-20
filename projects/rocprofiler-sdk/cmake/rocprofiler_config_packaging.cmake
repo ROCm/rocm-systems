@@ -56,7 +56,8 @@ rocprofiler_add_feature(CPACK_PACKAGE_FILE_NAME "CPack filename")
 get_cmake_property(ROCPROFILER_PACKAGING_COMPONENTS COMPONENTS)
 
 rocprofiler_add_feature(ROCPROFILER_PACKAGING_COMPONENTS "Packaging components")
-list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified" "fmt_core")
+list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified" "fmt_core"
+                 "devel" "runtime")
 list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENTS)
 
 # the packages we will generate

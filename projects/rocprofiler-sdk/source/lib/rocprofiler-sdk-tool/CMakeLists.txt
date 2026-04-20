@@ -19,6 +19,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-output-library
+            rocprofiler-sdk::rocprofiler-sdk-rocksdb
             rocprofiler-sdk::rocprofiler-sdk-cereal
             rocprofiler-sdk::rocprofiler-sdk-perfetto
             rocprofiler-sdk::rocprofiler-sdk-otf2
