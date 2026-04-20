@@ -12,27 +12,10 @@ target_sources(codeobj-library-tests PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
 set(PKG_TEST_BIN_DIR "${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin")
 
-find_program(
-    CODEOBJ_LLVM_SYMBOLIZER
-    NAMES llvm-symbolizer
-    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-    PATH_SUFFIXES llvm/bin bin)
-
 target_compile_definitions(
     codeobj-library-tests
     PRIVATE CODEOBJ_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}/"
             CODEOBJ_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${PKG_TEST_BIN_DIR}/")
-
-if(CODEOBJ_LLVM_SYMBOLIZER)
-    target_compile_definitions(codeobj-library-tests
-                               PRIVATE LLVM_SYMBOLIZER_PATH="${CODEOBJ_LLVM_SYMBOLIZER}")
-else()
-    message(
-        STATUS
-            "llvm-symbolizer not found; codeobj_library.dwarf_matches_llvm_symbolizer test will SKIP."
-        )
-endif()
 
 configure_file(smallkernel.bin smallkernel.bin COPYONLY)
 configure_file(hipcc_output.s hipcc_output.s COPYONLY)
