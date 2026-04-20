@@ -202,6 +202,52 @@ using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;
 void
 process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell);
 
+/**
+ * @brief Compute inflated ring size for K-factor metadata queues
+ *
+ * Given a requested queue size and K-factor, computes the actual ring buffer
+ * size needed to accommodate both application packets and metadata packets.
+ *
+ * For K=0 (trace-only), returns the requested size unchanged.
+ * For K>0, inflates by (1 + K) * 2 and rounds up to next power of two.
+ * Maximum ring size is capped at 262144 packets.
+ *
+ * @param requested_size Application-requested queue size
+ * @param k_factor Number of metadata packets per application packet
+ * @return Inflated ring size (power of two)
+ */
+uint32_t
+compute_inflated_ring_size(uint32_t requested_size, uint64_t k_factor);
+
+/**
+ * @brief Create and register queue state
+ *
+ * Allocates a QueueState for the given queue and registers it in both the
+ * queue registry and doorbell map. This should be called when a queue is
+ * created by the application.
+ *
+ * @param queue The HSA queue to create state for
+ * @param wdid_addr Pointer to the queue's real write doorbell index
+ * @param rdid_addr Pointer to the queue's real read doorbell index
+ * @param k_factor K-factor for metadata queue synchronization
+ */
+void
+create_queue_state(const hsa_queue_t* queue,
+                   volatile uint64_t* wdid_addr,
+                   volatile uint64_t* rdid_addr,
+                   uint64_t           k_factor);
+
+/**
+ * @brief Destroy and unregister queue state
+ *
+ * Removes the queue's state from the registry and doorbell map.
+ * This should be called when a queue is destroyed by the application.
+ *
+ * @param queue The HSA queue to destroy state for
+ */
+void
+destroy_queue_state(const hsa_queue_t* queue);
+
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler
