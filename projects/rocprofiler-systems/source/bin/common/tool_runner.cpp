@@ -100,12 +100,12 @@ EXAMPLES:
 }
 
 auto
-toggle_suppression(std::tuple<bool, bool> _inp)
+toggle_suppression(std::tuple<bool, bool> incoming)
 {
-    auto _out =
+    auto previous =
         std::make_tuple(settings::suppress_config(), settings::suppress_parsing());
-    std::tie(settings::suppress_config(), settings::suppress_parsing()) = _inp;
-    return _out;
+    std::tie(settings::suppress_config(), settings::suppress_parsing()) = incoming;
+    return previous;
 }
 
 // Suppresses timemory env-parsing during static init; replayed in parse_args.
@@ -114,74 +114,71 @@ toggle_suppression(std::tuple<bool, bool> _inp)
 auto pre_main_suppression_guard = toggle_suppression({ true, true });
 
 int
-get_verbose(parser_data_t& _data)
+refresh_verbose_from_env(parser_data_t& data)
 {
-    auto&       verbose    = _data.verbose;
-    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
-    if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
-    return verbose;
+    const auto* log_level = std::getenv(env::LOG_LEVEL.data());
+    if(log_level != nullptr) data.out.verbose = env::log_level_to_verbose(log_level);
+    return data.out.verbose;
 }
 
-parser_data_t&
-get_initial_environment(parser_data_t&                               _data,
-                        const rocprofsys::common_utils::tool_config& _config)
+void
+get_initial_environment(parser_data_t&                               data,
+                        const rocprofsys::common_utils::tool_config& config)
 {
     if(environ != nullptr)
     {
         for(int idx = 0; environ[idx] != nullptr; ++idx)
         {
-            _data.initial.emplace(environ[idx]);
-            _data.current.emplace_back(environ[idx]);
+            data.env.initial.emplace(environ[idx]);
+            data.env.current.emplace_back(environ[idx]);
         }
     }
 
-    auto _libexecpath = path::realpath(path::get_internal_script_path());
-    if(!_libexecpath.empty())
+    auto libexec_path = path::realpath(path::get_internal_script_path());
+    if(!libexec_path.empty())
     {
-        rocprofsys::common::update_env(_data.current, env::SCRIPT_PATH, _libexecpath,
-                                       update_mode::REPLACE, ":", _data.updated,
-                                       _data.initial);
+        rocprofsys::common::update_env(data.env.current, env::SCRIPT_PATH, libexec_path,
+                                       update_mode::REPLACE, ":", data.env.updated,
+                                       data.env.initial);
     }
 
-    const bool verbose = (get_verbose(_data) > 0);
+    const bool verbose = (refresh_verbose_from_env(data) > 0);
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose);
        !llvm_dir.empty())
     {
-        rocprofsys::common::update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir,
-                                       update_mode::APPEND, ":", _data.updated,
-                                       _data.initial);
+        rocprofsys::common::update_env(data.env.current, "LD_LIBRARY_PATH", llvm_dir,
+                                       update_mode::APPEND, ":", data.env.updated,
+                                       data.env.initial);
         auto        current_ld = getenv("LD_LIBRARY_PATH");
         std::string new_ld     = current_ld ? (llvm_dir + ":" + current_ld) : llvm_dir;
         setenv("LD_LIBRARY_PATH", new_ld.c_str(), 1);
     }
 
-    if(_config.force_sampling())
+    if(config.force_sampling())
     {
-        auto _mode = get_env<std::string>(std::string{ env::MODE }, "sampling", false);
-        rocprofsys::common::update_env(_data.current, env::USE_SAMPLING,
-                                       (_mode != "causal"), update_mode::REPLACE, ":",
-                                       _data.updated, _data.initial);
+        auto mode = get_env<std::string>(std::string{ env::MODE }, "sampling", false);
+        rocprofsys::common::update_env(data.env.current, env::USE_SAMPLING,
+                                       (mode != "causal"), update_mode::REPLACE, ":",
+                                       data.env.updated, data.env.initial);
     }
-
-    return _data;
 }
 
 // Slots reserved when injecting the launcher prefix into the command: exe + "--".
 constexpr size_t LAUNCHER_INJECT_SLOTS = 2;
 
 void
-prepare_command(const char* _exe, parser_data_t& _data)
+prepare_command(const char* exe, parser_data_t& data)
 {
-    if(_data.launcher.empty()) return;
+    if(data.out.launcher.empty()) return;
 
     bool                     injected = false;
     std::vector<std::string> new_argv;
-    new_argv.reserve(_data.command.size() + LAUNCHER_INJECT_SLOTS);
-    for(const auto& arg : _data.command)
+    new_argv.reserve(data.out.command.size() + LAUNCHER_INJECT_SLOTS);
+    for(const auto& arg : data.out.command)
     {
-        if(!injected && arg.find(_data.launcher) != std::string::npos)
+        if(!injected && arg.find(data.out.launcher) != std::string::npos)
         {
-            new_argv.emplace_back(_exe);
+            new_argv.emplace_back(exe);
             new_argv.emplace_back("--");
             injected = true;
         }
@@ -190,35 +187,35 @@ prepare_command(const char* _exe, parser_data_t& _data)
 
     if(!injected)
     {
-        throw std::runtime_error(join("", "Unable to match launcher \"", _data.launcher,
-                                      "\" to any arguments on the command line: \"",
-                                      join(array_config{ " ", "", "" }, _data.command),
-                                      "\""));
+        throw std::runtime_error(
+            join("", "Unable to match launcher \"", data.out.launcher,
+                 "\" to any arguments on the command line: \"",
+                 join(array_config{ " ", "", "" }, data.out.command), "\""));
     }
 
-    _data.command = std::move(new_argv);
+    data.out.command = std::move(new_argv);
 }
 
 void
-prepare_environment(parser_data_t&                               _data,
-                    const rocprofsys::common_utils::tool_config& _config)
+prepare_environment(parser_data_t&                               data,
+                    const rocprofsys::common_utils::tool_config& config)
 {
     // launcher mode re-injects LD_PRELOAD itself, so skip it here
-    if(!_config.enable_launcher() || _data.launcher.empty())
+    if(!config.enable_launcher() || data.out.launcher.empty())
     {
-        rocprofsys::argparse::add_ld_preload(_data);
-        rocprofsys::argparse::add_ld_library_path(_data);
+        rocprofsys::argparse::add_ld_preload(data);
+        rocprofsys::argparse::add_ld_library_path(data);
     }
 
-    rocprofsys::argparse::add_torch_library_path(_data, _data.verbose > 0);
-    rocprofsys::common::consolidate_env_entries(_data.current);
+    rocprofsys::argparse::add_torch_library_path(data, data.out.verbose > 0);
+    rocprofsys::common::consolidate_env_entries(data.env.current);
 }
 
 void
-parse_command_fast_path(int argc, char** argv, parser_data_t& _data)
+parse_command_fast_path(int argc, char** argv, parser_data_t& data)
 {
     toggle_suppression(pre_main_suppression_guard);
-    rocprofsys::argparse::init_parser(_data);
+    rocprofsys::argparse::init_parser(data);
 
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
@@ -228,7 +225,7 @@ parse_command_fast_path(int argc, char** argv, parser_data_t& _data)
         if(argv[arg_idx] == nullptr) continue;
 
         if(past_separator)
-            _data.command.emplace_back(argv[arg_idx]);
+            data.out.command.emplace_back(argv[arg_idx]);
         else if(std::string_view{ argv[arg_idx] } == "--")
             past_separator = true;
     }
@@ -266,18 +263,18 @@ help_requested(const parser_t& parser, int argc, char** argv)
 }
 
 void
-configure_parser(parser_t& parser, parser_data_t& _data,
-                 const rocprofsys::common_utils::tool_config& _config,
+configure_parser(parser_t& parser, parser_data_t& data,
+                 const rocprofsys::common_utils::tool_config& config,
                  rocprofsys::common_utils::domain_flag_state& domain_state,
-                 bool&                                        _fork_exec)
+                 bool&                                        fork_exec)
 {
-    parser.on_error([](parser_t&, const parser_err_t& _err) {
-        stream(std::cerr, color::fatal()) << _err << "\n";
+    parser.on_error([](parser_t&, const parser_err_t& err) {
+        stream(std::cerr, color::fatal()) << err << "\n";
         exit(EXIT_FAILURE);
     });
 
     parser.enable_help().count(-1).min_count(0).max_count(1).dtype("topic");
-    parser.enable_version(std::string{ _config.version_name },
+    parser.enable_version(std::string{ config.version_name },
                           ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
     auto cols = std::get<0>(console::get_columns());
@@ -285,45 +282,45 @@ configure_parser(parser_t& parser, parser_data_t& _data,
         parser.set_description_width(
             std::min<int>(cols - parser.get_help_width() - HELP_PADDING, MAX_DESC_WIDTH));
 
-    _data.processed_groups.emplace("causal");
-    if(!_config.show_sample_flag()) _data.processed_environs.emplace("sampling");
-    if(!_config.enable_launcher()) _data.processed_environs.emplace("launcher");
+    data.reg.processed_groups.emplace("causal");
+    if(!config.show_sample_flag()) data.reg.processed_environs.emplace("sampling");
+    if(!config.enable_launcher()) data.reg.processed_environs.emplace("launcher");
 
-    rocprofsys::argparse::add_core_arguments(parser, _data);
-    rocprofsys::argparse::add_extended_arguments(parser, _data);
+    rocprofsys::argparse::add_core_arguments(parser, data);
+    rocprofsys::argparse::add_extended_arguments(parser, data);
 
     rocprofsys::common_utils::register_preset_and_domain_arguments(
-        parser, _config.tool_name, domain_state,
+        parser, config.tool_name, domain_state,
         [&](std::string_view key, std::string_view val) {
-            rocprofsys::common::update_env(_data.current, std::string{ key },
+            rocprofsys::common::update_env(data.env.current, std::string{ key },
                                            std::string{ val }, update_mode::REPLACE, ":",
-                                           _data.updated, _data.initial);
+                                           data.env.updated, data.env.initial);
         });
 
-    if(_config.enable_fork())
+    if(config.enable_fork())
     {
         parser.start_group("EXECUTION OPTIONS", "");
         parser.add_argument({ "--fork" }, "Execute via fork + execvpe instead of execvpe")
             .min_count(0)
             .max_count(1)
             .dtype("boolean")
-            .action([&_fork_exec](parser_t& parser_ref) {
-                _fork_exec = parser_ref.get<bool>("fork");
+            .action([&fork_exec](parser_t& parser_ref) {
+                fork_exec = parser_ref.get<bool>("fork");
             });
     }
 }
 
 std::optional<int>
-apply_post_parse(parser_t& parser, parser_data_t& _data,
-                 const rocprofsys::common_utils::tool_config& _config,
+apply_post_parse(parser_t& parser, parser_data_t& data,
+                 const rocprofsys::common_utils::tool_config& config,
                  rocprofsys::common_utils::domain_flag_state& domain_state)
 {
-    if(_config.disable_cputime_on_realtime_only())
+    if(config.disable_cputime_on_realtime_only())
     {
         if(parser.exists("sample-realtime") && !parser.exists("sample-cputime"))
-            rocprofsys::common::update_env(_data.current, env::SAMPLING_CPUTIME, false,
-                                           update_mode::REPLACE, ":", _data.updated,
-                                           _data.initial);
+            rocprofsys::common::update_env(data.env.current, env::SAMPLING_CPUTIME, false,
+                                           update_mode::REPLACE, ":", data.env.updated,
+                                           data.env.initial);
     }
 
     if(parser.exists("profile") && parser.exists("flat-profile"))
@@ -333,55 +330,55 @@ apply_post_parse(parser_t& parser, parser_data_t& _data,
     if(domain_state.export_config_requested)
     {
         rocprofsys::common_utils::export_config(
-            _data.current, _data.initial, domain_state.active_preset_name,
-            _config.tool_name, domain_state.export_config_file);
+            data.env.current, data.env.initial, domain_state.active_preset_name,
+            config.tool_name, domain_state.export_config_file);
         return EXIT_SUCCESS;
     }
 
     rocprofsys::common_utils::run_post_parse_validation(
-        _config.tool_name, domain_state.active_preset_name,
+        config.tool_name, domain_state.active_preset_name,
         domain_state.gpu_domain_enabled, domain_state.rocm_domain_enabled,
         domain_state.cpu_domain_enabled, domain_state.parallel_domain_enabled,
-        _data.verbose, domain_state.registry);
+        data.out.verbose, domain_state.registry);
 
     return std::nullopt;
 }
 
 std::optional<int>
-parse_args(int argc, char** argv, parser_data_t& _data,
-           const rocprofsys::common_utils::tool_config& _config, bool& _fork_exec)
+parse_args(int argc, char** argv, parser_data_t& data,
+           const rocprofsys::common_utils::tool_config& config, bool& fork_exec)
 {
-    get_initial_environment(_data, _config);
+    get_initial_environment(data, config);
 
     if(!needs_full_parse(argc, argv))
     {
-        parse_command_fast_path(argc, argv, _data);
+        parse_command_fast_path(argc, argv, data);
         return std::nullopt;
     }
 
     toggle_suppression(pre_main_suppression_guard);
-    rocprofsys::argparse::init_parser(_data);
+    rocprofsys::argparse::init_parser(data);
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
-    auto parser = parser_t{ basename(argv[0]), build_description(_config) };
+    auto parser = parser_t{ basename(argv[0]), build_description(config) };
 
     rocprofsys::common_utils::domain_flag_state domain_state;
-    configure_parser(parser, _data, _config, domain_state, _fork_exec);
+    configure_parser(parser, data, config, domain_state, fork_exec);
 
     auto args = rocprofsys::common_utils::translate_arguments(
-        argc, argv, domain_state.registry, _config.deprecated_flags);
-    _data.command = std::move(args.command);
+        argc, argv, domain_state.registry, config.deprecated_flags);
+    data.out.command = std::move(args.command);
 
     auto parse_err = parser.parse_args(args.argv_ptrs.size(), args.argv_ptrs.data());
     if(help_requested(parser, argc, argv))
-        return rocprofsys::common_utils::dispatch_help(parser, _config.tool_name,
+        return rocprofsys::common_utils::dispatch_help(parser, config.tool_name,
                                                        EXIT_SUCCESS);
     if(parse_err) throw std::runtime_error(parse_err.what());
     if(domain_state.early_exit) return domain_state.early_exit;
 
-    tim::log::monochrome() = _data.monochrome;
+    tim::log::monochrome() = data.out.monochrome;
 
-    return apply_post_parse(parser, _data, _config, domain_state);
+    return apply_post_parse(parser, data, config, domain_state);
 }
 }  // namespace
 
@@ -428,7 +425,7 @@ make_sample_config()
 int
 run_tool(int argc, char** argv, const tool_config& config)
 {
-    auto _print_usage = [argv]() {
+    auto print_usage = [argv]() {
         std::cerr << tim::log::color::fatal() << "Usage: " << argv[0]
                   << " [OPTIONS] -- <COMMAND> <ARGS>" << tim::log::color::end()
                   << std::endl;
@@ -436,31 +433,31 @@ run_tool(int argc, char** argv, const tool_config& config)
 
     if(argc == 1)
     {
-        _print_usage();
+        print_usage();
         return EXIT_FAILURE;
     }
 
-    auto _parse_data = parser_data_t{};
-    auto _fork_exec  = false;
+    auto parse_data = parser_data_t{};
+    auto fork_exec  = false;
 
-    if(auto exit_code = parse_args(argc, argv, _parse_data, config, _fork_exec))
+    if(auto exit_code = parse_args(argc, argv, parse_data, config, fork_exec))
         return *exit_code;
 
-    if(config.enable_launcher()) prepare_command(argv[0], _parse_data);
+    if(config.enable_launcher()) prepare_command(argv[0], parse_data);
 
-    prepare_environment(_parse_data, config);
+    prepare_environment(parse_data, config);
 
-    if(_parse_data.command.empty())
+    if(parse_data.out.command.empty())
     {
-        _print_usage();
+        print_usage();
         return EXIT_FAILURE;
     }
 
-    auto _verbose = get_verbose(_parse_data);
-    if(_verbose >= 0)
-        utils::print_environment(_parse_data.current, _parse_data.updated, _verbose >= 1,
-                                 config.output_prefix);
-    if(_verbose >= 1) utils::print_command(_parse_data.command, config.output_prefix);
+    auto verbose = refresh_verbose_from_env(parse_data);
+    if(verbose >= 0)
+        utils::print_environment(parse_data.env.current, parse_data.env.updated,
+                                 verbose >= 1, config.output_prefix);
+    if(verbose >= 1) utils::print_command(parse_data.out.command, config.output_prefix);
 
     auto to_c_argv = [](std::vector<std::string>& src) {
         std::vector<char*> out;
@@ -471,29 +468,30 @@ run_tool(int argc, char** argv, const tool_config& config)
         return out;
     };
 
-    auto argv_ptrs = to_c_argv(_parse_data.command);
-    auto envp_ptrs = to_c_argv(_parse_data.current);
+    auto argv_ptrs = to_c_argv(parse_data.out.command);
+    auto envp_ptrs = to_c_argv(parse_data.env.current);
 
-    if(_fork_exec)
+    if(fork_exec)
     {
-        auto _pid = fork();
-        if(_pid == 0)
+        auto pid = fork();
+        if(pid == 0)
             return execvpe(argv_ptrs.front(), argv_ptrs.data(), envp_ptrs.data());
 
-        auto _status = rocprofsys::mproc::wait_pid(_pid);
-        auto _ec     = rocprofsys::mproc::diagnose_status(_pid, _status);
-        if(_ec != 0 && _parse_data.verbose >= 0)
+        auto status    = rocprofsys::mproc::wait_pid(pid);
+        auto exit_code = rocprofsys::mproc::diagnose_status(pid, status);
+        if(exit_code != 0 && parse_data.out.verbose >= 0)
+        {
+            TIMEMORY_PRINTF_FATAL(stderr,
+                                  "process %i exiting with non-zero exit code: %i\n", pid,
+                                  exit_code);
+        }
+        else if(parse_data.out.verbose >= 2)
         {
             TIMEMORY_PRINTF_FATAL(
-                stderr, "process %i exiting with non-zero exit code: %i\n", _pid, _ec);
+                stderr, "rocprof-sys run in process %i completed. exit code: %i\n", pid,
+                exit_code);
         }
-        else if(_parse_data.verbose >= 2)
-        {
-            TIMEMORY_PRINTF_FATAL(
-                stderr, "rocprof-sys run in process %i completed. exit code: %i\n", _pid,
-                _ec);
-        }
-        return _ec;
+        return exit_code;
     }
 
     return execvpe(argv_ptrs.front(), argv_ptrs.data(), envp_ptrs.data());
