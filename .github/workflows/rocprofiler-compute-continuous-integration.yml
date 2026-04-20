@@ -109,6 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          submodules: true
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
