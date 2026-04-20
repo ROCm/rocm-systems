@@ -27,24 +27,23 @@ THE SOFTWARE.
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <ctime>
+#include <time.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <sys/syscall.h>
 
-#define TOSTR(X) std::to_string(X)
-#define STR(X) std::string(X)
-
 #if DBGINFO
-#define INFO(X) std::clog << "[INF] " << " {" << __func__ <<"} " << " " << X << std::endl;
 #define MSG(X) std::clog << X << std::endl;
 #define MSG_NO_NEWLINE(X) std::clog << X;
 #else
-#define INFO(X) ;
 #define MSG(X) ;
 #define MSG_NO_NEWLINE(X) ;
 #endif
-#define ERR(X) std::cerr << "[ERR] "  << " {" << __func__ <<"} " << " " << X << std::endl;
+
+#define ROCDEC_TOSTR(X) std::to_string(X)
+#define ROCDEC_STR(X) std::string(X)
 
 // Logging control
 enum RocDecLogLevel {
@@ -57,8 +56,8 @@ enum RocDecLogLevel {
 };
 
 #define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
-#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define MakeMsg(msg) STR(__FILENAME__) + ":" + TOSTR(__LINE__) + ": " + TOSTR(GET_TIME_NS() / 1000ULL) + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") + TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(__func__) + "(): " + msg
+#define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+#define MakeMsg(msg) ROCDEC_STR(FILENAME_ONLY) + ":" + ROCDEC_TOSTR(__LINE__) + ": " + ROCDEC_TOSTR(GET_TIME_NS() / 1000ULL) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") + ROCDEC_TOSTR(syscall(SYS_gettid)) + ROCDEC_STR("] ") + ROCDEC_STR(__func__) + "(): " + msg
 
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
@@ -73,14 +72,11 @@ public:
     }
     RocDecLogger(int log_level) : log_level_(log_level) {};
     ~RocDecLogger() {};
-
     void SetLogLevel(int log_level) {log_level_ = std::clamp(log_level, 0, static_cast<int>(kRocDecLogLevelMax));};
     int GetLogLevel() {return log_level_;};
-
-    static void AlwaysLog(std::string msg) {
+    void AlwaysLog(std::string msg) {
         OutputMsg(msg);
     };
-
 private:
     int log_level_ = kRocDecLogCritical;
 };
@@ -104,18 +100,18 @@ public:
         : logger_(logger), filename_(filename), line_(line), func_(func), start_time_(0) {
         if (logger_.GetLogLevel() >= kRocDecLogInfo) {
             start_time_ = GET_TIME_NS() / 1000ULL;
-            OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + STR(filename_) + ":" + TOSTR(line_) + ": " +
-                      TOSTR(start_time_) + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") +
-                      TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(func_) + "(): entry ...");
+            OutputMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + ROCDEC_STR(filename_) + ":" + ROCDEC_TOSTR(line_) + ": " +
+                      ROCDEC_TOSTR(start_time_) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") +
+                      ROCDEC_TOSTR(syscall(SYS_gettid)) + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): entry ...");
         }
     }
     ~RocDecFuncScopeLog() {
         if (logger_.GetLogLevel() >= kRocDecLogInfo) {
             uint64_t end_time = GET_TIME_NS() / 1000ULL;
-            OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + STR(filename_) + ":" + TOSTR(line_) + ": " +
-                      TOSTR(end_time) + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") +
-                      TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(func_) + "(): exit (" +
-                      TOSTR(end_time - start_time_) + " us) ...");
+            OutputMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + ROCDEC_STR(filename_) + ":" + ROCDEC_TOSTR(line_) + ": " +
+                      ROCDEC_TOSTR(end_time) + ROCDEC_STR(" us: ") + ROCDEC_STR("[pid:") + ROCDEC_TOSTR(getpid()) + ROCDEC_STR(" tid:") +
+                      ROCDEC_TOSTR(syscall(SYS_gettid)) + ROCDEC_STR("] ") + ROCDEC_STR(func_) + "(): exit (" +
+                      ROCDEC_TOSTR(end_time - start_time_) + " us) ...");
         }
     }
     RocDecFuncScopeLog(const RocDecFuncScopeLog&) = delete;
@@ -131,32 +127,42 @@ private:
 };
 
 #define CriticalLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogCritical) { \
-        OutputErrMsg("[" + TOSTR(kRocDecLogCritical) + ", Critical] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogCritical) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogCritical) + ", Critical] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define ErrorLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogError) { \
-        OutputErrMsg("[" + TOSTR(kRocDecLogError) + ", Error] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogError) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogError) + ", Error] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define WarningLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogWarning) { \
-        OutputErrMsg("[" + TOSTR(kRocDecLogWarning) + ", Warning] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogWarning) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogWarning) + ", Warning] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define InfoLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogInfo) { \
-        OutputErrMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogInfo) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define DebugLog(logger, msg) \
-    if (logger.GetLogLevel() >= kRocDecLogDebug) { \
-        OutputErrMsg("[" + TOSTR(kRocDecLogDebug) + ", Debug] " + MakeMsg(msg)); \
-    }
+    do { \
+        if (logger.GetLogLevel() >= kRocDecLogDebug) { \
+            OutputErrMsg("[" + ROCDEC_TOSTR(kRocDecLogDebug) + ", Debug] " + MakeMsg(msg)); \
+        } \
+    } while (0)
 
 #define FunctionEntryLog(logger) \
-    RocDecFuncScopeLog _rocdec_func_scope_log_(logger, __FILENAME__, __LINE__, __func__)
+    RocDecFuncScopeLog _rocdec_func_scope_log_(logger, FILENAME_ONLY, __LINE__, __func__)
 
 // FunctionExitLog is a no-op: exit is logged automatically when the
 // RocDecFuncScopeLog RAII object created by FunctionEntryLog goes out of scope.
@@ -164,7 +170,6 @@ private:
 
 class rocDecodeException : public std::exception {
 public:
-
     explicit rocDecodeException(const std::string& OutputMsg):_message(OutputMsg){}
     virtual const char* what() const throw() override {
         return _message.c_str();
