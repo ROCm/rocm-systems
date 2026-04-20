@@ -58,5 +58,7 @@ def discover_read_only_tools() -> Dict[str, Callable]:
                 continue
             cls = getattr(fn, "__tool_class__", None)
             if cls is ToolClass.READ_ONLY:
-                registry[f"{rel_name}.{fn_name}"] = fn
+                override = getattr(fn, "__tool_name__", None)
+                key = override if override else f"{rel_name}.{fn_name}"
+                registry[key] = fn
     return registry

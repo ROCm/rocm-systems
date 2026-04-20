@@ -642,7 +642,7 @@ def _execute_agentic(
     llm_provider = kwargs.get("llm_provider")
 
     # Route the agentic path through the public Python API — same
-    # function the MCP server wraps as ``agents_root_agent_root``.
+    # function the MCP server wraps as ``agent_root``.
     #
     # Let typed ProviderError subclasses (QuotaExceeded, AuthError,
     # RateLimitError, TransientError, FatalError) propagate unchanged so

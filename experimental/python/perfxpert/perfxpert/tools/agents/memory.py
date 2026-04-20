@@ -61,4 +61,6 @@ def agent_memory_specialist(
     }
 
 
+agent_memory_specialist.__tool_name__ = "agent_memory_specialist"
+
 __all__ = ["agent_memory_specialist"]

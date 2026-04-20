@@ -61,4 +61,6 @@ def agent_compute_specialist(
     }
 
 
+agent_compute_specialist.__tool_name__ = "agent_compute_specialist"
+
 __all__ = ["agent_compute_specialist"]

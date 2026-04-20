@@ -61,4 +61,6 @@ def agent_recommendation(
     }
 
 
+agent_recommendation.__tool_name__ = "agent_recommendation"
+
 __all__ = ["agent_recommendation"]

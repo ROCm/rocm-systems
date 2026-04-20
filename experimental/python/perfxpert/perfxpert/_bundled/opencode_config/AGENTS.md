@@ -61,37 +61,37 @@ Layer 0 — Root (delegates by intent)
 
 ### Agent MCP tools — when to call each
 
-- **`perfxpert_agents_root_agent_root`** — one-shot full pipeline.
+- **`perfxpert_agent_root`** — one-shot full pipeline.
   Call this when the user asked a broad GPU-perf question and you
   want Analysis → Recommendation → narrative in one round-trip.
   Returns `{narrative, recommendations, primary_bottleneck,
   warnings, metadata}`.
 
-- **`perfxpert_agents_analysis_agent_analysis`** — classify the
+- **`perfxpert_agent_analysis`** — classify the
   primary bottleneck. Call this when you already have a trace and
   only want the bottleneck verdict (no technique list yet).
   Returns `{primary_bottleneck, confidence, time_breakdown,
   hot_kernels, counter_data_available}`.
 
-- **`perfxpert_agents_recommendation_agent_recommendation`** — pick
+- **`perfxpert_agent_recommendation`** — pick
   optimization techniques for an analysis verdict. Call this when
   you have the Analysis output and want the ranked technique list
   without running Analysis again.
 
-- **`perfxpert_agents_correctness_agent_correctness`** — decide on a
+- **`perfxpert_agent_correctness`** — decide on a
   patch. Call this after you have run a gate-cascade probe (compile
   / sol / bitwise / regression / anchors) and want a structured
   accept-or-revert decision.
 
-- **`perfxpert_agents_compute_agent_compute_specialist`** —
+- **`perfxpert_agent_compute_specialist`** —
   compute-bound techniques. Call this directly if the kernel is
   already known compute-bound and you want the technique list
   without going through Root + Analysis + Recommendation.
 
-- **`perfxpert_agents_memory_agent_memory_specialist`** —
+- **`perfxpert_agent_memory_specialist`** —
   memory-bound techniques. Same idea, for HBM / cache-bound work.
 
-- **`perfxpert_agents_latency_agent_latency_specialist`** —
+- **`perfxpert_agent_latency_specialist`** —
   launch-overhead / short-kernel techniques. Same idea, for
   latency-bound work.
 

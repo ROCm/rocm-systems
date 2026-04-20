@@ -62,4 +62,6 @@ def agent_latency_specialist(
     }
 
 
+agent_latency_specialist.__tool_name__ = "agent_latency_specialist"
+
 __all__ = ["agent_latency_specialist"]

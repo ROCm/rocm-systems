@@ -95,4 +95,6 @@ def agent_root(
     }
 
 
+agent_root.__tool_name__ = "agent_root"
+
 __all__ = ["agent_root"]

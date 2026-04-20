@@ -65,4 +65,6 @@ def agent_analysis(
     }
 
 
+agent_analysis.__tool_name__ = "agent_analysis"
+
 __all__ = ["agent_analysis"]

@@ -66,4 +66,6 @@ def agent_correctness(
     }
 
 
+agent_correctness.__tool_name__ = "agent_correctness"
+
 __all__ = ["agent_correctness"]
