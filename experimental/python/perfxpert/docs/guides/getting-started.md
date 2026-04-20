@@ -31,19 +31,45 @@ The setup.py build hook compiles the bundled AMD-branded opencode
 binary from the pinned `sst/opencode` submodule. This requires `bun`;
 if `bun` isn't on PATH the hook **auto-downloads** a prebuilt bun
 release into `~/.cache/perfxpert/bun/bin/` (or
-`%USERPROFILE%\.cache\perfxpert\bun\bin\` on Windows). Supported:
-Linux x64/arm64 glibc + musl, macOS x64/arm64, Windows x64/arm64.
-Offline installs fall back to a warn-skip; `perfxpert-code` will
-then print a helpful message on first launch explaining how to
-install bun manually.
+`%USERPROFILE%\.cache\perfxpert\bun\bin\` on Windows).
 
-Note on Windows: bun itself is supported and auto-downloaded, but
-the subsequent `bun build` of opencode inherits opencode's own
-platform-support matrix. If the build step fails on Windows,
-install `perfxpert` without the bundled launcher
-(`PERFXPERT_SKIP_BUNDLED_BUILD=1 pip install …`) and use the
-multi-backend launcher (`perfxpert-code claude` etc.) — those route
-to native backend CLIs and work anywhere.
+#### Supported hosts for auto-bun-download
+
+| Host | bun asset downloaded |
+|------|---------------------|
+| Linux x64 glibc | `bun-linux-x64.zip` |
+| Linux x64 musl (Alpine) | `bun-linux-x64-musl.zip` |
+| Linux aarch64 glibc | `bun-linux-aarch64.zip` |
+| Linux aarch64 musl | `bun-linux-aarch64-musl.zip` |
+| macOS x64 | `bun-darwin-x64.zip` |
+| macOS arm64 | `bun-darwin-aarch64.zip` |
+| Windows x64 | `bun-windows-x64.zip` |
+| Windows arm64 | `bun-windows-aarch64.zip` |
+
+Offline installs fall back to a warn-skip; `perfxpert-code` will then
+print a helpful message on first launch explaining how to install bun
+manually.
+
+#### Opt-out env vars
+
+- `PERFXPERT_SKIP_BUN_DOWNLOAD=1` — don't auto-fetch bun; let the
+  hook warn-skip if bun isn't already on PATH.
+- `PERFXPERT_SKIP_BUNDLED_BUILD=1` — skip the entire opencode build.
+  Library + analyze + MCP all still work; `perfxpert-code` will
+  fall back to whatever `opencode` is on PATH or exit with a helpful
+  error.
+- `PERFXPERT_OPENCODE_PATH=/path/to/opencode` — last-resort override
+  pointing the launcher at a pre-built binary.
+
+#### Note on Windows
+
+Bun itself is supported and auto-downloaded, but the subsequent
+`bun build` of opencode inherits opencode's own platform-support
+matrix. If the build step fails on Windows, install `perfxpert`
+without the bundled launcher (`PERFXPERT_SKIP_BUNDLED_BUILD=1 pip
+install …`) and use the multi-backend launcher
+(`perfxpert-code claude` / `codex` / `gemini`) — those route to
+native backend CLIs and work anywhere.
 
 ### Pip install
 

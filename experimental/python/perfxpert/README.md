@@ -7,31 +7,11 @@ AI-powered AMD ROCm GPU trace analysis.
 ### Prerequisites
 
 - Python 3.10+
-- (Optional) `claude`, `codex`, or `gemini` CLI on PATH if you plan to
-  use the multi-backend dispatch.
-
-The bundled AMD-branded opencode binary is compiled during `pip install`
-by the setup.py build hook, which requires `bun`. If `bun` isn't on
-PATH, the hook **auto-downloads** a prebuilt bun release into
-`~/.cache/perfxpert/bun/bin/` (or `%USERPROFILE%\.cache\perfxpert\bun\bin\` on
-Windows). Supported platforms and their downloaded asset:
-
-| Host | bun asset |
-|------|-----------|
-| Linux x64 glibc | `bun-linux-x64.zip` |
-| Linux x64 musl (Alpine) | `bun-linux-x64-musl.zip` |
-| Linux aarch64 glibc | `bun-linux-aarch64.zip` |
-| Linux aarch64 musl | `bun-linux-aarch64-musl.zip` |
-| macOS x64 | `bun-darwin-x64.zip` |
-| macOS arm64 | `bun-darwin-aarch64.zip` |
-| Windows x64 | `bun-windows-x64.zip` |
-| Windows arm64 | `bun-windows-aarch64.zip` |
-
-Offline installs fall back to a warn-skip and `perfxpert-code` will
-print a helpful error at first launch. Opt out with
-`PERFXPERT_SKIP_BUN_DOWNLOAD=1` if you'd rather manage bun yourself, or
-`PERFXPERT_SKIP_BUNDLED_BUILD=1` to skip the whole build (library,
-analyze, and MCP paths all work without the bundled opencode).
+- `bun` — if not on PATH, the pip-install build hook auto-downloads it
+  into `~/.cache/perfxpert/bun/`. See
+  [docs/guides/getting-started.md](docs/guides/getting-started.md)
+  for the supported-host matrix + opt-out envs.
+- (Optional) `claude`, `codex`, or `gemini` CLI on PATH for multi-backend dispatch.
 
 ### Install
 
