@@ -193,7 +193,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--coverage-n",
         type=int,
-        default=50,
+        default=100,
         help="Number of operators to sample in test_torch_trace_coverage",
     )
 

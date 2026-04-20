@@ -1,33 +1,32 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Per-operator call recipes for :mod:`test_torch_trace_coverage`.
+"""Per-operator argument builders for :mod:`test_torch_trace_coverage`.
 
-Single source of truth for ATen operators that need hardcoded arguments or
-must be skipped entirely from the generated ``coverage_workload.py``. Keys
-of :data:`OP_SPECS` are ATen short names (last segment of
-``torch.ops.aten.<name>``). Each value is an :class:`OpSpec` with exactly
+Single source of truth for ATen operators that appear in the generated
+``coverage_workload.py``. Keys of :data:`OP_SPECS` are ATen short names
+(last segment of ``torch.ops.aten.<name>``) or overload-specific keys
+(``<name>.<overload>``). Each value is an :class:`OpSpec` with exactly
 one of:
 
-- ``build``: a ``(device) -> (args_list, kwargs_dict)`` callable whose
-  return value is the call's positional args and kwargs. Used when schema-
-  driven argument generation in ``build_args_for_op`` cannot produce valid
-  shapes / dtypes for the op (Cholesky needs SPD input, bitwise ops on CUDA
-  reject float, pooling ops need 4-D NCHW, etc.).
-- ``skip``: a short human reason string. The op is dropped from the
-  workload; :func:`build_args_for_op` returns ``None`` for it.
+- ``build``: a ``(device) -> (args_list, kwargs_dict)`` callable returning
+  the positional arguments and keyword arguments for the call. An entry
+  is required for every ATen operator that must appear in the workload;
+  :func:`build_args_for_op` reports any ATen operator without an entry as
+  SKIP.
+- ``skip``: a short human-readable reason string. The operator is dropped
+  from the workload and reported as SKIP.
 
-Recipe return values are consumed by ``serialize_arg`` in the test module,
-which reads each tensor's ``shape`` and ``dtype`` and emits a matching
-factory call (``torch.randn``, ``torch.randint``, or ``torch.randint(..., dtype=bool)``)
-into the generated workload. Dtype is preserved end-to-end, so recipes that
-need int32 pivots, complex FFT inputs, fp16 softmax, bool masks, or int8
-operands can simply return tensors of that dtype.
+Builder return values are consumed by ``serialize_arg`` in the test
+module, which reads each tensor's ``shape`` and ``dtype`` and emits a
+matching factory call into the generated workload. Dtype is preserved
+end-to-end, so builders that need int32 pivots, complex FFT inputs, fp16
+softmax, bool masks, or int8 operands can return tensors of that dtype
+directly.
 
-The only escape hatch is :class:`_CoverageTensorArg`: use it when the emitted
-workload must draw values from a specific *distribution* rather than ``randn``
-(Bernoulli probabilities need ``[0, 1)``, Poisson rates need non-negative
-floats).
+:class:`_CoverageTensorArg` is available for tensors that require a
+value *distribution* the default ``randn`` factory cannot produce
+(Bernoulli probabilities in ``[0, 1)``, Poisson rates ``>= 0``, etc.).
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ import torch
 class _CoverageTensorArg(NamedTuple):
     """Shape-only tensor slot for workload emission when ``randn`` is invalid.
 
-    The emitter normally preserves shape and dtype only, so recipes that build
+    The emitter normally preserves shape and dtype only, so builders that make
     tensors with *structural* invariants (positive-definite, 1-based
     permutation, monotonic offsets, ...) would lose them on serialization.
     This node tells ``serialize_arg`` to emit a specific factory expression:
@@ -74,24 +73,24 @@ class _CoverageTensorArg(NamedTuple):
     scale: float = 4.0
 
 
-Recipe = Callable[[str], Tuple[List[Any], Dict[str, Any]]]
+ArgBuilder = Callable[[str], Tuple[List[Any], Dict[str, Any]]]
 
 
 @dataclass(frozen=True)
 class OpSpec:
-    """Declarative recipe or skip directive for one ATen op.
+    """Declarative argument builder or skip directive for one ATen operator.
 
-    Exactly one of ``build`` / ``skip`` is expected to be set. Entries with a
-    ``build`` override schema-driven arg generation; entries with ``skip``
-    cause the op to be dropped from the emitted workload.
+    Exactly one of ``build`` / ``skip`` is expected to be set. Entries
+    with ``build`` contribute the operator to the generated workload;
+    entries with ``skip`` drop the operator with an explanatory reason.
     """
 
-    build: Optional[Recipe] = None
+    build: Optional[ArgBuilder] = None
     skip: Optional[str] = None
 
 
 # -----------------------------------------------------------------------------
-# Compact tensor factories used by recipes
+# Compact tensor factories used by builders
 # -----------------------------------------------------------------------------
 
 def _f(device: str, *shape: int, dtype: torch.dtype = torch.float32) -> torch.Tensor:
@@ -126,7 +125,7 @@ def _spd(device: str, n: int = 4) -> torch.Tensor:
 
 
 # -----------------------------------------------------------------------------
-# Multi-line recipe helpers (kept out of the table for readability)
+# Multi-line builder helpers (kept out of the table for readability)
 # -----------------------------------------------------------------------------
 
 def _linalg_householder_product(device: str) -> Tuple[List[Any], Dict[str, Any]]:
@@ -322,9 +321,11 @@ def _native_layer_norm_backward(device: str) -> Tuple[List[Any], Dict[str, Any]]
 # The unified table.  Keys are ATen short names.
 # -----------------------------------------------------------------------------
 #
-# Skip entries first, then hardcoded-arg recipes grouped by category. Adding a
-# new op fix = one entry here; deleting an entry reverts to schema-driven
-# generation in ``build_args_for_op``.
+# Skip entries appear first, followed by hardcoded-argument builders
+# grouped by operator category. Adding a new operator to the coverage
+# workload requires exactly one entry in this table (``OpSpec.build`` or
+# ``OpSpec.skip``); removing an entry causes :func:`build_args_for_op` to
+# report the operator as SKIP.
 
 OP_SPECS: Dict[str, OpSpec] = {
     # ---------------------------------------------------------------
@@ -337,12 +338,13 @@ OP_SPECS: Dict[str, OpSpec] = {
         "sparse tensor cores); not built for the ROCm stack.",
     ),
     # The FFT family segfaults the ground-truth subprocess whenever
-    # ``torch.profiler`` is active — the ROCm FFT kernel and ROCTracer's
-    # flow-event hooks race, and the op aborts before ROCTracer can emit a
-    # completion event.  The kernels themselves run correctly outside the
-    # profiler.  Because the test needs ``torch.profiler`` to build ground
-    # truth, we skip these ops entirely; coverage for them can only come
-    # from a future driver / profiler update that resolves the race.
+    # ``torch.profiler`` is active: the ROCm FFT kernel and ROCTracer's
+    # flow-event hooks race, and the operator aborts before ROCTracer can
+    # emit a completion event. The kernels themselves run correctly
+    # outside the profiler. Because the test requires ``torch.profiler``
+    # to collect ground truth, these operators are skipped entirely;
+    # coverage can only be restored by a driver / profiler update that
+    # resolves the race.
     "_fft_r2c": OpSpec(
         skip="torch.profiler cannot collect ground truth: ROCm FFT kernel + "
         "ROCTracer race produces SIGSEGV inside the profiler subprocess "
@@ -368,6 +370,16 @@ OP_SPECS: Dict[str, OpSpec] = {
         skip="Requires cdist output tied to x1/x2; serialized workload cannot "
         "preserve that correlation.",
     ),
+    # ``igamma`` / ``igammac`` (and their ``.out`` overloads) trigger a
+    # kernel-side illegal memory access on ROCm (HIP error 719,
+    # ``hipErrorLaunchFailure``) that places the HIP context in a
+    # sticky-error state.
+    "igamma": OpSpec(
+        skip="ROCm kernel: HIP error 719 (unspecified launch failure).",
+    ),
+    "igammac": OpSpec(
+        skip="ROCm kernel: HIP error 719 (unspecified launch failure).",
+    ),
     "cudnn_batch_norm_backward": OpSpec(
         skip="Needs save_mean / save_var / reserveSpace from a matching forward.",
     ),
@@ -378,7 +390,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     # Specialised quantised / low-precision GEMMs: signatures require matching
     # qScaleAndZeros / scales / layouts that are backend-specific. Skip until a
-    # proper per-backend recipe exists.
+    # proper per-backend builder exists.
     "_weight_int4pack_mm": OpSpec(
         skip="Requires packed int4 weights + matching qScaleAndZeros layout.",
     ),
@@ -391,14 +403,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     # ``_fused_moving_avg_obs_fq_helper(self, observer_on, fake_quant_on,
     # running_min, running_max, scale, zero_point, averaging_const,
     # quant_min, quant_max, ch_axis, per_row_fake_quant=False,
-    # symmetric_quant=False) -> (out, mask)``.  The op updates the running
-    # min/max tensors in place based on ``self``, so for a one-shot call
-    # we just need shape-correct buffers — the emitter's random values
-    # satisfy the kernel (``observer_on``/``fake_quant_on`` are treated
-    # truthily, ``running_min``/``running_max`` need not be ordered on
-    # first call).  ``observer_on``/``fake_quant_on``/``zero_point`` need
-    # ``int32`` (the op rejects ``int64``), which ``.to(dtype=torch.int32)``
-    # pins so the emitter preserves it.
+    # symmetric_quant=False) -> (out, mask)``. The operator updates the
+    # running min/max tensors in place based on ``self``, so a one-shot
+    # call only requires shape-correct buffers — the emitter's random
+    # values satisfy the kernel (``observer_on`` / ``fake_quant_on`` are
+    # treated truthily; ``running_min`` / ``running_max`` need not be
+    # ordered on the first call). ``observer_on`` / ``fake_quant_on`` /
+    # ``zero_point`` must be ``int32`` (the operator rejects ``int64``);
+    # ``.to(dtype=torch.int32)`` pins the dtype so the emitter preserves it.
     "_fused_moving_avg_obs_fq_helper": OpSpec(
         build=lambda d: (
             [
@@ -427,21 +439,21 @@ OP_SPECS: Dict[str, OpSpec] = {
     # ``values.numel()`` along the ragged dim, otherwise the packer reads
     # past the values buffer.  ``serialize_arg`` now dispatches through each
     # list element (so ``[_CoverageTensorArg(emit="cumsum_offsets")]`` emits
-    # correctly), but the recipes still need ``values.shape[0]`` /
+    # correctly), but the builders still need ``values.shape[0]`` /
     # ``max_lengths`` / ``offsets[-1]`` to agree, which is op-specific and
-    # not yet worked out; leaving them skipped until a coherent shape recipe
+    # not yet worked out; leaving them skipped until a coherent shape contract
     # is added.
     "_jagged_to_padded_dense_forward": OpSpec(
         skip="Nested-tensor API: needs a list of monotonic int64 offsets "
         "tensors whose tail equals ``values.numel`` along the ragged dim; "
         "emitter supports the list-of-_CoverageTensorArg form, but a "
-        "consistent shape recipe (values / offsets / max_lengths) is TBD.",
+        "consistent shape contract (values / offsets / max_lengths) is TBD.",
     ),
     "_padded_dense_to_jagged_forward": OpSpec(
         skip="Nested-tensor API: needs a list of monotonic int64 offsets "
         "tensors whose tail equals ``values.numel`` along the ragged dim; "
         "emitter supports the list-of-_CoverageTensorArg form, but a "
-        "consistent shape recipe (values / offsets / max_lengths) is TBD.",
+        "consistent shape contract (values / offsets / max_lengths) is TBD.",
     ),
 
     # ---------------------------------------------------------------
@@ -463,8 +475,12 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: ([_f(d, 1, 3, 4, 4, 4), _f(d, 3, 6, 3, 3, 3)], {}),
     ),
     "addmm": OpSpec(build=lambda d: ([_f(d, 4), _f(d, 4, 4), _f(d, 4, 4)], {})),
-    "addbmm": OpSpec(build=lambda d: ([_f(d, 4, 4), _f(d, 2, 4, 4), _f(d, 2, 4, 4)], {})),
-    "addbmm_": OpSpec(build=lambda d: ([_f(d, 4, 4), _f(d, 2, 4, 4), _f(d, 2, 4, 4)], {})),
+    "addbmm": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), _f(d, 2, 4, 4), _f(d, 2, 4, 4)], {}),
+    ),
+    "addbmm_": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), _f(d, 2, 4, 4), _f(d, 2, 4, 4)], {}),
+    ),
     "baddbmm": OpSpec(
         build=lambda d: ([_f(d, 2, 4, 4), _f(d, 2, 4, 4), _f(d, 2, 4, 4)], {}),
     ),
@@ -532,17 +548,12 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Linalg / Cholesky (need structured input)
     # ---------------------------------------------------------------
     "linalg_householder_product": OpSpec(build=_linalg_householder_product),
-    # ``cholesky`` raises _LinAlgError on non-PD input.  The recipe builds an
-    # SPD matrix at emission time, but ``serialize_arg`` only reads shape and
-    # dtype, so the emitted workload calls ``torch.randn`` — almost never PD.
-    # ``linalg_cholesky_ex`` / ``cholesky_inverse`` do not raise, so their
-    # kernels still launch and we keep their builds below.
-    # ``cholesky`` / ``_cholesky_solve_helper`` / ``linalg_cholesky_ex`` /
-    # ``cholesky_inverse`` all need a symmetric positive-definite matrix.
-    # ``_CoverageTensorArg(emit="spd")`` tells the emitter to produce
-    # ``a @ a.mT + n * I`` — diagonal-dominant, always SPD.  The recipe-time
-    # ``_spd`` helper was not enough because ``serialize_arg`` only reads
-    # shape+dtype and would drop the SPD structure.
+    # ``cholesky`` raises _LinAlgError on non-PD input. ``_CoverageTensorArg(
+    # emit="spd")`` tells the emitter to produce ``a @ a.mT + n * I`` —
+    # diagonal-dominant, always SPD. The build-time ``_spd`` helper was not
+    # enough because ``serialize_arg`` only reads shape+dtype and would drop
+    # the SPD structure. ``linalg_cholesky_ex`` / ``cholesky_inverse`` do not
+    # raise, but they still need an SPD input for meaningful kernels.
     "cholesky": OpSpec(
         build=lambda d: ([_CoverageTensorArg(shape=(4, 4), emit="spd")], {}),
     ),
@@ -659,8 +670,8 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     # Schema: multi_margin_loss(self, target, p=1, margin=1, weight?, reduction=Mean).
-    # ``weight`` is Tensor? — the previous recipe passed ``0`` which tripped the
-    # dispatcher.  Use ``None`` to fall back to unit weights.
+    # ``weight`` is Tensor? — passing ``0`` trips the dispatcher; use ``None``
+    # to fall back to unit weights.
     "multi_margin_loss": OpSpec(
         build=lambda d: (
             [
@@ -712,7 +723,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     # Schema: (input, grad_output, weight, running_mean?, running_var?,
     #          save_mean?, save_var?, epsilon). grad_output must match input
-    #          shape — previous recipe passed a 1-D tensor there.
+    #          shape (not a 1-D tensor).
     "miopen_batch_norm_backward": OpSpec(
         build=lambda d: (
             [
@@ -961,7 +972,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_upsample_bicubic2d_aa": OpSpec(
         build=lambda d: ([_f(d, 1, 3, 8, 8), [16, 16], False, None], {}),
     ),
-    # Schema: (grad_output, output_size, input_size, align_corners, scales_h?, scales_w?).
+    # Schema: (grad_output, output_size, input_size, align_corners, scales_h?,
+    # scales_w?).
     "_upsample_bilinear2d_aa_backward": OpSpec(
         build=lambda d: (
             [_f(d, 1, 3, 16, 16), [16, 16], [1, 3, 8, 8], False, None, None],
@@ -978,7 +990,8 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-    # Schema: (grad_output, input, grid, interp, padding, align_corners, bool[2] output_mask).
+    # Schema: (grad_output, input, grid, interp, padding, align_corners,
+    # bool[2] output_mask).
     "grid_sampler_2d_backward": OpSpec(
         build=lambda d: (
             [
@@ -1010,8 +1023,8 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     # Schema: im2col(self, kernel_size, dilation, padding, stride).
-    # The final argument is ``stride`` and must be > 0 — previous recipe had
-    # stride/padding swapped which produced ``stride should be greater than zero``.
+    # The final argument is ``stride`` and must be > 0; swapping stride/padding
+    # produces ``stride should be greater than zero``.
     "im2col": OpSpec(
         build=lambda d: ([_f(d, 1, 1, 8, 8), [3, 3], [1, 1], [0, 0], [1, 1]], {}),
     ),
@@ -1081,7 +1094,10 @@ OP_SPECS: Dict[str, OpSpec] = {
     "bitwise_left_shift": OpSpec(build=lambda d: ([_i(d, 4, 4), _i(d, 4, 4)], {})),
     "bitwise_right_shift": OpSpec(build=lambda d: ([_i(d, 4, 4), _i(d, 4, 4)], {})),
     "bitwise_not": OpSpec(
-        build=lambda d: ([torch.randint(0, 256, (4, 4), device=d, dtype=torch.int64)], {}),
+        build=lambda d: (
+            [torch.randint(0, 256, (4, 4), device=d, dtype=torch.int64)],
+            {},
+        ),
     ),
     "bitwise_not_": OpSpec(build=lambda d: ([_i(d, 4, 4)], {})),
     "gcd": OpSpec(build=lambda d: ([_i(d, 4, 4), _i(d, 4, 4)], {})),
@@ -1146,8 +1162,8 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     # Schema: native_dropout_backward(Tensor grad_output, Tensor mask, float scale).
-    # A previous recipe passed a second float tensor between grad_output and
-    # mask, producing "expected at most 3 argument(s) but received 4".
+    # Passing a second float tensor between grad_output and mask produces
+    # "expected at most 3 argument(s) but received 4".
     "native_dropout_backward": OpSpec(
         build=lambda d: ([_f(d, 4, 4), _b(d), 0.5], {}),
     ),
@@ -1167,10 +1183,18 @@ OP_SPECS: Dict[str, OpSpec] = {
     ),
     # ``List[int]`` defaults like ``[1, 1]`` duplicate a dim on 2D tensors.
     "flip": OpSpec(build=lambda d: ([_f(d, 4, 4), [0]], {})),
-    "index_copy": OpSpec(build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {})),
-    "index_copy_": OpSpec(build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {})),
-    "index_add": OpSpec(build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {})),
-    "index_add_": OpSpec(build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {})),
+    "index_copy": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {}),
+    ),
+    "index_copy_": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {}),
+    ),
+    "index_add": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {}),
+    ),
+    "index_add_": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), 0, _i1(d, 2), _f(d, 2, 4)], {}),
+    ),
     # ``include_self`` is kwarg-only; passing as 6th positional trips the
     # dispatcher with "takes 5 positional argument(s) but 6 was/were given".
     "index_reduce": OpSpec(
@@ -1193,8 +1217,12 @@ OP_SPECS: Dict[str, OpSpec] = {
     "gather": OpSpec(
         build=lambda d: ([_f(d, 4, 4), 0, _i(d, 4, 4, low=0, high=4)], {}),
     ),
-    "scatter": OpSpec(build=lambda d: ([_f(d, 4, 4), 0, _i(d, 4, 4), _f(d, 4, 4)], {})),
-    "scatter_": OpSpec(build=lambda d: ([_f(d, 4, 4), 0, _i(d, 4, 4), _f(d, 4, 4)], {})),
+    "scatter": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), 0, _i(d, 4, 4), _f(d, 4, 4)], {}),
+    ),
+    "scatter_": OpSpec(
+        build=lambda d: ([_f(d, 4, 4), 0, _i(d, 4, 4), _f(d, 4, 4)], {}),
+    ),
     "scatter_add": OpSpec(
         build=lambda d: ([_f(d, 4, 4), 0, _i(d, 4, 4), _f(d, 4, 4)], {}),
     ),
@@ -1215,11 +1243,12 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     "take": OpSpec(build=lambda d: ([_f(d, 4, 4), _i1(d, 8)], {})),
-    # segment_reduce: most args (lengths/indices/offsets/axis/unsafe/initial)
-    # are kwarg-only.  The kernel normally checks ``lengths.sum() ==
-    # data.size(axis)``, but the emitter replaces tensor literals with
-    # random ``torch.randint`` values, so we pass ``unsafe=True`` to skip
-    # that check and still launch the reduction kernel.
+    # ``segment_reduce``: most arguments (``lengths``, ``indices``,
+    # ``offsets``, ``axis``, ``unsafe``, ``initial``) are kwarg-only. The
+    # kernel normally checks ``lengths.sum() == data.size(axis)``, but the
+    # emitter replaces tensor literals with random ``torch.randint``
+    # values; ``unsafe=True`` bypasses the check so the reduction kernel
+    # still launches.
     "segment_reduce": OpSpec(
         build=lambda d: (
             [_f(d, 8), "sum"],
@@ -1276,7 +1305,7 @@ OP_SPECS: Dict[str, OpSpec] = {
     # does not match the List[int] slot.
     "view": OpSpec(build=lambda d: ([_f(d, 4, 4), [8, 2]], {})),
     # Schema: glu_backward(grad_output, self, dim).  grad_output matches the
-    # glu output shape (self halved along ``dim``); recipe had the two swapped.
+    # glu output shape (self halved along ``dim``); don't swap the two.
     "glu_backward": OpSpec(build=lambda d: ([_f(d, 2, 4), _f(d, 2, 8), 1], {})),
 
     # ---------------------------------------------------------------
@@ -1337,8 +1366,8 @@ OP_SPECS: Dict[str, OpSpec] = {
     # ---------------------------------------------------------------
     # Misc / AMP / assertions
     # ---------------------------------------------------------------
-    # Schema: (Tensor[] self, Tensor found_inf, Tensor inv_scale) -> ().  The
-    # previous recipe omitted ``inv_scale``, so the dispatcher failed.
+    # Schema: (Tensor[] self, Tensor found_inf, Tensor inv_scale) -> ().
+    # Omitting ``inv_scale`` fails the dispatcher.
     "_amp_foreach_non_finite_check_and_unscale_": OpSpec(
         build=lambda d: (
             [
