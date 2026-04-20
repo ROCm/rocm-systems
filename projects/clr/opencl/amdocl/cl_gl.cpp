@@ -122,7 +122,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLBuffer,
     return clMemObj;
   }
 
-  return (amd::clCreateFromGLBufferAMD(*as_amd(context), flags, bufobj, errcode_ret));
+  return static_cast<cl_mem>(amd::clCreateFromGLBufferAMD(
+      *as_amd(context), static_cast<amd::MemFlags>(flags), bufobj, errcode_ret));
 }
 RUNTIME_EXIT
 
@@ -208,8 +209,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture,
     return static_cast<cl_mem>(0);
   }
 
-  return amd::clCreateFromGLTextureAMD(*as_amd(context), flags, texture_target, miplevel, texture,
-                                       errcode_ret);
+  return static_cast<cl_mem>(amd::clCreateFromGLTextureAMD(
+      *as_amd(context), static_cast<amd::MemFlags>(flags), texture_target, miplevel, texture,
+      errcode_ret));
 }
 RUNTIME_EXIT
 
@@ -289,8 +291,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture2D,
     return static_cast<cl_mem>(0);
   }
 
-  return amd::clCreateFromGLTextureAMD(*as_amd(context), flags, target, miplevel, texture,
-                                       errcode_ret);
+  return static_cast<cl_mem>(amd::clCreateFromGLTextureAMD(
+      *as_amd(context), static_cast<amd::MemFlags>(flags), target, miplevel, texture,
+      errcode_ret));
 }
 RUNTIME_EXIT
 
@@ -365,8 +368,9 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLTexture3D,
     return static_cast<cl_mem>(0);
   }
 
-  return amd::clCreateFromGLTextureAMD(*as_amd(context), flags, target, miplevel, texture,
-                                       errcode_ret);
+  return static_cast<cl_mem>(amd::clCreateFromGLTextureAMD(
+      *as_amd(context), static_cast<amd::MemFlags>(flags), target, miplevel, texture,
+      errcode_ret));
 }
 RUNTIME_EXIT
 
@@ -424,7 +428,8 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateFromGLRenderbuffer,
     return clMemObj;
   }
 
-  return (amd::clCreateFromGLRenderbufferAMD(*as_amd(context), flags, renderbuffer, errcode_ret));
+  return static_cast<cl_mem>(amd::clCreateFromGLRenderbufferAMD(
+      *as_amd(context), static_cast<amd::MemFlags>(flags), renderbuffer, errcode_ret));
 }
 RUNTIME_EXIT
 
@@ -473,7 +478,8 @@ RUNTIME_ENTRY(cl_int, clGetGLObjectInfo,
 
   cl_int result;
 
-  cl_gl_object_type clGLType = glObject->getCLGLObjectType();
+  cl_gl_object_type clGLType =
+      static_cast<cl_gl_object_type>(glObject->getCLGLObjectType());
   result = amd::clGetInfo(clGLType, sizeof(cl_gl_object_type), gl_object_type, NULL);
 
   GLuint glName = glObject->getGLName();
@@ -1032,8 +1038,8 @@ static GLenum glInternalFormatToGlFormat(GLenum internalFormat) {
 //
 //      clCreateFromGLBufferAMD
 //
-cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint bufobj,
-                               cl_int* errcode_ret) {
+void* clCreateFromGLBufferAMD(Context& amdContext, amd::MemFlags flags, GLuint bufobj,
+                               int* errcode_ret) {
   BufferGL* pBufferGL = NULL;
   GLenum glErr;
   GLenum glTarget = GL_ARRAY_BUFFER;
@@ -1044,7 +1050,7 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
   if (!amdContext.glenv() || !amdContext.glenv()->isAssociated()) {
     *not_null(errcode_ret) = CL_INVALID_CONTEXT;
     LogWarning("\"amdContext\" is not created from GL context or share list");
-    return (cl_mem)0;
+    return nullptr;
   }
 
   // Add this scope to bound the scoped lock
@@ -1053,7 +1059,7 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
     if (!ie.isValid()) {
       *not_null(errcode_ret) = CL_INVALID_CONTEXT;
       LogWarning("\"amdContext\" is not created from GL context or share list");
-      return as_cl<Memory>(0);
+      return nullptr;
     }
 
     // Verify GL buffer object
@@ -1062,7 +1068,7 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
         (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_()))) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("\"bufobj\" is not a GL buffer object");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     // It seems that CL spec is not concerned with GL_BUFFER_USAGE, so skip it
@@ -1075,13 +1081,13 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("cannot get the GL buffer size");
-      return (cl_mem)0;
+      return nullptr;
     }
     if (gliSize == 0) {
       //@todo - check why sometime the size is zero
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("the GL buffer's data store is not created");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     // Mapping will be done at acquire time (sync point)
@@ -1092,13 +1098,13 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
     if (!pBufferGL) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
       LogWarning("cannot create object of class BufferGL");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     if (!pBufferGL->create()) {
       *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
       pBufferGL->release();
-      return (cl_mem)0;
+      return nullptr;
     }
   }  // Release scoped lock
 
@@ -1108,7 +1114,7 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
   if (pBufferGL->getInteropObj() == NULL) {
     *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
     LogWarning("cannot create object of class BufferGL");
-    return (cl_mem)0;
+    return nullptr;
   }
 
   // Fixme: If more than one device is present in the context, we choose the first device.
@@ -1122,23 +1128,23 @@ cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint b
   if (NULL == mem) {
     LogPrintfError("Can't allocate memory size - 0x%08X bytes!", pBufferGL->getSize());
     *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
-    return (cl_mem)0;
+    return nullptr;
   }
   mem->processGLResource(device::Memory::GLDecompressResource);
 
-  return as_cl<Memory>(pBufferGL);
+  return static_cast<void*>(pBufferGL);
 }
 
-cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenum target,
+void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags clFlags, GLenum target,
                                 GLint miplevel, GLuint texture, int* errcode_ret) {
   ImageGL* pImageGL = NULL;
   GLenum glErr;
   GLenum glTarget = 0;
   GLenum glInternalFormat;
-  cl_image_format clImageFormat;
+  amd::ImageFormat clImageFormat;
   uint dim = 1;
-  cl_mem_object_type clType;
-  cl_gl_object_type clGLType;
+  amd::MemObjectType clType = amd::MemObjectType::Image2D;
+  amd::GlObjectType clGLType = amd::GlObjectType::Texture2D;
   GLsizei numSamples = 1;
   GLint gliTexMaxLevel;
   bool wholeMipmap = false;
@@ -1147,7 +1153,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
   if (!amdContext.glenv() || !amdContext.glenv()->isAssociated()) {
     *not_null(errcode_ret) = CL_INVALID_CONTEXT;
     LogWarning("\"amdContext\" is not created from GL context or share list");
-    return static_cast<cl_mem>(0);
+    return nullptr;
   }
 
   GLint gliTexWidth = 1;
@@ -1160,7 +1166,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
     if (!ie.isValid()) {
       *not_null(errcode_ret) = CL_INVALID_CONTEXT;
       LogWarning("\"amdContext\" is not created from GL context or share list");
-      return as_cl<Memory>(0);
+      return nullptr;
     }
 
     // Verify GL texture object
@@ -1169,7 +1175,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
         (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_()))) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("\"texture\" is not a GL texture object");
-      return static_cast<cl_mem>(0);
+      return nullptr;
     }
 
     bool image = true;
@@ -1179,16 +1185,16 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       case GL_TEXTURE_BUFFER:
         glTarget = GL_TEXTURE_BUFFER;
         dim = 1;
-        clType = CL_MEM_OBJECT_IMAGE1D_BUFFER;
-        clGLType = CL_GL_OBJECT_TEXTURE_BUFFER;
+        clType = amd::MemObjectType::Image1DBuffer;
+        clGLType = amd::GlObjectType::TextureBuffer;
         image = false;
         break;
 
       case GL_TEXTURE_1D:
         glTarget = GL_TEXTURE_1D;
         dim = 1;
-        clType = CL_MEM_OBJECT_IMAGE1D;
-        clGLType = CL_GL_OBJECT_TEXTURE1D;
+        clType = amd::MemObjectType::Image1D;
+        clGLType = amd::GlObjectType::Texture1D;
         break;
 
       case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
@@ -1199,57 +1205,57 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
         glTarget = GL_TEXTURE_CUBE_MAP;
         dim = 2;
-        clType = CL_MEM_OBJECT_IMAGE2D;
-        clGLType = CL_GL_OBJECT_TEXTURE2D;
+        clType = amd::MemObjectType::Image2D;
+        clGLType = amd::GlObjectType::Texture2D;
         break;
 
       case GL_TEXTURE_1D_ARRAY:
         glTarget = GL_TEXTURE_1D_ARRAY;
         dim = 2;
-        clType = CL_MEM_OBJECT_IMAGE1D_ARRAY;
-        clGLType = CL_GL_OBJECT_TEXTURE1D_ARRAY;
+        clType = amd::MemObjectType::Image1DArray;
+        clGLType = amd::GlObjectType::Texture1DArray;
         break;
 
       case GL_TEXTURE_2D:
         glTarget = GL_TEXTURE_2D;
         dim = 2;
-        clType = CL_MEM_OBJECT_IMAGE2D;
-        clGLType = CL_GL_OBJECT_TEXTURE2D;
+        clType = amd::MemObjectType::Image2D;
+        clGLType = amd::GlObjectType::Texture2D;
         break;
 
       case GL_TEXTURE_2D_MULTISAMPLE:
         glTarget = GL_TEXTURE_2D_MULTISAMPLE;
         dim = 2;
-        clType = CL_MEM_OBJECT_IMAGE2D;
-        clGLType = CL_GL_OBJECT_TEXTURE2D;
+        clType = amd::MemObjectType::Image2D;
+        clGLType = amd::GlObjectType::Texture2D;
         break;
 
       case GL_TEXTURE_RECTANGLE_ARB:
         glTarget = GL_TEXTURE_RECTANGLE_ARB;
         dim = 2;
-        clType = CL_MEM_OBJECT_IMAGE2D;
-        clGLType = CL_GL_OBJECT_TEXTURE2D;
+        clType = amd::MemObjectType::Image2D;
+        clGLType = amd::GlObjectType::Texture2D;
         break;
 
       case GL_TEXTURE_2D_ARRAY:
         glTarget = GL_TEXTURE_2D_ARRAY;
         dim = 3;
-        clType = CL_MEM_OBJECT_IMAGE2D_ARRAY;
-        clGLType = CL_GL_OBJECT_TEXTURE2D_ARRAY;
+        clType = amd::MemObjectType::Image2DArray;
+        clGLType = amd::GlObjectType::Texture2DArray;
         break;
 
       case GL_TEXTURE_3D:
         glTarget = GL_TEXTURE_3D;
         dim = 3;
-        clType = CL_MEM_OBJECT_IMAGE3D;
-        clGLType = CL_GL_OBJECT_TEXTURE3D;
+        clType = amd::MemObjectType::Image3D;
+        clGLType = amd::GlObjectType::Texture3D;
         break;
 
       default:
         // wrong value
         *not_null(errcode_ret) = CL_INVALID_VALUE;
         LogWarning("invalid \"target\" value");
-        return static_cast<cl_mem>(0);
+        return nullptr;
         break;
     }
 
@@ -1265,21 +1271,21 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
         *not_null(errcode_ret) = CL_INVALID_MIP_LEVEL;
         LogWarning("Cannot get base mipmap level of a GL \"texture\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
       clearGLErrors(amdContext);
       amdContext.glenv()->glGetTexParameteriv_(glTarget, GL_TEXTURE_MAX_LEVEL, &gliTexMaxLevel);
       if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
         *not_null(errcode_ret) = CL_INVALID_MIP_LEVEL;
         LogWarning("Cannot get max mipmap level of a GL \"texture\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
       wholeMipmap = miplevel < 0;
       miplevel = wholeMipmap ? gliTexBaseLevel : miplevel;
       if ((gliTexBaseLevel > miplevel) || (miplevel > gliTexMaxLevel)) {
         *not_null(errcode_ret) = CL_INVALID_MIP_LEVEL;
         LogWarning("\"miplevel\" is not a valid mipmap level of the GL \"texture\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
 
       // Get GL texture format and check if it's compatible with CL format
@@ -1289,7 +1295,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("Cannot get internal format of \"miplevel\" of GL \"texture\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
 
       amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_SAMPLES,
@@ -1297,12 +1303,12 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("Cannot get  numbers of samples of GL \"texture\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
       if (numSamples > 1) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("MSAA \"texture\" object is not suppoerted for the device");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
 
       // Now get CL format from GL format and bytes per pixel
@@ -1311,7 +1317,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
                              clFlags)) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("\"texture\" format does not map to an appropriate CL image format");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
 
       switch (dim) {
@@ -1322,7 +1328,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
           if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
             *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
             LogWarning("Cannot get the depth of \"miplevel\" of GL \"texure\"");
-            return static_cast<cl_mem>(0);
+            return nullptr;
           }
         // Fall trough to process other dimensions...
         case 2:
@@ -1332,7 +1338,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
           if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
             *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
             LogWarning("Cannot get the height of \"miplevel\" of GL \"texure\"");
-            return static_cast<cl_mem>(0);
+            return nullptr;
           }
         // Fall trough to process other dimensions...
         case 1:
@@ -1342,13 +1348,13 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
           if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
             *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
             LogWarning("Cannot get the width of \"miplevel\" of GL \"texure\"");
-            return static_cast<cl_mem>(0);
+            return nullptr;
           }
           break;
         default:
           *not_null(errcode_ret) = CL_INVALID_VALUE;
           LogWarning("invalid \"target\" value");
-          return static_cast<cl_mem>(0);
+          return nullptr;
       }
     } else {
       GLint size;
@@ -1361,7 +1367,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("Cannot get backing buffer for GL \"texture buffer\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
       amdContext.glenv()->glBindBuffer_(glTarget, backingBuffer);
 
@@ -1372,7 +1378,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("Cannot get internal format of \"miplevel\" of GL \"texture\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
 
       // Now get CL format from GL format and bytes per pixel
@@ -1381,7 +1387,7 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
                              clFlags)) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("\"texture\" format does not map to an appropriate CL image format");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
 
       clearGLErrors(amdContext);
@@ -1389,20 +1395,21 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
       if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
         *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
         LogWarning("Cannot get internal format of \"miplevel\" of GL \"texture\" object");
-        return static_cast<cl_mem>(0);
+        return nullptr;
       }
 
       gliTexWidth = size / iBytesPerPixel;
     }
-    size_t imageSize = (clType == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? static_cast<size_t>(gliTexHeight)
-                                                               : static_cast<size_t>(gliTexDepth);
+    size_t imageSize = (clType == amd::MemObjectType::Image1DArray)
+                           ? static_cast<size_t>(gliTexHeight)
+                           : static_cast<size_t>(gliTexDepth);
 
     if (!amd::Image::validateDimensions(
             amdContext.devices(), clType, static_cast<size_t>(gliTexWidth),
             static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), imageSize)) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("The GL \"texture\" data store is not created or out of supported dimensions");
-      return static_cast<cl_mem>(0);
+      return nullptr;
     }
 
     // PBO and mapping will be done at "acquire" time (sync point)
@@ -1424,38 +1431,38 @@ cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags clFlags, GLenu
     if (!pImageGL) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
       LogWarning("Cannot create class ImageGL - out of memory?");
-      return static_cast<cl_mem>(0);
+      return nullptr;
     }
 
     if (!pImageGL->create()) {
       *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
       pImageGL->release();
-      return static_cast<cl_mem>(0);
+      return nullptr;
     }
 
   }  // Release scoped lock
 
   *not_null(errcode_ret) = CL_SUCCESS;
-  return as_cl<Memory>(pImageGL);
+  return static_cast<void*>(pImageGL);
 }
 
 //
 //      clCreateFromGLRenderbufferDAMD
 //
-cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, GLuint renderbuffer,
+void* clCreateFromGLRenderbufferAMD(Context& amdContext, amd::MemFlags clFlags, GLuint renderbuffer,
                                      int* errcode_ret) {
   ImageGL* pImageGL = NULL;
   GLenum glErr;
 
   GLenum glTarget = GL_RENDERBUFFER;
   GLenum glInternalFormat;
-  cl_image_format clImageFormat;
+  amd::ImageFormat clImageFormat;
 
   // Verify context init'ed for interop
   if (!amdContext.glenv() || !amdContext.glenv()->isAssociated()) {
     *not_null(errcode_ret) = CL_INVALID_CONTEXT;
     LogWarning("\"amdContext\" is not created from GL context or share list");
-    return (cl_mem)0;
+    return nullptr;
   }
 
   GLint gliRbWidth;
@@ -1467,7 +1474,7 @@ cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, 
     if (!ie.isValid()) {
       *not_null(errcode_ret) = CL_INVALID_CONTEXT;
       LogWarning("\"amdContext\" is not created from GL context or share list");
-      return as_cl<Memory>(0);
+      return nullptr;
     }
 
     // Verify GL renderbuffer object
@@ -1476,7 +1483,7 @@ cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, 
         (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_()))) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("\"renderbuffer\" is not a GL texture object");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     amdContext.glenv()->glBindRenderbuffer_(glTarget, renderbuffer);
@@ -1488,7 +1495,7 @@ cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, 
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
       LogWarning("Cannot get internal format of GL \"renderbuffer\" object");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     // Now get CL format from GL format and bytes per pixel
@@ -1497,7 +1504,7 @@ cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, 
                            clFlags)) {
       *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
       LogWarning("\"renderbuffer\" format does not map to an appropriate CL image format");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     // Check if size is available - data store is created
@@ -1507,12 +1514,12 @@ cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, 
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("Cannot get the width of GL \"renderbuffer\"");
-      return (cl_mem)0;
+      return nullptr;
     }
     if (gliRbWidth == 0) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("The GL \"renderbuffer\" data store is not created");
-      return (cl_mem)0;
+      return nullptr;
     }
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetRenderbufferParameterivEXT_(glTarget, GL_RENDERBUFFER_HEIGHT,
@@ -1520,36 +1527,36 @@ cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags clFlags, 
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("Cannot get the height of GL \"renderbuffer\"");
-      return (cl_mem)0;
+      return nullptr;
     }
     if (gliRbHeight == 0) {
       *not_null(errcode_ret) = CL_INVALID_GL_OBJECT;
       LogWarning("The GL \"renderbuffer\" data store is not created");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     // PBO and mapping will be done at "acquire" time (sync point)
 
-    pImageGL =
-        new (amdContext) ImageGL(amdContext, CL_MEM_OBJECT_IMAGE2D, clFlags, clImageFormat,
-                                 (size_t)gliRbWidth, (size_t)gliRbHeight, 1, glTarget, renderbuffer,
-                                 0, glInternalFormat, CL_GL_OBJECT_RENDERBUFFER, 0);
+    pImageGL = new (amdContext)
+        ImageGL(amdContext, amd::MemObjectType::Image2D, clFlags, clImageFormat,
+                (size_t)gliRbWidth, (size_t)gliRbHeight, 1, glTarget, renderbuffer,
+                0, glInternalFormat, amd::GlObjectType::Renderbuffer, 0);
 
     if (!pImageGL) {
       *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
       LogWarning("Cannot create class ImageGL from renderbuffer - out of memory?");
-      return (cl_mem)0;
+      return nullptr;
     }
 
     if (!pImageGL->create()) {
       *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
       pImageGL->release();
-      return (cl_mem)0;
+      return nullptr;
     }
   }  // Release scoped lock
 
   *not_null(errcode_ret) = CL_SUCCESS;
-  return as_cl<Memory>(pImageGL);
+  return static_cast<void*>(pImageGL);
 }
 
 //

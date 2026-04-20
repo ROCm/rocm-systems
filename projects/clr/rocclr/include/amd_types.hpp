@@ -150,6 +150,18 @@ inline MemFlags operator~(MemFlags a) {
   return static_cast<MemFlags>(~static_cast<uint64_t>(a));
 }
 
+// Replaces cl_gl_object_type (cl_uint) from CL/cl_gl.h
+enum class GlObjectType : uint32_t {
+  Buffer        = 0x2000, // CL_GL_OBJECT_BUFFER
+  Texture2D     = 0x2001, // CL_GL_OBJECT_TEXTURE2D
+  Texture3D     = 0x2002, // CL_GL_OBJECT_TEXTURE3D
+  Renderbuffer  = 0x2003, // CL_GL_OBJECT_RENDERBUFFER
+  Texture2DArray= 0x200E, // CL_GL_OBJECT_TEXTURE2D_ARRAY
+  Texture1D     = 0x200F, // CL_GL_OBJECT_TEXTURE1D
+  Texture1DArray= 0x2010, // CL_GL_OBJECT_TEXTURE1D_ARRAY
+  TextureBuffer = 0x2011, // CL_GL_OBJECT_TEXTURE_BUFFER
+};
+
 // Replaces cl_mem_object_type (cl_uint)
 enum class MemObjectType : uint32_t {
   Buffer        = 0x10F0, // CL_MEM_OBJECT_BUFFER
@@ -365,6 +377,112 @@ struct DeviceTopology {
   uint8_t  bus;
   uint8_t  device;
   uint8_t  function;
+};
+
+// Replaces cl_kernel_arg_address_qualifier (cl_uint = uint32_t)
+// Values match CL_KERNEL_ARG_ADDRESS_* constants from cl.h.
+enum class KernelArgAddressQualifier : uint32_t {
+  Global   = 0x119B, // CL_KERNEL_ARG_ADDRESS_GLOBAL
+  Local    = 0x119C, // CL_KERNEL_ARG_ADDRESS_LOCAL
+  Constant = 0x119D, // CL_KERNEL_ARG_ADDRESS_CONSTANT
+  Private  = 0x119E, // CL_KERNEL_ARG_ADDRESS_PRIVATE
+};
+
+// Replaces cl_kernel_arg_access_qualifier (cl_uint = uint32_t)
+// Values match CL_KERNEL_ARG_ACCESS_* constants from cl.h.
+enum class KernelArgAccessQualifier : uint32_t {
+  ReadOnly  = 0x11A0, // CL_KERNEL_ARG_ACCESS_READ_ONLY
+  WriteOnly = 0x11A1, // CL_KERNEL_ARG_ACCESS_WRITE_ONLY
+  ReadWrite = 0x11A2, // CL_KERNEL_ARG_ACCESS_READ_WRITE
+  None      = 0x11A3, // CL_KERNEL_ARG_ACCESS_NONE
+};
+
+// Replaces cl_kernel_arg_type_qualifier (cl_bitfield = uint64_t)
+// Values match CL_KERNEL_ARG_TYPE_* constants from cl.h.
+enum class KernelArgTypeQualifier : uint64_t {
+  None     = 0,        // CL_KERNEL_ARG_TYPE_NONE
+  Const    = (1u << 0), // CL_KERNEL_ARG_TYPE_CONST
+  Restrict = (1u << 1), // CL_KERNEL_ARG_TYPE_RESTRICT
+  Volatile = (1u << 2), // CL_KERNEL_ARG_TYPE_VOLATILE
+  Pipe     = (1u << 3), // CL_KERNEL_ARG_TYPE_PIPE
+};
+inline KernelArgTypeQualifier operator|(KernelArgTypeQualifier a, KernelArgTypeQualifier b) {
+  return static_cast<KernelArgTypeQualifier>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
+}
+inline KernelArgTypeQualifier operator&(KernelArgTypeQualifier a, KernelArgTypeQualifier b) {
+  return static_cast<KernelArgTypeQualifier>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
+}
+
+// Replaces clk_value_type_t from amdocl/cl_kernel.h.
+// Numeric values must stay in sync with clk_value_type_t.
+enum class KernelArgValueType : int32_t {
+  Void    = 0,  // T_VOID
+  Char    = 1,  // T_CHAR
+  Short   = 2,  // T_SHORT
+  Int     = 3,  // T_INT
+  Long    = 4,  // T_LONG
+  Float   = 5,  // T_FLOAT
+  Double  = 6,  // T_DOUBLE
+  Pointer = 7,  // T_POINTER
+  Char2   = 8,  // T_CHAR2
+  Char3   = 9,  // T_CHAR3
+  Char4   = 10, // T_CHAR4
+  Char8   = 11, // T_CHAR8
+  Char16  = 12, // T_CHAR16
+  Short2  = 13, // T_SHORT2
+  Short3  = 14, // T_SHORT3
+  Short4  = 15, // T_SHORT4
+  Short8  = 16, // T_SHORT8
+  Short16 = 17, // T_SHORT16
+  Int2    = 18, // T_INT2
+  Int3    = 19, // T_INT3
+  Int4    = 20, // T_INT4
+  Int8    = 21, // T_INT8
+  Int16   = 22, // T_INT16
+  Long2   = 23, // T_LONG2
+  Long3   = 24, // T_LONG3
+  Long4   = 25, // T_LONG4
+  Long8   = 26, // T_LONG8
+  Long16  = 27, // T_LONG16
+  Float2  = 28, // T_FLOAT2
+  Float3  = 29, // T_FLOAT3
+  Float4  = 30, // T_FLOAT4
+  Float8  = 31, // T_FLOAT8
+  Float16 = 32, // T_FLOAT16
+  Double2 = 33, // T_DOUBLE2
+  Double3 = 34, // T_DOUBLE3
+  Double4 = 35, // T_DOUBLE4
+  Double8 = 36, // T_DOUBLE8
+  Double16 = 37, // T_DOUBLE16
+  Sampler = 38, // T_SAMPLER
+  Sema    = 39, // T_SEMA
+  Struct  = 40, // T_STRUCT
+  Queue   = 41, // T_QUEUE
+  Pad     = 42, // T_PAD
+};
+
+// Replaces cl_DeviceClockMode_AMD from amdocl/cl_profile_amd.h.
+enum class DeviceClockMode : uint32_t {
+  Default       = 0x0, // CL_DEVICE_CLOCK_MODE_DEFAULT_AMD
+  Query         = 0x1, // CL_DEVICE_CLOCK_MODE_QUERY_AMD
+  Profiling     = 0x2, // CL_DEVICE_CLOCK_MODE_PROFILING_AMD
+  MinimumMemory = 0x3, // CL_DEVICE_CLOCK_MODE_MINIMUMMEMORY_AMD
+  MinimumEngine = 0x4, // CL_DEVICE_CLOCK_MODE_MINIMUMENGINE_AMD
+  Peak          = 0x5, // CL_DEVICE_CLOCK_MODE_PEAK_AMD
+  QueryProfiling = 0x6, // CL_DEVICE_CLOCK_MODE_QUERYPROFILING_AMD
+  QueryPeak     = 0x7, // CL_DEVICE_CLOCK_MODE_QUERYPEAK_AMD
+  Count         = 0x8, // CL_DEVICE_CLOCK_MODE_COUNT_AMD
+};
+
+// Replaces cl_set_device_clock_mode_input_amd from amdocl/cl_profile_amd.h.
+struct SetDeviceClockModeInput {
+  DeviceClockMode clockMode; // cl_DeviceClockMode_AMD clock_mode
+};
+
+// Replaces cl_set_device_clock_mode_output_amd from amdocl/cl_profile_amd.h.
+struct SetDeviceClockModeOutput {
+  float memoryClockRatioToPeak; // cl_float memory_clock_ratio_to_peak
+  float engineClockRatioToPeak; // cl_float engine_clock_ratio_to_peak
 };
 
 }  // namespace amd

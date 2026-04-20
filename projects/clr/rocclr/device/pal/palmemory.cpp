@@ -369,15 +369,15 @@ bool Memory::createInterop() {
 
       // Find OGL object type
       switch (glObject->getCLGLObjectType()) {
-        case CL_GL_OBJECT_BUFFER:
+        case amd::GlObjectType::Buffer:
           oglRes.type_ = Resource::InteropVertexBuffer;
           break;
-        case CL_GL_OBJECT_TEXTURE_BUFFER:
-        case CL_GL_OBJECT_TEXTURE1D:
-        case CL_GL_OBJECT_TEXTURE1D_ARRAY:
-        case CL_GL_OBJECT_TEXTURE2D:
-        case CL_GL_OBJECT_TEXTURE2D_ARRAY:
-        case CL_GL_OBJECT_TEXTURE3D:
+        case amd::GlObjectType::TextureBuffer:
+        case amd::GlObjectType::Texture1D:
+        case amd::GlObjectType::Texture1DArray:
+        case amd::GlObjectType::Texture2D:
+        case amd::GlObjectType::Texture2DArray:
+        case amd::GlObjectType::Texture3D:
           oglRes.type_ = Resource::InteropTexture;
           if (GL_TEXTURE_CUBE_MAP == glObject->getGLTarget()) {
             switch (glObject->getCubemapFace()) {
@@ -400,7 +400,7 @@ bool Memory::createInterop() {
             oglRes.mipLevel_ = glObject->getGLMipLevel();
           }
           break;
-        case CL_GL_OBJECT_RENDERBUFFER:
+        case amd::GlObjectType::Renderbuffer:
           oglRes.type_ = Resource::InteropRenderBuffer;
           break;
         default:

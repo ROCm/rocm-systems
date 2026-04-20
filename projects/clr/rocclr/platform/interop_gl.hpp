@@ -14,7 +14,6 @@
 
 #include <GL/gl.h>
 #include <GL/glext.h>
-#include "CL/cl_gl.h"
 #ifndef _WIN32
 #include <GL/glx.h>
 #endif  //!_WIN32
@@ -32,7 +31,7 @@ namespace amd {
 //! from which the CL object is created
 class GLObject : public InteropObject {
  protected:
-  cl_gl_object_type clGLType_;  //!< CL GL object type
+  amd::GlObjectType clGLType_;  //!< GL object type
   GLenum glTarget_;
   GLuint gluiName_;
   GLint gliMipLevel_;
@@ -46,7 +45,7 @@ class GLObject : public InteropObject {
  public:
   //! GLObject constructor initializes member variables
   GLObject(GLenum glTarget, GLuint gluiName, GLint gliMipLevel, GLenum glInternalFormat,
-           GLint gliWidth, GLint gliHeight, GLint gliDepth, cl_gl_object_type clGLType,
+           GLint gliWidth, GLint gliHeight, GLint gliDepth, amd::GlObjectType clGLType,
            GLenum glCubemapFace,
            GLsizei glNumSamples)
       :  // Initialization of member variables
@@ -73,7 +72,7 @@ class GLObject : public InteropObject {
   GLint getGLWidth() const { return gliWidth_; }
   GLint getGLHeight() const { return gliHeight_; }
   GLint getGLDepth() const { return gliDepth_; }
-  cl_gl_object_type getCLGLObjectType() const { return clGLType_; }
+  amd::GlObjectType getCLGLObjectType() const { return clGLType_; }
   GLenum getCubemapFace() const { return glCubemapFace_; }
   GLsizei getNumSamples() const { return glNumSamples_; }
 };
@@ -91,14 +90,14 @@ class BufferGL : public Buffer, public GLObject {
  public:
   //! BufferGL constructor just calls constructors of base classes
   //! to pass down the parameters
-  BufferGL(Context& amdContext, cl_mem_flags clFlags, size_t uiSizeInBytes, GLenum glTarget,
+  BufferGL(Context& amdContext, amd::MemFlags clFlags, size_t uiSizeInBytes, GLenum glTarget,
            GLuint gluiName)
       :  // Call base classes constructors
         Buffer(amdContext, clFlags, uiSizeInBytes),
         GLObject(glTarget, gluiName,
                  0,                // Mipmap level default
                  GL_ARRAY_BUFFER,  // Just init to some value
-                 (GLint)uiSizeInBytes, 1, 1, CL_GL_OBJECT_BUFFER, 0, 0) {
+                 (GLint)uiSizeInBytes, 1, 1, amd::GlObjectType::Buffer, 0, 0) {
     setInteropObj(this);
   }
   virtual ~BufferGL() {}
@@ -114,9 +113,9 @@ class ImageGL : public Image, public GLObject {
  public:
   //! ImageGL constructor just calls constructors of base classes
   //! to pass down the parameters
-  ImageGL(Context& amdContext, cl_mem_object_type clType, cl_mem_flags clFlags,
+  ImageGL(Context& amdContext, amd::MemObjectType clType, amd::MemFlags clFlags,
           const Format& format, size_t width, size_t height, size_t depth, GLenum glTarget,
-          GLuint gluiName, GLint gliMipLevel, GLenum glInternalFormat, cl_gl_object_type clGLType,
+          GLuint gluiName, GLint gliMipLevel, GLenum glInternalFormat, amd::GlObjectType clGLType,
           GLsizei numSamples, GLenum glCubemapFace = 0)
       : Image(amdContext, clType, clFlags, format, width, height, depth,
               Format(format).getElementSize() * width,
@@ -129,9 +128,9 @@ class ImageGL : public Image, public GLObject {
 
   //! ImageGL constructor for mipmapped image,
   //! just calls constructors of base classes to pass down the parameters
-  ImageGL(Context& amdContext, cl_mem_object_type clType, cl_mem_flags clFlags,
+  ImageGL(Context& amdContext, amd::MemObjectType clType, amd::MemFlags clFlags,
           const Format& format, size_t width, size_t height, size_t depth, GLenum glTarget,
-          GLuint gluiName, GLint gliMipLevel, GLenum glInternalFormat, cl_gl_object_type clGLType,
+          GLuint gluiName, GLint gliMipLevel, GLenum glInternalFormat, amd::GlObjectType clGLType,
           GLsizei numSamples, cl_int num_mip_levels, GLenum glCubemapFace = 0)
       : Image(amdContext, clType, clFlags, format, width, height, depth,
               Format(format).getElementSize() * width,
@@ -343,15 +342,17 @@ class GLFunctions {
 #include "gl_functions.hpp"
 };
 
-//! Functions for executing the GL related stuff
-cl_mem clCreateFromGLBufferAMD(Context& amdContext, cl_mem_flags flags, GLuint bufobj,
-                               cl_int* errcode_ret);
-cl_mem clCreateFromGLTextureAMD(Context& amdContext, cl_mem_flags flags, GLenum target,
+//! Functions for executing the GL related stuff.
+//! These return amd::Memory* (as void*) for use by both CL and HIP callers.
+void* clCreateFromGLBufferAMD(Context& amdContext, amd::MemFlags flags, GLuint bufobj,
+                               int* errcode_ret);
+void* clCreateFromGLTextureAMD(Context& amdContext, amd::MemFlags flags, GLenum target,
                                 GLint miplevel, GLuint texture, int* errcode_ret);
-cl_mem clCreateFromGLRenderbufferAMD(Context& amdContext, cl_mem_flags flags, GLuint renderbuffer,
+void* clCreateFromGLRenderbufferAMD(Context& amdContext, amd::MemFlags flags, GLuint renderbuffer,
                                      int* errcode_ret);
 
 bool getCLFormatFromGL(const Context& amdContext, GLint gliInternalFormat,
-                       cl_image_format* pclImageFormat, int* piBytesPerPixel, cl_mem_flags flags);
+                       amd::ImageFormat* pclImageFormat, int* piBytesPerPixel,
+                       amd::MemFlags flags);
 
 }  // namespace amd

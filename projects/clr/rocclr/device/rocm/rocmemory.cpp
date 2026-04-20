@@ -1252,7 +1252,7 @@ void Image::populateImageDescriptor() {
 
 bool Image::createInteropImage() {
   auto obj = owner()->getInteropObj()->asGLObject();
-  assert(obj->getCLGLObjectType() != CL_GL_OBJECT_BUFFER &&
+  assert(obj->getCLGLObjectType() != amd::GlObjectType::Buffer &&
          "Non-image OpenGL object used with interop image API.");
 
   GLenum glTarget = obj->getGLTarget();

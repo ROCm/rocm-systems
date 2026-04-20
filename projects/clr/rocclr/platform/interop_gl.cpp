@@ -19,8 +19,6 @@
 #include <EGL/eglext.h>
 #include <EGL/eglplatform.h>
 
-#include "cl_common.hpp"
-
 #include "device/device.hpp"
 #include "platform/command.hpp"
 #include "platform/interop_gl.hpp"
@@ -453,119 +451,89 @@ bool amd::GLFunctions::restoreEnv() {
 
 
 //! Function getCLFormatFromGL returns "true" if GL format
-//! is compatible with CL format, "false" otherwise.
+//! is compatible with an amd image format, "false" otherwise.
 bool amd::getCLFormatFromGL(const amd::Context& amdContext, GLint gliInternalFormat,
-                            cl_image_format* pclImageFormat, int* piBytesPerPixel,
-                            cl_mem_flags flags) {
+                            amd::ImageFormat* pclImageFormat, int* piBytesPerPixel,
+                            amd::MemFlags flags) {
   bool bRetVal = false;
-
-  /*
-  Available values for "image_channel_order"
-  ==========================================
-  CL_R
-  CL_A
-  CL_INTENSITY
-  CL_LUMINANCE
-  CL_RG
-  CL_RA
-  CL_RGB
-  CL_RGBA
-  CL_ARGB
-  CL_BGRA
-
-  Available values for "image_channel_data_type"
-  ==============================================
-  CL_SNORM_INT8
-  CL_SNORM_INT16
-  CL_UNORM_INT8
-  CL_UNORM_INT16
-  CL_UNORM_SHORT_565
-  CL_UNORM_SHORT_555
-  CL_UNORM_INT_101010
-  CL_SIGNED_INT8
-  CL_SIGNED_INT16
-  CL_SIGNED_INT32
-  CL_UNSIGNED_INT8
-  CL_UNSIGNED_INT16
-  CL_UNSIGNED_INT32
-  CL_HALF_FLOAT
-  CL_FLOAT
-  */
 
   switch (gliInternalFormat) {
     case GL_RGB10_EXT:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type = CL_UNORM_INT_101010;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UNormInt101010;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_RGB10_A2:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type = CL_UNORM_INT_101010;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UNormInt101010;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_BGR8_ATI:
     case GL_BGRA8_ATI:
-      pclImageFormat->image_channel_order = CL_BGRA;
-      pclImageFormat->image_channel_data_type = CL_UNORM_INT8;  // CL_UNSIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::BGRA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UNormInt8;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_ALPHA8:
-      pclImageFormat->image_channel_order = CL_A;
-      pclImageFormat->image_channel_data_type = CL_UNORM_INT8;  // CL_UNSIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::A;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UNormInt8;
       *piBytesPerPixel = 1;
       bRetVal = true;
       break;
 
     case GL_R8:
     case GL_R8UI:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_R8) ? CL_UNORM_INT8 : CL_UNSIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_R8) ? amd::ChannelDataType::UNormInt8
+                                       : amd::ChannelDataType::UnsignedInt8;
       *piBytesPerPixel = 1;
       bRetVal = true;
       break;
 
     case GL_R8I:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt8;
       *piBytesPerPixel = 1;
       bRetVal = true;
       break;
 
     case GL_RG8:
     case GL_RG8UI:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_RG8) ? CL_UNORM_INT8 : CL_UNSIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_RG8) ? amd::ChannelDataType::UNormInt8
+                                        : amd::ChannelDataType::UnsignedInt8;
       *piBytesPerPixel = 2;
       bRetVal = true;
       break;
 
     case GL_RG8I:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt8;
       *piBytesPerPixel = 2;
       bRetVal = true;
       break;
 
     case GL_RGB8:
     case GL_RGB8UI:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_RGB8) ? CL_UNORM_INT8 : CL_UNSIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_RGB8) ? amd::ChannelDataType::UNormInt8
+                                         : amd::ChannelDataType::UnsignedInt8;
       *piBytesPerPixel = 3;
       bRetVal = true;
       break;
 
     case GL_RGB8I:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt8;
       *piBytesPerPixel = 3;
       bRetVal = true;
       break;
@@ -573,216 +541,221 @@ bool amd::getCLFormatFromGL(const amd::Context& amdContext, GLint gliInternalFor
     case GL_RGBA:
     case GL_RGBA8:
     case GL_RGBA8UI:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_RGBA8UI) ? CL_UNSIGNED_INT8 : CL_UNORM_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_RGBA8UI) ? amd::ChannelDataType::UnsignedInt8
+                                            : amd::ChannelDataType::UNormInt8;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_RGBA8I:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT8;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt8;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_R16:
     case GL_R16UI:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_R16) ? CL_UNORM_INT16 : CL_UNSIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_R16) ? amd::ChannelDataType::UNormInt16
+                                        : amd::ChannelDataType::UnsignedInt16;
       bRetVal = true;
       *piBytesPerPixel = 2;
       break;
 
     case GL_R16I:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt16;
       *piBytesPerPixel = 2;
       bRetVal = true;
       break;
 
     case GL_R16F:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type = CL_HALF_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType = amd::ChannelDataType::HalfFloat;
       *piBytesPerPixel = 2;
       bRetVal = true;
       break;
 
     case GL_RG16:
     case GL_RG16UI:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_RG16) ? CL_UNORM_INT16 : CL_UNSIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_RG16) ? amd::ChannelDataType::UNormInt16
+                                         : amd::ChannelDataType::UnsignedInt16;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_RG16I:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt16;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_RG16F:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type = CL_HALF_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType = amd::ChannelDataType::HalfFloat;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_RGB16:
     case GL_RGB16UI:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_RGB16) ? CL_UNORM_INT16 : CL_UNSIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_RGB16) ? amd::ChannelDataType::UNormInt16
+                                          : amd::ChannelDataType::UnsignedInt16;
       *piBytesPerPixel = 6;
       bRetVal = true;
       break;
 
     case GL_RGB16I:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt16;
       *piBytesPerPixel = 6;
       bRetVal = true;
       break;
 
     case GL_RGB16F:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type = CL_HALF_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType = amd::ChannelDataType::HalfFloat;
       *piBytesPerPixel = 6;
       bRetVal = true;
       break;
 
     case GL_RGBA16:
     case GL_RGBA16UI:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type =
-          (gliInternalFormat == GL_RGBA16) ? CL_UNORM_INT16 : CL_UNSIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType =
+          (gliInternalFormat == GL_RGBA16) ? amd::ChannelDataType::UNormInt16
+                                           : amd::ChannelDataType::UnsignedInt16;
       *piBytesPerPixel = 8;
       bRetVal = true;
       break;
 
     case GL_RGBA16I:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt16;
       *piBytesPerPixel = 8;
       bRetVal = true;
       break;
 
     case GL_RGBA16F:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type = CL_HALF_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::HalfFloat;
       *piBytesPerPixel = 8;
       bRetVal = true;
       break;
 
     case GL_R32I:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt32;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_R32UI:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type = CL_UNSIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UnsignedInt32;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_R32F:
-      pclImageFormat->image_channel_order = CL_R;
-      pclImageFormat->image_channel_data_type = CL_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::R;
+      pclImageFormat->channelDataType = amd::ChannelDataType::Float;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
 
     case GL_RG32I:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt32;
       *piBytesPerPixel = 8;
       bRetVal = true;
       break;
 
     case GL_RG32UI:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type = CL_UNSIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UnsignedInt32;
       *piBytesPerPixel = 8;
       bRetVal = true;
       break;
 
     case GL_RG32F:
-      pclImageFormat->image_channel_order = CL_RG;
-      pclImageFormat->image_channel_data_type = CL_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RG;
+      pclImageFormat->channelDataType = amd::ChannelDataType::Float;
       *piBytesPerPixel = 8;
       bRetVal = true;
       break;
 
     case GL_RGB32I:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt32;
       *piBytesPerPixel = 12;
       bRetVal = true;
       break;
 
     case GL_RGB32UI:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type = CL_UNSIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UnsignedInt32;
       *piBytesPerPixel = 12;
       bRetVal = true;
       break;
 
     case GL_RGB32F:
-      pclImageFormat->image_channel_order = CL_RGB;
-      pclImageFormat->image_channel_data_type = CL_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGB;
+      pclImageFormat->channelDataType = amd::ChannelDataType::Float;
       *piBytesPerPixel = 12;
       bRetVal = true;
       break;
 
     case GL_RGBA32I:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type = CL_SIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::SignedInt32;
       *piBytesPerPixel = 16;
       bRetVal = true;
       break;
 
     case GL_RGBA32UI:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type = CL_UNSIGNED_INT32;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UnsignedInt32;
       *piBytesPerPixel = 16;
       bRetVal = true;
       break;
 
     case GL_RGBA32F:
-      pclImageFormat->image_channel_order = CL_RGBA;
-      pclImageFormat->image_channel_data_type = CL_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::RGBA;
+      pclImageFormat->channelDataType = amd::ChannelDataType::Float;
       *piBytesPerPixel = 16;
       bRetVal = true;
       break;
     case GL_DEPTH_COMPONENT32F:
-      pclImageFormat->image_channel_order = CL_DEPTH;
-      pclImageFormat->image_channel_data_type = CL_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::Depth;
+      pclImageFormat->channelDataType = amd::ChannelDataType::Float;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
     case GL_DEPTH_COMPONENT16:
-      pclImageFormat->image_channel_order = CL_DEPTH;
-      pclImageFormat->image_channel_data_type = CL_UNORM_INT16;
+      pclImageFormat->channelOrder = amd::ChannelOrder::Depth;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UNormInt16;
       *piBytesPerPixel = 2;
       bRetVal = true;
       break;
     case GL_DEPTH24_STENCIL8:
-      pclImageFormat->image_channel_order = CL_DEPTH_STENCIL;
-      pclImageFormat->image_channel_data_type = CL_UNORM_INT24;
+      pclImageFormat->channelOrder = amd::ChannelOrder::DepthStencil;
+      pclImageFormat->channelDataType = amd::ChannelDataType::UNormInt24;
       *piBytesPerPixel = 4;
       bRetVal = true;
       break;
     case GL_DEPTH32F_STENCIL8:
-      pclImageFormat->image_channel_order = CL_DEPTH_STENCIL;
-      pclImageFormat->image_channel_data_type = CL_FLOAT;
+      pclImageFormat->channelOrder = amd::ChannelOrder::DepthStencil;
+      pclImageFormat->channelDataType = amd::ChannelDataType::Float;
       *piBytesPerPixel = 5;
       bRetVal = true;
       break;
@@ -791,7 +764,7 @@ bool amd::getCLFormatFromGL(const amd::Context& amdContext, GLint gliInternalFor
       break;
   }
   amd::Image::Format imageFormat(*pclImageFormat);
-  if (bRetVal && !imageFormat.isSupported(amdContext, 0, flags)) {
+  if (bRetVal && !imageFormat.isSupported(amdContext, static_cast<amd::MemObjectType>(0), flags)) {
     bRetVal = false;
   }
   return bRetVal;

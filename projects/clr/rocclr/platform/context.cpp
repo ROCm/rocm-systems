@@ -12,12 +12,26 @@
 #include <algorithm>
 #include <functional>
 
+// Context property constants (replaces CL header includes for these integer-only values).
+// Values verified against cl.h, cl_gl.h, cl_ext.h, cl_d3d10.h, cl_d3d11.h, cl_dx9_media_sharing.h
+#define ROCCLR_CL_CONTEXT_PLATFORM               0x1084  // CL_CONTEXT_PLATFORM
+#define ROCCLR_CL_CONTEXT_INTEROP_USER_SYNC      0x1085  // CL_CONTEXT_INTEROP_USER_SYNC
+#define ROCCLR_CL_GL_CONTEXT_KHR                 0x2008  // CL_GL_CONTEXT_KHR
+#define ROCCLR_CL_EGL_DISPLAY_KHR                0x2009  // CL_EGL_DISPLAY_KHR
+#define ROCCLR_CL_GLX_DISPLAY_KHR                0x200A  // CL_GLX_DISPLAY_KHR
+#define ROCCLR_CL_WGL_HDC_KHR                    0x200B  // CL_WGL_HDC_KHR
+#define ROCCLR_CL_CGL_SHAREGROUP_KHR             0x200C  // CL_CGL_SHAREGROUP_KHR
+#define ROCCLR_CL_CONTEXT_OFFLINE_DEVICES_AMD    0x403F  // CL_CONTEXT_OFFLINE_DEVICES_AMD (AMD ext)
 #ifdef _WIN32
 #include <d3d10_1.h>
 #include <dxgi.h>
-#include "CL/cl_d3d10.h"
-#include "CL/cl_d3d11.h"
-#include "CL/cl_dx9_media_sharing.h"
+// D3D interop context property constants (from CL/cl_d3d10.h, cl_d3d11.h, cl_dx9_media_sharing.h)
+// These are integer constants only; no types from those headers are needed here.
+#define ROCCLR_CL_CONTEXT_D3D10_DEVICE_KHR       0x4014  // CL_CONTEXT_D3D10_DEVICE_KHR
+#define ROCCLR_CL_CONTEXT_D3D11_DEVICE_KHR       0x401D  // CL_CONTEXT_D3D11_DEVICE_KHR
+#define ROCCLR_CL_CONTEXT_ADAPTER_D3D9_KHR       0x2025  // CL_CONTEXT_ADAPTER_D3D9_KHR
+#define ROCCLR_CL_CONTEXT_ADAPTER_D3D9EX_KHR     0x2026  // CL_CONTEXT_ADAPTER_D3D9EX_KHR
+#define ROCCLR_CL_CONTEXT_ADAPTER_DXVA_KHR       0x2027  // CL_CONTEXT_ADAPTER_DXVA_KHR
 #endif  //_WIN32
 
 namespace amd {
@@ -84,118 +98,118 @@ int Context::checkProperties(const intptr_t* properties, Context::Info* info) {
   ::memset(info, 0, sizeof(Context::Info));
 
   if (properties == nullptr) {
-    return CL_SUCCESS;
+    return static_cast<int>(amd::Status::Success);
   }
 
   // Process all properties
   while (p->name != 0) {
     switch (p->name) {
-      case CL_CONTEXT_INTEROP_USER_SYNC:
+      case ROCCLR_CL_CONTEXT_INTEROP_USER_SYNC:
         if (p->ptr == reinterpret_cast<void*>(true)) {
           info->flags_ |= InteropUserSync;
         }
         break;
 #ifdef _WIN32
-      case CL_CONTEXT_D3D10_DEVICE_KHR:
+      case ROCCLR_CL_CONTEXT_D3D10_DEVICE_KHR:
         if (p->ptr == NULL) {
-          return CL_INVALID_VALUE;
+          return static_cast<int>(amd::Status::InvalidValue);
         }
         info->hDev_[D3D10DeviceKhrIdx] = p->ptr;
         info->flags_ |= D3D10DeviceKhr;
         break;
-      case CL_CONTEXT_D3D11_DEVICE_KHR:
+      case ROCCLR_CL_CONTEXT_D3D11_DEVICE_KHR:
         if (p->ptr == NULL) {
-          return CL_INVALID_VALUE;
+          return static_cast<int>(amd::Status::InvalidValue);
         }
         info->hDev_[D3D11DeviceKhrIdx] = p->ptr;
         info->flags_ |= D3D11DeviceKhr;
         break;
-      case CL_CONTEXT_ADAPTER_D3D9_KHR:
+      case ROCCLR_CL_CONTEXT_ADAPTER_D3D9_KHR:
         if (p->ptr == NULL) {  // not supported for xp
-          return CL_INVALID_VALUE;
+          return static_cast<int>(amd::Status::InvalidValue);
         }
         info->hDev_[D3D9DeviceKhrIdx] = p->ptr;
         info->flags_ |= D3D9DeviceKhr;
         break;
-      case CL_CONTEXT_ADAPTER_D3D9EX_KHR:
+      case ROCCLR_CL_CONTEXT_ADAPTER_D3D9EX_KHR:
         if (p->ptr == NULL) {
-          return CL_INVALID_VALUE;
+          return static_cast<int>(amd::Status::InvalidValue);
         }
         info->hDev_[D3D9DeviceEXKhrIdx] = p->ptr;
         info->flags_ |= D3D9DeviceEXKhr;
         break;
-      case CL_CONTEXT_ADAPTER_DXVA_KHR:
+      case ROCCLR_CL_CONTEXT_ADAPTER_DXVA_KHR:
         if (p->ptr == NULL) {
-          return CL_INVALID_VALUE;
+          return static_cast<int>(amd::Status::InvalidValue);
         }
         info->hDev_[D3D9DeviceVAKhrIdx] = p->ptr;
         info->flags_ |= D3D9DeviceVAKhr;
         break;
 #endif  //_WIN32
 
-      case CL_EGL_DISPLAY_KHR:
+      case ROCCLR_CL_EGL_DISPLAY_KHR:
         info->flags_ |= EGLDeviceKhr;
 
 #ifdef _WIN32
-      case CL_WGL_HDC_KHR:
+      case ROCCLR_CL_WGL_HDC_KHR:
 #endif  //_WIN32
 
 #if defined(__linux__)
-      case CL_GLX_DISPLAY_KHR:
+      case ROCCLR_CL_GLX_DISPLAY_KHR:
 #endif  // linux
         if (p->ptr == NULL) {
-          return CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
+          return -1000 /* CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR */;
         }
       case ROCCLR_HIP_GLX_DISPLAY_KHR:
       case ROCCLR_HIP_WGL_HDC_KHR:
         info->hDev_[GLDeviceKhrIdx] = p->ptr;
         break;
 #if defined(__APPLE__) || defined(__MACOSX)
-      case CL_CGL_SHAREGROUP_KHR:
+      case ROCCLR_CL_CGL_SHAREGROUP_KHR:
         Unimplemented();
         break;
 #endif  //__APPLE__ || MACOS
-      case CL_GL_CONTEXT_KHR:
+      case ROCCLR_CL_GL_CONTEXT_KHR:
         if (p->ptr == NULL) {
-          return CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
+          return -1000 /* CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR */;
         }
         // skip the null case in the case of hip-gl, it will be initialized in create
       case ROCCLR_HIP_GL_CONTEXT_KHR:
         info->hCtx_ = p->ptr;
         info->flags_ |= GLDeviceKhr;
         break;
-      case CL_CONTEXT_PLATFORM:
+      case ROCCLR_CL_CONTEXT_PLATFORM:
         pfmId = p->ptr;
         if ((nullptr != pfmId) && (AMD_PLATFORM != pfmId)) {
-          return CL_INVALID_VALUE;
+          return static_cast<int>(amd::Status::InvalidValue);
         }
         break;
-      case CL_CONTEXT_OFFLINE_DEVICES_AMD:
+      case ROCCLR_CL_CONTEXT_OFFLINE_DEVICES_AMD:
         if (p->ptr != reinterpret_cast<void*>(1)) {
-          return CL_INVALID_VALUE;
+          return static_cast<int>(amd::Status::InvalidValue);
         }
         // Set the offline device flag
         info->flags_ |= OfflineDevices;
         break;
       default:
-        return CL_INVALID_VALUE;
+        return static_cast<int>(amd::Status::InvalidValue);
     }
     p++;
     count++;
   }
 
   info->propertiesSize_ = count * sizeof(Element) + sizeof(intptr_t);
-  return CL_SUCCESS;
+  return static_cast<int>(amd::Status::Success);
 }
 
 int Context::create(const intptr_t* properties) {
   static const bool VALIDATE_ONLY = false;
-  int result = CL_SUCCESS;
+  int result = static_cast<int>(amd::Status::Success);
 
   if (properties != NULL) {
     properties_ = new intptr_t[info().propertiesSize_ / sizeof(intptr_t)];
     if (properties_ == NULL) {
-      return CL_OUT_OF_HOST_MEMORY;
+      return static_cast<int>(amd::Status::OutOfHostMemory);
     }
 
     ::memcpy(properties_, properties, info().propertiesSize_);
@@ -251,19 +265,19 @@ int Context::create(const intptr_t* properties) {
     // Loop through all devices
     for (const auto& it : devices_) {
       if (!it->bindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {
-        result = CL_INVALID_VALUE;
+        result = static_cast<int>(amd::Status::InvalidValue);
       }
     }
   }
 
   // Check if the device binding wasn't successful
-  if (result != CL_SUCCESS) {
+  if (result != static_cast<int>(amd::Status::Success)) {
     if (info_.flags_ & GLDeviceKhr) {
-      result = CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
+      result = -1000 /* CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR */;
     } else if (info_.flags_ & D3D10DeviceKhr) {
-      // return CL_INVALID_VALUE; // FIXME_odintsov: CL_INVALID_D3D_INTEROP;
+      // return static_cast<int>(amd::Status::InvalidValue); // FIXME_odintsov: CL_INVALID_D3D_INTEROP;
     } else if (info_.flags_ & D3D11DeviceKhr) {
-      // return CL_INVALID_VALUE; // FIXME_odintsov: CL_INVALID_D3D_INTEROP;
+      // return static_cast<int>(amd::Status::InvalidValue); // FIXME_odintsov: CL_INVALID_D3D_INTEROP;
     } else if (info_.flags_ & (D3D9DeviceKhr | D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
       // return CL_INVALID_DX9_MEDIA_ADAPTER_KHR;
     }
@@ -278,14 +292,14 @@ int Context::create(const intptr_t* properties) {
 #endif  //!_WIN32
         );
         if (!h || !(glenv_ = new GLFunctions(h, (info_.flags_ & Flags::EGLDeviceKhr) != 0))) {
-          return CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
+          return -1000 /* CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR */;
         }
       }
       if (!glenv_->init(reinterpret_cast<intptr_t>(info_.hDev_[GLDeviceKhrIdx]),
                         reinterpret_cast<intptr_t>(info_.hCtx_))) {
         delete glenv_;
         glenv_ = NULL;
-        result = CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
+        result = -1000 /* CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR */;
       }
     }
   }

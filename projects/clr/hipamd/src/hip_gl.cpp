@@ -368,7 +368,8 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
       hip::getCLMemObjectType(myarray->width, myarray->height, myarray->depth, hipArrayDefault);
   myarray->type = image_type;
   amd::Image::Format f = image->getImageFormat();
-  myarray->Format = hip::getCL2hipArrayFormat(f.image_channel_data_type);
+  myarray->Format = hip::getCL2hipArrayFormat(
+      static_cast<cl_channel_type>(f.channelDataType));
   myarray->desc = hip::getChannelFormatDesc(f.getNumChannels(), myarray->Format);
   myarray->NumChannels = hip::getNumChannels(myarray->desc);
   myarray->isDrv = 0;
@@ -445,10 +446,10 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   GLenum glErr;
   GLenum glTarget = 0;
   GLenum glInternalFormat;
-  cl_image_format clImageFormat;
+  amd::ImageFormat clImageFormat;
   uint dim = 1;
-  cl_mem_object_type clType;
-  cl_gl_object_type clGLType;
+  amd::MemObjectType clType = amd::MemObjectType::Image2D;
+  amd::GlObjectType clGLType = amd::GlObjectType::Texture2D;
   GLsizei numSamples = 1;
 
   GLint gliTexWidth = 1;
@@ -468,16 +469,16 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     case GL_TEXTURE_BUFFER:
       glTarget = GL_TEXTURE_BUFFER;
       dim = 1;
-      clType = CL_MEM_OBJECT_IMAGE1D_BUFFER;
-      clGLType = CL_GL_OBJECT_TEXTURE_BUFFER;
+      clType = amd::MemObjectType::Image1DBuffer;
+      clGLType = amd::GlObjectType::TextureBuffer;
       isImage = false;
       break;
 
     case GL_TEXTURE_1D:
       glTarget = GL_TEXTURE_1D;
       dim = 1;
-      clType = CL_MEM_OBJECT_IMAGE1D;
-      clGLType = CL_GL_OBJECT_TEXTURE1D;
+      clType = amd::MemObjectType::Image1D;
+      clGLType = amd::GlObjectType::Texture1D;
       break;
 
     case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
@@ -488,50 +489,50 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
       glTarget = GL_TEXTURE_CUBE_MAP;
       dim = 2;
-      clType = CL_MEM_OBJECT_IMAGE2D;
-      clGLType = CL_GL_OBJECT_TEXTURE2D;
+      clType = amd::MemObjectType::Image2D;
+      clGLType = amd::GlObjectType::Texture2D;
       break;
 
     case GL_TEXTURE_1D_ARRAY:
       glTarget = GL_TEXTURE_1D_ARRAY;
       dim = 2;
-      clType = CL_MEM_OBJECT_IMAGE1D_ARRAY;
-      clGLType = CL_GL_OBJECT_TEXTURE1D_ARRAY;
+      clType = amd::MemObjectType::Image1DArray;
+      clGLType = amd::GlObjectType::Texture1DArray;
       break;
 
     case GL_TEXTURE_2D:
       glTarget = GL_TEXTURE_2D;
       dim = 2;
-      clType = CL_MEM_OBJECT_IMAGE2D;
-      clGLType = CL_GL_OBJECT_TEXTURE2D;
+      clType = amd::MemObjectType::Image2D;
+      clGLType = amd::GlObjectType::Texture2D;
       break;
 
     case GL_TEXTURE_2D_MULTISAMPLE:
       glTarget = GL_TEXTURE_2D_MULTISAMPLE;
       dim = 2;
-      clType = CL_MEM_OBJECT_IMAGE2D;
-      clGLType = CL_GL_OBJECT_TEXTURE2D;
+      clType = amd::MemObjectType::Image2D;
+      clGLType = amd::GlObjectType::Texture2D;
       break;
 
     case GL_TEXTURE_RECTANGLE_ARB:
       glTarget = GL_TEXTURE_RECTANGLE_ARB;
       dim = 2;
-      clType = CL_MEM_OBJECT_IMAGE2D;
-      clGLType = CL_GL_OBJECT_TEXTURE2D;
+      clType = amd::MemObjectType::Image2D;
+      clGLType = amd::GlObjectType::Texture2D;
       break;
 
     case GL_TEXTURE_2D_ARRAY:
       glTarget = GL_TEXTURE_2D_ARRAY;
       dim = 3;
-      clType = CL_MEM_OBJECT_IMAGE2D_ARRAY;
-      clGLType = CL_GL_OBJECT_TEXTURE2D_ARRAY;
+      clType = amd::MemObjectType::Image2DArray;
+      clGLType = amd::GlObjectType::Texture2DArray;
       break;
 
     case GL_TEXTURE_3D:
       glTarget = GL_TEXTURE_3D;
       dim = 3;
-      clType = CL_MEM_OBJECT_IMAGE3D;
-      clGLType = CL_GL_OBJECT_TEXTURE3D;
+      clType = amd::MemObjectType::Image3D;
+      clGLType = amd::GlObjectType::Texture3D;
       break;
 
     default:
@@ -582,7 +583,8 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     }
 
     int iBytesPerPixel = 0;
-    if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel, 0)) {
+    if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
+                                amd::MemFlags::None)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -642,7 +644,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
     int iBytesPerPixel = 0;
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                                cl_flags)) {
+                                static_cast<amd::MemFlags>(cl_flags))) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -656,8 +658,9 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
     gliTexWidth = size / iBytesPerPixel;
   }
-  size_t imageSize = (clType == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? static_cast<size_t>(gliTexHeight)
-                                                             : static_cast<size_t>(gliTexDepth);
+  size_t imageSize = (clType == amd::MemObjectType::Image1DArray)
+                         ? static_cast<size_t>(gliTexHeight)
+                         : static_cast<size_t>(gliTexDepth);
 
   if (!amd::Image::validateDimensions(
           amdContext.devices(), clType, static_cast<size_t>(gliTexWidth),
@@ -668,9 +671,10 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   target = (glTarget == GL_TEXTURE_CUBE_MAP) ? target : 0;
 
   pImageGL = new (amdContext)
-      amd::ImageGL(amdContext, clType, cl_flags, clImageFormat, static_cast<size_t>(gliTexWidth),
-                   static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
-                   image, 0, glInternalFormat, clGLType, numSamples, target);
+      amd::ImageGL(amdContext, clType, static_cast<amd::MemFlags>(cl_flags), clImageFormat,
+                   static_cast<size_t>(gliTexWidth), static_cast<size_t>(gliTexHeight),
+                   static_cast<size_t>(gliTexDepth), glTarget, image, 0, glInternalFormat,
+                   clGLType, numSamples, target);
   if (!pImageGL->create()) {
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);
@@ -778,7 +782,8 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   }  // Release scoped lock
 
   // Now create BufferGL object
-  pBufferGL = new (amdContext) amd::BufferGL(amdContext, cl_flags, gliSize, 0, buffer);
+  pBufferGL = new (amdContext) amd::BufferGL(amdContext, static_cast<amd::MemFlags>(cl_flags),
+                                             gliSize, 0, buffer);
   if (!pBufferGL->create()) {
     pBufferGL->release();
     HIP_RETURN(hipErrorUnknown);

@@ -239,4 +239,47 @@ inline amd::MemMigrationFlags from_cl_MemMigrationFlags(cl_mem_migration_flags f
   return static_cast<amd::MemMigrationFlags>(f);
 }
 
+// Verify KernelArgAddressQualifier values match CL_KERNEL_ARG_ADDRESS_* constants.
+static_assert(static_cast<uint32_t>(amd::KernelArgAddressQualifier::Global)   == CL_KERNEL_ARG_ADDRESS_GLOBAL);
+static_assert(static_cast<uint32_t>(amd::KernelArgAddressQualifier::Local)    == CL_KERNEL_ARG_ADDRESS_LOCAL);
+static_assert(static_cast<uint32_t>(amd::KernelArgAddressQualifier::Constant) == CL_KERNEL_ARG_ADDRESS_CONSTANT);
+static_assert(static_cast<uint32_t>(amd::KernelArgAddressQualifier::Private)  == CL_KERNEL_ARG_ADDRESS_PRIVATE);
+
+// Verify KernelArgAccessQualifier values match CL_KERNEL_ARG_ACCESS_* constants.
+static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::ReadOnly)  == CL_KERNEL_ARG_ACCESS_READ_ONLY);
+static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::WriteOnly) == CL_KERNEL_ARG_ACCESS_WRITE_ONLY);
+static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::ReadWrite) == CL_KERNEL_ARG_ACCESS_READ_WRITE);
+static_assert(static_cast<uint32_t>(amd::KernelArgAccessQualifier::None)      == CL_KERNEL_ARG_ACCESS_NONE);
+
+// Verify KernelArgTypeQualifier values match CL_KERNEL_ARG_TYPE_* constants.
+static_assert(static_cast<uint64_t>(amd::KernelArgTypeQualifier::None)     == CL_KERNEL_ARG_TYPE_NONE);
+static_assert(static_cast<uint64_t>(amd::KernelArgTypeQualifier::Const)    == CL_KERNEL_ARG_TYPE_CONST);
+static_assert(static_cast<uint64_t>(amd::KernelArgTypeQualifier::Restrict) == CL_KERNEL_ARG_TYPE_RESTRICT);
+static_assert(static_cast<uint64_t>(amd::KernelArgTypeQualifier::Volatile) == CL_KERNEL_ARG_TYPE_VOLATILE);
+static_assert(static_cast<uint64_t>(amd::KernelArgTypeQualifier::Pipe)     == CL_KERNEL_ARG_TYPE_PIPE);
+
+// Verify KernelArgValueType values match clk_value_type_t from amdocl/cl_kernel.h.
+// clk_value_type_t is a plain C enum starting at T_VOID=0.
+#include "amdocl/cl_kernel.h"
+static_assert(static_cast<int32_t>(amd::KernelArgValueType::Void)    == T_VOID);
+static_assert(static_cast<int32_t>(amd::KernelArgValueType::Pointer) == T_POINTER);
+static_assert(static_cast<int32_t>(amd::KernelArgValueType::Struct)  == T_STRUCT);
+static_assert(static_cast<int32_t>(amd::KernelArgValueType::Queue)   == T_QUEUE);
+static_assert(static_cast<int32_t>(amd::KernelArgValueType::Pad)     == T_PAD);
+
+// Verify DeviceClockMode values match cl_DeviceClockMode_AMD from amdocl/cl_profile_amd.h.
+#include "amdocl/cl_profile_amd.h"
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::Default)       == CL_DEVICE_CLOCK_MODE_DEFAULT_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::Query)         == CL_DEVICE_CLOCK_MODE_QUERY_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::Profiling)     == CL_DEVICE_CLOCK_MODE_PROFILING_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::MinimumMemory) == CL_DEVICE_CLOCK_MODE_MINIMUMMEMORY_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::MinimumEngine) == CL_DEVICE_CLOCK_MODE_MINIMUMENGINE_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::Peak)          == CL_DEVICE_CLOCK_MODE_PEAK_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::QueryProfiling) == CL_DEVICE_CLOCK_MODE_QUERYPROFILING_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::QueryPeak)     == CL_DEVICE_CLOCK_MODE_QUERYPEAK_AMD);
+static_assert(static_cast<uint32_t>(amd::DeviceClockMode::Count)         == CL_DEVICE_CLOCK_MODE_COUNT_AMD);
+
+// Verify SetDeviceClockModeOutput struct layout matches cl_set_device_clock_mode_output_amd.
+static_assert(sizeof(amd::SetDeviceClockModeOutput) == sizeof(cl_set_device_clock_mode_output_amd));
+
 }  // namespace amd::cl
