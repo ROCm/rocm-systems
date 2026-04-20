@@ -1221,6 +1221,74 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // VOP3 gfx1250-only scaled packed-8 FP4 -> BF16 convert.
+  //
+  // Hardware shape (AMDGPUGenInstrInfo.inc / VOP3Instructions.td:1788):
+  //   opcode V_CVT_SCALE_PK8_BF16_FP4_e64 with MC operand layout
+  //     0: vdst        (VReg_128 aligned — 4 consecutive VGPRs,
+  //                     written as <8 x bfloat> / 128 bits)
+  //     1: src0        (VGPR_32 — 1 VGPR, packed 8xFP4 in the i32
+  //                     bits, nibble 0 = lane 0, nibble 7 = lane 7)
+  //     2: src1        (VSrc_b32 — scale, E8M0 encoded in an i32)
+  //     3: scale_sel   (immediate byte-selector, range 0..15;
+  //                     byte_sel % 2 picks the high / low FP4 word of
+  //                     the packed pair — only FP4 has the /2 collapse;
+  //                     FP8/BF8 siblings take the full 0..3 range).
+  //
+  // LLVM lowering (IntrinsicsAMDGPU.td:686, class
+  // `AMDGPUCvtScaleIntrinsic<llvm_v8bf16_ty, llvm_i32_ty, ...>`):
+  //   declare <8 x bfloat> @llvm.amdgcn.cvt.scale.pk8.bf16.fp4(
+  //       i32 %src, i32 %scale, i32 immarg %scale_sel)
+  // with `ImmArg<ArgIndex<2>>` + `Range<0, 16>` on the selector.
+  //
+  // Cross-target: gfx942 has no MX-FP4 scaling unit (the MXFP familyis
+  // gated behind FeatureGFX1250Insts via `isGFX125xOnly`), so a
+  // lift to --target-isa=gfx942 would require a manual per-nibble
+  // dequantisation expansion.  That is a separate design; until a
+  // corpus kernel actually wants cross-target MX-FP4, we refuse
+  // loudly rather than silently mis-lowering.
+  if (sop == SemOp::V_CVT_SCALE_PK8_BF16_FP4) {
+    if (!ctx.targetIsa.hasTensorOps) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3",
+          "v_cvt_scale_pk8_bf16_fp4 is a gfx1250-only VOP3 "
+          "(int_amdgcn_cvt_scale_pk8_bf16_fp4 lives behind "
+          "isGFX125xOnly in IntrinsicsAMDGPU.td:686); cross-target "
+          "lift to gfx942 would need a per-nibble FP4->BF16 "
+          "dequantisation expansion that no corpus kernel exercises "
+          "today");
+      return hr;
+    }
+
+    unsigned opc = di.inst.getOpcode();
+    int selIdx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::scale_sel);
+    if (selIdx < 0 || !di.isImm(selIdx)) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3",
+          "v_cvt_scale_pk8_bf16_fp4 missing OpName::scale_sel "
+          "immediate operand — operand table mismatch");
+      return hr;
+    }
+    int64_t scaleSel = di.getImm(selIdx);
+
+    Value *src = op.src(0);
+    if (src->getType() != ctx.i32Ty)
+      src = ctx.B.CreateBitOrPointerCast(src, ctx.i32Ty);
+    Value *scale = op.src(1);
+    if (scale->getType() != ctx.i32Ty)
+      scale = ctx.B.CreateBitOrPointerCast(scale, ctx.i32Ty);
+
+    Function *cvtFn = Intrinsic::getOrInsertDeclaration(
+        &ctx.M, Intrinsic::amdgcn_cvt_scale_pk8_bf16_fp4);
+    Value *result = ctx.B.CreateCall(
+        cvtFn,
+        {src, scale, ConstantInt::get(ctx.i32Ty, scaleSel)},
+        "cvt_scale_pk8_bf16_fp4");
+    ctx.writeRegVec(op.dst(), result);
+    hr.handled = true;
+    return hr;
+  }
+
   if (sop == SemOp::V_PERM_B32) {
     Function *permFn = Intrinsic::getOrInsertDeclaration(&ctx.M, Intrinsic::amdgcn_perm);
     ctx.writeReg32(op.dst(), ctx.B.CreateCall(permFn, {op.src(0), op.src(1), op.src(2)}, "perm"));

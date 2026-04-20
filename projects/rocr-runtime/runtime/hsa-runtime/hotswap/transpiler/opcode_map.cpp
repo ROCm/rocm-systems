@@ -294,6 +294,13 @@ static const Entry kCanonTable[] = {
     E(V_CVT_PK_F32_BF8_e64, V_CVT_PK_F32_BF8),
     E(V_CVT_F32_FP8_e64, V_CVT_F32_FP8),
     E(V_CVT_F32_BF8_e64, V_CVT_F32_BF8),
+    // gfx1250-only packed-8 FP4 -> BF16 scaled convert
+    // (VOP3Instructions.td:1788). The real form
+    // `V_CVT_SCALE_PK8_BF16_FP4_e64_gfx1250` canonicalises onto the
+    // `_e64` pseudo via the MC->pseudo step in
+    // `OpcodeMap::canonicalize` (getMCOpcode-derived table); a single
+    // entry therefore covers every real subtarget slot.
+    E(V_CVT_SCALE_PK8_BF16_FP4_e64, V_CVT_SCALE_PK8_BF16_FP4),
     E(V_CVT_F32_UBYTE0_e64, V_CVT_F32_UBYTE0),
     E(V_CVT_F32_UBYTE1_e64, V_CVT_F32_UBYTE1),
     E(V_CVT_F32_UBYTE2_e64, V_CVT_F32_UBYTE2),

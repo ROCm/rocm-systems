@@ -109,6 +109,16 @@ config.fixtures = {
     # in handle_ds.cpp; the fixture pins the generic `<3 x i32>`
     # vector-load/store path the handler routes both ops through.
     "ds_load_b96": r"@LIT_FIXTURE_DS_LOAD_B96_CO@",
+    # v_cvt_scale_pk8_bf16_fp4 (VOP3 gfx1250-only scaled packed-8
+    # FP4 -> BF16 convert, V_CVT_SCALE_PK8_BF16_FP4_e64).  Pins both
+    # the same-target intrinsic-emit shape (call <8 x bfloat>
+    # @llvm.amdgcn.cvt.scale.pk8.bf16.fp4 + i128 bitcast + writeRegVec)
+    # AND the cross-target refusal path (--target-isa=gfx942 must
+    # surface a loud RaiseFailure::unsupportedShape referencing
+    # `isGFX125xOnly`).  Closes the corpus gap on scope_discovery
+    # `_matmul_ogs_NNT_bf16xbf16xmxfp4_32x256x128x1`.
+    "v_cvt_scale_pk8_bf16_fp4":
+        r"@LIT_FIXTURE_V_CVT_SCALE_PK8_BF16_FP4_CO@",
     # v_fma_mix_f32 + v_fma_mix_f32_bf16 (VOP3P mixed-precision FMA
     # family) — pins the shared narrow-half extraction + fpext chain
     # for both mnemonics in one fixture.  The BF16 sibling is the

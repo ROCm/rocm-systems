@@ -250,6 +250,32 @@ enum class SemOp : uint16_t {
   // future corpus drift surfaces immediately rather than silently
   // collapsing to byte 0.
   V_CVT_F32_FP8, V_CVT_F32_BF8,
+  // VOP3 scaled packed-8 FP4 → BF16 conversion (gfx1250 only,
+  // VOP3Instructions.td:1788; LLVM opcode V_CVT_SCALE_PK8_BF16_FP4_e64,
+  // real form `..._gfx1250`).  Reads 1 VGPR of packed 8xFP4 (4 bits
+  // each, 32 bits total) plus an E8M0-encoded scale value and a
+  // byte-granularity `scale_sel` immediate, and writes an 8xBF16
+  // result across 4 consecutive VGPRs.  Lowers to
+  //   `<8 x bfloat> @llvm.amdgcn.cvt.scale.pk8.bf16.fp4(i32 src,
+  //                                                     i32 scale,
+  //                                                     i32 immarg sel)`
+  // which is declared inside the gfx1250-only block of
+  // IntrinsicsAMDGPU.td (AMDGPUCvtScaleIntrinsic w/ isGFX125xOnly) —
+  // the handler therefore gates same-target lift on
+  // `ctx.targetIsa.hasTensorOps` (FeatureGFX1250Insts) and refuses
+  // cross-target lift to gfx942 loudly (no MX-FP4 scaling unit on
+  // CDNA3; a manual per-nibble dequant expansion would be a separate
+  // design).
+  //
+  // Sibling variants (V_CVT_SCALE_PK8_{F16,F32}_{FP4,FP8,BF8} /
+  // V_CVT_SCALE_PK8_BF16_{FP8,BF8}) share the same operand shape and
+  // the same same-target-only constraint.  Only the BF16_FP4 form is
+  // exercised by the current kerneldex corpus (scope_discovery
+  // `_matmul_ogs_NNT_bf16xbf16xmxfp4_32x256x128x1`); adding a sibling
+  // is a two-line change (new SemOp + new entry in the handler's
+  // variant-classifier table) and intentionally deferred until a
+  // corpus kernel exercises it.
+  V_CVT_SCALE_PK8_BF16_FP4,
   // VOP1 find-first-bit family (gfx7+, VOP1Instructions.td:371-373).
   // V_FFBH_U32  -> AMDGPUffbh_u32 = ctlz_zero_undef but returns -1 on
   //                input 0; lower with llvm.ctlz(x, false) — LLVM
