@@ -90,20 +90,20 @@ struct perfetto_category;
 }  // namespace sdk
 }  // namespace rocprofiler
 
-ROCPROFILER_DEFINE_CATEGORY(category, hsa_api, "HSA API function")
-ROCPROFILER_DEFINE_CATEGORY(category, hip_api, "HIP API function")
-ROCPROFILER_DEFINE_CATEGORY(category, marker_api, "Marker API region")
-ROCPROFILER_DEFINE_CATEGORY(category, rccl_api, "RCCL API function")
-ROCPROFILER_DEFINE_CATEGORY(category, openmp, "OpenMP")
-ROCPROFILER_DEFINE_CATEGORY(category, kernel_dispatch, "GPU kernel dispatch")
-ROCPROFILER_DEFINE_CATEGORY(category, memory_copy, "Async memory copy")
-ROCPROFILER_DEFINE_CATEGORY(category, memory_allocation, "Memory Allocation")
-ROCPROFILER_DEFINE_CATEGORY(category, rocdecode_api, "rocDecode API function")
-ROCPROFILER_DEFINE_CATEGORY(category, rocjpeg_api, "rocJPEG API function")
-ROCPROFILER_DEFINE_CATEGORY(category, counter_collection, "Counter Collection")
-ROCPROFILER_DEFINE_CATEGORY(category, kfd_events, "KFD events collection")
-ROCPROFILER_DEFINE_CATEGORY(category, scratch_memory, "Scratch Memory Allocation")
-ROCPROFILER_DEFINE_CATEGORY(category, none, "Unknown category")
+ROCPROFILER_DEFINE_CATEGORY(category, hsa_api,                "HSA API function")
+ROCPROFILER_DEFINE_CATEGORY(category, hip_api,                "HIP API function")
+ROCPROFILER_DEFINE_CATEGORY(category, marker_api,             "Marker API region")
+ROCPROFILER_DEFINE_CATEGORY(category, rccl_api,               "RCCL API function")
+ROCPROFILER_DEFINE_CATEGORY(category, openmp,                 "OpenMP")
+ROCPROFILER_DEFINE_CATEGORY(category, kernel_dispatch,        "GPU kernel dispatch")
+ROCPROFILER_DEFINE_CATEGORY(category, memory_copy,            "Async memory copy")
+ROCPROFILER_DEFINE_CATEGORY(category, memory_allocation,      "Memory Allocation")
+ROCPROFILER_DEFINE_CATEGORY(category, rocdecode_api,          "rocDecode API function")
+ROCPROFILER_DEFINE_CATEGORY(category, rocjpeg_api,            "rocJPEG API function")
+ROCPROFILER_DEFINE_CATEGORY(category, counter_collection,     "Counter Collection")
+ROCPROFILER_DEFINE_CATEGORY(category, kfd_events,             "KFD events collection")
+ROCPROFILER_DEFINE_CATEGORY(category, scratch_memory,         "Scratch Memory Allocation")
+ROCPROFILER_DEFINE_CATEGORY(category, none,                   "Unknown category")
 
 #define ROCPROFILER_PERFETTO_CATEGORIES                                                            \
     ROCPROFILER_PERFETTO_CATEGORY(category::hsa_api),                                              \
