@@ -52,6 +52,7 @@
 
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
+#include "macgpu.h"
 
 namespace rocr {
 namespace core {
@@ -170,6 +171,12 @@ class MacOsDriver final : public core::Driver {
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address,
                                     size_t* size) const override;
+
+ private:
+  // Opaque libmacgpu handle. nullptr until Open() succeeds.
+  macgpu_device_t* dev_ = nullptr;
+  // Cached device info populated on Open(); reused by GetNodeProperties.
+  macgpu_device_info_t info_{};
 };
 
 }  // namespace AMD

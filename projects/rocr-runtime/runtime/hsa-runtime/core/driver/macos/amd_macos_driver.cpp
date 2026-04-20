@@ -44,6 +44,9 @@
 
 #include "core/inc/amd_macos_driver.h"
 
+#include <sys/sysctl.h>
+
+#include <cstring>
 #include <utility>
 
 #include "core/inc/memory_region.h"
@@ -54,46 +57,126 @@ namespace AMD {
 MacOsDriver::MacOsDriver(std::string devnode_name)
     : core::Driver(core::DriverType::MACOS_DEXT, std::move(devnode_name)) {}
 
-// Stage 2B scaffold: always reports no device. Stage 1 (libmacgpu) replaces
-// this with an IOKit IOServiceMatching / IOServiceOpen probe against the
-// ROCmGPU.dext user-client.
 hsa_status_t MacOsDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
-  (void)driver;
-  return HSA_STATUS_ERROR;
-}
-
-hsa_status_t MacOsDriver::Init()   { return HSA_STATUS_ERROR; }
-hsa_status_t MacOsDriver::ShutDown() { return HSA_STATUS_ERROR; }
-
-hsa_status_t MacOsDriver::QueryKernelModeDriver(core::DriverQuery) {
-  return HSA_STATUS_ERROR;
-}
-
-hsa_status_t MacOsDriver::Open()  { return HSA_STATUS_ERROR; }
-hsa_status_t MacOsDriver::Close() { return HSA_STATUS_ERROR; }
-
-hsa_status_t MacOsDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
-  sys_props.NumNodes = 0;
+  // Construct a tentative instance, attempt to open the DEXT, and keep
+  // it if the handshake succeeds. devnode_name_ carries no information
+  // for Darwin (IOKit does service matching by class name, not devnode).
+  auto tmp = std::make_unique<MacOsDriver>(std::string("ROCmGPUDriver"));
+  hsa_status_t s = tmp->Open();
+  if (s != HSA_STATUS_SUCCESS) {
+    // HSA_STATUS_ERROR for "no DEXT / not authorized" is normal at
+    // discovery time — topology layer treats it as "no device."
+    return s;
+  }
+  s = tmp->QueryKernelModeDriver(core::DriverQuery::GET_DRIVER_VERSION);
+  if (s != HSA_STATUS_SUCCESS) {
+    tmp->Close();
+    return s;
+  }
+  driver = std::move(tmp);
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MacOsDriver::GetNodeProperties(HsaNodeProperties&, uint32_t) const {
-  return HSA_STATUS_ERROR;
+hsa_status_t MacOsDriver::Init()     { return HSA_STATUS_SUCCESS; }
+hsa_status_t MacOsDriver::ShutDown() { return Close(); }
+
+hsa_status_t MacOsDriver::QueryKernelModeDriver(core::DriverQuery query) {
+  if (query != core::DriverQuery::GET_DRIVER_VERSION) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if (!dev_) return HSA_STATUS_ERROR;
+  // The DEXT doesn't currently publish a version field via the escape
+  // table — seed a plausible value derived from the device-info handshake
+  // we already performed in Open(). Real versioning lands once the DEXT
+  // grows a kROCmGPU_GetVersion selector.
+  version_.KernelInterfaceMajorVersion = 1;
+  version_.KernelInterfaceMinorVersion = 0;
+  return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MacOsDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>&,
+hsa_status_t MacOsDriver::Open() {
+  if (dev_) return HSA_STATUS_SUCCESS;
+  macgpu_status_t r = macgpu_open(&dev_);
+  if (r != MACGPU_SUCCESS) {
+    dev_ = nullptr;
+    // NOT_FOUND is the common path on a Mac without the DEXT installed —
+    // let the topology layer treat it as "no GPU from this driver" by
+    // returning HSA_STATUS_ERROR (same convention KfdDriver uses).
+    return HSA_STATUS_ERROR;
+  }
+  // Cache the device info so GetSystemProperties / GetNodeProperties can
+  // answer without additional DEXT round-trips.
+  if (macgpu_get_info(dev_, &info_) != MACGPU_SUCCESS) {
+    macgpu_close(dev_);
+    dev_ = nullptr;
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t MacOsDriver::Close() {
+  if (dev_) {
+    macgpu_close(dev_);
+    dev_ = nullptr;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t MacOsDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
+  // Stage-1 MVP: report a single node that carries the host CPU
+  // properties. No FCompute cores yet (GPU-agent discovery is a later
+  // commit that lands with MacGpuAgent); reporting CPU cores is what
+  // gets ROCR's topology layer to build a CPU agent, which in turn
+  // installs the "shared" allocator other parts of the runtime rely
+  // on during hsa_init().
+  sys_props.NumNodes = dev_ ? 1 : 0;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t MacOsDriver::GetNodeProperties(HsaNodeProperties& node_props,
+                                            uint32_t node_id) const {
+  if (node_id != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  std::memset(&node_props, 0, sizeof(node_props));
+
+  // Query host CPU count via sysctl — Darwin has no _SC_NPROCESSORS_ONLN.
+  int ncpu = 1;
+  size_t len = sizeof(ncpu);
+  if (sysctlbyname("hw.ncpu", &ncpu, &len, nullptr, 0) != 0 || ncpu < 1) {
+    ncpu = 1;
+  }
+  node_props.NumCPUCores = static_cast<HSAuint32>(ncpu);
+  node_props.NumFComputeCores = 0;   // no GPU agent yet
+  node_props.NumMemoryBanks = 0;
+  node_props.NumCaches = 0;
+  node_props.NumIOLinks = 0;
+  // Vendor / device identification that downstream consumers look at.
+  node_props.VendorId = info_.vendor_id;
+  node_props.DeviceId = info_.device_id;
+  // NumNeuralCores = 0 (no AIE).
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t MacOsDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                             uint32_t) const {
-  return HSA_STATUS_ERROR;
+  // Stage-1 MVP: no IO links advertised. Caller expects a non-error
+  // empty vector when the node has no peers.
+  io_link_props.clear();
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t MacOsDriver::GetMemoryProperties(uint32_t,
-                                              std::vector<HsaMemoryProperties>&) const {
-  return HSA_STATUS_ERROR;
+                                              std::vector<HsaMemoryProperties>& mem_props) const {
+  // No memory banks exposed yet — GPU VRAM + system memory plumbing
+  // lands with MacGpuAgent.
+  mem_props.clear();
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t MacOsDriver::GetCacheProperties(uint32_t, uint32_t,
-                                             std::vector<HsaCacheProperties>&) const {
-  return HSA_STATUS_ERROR;
+                                             std::vector<HsaCacheProperties>& cache_props) const {
+  cache_props.clear();
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t MacOsDriver::AllocateMemory(const core::MemoryRegion&,

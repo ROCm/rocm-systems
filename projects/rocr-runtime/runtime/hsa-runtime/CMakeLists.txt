@@ -510,8 +510,11 @@ if( BUILD_SHARED_LIBS )
       set(HSA_DEP_ROCPROFILER_REGISTER OFF CACHE INTERNAL "")
     endif() # end rocprofiler-register_FOUND
   elseif (APPLE)
-    # No hsakmt or libdrm on Darwin. Driver backend for macOS is MacOsDriver
-    # (via IOKit/DEXT), added in a follow-up commit; nothing to link here yet.
+    # No hsakmt or libdrm on Darwin. MacOsDriver goes through libmacgpu
+    # (userspace IOKit/DEXT shim) instead, built as a static library in the
+    # parent libmacgpu subdirectory and linked PRIVATE here so its symbols
+    # end up in libhsa-runtime64.dylib.
+    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE macgpu)
     set(HSA_DEP_ROCPROFILER_REGISTER OFF CACHE INTERNAL "")
   else()
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt)

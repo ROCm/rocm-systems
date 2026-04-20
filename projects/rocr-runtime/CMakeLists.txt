@@ -116,6 +116,12 @@ if (NOT DEFINED BUILD_THUNK_VIRTIO)
   set(BUILD_THUNK_VIRTIO OFF)
 endif()
 
+if (APPLE)
+  # Darwin's MacOsDriver in hsa-runtime links against libmacgpu (IOKit/DEXT
+  # shim), so pull that subdirectory in first.
+  add_subdirectory(libmacgpu)
+endif()
+
 if (NOT APPLE)
   # libhsakmt is the KFD (Kernel Fusion Driver) ioctl wrapper — Linux /dev/kfd
   # only. Darwin port uses MacOsDriver via DEXT/IOKit instead, so skip.
