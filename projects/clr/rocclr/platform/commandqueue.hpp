@@ -269,6 +269,9 @@ class HostQueue : public CommandQueue {
     // Release the last command in the batch
     if (lastEnqueueCommand_ != nullptr) {
       lastEnqueueCommand_->release();
+      if (GPU_ENABLE_PAL == 0) {
+        device_.addToActiveQueues(this);
+      }
     } else {
       // The queue becomes active. Add it to the set of activeQueues.
       device_.addToActiveQueues(this);
