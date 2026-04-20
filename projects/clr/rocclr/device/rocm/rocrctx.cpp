@@ -82,6 +82,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_agents_allow_access)
   GET_ROCR_SYMBOL(hsa_amd_memory_unlock)
   GET_ROCR_SYMBOL(hsa_amd_interop_map_buffer)
+  GET_ROCR_SYMBOL(hsa_amd_interop_map_buffer_with_size)
   GET_ROCR_SYMBOL(hsa_amd_interop_unmap_buffer)
   GET_ROCR_SYMBOL(hsa_amd_image_create)
   GET_ROCR_SYMBOL(hsa_amd_image_create_v2)
