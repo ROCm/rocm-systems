@@ -58,9 +58,10 @@ MubufOps classifyMubufOps(const DecodedInst &di, OpResolver &op,
   int offIdx =
       llvm::AMDGPU::getNamedOperandIdx(di.inst.getOpcode(),
                                        llvm::AMDGPU::OpName::offset);
-  if (offIdx >= 0 && (unsigned)offIdx < di.inst.getNumOperands() &&
-      di.inst.getOperand((unsigned)offIdx).isImm()) {
-    out.immOff = di.inst.getOperand((unsigned)offIdx).getImm();
+  if (offIdx >= 0 &&
+      static_cast<unsigned>(offIdx) < di.inst.getNumOperands() &&
+      di.inst.getOperand(static_cast<unsigned>(offIdx)).isImm()) {
+    out.immOff = di.inst.getOperand(static_cast<unsigned>(offIdx)).getImm();
   }
 
   int vgprSrcCount = 0;
@@ -134,10 +135,10 @@ Value *buildMubufSRD(RaiseContext &ctx, const SRSRCDwords &dw) {
   Value *srdW2 = ctx.B.CreateCall(readfirstlane, {dw.dw2}, "srd_w2");
   Value *word3 = ConstantInt::get(ctx.i32Ty, 0);
   Value *srd = UndefValue::get(FixedVectorType::get(ctx.i32Ty, 4));
-  srd = ctx.B.CreateInsertElement(srd, srdW0, (uint64_t)0);
-  srd = ctx.B.CreateInsertElement(srd, srdW1, (uint64_t)1);
-  srd = ctx.B.CreateInsertElement(srd, srdW2, (uint64_t)2);
-  srd = ctx.B.CreateInsertElement(srd, word3, (uint64_t)3);
+  srd = ctx.B.CreateInsertElement(srd, srdW0, static_cast<uint64_t>(0));
+  srd = ctx.B.CreateInsertElement(srd, srdW1, static_cast<uint64_t>(1));
+  srd = ctx.B.CreateInsertElement(srd, srdW2, static_cast<uint64_t>(2));
+  srd = ctx.B.CreateInsertElement(srd, word3, static_cast<uint64_t>(3));
   return srd;
 }
 
@@ -165,8 +166,9 @@ MubufAddr decodeMubufAddr(RaiseContext &ctx, const DecodedInst &di,
   if (m.haveVaddr)
     voffset = ctx.B.CreateAdd(voffset, ctx.regs.readReg32(ctx.B, m.vaddr));
   if (m.immOff != 0)
-    voffset = ctx.B.CreateAdd(voffset,
-                               ConstantInt::get(ctx.i32Ty, (int32_t)m.immOff));
+    voffset = ctx.B.CreateAdd(
+        voffset,
+        ConstantInt::get(ctx.i32Ty, static_cast<int32_t>(m.immOff)));
   out.voffset = voffset;
 
   out.soffset = m.haveSoff ? ctx.regs.readReg32(ctx.B, m.soff)

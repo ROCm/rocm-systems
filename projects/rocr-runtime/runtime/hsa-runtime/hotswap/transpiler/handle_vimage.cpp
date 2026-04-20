@@ -103,7 +103,7 @@ Value *marshalSgprGroup(RaiseContext &ctx, ParsedReg base, unsigned n,
   auto *vecTy = FixedVectorType::get(ctx.i32Ty, n);
   Value *vec = PoisonValue::get(vecTy);
   for (unsigned i = 0; i < n; ++i) {
-    Value *dword = ctx.regs.loadSGPR32(ctx.B, base.baseIdx + (int)i);
+    Value *dword = ctx.regs.loadSGPR32(ctx.B, base.baseIdx + static_cast<int>(i));
     vec = ctx.B.CreateInsertElement(vec, dword, i, name);
   }
   return vec;
@@ -122,7 +122,7 @@ Value *zeroVec(RaiseContext &ctx, unsigned n) {
 // so the value MUST be a constant — `op.srcImm` returns the decoded
 // integer directly, sidestepping any operand-read divergence path.
 Value *cpolImm(RaiseContext &ctx, OpResolver &op, unsigned cpolIdx) {
-  return ConstantInt::get(ctx.i32Ty, (uint32_t)op.srcImm(cpolIdx));
+  return ConstantInt::get(ctx.i32Ty, static_cast<uint32_t>(op.srcImm(cpolIdx)));
 }
 
 } // namespace

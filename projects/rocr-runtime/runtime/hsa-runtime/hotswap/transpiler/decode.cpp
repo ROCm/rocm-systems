@@ -63,7 +63,7 @@ void buildSrcMap(DecodedInst &di, const MCInstrDesc &desc) {
       pendingModIdx = i;
       continue;
     }
-    if ((int)i == oldIdx || (int)i == vdstInIdx) {
+    if (static_cast<int>(i) == oldIdx || static_cast<int>(i) == vdstInIdx) {
       pendingModIdx = UINT_MAX;
       continue;
     }
@@ -133,11 +133,11 @@ void driftCheckTiedIn(const DecodedInst &di, const MCInstrDesc &desc) {
     // Only flag operands tied to a def. Use-to-use ties exist in LLVM's
     // constraint system but are not relevant to the fallback/accumulator
     // distinction this check protects.
-    if ((unsigned)tied >= desc.getNumDefs())
+    if (static_cast<unsigned>(tied) >= desc.getNumDefs())
       continue;
     bool known = false;
     for (AMDGPU::OpName n : kKnownTiedIn) {
-      if ((int)i == AMDGPU::getNamedOperandIdx(opc, n)) {
+      if (static_cast<int>(i) == AMDGPU::getNamedOperandIdx(opc, n)) {
         known = true;
         break;
       }
@@ -232,7 +232,7 @@ void driftCheckSrcN(DecodedInst &di, const MCInstrDesc &desc) {
     int namedSrc = AMDGPU::getNamedOperandIdx(opc, kSrcNames[k]);
     if (namedSrc < 0)
       break;
-    int ourSrc = (k < di.numSrcs) ? (int)di.srcMap[k] : -1;
+    int ourSrc = (k < di.numSrcs) ? static_cast<int>(di.srcMap[k]) : -1;
     // Skip ONLY the genuinely-affected index (k=1) for MADMK. k=0
     // (src0) still receives the strict check, so a hypothetical
     // future drift in src0's MCInst position is still caught even
@@ -240,18 +240,19 @@ void driftCheckSrcN(DecodedInst &di, const MCInstrDesc &desc) {
     bool skipThis = isMADMK && k == 1;
     if (!skipThis && ourSrc != namedSrc)
       reportErr("transpiler: srcMap disagrees with OpName::srcN table",
-                (int)k, ourSrc, namedSrc);
+                static_cast<int>(k), ourSrc, namedSrc);
     int namedMod = AMDGPU::getNamedOperandIdx(opc, kModNames[k]);
-    int ourMod = (di.modMap[k] == UINT_MAX) ? -1 : (int)di.modMap[k];
+    int ourMod =
+        (di.modMap[k] == UINT_MAX) ? -1 : static_cast<int>(di.modMap[k]);
     int expectedMod = (namedMod < 0) ? -1 : namedMod;
     if (ourMod != expectedMod) {
       bool isMAI = di.tsFlags & SIInstrFlags::IsMAI;
       if (isMAI && namedMod >= 0 && ourMod == -1) {
-        di.modMap[k] = (unsigned)namedMod;
+        di.modMap[k] = static_cast<unsigned>(namedMod);
       } else {
         reportErr(
             "transpiler: modMap disagrees with OpName::srcN_modifiers table",
-            (int)k, ourMod, expectedMod);
+            static_cast<int>(k), ourMod, expectedMod);
       }
     }
   }
@@ -294,9 +295,10 @@ void decodeScaleOffset(DecodedInst &di) {
   const MCInst &inst = di.inst;
   int cpolIdx =
       AMDGPU::getNamedOperandIdx(inst.getOpcode(), AMDGPU::OpName::cpol);
-  if (cpolIdx < 0 || (unsigned)cpolIdx >= inst.getNumOperands())
+  if (cpolIdx < 0 ||
+      static_cast<unsigned>(cpolIdx) >= inst.getNumOperands())
     return;
-  const MCOperand &mop = inst.getOperand((unsigned)cpolIdx);
+  const MCOperand &mop = inst.getOperand(static_cast<unsigned>(cpolIdx));
   if (!mop.isImm())
     return;
   int64_t cpol = mop.getImm();
@@ -423,7 +425,8 @@ void collectBranchTargets(const DecodedInst &di, uint64_t off,
     if (!inst.getOperand(i).isImm())
       continue;
     int64_t raw = inst.getOperand(i).getImm();
-    int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
+    int64_t brOff = static_cast<int64_t>(
+        static_cast<int16_t>(static_cast<uint16_t>(raw & 0xFFFF)));
     blockStarts.insert(off + 4 + brOff * 4);
   }
   if (di.isConditionalBranch)

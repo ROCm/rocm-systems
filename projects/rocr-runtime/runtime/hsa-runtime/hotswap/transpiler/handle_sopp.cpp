@@ -19,14 +19,16 @@ HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
   }
   if (sop == SemOp::S_BRANCH) {
     int64_t raw = di.getImm(0);
-    int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
+    int64_t brOff = static_cast<int64_t>(
+        static_cast<int16_t>(static_cast<uint16_t>(raw & 0xFFFF)));
     ctx.B.CreateBr(ctx.lookupBB(di.offset + 4 + brOff * 4));
     hr.handled = true;
     return hr;
   }
   if (sop == SemOp::S_CBRANCH_EXECZ || sop == SemOp::S_CBRANCH_EXECNZ) {
     int64_t raw = di.getImm(0);
-    int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
+    int64_t brOff = static_cast<int64_t>(
+        static_cast<int16_t>(static_cast<uint16_t>(raw & 0xFFFF)));
     uint64_t target = di.offset + 4 + brOff * 4;
     BasicBlock *targetBB = ctx.lookupBB(target);
     BasicBlock *fallthroughBB = ctx.lookupBB(di.offset + di.size);
@@ -43,7 +45,8 @@ HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
   }
   if (sop == SemOp::S_CBRANCH_SCC0 || sop == SemOp::S_CBRANCH_SCC1) {
     int64_t raw = di.getImm(0);
-    int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
+    int64_t brOff = static_cast<int64_t>(
+        static_cast<int16_t>(static_cast<uint16_t>(raw & 0xFFFF)));
     uint64_t target = di.offset + 4 + brOff * 4;
     BasicBlock *targetBB = ctx.lookupBB(target);
     BasicBlock *fallthroughBB = ctx.lookupBB(di.offset + di.size);
@@ -56,7 +59,8 @@ HandlerResult handleSOPP(RaiseContext &ctx, const DecodedInst &di,
   }
   if (sop == SemOp::S_CBRANCH_VCCNZ || sop == SemOp::S_CBRANCH_VCCZ) {
     int64_t raw = di.getImm(0);
-    int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
+    int64_t brOff = static_cast<int64_t>(
+        static_cast<int16_t>(static_cast<uint16_t>(raw & 0xFFFF)));
     uint64_t target = di.offset + 4 + brOff * 4;
     BasicBlock *targetBB = ctx.lookupBB(target);
     BasicBlock *fallthroughBB = ctx.lookupBB(di.offset + di.size);

@@ -135,7 +135,7 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
       // kernarg_layout.cpp must keep that fixture's IR signature
       // and `phi i32 [ %arg{1,2}, ... ]` data-flow pins green.
       for (int d = 0; d < loadDwords; ++d) {
-        int dwordOffset = (int)byteOffset + d * 4;
+        int dwordOffset = static_cast<int>(byteOffset) + d * 4;
         std::string why;
         Value *v = extractKernargDword(ctx.kernargs, ctx.B, ctx.kernel,
                                        dwordOffset, &why);

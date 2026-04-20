@@ -1038,7 +1038,7 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     // Dest-slot index is packed as bits[3:2]+bit[0] per the HW op_sel
     // layout (see LLVM's SIInstrInfo::lowerScaleCvt for reference); for the
     // common `op_sel:[0,0,0,0]` form the selector is simply 0.
-    unsigned dstSel = (unsigned)opSel[3];
+    unsigned dstSel = static_cast<unsigned>(opSel[3]);
     Value *oldVdst = ctx.regs.readReg32(ctx.B, op.dst());
     Function *fn = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_cvt_scalef32_pk_fp4_f32);

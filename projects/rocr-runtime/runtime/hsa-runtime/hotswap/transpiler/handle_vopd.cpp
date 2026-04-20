@@ -111,7 +111,8 @@ HandlerResult handleVOPD(RaiseContext &ctx, const DecodedInst &di,
       if (!v) {
         int64_t imm;
         if (!name.getAsInteger(0, imm))
-          v = ConstantInt::get(ctx.i32Ty, (uint32_t)(imm & 0xFFFFFFFF));
+          v = ConstantInt::get(ctx.i32Ty,
+                                static_cast<uint32_t>(imm & 0xFFFFFFFF));
       }
       // AMDGPU's instruction printer surfaces the f32 inline-constant
       // pool (see `printImmediateFloat32` in

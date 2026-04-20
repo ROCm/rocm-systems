@@ -138,7 +138,7 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   for (uint64_t addr : setpcAnalysis.extraBlockStarts)
     blockStarts.insert(addr);
 
-  result.totalCount = (int)insts.size();
+  result.totalCount = static_cast<int>(insts.size());
 
   {
     raw_string_ostream disOS(result.disasmText);

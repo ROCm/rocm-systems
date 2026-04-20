@@ -222,8 +222,9 @@ HandlerResult handleMUBUF(RaiseContext &ctx, const DecodedInst &di,
                                       "MUBUF_LDS");
 
     // Load from buffer into a temp value.
-    Type *ldTy = (dwords == 1) ? (Type *)ctx.i32Ty
-                               : (Type *)FixedVectorType::get(ctx.i32Ty, dwords);
+    Type *ldTy = (dwords == 1)
+                     ? ctx.i32Ty
+                     : FixedVectorType::get(ctx.i32Ty, dwords);
     Function *bufLd = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_raw_buffer_load, {ldTy});
     Value *loaded = ctx.B.CreateCall(

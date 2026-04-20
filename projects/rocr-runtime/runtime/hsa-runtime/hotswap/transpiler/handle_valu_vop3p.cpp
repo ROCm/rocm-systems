@@ -91,8 +91,8 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       Value *lo, *hi;
       if (op.isSrcReg(i)) {
         Value *vec = ctx.regs.readRegVec(ctx.B, op.srcReg(i), v2f32);
-        lo = ctx.B.CreateExtractElement(vec, (uint64_t)0);
-        hi = ctx.B.CreateExtractElement(vec, (uint64_t)1);
+        lo = ctx.B.CreateExtractElement(vec, static_cast<uint64_t>(0));
+        hi = ctx.B.CreateExtractElement(vec, static_cast<uint64_t>(1));
         // op_sel_hi: if 0, high lane reads low element (broadcast).
         if (opSelHi[i] == 0)
           hi = lo;
@@ -107,8 +107,8 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       if (negHi[i])
         hi = ctx.B.CreateFNeg(hi);
       Value *r = UndefValue::get(v2f32);
-      r = ctx.B.CreateInsertElement(r, lo, (uint64_t)0);
-      r = ctx.B.CreateInsertElement(r, hi, (uint64_t)1);
+      r = ctx.B.CreateInsertElement(r, lo, static_cast<uint64_t>(0));
+      r = ctx.B.CreateInsertElement(r, hi, static_cast<uint64_t>(1));
       return r;
     };
 
@@ -192,13 +192,13 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       if (raw->getType() != ctx.i32Ty)
         raw = ctx.B.CreateBitCast(raw, ctx.i32Ty);
       Value *vec = ctx.B.CreateBitCast(raw, v2i16);
-      Value *natLo = ctx.B.CreateExtractElement(vec, (uint64_t)0);
-      Value *natHi = ctx.B.CreateExtractElement(vec, (uint64_t)1);
+      Value *natLo = ctx.B.CreateExtractElement(vec, static_cast<uint64_t>(0));
+      Value *natHi = ctx.B.CreateExtractElement(vec, static_cast<uint64_t>(1));
       Value *lo = (opSel[i] != 0) ? natHi : natLo;
       Value *hi = (opSelHi[i] == 0) ? natLo : natHi;
       Value *r = UndefValue::get(v2i16);
-      r = ctx.B.CreateInsertElement(r, lo, (uint64_t)0);
-      r = ctx.B.CreateInsertElement(r, hi, (uint64_t)1);
+      r = ctx.B.CreateInsertElement(r, lo, static_cast<uint64_t>(0));
+      r = ctx.B.CreateInsertElement(r, hi, static_cast<uint64_t>(1));
       return r;
     };
 
@@ -658,10 +658,8 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
           ctx.parseReg(di.getReg(op.srcIdx(2)), op.srcIdx(2));
       if (condReg.kind == ParsedReg::SGPR) {
         Value *condVal = ctx.isa.isWave32()
-                              ? (Value *)ctx.regs.loadSGPR32(ctx.B,
-                                                               condReg.baseIdx)
-                              : (Value *)ctx.regs.loadSGPR64(ctx.B,
-                                                               condReg.baseIdx);
+                             ? ctx.regs.loadSGPR32(ctx.B, condReg.baseIdx)
+                             : ctx.regs.loadSGPR64(ctx.B, condReg.baseIdx);
         cond = ctx.B.CreateICmpNE(condVal,
                                    Constant::getNullValue(condVal->getType()));
       } else {
