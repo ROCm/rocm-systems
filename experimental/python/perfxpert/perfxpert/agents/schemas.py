@@ -63,7 +63,7 @@ class RootInput(_FrozenModel):
     database_path: Optional[str] = None
     source_dir: Optional[str] = None
     provider: Optional[
-        Literal["anthropic", "openai", "ollama", "private", "opencode", "claude-code"]
+        Literal["anthropic", "openai", "ollama", "private", "opencode"]
     ] = None
     airgap: bool = False
     session_id: Optional[str] = None

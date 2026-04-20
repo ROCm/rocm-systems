@@ -90,10 +90,10 @@ def test_parse_chain_env_empty_string_is_empty() -> None:
 
 
 def test_parse_chain_env_trims_and_splits() -> None:
-    assert parse_chain_env("openai, anthropic,  claude-code") == [
+    assert parse_chain_env("openai, anthropic,  ollama") == [
         "openai",
         "anthropic",
-        "claude-code",
+        "ollama",
     ]
 
 

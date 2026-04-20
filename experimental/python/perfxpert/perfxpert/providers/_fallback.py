@@ -7,8 +7,8 @@ caller. Intended for interactive sessions where the user has multiple
 providers configured and just wants an answer.
 
 Env var ``PERFXPERT_LLM_FALLBACK_CHAIN`` is a comma-separated list of
-registered provider names, e.g. ``openai,anthropic,claude-code``. The
-first name is tried first; each subsequent name is tried only on
+registered provider names, e.g. ``openai,anthropic``. The first name
+is tried first; each subsequent name is tried only on
 ``RateLimitError`` from the previous one.
 """
 

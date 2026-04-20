@@ -237,7 +237,7 @@ def test_build_session_from_env_wires_fallback_through_run_root(
     """End-to-end: env var -> build_session -> run_root uses chain.
 
     This is the exact scenario in the blocker report:
-    PERFXPERT_LLM_FALLBACK_CHAIN=anthropic,claude-code perfxpert analyze --llm openai
+    PERFXPERT_LLM_FALLBACK_CHAIN=anthropic,opencode perfxpert analyze --llm openai
     """
     monkeypatch.setenv("PERFXPERT_LLM_FALLBACK_CHAIN", "anthropic,opencode")
 

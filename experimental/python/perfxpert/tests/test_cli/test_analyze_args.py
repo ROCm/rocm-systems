@@ -66,7 +66,7 @@ def test_llm_flag_propagates():
     assert "llm" not in kwargs
 
 
-@pytest.mark.parametrize("provider", ["anthropic", "openai", "claude-code"])
+@pytest.mark.parametrize("provider", ["anthropic", "openai"])
 def test_llm_flag_all_choices_propagate(provider):
     process_args, ns = _build_parsed_args(["--llm", provider])
     kwargs = process_args(_FakeConn(), ns)

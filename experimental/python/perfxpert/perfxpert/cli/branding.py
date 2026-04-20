@@ -34,9 +34,6 @@ def _provider_configured(name: str) -> bool:
         "ollama": ("PERFXPERT_LLM_LOCAL_URL",),
         "private": ("PERFXPERT_LLM_PRIVATE_URL",),
         "opencode": ("PERFXPERT_OPENCODE_PATH",),
-        # claude-code: credential alias for anthropic (see
-        # agents.framework._api_key_for). Configured iff anthropic is.
-        "claude-code": ("PERFXPERT_LLM_ANTHROPIC_KEY", "ANTHROPIC_API_KEY"),
     }
     for env in checks.get(name, ()):
         if os.environ.get(env):
@@ -60,9 +57,8 @@ def get_provider_status_table() -> str:
         "ollama": "PERFXPERT_LLM_LOCAL_URL (defaults to localhost:11434)",
         "private": "PERFXPERT_LLM_PRIVATE_URL + _MODEL + _API_KEY",
         "opencode": "PERFXPERT_OPENCODE_PATH or opencode on PATH",
-        "claude-code": "ANTHROPIC_API_KEY (credential alias for anthropic)",
     }
-    for name in ("anthropic", "openai", "ollama", "private", "opencode", "claude-code"):
+    for name in ("anthropic", "openai", "ollama", "private", "opencode"):
         status = "configured" if _provider_configured(name) else "missing"
         rows.append(f"{name:<12} {status:<12} {hints[name]}")
     return "\n".join(rows)

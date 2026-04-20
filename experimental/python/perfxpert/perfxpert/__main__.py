@@ -331,11 +331,6 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
         "ollama": "OLLAMA_HOST",
         "private": "PRIVATE_LLM_ENDPOINT",
         "opencode": None,  # always available (bundled)
-        # claude-code is a credential alias for anthropic; it shares
-        # ANTHROPIC_API_KEY (see agents.framework._api_key_for). Future
-        # work may let it read stored Claude Code OAuth credentials
-        # directly; until then it's configured iff anthropic is.
-        "claude-code": "ANTHROPIC_API_KEY",
     }
 
     for name, env_var in providers.items():
@@ -357,7 +352,7 @@ def _resolved_models() -> dict[str, str]:
     from perfxpert.agents.framework import _resolve_model as _agents_resolve
 
     result: dict[str, str] = {}
-    for prov in ("anthropic", "openai", "ollama", "private", "opencode", "claude-code"):
+    for prov in ("anthropic", "openai", "ollama", "private", "opencode"):
         try:
             result[prov] = _agents_resolve(prov)
         except Exception:  # pragma: no cover - defensive

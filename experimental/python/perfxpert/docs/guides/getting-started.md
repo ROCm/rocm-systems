@@ -110,7 +110,7 @@ The interactive mode automates the full optimization loop: profile, analyze, AI-
 ```bash
 perfxpert analyze \
   --source-dir ./my_app \
-  --llm claude-code \
+  --llm anthropic \
   --interactive "./my_app"
 ```
 
@@ -152,7 +152,7 @@ PerfXpert auto-detects MPI launchers and restructures the profiling command so e
 
 ```bash
 perfxpert analyze \
-  --llm claude-code \
+  --llm anthropic \
   --source-dir ./src \
   --interactive "mpirun -n 8 ./multi_gpu_demo"
 ```
@@ -189,9 +189,6 @@ perfxpert analyze -i trace.db --llm private
 
 # Local Ollama (air-gapped, zero internet)
 perfxpert analyze -i trace.db --llm local
-
-# Claude Code (API key or stored CLI OAuth — no key needed)
-perfxpert analyze -i trace.db --llm claude-code
 ```
 
 ![LLM Providers Demo](assets/llm-providers.gif)
@@ -350,7 +347,7 @@ The checkpoint system tracks every code edit. Roll back to any prior state durin
 | Analyze trace | `perfxpert analyze -i trace.db` |
 | HTML report | `perfxpert analyze -i trace.db --format webview -d ./out -o report` |
 | Source scan | `perfxpert analyze --source-dir ./src` |
-| Interactive | `perfxpert analyze --source-dir ./src --llm claude-code --interactive ./my_app` |
+| Interactive | `perfxpert analyze --source-dir ./src --llm anthropic --interactive ./my_app` |
 | MPI profiling | `perfxpert analyze --source-dir ./src --interactive "mpirun -n 4 ./my_app"` |
 | Resume session | `perfxpert analyze --source-dir ./src --interactive -- ./my_app --resume-session <path>` |
 | ATT analysis | `perfxpert analyze -i att_output/trace*.db --att-dir ./att_output` |

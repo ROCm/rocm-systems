@@ -427,36 +427,6 @@ def test_sdk_invoke_keeps_openai_as_plain_string(monkeypatch):
     assert isinstance(captured["model"], str)
 
 
-def test_sdk_invoke_claude_code_alias_routes_through_anthropic(monkeypatch):
-    """Phase 8 — provider=claude-code is a credential alias for anthropic.
-
-    It must construct a LitellmModel with ``anthropic/<model>`` so the
-    SDK reaches Anthropic's endpoint, and pull the API key from
-    ANTHROPIC_API_KEY (claude-agent-sdk does not expose a credential
-    lookup helper for the ``claude`` CLI's stored OAuth token).
-    """
-    from agents.extensions.models.litellm_model import LitellmModel
-
-    from perfxpert.agents.framework import Agent, _sdk_invoke
-
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-cc")
-    monkeypatch.delenv("PERFXPERT_AGENTS_MODEL_ANTHROPIC", raising=False)
-    monkeypatch.delenv("PERFXPERT_ANTHROPIC_MODEL", raising=False)
-    monkeypatch.delenv("PERFXPERT_LLM_MODEL", raising=False)
-
-    captured = {}
-    _install_fake_sdk(monkeypatch, captured)
-
-    agent = Agent(
-        name="CC", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
-    )
-    _sdk_invoke(agent, {"q": "?"}, provider="claude-code")
-
-    assert isinstance(captured["model"], LitellmModel)
-    assert captured["model"].model.startswith("anthropic/")
-    assert captured["model"].api_key == "sk-ant-fake-cc"
-
-
 # -- Fix 1 — SDK error classification ---------------------------------------
 
 

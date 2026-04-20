@@ -203,16 +203,12 @@ def add_args(parser: argparse.ArgumentParser):
         "--llm",
         type=str,
         dest="llm_provider",
-        choices=["anthropic", "openai", "claude-code"],
+        choices=["anthropic", "openai"],
         default=None,
         help=(
             "Enable LLM-powered analysis enhancement. "
             "'anthropic' uses the Anthropic API (requires ANTHROPIC_API_KEY). "
             "'openai' uses the OpenAI API (requires OPENAI_API_KEY). "
-            "'claude-code': currently a credential alias for 'anthropic' — "
-            "requires ANTHROPIC_API_KEY. Future versions will use "
-            "claude-agent-sdk to read stored Claude Code credentials once "
-            "the SDK exposes that lookup. "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
     )
@@ -794,7 +790,6 @@ def _render_cli_error(exc: BaseException) -> int:
         env_var = {
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
-            "claude-code": "ANTHROPIC_API_KEY",
             "ollama": "PERFXPERT_LLM_LOCAL_URL",
             "private": "PERFXPERT_LLM_PRIVATE_API_KEY",
         }.get(prov, f"{prov.upper()}_API_KEY")

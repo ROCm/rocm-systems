@@ -65,12 +65,9 @@ _LOG = logging.getLogger(__name__)
 # defaults are intentionally the *latest widely-available* snapshot for
 # each family so `--llm anthropic` "just works" without env setup.
 #
-# NOTE: ``claude-code`` is a CLI-credentials alias that routes through
-# the Anthropic API, so it shares the anthropic default model.
 _DEFAULT_MODELS: Dict[str, str] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-4-5",
-    "claude-code": "claude-sonnet-4-5",
     "ollama": "ollama/llama3.1",
     "private": "gpt-4o-mini",
     "opencode": "gpt-4o-mini",
@@ -89,10 +86,6 @@ _DEFAULT_MODELS: Dict[str, str] = {
 # and never reaches this code path.
 _LITELLM_PROVIDER_PREFIX: Dict[str, str] = {
     "anthropic": "anthropic",
-    # claude-code routes through Anthropic (credential-alias only — the
-    # openai-agents SDK has no notion of OAuth tokens, so this alias uses
-    # ANTHROPIC_API_KEY just like the ``anthropic`` provider).
-    "claude-code": "anthropic",
     "ollama": "ollama",
     # OpenAI-compatible private endpoint (same wire format as openai/*).
     "private": "openai",
@@ -218,9 +211,7 @@ def _resolve_model(provider: str) -> str:
       3. ``PERFXPERT_LLM_MODEL`` (cross-provider global override)
       4. Built-in default from :data:`_DEFAULT_MODELS`.
     """
-    # claude-code shares Anthropic's env vars (it's a credential alias only).
-    probe = "anthropic" if provider == "claude-code" else provider
-    up = probe.upper()
+    up = provider.upper()
     for var in (f"PERFXPERT_AGENTS_MODEL_{up}", f"PERFXPERT_{up}_MODEL"):
         val = os.environ.get(var)
         if val:
@@ -240,17 +231,10 @@ def _api_key_for(provider: str) -> Optional[str]:
     through :class:`LitellmModel` (Phase 8 fix — without it the SDK routes
     to OpenAI's endpoint and emits ``model not found`` for Anthropic /
     Ollama models).
-
-    ``claude-code`` is a credential alias for ``anthropic``: the
-    claude-agent-sdk package does not expose a credential-lookup helper
-    (the ``claude`` CLI stores an OAuth token, not an API key, so it
-    can't be forwarded to ``anthropic.messages.create`` as-is). We fall
-    back to ``ANTHROPIC_API_KEY`` so the CLI choice advertised in
-    ``analyze.py`` still works end-to-end.
     """
     if provider == "openai":
         return None  # Let the SDK default to OPENAI_API_KEY.
-    if provider in ("anthropic", "claude-code"):
+    if provider == "anthropic":
         for var in (
             "PERFXPERT_LLM_ANTHROPIC_KEY",
             "ANTHROPIC_API_KEY",

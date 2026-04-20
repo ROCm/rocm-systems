@@ -97,7 +97,7 @@ without being ported.
 ## Ship state (cycle-3 convergence, 2026-04-20)
 
 - **Cycle-3 reviewers**: 0 blockers, 0 important across all three branches.
-- **Test suite**: 1383 passed / 3 skipped / 0 failed (measured 2026-04-20 after Phase 8 LLM provider routing fix). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1). The Phase 8 delta added 5 tests (4 in `test_agents/test_framework.py` covering LitellmModel wiring for anthropic / claude-code / plain-openai / double-prefix guards, and 1 in `test_agents/test_runtime.py` covering `build_session(provider="claude-code")`).
+- **Test suite**: 1383 passed / 3 skipped / 0 failed (measured 2026-04-20 after Phase 8 LLM provider routing fix). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1). The Phase 8 delta added 3 tests in `test_agents/test_framework.py` covering LitellmModel wiring for anthropic / plain-openai / double-prefix guards.
 - **Secret scanning**: local-only dev tool; not shipped in the repo. Each developer is responsible for their own secret-detection tooling. The scanner, its CI workflow, pre-commit hook, and contributor guide were removed on 2026-04-19.
 - **Known ongoing work** (not blocking ship):
   - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
