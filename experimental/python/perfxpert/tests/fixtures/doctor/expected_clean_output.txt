@@ -4,6 +4,6 @@
 ✓ MCP server reachable
 ✓ Python task store (.perfxpert/) ready
 ✓ Bundled opencode {{opencode_version}} detected at {{opencode_path}}
-✓ {{configured_count}}/5 LLM providers configured ({{configured_list}})
-  {{unconfigured_count}}/5 providers unconfigured ({{unconfigured_list}}) — see README
+✓ {{configured_count}}/6 LLM providers configured ({{configured_list}})
+  {{unconfigured_count}}/6 providers unconfigured ({{unconfigured_list}}) — see README
 ✓ ALL CLEAN

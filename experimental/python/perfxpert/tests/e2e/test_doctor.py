@@ -58,7 +58,7 @@ def test_doctor_emits_expected_lines():
         r"✓ MCP server",
         r"✓ Python task store",
         r"(✓|✗) (opencode|Bundled opencode)",
-        r"\d+/5 LLM providers configured",
+        r"\d+/\d+ LLM providers configured",
     ]
     for pat in essential_patterns:
         assert re.search(pat, out), f"pattern missing: {pat}\noutput: {out}"

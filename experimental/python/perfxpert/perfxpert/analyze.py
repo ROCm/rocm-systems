@@ -209,8 +209,10 @@ def add_args(parser: argparse.ArgumentParser):
             "Enable LLM-powered analysis enhancement. "
             "'anthropic' uses the Anthropic API (requires ANTHROPIC_API_KEY). "
             "'openai' uses the OpenAI API (requires OPENAI_API_KEY). "
-            "'claude-code' uses the Claude Code CLI installed on this machine — "
-            "no API key needed, uses existing Claude Code credentials. "
+            "'claude-code': currently a credential alias for 'anthropic' — "
+            "requires ANTHROPIC_API_KEY. Future versions will use "
+            "claude-agent-sdk to read stored Claude Code credentials once "
+            "the SDK exposes that lookup. "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
     )

@@ -331,6 +331,11 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
         "ollama": "OLLAMA_HOST",
         "private": "PRIVATE_LLM_ENDPOINT",
         "opencode": None,  # always available (bundled)
+        # claude-code is a credential alias for anthropic; it shares
+        # ANTHROPIC_API_KEY (see agents.framework._api_key_for). Future
+        # work may let it read stored Claude Code OAuth credentials
+        # directly; until then it's configured iff anthropic is.
+        "claude-code": "ANTHROPIC_API_KEY",
     }
 
     for name, env_var in providers.items():
@@ -352,7 +357,7 @@ def _resolved_models() -> dict[str, str]:
     from perfxpert.agents.framework import _resolve_model as _agents_resolve
 
     result: dict[str, str] = {}
-    for prov in ("anthropic", "openai", "ollama", "private", "opencode"):
+    for prov in ("anthropic", "openai", "ollama", "private", "opencode", "claude-code"):
         try:
             result[prov] = _agents_resolve(prov)
         except Exception:  # pragma: no cover - defensive
@@ -391,9 +396,13 @@ def _run_doctor():
     all_ok = all_ok and len(configured) > 0  # at least one provider configured
     configured_str = ", ".join(configured) if configured else "(none)"
     unconfigured_str = ", ".join(unconfigured) if unconfigured else "(all configured)"
-    print(f"✓ {len(configured)}/5 LLM providers configured ({configured_str})")
+    total = len(configured) + len(unconfigured)
+    print(f"✓ {len(configured)}/{total} LLM providers configured ({configured_str})")
     if unconfigured:
-        print(f"  {len(unconfigured)}/5 providers unconfigured ({unconfigured_str}) — see README")
+        print(
+            f"  {len(unconfigured)}/{total} providers unconfigured "
+            f"({unconfigured_str}) — see README"
+        )
 
     # Cycle-4 B2: show the RESOLVED model id per provider so users can tell
     # at a glance what `--llm <provider>` would actually invoke. If the
