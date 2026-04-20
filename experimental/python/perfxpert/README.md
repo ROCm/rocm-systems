@@ -4,23 +4,52 @@ AI-powered AMD ROCm GPU trace analysis.
 
 ## Quickstart
 
-```bash
-pip install perfxpert
+### Prerequisites
 
+- Python 3.10+
+- `bun` on PATH (https://bun.sh) — required by the pip-install build hook
+  that compiles the bundled AMD-branded opencode binary. If `bun` is
+  missing the install completes but `perfxpert-code` won't launch until
+  you install bun and rerun `pip install`.
+- (Optional) `claude`, `codex`, or `gemini` CLI on PATH if you plan to
+  use the multi-backend dispatch.
+
+### Install
+
+```bash
+# SKIP-SAMPLE — install from PyPI (when published)
+pip install "perfxpert[all]"
+
+# OR install the latest development build direct from GitHub:
+# SKIP-SAMPLE — install latest dev from source
+pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
+```
+
+`[all]` pulls in the optional LLM providers (anthropic, openai,
+claude-agent-sdk) plus rich for pretty terminal output.
+
+### Run
+
+```bash
+# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
 # One-shot analysis (batch mode)
 perfxpert analyze -i trace.db --llm anthropic --format webview -o report.html
 
-# Interactive agentic TUI (AMD-themed opencode, replaces the old conversational mode)
+# SKIP-SAMPLE — launches interactive TUI
+# Interactive agentic TUI (AMD-branded bundled opencode)
 perfxpert-code
 
-# Multi-backend dispatch (PR 1 — claude + gemini; codex ships in PR 2):
+# SKIP-SAMPLE — multi-backend dispatch (requires the native CLI installed)
+# Claude / Codex / Gemini native CLIs with perfxpert MCP wired in:
 perfxpert-code claude   # installs perfxpert MCP + gate into Claude Code, execs claude
-perfxpert-code gemini   # same flow for Gemini CLI
+perfxpert-code codex    # same for Codex CLI (trust-gate workflow)
+perfxpert-code gemini   # same for Gemini CLI
 perfxpert-code claude --dry-run "analyze this trace"   # preview, write nothing
 perfxpert-code uninstall claude   # reverses install (refuses on marker drift)
 
+# SKIP-SAMPLE — requires an existing rocprofv3 trace DB
 # Air-gap mode (no LLM; deterministic rule-based analysis only)
-perfxpert analyze -i trace.db --format markdown -o report.md
+PERFXPERT_AIRGAP=1 perfxpert analyze -i trace.db --format markdown -o report.md
 
 # Health check
 perfxpert doctor
@@ -51,10 +80,21 @@ perfxpert doctor
 └────────────────────────────────────────────────────────────┘
 ```
 
-Core analysis is self-contained — `pip install perfxpert` is sufficient for all
-profiling and recommendation features. `perfxpert-code` (`perfxpert-code`
-sub-command) requires **opencode** as a system dependency (bundling into the
-wheel is tracked as future work). Install opencode separately:
+Core analysis is self-contained — `pip install perfxpert` handles all
+profiling + recommendation features. `perfxpert-code` ships an
+AMD-branded opencode binary bundled directly into the wheel: the
+pip-install build hook compiles it from the pinned `sst/opencode`
+submodule + our patch series (`experimental/python/perfxpert/.patches/`)
+during install, provided `bun` is on PATH.
+
+If `bun` is missing, the install still succeeds (library + analyze + MCP
+paths all work); `perfxpert-code` itself won't launch until you install
+bun and rerun the install. As a last resort, set
+`PERFXPERT_OPENCODE_PATH` to point at a pre-built opencode binary.
+
+Advanced: for tightly-sandboxed CI where neither bun nor network access
+is available, set `PERFXPERT_SKIP_BUNDLED_BUILD=1` before
+`pip install` to suppress the build attempt entirely:
 
 ```bash
 # SKIP-SAMPLE — actual installer; scripts/test-samples.py must not execute this

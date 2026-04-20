@@ -17,11 +17,17 @@ RDNA2 / RDNA3.
 
 ## 1. Install
 
-PerfXpert is a pure-Python package plus a bundled AMD-themed opencode
-binary. The install is two steps: pip-install the Python wheel, then
-build the bundled patched opencode (one-time, requires `bun`).
+PerfXpert ships as a single Python wheel. The `setuptools` build hook
+in `setup.py` automatically compiles the AMD-branded bundled opencode
+binary during `pip install` — no separate step to remember.
 
-### Step 1: pip install
+### Prerequisites
+
+- Python 3.10+
+- `bun` on PATH (https://bun.sh) — required by the build hook to
+  compile the patched opencode from the pinned `sst/opencode` submodule.
+
+### Pip install
 
 > **Run this FIRST on stock Ubuntu / rocm/dev-ubuntu images**: those
 > images ship with pip 22.x and pre-PEP-621 setuptools, which fails the
@@ -37,33 +43,40 @@ build the bundled patched opencode (one-time, requires `bun`).
 > automatically; older pip does not.
 
 ```bash
-# SKIP-SAMPLE — destructive pattern filtered by scripts/test-samples.py
+# SKIP-SAMPLE — install from a local checkout (editable mode)
 pip install -e "experimental/python/perfxpert[all]"
+```
+
+…or pull the latest build straight from GitHub:
+
+```bash
+# SKIP-SAMPLE — install latest dev build from GitHub
+pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"
 ```
 
 The `[all]` extra pulls in `anthropic`, `openai`, `rich`, and
 `claude-agent-sdk` so every LLM provider works out of the box. Omit it
 if you only want deterministic air-gap analysis.
 
-### Step 2: build the bundled patched opencode (one-time)
+### What the build hook does
 
-The interactive TUI (`perfxpert-code`) wraps upstream opencode with 17
-AMD patches: branding, the AMD red color palette, the 7-agent prompt
-preamble, and the STRICT-TOOL-DISCIPLINE stanza that forces
-`perfxpert_intent_classify` → `perfxpert_workflow_next_step` as the
-first two tool calls. Apply them with:
+It applies all 26 patches in `.patches/` (AMD branding, color palette,
+per-model system-prompt preambles with the STRICT-TOOL-DISCIPLINE
+stanza, the tool-priority gate, and the deep-rebrand session UI) to the
+pinned `opencode` submodule, then runs `bun build` to produce the
+bundled binary at `perfxpert/_bundled/opencode`. Subsequent `pip install`
+invocations skip the rebuild if the binary is already newer than every
+patch file.
 
-```bash
-# SKIP-SAMPLE — requires the opencode submodule and bun toolchain
-cd experimental/python/perfxpert
-git submodule update --init --recursive
-bash scripts/apply-opencode-patches.sh
-```
+**Opt-out:** set `PERFXPERT_SKIP_BUNDLED_BUILD=1` to suppress the build
+(useful in offline / sandboxed CI). `perfxpert-code` will then fall back
+to whatever `opencode` is on `PATH`, which will NOT include our tool-
+priority gate or system prompt — library + analyze + MCP paths still
+work fine. A last-resort override `PERFXPERT_OPENCODE_PATH` points the
+launcher at an explicit binary.
 
-See `.patches/README.md` for the patch catalogue. Skip this step and
-`perfxpert-code` will still launch — it falls back to whatever
-`opencode` is on `PATH` — but you will NOT get the PerfXpert system
-prompt or the tool-priority gate.
+**Bun missing:** the install completes with a clear warning; only
+`perfxpert-code` (the interactive TUI) is affected.
 
 ## 2. Verify
 
