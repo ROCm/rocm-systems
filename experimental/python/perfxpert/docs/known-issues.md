@@ -118,8 +118,10 @@ or historical content:
   reference the old symbol names to describe what was scrubbed.
 - `**/opencode/**`, `**/node_modules/**` — upstream opencode submodule
   (MIT) and its bun-installed JS dep tree. Contains legitimate
-  third-party `.resume()` references, translated READMEs, test
-  fixtures with deliberately-incomplete internal links.
+  third-party stream-resume API references (the ban applies only to
+  the legacy class we deleted, removed in Phase 7.1 — not Node
+  stream APIs), translated READMEs, test fixtures with
+  deliberately-incomplete internal links.
 - `**/perfxpert/ai_analysis/**` — legacy module kept as a stub to avoid
   bisect-churn; never imported at runtime.
 

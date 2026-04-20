@@ -30,11 +30,20 @@ binary during `pip install` — no separate step to remember.
 The setup.py build hook compiles the bundled AMD-branded opencode
 binary from the pinned `sst/opencode` submodule. This requires `bun`;
 if `bun` isn't on PATH the hook **auto-downloads** a prebuilt bun
-release into `~/.cache/perfxpert/bun/bin/bun` (Linux x64/arm64 +
-macOS x64/arm64 supported). Unsupported platforms (musl libc, Windows)
-or offline installs fall back to a warn-skip; `perfxpert-code` will
+release into `~/.cache/perfxpert/bun/bin/` (or
+`%USERPROFILE%\.cache\perfxpert\bun\bin\` on Windows). Supported:
+Linux x64/arm64 glibc + musl, macOS x64/arm64, Windows x64/arm64.
+Offline installs fall back to a warn-skip; `perfxpert-code` will
 then print a helpful message on first launch explaining how to
 install bun manually.
+
+Note on Windows: bun itself is supported and auto-downloaded, but
+the subsequent `bun build` of opencode inherits opencode's own
+platform-support matrix. If the build step fails on Windows,
+install `perfxpert` without the bundled launcher
+(`PERFXPERT_SKIP_BUNDLED_BUILD=1 pip install …`) and use the
+multi-backend launcher (`perfxpert-code claude` etc.) — those route
+to native backend CLIs and work anywhere.
 
 ### Pip install
 
