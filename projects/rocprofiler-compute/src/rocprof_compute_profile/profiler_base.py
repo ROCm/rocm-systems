@@ -344,7 +344,7 @@ class RocProfCompute_Base:
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
         print_status(status_msg)
 
-        native_tool_path = None
+        native_tool_path_str = None
         if (
             self.__profiler == "rocprofiler-sdk"
             and not args.no_native_tool
@@ -355,11 +355,14 @@ class RocProfCompute_Base:
             native_tool = NativeTool()
             rocprof_compute_script_path = Path(sys.argv[0]).resolve()
             native_tool_path = native_tool.get_collector_library_path(
-                rocprof_compute_script_path, args.rocprofiler_sdk_tool_path
+                Path(rocprof_compute_script_path), Path(args.rocprofiler_sdk_tool_path)
             )
+            native_tool_path_str = str(
+                native_tool_path
+            )  # for compatibility with downstream code
 
         if self.__profiler == "rocprofiler-sdk":
-            options = self.get_profiler_options(native_tool_path=native_tool_path)
+            options = self.get_profiler_options(native_tool_path=native_tool_path_str)
         else:
             options = self.get_profiler_options()
 
@@ -391,7 +394,7 @@ class RocProfCompute_Base:
         total_profiling_time = 0.0
 
         if args.iteration_multiplexing is not None:
-            if native_tool_path is None:
+            if native_tool_path_str is None:
                 console_error(
                     "Native tool is not supported which is required for "
                     "iteration multiplexing."
@@ -447,8 +450,8 @@ class RocProfCompute_Base:
                 total_profiling_time += duration
 
         # Delete temporary native tool if created
-        if native_tool_path and native_tool_path.startswith("/tmp"):
-            shutil.rmtree(Path(native_tool_path).parent, ignore_errors=True)
+        if native_tool_path_str and native_tool_path_str.startswith("/tmp"):
+            shutil.rmtree(Path(native_tool_path_str).parent, ignore_errors=True)
 
         # PC sampling data is only collected when block "21" is specified
         if not "21" in args.filter_blocks:
