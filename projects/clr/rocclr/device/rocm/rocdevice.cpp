@@ -125,7 +125,6 @@ Device::Device(hsa_agent_t bkendDevice)
       xferQueue_(nullptr),
       freeMem_(0),
       hsa_exclusive_gpu_access_(false),
-      coopHostcallBuffer_(nullptr),
       numOfVgpus_(0),
       preferred_numa_node_(0),
       maxSdmaReadMask_(0),
@@ -136,7 +135,6 @@ Device::Device(hsa_agent_t bkendDevice)
   // Initialize queue pools with proper comparators (requires 'this' pointer)
   for (uint i = 0; i < QueuePriority::Total; ++i) {
     queuePool_.emplace_back(QueueCompare(this));
-    queueWithCUMaskPool_.emplace_back(QueueCompare(this));
   }
 
   group_segment_.handle = 0;
@@ -191,11 +189,6 @@ void Device::checkAtomicSupport() {
 Device::~Device() {
   WaitForHsaAsyncHandlersIdle();
 
-  if (coopHostcallBuffer_) {
-    amd::disableHostcalls(coopHostcallBuffer_);
-    hostFree(coopHostcallBuffer_);
-    coopHostcallBuffer_ = nullptr;
-  }
   // Release cached map targets
   for (uint i = 0; mapCache_ != nullptr && i < mapCache_->size(); ++i) {
     if ((*mapCache_)[i] != nullptr) {
@@ -227,13 +220,6 @@ Device::~Device() {
     for (auto qIter = it.begin(); qIter != it.end();) {
       hsa_queue_t* queue = qIter->first;
       auto& qInfo = qIter->second;
-      if (qInfo.hostcallBuffer_) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
-                "Deleting hostcall buffer %p for hardware queue %p", qInfo.hostcallBuffer_,
-                qIter->first->base_address);
-        amd::disableHostcalls(qInfo.hostcallBuffer_);
-        hostFree(qInfo.hostcallBuffer_);
-      }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
       qIter = it.erase(qIter);
@@ -2139,7 +2125,7 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
   else {
     stat = Hsa::agents_allow_access(1, &bkendDevice_, nullptr, ptr);
   }
-  
+
   if (stat != HSA_STATUS_SUCCESS) {
     LogPrintfError("Fail hsa_amd_agents_allow_access with err %d", stat);
     hostFree(ptr, size);
@@ -3129,7 +3115,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
         }
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
-               "Device::acquireQueue: hsa_queue_create failed!");
+              "Device::acquireQueue: hsa_queue_create failed!");
       return nullptr;
     }
   }
@@ -3139,7 +3125,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     hsa_status_t st = Hsa::queue_set_priority(queue, queue_priority);
     if (st != HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
-               "Device::acquireQueue: hsa_amd_queue_set_priority failed!");
+              "Device::acquireQueue: hsa_amd_queue_set_priority failed!");
       Hsa::queue_destroy(queue);
       return nullptr;
     }
@@ -3211,26 +3197,15 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
       final_mask = mask;
     }
 
-    hsa_status_t status =
-        Hsa::queue_cu_set_mask(queue, final_mask.size() * 32, final_mask.data());
+    hsa_status_t status = Hsa::queue_cu_set_mask(queue, final_mask.size() * 32, final_mask.data());
     if (status != HSA_STATUS_SUCCESS) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE,
-               "Device::acquireQueue: hsa_amd_queue_cu_set_mask failed!");
+              "Device::acquireQueue: hsa_amd_queue_cu_set_mask failed!");
       Hsa::queue_destroy(queue);
       return nullptr;
     }
-    if (cuMask.size() != 0) {
-      amd::ScopedLock l(active_queue_access_);
-      // add queues with custom CU mask into their special pool to keep track
-      // of mapping of these queues to their associated queueInfo (i.e., hostcall buffers)
-      auto result = queueWithCUMaskPool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
-      assert(result.second && "QueueInfo already exists");
-      auto& qInfo = result.first->second;
-      qInfo.refCount = 1;
-      qInfo.hasDedicatedQueue_ = dedicated_queue;  // Track if this is a dedicated queue
 
-      return queue;
-    }
+    return queue;
   }
 
   if (coop_queue) {
@@ -3284,14 +3259,10 @@ bool Device::ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority 
 void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMask, bool coop_queue,
                           bool managed) {
   // Defer cleanup operations outside the lock
-  void* hostcallBufferToFree = nullptr;
-  bool shouldDestroyQueue = false;
-
-  { // Lock
+  {  // Lock
     amd::ScopedLock l(active_queue_access_);
-    auto& pools = cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_;
-    for (uint qIndex = 0; qIndex < pools.size(); ++qIndex) {
-      auto& it = pools[qIndex];
+    for (uint qIndex = 0; qIndex < queuePool_.size(); ++qIndex) {
+      auto& it = queuePool_[qIndex];
       auto qIter = it.find(queue);
       if (qIter != it.end()) {
         if (!managed && (cuMask.size() == 0)) {
@@ -3302,92 +3273,18 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
         qInfo.refCount--;
         ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "releaseQueue refCount:%p (%d)",
                 qIter->first->base_address, qIter->second.refCount);
-        // hsa queues with cumask set are not being reused. Hence, if the app uses multiple
-        // such queues it can cause memory leak and those must be destroyed here once the
-        // refcount reaches 0.
-        if ((!cuMask.empty()) && (qInfo.refCount == 0)) {
-          hostcallBufferToFree = qInfo.hostcallBuffer_;
-          shouldDestroyQueue = true;
-          ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
-                  queue->base_address);
-          it.erase(qIter);
-        }
         break;  // Found and processed the queue
       }
     }
-  } // Lock release
+  }  // Lock release
 
-  // Perform expensive cleanup operations outside the lock
-  if (shouldDestroyQueue) {
-    if (hostcallBufferToFree) {
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-              "Deleting hostcall buffer %p for hardware queue %p", hostcallBufferToFree,
-              queue->base_address);
-      amd::disableHostcalls(hostcallBufferToFree);
-      hostFree(hostcallBufferToFree);
-    }
-    Hsa::queue_destroy(queue);
-  }
-
-  if (coop_queue) {  // cooperative queue
+  // hsa queues with cumask set and coop queues are not being reused. Hence, if the app uses such
+  // queues, we need to destroy them when the queue is released.
+  if (!cuMask.empty() || coop_queue) {
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
             queue->base_address);
     Hsa::queue_destroy(queue);
   }
-}
-
-void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
-                                        const std::vector<uint32_t>& cuMask) {
-  decltype(queuePool_)::value_type::iterator qIter;
-  bool found = false;
-
-  amd::ScopedLock l(active_queue_access_);
-  if (!coop_queue) {
-    for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
-      qIter = it.find(queue);
-      if (qIter != it.end()) {
-        found = true;
-        break;
-      }
-    }
-    assert(found && "Couldn't find queue");
-
-    if (qIter->second.hostcallBuffer_) {
-      return qIter->second.hostcallBuffer_;
-    }
-  } else {
-    if (coopHostcallBuffer_) {
-      return coopHostcallBuffer_;
-    }
-  }
-
-  // The number of packets required in each buffer is at least equal to the
-  // maximum number of waves supported by the device.
-  auto wavesPerCu = info().maxThreadsPerCU_ / info().wavefrontWidth_;
-  auto numPackets = info().maxComputeUnits_ * wavesPerCu;
-
-  auto size = amd::getHostcallBufferSize(numPackets);
-  auto align = amd::getHostcallBufferAlignment();
-
-  void* buffer = hostAlloc(size, align, kAtomics, cpu_agent_info_, false);
-  if (!buffer) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
-            "Failed to create hostcall buffer for hardware queue %p", queue->base_address);
-    return nullptr;
-  }
-  ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created hostcall buffer %p for hardware queue %p", buffer,
-          queue->base_address);
-  if (!coop_queue) {
-    qIter->second.hostcallBuffer_ = buffer;
-  } else {
-    coopHostcallBuffer_ = buffer;
-  }
-  if (!amd::enableHostcalls(*this, buffer, numPackets)) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
-            buffer);
-    return nullptr;
-  }
-  return buffer;
 }
 
 bool Device::findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attrs) {

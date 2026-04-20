@@ -85,8 +85,8 @@ cache_stop(const char* name)
     auto      x = map_name_to_args.find(key);
     if(x != map_name_to_args.end())
     {
-        map_name_to_args.erase(key);
         auto timestamp = x->second;
+        map_name_to_args.erase(x);
 
         const auto end_ts =
             static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());

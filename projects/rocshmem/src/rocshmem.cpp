@@ -1075,6 +1075,18 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all_on_stream(stream);
 }
 
+__host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
+  LOG_API("rocshmem_quiet_on_stream");
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->quiet_on_stream(stream);
+}
+
+__host__ void rocshmem_sync_all_on_stream(hipStream_t stream) {
+  LOG_API("rocshmem_sync_all_on_stream");
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all_on_stream(stream);
+}
+
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                              const void *source, size_t size,
                                              hipStream_t stream) {

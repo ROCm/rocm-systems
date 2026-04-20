@@ -127,6 +127,8 @@ declare -A TEST_NUMBERS=(
   ["flood_fadd"]="91"
   ["flood_waitadd"]="92"
   ["device_bitcode"]="93"
+  ["quiet_on_stream"]="96"
+  ["sync_all_on_stream"]="97"
 )
 
 ExecTest() {
@@ -504,6 +506,8 @@ TestOnStream() {
   else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
+  ExecTest  "quiet_on_stream"        2  1           1
+  ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
 }
