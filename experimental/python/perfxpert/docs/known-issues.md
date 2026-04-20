@@ -3,6 +3,38 @@
 Active, living list. Entries that correspond to shipped fixes have been
 removed; check `CHANGELOG.md` for history.
 
+## Fixed: empty HTML on `--llm-api-key` passed a model name
+
+Before Phase 8, running
+
+```
+perfxpert analyze --llm anthropic --llm-api-key opus-4-7 \
+  --source-dir . --format webview -d out -i out1/*/*.db
+```
+
+would leave an empty `out/<stem>_results.html` on disk with no
+error message. Two root causes are fixed:
+
+1. The `--llm-api-key` CLI flag was silently dropped by the
+   agentic runtime — it only read env vars. Fixed: the flag is now
+   threaded through `perfxpert.api.agent_root(..., api_key=...)` →
+   `build_session` → `_cascade`, which temporarily sets the
+   canonical vendor env var (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+   / …) for the duration of the call. When the flag and env var
+   disagree, the flag wins and PerfXpert emits a one-line stderr
+   WARNING.
+2. An empty LLM response produced a blank formatter pass instead of
+   an error. Fixed: `AnalysisSession.run_root` now raises
+   `FatalError("provider returned empty response — check API key /
+   quota / model availability")` when the non-airgap narrative is
+   empty, and the CLI handler (`perfxpert.__main__`) deletes any
+   zero-byte output file and exits with rc=2.
+
+Accidentally passing a model name (`opus-4-7`) to `--llm-api-key`
+now fails fast with a `FatalError` from the provider SDK (the key
+is invalid); the CLI surfaces a clean one-liner on stderr and
+never leaves an HTML file behind.
+
 ## Codex tool gate is prompt-layer only
 
 `perfxpert-code codex` cannot reject `bash`/`read` calls via a native

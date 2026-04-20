@@ -403,6 +403,43 @@ lines, with no ANSI escapes.
 For the full provider matrix, model-selection ladder, and fallback
 chain, see §10 LLM Providers below.
 
+### Credentials
+
+Each provider has a canonical env var PerfXpert reads at session
+boot; the `--llm-api-key` CLI flag is an equivalent one-shot
+override. If both are set and differ the flag wins (PerfXpert emits
+a one-line stderr WARNING so you know which credential is active):
+
+| `--llm` | Primary env var | PerfXpert alias | Notes |
+|---------|-----------------|-----------------|-------|
+| `anthropic` | `ANTHROPIC_API_KEY` | `PERFXPERT_LLM_ANTHROPIC_KEY` | Either works; alias kept for migration parity |
+| `openai` | `OPENAI_API_KEY` | `PERFXPERT_LLM_OPENAI_KEY` | Either works |
+| `private` | `PERFXPERT_LLM_PRIVATE_API_KEY` | — | Plus `PERFXPERT_LLM_PRIVATE_URL` (required) |
+| `ollama` | — (no key) | — | Plus `PERFXPERT_LLM_LOCAL_URL` (default `http://localhost:11434`) |
+| `opencode` | — (no key) | — | Plus `PERFXPERT_OPENCODE_PATH` if not on `PATH` |
+
+```bash
+# SKIP-SAMPLE — requires a real trace.db and a live ANTHROPIC_API_KEY
+# CLI flag — equivalent to exporting ANTHROPIC_API_KEY
+perfxpert analyze -i trace.db --llm anthropic --llm-api-key sk-ant-...
+
+# Env var — survives across invocations
+export ANTHROPIC_API_KEY="sk-ant-..."
+perfxpert analyze -i trace.db --llm anthropic
+```
+
+**Missing credentials surface a clean pre-flight error.** Starting
+with Phase 8, running `--llm anthropic` with no `ANTHROPIC_API_KEY`
+and no `--llm-api-key` raises a one-line stderr message like:
+
+```
+⚠ LLM auth failed for anthropic. Check ANTHROPIC_API_KEY is set correctly.
+```
+
+and exits with rc=2 BEFORE any network call or formatter pass runs.
+No empty HTML / markdown file is left behind — the previous
+"silently produces a blank report" failure mode is gone.
+
 ---
 
 ## 7. Tier 0: Source Code Scanning
