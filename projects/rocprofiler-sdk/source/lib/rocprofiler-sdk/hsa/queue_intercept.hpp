@@ -25,6 +25,7 @@
 #include "lib/common/synchronized.hpp"
 
 #include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
 
 #include <atomic>
 #include <functional>
@@ -263,6 +264,18 @@ create_queue_state(const hsa_queue_t* queue,
  */
 void
 destroy_queue_state(const hsa_queue_t* queue);
+
+/**
+ * @brief Install interposition wrappers into the HSA core API table
+ *
+ * Saves original function pointers and replaces them with wrappers that
+ * route through the SDK's write-pointer virtualization when the queue is
+ * tracked, or fall through to the original HSA implementation otherwise.
+ *
+ * @param core_table The HSA core API table to intercept
+ */
+void
+install_intercept(CoreApiTable& core_table);
 
 }  // namespace queue_intercept
 }  // namespace hsa

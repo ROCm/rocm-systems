@@ -26,7 +26,10 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <hsa/amd_hsa_queue.h>
 
 #include <rocprofiler-sdk/fwd.h>
 #include <memory>
@@ -219,6 +222,10 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
             }
         });
     });
+
+    // Register queue state for SDK-level write pointer interception
+    auto* amd_q = reinterpret_cast<amd_queue_t*>(id);
+    queue_intercept::create_queue_state(id, &amd_q->write_dispatch_id, &amd_q->read_dispatch_id, 0);
 }
 
 void
@@ -232,6 +239,8 @@ QueueController::destroy_queue(hsa_queue_t* id)
     if(!queue) return;
 
     ROCP_INFO << "destroying queue...";
+
+    queue_intercept::destroy_queue_state(id);
 
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
@@ -326,6 +335,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
         }
+        queue_intercept::install_intercept(core_table);
     }
 }
 
