@@ -41,7 +41,10 @@ GPU_CLR_PROFILE_OUTPUT=<path>   # enable at startup; writes JSON to <path> on ex
 
 Defined in `projects/clr/rocclr/utils/flags.hpp` via the CLR flag system.
 
-### Programmatic API (`hip/amd_detail/hip_profiler_ext.h`)
+### Programmatic API (`hip/amd_detail/hip_profiler_ext.h`) — BETA v0.1.0
+
+> **Beta:** structures, signatures, and enum values may change without notice.
+> Do not use in production code.
 
 ```c
 hipError_t hipProfilerEnableExt(void);

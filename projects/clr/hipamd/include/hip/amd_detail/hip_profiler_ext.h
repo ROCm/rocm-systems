@@ -7,9 +7,25 @@
 #ifndef HIP_PROFILER_EXT_H
 #define HIP_PROFILER_EXT_H
 
+/**
+ * @file hip_profiler_ext.h
+ *
+ * HIP built-in profiling extension — BETA API.
+ *
+ * This interface is under active development. Structures, function signatures,
+ * and enum values may change in future releases without notice.
+ * Do not use in production code.
+ *
+ * Version: 0.1.0
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 #include "hip/hip_runtime_api.h"
+
+#define HIP_PROFILER_EXT_VERSION_MAJOR 0
+#define HIP_PROFILER_EXT_VERSION_MINOR 1
+#define HIP_PROFILER_EXT_VERSION_PATCH 0
 
 #ifdef __cplusplus
 extern "C" {
