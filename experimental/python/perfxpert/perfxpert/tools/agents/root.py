@@ -19,7 +19,7 @@ ladder because it defers to ``agents.runtime.build_session``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from perfxpert.tools._class import ToolClass, tool_class
 
@@ -32,6 +32,7 @@ def agent_root(
     provider: Optional[str] = None,
     airgap: bool = False,
     session_id: Optional[str] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Run the full Root → Analysis → Recommendation pipeline.
 
@@ -53,6 +54,11 @@ def agent_root(
             provider call and return the deterministic airgap narrative.
         session_id: Re-use an existing session id. A UUID is generated
             when unset.
+        progress_callback: Optional ``Callable[[str], None]`` that receives
+            short phase-transition messages (e.g. ``"entering root"``,
+            ``"exit root"``) so UI consumers (CLI spinner, MCP streaming
+            consumer) can show progress during long LLM calls. ``None``
+            disables the feature with zero overhead.
 
     Returns:
         A dict with the documented RootOutput schema keys:
@@ -68,6 +74,7 @@ def agent_root(
         provider=provider,
         session_id=session_id,
         airgap=airgap if airgap else None,
+        progress_callback=progress_callback,
     )
 
     payload = schemas.RootInput(
@@ -79,7 +86,7 @@ def agent_root(
         session_id=session.session_id,
     )
 
-    output = session.run_root(payload)
+    output = session.run_root(payload, progress_callback=progress_callback)
 
     # RootOutput is a frozen Pydantic model; ``model_dump`` gives us the
     # documented schema-shaped dict. Fall back to attribute reads if the

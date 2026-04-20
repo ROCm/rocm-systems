@@ -14,7 +14,7 @@ provider / fallback-chain ladder via ``agents.runtime.build_session``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from perfxpert.tools._class import ToolClass, tool_class
 
@@ -25,6 +25,7 @@ def agent_recommendation(
     provider: Optional[str] = None,
     airgap: bool = False,
     session_id: Optional[str] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Run the Recommendation agent for an analysis verdict.
 
@@ -37,6 +38,8 @@ def agent_recommendation(
         airgap: When ``True`` (or ``PERFXPERT_AIRGAP=1``), skip every
             provider call.
         session_id: Re-use an existing session id. Generated when unset.
+        progress_callback: Optional ``Callable[[str], None]`` fired with
+            phase-transition messages. ``None`` for zero overhead.
 
     Returns:
         A dict with :class:`RecommendationOutput` keys:
@@ -48,9 +51,12 @@ def agent_recommendation(
         provider=provider,
         session_id=session_id,
         airgap=airgap if airgap else None,
+        progress_callback=progress_callback,
     )
     payload = schemas.RecommendationInput(**input)
-    output = session.run_recommendation(payload)
+    output = session.run_recommendation(
+        payload, progress_callback=progress_callback
+    )
 
     if hasattr(output, "model_dump"):
         return output.model_dump()

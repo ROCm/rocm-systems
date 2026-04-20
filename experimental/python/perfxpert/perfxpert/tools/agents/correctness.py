@@ -15,7 +15,7 @@ provider / fallback-chain ladder via ``agents.runtime.build_session``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from perfxpert.tools._class import ToolClass, tool_class
 
@@ -26,6 +26,7 @@ def agent_correctness(
     provider: Optional[str] = None,
     airgap: bool = False,
     session_id: Optional[str] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Run the Correctness agent on a gate-cascade verdict.
 
@@ -39,6 +40,8 @@ def agent_correctness(
         airgap: When ``True`` (or ``PERFXPERT_AIRGAP=1``), skip every
             provider call.
         session_id: Re-use an existing session id. Generated when unset.
+        progress_callback: Optional ``Callable[[str], None]`` fired with
+            phase-transition messages. ``None`` for zero overhead.
 
     Returns:
         A dict with :class:`CorrectnessOutput` keys:
@@ -51,9 +54,10 @@ def agent_correctness(
         provider=provider,
         session_id=session_id,
         airgap=airgap if airgap else None,
+        progress_callback=progress_callback,
     )
     payload = schemas.CorrectnessInput(**input)
-    output = session.run_correctness(payload)
+    output = session.run_correctness(payload, progress_callback=progress_callback)
 
     if hasattr(output, "model_dump"):
         return output.model_dump()
