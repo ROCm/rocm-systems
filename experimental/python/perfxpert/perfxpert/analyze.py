@@ -398,6 +398,192 @@ def execute(
     return _execute_agentic(input, config=config, **kwargs)
 
 
+# ---------------------------------------------------------------------------
+# Webview splice helpers
+# ---------------------------------------------------------------------------
+#
+# The agentic pipeline builds the narrative/primary_bottleneck/warnings block
+# independently from the deterministic webview template. These helpers keep
+# the splice logic symmetrical with the other formats:
+#
+#  * ``_build_summary_scard`` renders the Summary as a standard
+#    ``.scard/.shdr/.sbody`` card (no ad-hoc ``.card`` class).
+#  * ``_splice_after_overview`` inserts it as the FIRST section inside
+#    ``<div class="wrap">`` (right after the Overview card).
+#  * ``_build_tier0_wrapper_scard`` takes the full tier-0 HTML (a complete
+#    ``<!DOCTYPE html>…</html>`` document) and extracts only the inner
+#    ``<section class="scard">`` siblings, wrapping them in one parent
+#    ``.scard`` labelled "Tier-0 Source Scan".
+#  * ``_splice_before_wrap_end`` inserts the wrapper just before
+#    ``</div><footer>`` so tier-0 always renders as the LAST top-level
+#    card in the main report.
+
+
+def _build_summary_scard(
+    *, narrative: str, primary_bottleneck: str, warnings: list
+) -> str:
+    """Render the agent Summary as a standard ``.scard``.
+
+    The narrative goes in a ``<p>`` inside ``.sbody`` (preserving
+    paragraph breaks), the primary bottleneck surfaces as a
+    ``shdr-badge sbadge-info`` pill, and warnings render as a
+    bulleted list below the narrative with a subtle warn styling.
+    """
+    import html as _html_mod
+
+    narrative_s = (narrative or "").strip()
+    # Split on blank lines so multi-paragraph LLM output renders cleanly.
+    paragraphs = [p.strip() for p in narrative_s.split("\n\n") if p.strip()]
+    if not paragraphs and narrative_s:
+        paragraphs = [narrative_s]
+    body_parts = []
+    if primary_bottleneck:
+        body_parts.append(
+            f'<p class="assess"><strong>Primary bottleneck:</strong> '
+            f'{_html_mod.escape(str(primary_bottleneck))}</p>'
+        )
+    for para in paragraphs:
+        body_parts.append(
+            f'<p style="margin-bottom:.8rem;line-height:1.65">'
+            f'{_html_mod.escape(para)}</p>'
+        )
+    if warnings:
+        w_items = "".join(
+            f"<li>{_html_mod.escape(str(w))}</li>" for w in warnings
+        )
+        body_parts.append(
+            '<p style="margin-top:.85rem;color:var(--sub);font-size:.9rem">'
+            "Warnings:</p>"
+            f'<ul class="findings">{w_items}</ul>'
+        )
+    bn_badge = ""
+    if primary_bottleneck:
+        bn_badge = (
+            f'<span class="shdr-badge sbadge-info">'
+            f'{_html_mod.escape(str(primary_bottleneck))}</span>'
+        )
+    return (
+        '\n<section class="scard" id="agentic-narrative">'
+        '\n<div class="shdr">'
+        '\n<span class="shdr-icon">&#128220;</span>'
+        '\n<h2>Summary</h2>'
+        f"\n{bn_badge}"
+        '\n</div>'
+        '\n<div class="sbody">'
+        f'\n{"".join(body_parts)}'
+        '\n</div>'
+        '\n</section>\n'
+    )
+
+
+def _splice_after_overview(html: str, section_html: str) -> str:
+    """Insert ``section_html`` right after the Overview ``.scard``.
+
+    The main webview template opens with an Overview ``.scard`` inside
+    ``<div class="wrap">``. We anchor on that card's ``<h2>Overview</h2>``
+    and walk to its closing ``</section>``; the new section goes just
+    after that closing tag.
+
+    Fallback: if the anchor cannot be located (unexpected template
+    drift), splice right after the opening ``<div class="wrap">`` instead
+    — the Summary still lands at the TOP of the report, just above the
+    Overview.
+    """
+    anchor = "<h2>Overview</h2>"
+    idx = html.find(anchor)
+    if idx != -1:
+        close = html.find("</section>", idx)
+        if close != -1:
+            insert_at = close + len("</section>")
+            return html[:insert_at] + section_html + html[insert_at:]
+    wrap_open = '<div class="wrap">'
+    idx = html.find(wrap_open)
+    if idx != -1:
+        insert_at = idx + len(wrap_open)
+        return html[:insert_at] + section_html + html[insert_at:]
+    # Last resort — append before </body> so we never lose the content.
+    if "</body>" in html:
+        return html.replace("</body>", section_html + "</body>", 1)
+    return html + section_html
+
+
+def _splice_before_wrap_end(html: str, section_html: str) -> str:
+    """Insert ``section_html`` just before ``</div>`` that closes
+    ``<div class="wrap">``.
+
+    We locate the opening tag and walk the string to find the matching
+    closing ``</div>`` that sits immediately before ``<footer>`` (the
+    template always renders ``</div>\n\n<footer>``). This keeps tier-0
+    inside the main wrap, not floating after the footer.
+    """
+    anchor = "</div>\n\n<footer>"
+    idx = html.find(anchor)
+    if idx != -1:
+        return html[:idx] + section_html + html[idx:]
+    # More tolerant fallback: any </div> followed by <footer.
+    import re as _re
+
+    m = _re.search(r"</div>\s*<footer", html)
+    if m is not None:
+        insert_at = m.start()
+        return html[:insert_at] + section_html + html[insert_at:]
+    if "</body>" in html:
+        return html.replace("</body>", section_html + "</body>", 1)
+    return html + section_html
+
+
+def _build_tier0_wrapper_scard(tier0_full_html: str) -> str:
+    """Extract inner ``<section class="scard">`` blocks from a full Tier-0
+    webview document and wrap them in a single top-level ``.scard`` named
+    "Tier-0 Source Scan".
+
+    The Tier-0 webview is a complete, self-contained
+    ``<!DOCTYPE html>…</html>`` document — splicing it verbatim produces
+    nested ``<head>`` / ``<body>`` and duplicate ``<style>`` blocks.
+    This helper pulls out ONLY the ``.scard`` children from the tier-0
+    ``<div class="wrap">`` and composes them as siblings inside our
+    wrapper card.
+    """
+    import re as _re
+
+    # Greedy sibling match: ``<section class="scard"`` through the next
+    # ``</section>``. The tier-0 renderer does not nest scards, so a
+    # non-greedy closure is safe.
+    inner_sections = _re.findall(
+        r'<section class="scard".*?</section>',
+        tier0_full_html,
+        flags=_re.DOTALL,
+    )
+    if not inner_sections:
+        # Defensive: fall back to the raw string so users still see
+        # something (just without the extra wrapping). A comment marks
+        # this as a known degraded path for debugging.
+        return (
+            '\n<section class="scard" id="tier0-scan">'
+            '\n<div class="shdr">'
+            '\n<span class="shdr-icon">&#128187;</span>'
+            '\n<h2>Tier-0 Source Scan</h2>'
+            '\n</div>'
+            '\n<div class="sbody">'
+            '\n<!-- tier-0 scards not found; raw content omitted -->'
+            '\n</div>'
+            '\n</section>\n'
+        )
+    inner = "\n".join(inner_sections)
+    return (
+        '\n<section class="scard" id="tier0-scan">'
+        '\n<div class="shdr">'
+        '\n<span class="shdr-icon">&#128187;</span>'
+        '\n<h2>Tier-0 Source Scan</h2>'
+        '\n<span class="shdr-badge sbadge-info">Static source analysis</span>'
+        '\n</div>'
+        '\n<div class="sbody">'
+        f'\n{inner}'
+        '\n</div>'
+        '\n</section>\n'
+    )
+
+
 def _format_agentic_output(
     root_output: Any,
     output_format: str,
@@ -492,32 +678,44 @@ def _format_agentic_output(
             doc.setdefault("memory_analysis", {})
             doc.setdefault("hardware_counters", doc.get("hardware_counters") or {"has_counters": False})
             doc.setdefault("tier0_findings", tier0_findings)
+            # Bump schema to 0.3.0 to reflect the agentic + tier-0 contract.
+            doc["schema_version"] = "0.3.0"
+            doc.setdefault("metadata", {})["analysis_version"] = "0.3.0"
+            if narrative and not doc.get("llm_enhanced_explanation"):
+                doc["llm_enhanced_explanation"] = narrative
             return _json.dumps(doc, indent=2)
         if output_format == "markdown":
             md = _format_tier0_markdown(tier0_ns)
+            summary_parts: list = []
+            if primary_bottleneck:
+                summary_parts.append(
+                    f"**Primary bottleneck:** {primary_bottleneck}"
+                )
+                summary_parts.append("")
             if narrative:
-                md = ("\n## Summary\n\n" + narrative.rstrip() + "\n\n---\n\n") + md
+                summary_parts.append(narrative.rstrip())
+                summary_parts.append("")
             if warnings:
-                md += "\n\n## Warnings\n\n"
                 for w in warnings:
-                    md += f"- {w}\n"
+                    summary_parts.append(f"- \u26a0 {w}")
+                summary_parts.append("")
+            if summary_parts:
+                md = (
+                    "## Summary\n\n"
+                    + "\n".join(summary_parts).rstrip()
+                    + "\n\n---\n\n"
+                    + md
+                )
             return md
         if output_format == "webview":
             html = _format_tier0_webview(tier0_ns)
-            if narrative:
-                import html as _html_mod
-                narrative_panel = (
-                    '<section class="card" id="agentic-narrative">'
-                    '<h2>Summary</h2>'
-                    f'<pre style="white-space:pre-wrap;">{_html_mod.escape(narrative)}</pre>'
-                    '</section>'
+            if narrative or primary_bottleneck or warnings:
+                summary_section = _build_summary_scard(
+                    narrative=narrative,
+                    primary_bottleneck=primary_bottleneck,
+                    warnings=warnings,
                 )
-                if "</main>" in html:
-                    html = html.replace("</main>", narrative_panel + "</main>", 1)
-                elif "</body>" in html:
-                    html = html.replace("</body>", narrative_panel + "</body>", 1)
-                else:
-                    html += "\n" + narrative_panel
+                html = _splice_after_overview(html, summary_section)
             return html
         # text: prepend "PERFXPERT ANALYSIS" banner so tests that assert
         # the title remain green even on the tier-0-only path.
@@ -571,6 +769,20 @@ def _format_agentic_output(
         doc["metadata"] = {**doc.get("metadata", {}), **metadata}
         if tier0_findings is not None:
             doc["tier0_findings"] = tier0_findings
+        # Schema bump: the agentic pipeline adds
+        # ``narrative + primary_bottleneck + summary + tier0_findings`` on
+        # top of the legacy deterministic schema. This is the contract the
+        # four formatters render against, so bump to 0.3.0 unless a later
+        # schema (0.4.0 for ATT) is already set by ``_format_as_json``.
+        _existing = doc.get("schema_version", "0.1.0")
+        if _existing in ("0.1.0", "0.2.0"):
+            doc["schema_version"] = "0.3.0"
+            doc.setdefault("metadata", {})["analysis_version"] = "0.3.0"
+        # ``narrative`` is the canonical agent-brain field; mirror it into
+        # the legacy ``llm_enhanced_explanation`` alias so consumers that
+        # still read that key do not regress.
+        if narrative and not doc.get("llm_enhanced_explanation"):
+            doc["llm_enhanced_explanation"] = narrative
         # Flat convenience keys for the test contract.
         doc.setdefault("time_breakdown", time_breakdown)
         doc.setdefault("hotspots", hotspots)
@@ -589,21 +801,70 @@ def _format_agentic_output(
             hardware_counters=hardware_counters,
             database_path=database_path,
         )
-        # Splice the agent narrative in as a summary section under the H1.
-        if narrative:
-            narrative_block = "\n## Summary\n\n" + narrative.rstrip() + "\n"
-            parts = md.split("\n", 3)
-            if len(parts) >= 2 and parts[0].startswith("# "):
-                md = parts[0] + "\n" + (parts[1] + "\n" if len(parts) > 1 else "") + \
-                     narrative_block + "\n".join(parts[2:])
-            else:
-                md = narrative_block + "\n" + md
+        # Splice the agent Summary in between the H1 and the metadata
+        # block (``**Database:**`` / ``**Analysis Date:**`` /
+        # ``**Analysis Tier:**``) with a horizontal rule between the
+        # narrative and the metadata. Format:
+        #
+        #   # PerfXpert AI Performance Analysis
+        #
+        #   ## Summary
+        #
+        #   **Primary bottleneck:** compute
+        #
+        #   <narrative>
+        #
+        #   ⚠ warning 1
+        #
+        #   ---
+        #
+        #   **Database:** `…`
+        #   **Analysis Date:** …
+        #   **Analysis Tier:** …
+        #
+        #   ## Time Breakdown
+        summary_parts: list = []
         if primary_bottleneck:
-            md += f"\n\n*Primary bottleneck:* **{primary_bottleneck}**\n"
+            summary_parts.append(
+                f"**Primary bottleneck:** {primary_bottleneck}"
+            )
+            summary_parts.append("")
+        if narrative:
+            summary_parts.append(narrative.rstrip())
+            summary_parts.append("")
         if warnings:
-            md += "\n\n## Warnings\n\n"
             for w in warnings:
-                md += f"- {w}\n"
+                summary_parts.append(f"- \u26a0 {w}")
+            summary_parts.append("")
+        summary_block = ""
+        if summary_parts:
+            summary_block = (
+                "## Summary\n\n"
+                + "\n".join(summary_parts).rstrip()
+                + "\n\n---\n\n"
+            )
+        if summary_block:
+            anchor = "**Database:**"
+            idx = md.find(anchor)
+            if idx != -1:
+                # Rewind to the start of the line that contains the anchor
+                # so we can insert the Summary BEFORE the metadata lines.
+                line_start = md.rfind("\n", 0, idx)
+                if line_start < 0:
+                    line_start = 0
+                md = md[:line_start + 1] + summary_block + md[line_start + 1:]
+            else:
+                # No metadata block — splice Summary right under the H1.
+                h1_end = md.find("\n", md.find("# "))
+                if h1_end != -1:
+                    md = (
+                        md[: h1_end + 1]
+                        + "\n"
+                        + summary_block
+                        + md[h1_end + 1:]
+                    )
+                else:
+                    md = summary_block + md
         if tier0_findings is not None:
             tier0_ns = tier0_dict_to_ns(tier0_findings)
             md += "\n\n---\n\n## Tier 0 — Source Scan\n\n"
@@ -620,41 +881,28 @@ def _format_agentic_output(
             database_path=database_path,
             att_analysis=thread_trace,
         )
-        # Splice the narrative in as a prose panel so the HTML isn't silent
-        # on LLM / airgap reasoning.
-        if narrative:
-            import html as _html_mod
-            narrative_panel = (
-                '<section class="card" id="agentic-narrative">'
-                '<h2>Summary</h2>'
-                f'<pre style="white-space:pre-wrap;">{_html_mod.escape(narrative)}</pre>'
-                '</section>'
+        # Splice the narrative as a standard `.scard` Summary section at the
+        # TOP of the report (right after the Overview card inside
+        # `<div class="wrap">`). Uses the shared `.scard/.shdr/.sbody`
+        # template so it matches every other section visually.
+        if narrative or primary_bottleneck or warnings:
+            summary_section = _build_summary_scard(
+                narrative=narrative,
+                primary_bottleneck=primary_bottleneck,
+                warnings=warnings,
             )
-            if "</main>" in html:
-                html = html.replace("</main>", narrative_panel + "</main>", 1)
-            elif "</body>" in html:
-                html = html.replace("</body>", narrative_panel + "</body>", 1)
-            else:
-                html = html + "\n" + narrative_panel
-        # Bug 3 — when tier-0 findings are present in the combined path
-        # (-i + --source-dir), splice in a dedicated "Tier-0 Source Scan"
-        # section BEFORE the main report ends. The section lives under
-        # id="tier0" so tests + users can target it directly.
+            html = _splice_after_overview(html, summary_section)
+        # When tier-0 findings are present in the combined path
+        # (-i + --source-dir), splice a SINGLE dedicated "Tier-0 Source Scan"
+        # `.scard` before the closing `</div>` of `<div class="wrap">`.
+        # Inner `<section class="scard">` elements from the tier-0 renderer
+        # are extracted and inlined — the nested `<!DOCTYPE html>…</html>`
+        # scaffolding is stripped entirely.
         if tier0_findings is not None:
             tier0_ns = tier0_dict_to_ns(tier0_findings)
-            tier0_html_body = _format_tier0_webview(tier0_ns)
-            tier0_wrapper = (
-                '<section class="card" id="tier0">'
-                '<h2>Tier-0 Source Scan</h2>'
-                f'{tier0_html_body}'
-                '</section>'
-            )
-            if "</main>" in html:
-                html = html.replace("</main>", tier0_wrapper + "</main>", 1)
-            elif "</body>" in html:
-                html = html.replace("</body>", tier0_wrapper + "</body>", 1)
-            else:
-                html = html + "\n" + tier0_wrapper
+            tier0_full = _format_tier0_webview(tier0_ns)
+            tier0_wrapper = _build_tier0_wrapper_scard(tier0_full)
+            html = _splice_before_wrap_end(html, tier0_wrapper)
         return html
 
     # Default: structured text — dispatch to the legacy text formatter for
