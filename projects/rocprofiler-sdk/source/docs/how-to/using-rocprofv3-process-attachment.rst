@@ -117,10 +117,9 @@ There are some restrictions on what options can change when reattaching.  Typica
 
 By default, output file generation runs asynchronously after detachment to allow for faster tool detachment. This means output files may not be immediately available when ``rocprofv3`` exits. If output file generation from the previous attachment is still in progress, ``rocprofv3`` will block reattachment until that output generation completes.
 
-For use cases that require output files to be fully written before detachment completes (e.g., scripts that process or delete output directories immediately after detachment), you can enable synchronous output generation using either:
+For use cases that require output files to be fully written before detachment completes (e.g., scripts that process or delete output directories immediately after detachment), you can enable synchronous output generation using:
 
 - Command line: ``--attach-sync-output`` flag
-- Environment variable: ``ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC=1``
 
 This will cause ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
 
