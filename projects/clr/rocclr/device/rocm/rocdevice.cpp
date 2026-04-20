@@ -1933,7 +1933,9 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
     if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
-      LogError("Failed GlInterop::glAssociate()");
+      // Info level: also called from enumeration paths (clGetGLContextInfoKHR,
+      // hipGLGetDevices) where non-matching adapters are expected.
+      LogInfo("GlInterop::glAssociate() reported no interop");
       success = false;
     }
   }

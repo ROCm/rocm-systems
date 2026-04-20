@@ -1911,9 +1911,11 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
 #endif  //_WIN32
 
   if (flags & amd::Context::Flags::GLDeviceKhr) {
-    // Attempt to associate PAL-OGL
+    // Attempt to associate PAL-OGL. Logged at info level because this path
+    // is also exercised by enumeration callers (clGetGLContextInfoKHR,
+    // hipGLGetDevices) where non-matching adapters are expected.
     if (!glAssociate(pContext, pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx])) {
-      LogError("Failed glAssociate()");
+      LogInfo("glAssociate() reported no interop");
       return false;
     }
   }
