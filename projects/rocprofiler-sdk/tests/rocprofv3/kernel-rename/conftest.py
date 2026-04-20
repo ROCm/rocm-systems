@@ -25,10 +25,9 @@
 import pytest
 import json
 import os
-import glob
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import collapse_dict_list, find_single_file
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
 
@@ -54,11 +53,7 @@ def pytest_addoption(parser):
 @pytest.fixture
 def json_data(request):
     filename_pattern = request.config.getoption("--json-input")
-    matching_files = glob.glob(filename_pattern)
-    assert (
-        len(matching_files) == 1
-    ), f"Expected exactly 1 file matching {filename_pattern}, found {len(matching_files)}: {matching_files}"
-    filename = matching_files[0]
+    filename = find_single_file(filename_pattern, "JSON file")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
@@ -66,22 +61,14 @@ def json_data(request):
 @pytest.fixture
 def pftrace_data(request):
     filename_pattern = request.config.getoption("--pftrace-input")
-    matching_files = glob.glob(filename_pattern)
-    assert (
-        len(matching_files) == 1
-    ), f"Expected exactly 1 file matching {filename_pattern}, found {len(matching_files)}: {matching_files}"
-    filename = matching_files[0]
+    filename = find_single_file(filename_pattern, "perfetto trace file")
     return PerfettoReader(filename).read()[0]
 
 
 @pytest.fixture
 def otf2_data(request):
     filename_pattern = request.config.getoption("--otf2-input")
-    matching_files = glob.glob(filename_pattern)
-    assert (
-        len(matching_files) == 1
-    ), f"Expected exactly 1 file matching {filename_pattern}, found {len(matching_files)}: {matching_files}"
-    filename = matching_files[0]
+    filename = find_single_file(filename_pattern, "OTF2 trace file")
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]

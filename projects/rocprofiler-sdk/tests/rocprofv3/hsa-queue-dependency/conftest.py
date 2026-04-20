@@ -23,12 +23,11 @@
 # THE SOFTWARE.
 
 import csv
-import glob
 import pytest
 import json
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
-from rocprofiler_sdk.pytest_utils import collapse_dict_list
+from rocprofiler_sdk.pytest_utils import collapse_dict_list, find_single_file
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
 
@@ -58,12 +57,9 @@ def pytest_addoption(parser):
 @pytest.fixture
 def hsa_trace_input_data(request):
     filename_pattern = request.config.getoption("--hsa-trace-input")
-    matches = glob.glob(filename_pattern)
-    assert (
-        len(matches) == 1
-    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    filename = find_single_file(filename_pattern, "HSA trace CSV")
     data = []
-    with open(matches[0], "r") as inp:
+    with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -74,12 +70,9 @@ def hsa_trace_input_data(request):
 @pytest.fixture
 def kernel_trace_input_data(request):
     filename_pattern = request.config.getoption("--kernel-trace-input")
-    matches = glob.glob(filename_pattern)
-    assert (
-        len(matches) == 1
-    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
+    filename = find_single_file(filename_pattern, "kernel trace CSV")
     data = []
-    with open(matches[0], "r") as inp:
+    with open(filename, "r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
             data.append(row)
@@ -90,19 +83,13 @@ def kernel_trace_input_data(request):
 @pytest.fixture
 def json_data(request):
     filename_pattern = request.config.getoption("--json-input")
-    matches = glob.glob(filename_pattern)
-    assert (
-        len(matches) == 1
-    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
-    with open(matches[0], "r") as inp:
+    filename = find_single_file(filename_pattern, "JSON file")
+    with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
 
 @pytest.fixture
 def pftrace_data(request):
     filename_pattern = request.config.getoption("--pftrace-input")
-    matches = glob.glob(filename_pattern)
-    assert (
-        len(matches) == 1
-    ), f"Expected 1 file matching {filename_pattern}, found {len(matches)}"
-    return PerfettoReader(matches[0]).read()[0]
+    filename = find_single_file(filename_pattern, "perfetto trace file")
+    return PerfettoReader(filename).read()[0]
