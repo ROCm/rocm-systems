@@ -457,6 +457,36 @@ config.fixtures = {
     # the corpus exercises).
     "v_pk_int_b16":
         r"@LIT_FIXTURE_V_PK_INT_B16_CO@",
+    # scratch_refusal — pins the loud-failure contract of the early
+    # `SIInstrFlags::FlatScratch` branch in handle_flat.cpp for the
+    # entire FLAT scratch family (`scratch_load_*`, `scratch_store_*`,
+    # `scratch_atomic_*`). One fixture covers every scratch SemOp
+    # that would reach the dispatcher because the refusal is keyed on
+    # the encoding-level TSFlags bit (set by the `IsFlatScratch` field
+    # on every `FLAT_Scratch_*_Pseudo` in FLATInstructions.td), not on
+    # a per-mnemonic SemOp — the regression guard is
+    # format-symmetric.
+    #
+    # Fixture pins:
+    #   * raise_cli exits non-zero (refusal is contractual, not a
+    #     silent miscompile).
+    #   * Handler diagnostic names the mnemonic (`scratch_store_b32`),
+    #     the ABI anchor (`flat_scratch_init`), and back-links to the
+    #     `buffer_store_no_scratch_alloca` regression guard that
+    #     forbids the `addrspace(5)` alloca path a naïve lift would
+    #     take.
+    #   * raise_cli failure line pins the same anchors on the
+    #     outer-tool side (kernel name, mnemonic, `[FLAT]` format,
+    #     `flat_scratch_init`, `buffer_store_no_scratch_alloca`).
+    #
+    # This is a REFUSAL fixture — there is no companion
+    # `_same_target.ll`, because the refusal applies on every
+    # (isa, target-isa) combination until the Salmon ABI is
+    # extended to request `flat_scratch_init` in the generated KD.
+    # When that lands, this fixture becomes the single anchor point
+    # for a corresponding positive-emit fixture.
+    "scratch_refusal":
+        r"@LIT_FIXTURE_SCRATCH_REFUSAL_CO@",
 }
 
 lit_config.load_config(
