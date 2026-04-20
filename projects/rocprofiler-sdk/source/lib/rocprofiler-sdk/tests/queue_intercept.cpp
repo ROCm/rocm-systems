@@ -366,6 +366,66 @@ TEST(QueueIntercept, CreateAndDestroyQueueState)
     EXPECT_EQ(lookup_queue_state_by_doorbell({.handle = 9999}), nullptr);
 }
 
+TEST(QueueIntercept, MetadataSyncWritesEntries)
+{
+    QueueState compute_state{};
+    QueueState meta_state{};
+
+    alignas(64) char  compute_ring[64 * 256];
+    alignas(256) char meta_ring[256 * 256];
+    memset(compute_ring, 0, sizeof(compute_ring));
+    memset(meta_ring, 0, sizeof(meta_ring));
+
+    uint64_t compute_wdid = 0, compute_rdid = 0;
+    uint64_t meta_wdid = 0, meta_rdid = 0;
+
+    compute_state.ring_buf       = compute_ring;
+    compute_state.ring_size      = 256;
+    compute_state.ring_mask      = 255;
+    compute_state.real_wdid      = &compute_wdid;
+    compute_state.real_rdid      = &compute_rdid;
+    compute_state.k_factor       = 7;
+    compute_state.metadata_state = &meta_state;
+
+    meta_state.ring_buf  = meta_ring;
+    meta_state.ring_size = 256;
+    meta_state.ring_mask = 255;
+    meta_state.real_wdid = &meta_wdid;
+    meta_state.real_rdid = &meta_rdid;
+
+    compute_state.virtual_wptr.store(1);
+    auto* pkt          = get_pkt(compute_ring, 0, 255);
+    pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    pkt->kernel_object = 0x1234;
+
+    process_doorbell_impl(&compute_state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
+
+    EXPECT_EQ(meta_wdid, 8u);
+    EXPECT_EQ(meta_state.next_submit_pos, 8u);
+}
+
+TEST(QueueIntercept, NoMetadataSyncWhenNoPairing)
+{
+    QueueState       compute_state{};
+    alignas(64) char ring[64 * 256];
+    memset(ring, 0, sizeof(ring));
+    uint64_t wdid = 0, rdid = 0;
+
+    compute_state.ring_buf       = ring;
+    compute_state.ring_size      = 256;
+    compute_state.ring_mask      = 255;
+    compute_state.real_wdid      = &wdid;
+    compute_state.real_rdid      = &rdid;
+    compute_state.k_factor       = 7;
+    compute_state.metadata_state = nullptr;
+
+    compute_state.virtual_wptr.store(1);
+    get_pkt(ring, 0, 255)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+
+    process_doorbell_impl(&compute_state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
+    EXPECT_EQ(wdid, 8u);
+}
+
 }  // namespace
 }  // namespace queue_intercept
 }  // namespace hsa

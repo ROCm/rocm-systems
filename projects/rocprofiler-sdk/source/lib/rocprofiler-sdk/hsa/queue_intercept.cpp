@@ -117,6 +117,19 @@ load_write_index_impl(const QueueState* state)
 }
 
 void
+sync_metadata_impl(QueueState* compute_state,
+                   const hsa_kernel_dispatch_packet_t* /*pkt*/,
+                   uint64_t /*dest_pos*/)
+{
+    auto* meta = compute_state->metadata_state;
+    if(!meta) return;
+
+    uint64_t meta_dest    = meta->next_submit_pos;
+    meta->next_submit_pos = meta_dest + 1 + compute_state->k_factor;
+    __atomic_store_n(meta->real_wdid, meta->next_submit_pos, __ATOMIC_RELEASE);
+}
+
+void
 process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell)
 {
     std::lock_guard<std::mutex> lock(state->gate_lock);
@@ -139,6 +152,11 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
         }
 
         state->next_submit_pos = dest_idx + 1 + state->k_factor;
+
+        if(state->metadata_state)
+        {
+            sync_metadata_impl(state, src, dest_idx);
+        }
     }
 
     state->next_scan_pos = scan_end;
