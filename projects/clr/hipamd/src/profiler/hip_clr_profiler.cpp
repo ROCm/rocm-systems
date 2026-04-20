@@ -33,10 +33,10 @@
 #include "../hip_internal.hpp"
 
 #include "rocclr/os/os.hpp"
+#include "utils/flags.hpp"
 
 #include <algorithm>
 #include <atomic>
-#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -486,10 +486,9 @@ static void EnsureCallbackAndWrappers() {
 void HipProfilerInitExt() {
   // GPU_CLR_PROFILE_OUTPUT=<path>: presence (non-empty) enables profiling;
   // the value is the output file path written at process exit.
-  const char* out = std::getenv("GPU_CLR_PROFILE_OUTPUT");
-  if (!out || out[0] == '\0') return;
+  if (flagIsDefault(GPU_CLR_PROFILE_OUTPUT)) return;
 
-  g_env_output_path = out;
+  g_env_output_path = GPU_CLR_PROFILE_OUTPUT;
   EnsureCallbackAndWrappers();
 }
 
