@@ -75,13 +75,38 @@ out = api.agent_root(
     provider="anthropic",                  # anthropic|openai|ollama|private|opencode
     airgap=False,                          # True ⇒ deterministic path, no LLM
     session_id=None,                       # optional — for session persistence
-    intent_hint=None,                      # optional — bypass intent.classify
-    analysis_options={},                   # CLI-flag side channel
+    progress_callback=print,               # optional — live phase updates
 )
 ```
 
 Output: `narrative: str`, `recommendations: list[dict]`,
 `primary_bottleneck: str`, `warnings: list[str]`, `metadata: dict`.
+
+#### Live progress feedback
+
+Every agent tool (`agent_root`, `agent_analysis`, `agent_recommendation`,
+`agent_correctness`, `agent_compute_specialist`, `agent_memory_specialist`,
+`agent_latency_specialist`) accepts an optional
+`progress_callback: Callable[[str], None]`. When set, the runtime fires
+short status strings as each agent phase enters / exits and when the
+fallback chain cascades across providers — useful for driving a
+spinner, streaming to a web UI, or piping into a log aggregator:
+
+```python
+# SKIP-SAMPLE — illustrative Python API call
+events = []
+out = api.agent_root(
+    database_path="/tmp/trace.db",
+    provider="anthropic",
+    progress_callback=events.append,
+)
+# events == ["entering root", ..., "exit root"]
+```
+
+`progress_callback=None` (the default) is zero-overhead — the runtime
+short-circuits all emission when no callback is registered. This is the
+same mechanism the `perfxpert analyze` CLI uses to draw its Rich
+spinner (see the Getting Started guide §6).
 
 ### `agent_analysis` — Layer-1 bottleneck classifier
 

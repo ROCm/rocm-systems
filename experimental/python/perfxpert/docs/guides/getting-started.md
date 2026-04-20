@@ -385,6 +385,21 @@ export OPENAI_API_KEY="sk-..."
 perfxpert analyze -i trace.db --llm openai
 ```
 
+An LLM analysis can take 1-5 minutes per call — PerfXpert draws a live
+progress spinner on stderr so you can see each agent phase as it
+enters / exits (`entering root`, `entering analysis`, etc.) and if the
+fallback chain cascades across providers. The spinner is stderr-only,
+so piping stdout to a file (e.g. `--format json > out.json`) still
+captures clean output. Two opt-outs:
+
+- `--no-progress` — silent (useful for CI and log capture).
+- `--verbose` — full log lines instead of the compact spinner (unchanged
+  from prior releases).
+
+When stderr is not a TTY (piped / redirected / under a CI runner) the
+spinner degrades automatically to plain `[perfxpert] <phase>` status
+lines, with no ANSI escapes.
+
 For the full provider matrix, model-selection ladder, and fallback
 chain, see §10 LLM Providers below.
 
