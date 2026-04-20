@@ -27,12 +27,12 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 set(ROCPROFCOMPUTE_FULL_VERSION "${FULL_VERSION_STRING}")
 string(
-    REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    REGEX REPLACE
+    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
     "\\1.\\2.\\3"
     ROCPROFCOMPUTE_VERSION
     "${FULL_VERSION_STRING}"
 )
-
 
 # string(REGEX REPLACE "(${ROCPROFCOMPUTE_VERSION})(.*)" "\\2"
 # ROCPROFCOMPUTE_VERSION_TWEAK
@@ -141,7 +141,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
