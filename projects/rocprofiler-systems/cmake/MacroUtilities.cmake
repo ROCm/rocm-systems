@@ -546,7 +546,8 @@ function(ROCPROFILER_SYSTEMS_PRINT_ENABLED_FEATURES)
                     )
                 else()
                     string(
-                        REGEX REPLACE "^${PROJECT_NAME}_USE_"
+                        REGEX REPLACE
+                        "^${PROJECT_NAME}_USE_"
                         ""
                         _feature_tmp
                         "${_feature}"
