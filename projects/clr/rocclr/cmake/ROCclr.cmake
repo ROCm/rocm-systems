@@ -91,7 +91,6 @@ target_compile_definitions(rocclr PRIVATE ROCCLR_VERSION_GITHASH="${ROCCLR_VERSI
 
 if(WIN32)
   target_sources(rocclr PRIVATE
-  ${ROCCLR_SRC_DIR}/platform/interop_d3d9.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_d3d10.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_d3d11.cpp)
   target_link_libraries(rocclr PRIVATE dxguid.lib)
