@@ -29,6 +29,12 @@ _LOG = logging.getLogger("perfxpert.agents.runtime")
 
 # Defensive import — fallback registry keeps this module importable when
 # the providers package is not yet loaded in isolated test contexts.
+#
+# Phase 8 fix: ``claude-code`` is advertised by the CLI as a valid
+# ``--llm`` choice (analyze.py) but was missing here, so
+# `perfxpert analyze --llm claude-code` raised ``ValueError: unknown
+# provider``. It is a credential alias that routes through Anthropic —
+# see framework._api_key_for() for the auth fallback chain.
 try:
     from perfxpert.providers import PROVIDER_REGISTRY  # type: ignore
 except ImportError:
@@ -38,6 +44,7 @@ except ImportError:
         "ollama": "Local Ollama",
         "private": "Custom OpenAI-compatible endpoint",
         "opencode": "Bundled opencode CLI",
+        "claude-code": "Anthropic Claude via claude-code CLI credentials",
     }
 
 

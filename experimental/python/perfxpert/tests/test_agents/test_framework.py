@@ -333,3 +333,145 @@ def test_sdk_invoke_raises_runtime_error_when_sdk_missing(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="openai-agents"):
         _sdk_invoke(agent, "x", provider="openai")
+
+
+# -- Phase 8 — non-openai providers route through LitellmModel (B1) --------
+
+
+def _install_fake_sdk(monkeypatch, captured):
+    """Helper: stub the openai-agents SDK symbols so no network I/O occurs."""
+    from perfxpert.agents import framework
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            captured["agent_name"] = name
+            captured["instructions"] = instructions
+            captured["tools"] = list(tools)
+            captured["model"] = model
+
+    class _FakeRunResult:
+        def __init__(self):
+            self.final_output = {"ok": True}
+            self.new_items = []
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            captured["input"] = input
+            return _FakeRunResult()
+
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda: object())
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+
+def test_sdk_invoke_routes_anthropic_through_litellm_model(monkeypatch):
+    """Phase 8 — provider=anthropic must construct a LitellmModel wrapping
+    the provider-prefixed name (``anthropic/claude-sonnet-4-5``), NOT a
+    plain model string. Without this wrapper the openai-agents SDK
+    silently routes every request to OpenAI's endpoint and fails with
+    "requested model does not exist".
+    """
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-phase8")
+    monkeypatch.delenv("PERFXPERT_AGENTS_MODEL_ANTHROPIC", raising=False)
+    monkeypatch.delenv("PERFXPERT_ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("PERFXPERT_LLM_MODEL", raising=False)
+
+    captured: Dict[str, Any] = {}  # noqa: F821 — Any re-exposed below
+    from typing import Any, Dict  # noqa: F401,E402 — keep self-contained
+
+    captured = {}
+    _install_fake_sdk(monkeypatch, captured)
+
+    agent = Agent(
+        name="A", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+
+    _sdk_invoke(agent, {"q": "?"}, provider="anthropic")
+
+    assert isinstance(captured["model"], LitellmModel), (
+        "anthropic provider must hand the SDK a LitellmModel, not a plain string — "
+        "otherwise the SDK routes to OpenAI's endpoint and rejects Anthropic model names."
+    )
+    assert captured["model"].model == "anthropic/claude-sonnet-4-5"
+    assert captured["model"].api_key == "sk-ant-fake-phase8"
+
+
+def test_sdk_invoke_keeps_openai_as_plain_string(monkeypatch):
+    """openai provider must keep the legacy plain-string model, so the
+    SDK uses its native OpenAI client (retries / tracing / etc.)."""
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+
+    monkeypatch.delenv("PERFXPERT_AGENTS_MODEL_OPENAI", raising=False)
+    monkeypatch.delenv("PERFXPERT_OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("PERFXPERT_LLM_MODEL", raising=False)
+
+    captured = {}
+    _install_fake_sdk(monkeypatch, captured)
+
+    agent = Agent(
+        name="O", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    _sdk_invoke(agent, {}, provider="openai")
+
+    assert captured["model"] == "gpt-4o-mini"
+    assert isinstance(captured["model"], str)
+
+
+def test_sdk_invoke_claude_code_alias_routes_through_anthropic(monkeypatch):
+    """Phase 8 — provider=claude-code is a credential alias for anthropic.
+
+    It must construct a LitellmModel with ``anthropic/<model>`` so the
+    SDK reaches Anthropic's endpoint, and pull the API key from
+    ANTHROPIC_API_KEY (claude-agent-sdk does not expose a credential
+    lookup helper for the ``claude`` CLI's stored OAuth token).
+    """
+    from agents.extensions.models.litellm_model import LitellmModel
+
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-cc")
+    monkeypatch.delenv("PERFXPERT_AGENTS_MODEL_ANTHROPIC", raising=False)
+    monkeypatch.delenv("PERFXPERT_ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("PERFXPERT_LLM_MODEL", raising=False)
+
+    captured = {}
+    _install_fake_sdk(monkeypatch, captured)
+
+    agent = Agent(
+        name="CC", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    _sdk_invoke(agent, {"q": "?"}, provider="claude-code")
+
+    assert isinstance(captured["model"], LitellmModel)
+    assert captured["model"].model.startswith("anthropic/")
+    assert captured["model"].api_key == "sk-ant-fake-cc"
+
+
+def test_sdk_invoke_anthropic_does_not_double_prefix(monkeypatch):
+    """If the user pins an already-prefixed model via PERFXPERT_ANTHROPIC_MODEL,
+    we must not produce ``anthropic/anthropic/…`` nonsense."""
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("PERFXPERT_ANTHROPIC_MODEL", "anthropic/claude-opus-4")
+    monkeypatch.delenv("PERFXPERT_AGENTS_MODEL_ANTHROPIC", raising=False)
+    monkeypatch.delenv("PERFXPERT_LLM_MODEL", raising=False)
+
+    captured = {}
+    _install_fake_sdk(monkeypatch, captured)
+
+    agent = Agent(
+        name="A2", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    _sdk_invoke(agent, {}, provider="anthropic")
+    assert captured["model"].model == "anthropic/claude-opus-4"

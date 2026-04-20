@@ -37,9 +37,21 @@ dependencies = [
 [project.optional-dependencies]
 llm  = ["anthropic>=0.18", "openai>=1.0"]
 rich = ["rich>=13.0"]
+# litellm routes non-OpenAI providers (anthropic, ollama, private) through
+# the openai-agents SDK via agents.extensions.models.litellm_model.LitellmModel.
+# Without it, framework._sdk_invoke() silently routes every model string to
+# OpenAI's endpoint and fails with "requested model does not exist" for
+# Anthropic/Ollama models (Phase 8 fix).
+litellm = ["litellm>=1.50"]
 # claude-agent-sdk enables --llm claude-code using Claude Code's stored credentials
 # (falls back to ANTHROPIC_API_KEY if CLI not found)
-all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0", "claude-agent-sdk>=0.1"]
+all  = [
+    "anthropic>=0.18",
+    "openai>=1.0",
+    "rich>=13.0",
+    "claude-agent-sdk>=0.1",
+    "litellm>=1.50",
+]
 dev  = [
     "pytest>=8.0",
     "pytest-asyncio>=0.21",

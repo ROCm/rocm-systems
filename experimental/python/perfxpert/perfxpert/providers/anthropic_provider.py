@@ -96,4 +96,15 @@ class AnthropicProvider(Provider):
             output_tokens=resp.usage.output_tokens,
         )
 register("anthropic", AnthropicProvider, "Anthropic Claude via official SDK")
+# Phase 8: ``claude-code`` is a credential-alias of ``anthropic``. The
+# CLI choice is advertised by analyze.py but the actual auth path
+# currently uses ANTHROPIC_API_KEY (claude-agent-sdk does not expose
+# credential-lookup for the ``claude`` CLI's stored OAuth token). Users
+# with a key in ~/.claude/.credentials.json must still set
+# ANTHROPIC_API_KEY; see docs/known-issues.md.
+register(
+    "claude-code",
+    AnthropicProvider,
+    "Anthropic Claude via claude-code CLI credentials (requires ANTHROPIC_API_KEY)",
+)
 __all__ = ["AnthropicProvider"]

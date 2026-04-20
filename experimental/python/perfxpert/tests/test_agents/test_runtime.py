@@ -108,6 +108,18 @@ def test_build_session_no_chain_env_leaves_fallback_unset(monkeypatch):
     assert s.provider == "anthropic"
 
 
+def test_session_builds_with_claude_code_alias(monkeypatch):
+    """Phase 8 — ``claude-code`` is advertised by analyze.py's --llm
+    choices; build_session must accept it (it's a credential alias that
+    routes through Anthropic — see framework._build_model_spec). Before
+    the fix this raised ``ValueError: unknown provider 'claude-code'``.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake")
+    s = runtime_module.build_session(provider="claude-code")
+    assert s.provider == "claude-code"
+    assert s.session_id is not None
+
+
 def test_fallback_provider_complete_refuses_airgap(monkeypatch):
     """Defensive guard: FallbackProvider.complete() MUST NOT run live
     calls under PERFXPERT_AIRGAP=1 (regardless of how the chain was

@@ -64,12 +64,38 @@ _LOG = logging.getLogger(__name__)
 # `400 model_not_found` at runtime (cycle-4 blocker B2). The built-in
 # defaults are intentionally the *latest widely-available* snapshot for
 # each family so `--llm anthropic` "just works" without env setup.
+#
+# NOTE: ``claude-code`` is a CLI-credentials alias that routes through
+# the Anthropic API, so it shares the anthropic default model.
 _DEFAULT_MODELS: Dict[str, str] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-4-5",
+    "claude-code": "claude-sonnet-4-5",
     "ollama": "ollama/llama3.1",
     "private": "gpt-4o-mini",
     "opencode": "gpt-4o-mini",
+}
+
+
+# Phase 8: map perfxpert provider name → litellm provider prefix. LitellmModel
+# expects provider-prefixed names (e.g. ``anthropic/claude-sonnet-4-5``) so it
+# dispatches to the right endpoint. Without a prefix the openai-agents SDK
+# defaults every model string to the OpenAI Responses API (leading to 400
+# ``model not found`` for Anthropic/Ollama models — cycle-5 blocker).
+#
+# ``openai`` is absent here: it keeps the legacy plain-string path so the SDK
+# uses its native OpenAI client (and benefits from its retry / tracing).
+# ``opencode`` is also absent: it's subprocess-dispatched, not SDK-dispatched,
+# and never reaches this code path.
+_LITELLM_PROVIDER_PREFIX: Dict[str, str] = {
+    "anthropic": "anthropic",
+    # claude-code routes through Anthropic (credential-alias only — the
+    # openai-agents SDK has no notion of OAuth tokens, so this alias uses
+    # ANTHROPIC_API_KEY just like the ``anthropic`` provider).
+    "claude-code": "anthropic",
+    "ollama": "ollama",
+    # OpenAI-compatible private endpoint (same wire format as openai/*).
+    "private": "openai",
 }
 
 
@@ -192,7 +218,9 @@ def _resolve_model(provider: str) -> str:
       3. ``PERFXPERT_LLM_MODEL`` (cross-provider global override)
       4. Built-in default from :data:`_DEFAULT_MODELS`.
     """
-    up = provider.upper()
+    # claude-code shares Anthropic's env vars (it's a credential alias only).
+    probe = "anthropic" if provider == "claude-code" else provider
+    up = probe.upper()
     for var in (f"PERFXPERT_AGENTS_MODEL_{up}", f"PERFXPERT_{up}_MODEL"):
         val = os.environ.get(var)
         if val:
@@ -201,6 +229,102 @@ def _resolve_model(provider: str) -> str:
     if generic:
         return generic
     return _DEFAULT_MODELS.get(provider, _DEFAULT_MODELS["openai"])
+
+
+def _api_key_for(provider: str) -> Optional[str]:
+    """Return the API key to hand the openai-agents SDK for ``provider``.
+
+    The SDK has its own env-var defaults for the ``openai`` provider, so
+    returning ``None`` there lets the SDK auto-discover ``OPENAI_API_KEY``.
+    For every non-openai provider we must forward the key explicitly
+    through :class:`LitellmModel` (Phase 8 fix — without it the SDK routes
+    to OpenAI's endpoint and emits ``model not found`` for Anthropic /
+    Ollama models).
+
+    ``claude-code`` is a credential alias for ``anthropic``: the
+    claude-agent-sdk package does not expose a credential-lookup helper
+    (the ``claude`` CLI stores an OAuth token, not an API key, so it
+    can't be forwarded to ``anthropic.messages.create`` as-is). We fall
+    back to ``ANTHROPIC_API_KEY`` so the CLI choice advertised in
+    ``analyze.py`` still works end-to-end.
+    """
+    if provider == "openai":
+        return None  # Let the SDK default to OPENAI_API_KEY.
+    if provider in ("anthropic", "claude-code"):
+        for var in (
+            "PERFXPERT_LLM_ANTHROPIC_KEY",
+            "ANTHROPIC_API_KEY",
+            "ROCPD_LLM_ANTHROPIC_KEY",  # legacy alias, kept for parity with AnthropicProvider
+        ):
+            val = os.environ.get(var)
+            if val:
+                return val
+        return None
+    if provider == "ollama":
+        # Ollama has no auth by default; base_url handles the routing.
+        return os.environ.get("PERFXPERT_LLM_LOCAL_URL") or None
+    if provider == "private":
+        return os.environ.get("PERFXPERT_LLM_PRIVATE_API_KEY") or None
+    return None
+
+
+def _base_url_for(provider: str) -> Optional[str]:
+    """Return the HTTP base URL override for ``provider``, if configured.
+
+    ``ollama`` resolves ``PERFXPERT_LLM_LOCAL_URL`` (documented in
+    ``providers/__init__.py``) and ``private`` resolves
+    ``PERFXPERT_LLM_PRIVATE_URL`` (required for that provider). Every
+    other provider returns None so LitellmModel / the SDK picks the
+    vendor default.
+    """
+    if provider == "ollama":
+        return os.environ.get("PERFXPERT_LLM_LOCAL_URL") or None
+    if provider == "private":
+        return os.environ.get("PERFXPERT_LLM_PRIVATE_URL") or None
+    return None
+
+
+def _build_model_spec(provider: str) -> Any:
+    """Return the ``model=`` argument for :class:`SdkAgent` construction.
+
+    - ``openai``: plain string; the SDK routes to OpenAI natively.
+    - every other provider: a :class:`LitellmModel` wrapper carrying the
+      litellm-prefixed model name (``anthropic/claude-sonnet-4-5``), the
+      resolved API key, and an optional base URL. LitellmModel dispatches
+      to the correct vendor endpoint (Anthropic, Ollama, etc.) — without
+      it the SDK silently routes every request to OpenAI, producing the
+      misleading "requested model 'claude-sonnet-4-5' does not exist"
+      error (cycle-5 Phase 8 blocker).
+    """
+    model_name = _resolve_model(provider)
+    if provider == "openai":
+        return model_name
+
+    # Lazy import — we only need LitellmModel on the non-openai branch,
+    # and keeping the import local means bare ``perfxpert`` imports don't
+    # fail when litellm isn't installed in an openai-only environment.
+    try:
+        from agents.extensions.models.litellm_model import (  # type: ignore[import-not-found]
+            LitellmModel,
+        )
+    except ImportError as exc:  # pragma: no cover - exercised only without litellm
+        raise RuntimeError(
+            "Provider '{p}' requires the 'litellm' extra of openai-agents. "
+            "Run `pip install 'openai-agents[litellm]'` or `pip install litellm`."
+            .format(p=provider)
+        ) from exc
+
+    prefix = _LITELLM_PROVIDER_PREFIX.get(provider)
+    if prefix and not model_name.startswith(f"{prefix}/"):
+        full = f"{prefix}/{model_name}"
+    else:
+        full = model_name
+
+    return LitellmModel(
+        model=full,
+        api_key=_api_key_for(provider),
+        base_url=_base_url_for(provider),
+    )
 
 
 def _serialize_input(input_payload: Any) -> str:
@@ -333,7 +457,7 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
             "or set PERFXPERT_AIRGAP=1"
         )
 
-    model = _resolve_model(provider)
+    model = _build_model_spec(provider)
     tools = _translate_tools(list(agent.tools))
     instructions = agent.fence_text or (
         f"You are the {agent.name} agent. "
