@@ -7,8 +7,8 @@
 Salmon lifts native AMDGPU machine code to LLVM IR for cross-ISA binary
 translation.  When active (`HSA_HOTSWAP_IR_RAISER=1`), Salmon handles
 **all** ISA mismatches — both cross-family (e.g. gfx1250→gfx942) and
-same-family (e.g. gfx950→gfx942) — by raising, optimizing, and
-re-lowering through LLVM.  It is a standalone CMake project that links
+same-family (e.g. gfx950→gfx942) — by raising, and re-lowering through LLVM. 
+It is a standalone CMake project that links
 against a pre-built LLVM with AMDGPU support.
 
 ## Prerequisites
@@ -48,6 +48,16 @@ ninja -C build
 This gives you the LLVM libraries the transpiler links against, plus the tools
 (`llc`, `llvm-mc`, `ld.lld`) it invokes during the IR-to-HSACO pipeline.  The
 build tree's `lib/cmake/llvm/` directory is what you point `LLVM_DIR` at below.
+
+> **Note.**  `AMDGPU` alone is sufficient for the **standalone** transpiler
+> build in the next section.  If you are going to build a full
+> Salmon-enabled ROCR runtime (see
+> [Building a Salmon-enabled ROCR runtime](#building-a-salmon-enabled-rocr-runtime-rocr_build)),
+> add `X86` (or `native`) to `LLVM_TARGETS_TO_BUILD` as well —
+> `find_package(Clang)` from ROCm's Clang CMake config transitively
+> requires `LLVMX86*` targets to be visible in the LLVM package that
+> ROCR consumes, and the standalone transpiler build tree is what
+> gets reused there.
 
 ## Building the transpiler
 
@@ -159,6 +169,148 @@ ctest --test-dir . --output-on-failure
 GPU tests use `GTEST_SKIP()` when code objects or HIP are unavailable.
 Known-failing tests are tracked in `tests/xfail.cmake` (CTest `WILL_FAIL`) —
 they still run, but CTest expects them to fail and flags unexpected passes.
+
+## Building a Salmon-enabled ROCR runtime (`$ROCR_BUILD`)
+
+Everything above only needs the transpiler's own build tree.  The
+standalone tools in the next section (`smoke_test_compare_transpilers`,
+`compare_correctness/`) instead load Salmon *through* a live
+`libhsa-runtime64.so`, so they need a full ROCR build with the
+hotswap + IR-raiser CMake options turned on.  This section walks
+through producing that build on a typical gfx942 machine.
+
+### Prerequisites (in addition to the transpiler's)
+
+- Everything from the transpiler [Prerequisites](#prerequisites), plus
+  `libelf-dev`, `libdrm-amdgpu-dev` (or `libdrm-dev`), `pkg-config`,
+  `rocm-core`, `rocm-llvm-dev` — the standard ROCR build deps, see
+  `projects/rocr-runtime/README.md`.
+- A **local LLVM build tree** with both `AMDGPU` and `X86` (or
+  `native`) targets.  See the note at the end of
+  [Building LLVM with AMDGPU support](#building-llvm-with-amdgpu-support)
+  above; if you already have an AMDGPU-only tree you can add X86
+  with a one-line reconfigure:
+  ```bash
+  cmake -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" ~/llvm-project/build && \
+  ninja -C ~/llvm-project/build
+  ```
+
+### Step 1: Get the full `projects/rocr-runtime` tree
+
+If you cloned via `rocm-systems` with a sparse checkout limited to
+`hotswap/`, expand it to include the rocr-runtime source:
+
+```bash
+cd ~/rocm-systems
+git sparse-checkout add projects/rocr-runtime
+```
+
+A plain full clone of `rocm-systems` or `rocr-runtime` already has
+everything and can skip this step.
+
+### Step 2: Apply the `trap_handler_gfx12.s` compatibility patch (if your clang predates upstream LLVM 78defc82, Nov 2025)
+
+ROCR's gfx12 trap handler uses the symbolic hwreg name
+`HW_REG_WAVE_SCHED_MODE`, which was added to LLVM's AMDGPU MC parser
+by upstream commit
+[`78defc8`](https://github.com/llvm/llvm-project/commit/78defc820eef5185d50e9aa396fb5a4b5ed07f92)
+on 2025-11-28 (i.e. post-LLVM-22).  If your ROCm ships a clang whose
+LLVM tree predates that commit (for example, **ROCm 7.2.1 ships AMD
+clang 22.0.0git** at `/opt/rocm-7.2.1/lib/llvm/bin/clang`, branched
+earlier), the ROCR build fails with:
+
+```
+trap_handler_gfx12.s:850:29: error: expected a register name or an absolute expression
+    s_setreg_b32      hwreg(HW_REG_WAVE_SCHED_MODE, 0, 2), ttmp2
+```
+
+The patch rewrites that one line to use the numeric hwreg id (26,
+`ID_SCHED_MODE` in `llvm/lib/Target/AMDGPU/SIDefines.h`).  The numeric
+form has been the raw underlying `hwreg` syntax since long before the
+symbolic name was exposed, so every reasonably recent AMDGPU clang
+accepts it; the emitted encoding is byte-for-byte identical to what
+the symbolic form produces on LLVM 23.
+
+```bash
+cd projects/rocr-runtime
+patch -p1 < runtime/hsa-runtime/hotswap/transpiler/patches/trap_handler_gfx12_llvm22_compat.patch
+```
+
+Skip this step if your ROCm clang's LLVM already includes `78defc8`
+(the patch is a no-op at runtime — it only changes the assembly
+source encoding, not the resulting code object).
+
+### Step 3: Configure and build
+
+```bash
+cd projects/rocr-runtime
+mkdir build && cd build
+
+cmake -G Ninja .. \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="/opt/rocm-7.2.1/lib/llvm;/opt/rocm-7.2.1" \
+  -DROCR_ENABLE_HOTSWAP=ON \
+  -DROCR_ENABLE_IR_RAISER=ON \
+  -DLLVM_DIR=$HOME/llvm-project/build/lib/cmake/llvm
+
+ninja
+```
+
+Key flags:
+
+| flag | why it matters |
+|------|----------------|
+| `-DROCR_ENABLE_HOTSWAP=ON` | Compiles the hotswap hook (legacy byte-level transpiler) into `libhsa-runtime64.so`.  Without this, the runtime has no way to intercept code-object loads and both engines are unreachable. |
+| `-DROCR_ENABLE_IR_RAISER=ON` | Also links the Salmon IR raiser (`hotswap-transpiler` static library from this directory) into the runtime.  Without this, only the legacy byte-level path is available. |
+| `-DLLVM_DIR=<build>/lib/cmake/llvm` | Same LLVM **build tree** the standalone transpiler uses — needed for AMDGPU target-private headers not shipped by `ninja install`. |
+| `-DCMAKE_PREFIX_PATH="…rocm-7.2.1/lib/llvm;…rocm-7.2.1"` | Points `find_package(Clang)` (used by the trap-handler subproject for `clang` + `llvm-objcopy`) at the ROCm LLVM install.  Without this, CMake may latch onto a system package such as `/usr/lib/llvm-20/lib/cmake/clang/` that references static libraries its distro package doesn't ship, and configure fails with `The imported target "clangBasic" references the file … but this file does not exist.` |
+
+`HOTSWAP_TRANSPILER_BUILD_TOOLS` is **not** listed above on purpose: it
+defaults to `OFF` whenever the transpiler CMakeLists is pulled in via
+`add_subdirectory` (as ROCR does), so the optional `raise_cli` + test
+binaries are already suppressed for you.  You only need to pass
+`-DHOTSWAP_TRANSPILER_BUILD_TOOLS=ON` if you explicitly want those
+built as part of the ROCR build (and you have GTest + HIP available).
+
+Build output:
+
+- `build/rocr/lib/libhsa-runtime64.so.1.21.0` — the Salmon-enabled
+  runtime.  Verify by running
+  `nm -D build/rocr/lib/libhsa-runtime64.so.1 | grep rocr_salmon_patch_elf`;
+  the symbol must be present.
+- **No `ninja install` required.**  The tools in the next section
+  `rpath` into `$ROCR_BUILD/rocr/lib` directly, so nothing touches
+  `/opt/rocm-7.2.1`.  Set:
+  ```bash
+  export ROCR_BUILD=$HOME/rocm-systems/projects/rocr-runtime/build
+  ```
+  and the tool Makefiles will pick it up.
+
+### Known pitfalls
+
+- **"The imported target `clangBasic` references the file … but this file does not exist."**
+  CMake resolved `find_package(Clang)` against a system LLVM package
+  (e.g. `/usr/lib/llvm-20/lib/cmake/clang/ClangTargets.cmake`) whose
+  imported targets reference static libraries your distro package
+  does not actually install.  Fix by forcing CMake to use ROCm's
+  matching Clang package via
+  `-DCMAKE_PREFIX_PATH="/opt/rocm-<ver>/lib/llvm;/opt/rocm-<ver>"`
+  as shown above.
+- **"The following imported targets are referenced, but are missing: `LLVMX86CodeGen` …"**
+  Your local LLVM build tree was configured AMDGPU-only.  Add X86
+  per the reconfigure in the prerequisites above.
+- **Trap-handler assembly error on a *different* line than the
+  `HW_REG_WAVE_SCHED_MODE` one.**  The Step-2 patch only covers that
+  single symbol.  If a significantly older clang rejects other gfx12
+  mnemonics in `trap_handler_gfx12.s`, upgrade ROCm.  As a last
+  resort on a machine that has no gfx1200 agent (e.g. MI300-only),
+  you can drop gfx1200 from
+  `runtime/hsa-runtime/core/runtime/trap_handler/CMakeLists.txt`'s
+  `TARGET_DEVS` *and* remove the matching `kCodeTrapHandlerV2_12`
+  entries from `runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp`
+  — `AssembleShader` selects the trap handler per agent ISA, so the
+  gfx1200 blob is never bound on a gfx942 system and its build-time
+  presence is purely to ship a multi-ISA runtime.
 
 ### Standalone tools and end-to-end tests (not part of the CMake project)
 
