@@ -9,7 +9,7 @@ namespace rocprofiler_compute_tool
 class CountersWriter
 {
 public:
-    virtual      ~CountersWriter() = default;
+    virtual ~CountersWriter()                           = default;
     virtual void write_counters(tool_data_t* tool_data) = 0;
 };
 

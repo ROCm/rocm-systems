@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #include "input_parameters.h"
+
 #include <stdlib.h>
 
 using namespace rocprofiler_compute_tool;
