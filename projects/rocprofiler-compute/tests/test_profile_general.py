@@ -3044,7 +3044,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_baseline,
-        ["--iteration-multiplexing"],  # No torch-trace flag
+        ["--iteration-multiplexing"],  # Baseline without --torch-trace
         check_success=True,
         roof=False,
         app_name="torch_test_app",
