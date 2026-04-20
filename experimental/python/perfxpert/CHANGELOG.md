@@ -3,6 +3,73 @@
 All notable changes to perfxpert will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] — 2026-04-19 (release cut)
+
+This is the first tagged perfxpert release. It consolidates the
+multi-backend launcher (previously drafted as v0.3.0 below), the Codex
+backend adapter (drafted as v0.3.1 below), and Phase 8's final cleanup
+into a single v0.2.0 cut. The v0.3.0 and v0.3.1 headings below are
+retained as implementation-cycle drafts for audit trail; the canonical
+user-visible release is this v0.2.0 block.
+
+### Changed
+- **Version bump 0.1.0 → 0.2.0.** `pyproject.toml`, `perfxpert/__init__.py`,
+  `CMakeLists.txt`, the `perfxpert doctor` banner fallback, and the
+  `docs/guides/getting-started.md` footer marker all move together.
+  JSON analysis output keeps `schema_version = "0.1.0"` by design —
+  that field tracks the on-disk analysis schema, not the module
+  version, and consumers key off it independently.
+- **Claude Code pointer path** migrated from `.claude/CLAUDE.md` to
+  `CLAUDE.local.md` at the project root. Claude Code auto-loads
+  `CLAUDE.local.md` at session start, so the perfxpert prompt now
+  reaches the model without requiring a manual `/read`. User-facing
+  docs (`docs/guides/backends.md`, `docs/integration/mcp-server.md`,
+  `docs/architecture/backend-adapter.md`) are refreshed to match.
+- **`claude mcp list` parser** now handles Anthropic Claude CLI's
+  plain-text output format. Recent Claude CLI releases dropped the
+  `--json` flag; the adapter parses the plain-text table form instead.
+  The JSON-specific helpers in `perfxpert/cli/_backend/claude.py`
+  (`_extract_server_names`, `_extract_tool_names`) are removed.
+
+### Added
+- **Codex backend (`perfxpert-code codex`).** Full Codex CLI adapter
+  landed in PR 2. Trust-gate workflow
+  (`[projects."<cwd>"].trust_level = "trusted"` in
+  `~/.codex/config.toml`) with interactive prompt + CI-mode
+  `PERFXPERT_AUTO_TRUST=1` bypass (emits an always-on stderr warning
+  even under `--quiet`). Gate enforcement is **prompt-layer-only**
+  because Codex's native `PreToolUse` hook intercepts Bash only
+  (not MCP tool calls) as of April 2026 — see the Codex hook-surface
+  decision record. `tomlkit` is promoted to a **required runtime
+  dependency** so the comment-preserving TOML fallback path works
+  out of the box without an `[extras]` install step. Full install /
+  uninstall recipe in `docs/guides/backends.md`.
+- **Multi-backend `perfxpert-code` launcher** — `claude`, `gemini`,
+  `codex`, `uninstall` subcommands in one dispatcher. Per-`(backend,
+  cwd-hash, file-set-hash)` consent; `--dry-run` and `--quiet`
+  dispatcher flags; MCP warmup + retry with env-configurable
+  timeouts (`PERFXPERT_MCP_WARMUP_TIMEOUT_S`,
+  `PERFXPERT_MCP_RETRY_BUDGET_S`, `PERFXPERT_SKIP_LIVE_CHECK`).
+
+### Fixed
+- **Wordmark.** The `perfxpert-code` banner previously rendered
+  mis-shaped glyphs for `r`, `f`, `p`, `t` — so users saw a string
+  that did not read as "PerfXpert". Patch `0051-amd-wordmark-ui.patch`
+  is rewritten with correctly-shaped 9-letter block-letter art
+  (44 chars wide) and the bundled opencode binary is rebuilt so the
+  fix reaches pip-install users automatically.
+
+### Docs
+- `docs/guides/getting-started.md` fully audited and refreshed for
+  cycle-2/3 stack state (agentic-only, no `PERFXPERT_LEGACY`,
+  multi-backend launcher recipes, Codex trust-gate section).
+- Phase-9 docs-audit cleanup: `docs/canonical_facts/` + inventory
+  snapshot artifacts dropped; docs-tooling test suite pared down and
+  relocated under `experimental/python/perfxpert/tests/`.
+- Red-team / ship-readiness gate consolidated into
+  `tests/test_ship_readiness.py` (strict mode) — ships-as-tested
+  evidence rather than CI-gate-only.
+
 ## v0.3.1 — Codex backend
 
 ### Added
@@ -96,7 +163,7 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `perfxpert.agents.root` wires the real `tasks.*` tools (create / next /
   update / close) instead of no-op `lambda` stubs.
 
-## [0.2.0] — 2026-04-18
+## v0.2.0 draft — 2026-04-18 (agentic-runtime landing, rolled into v0.2.0 above)
 
 ### Added
 - **Agentic runtime**: `perfxpert/agents/` with 7 agent definitions
