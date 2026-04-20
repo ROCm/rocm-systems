@@ -14,6 +14,49 @@ using namespace llvm;
 
 namespace transpiler {
 
+namespace {
+
+// Look up the SGPR index that holds the *low* dword of the source-ISA
+// KernargSegmentPtr at kernel entry, via `ctx.userSgprLayout`.
+//
+// Why this exists: both the dword-granular S_LOAD_B* block and the
+// narrow-SMEM (S_LOAD_U8/I8/U16/I16) block need to answer the same
+// question — "is this load's sbase the kernarg pointer?" — in order
+// to route through `extractKernargDword` (dword path) or to refuse
+// (narrow path). The previous implementation hardcoded `baseIdx == 0`,
+// which is only correct when KernargSegmentPtr is the first enabled
+// user-SGPR source. That held for Triton kernels (where it is the
+// only enabled source) but silently broke as soon as a kernel also
+// enabled PrivateSegmentBuffer (4 dwords), DispatchPtr (2 dwords),
+// or QueuePtr (2 dwords) ahead of it in the canonical
+// enable_sgpr_* order — the kernarg pointer then slides up to
+// s[2:3], s[6:7], s[8:9], etc., and every `baseIdx == 0` check
+// incorrectly rejects it.
+//
+// The layout object is the single source of truth for the source
+// ISA's user-SGPR ABI. It is populated by
+// `UserSgprLayout::fromKernelMeta` (which itself aborts loudly if the
+// kernel descriptor is missing, so we never fall back to a guessed
+// layout), and wired into `RaiseContext` before handler dispatch in
+// raiser.cpp. A null pointer here therefore means the raiser failed
+// to wire the layout into the context — a wiring bug, not a runtime
+// condition — and we surface it with `report_fatal_error`.
+//
+// Returns -1 if KernargSegmentPtr is disabled in the KD (no corpus
+// kernel today, but the caller must still guard against the `-1`
+// match to avoid a false-positive "is kernarg" on negative sbase
+// indices).
+int getKernargPtrSgpr(RaiseContext &ctx) {
+  if (ctx.userSgprLayout == nullptr)
+    llvm::report_fatal_error(
+        "transpiler: handle_smem: RaiseContext::userSgprLayout is null. "
+        "The raiser must populate this before dispatching to handlers; "
+        "missing wiring is a bug.");
+  return ctx.userSgprLayout->kernargSegmentPtrSgpr;
+}
+
+} // namespace
+
 HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
                        OpResolver &op) {
   HandlerResult hr;
@@ -53,7 +96,9 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     unsigned offIdx = op.srcIdx(1);
     bool immOffset = di.isImm(offIdx);
     int64_t byteOffset = immOffset ? op.srcImm(1) : 0;
-    bool isKernarg = (base.kind == ParsedReg::SGPR && base.baseIdx == 0);
+    int kernargPtrSgpr = getKernargPtrSgpr(ctx);
+    bool isKernarg = (base.kind == ParsedReg::SGPR && kernargPtrSgpr >= 0 &&
+                      base.baseIdx == kernargPtrSgpr);
 
     LLVM_DEBUG(if (isKernarg && immOffset) {
       llvm::dbgs() << "transpiler: SMEM: mn=" << di.mnemonic
@@ -199,11 +244,14 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
 
     // Defensive refusal: narrow load against the kernarg pointer would
     // require sub-dword extraction from a dword-granular kernarg layout.
-    // Uses the same `baseIdx == 0` convention as the S_LOAD_B* path above
-    // so the two codepaths stay in sync; a future improvement to route
-    // the kernarg-pointer SGPR index through the user-SGPR layout should
-    // update both sites together.
-    bool isKernarg = (base.kind == ParsedReg::SGPR && base.baseIdx == 0);
+    // Uses the same layout-driven kernarg-pointer detection as the
+    // S_LOAD_B* path above (see `getKernargPtrSgpr` for the rationale);
+    // keeping the two call sites identical guarantees that whether a
+    // given sbase is treated as "the kernarg pointer" is a single
+    // source-ABI question, not two independently-drifted heuristics.
+    int kernargPtrSgpr = getKernargPtrSgpr(ctx);
+    bool isKernarg = (base.kind == ParsedReg::SGPR && kernargPtrSgpr >= 0 &&
+                      base.baseIdx == kernargPtrSgpr);
     if (isKernarg) {
       llvm::errs() << "transpiler: " << di.mnemonic
                    << ": narrow scalar load directly off the kernarg pointer "
