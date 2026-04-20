@@ -187,6 +187,22 @@ load_write_index_impl(const QueueState* state);
 using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;
 
 /**
+ * @brief Synchronize metadata queue entries with compute queue
+ *
+ * When a compute queue has a paired metadata queue (metadata_state != nullptr),
+ * this function writes corresponding metadata entries in lock-step with compute
+ * packets. It advances the metadata queue's write pointer by 1 + k_factor.
+ *
+ * @param compute_state Compute queue state
+ * @param pkt The kernel dispatch packet being submitted
+ * @param dest_pos Destination position in compute queue
+ */
+void
+sync_metadata_impl(QueueState*                         compute_state,
+                   const hsa_kernel_dispatch_packet_t* pkt,
+                   uint64_t                            dest_pos);
+
+/**
  * @brief Process doorbell ring in trace-only mode (K=0)
  *
  * This function scans the write-ahead zone (from next_scan_pos to virtual_wptr),
