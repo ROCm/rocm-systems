@@ -3,6 +3,52 @@
 Active, living list. Entries that correspond to shipped fixes have been
 removed; check `CHANGELOG.md` for history.
 
+## Fixed in `ec1bb44b40` / `58b1cec4ed` / `871a32981b`: report narrative + Tier-0 leakage
+
+Three related bugs in `perfxpert analyze` report output were fixed on
+Phase 8 so the final report reflects real analysis findings and the
+Tier-0 source scan stays in its own section.
+
+**Bug 1 — narrative was routing prose (SHA `ec1bb44b40`).**
+`perfxpert.agents.root.run_root` used its own LLM prompt as the
+narrative. That prompt answers with routing-speech ("Let me proceed
+with the analysis workflow directly…") so users saw routing text
+instead of analysis findings. Fix: Root now actually calls
+`run_analysis` / `run_recommendation` / `run_correctness` based on the
+classified intent and synthesizes a findings-driven narrative
+("The trace is dominated by kernel `X` at Y% of GPU time; the primary
+bottleneck is `compute` based on …"). Root's own LLM output is kept
+only as optional high-level framing prose, prepended rather than
+replacing. The airgap branch produces the same deterministic narrative
+without an LLM.
+
+**Bug 2 — narrative prose leaked into recommendations (SHA `ec1bb44b40`).**
+Root fabricated a recommendation whose `summary` was the first line of
+the narrative when the LLM returned no recs, producing entries like
+"Issue: Let me proceed with the analysis workflow…". Fix: the fallback
+is deleted. Empty LLM rec lists are left empty; downstream
+`merge_recommendations` + the deterministic pass supply real items,
+and formatters already render a "no issues identified" cell when both
+are empty.
+
+**Bug 3 — Tier-0 profiling-plan entries leaked into the main
+recommendations (SHA `58b1cec4ed` + `871a32981b`).**
+`scan_tier0_sources` used to append a "Found N GPU kernel(s) … Start
+with a `--sys-trace` baseline …" rec into `tier0_findings.recommendations`,
+which merged into the main Recommendations table. Users saw
+instrumentation advice mixed with real performance recommendations.
+Fix: the scanner now returns two buckets — `profiling_plan_actions`
+(instrumentation advice — NEVER in the main list) and `code_patterns`
+(actual code-level perf issues — DO flow into main recs). A new
+`tier0_findings.profiling_plan` dict exposes the suggested first
+command + counters + description. Every formatter now renders a
+dedicated "Tier-0: Source Scan" section with Profiling Plan and
+Detected Code Patterns subsections side-by-side. The webview anchors
+the section with `id="tier0"` so users and tests can target it
+directly.
+
+Regression tests: `tests/test_cli/test_report_quality.py` (5 cases).
+
 ## Fixed: `--llm <prov>` produced structurally-thin reports in all 4 formats
 
 Before Phase 8 commit `78ad3257f8`, running

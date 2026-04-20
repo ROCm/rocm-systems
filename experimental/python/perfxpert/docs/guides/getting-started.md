@@ -366,6 +366,44 @@ The JSON format exposes each section under a flat top-level key
 `.primary_bottleneck`, `.warnings`, `.metadata`) — so `jq` pipelines
 can slice the report without reaching into nested schema shapes.
 
+### Report structure
+
+Every report renders the same top-level sections in a fixed order. The
+main take-away: **the Tier-0 source scan always lives in its own
+section — NEVER folded into the main recommendations table**. Listed
+top-to-bottom:
+
+1. **Summary** — agent narrative (findings-derived: dominant kernel +
+   metric evidence + primary-bottleneck verdict). Never routing prose.
+2. **Time breakdown** — kernel / memcpy / API-overhead percentages.
+3. **Hotspots** — top-N kernels by total duration.
+4. **Memory analysis** — per-direction volume, duration, bandwidth.
+5. **Hardware counters** — Tier-2 derived metrics + raw table.
+6. **Kernel resources / occupancy** — VGPR / SGPR / LDS / scratch.
+7. **API overhead** — top HIP / HSA calls + warmup outliers.
+8. **Thread trace (Tier 3)** — only when `--att-dir` is set.
+9. **Recommendations** — merged LLM + deterministic recommendations,
+   deduped by target. **Only real perf-issue items** (e.g. hot-kernel
+   triage, cache-unfriendly access, synchronous hipMemcpy patterns).
+   Instrumentation advice (what counters to collect, what rocprofv3
+   command to run first) is **NOT** in this list.
+10. **Tier-0: Source Scan** — only when `--source-dir` is set. Split
+    into two clearly-labelled subsections:
+    - **Profiling Plan** — suggested first `rocprofv3 --sys-trace …`
+      command, suggested counters, other instrumentation actions.
+    - **Detected Code Patterns** — actual code-level perf issues found
+      by the scanner (these ALSO appear in the main Recommendations
+      list so they don't get overlooked).
+11. **Warnings** — block (empty when no warnings fire).
+12. **Metadata** — GPU arch, DB path, provider, model (footer).
+
+In the JSON format the Tier-0 block lives under
+`.tier0_findings.profiling_plan` +
+`.tier0_findings.code_patterns`. The webview carries it under
+`<section id="tier0">` with `<h3>Profiling Plan</h3>` and a Detected
+Code Patterns table, inserted AFTER the main recommendations so the
+two groups remain visually distinct.
+
 ## 5. Multi-GPU / MPI workflows
 
 **Correct pattern — MPI OUTSIDE, rocprofv3 INSIDE, per rank.** Each
