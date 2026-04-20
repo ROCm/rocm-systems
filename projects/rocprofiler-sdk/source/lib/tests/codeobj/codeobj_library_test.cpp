@@ -385,6 +385,17 @@ canonicalize(std::string_view s)
     return std::string{base} + ':' + std::string{line};
 }
 
+// Read a FILE* to EOF into a string.
+std::string
+slurp(FILE* fp)
+{
+    std::string out;
+    char        buf[4096];
+    while(size_t n = std::fread(buf, 1, sizeof(buf), fp))
+        out.append(buf, n);
+    return out;
+}
+
 // Locate llvm-symbolizer at runtime: $ROCM_PATH, $ROCM_HOME, /opt/rocm, then $PATH.
 // Resolved at runtime rather than configure time because some CI flows (e.g.
 // TheRock) wipe the build dir before tests run, leaving any baked-in absolute
@@ -404,10 +415,7 @@ find_symbolizer()
 
     FILE* pipe = ::popen("command -v llvm-symbolizer 2>/dev/null", "r");
     if(!pipe) return {};
-    char        buf[4096];
-    std::string out;
-    while(size_t n = std::fread(buf, 1, sizeof(buf), pipe))
-        out.append(buf, n);
+    auto out = slurp(pipe);
     ::pclose(pipe);
     while(!out.empty() && (out.back() == '\n' || out.back() == '\r'))
         out.pop_back();
@@ -427,7 +435,7 @@ find_symbolizer()
  */
 TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
 {
-    namespace fs                = rocprofiler::common::filesystem;
+    namespace fs                   = rocprofiler::common::filesystem;
     constexpr std::string_view sep = disassembly::Instruction::separator;
 
     const std::string symbolizer = find_symbolizer();
@@ -471,9 +479,9 @@ TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
 
     // Feed addresses to llvm-symbolizer via stdin from a tmp file (the test's
     // build dir is read-only in some CI install layouts).
-    std::error_code ec;
-    auto            tmp     = fs::temp_directory_path(ec);
-    std::string     tmpl_str = (ec ? "/tmp" : tmp.string()) + "/codeobj_addrs.XXXXXX";
+    std::error_code   ec;
+    auto              tmp      = fs::temp_directory_path(ec);
+    std::string       tmpl_str = (ec ? "/tmp" : tmp.string()) + "/codeobj_addrs.XXXXXX";
     std::vector<char> tmpl(tmpl_str.begin(), tmpl_str.end());
     tmpl.push_back('\0');
     int fd = ::mkstemp(tmpl.data());
@@ -489,11 +497,8 @@ TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
                       "\" --inlines --output-style=LLVM < \"" + tmpl.data() + "\" 2>&1";
     FILE* pipe = ::popen(cmd.c_str(), "r");
     ASSERT_NE(pipe, nullptr) << "popen: " << ::strerror(errno);
-    std::string raw;
-    char        buf[4096];
-    while(size_t n = std::fread(buf, 1, sizeof(buf), pipe))
-        raw.append(buf, n);
-    int rc = ::pclose(pipe);
+    std::string raw = slurp(pipe);
+    int         rc  = ::pclose(pipe);
     ::unlink(tmpl.data());
     ASSERT_EQ(rc, 0) << "llvm-symbolizer rc=" << rc << " cmd=" << cmd << "\n" << raw;
 
@@ -525,7 +530,8 @@ TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
     // Compare frame-by-frame after canonicalization. Trailing "no info" frames
     // are dropped on both sides so {""} (llvm's "??:0:0") matches our empty.
     auto trim = [](std::vector<std::string>& v) {
-        while(!v.empty() && v.back().empty()) v.pop_back();
+        while(!v.empty() && v.back().empty())
+            v.pop_back();
     };
 
     size_t mismatches = 0;
@@ -535,8 +541,8 @@ TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
         for(size_t pos = 0; pos <= ours[i].size();)
         {
             auto next = ours[i].find(sep, pos);
-            mine.emplace_back(canonicalize(
-                ours[i].substr(pos, next == std::string::npos ? next : next - pos)));
+            mine.emplace_back(
+                canonicalize(ours[i].substr(pos, next == std::string::npos ? next : next - pos)));
             if(next == std::string::npos) break;
             pos = next + sep.size();
         }
@@ -548,7 +554,8 @@ TEST(codeobj_library, dwarf_matches_llvm_symbolizer)
         {
             auto fmt = [](const std::vector<std::string>& v) {
                 std::string s;
-                for(auto& f : v) (s += '[') += f, s += ']';
+                for(auto& f : v)
+                    (s += '[') += f, s += ']';
                 return s;
             };
             ADD_FAILURE() << "addr=0x" << std::hex << addrs[i] << std::dec
