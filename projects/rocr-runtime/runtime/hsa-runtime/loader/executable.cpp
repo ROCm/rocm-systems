@@ -1345,8 +1345,46 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
       // patched value. Check the actual ELF note bytes directly.
       const uint8_t* elfBytes = reinterpret_cast<const uint8_t*>(code->ElfData());
       uint64_t elfSz = code->ElfSize();
+
+      // Highest-priority detection: the Salmon LD_PRELOAD intercept stashes
+      // the original MACH byte into e_ident[9..11] before it patches e_flags,
+      // so we can recover the true source ISA even when neither the MSGPACK
+      // metadata nor the NT_AMDGPU_ISA note carries a gfx string (as is the
+      // case for Tensile-generated .co files).  e_ident[9..15] is the
+      // reserved EI_PAD region; the ELF spec requires it to be zero, so
+      // the 'S','L' magic is unambiguous.
+      if (elfSz >= 16 && elfBytes[9] == 'S' && elfBytes[10] == 'L') {
+        uint8_t orig_mach = elfBytes[11];
+        // MACH -> gfx name reverse table (mirrors LLVM's
+        // EF_AMDGPU_MACH_AMDGCN_* in llvm/BinaryFormat/ELF.h).  Only
+        // entries whose MACH byte is unambiguous on current AMDGPU HW
+        // are listed; add more as needed when new ISAs ship.
+        struct M2G { uint8_t mach; const char* gfx; };
+        static const M2G salmonPadMap[] = {
+          {0x02c, "gfx900"},  {0x02f, "gfx906"},  {0x030, "gfx908"},
+          {0x03f, "gfx90a"},  {0x048, "gfx1200"}, {0x049, "gfx1250"},
+          {0x04a, "gfx1151"}, {0x04c, "gfx942"},  {0x04e, "gfx1201"},
+          {0x04f, "gfx950"},  {0x05a, "gfx1251"},
+        };
+        const char* origGfx = nullptr;
+        for (const auto& e : salmonPadMap) {
+          if (e.mach == orig_mach) { origGfx = e.gfx; break; }
+        }
+        if (origGfx && std::string(origGfx) != hotswapTargetGfx) {
+          isaOverridden = true;
+          hotswapOriginalIsa = std::string("amdgcn-amd-amdhsa--") + origGfx;
+          std::cerr << "hotswap: salmon EI_PAD original ISA=" << origGfx
+                    << " (mach=0x" << std::hex << static_cast<unsigned>(orig_mach)
+                    << std::dec << ") != target " << hotswapTargetGfx
+                    << " — transpile\n";
+        } else if (!origGfx) {
+          std::cerr << "hotswap: salmon EI_PAD present but unknown MACH=0x"
+                    << std::hex << static_cast<unsigned>(orig_mach) << std::dec
+                    << " — falling through to .note scan\n";
+        }
+      }
       // Read the original e_flags MACH value before any patching
-      if (elfSz >= 52) {
+      if (!isaOverridden && elfSz >= 52) {
         uint32_t e_flags = 0;
         std::memcpy(&e_flags, elfBytes + 48, 4);
         uint32_t mach = e_flags & 0xFF;

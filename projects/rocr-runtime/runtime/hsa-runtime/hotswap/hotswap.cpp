@@ -740,7 +740,26 @@ bool PatchElfIsa(void* elf_data, size_t elf_size,
   if (target_cpu.empty()) return false;
 
   // Map of gfx name → EF_AMDGPU_MACH value (from llvm/include/llvm/Support/ScopedPrinter.h)
-  // and llvm/include/llvm/BinaryFormat/ELF.h
+  // and llvm/include/llvm/BinaryFormat/ELF.h.
+  //
+  // TODO(mach-table-stale): several entries below disagree with the
+  // authoritative LLVM values in ROCm's own `llvm/BinaryFormat/ELF.h`;
+  // they survive only because gfx942 (the sole ISA we patch TO in
+  // production) is correct and the bogus entries go unused.  Specifically:
+  //
+  //   - gfx940  = 0x04a  ← LLVM reassigned 0x04a to gfx1151.
+  //                        gfx940 was a deprecated prototype and is no
+  //                        longer listed in ELF.h at all.
+  //   - gfx941  = 0x04b  ← LLVM marks 0x04b as RESERVED_0X4B; gfx941 is
+  //                        likewise a deprecated prototype and not listed.
+  //   - gfx1151 = 0x04b  ← RESERVED in LLVM; true value is 0x04a.
+  //   - gfx1201 = 0x04a  ← LLVM says 0x04e.
+  //
+  // Also missing entirely: gfx1250 (0x049), gfx1251 (0x05a), gfx1152
+  // (0x055), gfx1153 (0x058), and the gfx*_generic subtargets. Any
+  // future work that patches TO one of these ISAs must re-sync the
+  // table against the installed LLVM headers (and ideally generate it
+  // from them rather than maintaining a copy).
   struct GfxMach { const char* name; uint32_t mach; };
   static const GfxMach gfx_mach_map[] = {
     {"gfx900",  0x02c}, {"gfx902",  0x02d}, {"gfx904",  0x02e},
