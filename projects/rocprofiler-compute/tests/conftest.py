@@ -194,7 +194,12 @@ def pytest_addoption(parser):
         "--coverage-n",
         type=int,
         default=100,
-        help="Number of operators to sample in test_torch_trace_coverage",
+        help=(
+            "ATen operator sample budget for test_torch_trace_coverage. "
+            "Structural entries (nn.Module / Optimizer / torch.autograd / "
+            "torch.distributed / torch.cuda surfaces) are always included; "
+            "this budget caps only the random ATen sample (default: 100)."
+        ),
     )
 
 

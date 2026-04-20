@@ -133,9 +133,9 @@ def _spd(device: str, n: int = 4) -> torch.Tensor:
 def _linalg_householder_product(device: str) -> Tuple[List[Any], Dict[str, Any]]:
     """Build ``(input, tau)`` for ``linalg_householder_product`` across torch builds.
 
-    Some ROCm wheels omit ``torch.linalg.geqrf``; fall back to legacy
-    ``torch.geqrf``, then to CPU ``geqrf`` + ``.to(device)``. Last resort:
-    tensors with valid ranks only (may be numerically weaker).
+    Some ROCm wheels omit ``torch.linalg.geqrf``; fall back to the top-level
+    ``torch.geqrf``, then to a CPU ``geqrf`` copied to ``device``. Last
+    resort: tensors with valid ranks only (may be numerically weaker).
     """
     a = torch.randn(6, 4, device=device)
     for geqrf in (getattr(torch.linalg, "geqrf", None), getattr(torch, "geqrf", None)):

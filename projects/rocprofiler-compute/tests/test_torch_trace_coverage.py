@@ -1226,9 +1226,10 @@ def _build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
     """Flat ``name -> StructuralBuilder`` map. Duplicate names raise."""
     registry: Dict[str, StructuralBuilder] = {}
 
-    # Generic ``nn.Module.__call__`` / ``Optimizer.step`` / ``torch.Tensor.backward``
-    # entries kept for back-compat; class-specific variants below are a superset.
-    def _legacy_nn_call(safe_var: str) -> Tuple[List[str], str, str]:
+    # Generic fallback entries: ``nn.Module.__call__``, ``Optimizer.step``, and
+    # ``torch.Tensor.backward`` match any marker whose class-specific variant
+    # below is not present (or is bypassed by a subclass override).
+    def _generic_nn_call(safe_var: str) -> Tuple[List[str], str, str]:
         return (
             [
                 "import torch.nn as nn",
@@ -1238,7 +1239,7 @@ def _build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
             "torch.randn(2, 4, device=device)",
         )
 
-    def _legacy_optimizer_step(safe_var: str) -> Tuple[List[str], str, str]:
+    def _generic_optimizer_step(safe_var: str) -> Tuple[List[str], str, str]:
         return (
             [
                 "import torch.nn as nn",
@@ -1255,7 +1256,7 @@ def _build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
             "",
         )
 
-    def _legacy_tensor_backward(safe_var: str) -> Tuple[List[str], str, str]:
+    def _generic_tensor_backward(safe_var: str) -> Tuple[List[str], str, str]:
         return (
             [
                 f"_lin_{safe_var} = torch.nn.Linear(4, 4).cuda()",
@@ -1267,9 +1268,9 @@ def _build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
             "",
         )
 
-    registry["nn.Module.__call__"] = _legacy_nn_call
-    registry["Optimizer.step"] = _legacy_optimizer_step
-    registry["torch.Tensor.backward"] = _legacy_tensor_backward
+    registry["nn.Module.__call__"] = _generic_nn_call
+    registry["Optimizer.step"] = _generic_optimizer_step
+    registry["torch.Tensor.backward"] = _generic_tensor_backward
 
     for name, (ctor, input_expr, extra_setup) in _NN_MODULE_BUILDERS.items():
         if name in registry:
@@ -1552,6 +1553,100 @@ def write_coverage_workload_artifacts(
 
 
 # -- ROCTX marker CSV parsing --
+
+
+def _with_correlation_id_standard_name(marker_df: pd.DataFrame) -> pd.DataFrame:
+    """Normalise the correlation-id column name across rocprof-compute versions."""
+    if "Correlation_Id" not in marker_df.columns:
+        return marker_df
+    return marker_df.rename(columns={"Correlation_Id": "Correlation_ID"})
+
+
+def _leaf_from_function_cell(func: object) -> str | None:
+    """Return the last path segment of a ROCTX ``Function`` cell, or ``None``."""
+    if not isinstance(func, str):
+        return None
+    op_path = func.split(":#")[0] if ":#" in func else func
+    if "/" in op_path:
+        leaf = op_path.rsplit("/", 1)[-1].strip()
+    else:
+        leaf = op_path.strip()
+    return leaf or None
+
+
+def _collect_marker_ops_and_correlations(
+    marker_df: pd.DataFrame,
+) -> tuple[set[str], dict[str, set]]:
+    """Return ``(marker_leaves, leaf -> correlation_ids)`` from a marker CSV frame."""
+    marker_ops: set[str] = set()
+    op_to_corr: dict[str, set] = {}
+    func_col = marker_df.get("Function")
+    corr_col = marker_df.get("Correlation_ID")
+    if func_col is None:
+        return marker_ops, op_to_corr
+
+    for row_index, function_cell in enumerate(func_col):
+        leaf = _leaf_from_function_cell(function_cell)
+        if leaf is None:
+            continue
+        marker_ops.add(leaf)
+        if corr_col is None:
+            continue
+        correlation_id = corr_col.iloc[row_index]
+        if not pd.notna(correlation_id):
+            continue
+        op_to_corr.setdefault(leaf, set()).add(correlation_id)
+
+    return marker_ops, op_to_corr
+
+
+def _merge_kernel_names_for_correlation_ids(
+    correlation_ids: set,
+    correlation_id_to_kernels: dict,
+) -> set[str]:
+    """Union the kernel-name sets for every correlation id in ``correlation_ids``."""
+    kernels: set[str] = set()
+    for correlation_id in correlation_ids:
+        kernels |= correlation_id_to_kernels.get(correlation_id, set())
+    return kernels
+
+
+def _kernels_by_marker_leaf(
+    op_to_corr: dict[str, set],
+    counter_files: list[Path],
+) -> dict[str, set[str]]:
+    """Return ``leaf -> {kernel_name}`` by joining marker correlations to counters."""
+    counter_df = pd.concat(
+        [pd.read_csv(f) for f in counter_files],
+        ignore_index=True,
+    )
+    counter_df = _with_correlation_id_standard_name(counter_df)
+    if "Kernel_Name" not in counter_df.columns:
+        return {}
+
+    all_corr_ids: set = set()
+    for ids in op_to_corr.values():
+        all_corr_ids |= ids
+
+    matched = counter_df[counter_df["Correlation_ID"].isin(all_corr_ids)]
+    correlation_id_to_kernels: dict = {}
+    for correlation_id, kernel_name in zip(
+        matched["Correlation_ID"],
+        matched["Kernel_Name"],
+    ):
+        if not pd.notna(kernel_name):
+            continue
+        correlation_id_to_kernels.setdefault(correlation_id, set()).add(kernel_name)
+
+    op_to_kernels: dict[str, set[str]] = {}
+    for leaf, correlation_ids_for_leaf in op_to_corr.items():
+        kernels = _merge_kernel_names_for_correlation_ids(
+            correlation_ids_for_leaf,
+            correlation_id_to_kernels,
+        )
+        if kernels:
+            op_to_kernels[leaf] = kernels
+    return op_to_kernels
 
 
 def parse_roctx_markers(
@@ -2015,14 +2110,19 @@ def test_random_operator_kernel_coverage(
 
     Steps: sample ops → emit workload + runner → run runner for JSON → run
     rocprof-compute on the workload → parse CSVs → compare per op. Per-op
-    mismatches are reported (stdout + :class:`UserWarning`) but do **not**
-    fail the test item, so CI can collect signal without blocking on gaps.
+    mismatches are reported (stdout + :class:`UserWarning`) but do not
+    individually fail the test item; the test fails only if no sampled
+    operator passes (a regression guard while coverage gaps remain).
     """
     seed, sample_budget = torch_trace_coverage_sampling
     rng = random.Random(seed)
 
     aten_ops, structural_ops = discover_operators()
 
+    # ``sample_budget`` caps only the ATen sample; every structural entry is
+    # always included. When the budget is smaller than ``len(structural_ops)``
+    # the resulting sample size equals ``len(structural_ops)``; see the
+    # ``--coverage-n`` help text in ``conftest.py``.
     n_aten = min(
         max(0, sample_budget - len(structural_ops)),
         len(aten_ops),
@@ -2142,95 +2242,3 @@ def test_random_operator_kernel_coverage(
             COVERAGE_TEST_CONFIG["cleanup"],
             gt_work_dir,
         )
-
-
-# -- ROCTX marker CSV parsing (helpers for :func:`parse_roctx_markers`) --
-
-
-def _with_correlation_id_standard_name(marker_df: pd.DataFrame) -> pd.DataFrame:
-    if "Correlation_Id" not in marker_df.columns:
-        return marker_df
-    return marker_df.rename(columns={"Correlation_Id": "Correlation_ID"})
-
-
-def _leaf_from_function_cell(func: object) -> str | None:
-    if not isinstance(func, str):
-        return None
-    op_path = func.split(":#")[0] if ":#" in func else func
-    if "/" in op_path:
-        leaf = op_path.rsplit("/", 1)[-1].strip()
-    else:
-        leaf = op_path.strip()
-    return leaf or None
-
-
-def _collect_marker_ops_and_correlations(
-    marker_df: pd.DataFrame,
-) -> tuple[set[str], dict[str, set]]:
-    marker_ops: set[str] = set()
-    op_to_corr: dict[str, set] = {}
-    func_col = marker_df.get("Function")
-    corr_col = marker_df.get("Correlation_ID")
-    if func_col is None:
-        return marker_ops, op_to_corr
-
-    for row_index, function_cell in enumerate(func_col):
-        leaf = _leaf_from_function_cell(function_cell)
-        if leaf is None:
-            continue
-        marker_ops.add(leaf)
-        if corr_col is None:
-            continue
-        correlation_id = corr_col.iloc[row_index]
-        if not pd.notna(correlation_id):
-            continue
-        op_to_corr.setdefault(leaf, set()).add(correlation_id)
-
-    return marker_ops, op_to_corr
-
-
-def _merge_kernel_names_for_correlation_ids(
-    correlation_ids: set,
-    correlation_id_to_kernels: dict,
-) -> set[str]:
-    kernels: set[str] = set()
-    for correlation_id in correlation_ids:
-        kernels |= correlation_id_to_kernels.get(correlation_id, set())
-    return kernels
-
-
-def _kernels_by_marker_leaf(
-    op_to_corr: dict[str, set],
-    counter_files: list[Path],
-) -> dict[str, set[str]]:
-    counter_df = pd.concat(
-        [pd.read_csv(f) for f in counter_files],
-        ignore_index=True,
-    )
-    counter_df = _with_correlation_id_standard_name(counter_df)
-    if "Kernel_Name" not in counter_df.columns:
-        return {}
-
-    all_corr_ids: set = set()
-    for ids in op_to_corr.values():
-        all_corr_ids |= ids
-
-    matched = counter_df[counter_df["Correlation_ID"].isin(all_corr_ids)]
-    correlation_id_to_kernels: dict = {}
-    for correlation_id, kernel_name in zip(
-        matched["Correlation_ID"],
-        matched["Kernel_Name"],
-    ):
-        if not pd.notna(kernel_name):
-            continue
-        correlation_id_to_kernels.setdefault(correlation_id, set()).add(kernel_name)
-
-    op_to_kernels: dict[str, set[str]] = {}
-    for leaf, correlation_ids_for_leaf in op_to_corr.items():
-        kernels = _merge_kernel_names_for_correlation_ids(
-            correlation_ids_for_leaf,
-            correlation_id_to_kernels,
-        )
-        if kernels:
-            op_to_kernels[leaf] = kernels
-    return op_to_kernels
