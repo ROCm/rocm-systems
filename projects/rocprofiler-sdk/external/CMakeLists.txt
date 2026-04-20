@@ -284,6 +284,54 @@ else()
 endif()
 
 #
+# RocksDB
+#
+if(ROCPROFILER_BUILD_ROCKSDB)
+    include(FetchContent)
+
+    set(ROCKSDB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(ROCKSDB_BUILD_STATIC ON CACHE BOOL "" FORCE)
+    set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+    set(WITH_TOOLS OFF CACHE BOOL "" FORCE)
+    set(WITH_BENCHMARK_TOOLS OFF CACHE BOOL "" FORCE)
+    set(WITH_GFLAGS OFF CACHE BOOL "" FORCE)
+    set(WITH_LZ4 ON CACHE BOOL "" FORCE)
+    set(WITH_SNAPPY OFF CACHE BOOL "" FORCE)
+    set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
+    set(WITH_ZSTD OFF CACHE BOOL "" FORCE)
+    set(WITH_BZ2 OFF CACHE BOOL "" FORCE)
+    set(FAIL_ON_WARNINGS OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        rocksdb
+        GIT_REPOSITORY https://github.com/facebook/rocksdb.git
+        GIT_TAG v9.10.0
+        GIT_SHALLOW TRUE)
+
+    FetchContent_MakeAvailable(rocksdb)
+
+    if(TARGET rocksdb)
+        target_link_libraries(rocprofiler-sdk-rocksdb INTERFACE $<BUILD_INTERFACE:rocksdb>)
+        target_include_directories(
+            rocprofiler-sdk-rocksdb SYSTEM
+            INTERFACE $<BUILD_INTERFACE:${rocksdb_SOURCE_DIR}/include>)
+    elseif(TARGET RocksDB::rocksdb)
+        target_link_libraries(rocprofiler-sdk-rocksdb INTERFACE RocksDB::rocksdb)
+    else()
+        message(FATAL_ERROR "RocksDB target not found after FetchContent")
+    endif()
+else()
+    find_package(RocksDB REQUIRED)
+    if(TARGET RocksDB::rocksdb)
+        target_link_libraries(rocprofiler-sdk-rocksdb INTERFACE RocksDB::rocksdb)
+    elseif(TARGET rocksdb)
+        target_link_libraries(rocprofiler-sdk-rocksdb INTERFACE rocksdb)
+    else()
+        message(FATAL_ERROR "RocksDB package found but no known target is available")
+    endif()
+endif()
+
+#
 # PyBind11
 #
 if(ROCPROFILER_BUILD_PYBIND11)
