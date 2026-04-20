@@ -1,26 +1,20 @@
-"""analyze_run — single-call wrapper over the full Root->Analysis->Rec pipeline.
+"""agent_root — MCP tool wrapping the Layer-0 Root agent.
 
-Blocker 1 (same-brain): opencode / claude / codex / gemini TUI backends
-previously spun up their own agent loops and called perfxpert MCP tools
-à la carte. The tools are shared, but the decision hierarchy (Root →
-Analysis → Recommendation → Specialists) was NOT — each TUI's native
-planner was making its own call graph.
+Root is the user-facing entry point of the perfxpert agent hierarchy.
+It reads the user's intent, routes to one of the three Layer-1
+decision-makers (Analysis / Recommendation / Correctness), and
+assembles a structured verdict with narrative + primary_bottleneck +
+recommendations + warnings + metadata.
 
-This tool exposes the ENTIRE perfxpert decision hierarchy as ONE MCP
-call. A backend that calls ``perfxpert_run_root_analysis`` gets the
-same structured verdict (narrative + primary_bottleneck + recommendations
-+ warnings + metadata) the in-process ``perfxpert analyze`` path would
-produce, without the backend having to route through its own planner.
-
-The TUI-side prompt (see ``_bundled/opencode_config/AGENTS.md`` and the
-per-backend renderings) instructs the model to call this tool FIRST for
-any GPU-performance query. Combined with the existing
-``perfxpert_intent_classify`` gate, the two tools together enforce the
-same brain across every backend.
+This wrapper is the ONLY thing every backend (opencode / claude /
+codex / gemini) needs to reach the full agent brain: `agent_root`
+builds an :class:`AnalysisSession` and dispatches `run_root` through
+the same airgap + provider + fallback-chain semantics as the
+in-process `perfxpert analyze` path.
 
 Tool class: READ_ONLY — pure aggregator over already-READ_ONLY tools.
-Honors ``PERFXPERT_AIRGAP=1`` + the full provider / fallback-chain
-ladder because it defers directly to ``agents.runtime.build_session``.
+Honors ``PERFXPERT_AIRGAP=1`` plus the full provider / fallback-chain
+ladder because it defers to ``agents.runtime.build_session``.
 """
 
 from __future__ import annotations
@@ -31,7 +25,7 @@ from perfxpert.tools._class import ToolClass, tool_class
 
 
 @tool_class(ToolClass.READ_ONLY)
-def run_root_analysis(
+def agent_root(
     user_query: str = "Analyze this GPU performance trace.",
     database_path: Optional[str] = None,
     source_dir: Optional[str] = None,
@@ -39,7 +33,7 @@ def run_root_analysis(
     airgap: bool = False,
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Run the full perfxpert Root → Analysis → Recommendation pipeline.
+    """Run the full Root → Analysis → Recommendation pipeline.
 
     Wraps :func:`perfxpert.agents.runtime.build_session` + ``run_root``
     in a single MCP-visible call so backend TUIs (opencode / claude /
@@ -85,20 +79,20 @@ def run_root_analysis(
         session_id=session.session_id,
     )
 
-    root_output = session.run_root(payload)
+    output = session.run_root(payload)
 
     # RootOutput is a frozen Pydantic model; ``model_dump`` gives us the
     # documented schema-shaped dict. Fall back to attribute reads if the
     # test passes a plain object (e.g. a SimpleNamespace).
-    if hasattr(root_output, "model_dump"):
-        return root_output.model_dump()
+    if hasattr(output, "model_dump"):
+        return output.model_dump()
     return {
-        "narrative": getattr(root_output, "narrative", ""),
-        "recommendations": list(getattr(root_output, "recommendations", []) or []),
-        "primary_bottleneck": getattr(root_output, "primary_bottleneck", "mixed"),
-        "warnings": list(getattr(root_output, "warnings", []) or []),
-        "metadata": dict(getattr(root_output, "metadata", {}) or {}),
+        "narrative": getattr(output, "narrative", ""),
+        "recommendations": list(getattr(output, "recommendations", []) or []),
+        "primary_bottleneck": getattr(output, "primary_bottleneck", "mixed"),
+        "warnings": list(getattr(output, "warnings", []) or []),
+        "metadata": dict(getattr(output, "metadata", {}) or {}),
     }
 
 
-__all__ = ["run_root_analysis"]
+__all__ = ["agent_root"]

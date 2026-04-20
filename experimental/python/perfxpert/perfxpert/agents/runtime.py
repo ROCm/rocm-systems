@@ -11,6 +11,9 @@ Responsibilities:
   RateLimitError; ignored in airgap mode)
 - Generate session_id if missing
 - Expose run_root / run_correctness / run_analysis / run_recommendation
+  plus run_compute_specialist / run_memory_specialist / run_latency_specialist
+  (one session method per agent in the hierarchy — used by the MCP
+  tool wrappers under perfxpert.tools.agents.*)
 """
 
 from __future__ import annotations
@@ -21,7 +24,16 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, Tuple
 
-from perfxpert.agents import analysis, correctness, recommendation, root, schemas
+from perfxpert.agents import (
+    analysis,
+    compute_specialist,
+    correctness,
+    latency_specialist,
+    memory_specialist,
+    recommendation,
+    root,
+    schemas,
+)
 from perfxpert.runtime import ensure_not_recursive
 
 _LOG = logging.getLogger("perfxpert.agents.runtime")
@@ -229,6 +241,45 @@ class AnalysisSession:
         return self._cascade(
             lambda prov: correctness.run_correctness(payload, provider=prov),
             op_name="run_correctness",
+        )
+
+    def run_compute_specialist(
+        self, payload: schemas.ComputeSpecialistInput
+    ) -> schemas.ComputeSpecialistOutput:
+        """Compute-Techniques specialist (Layer 2) via the session cascade."""
+        if self.airgap:
+            return compute_specialist.run_compute_specialist(payload, airgap=True)
+        return self._cascade(
+            lambda prov: compute_specialist.run_compute_specialist(
+                payload, provider=prov
+            ),
+            op_name="run_compute_specialist",
+        )
+
+    def run_memory_specialist(
+        self, payload: schemas.MemorySpecialistInput
+    ) -> schemas.MemorySpecialistOutput:
+        """Memory-Techniques specialist (Layer 2) via the session cascade."""
+        if self.airgap:
+            return memory_specialist.run_memory_specialist(payload, airgap=True)
+        return self._cascade(
+            lambda prov: memory_specialist.run_memory_specialist(
+                payload, provider=prov
+            ),
+            op_name="run_memory_specialist",
+        )
+
+    def run_latency_specialist(
+        self, payload: schemas.LatencySpecialistInput
+    ) -> schemas.LatencySpecialistOutput:
+        """Latency-Techniques specialist (Layer 2) via the session cascade."""
+        if self.airgap:
+            return latency_specialist.run_latency_specialist(payload, airgap=True)
+        return self._cascade(
+            lambda prov: latency_specialist.run_latency_specialist(
+                payload, provider=prov
+            ),
+            op_name="run_latency_specialist",
         )
 
 
