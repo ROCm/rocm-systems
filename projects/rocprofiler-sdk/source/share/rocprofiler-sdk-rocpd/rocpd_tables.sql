@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "event_id" INTEGER,
         "pmc_id" INTEGER NOT NULL,
-        "value" REAL DEFAULT 0.0,
+        "values" JSONB DEFAULT "[]",
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE

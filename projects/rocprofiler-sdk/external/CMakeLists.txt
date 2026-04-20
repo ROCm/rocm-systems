@@ -345,4 +345,12 @@ else()
     endif()
 endif()
 
+#
+# Apache Arrow (for Feather/IPC output)
+#
+if(ROCPROFILER_BUILD_FEATHER)
+    find_package(Arrow REQUIRED)
+    target_link_libraries(rocprofiler-sdk-arrow INTERFACE Arrow::arrow_shared)
+endif()
+
 cmake_policy(POP)

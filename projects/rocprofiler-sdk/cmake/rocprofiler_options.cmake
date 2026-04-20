@@ -67,6 +67,8 @@ rocprofiler_add_option(ROCPROFILER_BUILD_GOTCHA
                        "Enable building gotcha library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_YAML_CPP
                        "Enable building yaml-cpp library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_FEATHER
+                       "Enable Apache Arrow IPC/Feather output format" OFF)
 if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST

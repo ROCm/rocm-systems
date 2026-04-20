@@ -67,6 +67,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -1588,15 +1589,22 @@ write_rocpd(
                     auto        dispatch_id = info.dispatch_id;
 
                     auto evt_id = dispatch_evt_ids.at(dispatch_id);
+                    auto grouped_values = std::map<uint64_t, std::vector<double>>{};
                     for(const auto& count : record.read())
                     {
+                        grouped_values[count.id.handle].emplace_back(count.value);
+                    }
+
+                    for(const auto& [pmc_id, values] : grouped_values)
+                    {
+                        auto values_json = fmt::format("[{}]", fmt::join(values, ","));
                         get_insert_statement(db,
                                              "rocpd_pmc_event{{uuid}}",
                                              {
                                                  insert_value("id", idx++),
                                                  insert_value("event_id", evt_id),
-                                                 insert_value("pmc_id", count.id.handle),
-                                                 insert_value("value", count.value),
+                                                 insert_value("pmc_id", pmc_id),
+                                                 insert_value("\"values\"", values_json),
                                              });
                     }
                 }
@@ -1991,7 +1999,8 @@ write_rocpd(
                                          {
                                              insert_value("event_id", evt_id),
                                              insert_value("pmc_id", _pmc_ids.at(data.kind)),
-                                             insert_value("value", data.value),
+                                             insert_value("\"values\"",
+                                                          fmt::format("[{}]", data.value)),
                                          });
                 }
             }

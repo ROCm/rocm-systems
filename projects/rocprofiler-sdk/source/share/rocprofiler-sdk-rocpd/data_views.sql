@@ -397,7 +397,7 @@ SELECT
     K.end,
     (K.end - K.start) AS duration,
     PMC_I.name AS counter_name,
-    PMC_E.value AS counter_value
+    CAST(JE.value AS REAL) AS counter_value
 FROM
     `rocpd_pmc_event` PMC_E
     INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
@@ -407,7 +407,8 @@ FROM
     INNER JOIN `rocpd_kernel_dispatch` K ON K.event_id = PMC_E.event_id
     AND K.guid = PMC_E.guid
     INNER JOIN `rocpd_info_process` P ON P.id = K.pid
-    AND P.guid = K.guid;
+    AND P.guid = K.guid
+    CROSS JOIN json_each(PMC_E."values") JE;
 
 -- events with arguments ---
 CREATE VIEW IF NOT EXISTS
@@ -685,7 +686,7 @@ SELECT
     PMC_I.expression,
     PMC_I.value_type,
     PMC_I.id AS counter_id,
-    SUM(PMC_E.value) AS value,
+    SUM(CAST(JE.value AS REAL)) AS value,
     K.start,
     K.end,
     PMC_I.is_constant,
@@ -719,6 +720,7 @@ FROM
     AND P.guid = K.guid
     INNER JOIN `rocpd_info_thread` T ON T.id = K.tid
     AND T.guid = K.guid
+    CROSS JOIN json_each(PMC_E."values") JE
 GROUP BY
     PMC_E.guid,
     K.dispatch_id,
