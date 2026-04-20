@@ -61,6 +61,38 @@ TEST_F(UpdateEnvTest, ReplaceMode_ExistingVariable)
     EXPECT_EQ(m_updated_envs.count("TEST_VAR"), 1);
 }
 
+TEST_F(UpdateEnvTest, ReplaceMode_RemovesDuplicateEntries)
+{
+    // Same key present twice (e.g. one from shell env, one from config file).
+    // REPLACE must leave exactly one entry; otherwise consolidate_env_entries
+    // later joins the parts and turns REPLACE into APPEND.
+    m_env_vars.emplace_back("ROCPROFSYS_TRACE=true");
+    m_env_vars.emplace_back("OTHER_VAR=keep");
+    m_env_vars.emplace_back("ROCPROFSYS_TRACE=true");
+
+    update_env(m_env_vars, "ROCPROFSYS_TRACE", false, update_mode::REPLACE, ":",
+               m_updated_envs, m_original_envs);
+
+    ASSERT_EQ(m_env_vars.size(), 2);
+    EXPECT_EQ(m_env_vars[0], "ROCPROFSYS_TRACE=false");
+    EXPECT_EQ(m_env_vars[1], "OTHER_VAR=keep");
+}
+
+TEST_F(UpdateEnvTest, ReplaceMode_RemovesAllDuplicatesWhenManyExist)
+{
+    m_env_vars.emplace_back("DUP=a");
+    m_env_vars.emplace_back("DUP=b");
+    m_env_vars.emplace_back("DUP=c");
+    m_env_vars.emplace_back("KEEP=x");
+
+    update_env(m_env_vars, "DUP", "final", update_mode::REPLACE, ":", m_updated_envs,
+               m_original_envs);
+
+    ASSERT_EQ(m_env_vars.size(), 2);
+    EXPECT_EQ(m_env_vars[0], "DUP=final");
+    EXPECT_EQ(m_env_vars[1], "KEEP=x");
+}
+
 TEST_F(UpdateEnvTest, AppendMode_NewVariable)
 {
     update_env(m_env_vars, "PATH", "/new/path", update_mode::APPEND, ":", m_updated_envs,

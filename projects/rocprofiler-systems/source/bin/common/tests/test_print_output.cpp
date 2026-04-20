@@ -5,7 +5,6 @@
 
 #include <gtest/gtest.h>
 
-#include <cstring>
 #include <sstream>
 #include <unordered_set>
 #include <vector>
@@ -18,23 +17,7 @@ class PrintOutputTest : public ::testing::Test
 protected:
     void SetUp() override { m_old_cerr_buf = std::cerr.rdbuf(m_cerr_stream.rdbuf()); }
 
-    void TearDown() override
-    {
-        std::cerr.rdbuf(m_old_cerr_buf);
-
-        for(auto* ptr : m_allocated)
-        {
-            free(ptr);
-        }
-        m_allocated.clear();
-    }
-
-    char* make_env(const char* str)
-    {
-        char* dup = strdup(str);
-        m_allocated.push_back(dup);
-        return dup;
-    }
+    void TearDown() override { std::cerr.rdbuf(m_old_cerr_buf); }
 
     std::string get_cerr() { return m_cerr_stream.str(); }
 
@@ -44,9 +27,8 @@ protected:
     }
 
 private:
-    std::stringstream  m_cerr_stream;
-    std::streambuf*    m_old_cerr_buf = nullptr;
-    std::vector<char*> m_allocated;
+    std::stringstream m_cerr_stream;
+    std::streambuf*   m_old_cerr_buf = nullptr;
 };
 
 TEST_F(PrintOutputTest, PrintCommand_HasOutput)

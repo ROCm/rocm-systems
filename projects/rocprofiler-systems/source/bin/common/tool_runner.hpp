@@ -26,17 +26,13 @@ struct tool_config
     std::string_view workflow;
     std::string_view output_prefix = {};
 
-    std::unordered_map<std::string, std::string> deprecated_flags = {};
+    bool force_sampling                   = false;
+    bool enable_fork                      = false;
+    bool enable_launcher                  = false;
+    bool show_sample_flag                 = false;
+    bool disable_cputime_on_realtime_only = false;
 
-    [[nodiscard]] bool is_sample() const noexcept { return mode == tool_mode::sample; }
-    [[nodiscard]] bool force_sampling() const noexcept { return is_sample(); }
-    [[nodiscard]] bool enable_fork() const noexcept { return !is_sample(); }
-    [[nodiscard]] bool enable_launcher() const noexcept { return !is_sample(); }
-    [[nodiscard]] bool show_sample_flag() const noexcept { return !is_sample(); }
-    [[nodiscard]] bool disable_cputime_on_realtime_only() const noexcept
-    {
-        return is_sample();
-    }
+    std::unordered_map<std::string, std::string> deprecated_flags = {};
 };
 
 tool_config

@@ -106,20 +106,6 @@ init_parser(parser_data& _data)
     set_state(State::Init);
     config::configure_settings(false);
 
-    auto& _current = _data.env.current;
-    auto& _initial = _data.env.initial;
-
-    if(environ != nullptr)
-    {
-        int idx = 0;
-        while(environ[idx] != nullptr)
-        {
-            auto* _v = environ[idx++];
-            _initial.emplace(_v);
-            _current.emplace_back(strdup(_v));
-        }
-    }
-
     _data.env.dl_libpath =
         path::realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
     _data.env.omni_libpath =
@@ -154,9 +140,8 @@ parser_data&
 add_torch_library_path(parser_data& _data, bool verbose)
 {
     if(_data.out.command.empty()) return _data;
-    const std::vector<char*> argv_view = { _data.out.command.front().data() };
-    rocprofsys::common::add_torch_library_path(_data.env.current, argv_view, verbose,
-                                               _data.env.updated);
+    rocprofsys::common::add_torch_library_path(
+        _data.env.current, _data.out.command.front(), verbose, _data.env.updated);
     return _data;
 }
 

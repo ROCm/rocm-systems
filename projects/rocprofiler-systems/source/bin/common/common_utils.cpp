@@ -44,6 +44,17 @@ env_key(std::string_view entry) noexcept
 }
 }  // namespace
 
+std::vector<char*>
+to_c_argv(std::vector<std::string>& src)
+{
+    std::vector<char*> out;
+    out.reserve(src.size() + 1);
+    for(auto& entry : src)
+        out.emplace_back(entry.data());
+    out.emplace_back(nullptr);
+    return out;
+}
+
 void
 print_command(const std::vector<std::string>& argv, std::string_view prefix)
 {
@@ -66,6 +77,7 @@ print_environment(const std::vector<std::string>&             env,
     entries.reserve(env.size());
     std::copy(env.begin(), env.end(), std::back_inserter(entries));
     std::sort(entries.begin(), entries.end());
+    entries.erase(std::unique(entries.begin(), entries.end()), entries.end());
 
     auto is_updated = [&](std::string_view entry) {
         return updated_envs.count(env_key(entry)) > 0;
@@ -179,24 +191,27 @@ bool
 check_directory_writable(const std::string& dir)
 {
     struct stat st;
-    if(stat(dir.c_str(), &st) == 0)
+    if(stat(dir.c_str(), &st) == 0) return access(dir.c_str(), W_OK) == 0;
+
+    std::string candidate = dir;
+    while(true)
     {
-        return (access(dir.c_str(), W_OK) == 0);
+        const auto pos = candidate.find_last_of('/');
+        if(pos == std::string::npos)
+        {
+            candidate = ".";
+            break;
+        }
+        candidate = candidate.substr(0, pos);
+        if(candidate.empty())
+        {
+            candidate = "/";
+            break;
+        }
+        if(stat(candidate.c_str(), &st) == 0) break;
     }
 
-    std::string parent = dir;
-    size_t      pos    = parent.find_last_of('/');
-    if(pos != std::string::npos)
-    {
-        parent = parent.substr(0, pos);
-        if(parent.empty()) parent = ".";
-    }
-    else
-    {
-        parent = ".";
-    }
-
-    return (access(parent.c_str(), W_OK) == 0);
+    return access(candidate.c_str(), W_OK) == 0;
 }
 
 void
@@ -294,7 +309,7 @@ validate_configuration()
     if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
        std::strlen(disable_cats) > 0)
     {
-        std::cerr << "[rocprof-sys][warning] Both " << env_vars::ENABLE_CATEGORIES
+        std::cerr << "[rocprof-sys][WARNING] Both " << env_vars::ENABLE_CATEGORIES
                   << " and " << env_vars::DISABLE_CATEGORIES << " are set.\n"
                   << "  This will cause an abort at runtime. Use only one.\n"
                   << "  " << env_vars::ENABLE_CATEGORIES << "=" << enable_cats << "\n"

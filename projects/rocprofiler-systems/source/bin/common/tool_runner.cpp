@@ -56,9 +56,12 @@ using rocprofsys::common::update_mode;
 std::string
 replace_all(std::string str, std::string_view from, std::string_view replacement)
 {
-    for(auto pos = str.find(from); pos != std::string::npos;
-        pos      = str.find(from, pos + replacement.size()))
+    auto pos = str.find(from);
+    while(pos != std::string::npos)
+    {
         str.replace(pos, from.size(), replacement);
+        pos = str.find(from, pos + replacement.size());
+    }
     return str;
 }
 
@@ -154,7 +157,7 @@ get_initial_environment(parser_data_t&                               data,
         setenv("LD_LIBRARY_PATH", new_ld.c_str(), 1);
     }
 
-    if(config.force_sampling())
+    if(config.force_sampling)
     {
         auto mode = get_env<std::string>(std::string{ env::MODE }, "sampling", false);
         rocprofsys::common::update_env(data.env.current, env::USE_SAMPLING,
@@ -171,12 +174,18 @@ prepare_command(const char* exe, parser_data_t& data)
 {
     if(data.out.launcher.empty()) return;
 
+    const auto basename_of = [](std::string_view path) {
+        const auto slash = path.rfind('/');
+        return (slash == std::string_view::npos) ? path : path.substr(slash + 1);
+    };
+
     bool                     injected = false;
     std::vector<std::string> new_argv;
     new_argv.reserve(data.out.command.size() + LAUNCHER_INJECT_SLOTS);
     for(const auto& arg : data.out.command)
     {
-        if(!injected && arg.find(data.out.launcher) != std::string::npos)
+        if(!injected &&
+           basename_of(arg).find(data.out.launcher) != std::string_view::npos)
         {
             new_argv.emplace_back(exe);
             new_argv.emplace_back("--");
@@ -201,7 +210,7 @@ prepare_environment(parser_data_t&                               data,
                     const rocprofsys::common_utils::tool_config& config)
 {
     // launcher mode re-injects LD_PRELOAD itself, so skip it here
-    if(!config.enable_launcher() || data.out.launcher.empty())
+    if(!config.enable_launcher || data.out.launcher.empty())
     {
         rocprofsys::argparse::add_ld_preload(data);
         rocprofsys::argparse::add_ld_library_path(data);
@@ -283,8 +292,8 @@ configure_parser(parser_t& parser, parser_data_t& data,
             std::min<int>(cols - parser.get_help_width() - HELP_PADDING, MAX_DESC_WIDTH));
 
     data.reg.processed_groups.emplace("causal");
-    if(!config.show_sample_flag()) data.reg.processed_environs.emplace("sampling");
-    if(!config.enable_launcher()) data.reg.processed_environs.emplace("launcher");
+    if(!config.show_sample_flag) data.reg.processed_environs.emplace("sampling");
+    if(!config.enable_launcher) data.reg.processed_environs.emplace("launcher");
 
     rocprofsys::argparse::add_core_arguments(parser, data);
     rocprofsys::argparse::add_extended_arguments(parser, data);
@@ -297,7 +306,7 @@ configure_parser(parser_t& parser, parser_data_t& data,
                                            data.env.updated, data.env.initial);
         });
 
-    if(config.enable_fork())
+    if(config.enable_fork)
     {
         parser.start_group("EXECUTION OPTIONS", "");
         parser.add_argument({ "--fork" }, "Execute via fork + execvpe instead of execvpe")
@@ -315,7 +324,7 @@ apply_post_parse(parser_t& parser, parser_data_t& data,
                  const rocprofsys::common_utils::tool_config& config,
                  rocprofsys::common_utils::domain_flag_state& domain_state)
 {
-    if(config.disable_cputime_on_realtime_only())
+    if(config.disable_cputime_on_realtime_only)
     {
         if(parser.exists("sample-realtime") && !parser.exists("sample-cputime"))
             rocprofsys::common::update_env(data.env.current, env::SAMPLING_CPUTIME, false,
@@ -345,17 +354,9 @@ apply_post_parse(parser_t& parser, parser_data_t& data,
 }
 
 std::optional<int>
-parse_args(int argc, char** argv, parser_data_t& data,
-           const rocprofsys::common_utils::tool_config& config, bool& fork_exec)
+do_full_parse(int argc, char** argv, parser_data_t& data,
+              const rocprofsys::common_utils::tool_config& config, bool& fork_exec)
 {
-    get_initial_environment(data, config);
-
-    if(!needs_full_parse(argc, argv))
-    {
-        parse_command_fast_path(argc, argv, data);
-        return std::nullopt;
-    }
-
     toggle_suppression(pre_main_suppression_guard);
     rocprofsys::argparse::init_parser(data);
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
@@ -380,6 +381,21 @@ parse_args(int argc, char** argv, parser_data_t& data,
 
     return apply_post_parse(parser, data, config, domain_state);
 }
+
+std::optional<int>
+parse_args(int argc, char** argv, parser_data_t& data,
+           const rocprofsys::common_utils::tool_config& config, bool& fork_exec)
+{
+    get_initial_environment(data, config);
+
+    if(!needs_full_parse(argc, argv))
+    {
+        parse_command_fast_path(argc, argv, data);
+        return std::nullopt;
+    }
+
+    return do_full_parse(argc, argv, data, config, fork_exec);
+}
 }  // namespace
 
 namespace rocprofsys::common_utils
@@ -388,38 +404,44 @@ namespace rocprofsys::common_utils
 tool_config
 make_run_config()
 {
-    return tool_config{
-        tool_mode::run,
-        "run",
-        "rocprof-sys-run",
-        "Execute instrumented binaries with ROCm Systems Profiler configuration.",
-        R"(INSTRUMENTATION WORKFLOW:
+    tool_config cfg{};
+    cfg.mode             = tool_mode::run;
+    cfg.tool_name        = "run";
+    cfg.version_name     = "rocprof-sys-run";
+    cfg.summary          = "Execute instrumented binaries with ROCm Systems Profiler "
+                           "configuration.";
+    cfg.workflow         = R"(INSTRUMENTATION WORKFLOW:
   1. Instrument: rocprof-sys-instrument -o app.inst -- ./app
   2. Run:        rocprof-sys-run --preset=balanced -- ./app.inst
-  3. Analyze:    cat rocprof-sys-output/wall_clock.txt)",
-        "ROCPROFSYS: ",
-    };
+  3. Analyze:    cat rocprof-sys-output/wall_clock.txt)";
+    cfg.output_prefix    = "ROCPROFSYS: ";
+    cfg.enable_fork      = true;
+    cfg.enable_launcher  = true;
+    cfg.show_sample_flag = true;
+    return cfg;
 }
 
 tool_config
 make_sample_config()
 {
-    return tool_config{
-        tool_mode::sample,
-        "sample",
-        "rocprof-sys-sample",
-        "Call-stack sampling profiler for applications without binary instrumentation.",
-        R"(PROFILING WORKFLOW:
+    tool_config cfg{};
+    cfg.mode           = tool_mode::sample;
+    cfg.tool_name      = "sample";
+    cfg.version_name   = "rocprof-sys-sample";
+    cfg.summary        = "Call-stack sampling profiler for applications without binary "
+                         "instrumentation.";
+    cfg.workflow       = R"(PROFILING WORKFLOW:
   1. Profile:   rocprof-sys-sample --preset=balanced -- ./app
   2. Analyze:   cat rocprof-sys-output/wall_clock.txt
-  3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev)",
-        {},
-        {
-            { "--cputime", "--sample-cputime" },
-            { "--realtime", "--sample-realtime" },
-            { "--freq", "--sampling-freq" },
-        },
+  3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev)";
+    cfg.force_sampling = true;
+    cfg.disable_cputime_on_realtime_only = true;
+    cfg.deprecated_flags                 = {
+        { "--cputime", "--sample-cputime" },
+        { "--realtime", "--sample-realtime" },
+        { "--freq", "--sampling-freq" },
     };
+    return cfg;
 }
 
 int
@@ -443,7 +465,7 @@ run_tool(int argc, char** argv, const tool_config& config)
     if(auto exit_code = parse_args(argc, argv, parse_data, config, fork_exec))
         return *exit_code;
 
-    if(config.enable_launcher()) prepare_command(argv[0], parse_data);
+    if(config.enable_launcher) prepare_command(argv[0], parse_data);
 
     prepare_environment(parse_data, config);
 
@@ -459,17 +481,8 @@ run_tool(int argc, char** argv, const tool_config& config)
                                  verbose >= 1, config.output_prefix);
     if(verbose >= 1) utils::print_command(parse_data.out.command, config.output_prefix);
 
-    auto to_c_argv = [](std::vector<std::string>& src) {
-        std::vector<char*> out;
-        out.reserve(src.size() + 1);
-        for(auto& entry : src)
-            out.emplace_back(entry.data());
-        out.emplace_back(nullptr);
-        return out;
-    };
-
-    auto argv_ptrs = to_c_argv(parse_data.out.command);
-    auto envp_ptrs = to_c_argv(parse_data.env.current);
+    auto argv_ptrs = utils::to_c_argv(parse_data.out.command);
+    auto envp_ptrs = utils::to_c_argv(parse_data.env.current);
 
     if(fork_exec)
     {

@@ -74,15 +74,6 @@ main(int argc, char** argv)
         }
     }
 
-    auto to_envp_ptrs = [](std::vector<std::string>& env) {
-        std::vector<char*> out;
-        out.reserve(env.size() + 1);
-        for(auto& entry : env)
-            out.emplace_back(entry.data());
-        out.emplace_back(nullptr);
-        return out;
-    };
-
     if(!_argv.empty())
     {
         if(_causal_env.size() == 1)
@@ -95,7 +86,7 @@ main(int argc, char** argv)
                 utils::print_environment(_env, get_updated_envs(), _verbose >= 1, "0: ");
             if(_verbose >= 1) utils::print_command(to_string_vec(_argv), "0: ");
             _argv.emplace_back(nullptr);
-            auto envp_ptrs = to_envp_ptrs(_env);
+            auto envp_ptrs = utils::to_c_argv(_env);
             return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());
         }
 
@@ -131,7 +122,7 @@ main(int argc, char** argv)
                 if(_verbose >= 1)
                     utils::print_command(to_string_vec(_argv), _prefix.str());
                 _argv.emplace_back(nullptr);
-                auto envp_ptrs = to_envp_ptrs(_env);
+                auto envp_ptrs = utils::to_c_argv(_env);
                 return execvpe(_argv.front(), _argv.data(), envp_ptrs.data());
             }
             else

@@ -198,27 +198,15 @@ protected:
 TEST_F(AddTorchLibraryPathTest, SkipsNonPythonExecutables)
 {
     std::vector<std::string> envp = { "LD_LIBRARY_PATH=/usr/lib" };
-    std::vector<char*>       argv = { strdup("/usr/bin/bash") };
-    add_torch_library_path(envp, argv, false, updated_envs);
-    ASSERT_EQ(envp.size(), 1);
-    EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
-    for(auto* entry : argv)
-        std::free(entry);
-}
-
-TEST_F(AddTorchLibraryPathTest, HandlesEmptyArgv)
-{
-    std::vector<std::string> envp = { "LD_LIBRARY_PATH=/usr/lib" };
-    std::vector<char*>       argv;
-    add_torch_library_path(envp, argv, false, updated_envs);
+    add_torch_library_path(envp, "/usr/bin/bash", false, updated_envs);
     ASSERT_EQ(envp.size(), 1);
     EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
 }
 
-TEST_F(AddTorchLibraryPathTest, HandlesNullArgvFront)
+TEST_F(AddTorchLibraryPathTest, HandlesEmptyExecutable)
 {
     std::vector<std::string> envp = { "LD_LIBRARY_PATH=/usr/lib" };
-    std::vector<char*>       argv = { nullptr };
-    add_torch_library_path(envp, argv, false, updated_envs);
+    add_torch_library_path(envp, std::string_view{}, false, updated_envs);
     ASSERT_EQ(envp.size(), 1);
+    EXPECT_EQ(envp[0], "LD_LIBRARY_PATH=/usr/lib");
 }

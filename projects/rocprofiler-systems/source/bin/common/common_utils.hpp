@@ -89,6 +89,9 @@ bool
 print_help_for_domain(const std::string& captured_help, std::string_view domain,
                       std::string_view tool_name, std::ostream& out = std::cout);
 
+[[nodiscard]] std::vector<char*>
+to_c_argv(std::vector<std::string>& src);
+
 void
 print_command(const std::vector<std::string>& argv, std::string_view prefix = {});
 
@@ -117,16 +120,7 @@ int
 dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
 {
     std::string topic;
-    if(parser.exists("help"))
-    {
-        try
-        {
-            topic = parser.template get<std::string>("help");
-        } catch(...)
-        {
-            // no value provided — bare --help
-        }
-    }
+    if(parser.exists("help")) topic = parser.template get<std::string>("help");
 
     if(topic.empty())
     {

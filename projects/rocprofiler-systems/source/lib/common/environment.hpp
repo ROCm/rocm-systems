@@ -376,51 +376,55 @@ update_env(std::vector<std::string>& _environ, std::string_view _env_var, Tp&& _
 {
     _updated_envs.emplace(_env_var);
 
-    const bool _prepend  = (_mode == update_mode::PREPEND);
-    const bool _append   = (_mode == update_mode::APPEND);
-    const bool _weak_upd = (_mode == update_mode::WEAK);
+    const auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
+    const auto _key         = join("", _env_var, "=");
 
-    auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
+    const auto matches_key = [&_key](const std::string& entry) {
+        return std::string_view{ entry }.find(_key) == 0;
+    };
 
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
+    auto first = std::find_if(_environ.begin(), _environ.end(), matches_key);
+    if(first == _environ.end())
     {
-        if(std::string_view{ itr }.find(_key) != 0) continue;
-
-        if(_weak_upd)
-        {
-            if(_original_envs.find(itr) == _original_envs.end()) return;
-        }
-
-        if(_prepend || _append)
-        {
-            if(itr.find(_env_val_str) == std::string::npos)
-            {
-                auto _val = itr.substr(_key.length());
-                if(_prepend)
-                    itr = join('=', _env_var, join(_join_delim, _env_val_str, _val));
-                else
-                    itr = join('=', _env_var, join(_join_delim, _val, _env_val_str));
-            }
-        }
-        else
-        {
-            itr = join('=', _env_var, _env_val_str);
-        }
+        _environ.emplace_back(join('=', _env_var, _env_val_str));
         return;
     }
-    _environ.emplace_back(join('=', _env_var, _env_val_str));
+
+    switch(_mode)
+    {
+        case update_mode::WEAK:
+            if(_original_envs.find(*first) == _original_envs.end()) return;
+            *first = join('=', _env_var, _env_val_str);
+            return;
+
+        case update_mode::PREPEND:
+        case update_mode::APPEND:
+        {
+            if(first->find(_env_val_str) != std::string::npos) return;
+            auto _val = first->substr(_key.size());
+            *first    = (_mode == update_mode::PREPEND)
+                            ? join('=', _env_var, join(_join_delim, _env_val_str, _val))
+                            : join('=', _env_var, join(_join_delim, _val, _env_val_str));
+            return;
+        }
+
+        case update_mode::REPLACE:
+            *first = join('=', _env_var, _env_val_str);
+            _environ.erase(std::remove_if(std::next(first), _environ.end(), matches_key),
+                           _environ.end());
+            return;
+    }
 }
 
 template <typename UpdatedEnvsT>
 inline void
-add_torch_library_path(std::vector<std::string>& envp, const std::vector<char*>& argv,
+add_torch_library_path(std::vector<std::string>& envp, std::string_view executable,
                        bool verbose, UpdatedEnvsT& updated_envs)
 {
-    if(argv.empty() || argv.front() == nullptr) return;
-    if(!is_python_interpreter(argv.front())) return;
+    if(executable.empty()) return;
+    if(!is_python_interpreter(executable)) return;
 
-    auto torch_libpath = discover_torch_libpath(argv.front(), verbose);
+    auto torch_libpath = discover_torch_libpath(std::string{ executable }, verbose);
     if(torch_libpath.empty()) return;
 
     std::unordered_set<std::string> seen{ torch_libpath };
