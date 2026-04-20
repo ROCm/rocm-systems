@@ -378,6 +378,166 @@ def execute(
     return _execute_agentic(input, config=config, **kwargs)
 
 
+def _format_agentic_output(
+    root_output: Any,
+    output_format: str,
+    *,
+    database_path: str = "",
+) -> str:
+    """Render a :class:`RootOutput` via the shared formatters.
+
+    The legacy formatters expect a rich dict of analysis metrics
+    (``time_breakdown``, ``hotspots``, ``memory_analysis``, …). The
+    agentic pipeline today only passes the narrative + recommendations
+    up through Root, so we construct a *minimal* analysis dict: it has
+    all the keys the formatters check for (so they don't KeyError) but
+    the kernel / counter / memcpy sections are intentionally empty,
+    letting the formatters short-circuit those sections cleanly.
+
+    Downstream work will lift ``time_breakdown`` + ``hotspots`` from the
+    Analysis agent's output up through Root's metadata so the report is
+    richer; until then we render the narrative inside a proper Markdown /
+    HTML skeleton with a recommendations table.
+    """
+    narrative = getattr(root_output, "narrative", "") or ""
+    recommendations = list(getattr(root_output, "recommendations", []) or [])
+    primary_bottleneck = getattr(root_output, "primary_bottleneck", "mixed") or "mixed"
+    warnings = list(getattr(root_output, "warnings", []) or [])
+    metadata = dict(getattr(root_output, "metadata", {}) or {})
+
+    if output_format == "json":
+        import json as _json
+        return _json.dumps(
+            {
+                "narrative": narrative,
+                "recommendations": recommendations,
+                "primary_bottleneck": primary_bottleneck,
+                "warnings": warnings,
+                "metadata": metadata,
+            },
+            indent=2,
+        )
+
+    # The Analysis agent's time_breakdown could flow up through Root.metadata
+    # if the pipeline is wired to do so. Default to an empty-but-shaped dict
+    # so the formatters emit their skeleton without failing.
+    time_breakdown = metadata.get("time_breakdown") or {}
+    hotspots = metadata.get("hotspots") or []
+    memory_analysis = metadata.get("memory_analysis") or {}
+    hardware_counters = metadata.get("hardware_counters") or {}
+
+    # Normalise recommendations to the shape the formatters expect.
+    # Agentic recs carry ``type`` / ``target`` / ``summary`` — map them
+    # onto the legacy ``category`` / ``issue`` / ``suggestion`` keys so
+    # the rendered report reads sensibly.
+    normalised_recs: list = []
+    for rec in recommendations:
+        if not isinstance(rec, dict):
+            continue
+        r = dict(rec)
+        r.setdefault("priority", "INFO")
+        r.setdefault("category", r.get("type", "analysis"))
+        r.setdefault("issue", r.get("summary", ""))
+        r.setdefault("suggestion", r.get("summary", ""))
+        normalised_recs.append(r)
+
+    if output_format == "markdown":
+        md = _format_as_markdown(
+            time_breakdown=time_breakdown,
+            hotspots=hotspots,
+            memory_analysis=memory_analysis,
+            recommendations=normalised_recs,
+            hardware_counters=hardware_counters,
+            database_path=database_path,
+        )
+        # Inject the LLM / airgap narrative between the title and the
+        # metric sections so the report reads as a cohesive document.
+        if narrative:
+            narrative_block = "\n## Summary\n\n" + narrative.rstrip() + "\n"
+            # Splice after the first blank line following the H1 title.
+            parts = md.split("\n", 3)
+            if len(parts) >= 2 and parts[0].startswith("# "):
+                md = parts[0] + "\n" + (parts[1] + "\n" if len(parts) > 1 else "") + \
+                     narrative_block + "\n".join(parts[2:])
+            else:
+                md = narrative_block + "\n" + md
+        if primary_bottleneck:
+            md += f"\n\n*Primary bottleneck:* **{primary_bottleneck}**\n"
+        if warnings:
+            md += "\n\n## Warnings\n\n"
+            for w in warnings:
+                md += f"- {w}\n"
+        return md
+
+    if output_format == "webview":
+        html = _format_as_webview(
+            time_breakdown=time_breakdown,
+            hotspots=hotspots,
+            memory_analysis=memory_analysis,
+            recommendations=normalised_recs,
+            hardware_counters=hardware_counters,
+            database_path=database_path,
+        )
+        # The template places a narrative only if summary / findings land
+        # in _build_summary; for a pure agentic RootOutput we splice the
+        # narrative into a prose panel so the HTML isn't empty of text.
+        if narrative:
+            import html as _html_mod
+            narrative_panel = (
+                '<section class="card" id="agentic-narrative">'
+                '<h2>Summary</h2>'
+                f'<pre style="white-space:pre-wrap;">{_html_mod.escape(narrative)}</pre>'
+                '</section>'
+            )
+            # Inject right before </main> if present, else before </body>.
+            if "</main>" in html:
+                html = html.replace("</main>", narrative_panel + "</main>", 1)
+            elif "</body>" in html:
+                html = html.replace("</body>", narrative_panel + "</body>", 1)
+            else:
+                html = html + "\n" + narrative_panel
+        return html
+
+    # text: structured plaintext with section separators — NOT raw narrative.
+    width = 80
+    lines = []
+    lines.append("=" * width)
+    lines.append("PERFXPERT ANALYSIS".center(width))
+    lines.append("=" * width)
+    if database_path:
+        lines.append(f"Database: {database_path}")
+    lines.append(f"Primary bottleneck: {primary_bottleneck}")
+    lines.append("")
+    lines.append("== Summary ==")
+    lines.append("")
+    lines.append(narrative.rstrip() or "(no narrative — airgap / empty response)")
+    lines.append("")
+    if normalised_recs:
+        lines.append("== Recommendations ==")
+        lines.append("")
+        for i, rec in enumerate(normalised_recs, 1):
+            prio = rec.get("priority", "INFO")
+            cat = rec.get("category", "")
+            issue = rec.get("issue", "") or rec.get("summary", "")
+            lines.append(f"  {i}. [{prio}] {cat}")
+            if issue:
+                lines.append(f"     * {issue}")
+            suggestion = rec.get("suggestion", "")
+            if suggestion and suggestion != issue:
+                lines.append(f"     * suggestion: {suggestion}")
+        lines.append("")
+    if warnings:
+        lines.append("== Warnings ==")
+        lines.append("")
+        for w in warnings:
+            lines.append(f"  * {w}")
+        lines.append("")
+    lines.append("=" * width)
+    lines.append("Analysis complete.".center(width))
+    lines.append("=" * width)
+    return "\n".join(lines)
+
+
 # -- known kwargs accepted by `_execute_agentic` ---------------------------
 # Any kwarg not in this set that is forwarded from `execute()` will emit a
 # WARNING so future argparse additions cannot silently drop through the
@@ -507,23 +667,15 @@ def _execute_agentic(
     except Exception as e:
         raise RuntimeError(f"Agentic root analysis failed: {e}") from e
 
-    # Format output according to requested format
+    # Format output according to requested format.
+    #
+    # The legacy formatters (_format_as_markdown / _format_as_webview)
+    # produce AMD-themed HTML and structured Markdown with headings.
+    # Wire them to the agentic RootOutput so `--format markdown` emits
+    # real Markdown (not raw narrative prose) and `--format webview`
+    # emits a real HTML report (not a plaintext narrative).
     output_format = kwargs.get("output_format", "text")
-    if output_format == "json":
-        import json
-        output = json.dumps(
-            {
-                "narrative": root_output.narrative,
-                "recommendations": root_output.recommendations,
-                "primary_bottleneck": root_output.primary_bottleneck,
-                "warnings": root_output.warnings,
-                "metadata": root_output.metadata,
-            },
-            indent=2,
-        )
-    else:
-        # text, markdown, webview — for now, just use the narrative
-        output = root_output.narrative
+    output = _format_agentic_output(root_output, output_format, database_path=database_path)
 
     # Handle output writing
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}

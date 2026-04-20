@@ -57,3 +57,114 @@ def test_legacy_symbols_are_absent():
     import importlib
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("perfxpert.ai_analysis")
+
+
+# -- Fix 2 — formatters wired on the agentic path ---------------------------
+
+
+class _FakeRootOutput:
+    """Minimal stand-in for agents.schemas.RootOutput for format tests."""
+
+    def __init__(
+        self,
+        narrative: str = "",
+        recommendations=None,
+        primary_bottleneck: str = "mixed",
+        warnings=None,
+        metadata=None,
+    ) -> None:
+        self.narrative = narrative
+        self.recommendations = list(recommendations or [])
+        self.primary_bottleneck = primary_bottleneck
+        self.warnings = list(warnings or [])
+        self.metadata = dict(metadata or {})
+
+
+def test_analyze_markdown_output_has_headings():
+    """`--format markdown` must produce real Markdown with an H1 heading
+    and at least one bullet list — NOT raw narrative prose."""
+    out = analyze_mod._format_agentic_output(
+        _FakeRootOutput(
+            narrative="Kernel `matmul` dominates runtime.",
+            recommendations=[
+                {"type": "optimize", "summary": "Enable tensor cores", "priority": "HIGH"}
+            ],
+            primary_bottleneck="compute",
+            warnings=["small sample size"],
+        ),
+        "markdown",
+        database_path="/tmp/fake.db",
+    )
+    # Must start with an H1 heading (the legacy formatter puts
+    # ``# PerfXpert AI Performance Analysis`` at the top).
+    assert any(line.startswith("# ") for line in out.splitlines()), (
+        f"Markdown output missing H1 heading; got first 200 chars:\n{out[:200]}"
+    )
+    # Must contain at least one list item (``- `` or ``* ``) — the
+    # warnings / recommendations sections emit bullets.
+    assert any(line.startswith(("- ", "* ")) for line in out.splitlines()), (
+        "Markdown output missing any bullet lists"
+    )
+    # Narrative must be embedded as prose.
+    assert "matmul" in out
+
+
+def test_analyze_webview_output_is_html():
+    """`--format webview` must emit a real HTML document with AMD branding
+    in the title/footer, NOT a plaintext narrative."""
+    out = analyze_mod._format_agentic_output(
+        _FakeRootOutput(
+            narrative="Memory-bound workload.",
+            recommendations=[],
+            primary_bottleneck="memory_transfer",
+        ),
+        "webview",
+        database_path="/tmp/fake.db",
+    )
+    head = out[:200].lower()
+    assert head.startswith("<!doctype") or "<html" in head, (
+        f"Webview output is not HTML; first 200 chars:\n{out[:200]}"
+    )
+    # AMD branding appears in the title or template footer.
+    assert "amd" in out.lower() or "AMD" in out
+    # Narrative panel must be spliced in.
+    assert "memory-bound workload" in out.lower() or "Memory-bound workload" in out
+
+
+def test_analyze_text_output_is_structured():
+    """`--format text` must be structured plaintext (section separators,
+    bullets), NOT raw narrative prose."""
+    out = analyze_mod._format_agentic_output(
+        _FakeRootOutput(
+            narrative="Narrative body goes here.",
+            recommendations=[{"type": "x", "summary": "do thing"}],
+            primary_bottleneck="latency",
+            warnings=["tiny workload"],
+        ),
+        "text",
+    )
+    # The structured plaintext renderer uses `== section ==` headings
+    # and long ``=`` bars.
+    assert "== Summary ==" in out or "== Recommendations ==" in out, (
+        f"Text output not structured; got:\n{out}"
+    )
+    assert "=" * 40 in out, "Text output missing horizontal section bars"
+    assert "latency" in out.lower()
+
+
+def test_analyze_json_output_has_schema_keys():
+    """`--format json` must contain the documented schema keys, not be an
+    ad-hoc dump of an internal object."""
+    import json as _json
+    out = analyze_mod._format_agentic_output(
+        _FakeRootOutput(
+            narrative="N",
+            recommendations=[{"type": "x"}],
+            primary_bottleneck="compute",
+            warnings=["w"],
+        ),
+        "json",
+    )
+    parsed = _json.loads(out)
+    for key in ("narrative", "recommendations", "primary_bottleneck", "warnings", "metadata"):
+        assert key in parsed, f"JSON output missing schema key {key!r}: {parsed}"
