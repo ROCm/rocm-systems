@@ -1215,7 +1215,6 @@ rocprofsys_finalize_hidden(void)
         auto _cfg       = settings::compose_filename_config{};
         _cfg.use_suffix = config::get_use_pid();
         _cfg.suffix     = settings::default_process_suffix();
-        // file output suppressed if _settings->file_output() == false
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "rocprofsys", _cfg);
 
