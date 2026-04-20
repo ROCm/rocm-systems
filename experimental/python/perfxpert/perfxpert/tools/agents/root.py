@@ -33,6 +33,7 @@ def agent_root(
     airgap: bool = False,
     session_id: Optional[str] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
+    api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the full Root → Analysis → Recommendation pipeline.
 
@@ -59,6 +60,12 @@ def agent_root(
             ``"exit root"``) so UI consumers (CLI spinner, MCP streaming
             consumer) can show progress during long LLM calls. ``None``
             disables the feature with zero overhead.
+        api_key: Explicit LLM provider API key forwarded through to
+            :func:`perfxpert.agents.runtime.build_session`. When set it
+            overrides the provider-specific env var for the duration of
+            this call (the previous env state is restored on exit). Use
+            this path to pass ``--llm-api-key`` from the CLI. Ignored
+            under airgap.
 
     Returns:
         A dict with the documented RootOutput schema keys:
@@ -75,6 +82,7 @@ def agent_root(
         session_id=session_id,
         airgap=airgap if airgap else None,
         progress_callback=progress_callback,
+        api_key=api_key,
     )
 
     payload = schemas.RootInput(

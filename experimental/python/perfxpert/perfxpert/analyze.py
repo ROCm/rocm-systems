@@ -652,6 +652,126 @@ def _progress_context(*, enable_llm: bool, no_progress: bool, verbose: bool):
     return _rich_callback, _rich_ctx()
 
 
+# -- credential helpers (Bug 1 + Bug 3) ------------------------------------
+#
+# These helpers live alongside ``_execute_agentic`` so the CLI auth
+# story is visible in one place: pre-flight check first, then an env-vs-
+# flag mismatch warning, then the actual call. The env var map mirrors
+# ``perfxpert.agents.runtime._PROVIDER_CANONICAL_ENV``; we duplicate it
+# here so the CLI layer can emit per-provider help text without pulling
+# runtime into import time.
+
+
+# Per-provider credential source-of-truth. Each entry lists the env vars
+# that already unlock the provider (used for pre-flight existence) and a
+# one-line hint that names the minimum required flag or env var. Keep
+# in lock-step with providers/*.py and agents/runtime.py.
+_PROVIDER_CREDENTIALS = {
+    "anthropic": {
+        "env_vars": ("ANTHROPIC_API_KEY", "PERFXPERT_LLM_ANTHROPIC_KEY"),
+        "hint": (
+            "no API key — pass --llm-api-key sk-ant-… or export ANTHROPIC_API_KEY"
+        ),
+    },
+    "openai": {
+        "env_vars": ("OPENAI_API_KEY", "PERFXPERT_LLM_OPENAI_KEY"),
+        "hint": (
+            "no API key — pass --llm-api-key sk-… or export OPENAI_API_KEY"
+        ),
+    },
+    "private": {
+        "env_vars": ("PERFXPERT_LLM_PRIVATE_API_KEY",),
+        "hint": (
+            "private provider requires PERFXPERT_LLM_PRIVATE_URL + "
+            "PERFXPERT_LLM_PRIVATE_API_KEY (or --llm-api-key <key>)"
+        ),
+        "required_env": ("PERFXPERT_LLM_PRIVATE_URL",),
+    },
+    "ollama": {
+        "env_vars": (),  # Ollama needs no key; URL is the credential.
+        "hint": (
+            "ollama provider requires a running daemon reachable via "
+            "PERFXPERT_LLM_LOCAL_URL (default http://localhost:11434)"
+        ),
+        "required_env": (),  # URL has an in-provider default.
+    },
+    "opencode": {
+        "env_vars": (),
+        "hint": (
+            "opencode provider requires the bundled CLI on PATH or set "
+            "PERFXPERT_OPENCODE_PATH=/path/to/opencode"
+        ),
+        "required_env": (),
+    },
+}
+
+
+def _preflight_provider_auth(provider: str, flag_api_key: Optional[str]) -> None:
+    """Raise :class:`AuthError` when the selected provider lacks a credential.
+
+    Runs before ``agent_root`` so a misconfiguration surfaces as a clean
+    one-line error on stderr with no half-written output files. Each
+    branch names the exact flag / env var the user needs to set.
+    """
+    from perfxpert.providers._exceptions import AuthError
+
+    info = _PROVIDER_CREDENTIALS.get(provider)
+    if info is None:
+        # Unknown provider name — ``build_session`` already validates
+        # against the registry. Skip pre-flight so we don't mask the
+        # clearer ValueError downstream.
+        return
+
+    # A flag-supplied key satisfies providers that take a key.
+    if flag_api_key and info.get("env_vars"):
+        _require_additional_env(provider, info)
+        return
+
+    # An existing env var satisfies key-bearing providers.
+    for var in info.get("env_vars", ()):
+        if os.environ.get(var):
+            _require_additional_env(provider, info)
+            return
+
+    # Providers that don't need a key (ollama, opencode) still need
+    # their connection info.
+    if not info.get("env_vars"):
+        _require_additional_env(provider, info)
+        return
+
+    raise AuthError(provider, info["hint"])
+
+
+def _require_additional_env(provider: str, info: Dict[str, Any]) -> None:
+    """Verify any ``required_env`` vars for ``provider`` are set."""
+    from perfxpert.providers._exceptions import AuthError
+
+    for var in info.get("required_env", ()) or ():
+        if not os.environ.get(var):
+            raise AuthError(provider, info["hint"])
+
+
+def _warn_if_flag_overrides_env(provider: str, flag_api_key: str) -> None:
+    """Emit a stderr WARNING when ``--llm-api-key`` disagrees with env.
+
+    The CLI flag always wins; this warning tells the user which key is
+    active so a mismatched ``ANTHROPIC_API_KEY`` doesn't silently affect
+    unrelated runs. No-op when the env var is unset or identical.
+    """
+    info = _PROVIDER_CREDENTIALS.get(provider)
+    if not info:
+        return
+    for var in info.get("env_vars", ()) or ():
+        env_val = os.environ.get(var)
+        if env_val and env_val != flag_api_key:
+            print(
+                f"⚠ --llm-api-key overrides {var} (env value ignored for "
+                f"this run)",
+                file=sys.stderr,
+            )
+            return
+
+
 # -- known kwargs accepted by `_execute_agentic` ---------------------------
 # Any kwarg not in this set that is forwarded from `execute()` will emit a
 # WARNING so future argparse additions cannot silently drop through the
@@ -738,8 +858,23 @@ def _execute_agentic(
 
     enable_llm = kwargs.get("enable_llm", False)
     llm_provider = kwargs.get("llm_provider")
+    llm_api_key = kwargs.get("llm_api_key")
     no_progress = bool(kwargs.get("no_progress", False))
     verbose = bool(kwargs.get("verbose", False))
+
+    # Bug 3 — pre-flight auth check. Surface a clean ``AuthError`` BEFORE
+    # building the session + making any network call when the selected
+    # provider has no usable credential. Airgap + disabled LLM skip this
+    # check so deterministic runs remain credential-free.
+    if enable_llm and llm_provider:
+        _preflight_provider_auth(llm_provider, llm_api_key)
+
+    # Bug 1 — if BOTH ``--llm-api-key`` and the provider's canonical env
+    # var are set and differ, the CLI flag wins (the session env override
+    # in ``build_session`` handles the actual injection). Emit a one-line
+    # WARNING on stderr so the user knows which credential is active.
+    if enable_llm and llm_provider and llm_api_key:
+        _warn_if_flag_overrides_env(llm_provider, llm_api_key)
 
     # Build progress feedback (spinner / plain lines / silent) based on
     # whether LLM mode is active and the terminal / flag state.
@@ -779,6 +914,7 @@ def _execute_agentic(
                 provider=llm_provider if enable_llm else None,
                 airgap=(not enable_llm),
                 progress_callback=progress_cb,
+                api_key=llm_api_key if enable_llm else None,
             )
     except ProviderError:
         raise  # let __main__.main render clean one-liner

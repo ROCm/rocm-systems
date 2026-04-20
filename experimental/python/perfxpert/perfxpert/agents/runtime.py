@@ -18,11 +18,12 @@ Responsibilities:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from perfxpert.agents import (
     analysis,
@@ -54,6 +55,55 @@ except ImportError:
 
 
 DEFAULT_PROVIDER = "anthropic"
+
+
+# Canonical env var per provider. When the user passes `--llm-api-key`
+# at the CLI we temporarily inject it into this env var for the
+# duration of the session run so every downstream key-resolver
+# (framework._api_key_for, AnthropicProvider._resolve_api_key, etc.)
+# picks it up without any per-provider plumbing. The secondary
+# PERFXPERT_LLM_<PROV>_KEY variant is already recognised by each
+# provider, so pinning the widely-known vendor var is sufficient.
+_PROVIDER_CANONICAL_ENV: Dict[str, str] = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "private": "PERFXPERT_LLM_PRIVATE_API_KEY",
+    # ollama + opencode typically do not take a key; we still accept the
+    # flag and route it through the PERFXPERT_LLM_<PROV>_KEY slot so
+    # providers that DO check it (future auth-enabled deployments) see
+    # the user's value.
+    "ollama": "PERFXPERT_LLM_OLLAMA_KEY",
+    "opencode": "PERFXPERT_LLM_OPENCODE_KEY",
+}
+
+
+@contextlib.contextmanager
+def _override_provider_env(
+    provider: Optional[str], api_key: Optional[str]
+) -> Iterator[None]:
+    """Temporarily set the provider-canonical env var to ``api_key``.
+
+    Restores the previous value (or unsets the var if it was missing) on
+    exit. No-op when ``provider`` or ``api_key`` is falsy, or when the
+    provider has no canonical env-var mapping.
+    """
+    if not provider or not api_key:
+        yield
+        return
+    var = _PROVIDER_CANONICAL_ENV.get(provider)
+    if not var:
+        yield
+        return
+    sentinel = object()
+    prev = os.environ.get(var, sentinel)
+    os.environ[var] = api_key
+    try:
+        yield
+    finally:
+        if prev is sentinel:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = prev  # type: ignore[assignment]
 
 
 # Cycle-4 B3 — substrings that identify a rate-limit-class error raised
@@ -147,6 +197,12 @@ class AnalysisSession:
     airgap: bool
     fallback_provider: Optional[Any] = field(default=None)
     progress_callback: Optional[Callable[[str], None]] = field(default=None)
+    # ``api_key`` is the explicit ``--llm-api-key`` value forwarded from
+    # the CLI (Bug 1). When set, ``_cascade`` wraps every provider call
+    # in a :func:`_override_provider_env` context so the framework +
+    # provider layers read the user-supplied key. Cleared after the
+    # call; env vars are restored to their original values.
+    api_key: Optional[str] = field(default=None)
 
     def _fallback_chain(self) -> List[str]:
         """Return the ordered provider chain for this session.
@@ -213,8 +269,11 @@ class AnalysisSession:
         chain = self._fallback_chain()
         if len(chain) == 1:
             # No fallback configured — preserve the legacy single-provider
-            # behaviour (and exception shape) exactly.
-            return runner(chain[0])
+            # behaviour (and exception shape) exactly. The env override is
+            # keyed on the provider name so the primary provider picks up
+            # any ``--llm-api-key`` the user passed on the CLI.
+            with _override_provider_env(chain[0], self.api_key):
+                return runner(chain[0])
 
         # Lazy import to avoid pulling providers package in airgap unit tests.
         from perfxpert.providers._exceptions import ProviderChainExhausted
@@ -222,7 +281,12 @@ class AnalysisSession:
         attempts: List[Tuple[str, BaseException]] = []
         for idx, name in enumerate(chain):
             try:
-                return runner(name)
+                # Scope the env override to THIS provider attempt — a
+                # fallback provider (e.g. ``openai`` after ``anthropic``)
+                # should not inherit the primary's key because the env
+                # var namespaces differ per vendor.
+                with _override_provider_env(name, self.api_key):
+                    return runner(name)
             except Exception as exc:
                 if not _is_rate_limit_like(exc):
                     # Auth / schema / timeout / anything else: surface
@@ -393,6 +457,7 @@ def build_session(
     session_id: Optional[str] = None,
     airgap: Optional[bool] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
+    api_key: Optional[str] = None,
 ) -> AnalysisSession:
     """Build an AnalysisSession handle.
 
@@ -418,6 +483,12 @@ def build_session(
             short status strings as each agent phase enters / exits. Used
             by the CLI to drive a Rich spinner during long LLM calls. A
             ``None`` value disables the feature with zero overhead.
+        api_key: Optional explicit API key forwarded from ``--llm-api-key``.
+            Stored on the session; every ``_cascade`` attempt wraps the
+            inner provider call in an env-override context so the key
+            lands in the canonical vendor env var
+            (``ANTHROPIC_API_KEY`` / ``OPENAI_API_KEY`` / …) for the
+            duration of the call. Ignored under airgap.
 
     Raises:
         ValueError: unknown provider.
@@ -460,6 +531,9 @@ def build_session(
         airgap=is_airgap,
         fallback_provider=fallback,
         progress_callback=progress_callback,
+        # api_key is cleared in airgap so a stale flag value from the CLI
+        # never alters env vars when the session is deterministic-only.
+        api_key=None if is_airgap else api_key,
     )
 
 
