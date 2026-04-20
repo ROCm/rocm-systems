@@ -20,6 +20,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <new>
 #include <set>
 
 #if defined(__clang__)
@@ -136,8 +137,10 @@ void HostcallBuffer::initialize(uint32_t num_packets,
   occupied_mem_    = occupied_mem;
   scan_limit_      = num_packets;
 
-  memset(device_phase_, 0, num_packets * sizeof(uint32_t));
-  memset(host_phase_,   0, num_packets * sizeof(uint32_t));
+  for (uint32_t i = 0; i < num_packets; ++i) {
+    new (&device_phase_[i]) std::atomic<uint32_t>(0);
+    new (&host_phase_[i]) std::atomic<uint32_t>(0);
+  }
 }
 
 bool HostcallBuffer::hasWorkPending() const {
