@@ -42,6 +42,8 @@ set(TEST_SRC
     hipTestDeviceDouble.cc
     hipTestHost.cc
     hadd.cc
+    bfloat16_atomic_test.cc
+    fp16_atomic_test.cc
 )
 if(HIP_PLATFORM MATCHES "nvidia")
   set_source_files_properties(hipTestHost.cc PROPERTIES COMPILE_OPTIONS "--expt-relaxed-constexpr")

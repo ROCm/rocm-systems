@@ -864,8 +864,43 @@ inline __HOST_DEVICE__ __half2 __h2div(__half2 x, __half2 y) {
   return __half2{static_cast<__half2_raw>(x).data / static_cast<__half2_raw>(y).data};
 }
 
-// Atomic
+// Device specific functions
 #if defined(__clang__) && defined(__HIP__)
+inline __device__ __half atomicAdd(__half* const address, const __half value) {
+  static_assert(sizeof(__half) == sizeof(unsigned short));
+  union u_hold {
+    __half_raw h;
+    unsigned short s;
+  };
+  u_hold old_val, new_val;
+  old_val.s = __hip_atomic_load((unsigned short*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  do {
+    __half temp = __hadd(__half{old_val.h}, value);
+    new_val.h = static_cast<__half_raw>(temp);
+  } while (!__hip_atomic_compare_exchange_strong((unsigned short*)address, &old_val.s, new_val.s,
+                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                                 __HIP_MEMORY_SCOPE_SYSTEM));
+  return __half{old_val.h};
+}
+
+inline __device__ __half2 atomicAdd(__half2* const address, const __half2 value) {
+  static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
+  union u_hold {
+    __half2_raw h2r;
+    unsigned int u32;
+  };
+  u_hold old_val, new_val;
+  old_val.u32 =
+      __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  do {
+    __half2 temp = __hadd2(__half2{old_val.h2r}, value);
+    new_val.h2r = static_cast<__half2_raw>(temp);
+  } while (!__hip_atomic_compare_exchange_strong((unsigned int*)address, &old_val.u32, new_val.u32,
+                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                                 __HIP_MEMORY_SCOPE_SYSTEM));
+  return __half2{old_val.h2r};
+}
+
 inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
 #if __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
   // The api expects an ext_vector_type of half
@@ -894,6 +929,7 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
   return old_val.h2r;
 #endif
 }
+
 inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
   static_assert(sizeof(unsigned short int) == sizeof(__half_raw));
   unsigned short int* address_as_short = reinterpret_cast<unsigned short int*>(address);
