@@ -653,10 +653,10 @@ bool Device::create() {
     return false;
   }
 
-  info_.deviceTopology_.pcie.type = 1; // CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD
-  info_.deviceTopology_.pcie.bus = (hsa_bdf_id & (0xFF << 8)) >> 8;
-  info_.deviceTopology_.pcie.device = (hsa_bdf_id & (0x1F << 3)) >> 3;
-  info_.deviceTopology_.pcie.function = (hsa_bdf_id & 0x07);
+  info_.deviceTopology_.type = 1; // CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD
+  info_.deviceTopology_.bus = (hsa_bdf_id & (0xFF << 8)) >> 8;
+  info_.deviceTopology_.device = (hsa_bdf_id & (0x1F << 3)) >> 3;
+  info_.deviceTopology_.function = (hsa_bdf_id & 0x07);
   uint32_t pci_domain_id = 0;
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN),
@@ -955,7 +955,7 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
       case static_cast<uint>(amd::AddressingMode::MirroredRepeat):
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_MIRRORED_REPEAT;
         break;
-      case static_cast<uint>(amd::AddressingMode::None):
+      case static_cast<uint>(amd::AddressingMode::NoAddressing):
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_UNDEFINED;
         break;
       default:
@@ -1324,7 +1324,7 @@ bool Device::populateOCLDeviceConstants() {
   info_.compilerAvailable_ = true;
   info_.executionCapabilities_ = amd::ExecCapabilities::Kernel;
   info_.queueProperties_ = amd::QueueProperties::Profiling;
-  info_.platform_ = AMD_PLATFORM;
+  info_.platform_ = reinterpret_cast<intptr_t>(AMD_PLATFORM);
   info_.profile_ = "FULL_PROFILE";
   ::strncpy(info_.vendor_, "Advanced Micro Devices, Inc.", sizeof(info_.vendor_) - 1);
 
@@ -1977,7 +1977,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
   // Transfer data only if OCL context has one device.
   // Cache coherency layer will update data for multiple devices
   if (!memory->isHostMemDirectAccess() && owner.asImage() && (owner.parent() == nullptr) &&
-      (owner.getMemFlags() & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None &&
+      (owner.getMemFlags() & amd::MemFlags::CopyHostPtr) != amd::MemFlags::Empty &&
       (owner.getContext().devices().size() == 1)) {
     // To avoid recurssive call to Device::createMemory, we perform
     // data transfer to the view of the image
@@ -2530,7 +2530,7 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
   if ((settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) && !first_alloc) {
     amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
     if ((nullptr == svm_mem) ||
-        ((svm_mem->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::None) ||
+        ((svm_mem->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::Empty) ||
         // Validate the range of provided memory
         ((svm_mem->getSize() - (reinterpret_cast<const_address>(dev_ptr) -
                                 reinterpret_cast<address>(svm_mem->getSvmPtr()))) < count)) {
@@ -2621,7 +2621,7 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
   amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
   if (settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) {
     if ((nullptr == svm_mem) ||
-        ((svm_mem->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::None) ||
+        ((svm_mem->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::Empty) ||
         // Validate the range of provided memory
         ((svm_mem->getSize() - (reinterpret_cast<const_address>(dev_ptr) -
                                 reinterpret_cast<address>(svm_mem->getSvmPtr()))) < count)) {
@@ -2656,7 +2656,7 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
       // If coherency is still indeterminate
       if (ptr_info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM) {
         if (svm_mem != nullptr &&
-            (svm_mem->getMemFlags() & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None) {
+            (svm_mem->getMemFlags() & amd::MemFlags::SvmFineGrain) != amd::MemFlags::Empty) {
           *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED;
         } else {
           *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;

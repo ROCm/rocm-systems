@@ -15,6 +15,11 @@
 namespace amd {
 
 class Agent : public _vdi_agent {
+ public:
+  //! Pointer to the ICD dispatch table (cl_icd_dispatch[]); set by the opencl layer.
+  //! Stored as void* so rocclr doesn't need to include <CL/cl_icd.h>.
+  static void* icdDispatch_;
+
  private:
   //! Linked list of agent instances
   static Agent* list_;
@@ -49,48 +54,48 @@ class Agent : public _vdi_agent {
 #undef AGENT_FLAG
 
   //! Post a context creation event
-  static void postContextCreate(cl_context context);
+  static void postContextCreate(void* context);
   //! Post a context destruction event
-  static void postContextFree(cl_context context);
+  static void postContextFree(void* context);
 
   //! Post a command queue creation event
-  static void postCommandQueueCreate(cl_command_queue queue);
+  static void postCommandQueueCreate(void* queue);
   //! Post a command queue destruction event
-  static void postCommandQueueFree(cl_command_queue queue);
+  static void postCommandQueueFree(void* queue);
 
   //! Post an event creation event
-  static void postEventCreate(cl_event event, cl_command_type type);
+  static void postEventCreate(void* event, amd::CommandType type);
   //! Post an event destruction event
-  static void postEventFree(cl_event event);
+  static void postEventFree(void* event);
   //! Post and event status change event.
-  static void postEventStatusChanged(cl_event event, int32_t execution_status,
+  static void postEventStatusChanged(void* event, int32_t execution_status,
                                      int64_t epoch_timestamp);
 
   //! Post a memory object creation event
-  static void postMemObjectCreate(cl_mem memobj);
+  static void postMemObjectCreate(void* memobj);
   //! Post a memory object destruction event
-  static void postMemObjectFree(cl_mem memobj);
+  static void postMemObjectFree(void* memobj);
   //! Post a memory transfer (acquired by device) event
-  static void postMemObjectAcquired(cl_mem memobj, cl_device_id device, int64_t elapsed_time);
+  static void postMemObjectAcquired(void* memobj, void* device, int64_t elapsed_time);
 
   //! Post a sampler creation event
-  static void postSamplerCreate(cl_sampler sampler);
+  static void postSamplerCreate(void* sampler);
   //! Post a sampler destruction event
-  static void postSamplerFree(cl_sampler sampler);
+  static void postSamplerFree(void* sampler);
 
   //! Post a program creation event
-  static void postProgramCreate(cl_program program);
+  static void postProgramCreate(void* program);
   //! Post a program destruction event
-  static void postProgramFree(cl_program program);
+  static void postProgramFree(void* program);
   //! Post a program build event
-  static void postProgramBuild(cl_program program);
+  static void postProgramBuild(void* program);
 
   //! Post a kernel creation event
-  static void postKernelCreate(cl_kernel kernel);
+  static void postKernelCreate(void* kernel);
   //! Post a kernel destruction event
-  static void postKernelFree(cl_kernel kernel);
+  static void postKernelFree(void* kernel);
   //! Post a kernel set argument event
-  static void postKernelSetArg(cl_kernel kernel, int32_t arg_index, size_t size,
+  static void postKernelSetArg(void* kernel, int32_t arg_index, size_t size,
                                const void* value_ptr);
 
  private:

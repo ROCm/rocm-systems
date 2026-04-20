@@ -50,7 +50,7 @@ class ExternalBuffer final : public Buffer, public ExternalMemory {
  public:
   ExternalBuffer(Context& amdContext, size_t size_in_bytes, amd::Os::FileDesc handle,
                  ExternalMemory::HandleType handle_type, const void* name = nullptr)
-      : Buffer(amdContext, 0, size_in_bytes), ExternalMemory(handle, name, handle_type) {
+      : Buffer(amdContext, amd::MemFlags::Empty, size_in_bytes), ExternalMemory(handle, name, handle_type) {
     setInteropObj(this);
   }
 

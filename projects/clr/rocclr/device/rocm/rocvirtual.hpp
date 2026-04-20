@@ -528,7 +528,7 @@ class VirtualGPU : public device::VirtualDevice {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
-  void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
+  void SetCopyCommandType(amd::CommandType type) { copy_command_type_ = type; }
 
   HwQueueTracker& Barriers() { return barriers_; }
 
@@ -627,7 +627,7 @@ class VirtualGPU : public device::VirtualDevice {
   bool createVirtualQueue(uint deviceQueueSize);
 
   //! Common function for fill memory used by both svm Fill and non-svm fill
-  bool fillMemory(cl_command_type type,         //!< the command type
+  bool fillMemory(amd::CommandType type,         //!< the command type
                   amd::Memory* amdMemory,       //!< memory object to fill
                   const void* pattern,          //!< pattern to fill the memory
                   size_t patternSize,           //!< pattern size
@@ -638,7 +638,7 @@ class VirtualGPU : public device::VirtualDevice {
   );
 
   //! Common function for memory copy used by both svm Copy and non-svm Copy
-  bool copyMemory(cl_command_type type,            //!< the command type
+  bool copyMemory(amd::CommandType type,            //!< the command type
                   amd::Memory& srcMem,             //!< source memory object
                   amd::Memory& dstMem,             //!< destination memory object
                   bool entire,                     //!< flag of entire memory copy
@@ -761,7 +761,7 @@ class VirtualGPU : public device::VirtualDevice {
   bool queue_pinned_ = false;             //!< TRUE if queue is pinned by graph (blocks ReleaseHwQueue)
   hsa_queue_t* last_hwq_ = nullptr;       //!< Last HW queue used, for preferred re-acquisition hint
 
-  cl_command_type copy_command_type_;  //!< Type of the copy command, used for ROC profiler
+  amd::CommandType copy_command_type_;  //!< Type of the copy command, used for ROC profiler
                                        //!< OCL doesn't distinguish different copy types,
                                        //!< but ROC profiler expects D2H or H2D detection
   int fence_state_;                    //!< Fence scope

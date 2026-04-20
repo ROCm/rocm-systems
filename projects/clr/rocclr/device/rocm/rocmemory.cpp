@@ -266,9 +266,9 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   in.version = MESA_GLINTEROP_EXPORT_IN_VERSION;
   out.version = MESA_GLINTEROP_EXPORT_OUT_VERSION;
 
-  if ((owner()->getMemFlags() & amd::MemFlags::ReadOnly) != amd::MemFlags::None)
+  if ((owner()->getMemFlags() & amd::MemFlags::ReadOnly) != amd::MemFlags::Empty)
     in.access = MESA_GLINTEROP_ACCESS_READ_ONLY;
-  else if ((owner()->getMemFlags() & amd::MemFlags::WriteOnly) != amd::MemFlags::None)
+  else if ((owner()->getMemFlags() & amd::MemFlags::WriteOnly) != amd::MemFlags::Empty)
     in.access = MESA_GLINTEROP_ACCESS_WRITE_ONLY;
   else
     in.access = MESA_GLINTEROP_ACCESS_READ_WRITE;
@@ -331,7 +331,7 @@ bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
     if (amdPinned != nullptr) {
       // Create view on the parent's pinned memory
       amdMemory = new (amdPinned->getContext())
-          amd::Buffer(*amdPinned, 0, owner()->getOrigin(), owner()->getSize());
+          amd::Buffer(*amdPinned, amd::MemFlags::Empty, owner()->getOrigin(), owner()->getSize());
       if ((amdMemory != nullptr) && !amdMemory->create()) {
         amdMemory->release();
         amdMemory = nullptr;
@@ -658,9 +658,9 @@ void Buffer::destroy() {
       memFlags = memFlags | amd::MemFlags::SvmFineGrain;
     }
     const bool isFineGrain =
-        (memFlags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None;
+        (memFlags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::Empty;
 
-    if ((memFlags & amd::MemFlags::PhyMem) != amd::MemFlags::None) {
+    if ((memFlags & amd::MemFlags::PhyMem) != amd::MemFlags::Empty) {
       // If this is physical memory, dont call hsa free function, since device mem was never created
       dev().deviceVmemRelease(owner()->getUserData().hsa_handle);
       return;
@@ -668,14 +668,14 @@ void Buffer::destroy() {
 
     if (kind_ != MEMORY_KIND_PTRGIVEN) {
       if (isFineGrain) {
-        if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::None) {
+        if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::Empty) {
           if (dev().info().hmmSupported_) {
             // AMD HMM path. Release reserved system memory
             dev().releaseMemory(deviceMemory_, size());
           } else {
             dev().memFree(deviceMemory_, size());
           }
-        } else if ((memFlags & amd::MemFlags::HsaSignalMemory) != amd::MemFlags::None) {
+        } else if ((memFlags & amd::MemFlags::HsaSignalMemory) != amd::MemFlags::Empty) {
           if (HSA_STATUS_SUCCESS != Hsa::signal_destroy(signal_)) {
             ClPrint(amd::LOG_ERROR, amd::LOG_MEM, "hsa_signal_destroy failed");
           }
@@ -687,7 +687,7 @@ void Buffer::destroy() {
         dev().memFree(deviceMemory_, size());
       }
     } else {
-      if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::None) {
+      if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty) {
         // unlock svm host pointer from memory pool
         if (!dev().info().hmmSupported_) {
           Hsa::memory_unlock(owner()->getSvmPtr());
@@ -719,12 +719,12 @@ void Buffer::destroy() {
       }
     } else {
       if ((memFlags & (amd::MemFlags::UseHostPtr | amd::MemFlags::AllocHostPtr |
-                       amd::MemFlags::CopyHostPtr)) == amd::MemFlags::None) {
+                       amd::MemFlags::CopyHostPtr)) == amd::MemFlags::Empty) {
         dev().memFree(deviceMemory_, size());
         if (dev().settings().apuSystem_) {
           const_cast<Device&>(dev()).updateFreeMemory(size(), true);
         }
-      } else if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::None &&
+      } else if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::Empty &&
                  (owner()->getContext().devices().size() == 1)) {
         dev().hostFree(deviceMemory_, size());
       } else if (isHostMemDirectAccess()) {
@@ -734,13 +734,13 @@ void Buffer::destroy() {
 
     if (needUnlockHostMem) {
       if ((memFlags & (amd::MemFlags::UseHostPtr | amd::MemFlags::AllocHostPtr)) !=
-          amd::MemFlags::None) {
+          amd::MemFlags::Empty) {
         if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
     }
   }
 
-  if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::None) {
+  if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty) {
     if (dev().agent_profile() == HSA_PROFILE_FULL) {
       Hsa::memory_deregister(owner()->getHostMem(), size());
     }
@@ -786,8 +786,8 @@ bool Buffer::create(bool alloc_local) {
   // Allocate backing storage in device local memory unless UHP or AHP are set
   amd::MemFlags memFlags = owner()->getMemFlags();
 
-  if ((memFlags & amd::MemFlags::PhyMem) != amd::MemFlags::None) {
-    if ((memFlags & amd::MemFlags::Interprocess) != amd::MemFlags::None) {
+  if ((memFlags & amd::MemFlags::PhyMem) != amd::MemFlags::Empty) {
+    if ((memFlags & amd::MemFlags::Interprocess) != amd::MemFlags::Empty) {
       // if interprocess flag is set, then the memory is importable.
       if (!dev().ImportShareableHSAHandle(owner()->getSvmPtr(),
                                           &owner()->getUserData().hsa_handle)) {
@@ -798,7 +798,7 @@ bool Buffer::create(bool alloc_local) {
     } else {
       owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(
           owner()->getSize(),
-          (memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::None
+          (memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::Empty
               ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG
               : 0);
     }
@@ -818,16 +818,16 @@ bool Buffer::create(bool alloc_local) {
       memFlags = memFlags | amd::MemFlags::SvmFineGrain;
     }
     const bool isFineGrain =
-        (memFlags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None;
+        (memFlags & amd::MemFlags::SvmFineGrain) != amd::MemFlags::Empty;
 
-    if (isFineGrain && (memFlags & amd::MemFlags::VaRangeAmd) == amd::MemFlags::None) {
+    if (isFineGrain && (memFlags & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
       // Use CPU direct access for the fine grain buffer
       flags_ |= HostMemoryDirectAccess;
     }
 
     if (owner()->getSvmPtr() == reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr)) {
       if (isFineGrain) {
-        if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::None) {
+        if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::Empty) {
           if (dev().info().hmmSupported_) {
             // AMD HMM path. ROCr allocates system memory and KFD will manage it
             deviceMemory_ = dev().reserveMemory(size(), amd::Os::pageSize());
@@ -843,9 +843,9 @@ bool Buffer::create(bool alloc_local) {
           } else {
             deviceMemory_ = dev().hostAlloc(size(), 1, Device::MemorySegment::kNoAtomics);
           }
-        } else if ((memFlags & amd::MemFlags::FollowUserNumaPolicy) != amd::MemFlags::None) {
+        } else if ((memFlags & amd::MemFlags::FollowUserNumaPolicy) != amd::MemFlags::Empty) {
           deviceMemory_ = dev().hostNumaAlloc(size(), 1, getHostMemorySegment(memFlags));
-        } else if ((memFlags & amd::MemFlags::HsaSignalMemory) != amd::MemFlags::None) {
+        } else if ((memFlags & amd::MemFlags::HsaSignalMemory) != amd::MemFlags::Empty) {
           // TODO: ROCr will introduce a new attribute enum that implies a non-blocking signal,
           // replace "HSA_AMD_SIGNAL_AMD_GPU_ONLY" with this new enum when it is ready.
           if (HSA_STATUS_SUCCESS != Hsa::signal_create(kInitSignalValueOne, 0, nullptr,
@@ -871,10 +871,10 @@ bool Buffer::create(bool alloc_local) {
       } else {
         assert(!isHostMemDirectAccess() && "Runtime doesn't support direct access to GPU memory!");
         amd::Device::AllocationFlags flags = {};
-        flags.atomics_ = (memFlags & amd::MemFlags::SvmAtomics) != amd::MemFlags::None;
-        flags.pseudo_fine_grain_ = (memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::None;
-        flags.contiguous_ = (memFlags & amd::MemFlags::HsaContiguous) != amd::MemFlags::None;
-        flags.uncached_ = (memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::None;
+        flags.atomics_ = (memFlags & amd::MemFlags::SvmAtomics) != amd::MemFlags::Empty;
+        flags.pseudo_fine_grain_ = (memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::Empty;
+        flags.contiguous_ = (memFlags & amd::MemFlags::HsaContiguous) != amd::MemFlags::Empty;
+        flags.uncached_ = (memFlags & amd::MemFlags::HsaUncached) != amd::MemFlags::Empty;
         deviceMemory_ = dev().deviceLocalAlloc(size(), flags);
       }
       owner()->setSvmPtr(deviceMemory_);
@@ -887,7 +887,7 @@ bool Buffer::create(bool alloc_local) {
       } else {
         kind_ = MEMORY_KIND_PTRGIVEN;
       }
-      if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::None) {
+      if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty) {
         if (dev().info().hmmSupported_) {
           // Currently HMM requires certain initial calls to mark sysmem allocation as
           // GPU accessible or prefetch memory into GPU
@@ -949,7 +949,7 @@ bool Buffer::create(bool alloc_local) {
   }
 
 #ifdef WITH_AMDGPU_PRO
-  // CL_MEM_USE_PERSISTENT_MEM_AMD (bit 6) is an AMD PRO extension not yet in amd_types.hpp.
+  // amd::MemFlags::UsePersistentMemAmd (bit 6) is an AMD PRO extension not yet in amd_types.hpp.
   if ((static_cast<uint64_t>(memFlags) & (1u << 6)) && dev().ProEna()) {
     void* host_ptr = nullptr;
     deviceMemory_ = dev().iPro().AllocDmaBuffer(dev().getBackendDevice(), size(), &host_ptr);
@@ -962,7 +962,7 @@ bool Buffer::create(bool alloc_local) {
 #endif
 
   if ((memFlags & (amd::MemFlags::UseHostPtr | amd::MemFlags::AllocHostPtr)) ==
-      amd::MemFlags::None) {
+      amd::MemFlags::Empty) {
     deviceMemory_ = dev().deviceLocalAlloc(size());
 
     if (deviceMemory_ == nullptr) {
@@ -990,12 +990,12 @@ bool Buffer::create(bool alloc_local) {
 
     // Transfer data only if OCL context has one device.
     // Cache coherency layer will update data for multiple devices
-    if (deviceMemory_ && (memFlags & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None &&
+    if (deviceMemory_ && (memFlags & amd::MemFlags::CopyHostPtr) != amd::MemFlags::Empty &&
         (owner()->getContext().devices().size() == 1)) {
       // To avoid recurssive call to Device::createMemory, we perform
       // data transfer to the view of the buffer.
       amd::Buffer* bufferView = new (owner()->getContext())
-          amd::Buffer(*owner(), 0, owner()->getOrigin(), owner()->getSize());
+          amd::Buffer(*owner(), amd::MemFlags::Empty, owner()->getOrigin(), owner()->getSize());
       bufferView->create(nullptr, false, true);
 
       roc::Buffer* devBufferView = new roc::Buffer(dev_, *bufferView);
@@ -1021,7 +1021,7 @@ bool Buffer::create(bool alloc_local) {
   if (dev().agent_profile() == HSA_PROFILE_FULL) {
     deviceMemory_ = owner()->getHostMem();
 
-    if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::None) {
+    if ((memFlags & amd::MemFlags::UseHostPtr) != amd::MemFlags::Empty) {
       Hsa::memory_register(deviceMemory_, size());
     }
 
@@ -1029,17 +1029,17 @@ bool Buffer::create(bool alloc_local) {
   }
 
   // Just one device and allocation must be done in the backend
-  if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::None &&
+  if ((memFlags & amd::MemFlags::AllocHostPtr) != amd::MemFlags::Empty &&
       (owner()->getContext().devices().size() == 1)) {
     deviceMemory_ = dev().hostAlloc(size(), 1, Device::MemorySegment::kNoAtomics);
     // Copy original data to the allocated host memory
-    if ((memFlags & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None) {
+    if ((memFlags & amd::MemFlags::CopyHostPtr) != amd::MemFlags::Empty) {
       memcpy(deviceMemory_, owner()->getHostMem(), owner()->getSize());
     }
     owner()->setHostMem(deviceMemory_);
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if ((memFlags & (amd::MemFlags::UseHostPtr | amd::MemFlags::AllocHostPtr)) !=
-        amd::MemFlags::None) {
+        amd::MemFlags::Empty) {
       deviceMemory_ =
           dev().hostLock(owner()->getHostMem(), owner()->getSize(), getHostMemorySegment(memFlags));
     } else {
@@ -1170,9 +1170,9 @@ static constexpr ChannelTypeMap kChannelTypeMapping[] = {
 
 
 static hsa_access_permission_t GetHsaAccessPermission(const amd::MemFlags flags) {
-  if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::None)
+  if ((flags & amd::MemFlags::ReadOnly) != amd::MemFlags::Empty)
     return HSA_ACCESS_PERMISSION_RO;
-  else if ((flags & amd::MemFlags::WriteOnly) != amd::MemFlags::None)
+  else if ((flags & amd::MemFlags::WriteOnly) != amd::MemFlags::Empty)
     return HSA_ACCESS_PERMISSION_WO;
   else
     return HSA_ACCESS_PERMISSION_RW;
@@ -1341,7 +1341,7 @@ bool Image::create(bool alloc_local) {
                                 ? deviceImageInfo_.size
                                 : deviceImageInfo_.size + deviceImageInfo_.alignment;
 
-  if ((owner()->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::None) {
+  if ((owner()->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::Empty) {
     originalDeviceMemory_ = dev().deviceLocalAlloc(alloc_size);
   }
 
@@ -1617,7 +1617,7 @@ bool Image::ValidateMemory() {
   amd::Image* img = owner()->asImage();
   // Create a native image without pitch for validation
   copyImageBuffer_ = new (dev().context())
-      amd::Image(dev().context(), amd::MemObjectType::Image2D, amd::MemFlags::None,
+      amd::Image(dev().context(), amd::MemObjectType::Image2D, amd::MemFlags::Empty,
                  img->getImageFormat(), img->getWidth(),
                  img->getHeight(), 1, 0, 0);
 
@@ -1632,9 +1632,9 @@ bool Image::ValidateMemory() {
 bool Image::AddView(amd::Image* image) {
   std::scoped_lock l(owner()->lockMemoryOps());
   for (auto it : view_cache_) {
-    if ((it->getImageFormat().image_channel_data_type ==
-         image->getImageFormat().image_channel_data_type) &&
-        (it->getImageFormat().image_channel_order == image->getImageFormat().image_channel_order)) {
+    if ((it->getImageFormat().channelDataType ==
+         image->getImageFormat().channelDataType) &&
+        (it->getImageFormat().channelOrder == image->getImageFormat().channelOrder)) {
       return false;
     }
   }

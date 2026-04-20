@@ -207,11 +207,26 @@ static int32_t CL_API_CALL GetVersionNumber(vdi_agent* agent, int32_t* version_r
   return CL_SUCCESS;
 }
 
+// GetPlatformHandle(): returns the AMD platform handle as void*.
+// This is used by AMD_PLATFORM in vdi_common.hpp for rocclr files that store
+// the platform as an opaque intptr_t without needing CL types.
+void* GetPlatformHandle() {
+  // PlatformIDS mimics the layout of cl_platform_id: starts with a pointer to the
+  // ICD dispatch table. Stored as void* so rocclr doesn't need cl_icd_dispatch.
+  // The dispatch pointer is set by Agent::setIcdDispatch() from the opencl layer.
+  struct PlatformIDS {
+    const void* dispatch_;  // opaque pointer to cl_icd_dispatch[]
+  };
+  static PlatformIDS platformHandle = {nullptr};
+  platformHandle.dispatch_ = Agent::icdDispatch_;
+  return static_cast<void*>(&platformHandle);
+}
+
 static int32_t CL_API_CALL GetPlatform(vdi_agent* agent, cl_platform_id* platform_id_ret) {
   if (platform_id_ret == NULL) {
     return CL_INVALID_VALUE;
   }
-  *platform_id_ret = AMD_PLATFORM;
+  *platform_id_ret = reinterpret_cast<cl_platform_id>(GetPlatformHandle());
   return CL_SUCCESS;
 }
 
@@ -251,14 +266,14 @@ static int32_t CL_API_CALL SetCapabilities(vdi_agent* agent,
 static int32_t CL_API_CALL GetICDDispatchTable(vdi_agent* agent, cl_icd_dispatch_table* table,
                                                size_t size) {
   // FIXME_lmoriche: check size
-  memcpy(table, amd::ICDDispatchedObject::icdVendorDispatch_, size);
+  memcpy(table, Agent::icdDispatch_, size);
   return CL_SUCCESS;
 }
 
 static int32_t CL_API_CALL SetICDDispatchTable(vdi_agent* agent, const cl_icd_dispatch_table* table,
                                                size_t size) {
   // FIXME_lmoriche: check size
-  memcpy(amd::ICDDispatchedObject::icdVendorDispatch_, table, size);
+  memcpy(Agent::icdDispatch_, table, size);
   return CL_SUCCESS;
 }
 
@@ -274,169 +289,174 @@ const vdi_agent Agent::entryPoints_ = {agent::GetVersionNumber,
                                        agent::GetICDDispatchTable,
                                        agent::SetICDDispatchTable};
 
-void Agent::postContextCreate(cl_context context) {
+// agent.cpp is the CL/amdocl boundary for the vdi_agent API: opaque void* handles
+// passed in from rocclr callers are cast to the appropriate cl_* types here before
+// forwarding to the vdi_agent callback functions defined in vdi_agent_amd.h.
+
+void Agent::postContextCreate(void* context) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acContextCreate_fn callback = agent->callbacks_.ContextCreate;
     if (callback != NULL && agent->canGenerateContextEvents()) {
-      callback(agent, context);
+      callback(agent, static_cast<cl_context>(context));
     }
   }
 }
 
-void Agent::postContextFree(cl_context context) {
+void Agent::postContextFree(void* context) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acContextFree_fn callback = agent->callbacks_.ContextFree;
     if (callback != NULL && agent->canGenerateContextEvents()) {
-      callback(agent, context);
+      callback(agent, static_cast<cl_context>(context));
     }
   }
 }
 
-void Agent::postCommandQueueCreate(cl_command_queue queue) {
+void Agent::postCommandQueueCreate(void* queue) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acCommandQueueCreate_fn callback = agent->callbacks_.CommandQueueCreate;
     if (callback != NULL && agent->canGenerateCommandQueueEvents()) {
-      callback(agent, queue);
+      callback(agent, static_cast<cl_command_queue>(queue));
     }
   }
 }
 
-void Agent::postCommandQueueFree(cl_command_queue queue) {
+void Agent::postCommandQueueFree(void* queue) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acCommandQueueFree_fn callback = agent->callbacks_.CommandQueueFree;
     if (callback != NULL && agent->canGenerateCommandQueueEvents()) {
-      callback(agent, queue);
+      callback(agent, static_cast<cl_command_queue>(queue));
     }
   }
 }
 
-void Agent::postEventCreate(cl_event event, cl_command_type type) {
+void Agent::postEventCreate(void* event, amd::CommandType type) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acEventCreate_fn callback = agent->callbacks_.EventCreate;
     if (callback != NULL && agent->canGenerateEventEvents()) {
-      callback(agent, event, type);
+      callback(agent, static_cast<cl_event>(event), static_cast<cl_command_type>(type));
     }
   }
 }
 
-void Agent::postEventFree(cl_event event) {
+void Agent::postEventFree(void* event) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acEventFree_fn callback = agent->callbacks_.EventFree;
     if (callback != NULL && agent->canGenerateEventEvents()) {
-      callback(agent, event);
+      callback(agent, static_cast<cl_event>(event));
     }
   }
 }
 
-void Agent::postEventStatusChanged(cl_event event, int32_t status, int64_t ts) {
+void Agent::postEventStatusChanged(void* event, int32_t status, int64_t ts) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acEventStatusChanged_fn callback = agent->callbacks_.EventStatusChanged;
     if (callback != NULL && agent->canGenerateEventEvents()) {
-      callback(agent, event, status, ts);
+      callback(agent, static_cast<cl_event>(event), status, ts);
     }
   }
 }
 
-void Agent::postMemObjectCreate(cl_mem memobj) {
+void Agent::postMemObjectCreate(void* memobj) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acMemObjectCreate_fn callback = agent->callbacks_.MemObjectCreate;
     if (callback != NULL && agent->canGenerateMemObjectEvents()) {
-      callback(agent, memobj);
+      callback(agent, static_cast<cl_mem>(memobj));
     }
   }
 }
 
-void Agent::postMemObjectFree(cl_mem memobj) {
+void Agent::postMemObjectFree(void* memobj) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acMemObjectFree_fn callback = agent->callbacks_.MemObjectFree;
     if (callback != NULL && agent->canGenerateMemObjectEvents()) {
-      callback(agent, memobj);
+      callback(agent, static_cast<cl_mem>(memobj));
     }
   }
 }
 
-void Agent::postMemObjectAcquired(cl_mem memobj, cl_device_id device, int64_t elapsed) {
+void Agent::postMemObjectAcquired(void* memobj, void* device, int64_t elapsed) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acMemObjectAcquired_fn callback = agent->callbacks_.MemObjectAcquired;
     if (callback != NULL && agent->canGenerateMemObjectEvents()) {
-      callback(agent, memobj, device, elapsed);
+      callback(agent, static_cast<cl_mem>(memobj), static_cast<cl_device_id>(device), elapsed);
     }
   }
 }
 
-void Agent::postSamplerCreate(cl_sampler sampler) {
+void Agent::postSamplerCreate(void* sampler) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acSamplerCreate_fn callback = agent->callbacks_.SamplerCreate;
     if (callback != NULL && agent->canGenerateSamplerEvents()) {
-      callback(agent, sampler);
+      callback(agent, static_cast<cl_sampler>(sampler));
     }
   }
 }
 
-void Agent::postSamplerFree(cl_sampler sampler) {
+void Agent::postSamplerFree(void* sampler) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acSamplerFree_fn callback = agent->callbacks_.SamplerFree;
     if (callback != NULL && agent->canGenerateSamplerEvents()) {
-      callback(agent, sampler);
+      callback(agent, static_cast<cl_sampler>(sampler));
     }
   }
 }
 
-void Agent::postProgramCreate(cl_program program) {
+void Agent::postProgramCreate(void* program) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acProgramCreate_fn callback = agent->callbacks_.ProgramCreate;
     if (callback != NULL && agent->canGenerateProgramEvents()) {
-      callback(agent, program);
+      callback(agent, static_cast<cl_program>(program));
     }
   }
 }
 
-void Agent::postProgramFree(cl_program program) {
+void Agent::postProgramFree(void* program) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acProgramFree_fn callback = agent->callbacks_.ProgramFree;
     if (callback != NULL && agent->canGenerateProgramEvents()) {
-      callback(agent, program);
+      callback(agent, static_cast<cl_program>(program));
     }
   }
 }
 
-void Agent::postProgramBuild(cl_program program) {
+void Agent::postProgramBuild(void* program) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acProgramBuild_fn callback = agent->callbacks_.ProgramBuild;
     if (callback != NULL && agent->canGenerateProgramEvents()) {
-      callback(agent, program);
+      callback(agent, static_cast<cl_program>(program));
     }
   }
 }
 
-void Agent::postKernelCreate(cl_kernel kernel) {
+void Agent::postKernelCreate(void* kernel) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acKernelCreate_fn callback = agent->callbacks_.KernelCreate;
     if (callback != NULL && agent->canGenerateKernelEvents()) {
-      callback(agent, kernel);
+      callback(agent, static_cast<cl_kernel>(kernel));
     }
   }
 }
 
-void Agent::postKernelFree(cl_kernel kernel) {
+void Agent::postKernelFree(void* kernel) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acKernelFree_fn callback = agent->callbacks_.KernelFree;
     if (callback != NULL && agent->canGenerateKernelEvents()) {
-      callback(agent, kernel);
+      callback(agent, static_cast<cl_kernel>(kernel));
     }
   }
 }
 
-void Agent::postKernelSetArg(cl_kernel kernel, int32_t index, size_t size, const void* value_ptr) {
+void Agent::postKernelSetArg(void* kernel, int32_t index, size_t size, const void* value_ptr) {
   for (Agent* agent = list_; agent != NULL; agent = agent->next_) {
     acKernelSetArg_fn callback = agent->callbacks_.KernelSetArg;
     if (callback != NULL && agent->canGenerateKernelEvents()) {
-      callback(agent, kernel, index, size, value_ptr);
+      callback(agent, static_cast<cl_kernel>(kernel), index, size, value_ptr);
     }
   }
 }
 
 Agent* Agent::list_ = NULL;
+void* Agent::icdDispatch_ = nullptr;
 Monitor Agent::capabilitiesLock_;
 vdi_agent_capabilities Agent::enabledCapabilities_ = {0};
 vdi_agent_capabilities Agent::potentialCapabilities_ = {0};

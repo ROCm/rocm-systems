@@ -6,6 +6,7 @@
 
 #include "cl_common.hpp"
 #include "vdi_common.hpp"
+#include "platform/agent.hpp"
 #ifdef _WIN32
 #include <d3d10_1.h>
 #include "cl_d3d9_amd.hpp"
@@ -107,6 +108,13 @@ cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {
      clSetDefaultDeviceCommandQueue,
 
      clSetProgramReleaseCallback, clSetProgramSpecializationConstant}};
+
+// Register the ICD dispatch table pointer with the Agent subsystem so rocclr
+// code (agent.cpp) can access it without depending on CL types.
+static const bool icdDispatchRegistered = [] {
+  amd::Agent::icdDispatch_ = amd::ICDDispatchedObject::icdVendorDispatch_;
+  return true;
+}();
 
 CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint num_entries,
                                                        cl_platform_id* platforms,

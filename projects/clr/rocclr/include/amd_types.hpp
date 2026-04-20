@@ -19,6 +19,10 @@ enum class DeviceType : uint64_t {
 inline DeviceType operator|(DeviceType a, DeviceType b) {
   return static_cast<DeviceType>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
 }
+inline DeviceType& operator|=(DeviceType& a, DeviceType b) {
+  a = a | b;
+  return a;
+}
 inline DeviceType operator&(DeviceType a, DeviceType b) {
   return static_cast<DeviceType>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
 }
@@ -45,6 +49,9 @@ inline FpConfig operator&(FpConfig a, FpConfig b) {
 }
 inline FpConfig operator~(FpConfig a) {
   return static_cast<FpConfig>(~static_cast<uint64_t>(a));
+}
+inline bool operator!(FpConfig a) {
+  return static_cast<uint64_t>(a) == 0;
 }
 
 // Replaces cl_device_mem_cache_type (cl_uint)
@@ -92,6 +99,9 @@ inline SvmCapabilities operator&(SvmCapabilities a, SvmCapabilities b) {
 inline SvmCapabilities operator~(SvmCapabilities a) {
   return static_cast<SvmCapabilities>(~static_cast<uint64_t>(a));
 }
+inline bool operator!(SvmCapabilities a) {
+  return static_cast<uint64_t>(a) == 0;
+}
 
 // Replaces cl_command_queue_properties (cl_bitfield = uint64_t)
 enum class QueueProperties : uint64_t {
@@ -110,11 +120,19 @@ inline QueueProperties operator&(QueueProperties a, QueueProperties b) {
 inline QueueProperties operator~(QueueProperties a) {
   return static_cast<QueueProperties>(~static_cast<uint64_t>(a));
 }
+inline QueueProperties& operator|=(QueueProperties& a, QueueProperties b) {
+  a = a | b;
+  return a;
+}
+inline QueueProperties& operator&=(QueueProperties& a, QueueProperties b) {
+  a = a & b;
+  return a;
+}
 
 // Replaces cl_mem_flags / cl_svm_mem_flags (cl_bitfield = uint64_t)
 // Upper bits are rocclr-internal extensions (no CL equivalent).
 enum class MemFlags : uint64_t {
-  None               = 0,          // no flags set
+  Empty              = 0,          // no flags set (avoid X11 "None" macro collision)
   // Standard CL_MEM_* flags
   ReadWrite          = (1u << 0),  // CL_MEM_READ_WRITE
   WriteOnly          = (1u << 1),  // CL_MEM_WRITE_ONLY
@@ -122,7 +140,7 @@ enum class MemFlags : uint64_t {
   UseHostPtr         = (1u << 3),  // CL_MEM_USE_HOST_PTR
   AllocHostPtr       = (1u << 4),  // CL_MEM_ALLOC_HOST_PTR
   CopyHostPtr        = (1u << 5),  // CL_MEM_COPY_HOST_PTR
-  // bit 6 unused in CL spec
+  UsePersistentMemAmd = (1u << 6), // CL_MEM_USE_PERSISTENT_MEM_AMD (AMD extension)
   HostWriteOnly      = (1u << 7),  // CL_MEM_HOST_WRITE_ONLY
   HostReadOnly       = (1u << 8),  // CL_MEM_HOST_READ_ONLY
   HostNoAccess       = (1u << 9),  // CL_MEM_HOST_NO_ACCESS
@@ -148,6 +166,14 @@ inline MemFlags operator&(MemFlags a, MemFlags b) {
 }
 inline MemFlags operator~(MemFlags a) {
   return static_cast<MemFlags>(~static_cast<uint64_t>(a));
+}
+inline MemFlags& operator|=(MemFlags& a, MemFlags b) {
+  a = a | b;
+  return a;
+}
+inline MemFlags& operator&=(MemFlags& a, MemFlags b) {
+  a = a & b;
+  return a;
 }
 
 // Replaces cl_gl_object_type (cl_uint) from CL/cl_gl.h
@@ -296,6 +322,15 @@ enum class Status : int32_t {
   MaxSizeRestrictionExceeded      = -72, // CL_MAX_SIZE_RESTRICTION_EXCEEDED
 };
 
+// Replaces cl_build_status (cl_int)
+// Values match CL_BUILD_* constants from cl.h.
+enum class BuildStatus : int32_t {
+  Success    =  0, // CL_BUILD_SUCCESS
+  BuildNone  = -1, // CL_BUILD_NONE
+  BuildError = -2, // CL_BUILD_ERROR
+  InProgress = -3, // CL_BUILD_IN_PROGRESS
+};
+
 // Replaces cl_command_type (cl_uint)
 enum class CommandType : uint32_t {
   NdRangeKernel      = 0x11F0, // CL_COMMAND_NDRANGE_KERNEL
@@ -394,7 +429,7 @@ enum class KernelArgAccessQualifier : uint32_t {
   ReadOnly  = 0x11A0, // CL_KERNEL_ARG_ACCESS_READ_ONLY
   WriteOnly = 0x11A1, // CL_KERNEL_ARG_ACCESS_WRITE_ONLY
   ReadWrite = 0x11A2, // CL_KERNEL_ARG_ACCESS_READ_WRITE
-  None      = 0x11A3, // CL_KERNEL_ARG_ACCESS_NONE
+  NoAccess  = 0x11A3, // CL_KERNEL_ARG_ACCESS_NONE (avoid X11 "None" macro collision)
 };
 
 // Replaces cl_kernel_arg_type_qualifier (cl_bitfield = uint64_t)
@@ -493,11 +528,28 @@ enum class FilterMode : uint32_t {
 
 // Replaces CL_ADDRESS_* constants (cl_addressing_mode = cl_uint = uint32_t)
 enum class AddressingMode : uint32_t {
-  None           = 0x1130, // CL_ADDRESS_NONE
+  NoAddressing   = 0x1130, // CL_ADDRESS_NONE
   ClampToEdge    = 0x1131, // CL_ADDRESS_CLAMP_TO_EDGE
   Clamp          = 0x1132, // CL_ADDRESS_CLAMP
   Repeat         = 0x1133, // CL_ADDRESS_REPEAT
   MirroredRepeat = 0x1134, // CL_ADDRESS_MIRRORED_REPEAT
+};
+
+// Bus address pair for the cl_amd_bus_addressable_memory extension.
+// Equivalent to cl_bus_address_amd { cl_ulong surface_bus_address; cl_ulong marker_bus_address; }.
+struct BusAddress {
+  uint64_t surface_bus_address;
+  uint64_t marker_bus_address;
+};
+
+// Replaces CL_PERFCOUNTER_* constants from cl_profile_amd.h (cl_perfcounter_info = cl_uint).
+enum class PerfCounterInfo : uint32_t {
+  None           = 0x0, // CL_PERFCOUNTER_NONE
+  ReferenceCount = 0x1, // CL_PERFCOUNTER_REFERENCE_COUNT
+  Data           = 0x2, // CL_PERFCOUNTER_DATA
+  GpuBlockIndex  = 0x3, // CL_PERFCOUNTER_GPU_BLOCK_INDEX
+  GpuCounterIndex = 0x4, // CL_PERFCOUNTER_GPU_COUNTER_INDEX
+  GpuEventIndex  = 0x5, // CL_PERFCOUNTER_GPU_EVENT_INDEX
 };
 
 }  // namespace amd

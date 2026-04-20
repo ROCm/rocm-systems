@@ -138,8 +138,8 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     }
   }
 
-  if (Agent::shouldPostEventEvents() && command().type() != 0) {
-    Agent::postEventStatusChanged(as_cl(this), status, timeStamp + Os::offsetToEpochNanos());
+  if (Agent::shouldPostEventEvents() && static_cast<uint32_t>(command().type()) != 0) {
+    Agent::postEventStatusChanged(static_cast<void*>(this), status, timeStamp + Os::offsetToEpochNanos());
   }
 
   if (status <= 0) {
@@ -204,7 +204,7 @@ bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* 
   // Check if the event has already reached 'status'
   if (this->status() <= status && entry->callback_ != CallBackFunction(0)) {
     if (entry->callback_.exchange(NULL) != NULL) {
-      callback(as_cl(this), status, entry->data_);
+      callback(static_cast<void*>(this), status, entry->data_);
     }
   }
 
@@ -213,7 +213,7 @@ bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* 
 
 // ================================================================================================
 void Event::processCallbacks(int32_t status) const {
-  void* event = as_cl(this);  // passed as opaque handle to user callbacks
+  void* event = static_cast<void*>(const_cast<Event*>(this));  // passed as opaque handle to user callbacks
   const int32_t mask = (status > 0) ? status : 0;  // 0 = Complete
 
   // For_each callback:
@@ -357,8 +357,7 @@ void Command::enqueue() {
   assert(queue_ != NULL && "Cannot be enqueued");
 
   if (Agent::shouldPostEventEvents() && type_ != static_cast<amd::CommandType>(0)) {
-    Agent::postEventCreate(as_cl(static_cast<Event*>(this)),
-                           static_cast<cl_command_type>(type_));
+    Agent::postEventCreate(static_cast<void*>(static_cast<Event*>(this)), type_);
   }
 
   ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) enqueued: %p to queue: %p",
@@ -481,7 +480,7 @@ NativeFnCommand::NativeFnCommand(HostQueue& queue, const EventWaitList& eventWai
   memObjects_.resize(numMemObjs);
   memOffsets_.resize(numMemObjs);
   for (size_t i = 0; i < numMemObjs; ++i) {
-    Memory* obj = static_cast<Memory*>(memObjs[i]);
+    Memory* obj = static_cast<Memory*>(const_cast<void*>(memObjs[i]));
 
     obj->retain();
     memObjects_[i] = obj;

@@ -184,11 +184,11 @@ bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
   if (!Init(kind) || !GetInfo(info, kind, display, context))
     return false;
 
-  const auto& pcie = device->info().deviceTopology_.pcie;
+  const auto& topo = device->info().deviceTopology_;
   const auto& dev_info = device->info();
-  return pcie.bus == info.pci_bus &&
-         pcie.device == info.pci_device &&
-         pcie.function == info.pci_function &&
+  return topo.bus == info.pci_bus &&
+         topo.device == info.pci_device &&
+         topo.function == info.pci_function &&
          dev_info.vendorId_ == info.vendor_id &&
          dev_info.pcieDeviceId_ == info.device_id;
 }

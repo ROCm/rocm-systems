@@ -105,13 +105,13 @@ bool VirtualDevice::ActiveWait() const { return device_().ActiveWait(); }
 
 }  // namespace amd::device
 
-static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessNone) ==
+static_assert(static_cast<uint32_t>(amd::device::Memory::MemAccess::kMemAccessNone) ==
                   static_cast<uint32_t>(amd::Device::VmmAccess::kNone),
               "Mem Access Flag None mismatch between Device and Memory!");
-static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessRead) ==
+static_assert(static_cast<uint32_t>(amd::device::Memory::MemAccess::kMemAccessRead) ==
                   static_cast<uint32_t>(amd::Device::VmmAccess::kReadOnly),
               "Mem Access Flag Read mismatch between Device and Memory!");
-static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWrite) ==
+static_assert(static_cast<uint32_t>(amd::device::Memory::MemAccess::kMemAccessReadWrite) ==
                   static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite),
               "Mem Access Flag Read Write mismatch between Device and Memory!");
 
@@ -380,7 +380,7 @@ Context* Device::glb_ctx_ = nullptr;
 std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
-cl_int Device::gpu_error_ = CL_SUCCESS;
+int Device::gpu_error_ = 0;
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
@@ -479,9 +479,9 @@ void MemObjMap::Purge(amd::Device* dev) {
     std::unique_lock lock(AllocatedLock_);
     for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
       amd::Memory* memObj = it->second;
-      unsigned int flags = memObj->getMemFlags();
+      amd::MemFlags flags = memObj->getMemFlags();
       const std::vector<Device*>& devices = memObj->getContext().devices();
-      if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
+      if (devices.size() == 1 && devices[0] == dev && (flags & amd::MemFlags::InternalMemory) == amd::MemFlags::Empty) {
         toRelease.push_back(memObj);
         it = MemObjMap_.erase(it);
       } else {
@@ -595,7 +595,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
   constexpr bool kSkipAlloc = false;
 
   if (parent) {
-    vaddr_base_obj = new (GlbCtx()) amd::Buffer(GlbCtx(), CL_MEM_VA_RANGE_AMD, size, vptr);
+    vaddr_base_obj = new (GlbCtx()) amd::Buffer(GlbCtx(), amd::MemFlags::VaRangeAmd, size, vptr);
     if (vaddr_base_obj == nullptr) {
       LogError("failed to new a va range curr_mem_obj object!");
       return nullptr;
@@ -616,12 +616,12 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
       LogPrintfError("Cannot find entry in VirtualMemObjMap: %p ", vptr);
       return nullptr;
     }
-    assert(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD);
+    assert(vaddr_base_obj->getMemFlags() & amd::MemFlags::VaRangeAmd);
 
     size_t offset =
         (reinterpret_cast<address>(vptr) - reinterpret_cast<address>(vaddr_base_obj->getSvmPtr()));
     vaddr_sub_obj =
-        new (device_context) amd::Buffer(device_context, CL_MEM_VA_RANGE_AMD, size, vptr);
+        new (device_context) amd::Buffer(device_context, amd::MemFlags::VaRangeAmd, size, vptr);
     vaddr_sub_obj->SetParent(vaddr_base_obj);
     vaddr_sub_obj->setOrigin(offset);
 
@@ -680,8 +680,9 @@ Device::BlitProgram::~BlitProgram() {
 
 bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKernels,
                                  const std::string& extraOptions) {
-  std::vector<amd::Device*> devices{device};
-  int32_t retval = CL_SUCCESS;
+  std::vector<amd::Device*> devices;
+  devices.push_back(device);
+  int32_t retval = 0;
   std::string kernels(device::BlitLinearSourceCode);
   std::string image_kernels(device::BlitImageSourceCode);
 
@@ -718,7 +719,7 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
 #endif
 #endif
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
-      CL_SUCCESS) {
+      0) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
              "Build failed for Kernel: %s with error code %d", kernels.c_str(), retval);
     return false;
@@ -1089,7 +1090,7 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   }
 
   // VMM allocations must use hipMemExportToShareableHandle for IPC.
-  if (amd_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+  if ((amd_mem_obj->getMemFlags() & amd::MemFlags::VaRangeAmd) != amd::MemFlags::Empty) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
              "IPC is not supported for VMM allocations (dev_ptr: %p)", dev_ptr);
     return false;
@@ -1131,7 +1132,7 @@ bool Device::IpcAttach(const char* handle, size_t mem_size, size_t mem_offset, u
   amd::Memory* amd_mem_obj = nullptr;
 
   // Create an amd Memory object for the handle
-  amd_mem_obj = new (context()) amd::IpcBuffer(context(), flags, mem_offset, mem_size, handle);
+  amd_mem_obj = new (context()) amd::IpcBuffer(context(), static_cast<amd::MemFlags>(flags), mem_offset, mem_size, handle);
   if (amd_mem_obj == nullptr) {
     LogError("failed to create a mem object!");
     return false;
@@ -1263,7 +1264,7 @@ amd::Memory* Device::FindDevMemObj(const void* k, size_t* offset) const {
 
   --it;
   amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+  size_t mem_size = (mem->getMemFlags() & amd::MemFlags::PhyMem) != amd::MemFlags::Empty
                         ? sizeof(mem->getUserData().hsa_handle)
                         : mem->getSize();
   if (key >= it->first && key < (it->first + mem_size)) {

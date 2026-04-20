@@ -1207,17 +1207,17 @@ struct FormatConvertion {
 
 // The list of rejected data formats and corresponding conversion
 static constexpr FormatConvertion RejectedData[] = {
-    {CL_UNORM_INT8, CL_UNSIGNED_INT8},       {CL_UNORM_INT16, CL_UNSIGNED_INT16},
-    {CL_SNORM_INT8, CL_UNSIGNED_INT8},       {CL_SNORM_INT16, CL_UNSIGNED_INT16},
-    {CL_HALF_FLOAT, CL_UNSIGNED_INT16},      {CL_FLOAT, CL_UNSIGNED_INT32},
-    {CL_SIGNED_INT8, CL_UNSIGNED_INT8},      {CL_SIGNED_INT16, CL_UNSIGNED_INT16},
-    {CL_UNORM_INT_101010, CL_UNSIGNED_INT8}, {CL_SIGNED_INT32, CL_UNSIGNED_INT32}};
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormInt8), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt8)},       {static_cast<uint32_t>(amd::ChannelDataType::UNormInt16), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt16)},
+    {static_cast<uint32_t>(amd::ChannelDataType::SNormInt8), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt8)},       {static_cast<uint32_t>(amd::ChannelDataType::SNormInt16), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt16)},
+    {static_cast<uint32_t>(amd::ChannelDataType::HalfFloat), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt16)},      {static_cast<uint32_t>(amd::ChannelDataType::Float), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt32)},
+    {static_cast<uint32_t>(amd::ChannelDataType::SignedInt8), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt8)},      {static_cast<uint32_t>(amd::ChannelDataType::SignedInt16), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt16)},
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormInt101010), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt8)}, {static_cast<uint32_t>(amd::ChannelDataType::SignedInt32), static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt32)}};
 
 // The list of rejected channel's order and corresponding conversion
 static constexpr FormatConvertion RejectedOrder[] = {
-    {CL_A, CL_R},        {CL_RA, CL_RG},      {CL_LUMINANCE, CL_R}, {CL_INTENSITY, CL_R},
-    {CL_RGB, CL_RGBA},   {CL_BGRA, CL_RGBA},  {CL_ARGB, CL_RGBA},   {CL_sRGB, CL_RGBA},
-    {CL_sRGBx, CL_RGBA}, {CL_sRGBA, CL_RGBA}, {CL_sBGRA, CL_RGBA},  {CL_DEPTH, CL_R}};
+    {static_cast<uint32_t>(amd::ChannelOrder::A), static_cast<uint32_t>(amd::ChannelOrder::R)},        {static_cast<uint32_t>(amd::ChannelOrder::RA), static_cast<uint32_t>(amd::ChannelOrder::RG)},      {static_cast<uint32_t>(amd::ChannelOrder::Luminance), static_cast<uint32_t>(amd::ChannelOrder::R)}, {static_cast<uint32_t>(amd::ChannelOrder::Intensity), static_cast<uint32_t>(amd::ChannelOrder::R)},
+    {static_cast<uint32_t>(amd::ChannelOrder::RGB), static_cast<uint32_t>(amd::ChannelOrder::RGBA)},   {static_cast<uint32_t>(amd::ChannelOrder::BGRA), static_cast<uint32_t>(amd::ChannelOrder::RGBA)},  {static_cast<uint32_t>(amd::ChannelOrder::ARGB), static_cast<uint32_t>(amd::ChannelOrder::RGBA)},   {static_cast<uint32_t>(amd::ChannelOrder::sRGB), static_cast<uint32_t>(amd::ChannelOrder::RGBA)},
+    {static_cast<uint32_t>(amd::ChannelOrder::sRGBx), static_cast<uint32_t>(amd::ChannelOrder::RGBA)}, {static_cast<uint32_t>(amd::ChannelOrder::sRGBA), static_cast<uint32_t>(amd::ChannelOrder::RGBA)}, {static_cast<uint32_t>(amd::ChannelOrder::sBGRA), static_cast<uint32_t>(amd::ChannelOrder::RGBA)},  {static_cast<uint32_t>(amd::ChannelOrder::Depth), static_cast<uint32_t>(amd::ChannelOrder::R)}};
 
 const uint RejectedFormatDataTotal = sizeof(RejectedData) / sizeof(FormatConvertion);
 const uint RejectedFormatChannelTotal = sizeof(RejectedOrder) / sizeof(FormatConvertion);
@@ -1273,7 +1273,7 @@ void CalcRowSlicePitches(uint64_t* pitch, const int32_t* copySize, size_t rowPit
                          size_t slicePitch, const Memory& mem) {
   amd::Image* image = static_cast<amd::Image*>(mem.owner());
   uint32_t memFmtSize = image->getImageFormat().getElementSize();
-  bool img1Darray = (mem.owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? true : false;
+  bool img1Darray = (mem.owner()->getType() == amd::MemObjectType::Image1DArray) ? true : false;
 
   if (rowPitch == 0) {
     pitch[0] = copySize[0];
@@ -1307,12 +1307,12 @@ bool KernelBlitManager::copyBufferToImageKernel(
   amd::Image* srcImage = static_cast<amd::Image*>(srcMemory.owner());
   amd::Image::Format newFormat(dstImage->getImageFormat());
   bool swapLayer =
-      (dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
+      (dstImage->getType() == amd::MemObjectType::Image1DArray) && (dev().isa().versionMajor() >= 10);
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
-    if (RejectedData[i].clOldType_ == newFormat.image_channel_data_type) {
-      newFormat.image_channel_data_type = RejectedData[i].clNewType_;
+    if (RejectedData[i].clOldType_ == static_cast<uint32_t>(newFormat.channelDataType)) {
+      newFormat.channelDataType = static_cast<amd::ChannelDataType>(RejectedData[i].clNewType_);
       rejected = true;
       break;
     }
@@ -1320,8 +1320,8 @@ bool KernelBlitManager::copyBufferToImageKernel(
 
   // Find unsupported channel's order
   for (uint i = 0; i < RejectedFormatChannelTotal; ++i) {
-    if (RejectedOrder[i].clOldType_ == newFormat.image_channel_order) {
-      newFormat.image_channel_order = RejectedOrder[i].clNewType_;
+    if (RejectedOrder[i].clOldType_ == static_cast<uint32_t>(newFormat.channelOrder)) {
+      newFormat.channelOrder = static_cast<amd::ChannelOrder>(RejectedOrder[i].clNewType_);
       rejected = true;
       break;
     }
@@ -1330,8 +1330,8 @@ bool KernelBlitManager::copyBufferToImageKernel(
   // If the image format was rejected, then attempt to create a view
   if (rejected &&
       // todo ROC runtime has a problem with a view for this format
-      (dstImage->getImageFormat().image_channel_data_type != CL_UNORM_INT_101010)) {
-    dstView = createView(gpuMem(dstMemory), newFormat, CL_MEM_WRITE_ONLY);
+      (dstImage->getImageFormat().channelDataType != amd::ChannelDataType::UNormInt101010)) {
+    dstView = createView(gpuMem(dstMemory), newFormat, amd::MemFlags::WriteOnly);
     if (dstView != nullptr) {
       rejected = false;
     }
@@ -1381,10 +1381,10 @@ bool KernelBlitManager::copyBufferToImageKernel(
   }
 
   // Program kernels arguments for the blit operation
-  cl_mem mem = as_cl<amd::Memory>(srcMemory.owner());
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
-  mem = as_cl<amd::Memory>(dstView->owner());
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  amd::Memory* mem = srcMemory.owner();
+  setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), &mem);
+  mem = dstView->owner();
+  setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), &mem);
   uint32_t memFmtSize = dstImage->getImageFormat().getElementSize();
   uint32_t components = dstImage->getImageFormat().getNumChannels();
 
@@ -1494,12 +1494,12 @@ bool KernelBlitManager::copyImageToBufferKernel(
   amd::Image* srcImage = static_cast<amd::Image*>(srcMemory.owner());
   amd::Image::Format newFormat(srcImage->getImageFormat());
   bool swapLayer =
-      (srcImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
+      (srcImage->getType() == amd::MemObjectType::Image1DArray) && (dev().isa().versionMajor() >= 10);
 
   // Find unsupported formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
-    if (RejectedData[i].clOldType_ == newFormat.image_channel_data_type) {
-      newFormat.image_channel_data_type = RejectedData[i].clNewType_;
+    if (RejectedData[i].clOldType_ == static_cast<uint32_t>(newFormat.channelDataType)) {
+      newFormat.channelDataType = static_cast<amd::ChannelDataType>(RejectedData[i].clNewType_);
       rejected = true;
       break;
     }
@@ -1507,8 +1507,8 @@ bool KernelBlitManager::copyImageToBufferKernel(
 
   // Find unsupported channel's order
   for (uint i = 0; i < RejectedFormatChannelTotal; ++i) {
-    if (RejectedOrder[i].clOldType_ == newFormat.image_channel_order) {
-      newFormat.image_channel_order = RejectedOrder[i].clNewType_;
+    if (RejectedOrder[i].clOldType_ == static_cast<uint32_t>(newFormat.channelOrder)) {
+      newFormat.channelOrder = static_cast<amd::ChannelOrder>(RejectedOrder[i].clNewType_);
       rejected = true;
       break;
     }
@@ -1517,8 +1517,8 @@ bool KernelBlitManager::copyImageToBufferKernel(
   // If the image format was rejected, then attempt to create a view
   if (rejected &&
       // todo ROC runtime has a problem with a view for this format
-      (srcImage->getImageFormat().image_channel_data_type != CL_UNORM_INT_101010)) {
-    srcView = createView(gpuMem(srcMemory), newFormat, CL_MEM_READ_ONLY);
+      (srcImage->getImageFormat().channelDataType != amd::ChannelDataType::UNormInt101010)) {
+    srcView = createView(gpuMem(srcMemory), newFormat, amd::MemFlags::ReadOnly);
     if (srcView != nullptr) {
       rejected = false;
     }
@@ -1568,16 +1568,16 @@ bool KernelBlitManager::copyImageToBufferKernel(
   }
 
   // Program kernels arguments for the blit operation
-  cl_mem mem = as_cl<amd::Memory>(srcView->owner());
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
-  mem = as_cl<amd::Memory>(dstMemory.owner());
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  amd::Memory* mem = srcView->owner();
+  setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), &mem);
+  mem = dstMemory.owner();
+  setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), &mem);
 
   // Update extra paramters for USHORT and UBYTE pointers.
   // Only then compiler can optimize the kernel to use
   // UAV Raw for other writes
-  setArgument(kernels_[blitType], 2, sizeof(cl_mem), &mem);
-  setArgument(kernels_[blitType], 3, sizeof(cl_mem), &mem);
+  setArgument(kernels_[blitType], 2, sizeof(amd::Memory*), &mem);
+  setArgument(kernels_[blitType], 3, sizeof(amd::Memory*), &mem);
 
   int32_t srcOrg[4] = {(int32_t)srcOrigin[0], (int32_t)srcOrigin[1], (int32_t)srcOrigin[2], 0};
   int32_t copySize[4] = {(int32_t)size[0], (int32_t)size[1], (int32_t)size[2], 0};
@@ -1644,8 +1644,8 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
   bool srcRejected = false, dstRejected = false;
   // Find unsupported source formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
-    if (RejectedData[i].clOldType_ == srcFormat.image_channel_data_type) {
-      srcFormat.image_channel_data_type = RejectedData[i].clNewType_;
+    if (RejectedData[i].clOldType_ == static_cast<uint32_t>(srcFormat.channelDataType)) {
+      srcFormat.channelDataType = static_cast<amd::ChannelDataType>(RejectedData[i].clNewType_);
       srcRejected = true;
       break;
     }
@@ -1655,8 +1655,8 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
   // Note: Image blit is independent from the channel order
   if (srcRejected) {
     for (uint i = 0; i < RejectedFormatChannelTotal; ++i) {
-      if (RejectedOrder[i].clOldType_ == srcFormat.image_channel_order) {
-        srcFormat.image_channel_order = RejectedOrder[i].clNewType_;
+      if (RejectedOrder[i].clOldType_ == static_cast<uint32_t>(srcFormat.channelOrder)) {
+        srcFormat.channelOrder = static_cast<amd::ChannelOrder>(RejectedOrder[i].clNewType_);
         srcRejected = true;
         break;
       }
@@ -1665,8 +1665,8 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   // Find unsupported destination formats
   for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
-    if (RejectedData[i].clOldType_ == dstFormat.image_channel_data_type) {
-      dstFormat.image_channel_data_type = RejectedData[i].clNewType_;
+    if (RejectedData[i].clOldType_ == static_cast<uint32_t>(dstFormat.channelDataType)) {
+      dstFormat.channelDataType = static_cast<amd::ChannelDataType>(RejectedData[i].clNewType_);
       dstRejected = true;
       break;
     }
@@ -1676,30 +1676,30 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
   // Note: Image blit is independent from the channel order
   if (dstRejected) {
     for (uint i = 0; i < RejectedFormatChannelTotal; ++i) {
-      if (RejectedOrder[i].clOldType_ == dstFormat.image_channel_order) {
-        dstFormat.image_channel_order = RejectedOrder[i].clNewType_;
+      if (RejectedOrder[i].clOldType_ == static_cast<uint32_t>(dstFormat.channelOrder)) {
+        dstFormat.channelOrder = static_cast<amd::ChannelOrder>(RejectedOrder[i].clNewType_);
         break;
       }
     }
   }
 
-  if (srcFormat.image_channel_order != dstFormat.image_channel_order ||
-      srcFormat.image_channel_data_type != dstFormat.image_channel_data_type) {
+  if (srcFormat.channelOrder != dstFormat.channelOrder ||
+      srcFormat.channelDataType != dstFormat.channelDataType) {
     // Give hint if any related test fails
     LogPrintfInfo("srcFormat(order=0x%xh, type=0x%xh) != dstFormat(order=0x%xh, type=0x%xh)",
-                  srcFormat.image_channel_order, srcFormat.image_channel_data_type,
-                  dstFormat.image_channel_order, dstFormat.image_channel_data_type);
+                  srcFormat.channelOrder, srcFormat.channelDataType,
+                  dstFormat.channelOrder, dstFormat.channelDataType);
   }
   // Attempt to create a view if the format was rejected
   if (srcRejected) {
-    srcView = createView(gpuMem(srcMemory), srcFormat, CL_MEM_READ_ONLY);
+    srcView = createView(gpuMem(srcMemory), srcFormat, amd::MemFlags::ReadOnly);
     if (srcView != nullptr) {
       srcRejected = false;
     }
   }
 
   if (dstRejected) {
-    dstView = createView(gpuMem(dstMemory), dstFormat, CL_MEM_WRITE_ONLY);
+    dstView = createView(gpuMem(dstMemory), dstFormat, amd::MemFlags::WriteOnly);
     if (dstView != nullptr) {
       dstRejected = false;
     }
@@ -1743,27 +1743,27 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
 
   // The current OpenCL spec allows "copy images from a 1D image
   // array object to a 1D image array object" only.
-  if ((gpuMem(srcMemory).owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) ||
-      (gpuMem(dstMemory).owner()->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY)) {
+  if ((gpuMem(srcMemory).owner()->getType() == amd::MemObjectType::Image1DArray) ||
+      (gpuMem(dstMemory).owner()->getType() == amd::MemObjectType::Image1DArray)) {
     blitType = BlitCopyImage1DA;
   }
 
   // Program kernels arguments for the blit operation
-  cl_mem mem = as_cl<amd::Memory>(srcView->owner());
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
-  mem = as_cl<amd::Memory>(dstView->owner());
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  amd::Memory* mem = srcView->owner();
+  setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), &mem);
+  mem = dstView->owner();
+  setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), &mem);
 
   // Program source origin
   int32_t srcOrg[4] = {(int32_t)srcOrigin[0], (int32_t)srcOrigin[1], (int32_t)srcOrigin[2], 0};
-  if ((srcImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10)) {
+  if ((srcImage->getType() == amd::MemObjectType::Image1DArray) && (dev().isa().versionMajor() >= 10)) {
     srcOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 2, sizeof(srcOrg), srcOrg);
 
   // Program destinaiton origin
   int32_t dstOrg[4] = {(int32_t)dstOrigin[0], (int32_t)dstOrigin[1], (int32_t)dstOrigin[2], 0};
-  if ((dstImage->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10)) {
+  if ((dstImage->getType() == amd::MemObjectType::Image1DArray) && (dev().isa().versionMajor() >= 10)) {
     dstOrg[3] = 1;
   }
   setArgument(kernels_[blitType], 3, sizeof(dstOrg), dstOrg);
@@ -1802,7 +1802,7 @@ void FindPinSize(size_t& pinSize, const amd::Coord3D& size, size_t& rowPitch, si
       if ((slicePitch == 0) || (slicePitch == pinSize)) {
         slicePitch = 0;
       } else {
-        if (mem.owner()->getType() != CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+        if (mem.owner()->getType() != amd::MemObjectType::Image1DArray) {
           pinSize = slicePitch;
         } else {
           pinSize = slicePitch * size[i];
@@ -2011,10 +2011,10 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
 
 
   // Program kernels arguments for the blit operation
-  cl_mem mem = as_cl<amd::Memory>(srcMemory.owner());
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
-  mem = as_cl<amd::Memory>(dstMemory.owner());
-  setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
+  amd::Memory* mem = srcMemory.owner();
+  setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), &mem);
+  mem = dstMemory.owner();
+  setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), &mem);
   uint64_t src[4] = {srcRect.rowPitch_, srcRect.slicePitch_, srcRect.start_, 0};
   setArgument(kernels_[blitType], 2, sizeof(src), src);
   uint64_t dst[4] = {dstRect.rowPitch_, dstRect.slicePitch_, dstRect.start_, 0};
@@ -2033,10 +2033,10 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   if (amd::IS_HIP) {
     // Update the command type for ROC profiler
     if (srcMemory.isHostMemDirectAccess()) {
-      gpu().SetCopyCommandType(CL_COMMAND_WRITE_BUFFER_RECT);
+      gpu().SetCopyCommandType(amd::CommandType::WriteBufferRect);
     }
     if (dstMemory.isHostMemDirectAccess()) {
-      gpu().SetCopyCommandType(CL_COMMAND_READ_BUFFER_RECT);
+      gpu().SetCopyCommandType(amd::CommandType::ReadBufferRect);
     }
   }
 
@@ -2382,8 +2382,8 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
                            : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
                                                         : sizeof(uint8_t);
       // Program kernels arguments for the fill operation
-      cl_mem mem = as_cl<amd::Memory>(memory.owner());
-      setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
+      amd::Memory* mem = memory.owner();
+      setArgument(kernels_[kFillType], 0, sizeof(amd::Memory*), &mem, koffset);
       const size_t localWorkSize = 256;
       size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, kfill_size);
       globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
@@ -2401,7 +2401,7 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
         memcpy(constBuf, pattern, kpattern_size);
       }
       constexpr bool kDirectVa = true;
-      setArgument(kernels_[kFillType], 1, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
+      setArgument(kernels_[kFillType], 1, sizeof(amd::Memory*), constBuf, 0, nullptr, kDirectVa);
 
       // Adjust the pattern size in the copy type size
       kpattern_size /= alignment;
@@ -2460,27 +2460,27 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
                          : (patternSize & 0x1) == 0 ? sizeof(uint16_t)
                                                     : sizeof(uint8_t);
 
-    cl_mem mem = as_cl<amd::Memory>(memory.owner());
+    amd::Memory* mem = memory.owner();
     if (alignment == sizeof(uint64_t)) {
-      setArgument(kernels_[fillType], 0, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 1, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 2, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 3, sizeof(cl_mem), &mem);
+      setArgument(kernels_[fillType], 0, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 1, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 2, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 3, sizeof(amd::Memory*), &mem);
     } else if (alignment == sizeof(uint32_t)) {
-      setArgument(kernels_[fillType], 0, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 1, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 2, sizeof(cl_mem), &mem);
-      setArgument(kernels_[fillType], 3, sizeof(cl_mem), nullptr);
+      setArgument(kernels_[fillType], 0, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 1, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 2, sizeof(amd::Memory*), &mem);
+      setArgument(kernels_[fillType], 3, sizeof(amd::Memory*), nullptr);
     } else if (alignment == sizeof(uint16_t)) {
-      setArgument(kernels_[fillType], 0, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 1, sizeof(cl_mem), &mem);
-      setArgument(kernels_[fillType], 2, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 3, sizeof(cl_mem), nullptr);
+      setArgument(kernels_[fillType], 0, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 1, sizeof(amd::Memory*), &mem);
+      setArgument(kernels_[fillType], 2, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 3, sizeof(amd::Memory*), nullptr);
     } else {
-      setArgument(kernels_[fillType], 0, sizeof(cl_mem), &mem);
-      setArgument(kernels_[fillType], 1, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 2, sizeof(cl_mem), nullptr);
-      setArgument(kernels_[fillType], 3, sizeof(cl_mem), nullptr);
+      setArgument(kernels_[fillType], 0, sizeof(amd::Memory*), &mem);
+      setArgument(kernels_[fillType], 1, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 2, sizeof(amd::Memory*), nullptr);
+      setArgument(kernels_[fillType], 3, sizeof(amd::Memory*), nullptr);
     }
 
     // Get constant buffer to allow multipel fills
@@ -2492,7 +2492,7 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     memcpy(constBuf, pattern, patternSize);
 
     constexpr bool kDirectVa = true;
-    setArgument(kernels_[fillType], 4, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
+    setArgument(kernels_[fillType], 4, sizeof(amd::Memory*), constBuf, 0, nullptr, kDirectVa);
 
     uint64_t mem_origin = static_cast<uint64_t>(origin[0]);
     uint64_t width = static_cast<uint64_t>(size[0]);
@@ -2753,10 +2753,10 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
     if (amd::IS_HIP) {
       // Update the command type for ROC profiler
       if (srcMemory.isHostMemDirectAccess()) {
-        gpu().SetCopyCommandType(CL_COMMAND_WRITE_BUFFER);
+        gpu().SetCopyCommandType(amd::CommandType::WriteBuffer);
       }
       if (dstMemory.isHostMemDirectAccess()) {
-        gpu().SetCopyCommandType(CL_COMMAND_READ_BUFFER);
+        gpu().SetCopyCommandType(amd::CommandType::ReadBuffer);
       }
     }
     result = DmaBlitManager::copyBuffer(srcMemory, dstMemory, srcOrigin, dstOrigin, sizeIn, entire,
@@ -2764,9 +2764,9 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   }
 
   if (!result) {
-    // Check CL_MEM_SVM_ATOMICS flag to see if we used system_coarse_segment_
+    // Check amd::MemFlags::SvmAtomics flag to see if we used system_coarse_segment_
     auto memFlags = srcMemory.owner()->getMemFlags();
-    bool srcSvmAtomics = (memFlags & CL_MEM_SVM_ATOMICS) != 0;
+    bool srcSvmAtomics = (memFlags & amd::MemFlags::SvmAtomics) != amd::MemFlags::Empty;
     if ((!srcSvmAtomics && srcMemory.isHostMemDirectAccess()) || (!copyMetadata.isAsync_)) {
       // Flush caches for coherency as the MTYPE of the src buffer is
       // non-coherent(ie read it again from memory).
@@ -2816,7 +2816,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   amd::Image* image = static_cast<amd::Image*>(memory.owner());
   amd::Image::Format newFormat(image->getImageFormat());
   bool swapLayer =
-      (image->getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) && (dev().isa().versionMajor() >= 10);
+      (image->getType() == amd::MemObjectType::Image1DArray) && (dev().isa().versionMajor() >= 10);
 
   // Program the kernels workload depending on the fill dimensions
   fillType = FillImage;
@@ -2828,17 +2828,17 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   bool rejected = false;
 
   // For depth, we need to create a view
-  if (newFormat.image_channel_order == CL_sRGBA) {
+  if (newFormat.channelOrder == amd::ChannelOrder::sRGBA) {
     // Find unsupported data type
     for (uint i = 0; i < RejectedFormatDataTotal; ++i) {
-      if (RejectedData[i].clOldType_ == newFormat.image_channel_data_type) {
-        newFormat.image_channel_data_type = RejectedData[i].clNewType_;
+      if (RejectedData[i].clOldType_ == static_cast<uint32_t>(newFormat.channelDataType)) {
+        newFormat.channelDataType = static_cast<amd::ChannelDataType>(RejectedData[i].clNewType_);
         rejected = true;
         break;
       }
     }
 
-    if (newFormat.image_channel_order == CL_sRGBA) {
+    if (newFormat.channelOrder == amd::ChannelOrder::sRGBA) {
       // Converting a linear RGB floating-point color value to a 8-bit unsigned integer sRGB value
       // because hw is not support write_imagef for sRGB.
       float* fColor = static_cast<float*>(newpattern);
@@ -2848,8 +2848,8 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
       iFillColor[3] = (uint32_t)(fColor[3] * 255.0f);
       newpattern = static_cast<void*>(&iFillColor[0]);
       for (uint i = 0; i < RejectedFormatChannelTotal; ++i) {
-        if (RejectedOrder[i].clOldType_ == newFormat.image_channel_order) {
-          newFormat.image_channel_order = RejectedOrder[i].clNewType_;
+        if (RejectedOrder[i].clOldType_ == static_cast<uint32_t>(newFormat.channelOrder)) {
+          newFormat.channelOrder = static_cast<amd::ChannelOrder>(RejectedOrder[i].clNewType_);
           rejected = true;
           break;
         }
@@ -2858,7 +2858,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   }
   // If the image format was rejected, then attempt to create a view
   if (rejected) {
-    memView = createView(gpuMem(memory), newFormat, CL_MEM_WRITE_ONLY);
+    memView = createView(gpuMem(memory), newFormat, amd::MemFlags::WriteOnly);
     if (memView != nullptr) {
       rejected = false;
     }
@@ -2900,8 +2900,8 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   }
 
   // Program kernels arguments for the blit operation
-  cl_mem mem = as_cl<amd::Memory>(memView->owner());
-  setArgument(kernels_[fillType], 0, sizeof(cl_mem), &mem);
+  amd::Memory* mem = memView->owner();
+  setArgument(kernels_[fillType], 0, sizeof(amd::Memory*), &mem);
   setArgument(kernels_[fillType], 1, sizeof(float[4]), newpattern);
   setArgument(kernels_[fillType], 2, sizeof(int32_t[4]), newpattern);
   setArgument(kernels_[fillType], 3, sizeof(uint32_t[4]), newpattern);
@@ -2919,26 +2919,26 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
 
   // Find the type of image
   uint32_t type = 0;
-  switch (newFormat.image_channel_data_type) {
-    case CL_SNORM_INT8:
-    case CL_SNORM_INT16:
-    case CL_UNORM_INT8:
-    case CL_UNORM_INT16:
-    case CL_UNORM_SHORT_565:
-    case CL_UNORM_SHORT_555:
-    case CL_UNORM_INT_101010:
-    case CL_HALF_FLOAT:
-    case CL_FLOAT:
+  switch (newFormat.channelDataType) {
+    case amd::ChannelDataType::SNormInt8:
+    case amd::ChannelDataType::SNormInt16:
+    case amd::ChannelDataType::UNormInt8:
+    case amd::ChannelDataType::UNormInt16:
+    case amd::ChannelDataType::UNormShort565:
+    case amd::ChannelDataType::UNormShort555:
+    case amd::ChannelDataType::UNormInt101010:
+    case amd::ChannelDataType::HalfFloat:
+    case amd::ChannelDataType::Float:
       type = 0;
       break;
-    case CL_SIGNED_INT8:
-    case CL_SIGNED_INT16:
-    case CL_SIGNED_INT32:
+    case amd::ChannelDataType::SignedInt8:
+    case amd::ChannelDataType::SignedInt16:
+    case amd::ChannelDataType::SignedInt32:
       type = 1;
       break;
-    case CL_UNSIGNED_INT8:
-    case CL_UNSIGNED_INT16:
-    case CL_UNSIGNED_INT32:
+    case amd::ChannelDataType::UnsignedInt8:
+    case amd::ChannelDataType::UnsignedInt16:
+    case amd::ChannelDataType::UnsignedInt32:
       type = 2;
       break;
   }
@@ -2969,16 +2969,16 @@ bool KernelBlitManager::streamOpsUpdate(uint blitType, device::Memory& memory, u
   size_t globalWorkSize[1] = {1};
   size_t localWorkSize[1] = {1};
   // Program kernels arguments for the write operation
-  cl_mem mem = as_cl<amd::Memory>(memory.owner());
+  amd::Memory* mem = memory.owner();
   bool is32BitWrite = (sizeBytes == sizeof(uint32_t)) ? true : false;
   // Program kernels arguments for the write operation
   if (is32BitWrite) {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem, offset);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), &mem, offset);
+    setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), nullptr);
     setArgument(kernels_[blitType], 2, sizeof(uint32_t), &value);
   } else {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), nullptr);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), nullptr);
+    setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), &mem, offset);
     setArgument(kernels_[blitType], 2, sizeof(uint64_t), &value);
   }
   // Create ND range object for the kernel's execution
@@ -3022,18 +3022,18 @@ bool KernelBlitManager::streamOpsWait(device::Memory& memory, uint64_t value, si
   size_t localWorkSize[1] = {1};
 
   // Program kernels arguments for the wait operation
-  cl_mem mem = as_cl<amd::Memory>(memory.owner());
+  amd::Memory* mem = memory.owner();
   bool is32BitWait = (sizeBytes == sizeof(uint32_t)) ? true : false;
   // Program kernels arguments for the wait operation
   if (is32BitWait) {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem, offset);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), nullptr);
+    setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), &mem, offset);
+    setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), nullptr);
     setArgument(kernels_[blitType], 2, sizeof(uint32_t), &value);
     setArgument(kernels_[blitType], 3, sizeof(uint32_t), &flags);
     setArgument(kernels_[blitType], 4, sizeof(uint32_t), &mask);
   } else {
-    setArgument(kernels_[blitType], 0, sizeof(cl_mem), nullptr);
-    setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem, offset);
+    setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), nullptr);
+    setArgument(kernels_[blitType], 1, sizeof(amd::Memory*), &mem, offset);
     setArgument(kernels_[blitType], 2, sizeof(uint64_t), &value);
     setArgument(kernels_[blitType], 3, sizeof(uint64_t), &flags);
     setArgument(kernels_[blitType], 4, sizeof(uint64_t), &mask);
@@ -3068,7 +3068,7 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
   auto constBuf = gpu().allocKernArg((count * paramSize), kCBAlignment);
   memcpy(constBuf, paramArray, (count * paramSize));
 
-  setArgument(kernels_[blitType], 0, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
+  setArgument(kernels_[blitType], 0, sizeof(amd::Memory*), constBuf, 0, nullptr, kDirectVa);
   setArgument(kernels_[blitType], 1, sizeof(uint32_t), &count);
 
   // Create ND range object for the kernel's execution
@@ -3130,7 +3130,7 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   // Recalculate pin memory size
   pinAllocSize = amd::alignUp(pinSize + partial, PinnedMemoryAlignment);
 
-  amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
+  amdMemory = new (*context_) amd::Buffer(*context_, amd::MemFlags::UseHostPtr, pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != nullptr) && !amdMemory->create(tmpHost, SysMem)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
@@ -3156,8 +3156,8 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   return amdMemory;
 }
 
-Memory* KernelBlitManager::createView(const Memory& parent, cl_image_format format,
-                                      cl_mem_flags flags) const {
+Memory* KernelBlitManager::createView(const Memory& parent, amd::ImageFormat format,
+                                      amd::MemFlags flags) const {
   assert((parent.owner()->asBuffer() == nullptr) && "View supports images only");
   amd::Image* parentImage = static_cast<amd::Image*>(parent.owner());
   auto parent_dev_image = static_cast<Image*>(parentImage->getDeviceMemory(dev()));
@@ -3222,7 +3222,7 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
   }
 
   constexpr bool kDirectVa = true;
-  setArgument(kernels_[Scheduler], 0, sizeof(cl_mem), sp, 0, nullptr, kDirectVa);
+  setArgument(kernels_[Scheduler], 0, sizeof(amd::Memory*), sp, 0, nullptr, kDirectVa);
 
   address parameters = captureArguments(kernels_[Scheduler]);
 

@@ -578,9 +578,9 @@ class KernelBlitManager : public DmaBlitManager {
   );
 
   //! Creates a view memory object
-  Memory* createView(const Memory& parent,    //!< Parent memory object
-                     cl_image_format format,  //!< The new format for a view
-                     cl_mem_flags flags       //!< Memory flags
+  Memory* createView(const Memory& parent,        //!< Parent memory object
+                     amd::ImageFormat format,     //!< The new format for a view
+                     amd::MemFlags flags          //!< Memory flags
   ) const;
 
   address captureArguments(const amd::Kernel* kernel) const;
@@ -653,8 +653,8 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
           nullptr;
     } else {
       if (!writeVAImmediate) {
-        // convert cl_mem to amd::Memory*, return false if invalid.
-        amd::Memory* mem = as_amd(*static_cast<const cl_mem*>(value));
+        // value points to an amd::Memory* (blit callers pass &mem where mem is amd::Memory*)
+        amd::Memory* mem = *static_cast<amd::Memory* const*>(value);
 
         reinterpret_cast<amd::Memory**>(
             kernel->parameters().values() +
