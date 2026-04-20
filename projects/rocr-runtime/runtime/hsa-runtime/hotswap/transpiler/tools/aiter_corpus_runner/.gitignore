@@ -1,0 +1,28 @@
+# Build artefacts
+*.so
+*.o
+*.d
+
+# The repo-level .gitignore at projects/rocr-runtime/.gitignore:12
+# excludes every ``Makefile`` (the ROCR tree is otherwise CMake-
+# driven and a stray hand-written Makefile there is always a build
+# artefact).  Our tool's Makefile is deliberately committed — it's
+# how a user builds libaiter_arch_spoof.so outside of CMake — so
+# explicitly re-include it here.
+!Makefile
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Runtime / transient outputs
+out.json
+
+# Auto-cloned AITER checkout (pulled by `python3 runner.py --setup`;
+# see README).  We deliberately don't vendor it — --setup reclones on
+# demand and the upstream repo is the source of truth.
+_aiter/
+
+# Persistent AITER @compile_ops JIT cache (hipcc per-op artefacts).
+# Rebuilt on demand; machine-specific (ROCm version, gfx arch flags).
+_jit_cache/

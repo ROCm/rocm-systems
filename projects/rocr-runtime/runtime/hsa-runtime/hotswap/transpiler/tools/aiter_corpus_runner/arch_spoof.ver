@@ -1,0 +1,43 @@
+# Symbol versioning for libaiter_arch_spoof.so.  AITER's ``nm -D
+# --with-symbol-versions module_moe_*.so`` lists the entries below with
+# explicit version tags — a plain-named LD_PRELOAD export is *skipped*
+# by the runtime symbol lookup for a versioned undefined reference,
+# which is exactly why our first cut of the shim silently did nothing
+# ("aiter_arch_spoof active" line printed but every hotswap
+# LoadCodeObject still reported gfx942).
+#
+# Each version node below is the default-version binding (``@@``) for
+# the symbols listed — we own the public entry point.  Version nodes
+# inherit in declaration order (GNU ld semantics) to mirror ROCm's own
+# exported DAG; everything else is local so we don't accidentally
+# export dlopen'd helpers or runtime initialisers.
+#
+# If AITER starts calling a new versioned variant of the property or
+# fat-binary-registration API, add a new node below and list the
+# matching plain-named function here — or ``nm -D --with-symbol-
+# versions`` on a fresh module_*.so will tell you exactly what to add.
+# The shim's startup self-check (arch_spoof.cpp:
+# ``aiter_arch_spoof_self_check``) calls ``dlsym(RTLD_DEFAULT, ...)``
+# for each hook and ``abort()``s the process if our export is not the
+# winner — so a DAG mismatch here fails loud and fast instead of
+# silently producing native-style results under the transpile modes.
+
+hip_4.2 {
+  global:
+    hipGetDevicePropertiesR0000;
+    __hipRegisterFatBinary;
+    __hipRegisterFunction;
+    __hipUnregisterFatBinary;
+  local:
+    *;
+};
+
+hip_6.0 {
+  global:
+    hipGetDevicePropertiesR0600;
+} hip_4.2;
+
+hip_6.2 {
+  global:
+    hipGetFuncBySymbol;
+} hip_6.0;
