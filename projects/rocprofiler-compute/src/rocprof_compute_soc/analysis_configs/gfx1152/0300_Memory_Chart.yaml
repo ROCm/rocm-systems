@@ -1,7 +1,7 @@
 # =============================================================================
 # RDNA3.5 (gfx1152) - RDNA3.5 Memory Hierarchy Chart Metrics
 # =============================================================================
-# 
+#
 # This panel provides detailed memory hierarchy metrics for visualization,
 # organized by cache level:
 #   - Instruction Cache (SQC)
@@ -10,16 +10,23 @@
 #   - LDS (Local Data Share)
 #   - GL1C Cache (L1)
 #   - GL2C Cache (L2)
-#   - GCEA to System Memory (DDR5/LPDDR5 for APU)
+#   - Graphics Core Efficiency Arbiter (GCEA) to system memory (DDR5/LPDDR5 for APU)
 # =============================================================================
 
 Panel Config:
   id: 300
   title: RDNA3.5 Memory Chart
   description: |-
-    Detailed memory hierarchy metrics for RDNA3.5 (RDNA3.5), showing request counts, 
+    Detailed memory hierarchy metrics for RDNA3.5, showing request counts,
     bandwidth, hit rates, and utilization at each cache level.
-    Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
+    Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory via GCEA
+    (Graphics Core Efficiency Arbiter).
+
+    Use this panel as the reference for **where** bandwidth is measured: GL2C Read/Write
+    Bandwidth use **client-side** GL2 counters; GCEA (Graphics Core Efficiency Arbiter)
+    tables use **DRAM interface** counters.
+    System Speed-of-Light lists separate **L2→fabric (EA)** and **memory controller** rates;
+    those are kernel-summary views and are not the same rows as GL2C client read BW here.
 
   data source:
 
@@ -39,22 +46,22 @@ Panel Config:
       metric:
         ICache Requests:
           value: AVG(SQC_ICACHE_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         ICache Utilization:
           value: AVG((100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         ICache Hit Rate:
-          value: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           unit: Percent
         ICache Miss Rate:
-          value: AVG((100 * SQC_ICACHE_MISSES_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG((100 * SQC_ICACHE_MISSES_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           unit: Percent
         ICache Request Stall Rate:
           value: AVG((100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         ICache-GL1 Read Bandwidth:
-          value: AVG(((SQC_TC_INST_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((SQC_TC_INST_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 302: Scalar Data Cache (SQC)
@@ -72,19 +79,19 @@ Panel Config:
       metric:
         Dcache Requests:
           value: AVG(SQC_DCACHE_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         Dcache Utilization:
           value: AVG((100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         Dcache Hit Rate:
-          value: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          value: AVG((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
           unit: Percent
         Dcache Request Stall Rate:
           value: AVG((100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         Dcache-GL1 Read Bandwidth:
-          value: AVG(((SQC_TC_DATA_READ_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((SQC_TC_DATA_READ_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 303: TCP Cache (L0 Vector Cache)
@@ -102,25 +109,23 @@ Panel Config:
       metric:
         TCP Total Requests:
           value: AVG(TCP_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP Read Requests:
           value: AVG(TCP_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP Write Requests:
           value: AVG(TCP_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
-        TCP Atomic Requests:
-          value: AVG(TCP_REQ_ATOMIC_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
+        # Counter not available: tcp_req_atomic_sum
         TCP Miss Requests:
           value: AVG(TCP_REQ_MISS_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP Hit Rate:
           value: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
         TCP Request Bandwidth:
-          value: AVG(((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 304: LDS (Local Data Share)
@@ -138,28 +143,23 @@ Panel Config:
       metric:
         LDS Instructions:
           value: AVG(SQ_INSTS_LDS_sum / $denom)
-          unit: Instructions + $normUnit
-        LDS Read Instructions:
-          value: AVG(SQ_LDS_DIRECT_RD_sum / $denom)
-          unit: Instructions + $normUnit
-        LDS Write Instructions:
-          value: AVG(SQ_LDS_DIRECT_WR_sum / $denom)
-          unit: Instructions + $normUnit
+          unit: (Instructions + $normUnit)
+        # Counters not available: sq_lds_direct_rd, sq_lds_direct_wr
         LDS Atomic Instructions:
           value: AVG(SQ_LDS_ATOMIC_RETURN_sum / $denom)
-          unit: Instructions + $normUnit
+          unit: (Instructions + $normUnit)
         LDS Instruction Cycles:
           value: AVG(SQ_INST_CYCLES_LDS_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         LDS Wait Cycles:
           value: AVG(SQ_WAIT_INST_LDS_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         LDS Bank Conflict Rate:
           value: AVG((100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum) if (SQC_LDS_IDX_ACTIVE_sum != 0) else None)
           unit: Percent
         LDS Estimated Bandwidth:
-          value: AVG((((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG(((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 305: TCP-GL1 Interface
@@ -177,16 +177,16 @@ Panel Config:
       metric:
         TCP-GL1 Read Requests:
           value: AVG(TCP_GL1_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP-GL1 Write Requests:
           value: AVG(TCP_GL1_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP-GL1 Read Bandwidth:
-          value: AVG(((TCP_GL1_REQ_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((TCP_GL1_REQ_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         TCP-GL1 Write Bandwidth:
-          value: AVG(((TCP_GL1_REQ_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((TCP_GL1_REQ_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 306: GL1C Cache (L1)
@@ -207,16 +207,16 @@ Panel Config:
           unit: Percent
         GL1C Total Requests:
           value: AVG(GL1C_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Read Requests:
           value: AVG(GL1C_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Write Requests:
           value: AVG(GL1C_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Miss Requests:
           value: AVG(GL1C_REQ_MISS_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Hit Rate:
           value: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
           unit: Percent
@@ -243,16 +243,16 @@ Panel Config:
       metric:
         GL1-GL2 Read Requests:
           value: AVG(GL1C_GL2_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1-GL2 Write Requests:
           value: AVG(GL1C_GL2_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1-GL2 Read Bandwidth:
-          value: AVG(((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         GL1-GL2 Write Bandwidth:
-          value: AVG(((GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         GL1-GL2 Read Latency:
           value: AVG((GL1C_GL2_REQ_READ_LATENCY_sum / GL1C_GL2_REQ_READ_sum) if (GL1C_GL2_REQ_READ_sum != 0) else None)
           unit: Cycles
@@ -279,32 +279,34 @@ Panel Config:
           unit: Percent
         GL2C Total Requests:
           value: AVG(GL2C_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Read Requests:
           value: AVG(GL2C_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Write Requests:
           value: AVG(GL2C_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Atomic Requests:
           value: AVG(GL2C_ATOMIC_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Hit Rate:
           value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
           unit: Percent
         GL2C Read Bandwidth:
-          value: AVG(((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          # 32/64/128 B read bins plus 96 B compressed reads; EA 96 B (GL2C_EA_RDREQ_96B) is fabric-side (see Speed-of-Light).
+          value: AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         GL2C Write Bandwidth:
-          value: AVG(((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          # Note: GL2C write requests can be 32B or 64B (no 128B writes documented).
+          value: AVG((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
-  # Table 309: GCEA to System Memory (APU)
+  # Table 309: Graphics Core Efficiency Arbiter (GCEA) to system memory (APU)
   # =========================================================================
   - metric_table:
       id: 309
-      title: "GCEA to System Memory"
+      title: "Graphics Core Efficiency Arbiter (GCEA) to System Memory"
       cli_style: mem_chart
       tui_style: mem_chart
       comparable: false
@@ -321,22 +323,22 @@ Panel Config:
           unit: Percent
         DRAM Read Requests:
           value: AVG(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         DRAM Write Requests:
           value: AVG(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         DRAM Read Bandwidth:
-          value: AVG(((GCEA_RDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GCEA_RDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         DRAM Write Bandwidth:
-          value: AVG(((GCEA_WDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GCEA_WDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         Read Returns:
           value: AVG(GCEA_RRET_VLD_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Write Returns:
           value: AVG(GCEA_WRET_VLD_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   metrics_description:
     ICache Utilization: |-
@@ -344,35 +346,26 @@ Panel Config:
       Formula: 100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum
 
     ICache Hit Rate: |-
-      Definition: Percentage of instruction cache requests that hit in cache.
-      Formula: 100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum
+      Definition: Share of instruction cache accesses that hit, using hit+miss as denominator.
+      Formula: 100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+      when the denominator is non-zero. HITS/REQ alone can exceed 100% (per-SQ per-bank counters).
+
+    ICache Miss Rate: |-
+      Definition: Share of instruction cache accesses that miss (same denominator as hit rate).
+      Formula: 100 * SQC_ICACHE_MISSES_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
 
     Dcache Utilization: |-
       Definition: Percentage of cycles the scalar data cache is busy.
       Formula: 100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum
 
     Dcache Hit Rate: |-
-      Definition: Percentage of scalar data cache requests that hit in cache.
-      Formula: 100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum
+      Definition: Share of scalar data cache accesses that hit (hit+miss denominator).
+      Formula: 100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
+      when the denominator is non-zero.
 
     TCP Hit Rate: |-
       Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.
       Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum
-
-    TCP Atomic Requests: |-
-      Definition: Number of atomic operations through the TCP (Texture Cache Pipe).
-      Description: Includes buffer_atomic, global_atomic, and flat_atomic operations.
-      Formula: TCP_REQ_ATOMIC_sum / $denom
-
-    LDS Read Instructions: |-
-      Definition: Number of LDS read instructions executed.
-      Description: Direct read operations from Local Data Share memory.
-      Formula: SQ_LDS_DIRECT_RD_sum / $denom
-
-    LDS Write Instructions: |-
-      Definition: Number of LDS write instructions executed.
-      Description: Direct write operations to Local Data Share memory.
-      Formula: SQ_LDS_DIRECT_WR_sum / $denom
 
     LDS Atomic Instructions: |-
       Definition: Number of LDS atomic instructions executed.
@@ -402,8 +395,8 @@ Panel Config:
       Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)
 
     SARB Utilization: |-
-      Definition: Percentage of cycles the System Arbiter in GCEA was busy.
-      Description: SARB handles arbitration between GPU and system memory interface.
+      Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy.
+      Description: SARB handles arbitration between the GPU and the system memory interface.
       Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum
 
     DRAM Read Bandwidth: |-

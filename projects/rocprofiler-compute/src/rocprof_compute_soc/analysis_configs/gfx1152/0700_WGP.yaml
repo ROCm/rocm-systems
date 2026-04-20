@@ -22,9 +22,9 @@ Panel Config:
         unit: Unit
       metric:
         WGP Utilization:
-          avg: AVG((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
 
   - metric_table:
@@ -128,42 +128,42 @@ Panel Config:
           avg: AVG(SQ_INSTS_ALL_sum / $denom)
           min: MIN(SQ_INSTS_ALL_sum / $denom)
           max: MAX(SQ_INSTS_ALL_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Internal:
           avg: AVG(SQ_INSTS_INTERNAL_sum / $denom)
           min: MIN(SQ_INSTS_INTERNAL_sum / $denom)
           max: MAX(SQ_INSTS_INTERNAL_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - VALU:
           avg: AVG(SQ_INSTS_VALU_sum / $denom)
           min: MIN(SQ_INSTS_VALU_sum / $denom)
           max: MAX(SQ_INSTS_VALU_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - SALU:
           avg: AVG(SQ_INSTS_SALU_sum / $denom)
           min: MIN(SQ_INSTS_SALU_sum / $denom)
           max: MAX(SQ_INSTS_SALU_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - SMEM:
           avg: AVG(SQ_INSTS_SMEM_sum / $denom)
           min: MIN(SQ_INSTS_SMEM_sum / $denom)
           max: MAX(SQ_INSTS_SMEM_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Transcendental:
           avg: AVG(SQ_INSTS_VALU_TRANS_sum / $denom)
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - VMEM:
           avg: AVG(SQ_INSTS_TEX_sum / $denom)
           min: MIN(SQ_INSTS_TEX_sum / $denom)
           max: MAX(SQ_INSTS_TEX_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - LDS:
           avg: AVG(SQ_INSTS_LDS_sum / $denom)
           min: MIN(SQ_INSTS_LDS_sum / $denom)
           max: MAX(SQ_INSTS_LDS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # VMEM Instruction Mix
@@ -182,30 +182,30 @@ Panel Config:
           avg: AVG(SQ_INSTS_FLAT_sum / $denom)
           min: MIN(SQ_INSTS_FLAT_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_sum / $denom)
-          unit: Count + $normUnit
-        Instructions - VMEM Load:
+          unit: (Count + $normUnit)
+        Instructions - TEX Load:
           avg: AVG(SQ_INSTS_TEX_LOAD_sum / $denom)
           min: MIN(SQ_INSTS_TEX_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_TEX_LOAD_sum / $denom)
-          unit: Count + $normUnit
-        Instructions - VMEM Store:
+          unit: (Count + $normUnit)
+        Instructions - TEX Store:
           avg: AVG(SQ_INSTS_TEX_STORE_sum / $denom)
           min: MIN(SQ_INSTS_TEX_STORE_sum / $denom)
           max: MAX(SQ_INSTS_TEX_STORE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Flat Load:
           avg: AVG(SQ_INSTS_FLAT_LOAD_sum / $denom)
           min: MIN(SQ_INSTS_FLAT_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_LOAD_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Flat Store:
           avg: AVG(SQ_INSTS_FLAT_STORE_sum / $denom)
           min: MIN(SQ_INSTS_FLAT_STORE_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_STORE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
-  # LDS Instruction Mix
+  # LDS Instruction Mix (breakdown; total LDS = "Instructions - LDS" in Wave Mix)
   # =========================================================================
   - metric_table:
       id: 707
@@ -217,35 +217,21 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        Total LDS Instructions:
-          avg: AVG(SQ_INSTS_LDS_sum / $denom)
-          min: MIN(SQ_INSTS_LDS_sum / $denom)
-          max: MAX(SQ_INSTS_LDS_sum / $denom)
-          unit: Count + $normUnit
-
-  # =========================================================================
-  # VALU Instruction Mix
-  # =========================================================================
-  - metric_table:
-      id: 708
-      title: "VALU Instruction Mix"
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        Total VALU Instructions:
-          avg: AVG(SQ_INSTS_VALU_sum / $denom)
-          min: MIN(SQ_INSTS_VALU_sum / $denom)
-          max: MAX(SQ_INSTS_VALU_sum / $denom)
-          unit: Count + $normUnit
-        VALU Instructions - Trans:
-          avg: AVG(SQ_INSTS_VALU_TRANS_sum / $denom)
-          min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
-          max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
-          unit: Count + $normUnit
+        LDS Direct Load Instructions:
+          avg: AVG(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
+          min: MIN(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
+          unit: (Count + $normUnit)
+        LDS Parameter Load Instructions:
+          avg: AVG(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
+          min: MIN(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
+          unit: (Count + $normUnit)
+        WAVE32 LDS Parameter Load Instructions:
+          avg: AVG(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
+          min: MIN(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # Wait State Analysis
@@ -261,24 +247,24 @@ Panel Config:
         unit: Unit
       metric:
         Wait for Any:
-          avg: AVG((100 * SQ_WAIT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
         Wait for Instruction Fetch:
-          avg: AVG((100 * SQ_WAIT_IFETCH_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_IFETCH_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_IFETCH_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
         Wait for Barrier:
-          avg: AVG((100 * SQ_WAIT_BARRIER_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_BARRIER_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_BARRIER_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
         Wait for Counter:
-          avg: AVG((100 * SQ_WAIT_CNT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_CNT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_CNT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -294,10 +280,12 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        # HITS and REQ are per-SQ per-bank; summed HITS can exceed REQ → >100%. Use HITS+MISSES
+        # as the outcome denominator (same pairing as Memory Chart / SoL).
         Icache Hit Rate:
-          avg: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
-          min: MIN((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
-          max: MAX((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          avg: AVG((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
+          min: MIN((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
+          max: MAX((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -314,23 +302,25 @@ Panel Config:
         unit: Unit
       metric:
         Dcache Hit Rate:
-          avg: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
-          min: MIN((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
-          max: MAX((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          avg: AVG((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
+          min: MIN((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
+          max: MAX((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
           unit: Percent
 
   metrics_description:
     WGP Utilization: |-
-      Percentage of cycles where the WGP (Workgroup Processor) was busy executing
-      waves. RDNA3.5 WGPs contain 2 CUs, each with 2 SIMD32 units.
+      WGP busy as a percent of GRBM GUI-active cycles. RDNA3.5 WGPs pair 2 CUs,
+      each with 2 SIMD32 units.
     Wave Life: |-
       Average number of cycles a wave exists from creation to completion.
       Calculated as SQ_WAVE_CYCLES / SQ_WAVES.
     Total Instructions: |-
       Total number of instructions executed across all waves.
     Instructions - VALU: |-
-      Number of Vector ALU instructions executed. VALU handles all vector
-      arithmetic and logic operations.
+      Number of Vector ALU instructions executed (SQ_INSTS_VALU). VALU handles all
+      vector arithmetic and logic operations. Transcendental VALU ops are
+      reported separately as "Instructions - Transcendental" in the same
+      Wave Instruction Mix table.
     Instructions - SALU: |-
       Number of Scalar ALU instructions executed. SALU handles scalar operations
       that are uniform across the wave.
@@ -341,20 +331,35 @@ Panel Config:
       Number of Vector Memory instructions executed. Includes global, buffer,
       and texture memory operations.
     Instructions - LDS: |-
-      Number of Local Data Share instructions executed. LDS provides fast
-      shared memory within a workgroup.
+      Total Local Data Share instructions (SQ_INSTS_LDS). LDS provides fast
+      shared memory within a workgroup. For LDS sub-categories (direct/param/
+      wave32 param loads), see the "LDS Instruction Mix" table.
+    LDS Direct Load Instructions: |-
+      LDS direct load instructions issued (SQ_INSTS_LDS_DIRECT_LOAD). Subset of
+      total LDS; not required to sum with other LDS mix rows to equal total.
+    LDS Parameter Load Instructions: |-
+      LDS parameter load instructions issued (SQ_INSTS_LDS_PARAM_LOAD).
+    WAVE32 LDS Parameter Load Instructions: |-
+      LDS parameter load instructions under wave32 execution (SQ_INSTS_WAVE32_LDS_PARAM_LOAD).
     Wait for Any: |-
       Percentage of wave lifetime spent waiting for any reason including
-      memory, barriers, or instruction fetch.
+      memory, barriers, or instruction fetch. Computed as 100 * SQ_WAIT_ANY /
+      SQ_WAVE_CYCLES.
     Wait for Instruction Fetch: |-
       Percentage of wave lifetime spent waiting for instructions to arrive
-      from the instruction cache.
+      from the instruction cache. Computed as 100 * SQ_WAIT_IFETCH /
+      SQ_WAVE_CYCLES.
     Wait for Barrier: |-
-      Percentage of wave lifetime spent waiting at barrier synchronization points.
+      Percentage of wave lifetime spent waiting at barrier synchronization
+      points. Computed as 100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES.
     Wait for Counter: |-
       Percentage of wave lifetime spent waiting for waitcnt counters (VMCNT,
-      LGKMCNT, etc.) to reach target values.
+      LGKMCNT, etc.) to reach target values. Computed as 100 * SQ_WAIT_CNT_ANY /
+      SQ_WAVE_CYCLES.
     Icache Hit Rate: |-
-      Percentage of instruction cache requests that hit in the cache.
+      Instruction cache hit percentage using 100 × SQC_ICACHE_HITS / (SQC_ICACHE_HITS +
+      SQC_ICACHE_MISSES). Do not divide only by SQC_ICACHE_REQ — hits and requests are both
+      per-SQ per-bank, and summed hits can exceed summed requests.
     Dcache Hit Rate: |-
-      Percentage of scalar data cache requests that hit in the cache.
+      Scalar data cache hit percentage: 100 × SQC_DCACHE_HITS / (SQC_DCACHE_HITS +
+      SQC_DCACHE_MISSES). Same rationale as Icache (HITS vs REQ can exceed 100%).

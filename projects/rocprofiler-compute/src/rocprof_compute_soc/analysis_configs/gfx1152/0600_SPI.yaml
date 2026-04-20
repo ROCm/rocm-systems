@@ -22,9 +22,12 @@ Panel Config:
         unit: Unit
       metric:
         SPI Busy:
-          avg: AVG((100 * SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          # Use GRBM_SPI_BUSY (not SPI_BUSY): SPI_BUSY is summed over all SPI instances, so it
+          # can exceed GRBM_GUI_ACTIVE when multiple SEs are busy in the same cycle. GRBM counts
+          # "any SPI busy" vs GUI active.
+          avg: AVG((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -40,76 +43,31 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        # Use SPI_CSN_WAVE (pmc_perf column name from collection), not SPI_CSN_WAVE_sum: the
+        # latter is a counter_defs derived alias and is often absent from pmc_perf.csv, which
+        # yields all-zero / NaN metrics. Profiler output typically already aggregates instances.
         Compute Wave Dispatches:
-          avg: AVG(SPI_CSN_WAVE_sum / $denom)
-          min: MIN(SPI_CSN_WAVE_sum / $denom)
-          max: MAX(SPI_CSN_WAVE_sum / $denom)
-          unit: Count + $normUnit
+          avg: AVG(SPI_CSN_WAVE / $denom)
+          min: MIN(SPI_CSN_WAVE / $denom)
+          max: MAX(SPI_CSN_WAVE / $denom)
+          unit: (Count + $normUnit)
         Wave Dispatch Rate:
-          avg: AVG((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Waves/cycle
-
-  # =========================================================================
-  # Resource Allocation
-  # =========================================================================
-  # Fixme: SPI_CSN_STALL_* counters not available - commenting out table
-  # - metric_table:
-  #     id: 603
-  #     title: "Resource Allocation Stalls"
-  #     header:
-  #       metric: Metric
-  #       avg: Avg
-  #       min: Min
-  #       max: Max
-  #       unit: Unit
-  #     metric:
-  #       VGPR Stall:
-  #         avg: AVG(SPI_CSN_STALL_VGPR_sum / $denom)
-  #         min: MIN(SPI_CSN_STALL_VGPR_sum / $denom)
-  #         max: MAX(SPI_CSN_STALL_VGPR_sum / $denom)
-  #         unit: Cycles + $normUnit
-  #       SGPR Stall:
-  #         avg: AVG(SPI_CSN_STALL_SGPR_sum / $denom)
-  #         min: MIN(SPI_CSN_STALL_SGPR_sum / $denom)
-  #         max: MAX(SPI_CSN_STALL_SGPR_sum / $denom)
-  #         unit: Cycles + $normUnit
-  #       LDS Stall:
-  #         avg: AVG(SPI_CSN_STALL_LDS_sum / $denom)
-  #         min: MIN(SPI_CSN_STALL_LDS_sum / $denom)
-  #         max: MAX(SPI_CSN_STALL_LDS_sum / $denom)
-  #         unit: Cycles + $normUnit
-  #       Wave Slot Stall:
-  #         avg: AVG(SPI_CSN_STALL_WAVE_sum / $denom)
-  #         min: MIN(SPI_CSN_STALL_WAVE_sum / $denom)
-  #         max: MAX(SPI_CSN_STALL_WAVE_sum / $denom)
-  #         unit: Cycles + $normUnit
-  #       Barrier Stall:
-  #         avg: AVG(SPI_CSN_STALL_BARRIER_sum / $denom)
-  #         min: MIN(SPI_CSN_STALL_BARRIER_sum / $denom)
-  #         max: MAX(SPI_CSN_STALL_BARRIER_sum / $denom)
-  #         unit: Cycles + $normUnit
 
   metrics_description:
     SPI Busy: |-
-      Percentage of cycles where the SPI (Shader Processor Input) was busy.
-      SPI handles wave scheduling and resource allocation.
+      Percentage of GPU active (GUI) cycles where any SPI was busy. Computed as
+      100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE (GRBM block). Do not use block-level SPI_BUSY here:
+      it is aggregated over every SPI instance, so summed busy cycles can far exceed GUI-active
+      cycles when multiple shader engines are active in parallel.
     Compute Wave Dispatches: |-
-      Number of compute shader waves dispatched by SPI.
+      SPI counter SPI_CSN_WAVE (block SPI, event 50): compute (CSN) path wave count as stored in
+      pmc_perf (column SPI_CSN_WAVE). Same idea as WGP “Dispatched Waves” (SQ_WAVES_sum) but at
+      SPI; values may differ slightly. Normalized by CLI $denom: per_kernel → ÷1; per_wave →
+      ÷SQ_WAVES; per_cycle → ÷$GRBM_GUI_ACTIVE_PER_XCD; per_second → ÷kernel wall time (s).
     Wave Dispatch Rate: |-
-      Average number of waves dispatched per cycle.
-    # Fixme: SPI_CSN_STALL_* counters not available - commenting out descriptions
-    # VGPR Stall: |-
-    #   Cycles SPI was stalled due to insufficient VGPRs.
-    #   Consider reducing VGPR usage per wave.
-    # SGPR Stall: |-
-    #   Cycles SPI was stalled due to insufficient SGPRs.
-    # LDS Stall: |-
-    #   Cycles SPI was stalled due to insufficient LDS.
-    #   Consider reducing LDS usage per workgroup.
-    # Wave Slot Stall: |-
-    #   Cycles SPI was stalled due to no available wave slots.
-    #   Indicates maximum occupancy reached.
-    # Barrier Stall: |-
-    #   Cycles SPI was stalled due to barrier resource limits.
+      SPI_CSN_WAVE / GRBM_GUI_ACTIVE — waves per GUI-active cycle (can exceed 1 when many SEs
+      dispatch in parallel). Uses the same SPI_CSN_WAVE column as collection emits.

@@ -23,14 +23,14 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Busy:
-          avg: AVG((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          min: MIN((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          max: MAX((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
+          avg: AVG((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          min: MIN((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          max: MAX((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
           unit: Percent
         GL1C Starve:
-          avg: AVG((100 * GL1C_STARVE_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          min: MIN((100 * GL1C_STARVE_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          max: MAX((100 * GL1C_STARVE_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
+          avg: AVG((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          min: MIN((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          max: MAX((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -50,22 +50,22 @@ Panel Config:
           avg: AVG(GL1C_REQ_sum / $denom)
           min: MIN(GL1C_REQ_sum / $denom)
           max: MAX(GL1C_REQ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Read Requests:
           avg: AVG(GL1C_REQ_READ_sum / $denom)
           min: MIN(GL1C_REQ_READ_sum / $denom)
           max: MAX(GL1C_REQ_READ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Write Requests:
           avg: AVG(GL1C_REQ_WRITE_sum / $denom)
           min: MIN(GL1C_REQ_WRITE_sum / $denom)
           max: MAX(GL1C_REQ_WRITE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Miss Requests:
           avg: AVG(GL1C_REQ_MISS_sum / $denom)
           min: MIN(GL1C_REQ_MISS_sum / $denom)
           max: MAX(GL1C_REQ_MISS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # GL1C Cache Performance
@@ -103,17 +103,17 @@ Panel Config:
           avg: AVG(GL1C_GL2_REQ_READ_sum / $denom)
           min: MIN(GL1C_GL2_REQ_READ_sum / $denom)
           max: MAX(GL1C_GL2_REQ_READ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GL2 Read 128B Requests:
           avg: AVG(GL1C_GL2_REQ_READ_128B_sum / $denom)
           min: MIN(GL1C_GL2_REQ_READ_128B_sum / $denom)
           max: MAX(GL1C_GL2_REQ_READ_128B_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GL2 Write Requests:
           avg: AVG(GL1C_GL2_REQ_WRITE_sum / $denom)
           min: MIN(GL1C_GL2_REQ_WRITE_sum / $denom)
           max: MAX(GL1C_GL2_REQ_WRITE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # GL1C Stalls
@@ -132,19 +132,21 @@ Panel Config:
           avg: AVG(GL1C_STALL_GL2_GL1_sum / $denom)
           min: MIN(GL1C_STALL_GL2_GL1_sum / $denom)
           max: MAX(GL1C_STALL_GL2_GL1_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         LFIFO Full Stall:
           avg: AVG(GL1C_STALL_LFIFO_FULL_sum / $denom)
           min: MIN(GL1C_STALL_LFIFO_FULL_sum / $denom)
           max: MAX(GL1C_STALL_LFIFO_FULL_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
 
   metrics_description:
     GL1C Busy: |-
       Percentage of cycles where the GL1C cache was busy processing requests.
       GL1C is the shared L1 cache within each Shader Engine.
+      Per sample: 100 * GL1C_BUSY / GL1C_CYCLE (when GL1C_CYCLE != 0).
     GL1C Starve: |-
       Percentage of cycles where GL1C had no pending requests from TCP.
+      Per sample: 100 * GL1C_STARVE / GL1C_CYCLE (when GL1C_CYCLE != 0).
     Total Requests: |-
       Total number of requests to the GL1C cache from TCP.
     Read Requests: |-

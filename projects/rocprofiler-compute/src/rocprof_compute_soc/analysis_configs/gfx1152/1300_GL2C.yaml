@@ -31,12 +31,12 @@ Panel Config:
           avg: AVG(GL2C_HIT_sum / $denom)
           min: MIN(GL2C_HIT_sum / $denom)
           max: MAX(GL2C_HIT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GL2C Misses:
           avg: AVG(GL2C_MISS_sum / $denom)
           min: MIN(GL2C_MISS_sum / $denom)
           max: MAX(GL2C_MISS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # GL2C Request Statistics
@@ -55,17 +55,32 @@ Panel Config:
           avg: AVG(GL2C_REQ_sum / $denom)
           min: MIN(GL2C_REQ_sum / $denom)
           max: MAX(GL2C_REQ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Read Requests:
           avg: AVG(GL2C_READ_sum / $denom)
           min: MIN(GL2C_READ_sum / $denom)
           max: MAX(GL2C_READ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Write Requests:
           avg: AVG(GL2C_WRITE_sum / $denom)
           min: MIN(GL2C_WRITE_sum / $denom)
           max: MAX(GL2C_WRITE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
+        Atomic Requests:
+          avg: AVG(GL2C_ATOMIC_sum / $denom)
+          min: MIN(GL2C_ATOMIC_sum / $denom)
+          max: MAX(GL2C_ATOMIC_sum / $denom)
+          unit: (Count + $normUnit)
+        EA Read Requests (DRAM):
+          avg: AVG(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
+        EA Write Requests (DRAM):
+          avg: AVG(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # GL2C Bandwidth
@@ -81,15 +96,17 @@ Panel Config:
         unit: Unit
       metric:
         GL2C Read BW:
-          avg: AVG((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          unit: GB/s
+          # 32/64/128 B read bins plus 96 B compressed reads; GL2C_EA_RDREQ_96B covers EA-side 96 B reads.
+          avg: AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          min: MIN((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          max: MAX((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         GL2C Write BW:
-          avg: AVG((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          unit: GB/s
+          # Note: GL2C write requests use 64B as the average transaction size.
+          avg: AVG((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          min: MIN((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          max: MAX((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   metrics_description:
     GL2C Hit Rate: |-
@@ -100,12 +117,24 @@ Panel Config:
     GL2C Misses: |-
       Number of requests that missed in the GL2C cache and went to memory.
     Total Requests: |-
-      Total number of requests to the GL2C cache.
+      Number of requests of all types to the GL2C cache (counter GL2C_REQ).
+      This is measured at the tag block (request path into GL2C tag / lookup).
+      Not guaranteed to equal Read + Write + Atomic; those use separate perf events and may omit or overlap
+      traffic relative to this aggregate.
     Read Requests: |-
-      Number of read requests to the GL2C cache.
+      Number of read requests to the GL2C cache (GL2C_READ).
     Write Requests: |-
-      Number of write requests to the GL2C cache.
+      Number of write requests to the GL2C cache (GL2C_WRITE).
+    Atomic Requests: |-
+      Number of atomic requests at the GL2C cache (GL2C_ATOMIC).
+    EA Read Requests (DRAM): |-
+      Number of GL2C/EA read requests destined for DRAM (memory controller).
+      gl2c_perf_sel_ea_rdreq_dram (GL2C_EA_RDREQ_DRAM). Reported values are summed over GL2C instances.
+    EA Write Requests (DRAM): |-
+      Number of GL2C/EA write requests destined for DRAM (memory controller).
+      gl2c_perf_sel_ea_wrreq_dram (GL2C_EA_WRREQ_DRAM). Reported values are summed over GL2C instances.
     GL2C Read BW: |-
-      Achieved read bandwidth at the GL2C level.
+      Read bandwidth from GL2C_READ_{32,64,128}_REQ byte accounting plus
+      GL2C_COMPRESSED_READ_96_REQ (96 B compressed reads). EA 96 B reads use GL2C_EA_RDREQ_96B.
     GL2C Write BW: |-
       Achieved write bandwidth at the GL2C level.
