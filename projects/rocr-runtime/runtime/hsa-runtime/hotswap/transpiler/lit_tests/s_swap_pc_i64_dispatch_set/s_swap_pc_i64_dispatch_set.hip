@@ -11,11 +11,14 @@
 // s_set_pc_i64_dispatch_set fixture for the shared dataflow design).
 // The swap differs in two ways:
 //   1. The handler ALSO writes a `blockaddress(@kernel, %BB_returnAddr)`
-//      into sdst before the indirectbr — mirroring the DirectA write
-//      so a downstream Pattern B (or DispatchSet) consumer of sdst
-//      can use it as an indirectbr operand. The return address is
-//      the offset immediately following the swap site (swap.offset +
-//      swap.size).
+//      into sdst before the cascade — mirroring the DirectA write so
+//      a downstream Pattern B (or DispatchSet) consumer of sdst can
+//      use it as a cascade-match operand. The return address is the
+//      offset immediately following the swap site (swap.offset +
+//      swap.size). The cascade itself is emitted via the file-local
+//      `emitEnumeratedDispatch` helper in handle_sop1.cpp — see its
+//      rationale block for why we use cmp+br and not `indirectbr`
+//      (FixIrreducible compatibility under irreducible CFGs).
 //   2. The post-swap fallthrough (the return target) is added to
 //      extraBlockStarts in the analysis Phase 1 pre-pass so the IR
 //      includes a named bb_<return-offset> label.
@@ -139,7 +142,7 @@ setpc_swap_dispatch_set_kernel(int *out) {
       "s_branch 0\n\t"
       // .Lconverge: dataflow has converged, src pair s[10:11] holds
       // one of {K+0x34, K+0x3C}. sdst = s[20:21] receives the return
-      // PC blockaddress (K+0x2C); the indirectbr enumerates both
+      // PC blockaddress (K+0x2C); the cmp+br cascade enumerates both
       // call targets.
       "s_swap_pc_i64 s[20:21], s[10:11]\n\t"
       // .Lret: pinned-by-construction observable instruction so the

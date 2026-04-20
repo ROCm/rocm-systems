@@ -1,15 +1,136 @@
 #include "handlers.hpp"
 #include "sem_op_attrs.hpp"
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
 namespace transpiler {
+
+namespace {
+
+// Lower an analysis-enumerated indirect dispatch (the runtime i64
+// value `targetInt` matches one of `targets` by setpc-analysis
+// construction) into a cascade of cmp+br terminators rooted at the
+// IRBuilder's current insertion block:
+//
+//   currBB:                                        ; B's current insert pt
+//     %cmp_0 = icmp eq i64 %targetInt, <target_offset_0>
+//     br i1 %cmp_0, label %bb_T0, label %dispatch_<off>_1
+//   dispatch_<off>_1:
+//     %cmp_1 = icmp eq i64 %targetInt, <target_offset_1>
+//     br i1 %cmp_1, label %bb_T1, label %dispatch_<off>_2
+//   ...
+//   dispatch_<off>_{N-1}:
+//     %cmp_{N-1} = icmp eq i64 %targetInt, <target_offset_{N-1}>
+//     br i1 %cmp_{N-1}, label %bb_T{N-1},
+//                       label %dispatch_<off>_unreachable
+//   dispatch_<off>_unreachable:
+//     unreachable
+//
+// On return the builder is positioned at the END of the unreachable
+// block (after its terminator). Callers in this file return from the
+// enclosing handler immediately afterwards, so no further code is
+// emitted.
+//
+// Why a cascade and not `indirectbr` / `switch`:
+//   LLVM's `FixIrreducible` pass (Transforms/Utils/FixIrreducible.cpp,
+//   relied on by AMDGPU's structurizer) only handles `UncondBrInst`,
+//   `CondBrInst` and `CallBrInst` as predecessors of an irreducible
+//   cycle header — it `llvm_unreachable`s for any other terminator.
+//   Tensilelite-shaped lifted CFGs (kernels using `s_swappc_b64` for
+//   activation-function dispatch) place the dispatch block inside an
+//   irreducible cycle, so an `indirectbr` (or `switch`) terminator
+//   there crashes llc with "unsupported block terminator". A cascade
+//   of `br` is FixIrreducible-compatible.
+//
+// Why we compare against an integer marker (target offset) rather
+// than a `blockaddress` pointer:
+//   The raiser's chain-terminator hook stores a per-predecessor marker
+//   into the ret-pair SGPRs. An earlier revision of this fix stored
+//   `ptrtoint(blockaddress(@kernel, %bb_<retAddr>)) to i64` so the
+//   cascade could compare against a `blockaddress` constant and let
+//   LLVM's SCCP+InstCombine fold the cmp to `i1 true` on the hot
+//   path. In practice the hi/lo split imposed by `storeSGPR64` (AMDGPU
+//   SGPR pairs are two i32 halves joined back with shl/or at the
+//   dispatch site) defeats that fold across phi joins, and the
+//   `BlockAddress` SDNode survives into AMDGPU ISel — which has no
+//   pattern for materialising a `BlockAddress` as an i64 register
+//   value (there is no relocation for "address of arbitrary BB inside
+//   a kernel"). llc then aborts with
+//     `LLVM ERROR: Cannot select: t1: i64 = BlockAddress<@kernel, %bb_N>`.
+//   Using the target's source-MC byte offset as a plain i64 marker
+//   sidesteps the issue entirely: the marker is a normal integer
+//   constant on every contributing predecessor path, folds cleanly
+//   through mem2reg + SCCP + InstCombine, and `BlockAddress` only
+//   appears as the `label` operand of the `br`, which DOES have a
+//   codegen pattern (normal conditional branch). The hot-path folded
+//   shape is identical to before (SimplifyCFG collapses the cascade
+//   to a direct branch); the cold path does a bounded runtime integer
+//   equality check before reaching the trap BB.
+//
+// `targetInt` must be of `ctx.i64Ty`; we assert this to catch
+// regressions that forget to unpack the SGPR pair to i64 before
+// calling.
+//
+// `targets` MUST be non-empty (the analysis never produces an empty
+// dispatch set; the caller refuses Unresolvable sites earlier).
+//
+// `siteOffset` is the source-MC byte offset of the dispatching
+// instruction; it is embedded in dispatch BB names to keep them
+// unique across multiple dispatch sites in the same kernel.
+void emitEnumeratedDispatch(RaiseContext &ctx, Value *targetInt,
+                            ArrayRef<uint64_t> targets,
+                            uint64_t siteOffset) {
+  assert(!targets.empty() && "enumerated dispatch needs ≥1 target");
+  assert(targetInt->getType() == ctx.i64Ty &&
+         "enumerated dispatch expects i64 target marker");
+
+  SmallString<32> sitePrefixStorage;
+  raw_svector_ostream(sitePrefixStorage) << "dispatch_0x"
+                                         << utohexstr(siteOffset);
+  StringRef sitePrefix = sitePrefixStorage;
+
+  IRBuilder<> &B = ctx.B;
+
+  // Pre-create the unreachable trap block so we can name it
+  // deterministically and reference it from the last cascade step.
+  BasicBlock *unreachableBB = BasicBlock::Create(
+      ctx.C, sitePrefix.str() + "_unreachable", ctx.kernel);
+
+  for (size_t i = 0; i < targets.size(); ++i) {
+    BasicBlock *targetBB = ctx.lookupBB(targets[i]);
+    Constant *markerCI = ConstantInt::get(ctx.i64Ty, targets[i]);
+    SmallString<48> cmpName;
+    raw_svector_ostream(cmpName) << sitePrefix << "_cmp_" << i;
+    Value *cmp = B.CreateICmpEQ(targetInt, markerCI, cmpName);
+
+    BasicBlock *fallthroughBB;
+    if (i + 1 < targets.size()) {
+      SmallString<48> nextName;
+      raw_svector_ostream(nextName) << sitePrefix << "_" << (i + 1);
+      fallthroughBB = BasicBlock::Create(ctx.C, nextName, ctx.kernel);
+    } else {
+      fallthroughBB = unreachableBB;
+    }
+    B.CreateCondBr(cmp, targetBB, fallthroughBB);
+    B.SetInsertPoint(fallthroughBB);
+  }
+
+  // Builder is now positioned at the start of unreachableBB. Emit the
+  // unreachable terminator. The block is a BlockAddress-free terminal
+  // sink — no other code emits into it.
+  B.CreateUnreachable();
+}
+
+} // namespace
 
 // SPE attribute registrations. Every SemOp listed here has been audited
 // to route EXEC writes through `regs.storeExec` — directly for the
@@ -112,10 +233,12 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
   }
   if (sop == SemOp::S_SET_PC_I64) {
     // Look up the static analysis classification (Pattern A direct,
-    // Pattern B indirectbr, or Unresolvable). Both patterns emit a
-    // terminator into the current BB; the raiser's BB-layout phase
-    // has already promoted the next linear offset to a leader so
-    // subsequent instructions land in their own BBs.
+    // Pattern B enumerated-dispatch, or Unresolvable). Both patterns
+    // emit a terminator into the current BB (and Pattern B / DispatchSet
+    // also append a chain of dispatch sub-blocks via
+    // `emitEnumeratedDispatch`); the raiser's BB-layout phase has
+    // already promoted the next linear offset to a leader so subsequent
+    // instructions land in their own BBs.
     if (!ctx.setpcAnalysis) {
       hr.failure = RaiseFailure::unsupportedShape(
           di, "SOP1",
@@ -139,22 +262,22 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     }
     case SetPcSiteInfo::Kind::IndirectB:
     case SetPcSiteInfo::Kind::DispatchSet: {
-      // Both shapes lower to the same `indirectbr` pattern: read the
-      // source SGPR pair as i64 (it holds a real LLVM BlockAddress
-      // constant — populated either by the call-site chain-terminator
-      // hook for IndirectB, or by the dispatch-target chain-terminator
-      // hook for DispatchSet), cast to ptr, and dispatch into the
-      // enumerated target list. The classification difference is
-      // purely semantic (return vs. forward dispatch); the lowering
-      // mechanism is identical.
+      // Both shapes lower to the same enumerated-dispatch cascade:
+      // read the source SGPR pair as i64 (it holds the per-predecessor
+      // marker — the resolved target's source-MC byte offset, written
+      // either by the call-site chain-terminator hook in raiser.cpp for
+      // IndirectB, or by the dispatch-target chain-terminator hook for
+      // DispatchSet), then emit a cmp+br cascade against each
+      // enumerated target offset. See `emitEnumeratedDispatch` above
+      // for why this is a cascade of integer equality compares and not
+      // `indirectbr` / a ptr-equality check against `blockaddress`.
+      // The classification difference is purely semantic (return vs.
+      // forward dispatch); the lowering mechanism is identical.
       Value *retVal = ctx.regs.loadSGPR64(
           ctx.B, static_cast<int>(info.indirectRetPairLowReg));
-      Value *retPtr = ctx.B.CreateIntToPtr(
-          retVal, PointerType::get(ctx.C, 0), "ret_pc_ptr");
-      IndirectBrInst *ibr = ctx.B.CreateIndirectBr(
-          retPtr, info.indirectTargets.size());
-      for (uint64_t addr : info.indirectTargets)
-        ibr->addDestination(ctx.lookupBB(addr));
+      retVal->setName("ret_pc_marker");
+      emitEnumeratedDispatch(ctx, retVal, info.indirectTargets,
+                             di.offset);
       hr.handled = true;
       return hr;
     }
@@ -180,13 +303,14 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
     // `blockaddress(@kernel, %BB_returnAddr)` cast to i64 into sdst
     // BEFORE the terminator (so a downstream Pattern B
     // `s_set_pc_i64 sdst` in the callee can consume that
-    // blockaddress via its indirectbr enumeration). The terminator
-    // itself is `br label %BB_callee` for DirectA or
-    // `indirectbr ptr ssrc, [list]` for DispatchSet. The
+    // blockaddress via its enumerated-dispatch cascade). The
+    // terminator itself is `br label %BB_callee` for DirectA or a
+    // cmp+br cascade against `[list]` (via
+    // `emitEnumeratedDispatch`) for DispatchSet. The
     // chain-terminator hook in raiser.cpp has already rewritten
     // ssrc to hold the matching BlockAddress on every contributing
-    // CFG path, so the indirectbr's source is a real LLVM
-    // BlockAddress constant rather than a binary PC.
+    // CFG path, so each cascade `icmp eq` resolves to a constant
+    // after mem2reg + SCCP rather than running a true runtime check.
     //
     // IndirectB on a swap_pc is NOT a valid classification: by
     // construction, IndirectB describes a return-side use (the pair
@@ -233,35 +357,39 @@ HandlerResult handleSOP1(RaiseContext &ctx, const DecodedInst &di,
           "indicates an analysis invariant violation)");
       return hr;
     }
-    // Materialise the return address BlockAddress into sdst on both
-    // DirectA and DispatchSet paths. Both operations land in the
-    // swap's own BB; Phase 1 of setpc_analysis has already promoted
-    // (di.offset + di.size) to a leader so subsequent linear
-    // instructions live in their own BB.
+    // Materialise the return address marker (the offset of the BB
+    // immediately after the swap) into sdst on both DirectA and
+    // DispatchSet paths. Phase 1 of setpc_analysis has already
+    // promoted `(di.offset + di.size)` to a leader so subsequent
+    // linear instructions live in their own BB; we simply write the
+    // offset of that BB as a plain i64 constant, and the downstream
+    // IndirectB consumer of sdst reads it back and compares it in a
+    // cmp+br cascade. See `emitEnumeratedDispatch` above for why we
+    // use an integer marker rather than `ptrtoint(blockaddress(...))`
+    // (AMDGPU ISel cannot materialise a `BlockAddress` as an i64).
     uint64_t returnAddr = di.offset + di.size;
-    BasicBlock *retBB = ctx.lookupBB(returnAddr);
-    Constant *ba = BlockAddress::get(ctx.kernel, retBB);
-    Value *baInt = ctx.B.CreatePtrToInt(ba, ctx.i64Ty,
-                                          "swap_ret_blockaddr");
-    ctx.regs.writeReg64(ctx.B, op.dst(), baInt);
+    // Force the target BB to exist in the lift so the subsequent
+    // `br label %bb_<returnAddr>` has a valid destination; we don't
+    // use the returned BB pointer here.
+    (void)ctx.lookupBB(returnAddr);
+    Value *retMarker = ConstantInt::get(ctx.i64Ty, returnAddr);
+    ctx.regs.writeReg64(ctx.B, op.dst(), retMarker);
 
     if (info.kind == SetPcSiteInfo::Kind::DirectA) {
       ctx.B.CreateBr(ctx.lookupBB(info.directTarget));
       hr.handled = true;
       return hr;
     }
-    // DispatchSet: emit indirectbr through the source pair into the
-    // enumerated targets. The source pair holds a BlockAddress
-    // constant (rewritten by the chain-terminator hook in raiser.cpp
-    // on each contributing predecessor path).
+    // DispatchSet: emit an enumerated-dispatch cascade through the
+    // source pair into the enumerated targets. The source pair holds
+    // a per-predecessor i64 marker (the resolved callee's source-MC
+    // byte offset), rewritten by the chain-terminator hook in
+    // raiser.cpp on each contributing predecessor path.
     Value *callTarget = ctx.regs.loadSGPR64(
         ctx.B, static_cast<int>(info.indirectRetPairLowReg));
-    Value *callPtr = ctx.B.CreateIntToPtr(
-        callTarget, PointerType::get(ctx.C, 0), "swap_call_target_ptr");
-    IndirectBrInst *ibr = ctx.B.CreateIndirectBr(
-        callPtr, info.indirectTargets.size());
-    for (uint64_t addr : info.indirectTargets)
-      ibr->addDestination(ctx.lookupBB(addr));
+    callTarget->setName("swap_call_target_marker");
+    emitEnumeratedDispatch(ctx, callTarget, info.indirectTargets,
+                           di.offset);
     hr.handled = true;
     return hr;
   }

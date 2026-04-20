@@ -7,19 +7,26 @@
 //     in the same basic block. Lowers to `br label %BB_target`.
 //
 //   * IndirectB: subroutine-return shape — the source SGPR pair is the
-//     ret-pair populated by a caller's chain (Pattern B). Lowers to
-//     `indirectbr ptr %ret_pc, [list of resolved return targets]` where
-//     each call site in the kernel that wrote that ret-pair contributes
-//     one target via the `chainTerminators` rewrite hook.
+//     ret-pair populated by a caller's chain (Pattern B). Lowers to a
+//     `cmp eq + br` cascade (emitted by `emitEnumeratedDispatch` in
+//     handle_sop1.cpp) over the resolved return targets, terminating
+//     in an `unreachable` trap BB. Each call site in the kernel that
+//     wrote that ret-pair contributes one target via the
+//     `chainTerminators` rewrite hook.
 //
 //   * DispatchSet: multi-target dispatch — the source SGPR pair holds
 //     one of N statically-known absolute targets reaching the use site
 //     through distinct CFG paths (e.g. a tensilelite "activation
 //     function dispatcher" — each predecessor block writes a different
 //     chain target into the same pair, then a join block consumes it).
-//     Lowers to `indirectbr ptr %target, [list]`. For `s_swap_pc_i64`
-//     it ALSO writes the return-PC `blockaddress` into sdst before the
-//     indirectbr (mirroring the DirectA dst-write).
+//     Lowers to the same enumerated-dispatch cascade as IndirectB. For
+//     `s_swap_pc_i64` it ALSO writes the return-PC `blockaddress` into
+//     sdst before the cascade (mirroring the DirectA dst-write).
+//
+// The cascade shape replaces an earlier `indirectbr` lowering; see the
+// rationale block on `emitEnumeratedDispatch` in handle_sop1.cpp for
+// why (FixIrreducible pass compatibility under the irreducible CFGs
+// the call/return pattern produces).
 //
 // See semop.hpp's `S_SET_PC_I64` and `S_SWAP_PC_I64` doc for the full
 // lowering contracts. The handler in `handle_sop1.cpp` consumes the
@@ -821,7 +828,8 @@ SetPcAnalysis analyseSetPC(ArrayRef<DecodedInst> insts,
         }
         // Dst pair now holds an opaque (return-PC) value; remove from
         // PC tracking so a downstream s_set_pc_i64 reading dst falls
-        // into Pattern B (indirectbr) rather than DirectA.
+        // into Pattern B (enumerated-dispatch cascade) rather than
+        // DirectA.
         if (dstLow) {
           state.invalidatePcAt(*dstLow);
           state.invalidatePcAt(*dstLow + 1);

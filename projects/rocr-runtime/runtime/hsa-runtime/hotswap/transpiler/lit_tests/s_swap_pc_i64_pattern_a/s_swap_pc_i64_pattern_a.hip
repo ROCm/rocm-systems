@@ -17,7 +17,9 @@
 // value is the offset of an in-kernel basic block leader. The
 // blockaddress materialisation into sdst replaces the binary return
 // PC the hardware would deposit there with a real LLVM constant a
-// downstream Pattern B `s_set_pc_i64` could consume via indirectbr.
+// downstream Pattern B `s_set_pc_i64` could consume as a
+// cascade-match operand (via the enumerated-dispatch cmp+br lowering
+// in `emitEnumeratedDispatch`, see handle_sop1.cpp).
 //
 // Layout (kernel-relative offsets after the kernarg-load prologue
 // hipcc auto-emits — call the inline-asm start K, with K = 0x08 in

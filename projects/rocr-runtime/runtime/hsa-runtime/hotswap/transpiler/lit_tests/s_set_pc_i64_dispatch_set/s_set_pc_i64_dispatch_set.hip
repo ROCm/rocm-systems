@@ -15,7 +15,12 @@
 // terminator is `s_set_pc_i64 sX:X+1`. The intra-block analysis sees
 // the source pair pristine through the join block; the Phase 3 inter-
 // block dataflow joins the per-path SET facts and Phase 4 lifts the
-// site to `indirectbr ptr %target, [list of enumerated callees]`.
+// site to a `cmp eq + br` cascade enumerating the statically-known
+// callees, terminating in an `unreachable` trap BB (via the
+// file-local `emitEnumeratedDispatch` helper in handle_sop1.cpp). See
+// that helper's rationale block for why this is a cascade and not
+// `indirectbr` (FixIrreducible compatibility under the irreducible
+// CFGs this shape produces).
 //
 // The S_ADDC_U32 post-handler hook in raiser.cpp also rewrites each
 // path's chain terminator to materialise
@@ -56,9 +61,11 @@
 //                                                ;  blockStarts via the
 //                                                ;  decoded immediate)
 //   ; .Lconverge (join block):
-//   K + 0x28:  s_set_pc_i64 s[10:11]            ; DispatchSet ⇒ indirectbr
-//                                                ; ptr %src, [bb_<K+0x2C>,
-//                                                ;            bb_<K+0x34>]
+//   K + 0x28:  s_set_pc_i64 s[10:11]            ; DispatchSet ⇒ cmp+br
+//                                                ; cascade over
+//                                                ;   [bb_<K+0x2C>,
+//                                                ;    bb_<K+0x34>]
+//                                                ; + unreachable trap BB
 //   K + 0x2C:  v_mov_b32 vR, 0xCAFE0001         ; .Ltarget1 (8 bytes)
 //   K + 0x34:  v_mov_b32 vR, 0xDEAD0001         ; .Ltarget2 (8 bytes)
 //   K + 0x3C:  s_endpgm                         ; terminate kernel
@@ -138,7 +145,7 @@ setpc_set_dispatch_set_kernel(int *out) {
       "s_add_co_ci_u32 s11, s11, 0\n\t"
       "s_branch 0\n\t"
       // .Lconverge: dataflow has converged, src pair s[10:11] holds
-      // one of {K+0x2C, K+0x34}. Lifts to indirectbr.
+      // one of {K+0x2C, K+0x34}. Lifts to a cmp+br cascade.
       "s_set_pc_i64 s[10:11]\n\t"
       // .Ltarget1 / .Ltarget2: pinned-by-construction observable
       // instructions so the lifted IR includes named bb_0x<...>

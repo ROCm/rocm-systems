@@ -572,27 +572,50 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       if (di.defsEXEC)
         result.hasDivergentExec = true;
       // Pattern B call-site post-processing: if this s_add_co_ci_u32
-      // is the high-half terminator of a getpc+add chain that feeds a
-      // Pattern B `s_set_pc_i64` indirectbr (i.e. some downstream
-      // s_set_pc_i64 reads the same ret-pair this chain populated),
-      // overwrite the ret-pair SGPR with `blockaddress(@kernel,
-      // %BB_returnAddr)` cast to i64. This makes the i64 the
-      // downstream indirectbr reads a real LLVM BlockAddress
-      // constant, not an opaque binary PC the indirectbr cannot use.
-      // The SOP2 handler has already done its arithmetic above; this
-      // commit happens *after* and clobbers the arithmetic result on
-      // purpose — that result was a binary PC we never want to see.
-      // See setpc_analysis.hpp + semop.hpp's S_SET_PC_I64 doc.
+      // is the high-half terminator of a getpc+add chain that feeds
+      // a Pattern B `s_set_pc_i64` enumerated-dispatch cascade (i.e.
+      // some downstream s_set_pc_i64 reads the same ret-pair this
+      // chain populated), overwrite the ret-pair SGPR with the plain
+      // i64 marker `resolvedReturnAddr` — i.e. the source-MC byte
+      // offset of the BB this chain meant to return to. The
+      // downstream cascade compares against the same offsets via
+      // `icmp eq i64 %marker, <offset_k>` for each enumerated
+      // target; when this predecessor's marker matches one of the
+      // enumerated offsets, mem2reg + SCCP + InstCombine fold the
+      // compare to `i1 true` across the phi join and SimplifyCFG
+      // collapses the cmp+br cascade into a direct
+      // `br label %BB_<offset>`. The SOP2 handler has already done
+      // its (binary-PC-producing) arithmetic above; this commit
+      // happens *after* and clobbers that result on purpose — that
+      // value was an opaque runtime PC we never want to see
+      // downstream.
+      //
+      // An earlier revision of this hook wrote
+      // `ptrtoint(blockaddress(@kernel, %BB_returnAddr)) to i64`
+      // here so the cascade could compare against a `blockaddress`
+      // constant. That form survived mem2reg + SCCP unfolded in
+      // irreducible tensilelite-shaped CFGs (the `storeSGPR64`
+      // hi/lo split prevented the cross-phi fold), leaving a
+      // `BlockAddress` SDNode alive into AMDGPU ISel, which has no
+      // codegen pattern for it and aborts llc with
+      //   `Cannot select: t1: i64 = BlockAddress<@kernel, %bb_N>`.
+      // Using a plain integer marker keeps `BlockAddress` solely
+      // as a direct-branch `label` operand (which DOES have a
+      // codegen pattern), sidestepping the ISel crash entirely.
+      // See setpc_analysis.hpp + semop.hpp's S_SET_PC_I64 doc +
+      // `emitEnumeratedDispatch` in handle_sop1.cpp.
       if (di.semOp == SemOp::S_ADDC_U32) {
         auto it = setpcAnalysis.chainTerminators.find(di.offset);
         if (it != setpcAnalysis.chainTerminators.end()) {
-          BasicBlock *retBB = ctx.lookupBB(it->second.resolvedReturnAddr);
-          Constant *ba = BlockAddress::get(F, retBB);
-          Value *baInt = ctx.B.CreatePtrToInt(ba, ctx.i64Ty,
-                                                "ret_pc_blockaddr");
+          // Force the BB to exist so the downstream cascade's
+          // direct branch has a destination; we don't use the
+          // pointer here.
+          (void)ctx.lookupBB(it->second.resolvedReturnAddr);
+          Value *retMarker =
+              ConstantInt::get(ctx.i64Ty, it->second.resolvedReturnAddr);
           ctx.regs.storeSGPR64(ctx.B,
                                 static_cast<int>(it->second.retPairLowReg),
-                                baInt);
+                                retMarker);
         }
       }
       raisedCount++;

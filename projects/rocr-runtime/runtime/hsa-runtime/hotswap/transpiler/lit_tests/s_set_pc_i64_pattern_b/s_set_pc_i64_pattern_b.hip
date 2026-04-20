@@ -4,14 +4,19 @@
 // return via an SGPR pair stashed at the call site). See
 // SemOp::S_SET_PC_I64 in semop.hpp and the symbolic-PC tracker
 // in setpc_analysis.cpp. The handler in handle_sop1.cpp must
-// lower this site to
-//   indirectbr ptr %ret_pc, [ list of resolved return targets ]
-// because the source SGPR pair was constructed at a call site
-// (its getpc+add chain finalised in a *different* basic block —
-// the analysis enforces a per-basic-block reset of its symbolic
-// PC table — and the chain's value is the return address). The
-// raiser also post-processes the chain-terminator s_add_co_ci_u32
-// to overwrite the ret-pair with `blockaddress(@kernel, %ret_BB)`
+// lower this site to a `cmp eq + br` cascade enumerating the
+// resolved return targets (via the file-local
+// `emitEnumeratedDispatch` helper), terminating in an
+// `unreachable` trap BB. See `emitEnumeratedDispatch`'s
+// rationale block for why this is a cascade and not
+// `indirectbr` (FixIrreducible compatibility under irreducible
+// call/return CFGs — the Tensilelite shape). The source SGPR
+// pair was constructed at a call site (its getpc+add chain
+// finalised in a *different* basic block — the analysis enforces
+// a per-basic-block reset of its symbolic PC table — and the
+// chain's value is the return address). The raiser also
+// post-processes the chain-terminator s_add_co_ci_u32 to
+// overwrite the ret-pair with `blockaddress(@kernel, %ret_BB)`
 // instead of the binary PC the chain would otherwise yield.
 //
 // Layout (kernel-relative offsets after the kernarg-load prologue
@@ -88,12 +93,14 @@ setpc_pattern_b_kernel(int *out) {
       // the decoder's blockStarts so the analysis pass resets its
       // symbolic-PC state at .Lcallee.
       "s_branch 2\n\t"
-      // .Lret: indirectbr destination for Pattern B's return.
+      // .Lret: cascade destination for Pattern B's return.
       "v_mov_b32 %[r], 0xCAFE0001\n\t"
       // .Lcallee: target of the Pattern A branch.
       "v_mov_b32 %[r], 0xDEAD0001\n\t"
-      // Pattern B indirect return — must lower to `indirectbr`
-      // with destination list [bb_0x20] (the .Lret label).
+      // Pattern B indirect return — must lower to a cmp+br
+      // cascade (via `emitEnumeratedDispatch`) with the single
+      // enumerated target bb_0x20 (the .Lret label), falling
+      // through to an `unreachable` trap BB on miss.
       "s_set_pc_i64 s[8:9]\n\t"
       : [r] "=v"(result)
       :

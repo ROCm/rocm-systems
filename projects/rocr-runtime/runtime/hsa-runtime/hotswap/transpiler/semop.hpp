@@ -94,15 +94,29 @@ enum class SemOp : uint16_t {
   //                  the target is a known intra-function label.
   //   IndirectB    — subroutine return via an SGPR pair stashed at the
   //                  call site (the canonical s[30:31] return-PC
-  //                  idiom). Lowers to `indirectbr ptr %ret_pc,
-  //                  [list of resolved return targets]`. The
+  //                  idiom). Lowers to a `cmp eq + br` cascade (via
+  //                  `emitEnumeratedDispatch` in handle_sop1.cpp)
+  //                  enumerating the resolved return targets and
+  //                  terminating in an `unreachable` trap BB. The
   //                  corresponding call-site
   //                  `s_get_pc_i64 + s_add*` chains are rewritten by
-  //                  the raiser to materialise a
-  //                  `blockaddress(@kernel, %ret_BB)` into the
-  //                  ret-pair (via a post-handler hook in raiser.cpp),
-  //                  so the i64 fed to indirectbr is a real LLVM
-  //                  blockaddress constant rather than a binary PC.
+  //                  the raiser to write the plain i64 marker
+  //                  `resolvedReturnAddr` (the source-MC byte offset
+  //                  of the intended return BB) into the ret-pair
+  //                  (via a post-handler hook in raiser.cpp), so
+  //                  each cascade `icmp eq i64 %marker, <offset>`
+  //                  folds across the phi join under mem2reg + SCCP
+  //                  + InstCombine and SimplifyCFG collapses the
+  //                  cmp+br to a direct branch — the same final
+  //                  codegen as a fully-folded `indirectbr` would
+  //                  produce. See `emitEnumeratedDispatch`'s
+  //                  rationale block for why a cascade (LLVM's
+  //                  FixIrreducible pass only handles br-flavoured
+  //                  predecessors of an irreducible cycle header)
+  //                  and why an integer marker rather than
+  //                  `ptrtoint(blockaddress)` (AMDGPU ISel has no
+  //                  pattern to materialise a `BlockAddress` as an
+  //                  i64 register value).
   //   DispatchSet  — multi-target dispatch via inter-block PC-chain
   //                  dataflow: each predecessor block writes a
   //                  different chain target into the same SGPR pair,
@@ -110,11 +124,12 @@ enum class SemOp : uint16_t {
   //                  `s_set_pc_i64`. The dataflow in setpc_analysis
   //                  enumerates the bounded set of targets reaching
   //                  the use site through distinct CFG paths. Lowers
-  //                  to `indirectbr ptr %target, [list]`. Same chain-
-  //                  terminator hook as IndirectB writes a
-  //                  `blockaddress` constant on each contributing
-  //                  predecessor path so the indirectbr's source is
-  //                  a real LLVM constant.
+  //                  to the same enumerated-dispatch cascade as
+  //                  IndirectB. Same chain-terminator hook as
+  //                  IndirectB writes the per-predecessor i64 marker
+  //                  (the callee's source-MC byte offset) on each
+  //                  contributing predecessor path so each cascade
+  //                  cmp folds to a constant branch after SCCP.
   // Sites the analysis cannot resolve (incomplete dataflow,
   // unbounded fan-in past kMaxDispatchTargets, or pair killed by an
   // unmodelled write before the use site) refuse loudly via
@@ -133,20 +148,32 @@ enum class SemOp : uint16_t {
   //   DirectA      — call target ssrc was produced by a local
   //                  `s_get_pc_i64 + s_add_co_u32 + s_add_co_ci_u32`
   //                  chain that resolves intra-block. Lowering writes
-  //                  `blockaddress(@kernel, %BB_returnAddr)` cast to
-  //                  i64 into sdst and emits `br label %BB_callee`.
+  //                  the return-address marker (the plain i64
+  //                  source-MC byte offset of swap.offset+swap.size)
+  //                  into sdst and emits `br label %BB_callee`.
   //   DispatchSet  — call target reached via inter-block PC-chain
   //                  dataflow (the tensilelite "activation function
   //                  dispatcher" shape: each predecessor block
   //                  computes a distinct callee target into the same
   //                  pair via its own getpc+add chain, then a join
   //                  block executes `s_swap_pc_i64`). Lowering writes
-  //                  the return-PC blockaddress into sdst as in
-  //                  DirectA, then emits `indirectbr ptr ssrc, [list
-  //                  of enumerated callee targets]`. The chain-
-  //                  terminator hook in raiser.cpp rewrites ssrc to
-  //                  hold a `blockaddress(@kernel, %BB_callee)` on
-  //                  every contributing predecessor path.
+  //                  the return-address marker into sdst as in
+  //                  DirectA, then emits a `cmp eq + br` cascade
+  //                  (via `emitEnumeratedDispatch` in
+  //                  handle_sop1.cpp) over the enumerated callee
+  //                  targets, terminating in an `unreachable` trap
+  //                  BB. The chain-terminator hook in raiser.cpp
+  //                  rewrites ssrc to hold the callee's i64 marker
+  //                  (source-MC byte offset) on every contributing
+  //                  predecessor path so each cascade cmp folds to
+  //                  a constant branch after SCCP. See
+  //                  `emitEnumeratedDispatch`'s rationale block for
+  //                  why a cascade (FixIrreducible compatibility
+  //                  under irreducible CFGs — the dominant shape
+  //                  this pattern produces) and why an integer
+  //                  marker rather than `ptrtoint(blockaddress)`
+  //                  (AMDGPU ISel cannot materialise a
+  //                  `BlockAddress` as an i64).
   //   Unresolvable — call target cannot be statically enumerated
   //                  (incomplete dataflow, fan-in past
   //                  kMaxDispatchTargets, or runtime-derived value).
@@ -161,7 +188,7 @@ enum class SemOp : uint16_t {
   // registers a synthetic chain-terminator at the swap site itself
   // (key = swap.offset, value = {sdst-low-reg, swap.offset+swap.size})
   // so any downstream IndirectB `s_set_pc_i64` reading sdst
-  // enumerates the swap's return offset as one of its indirectbr
+  // enumerates the swap's return offset as one of its cascade
   // targets.
   S_SWAP_PC_I64,
   S_ABS_I32,
