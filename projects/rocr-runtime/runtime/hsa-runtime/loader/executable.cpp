@@ -45,6 +45,9 @@
 #if defined(__linux__)
 #include <link.h>
 #include <unistd.h>
+#elif defined(__APPLE__)
+#include "core/inc/link_darwin.h"
+#include <unistd.h>
 #else
 #include <cstdint>
 #endif

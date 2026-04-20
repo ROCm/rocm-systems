@@ -72,6 +72,8 @@
 
 #if defined(__linux__)
 #include <link.h>
+#elif defined(__APPLE__)
+#include "core/inc/link_darwin.h"
 #else
 #include "loader/executable.hpp"
 #endif
@@ -87,11 +89,17 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
                  1
 #elif __linux__
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
+#elif __APPLE__
+                 // Darwin has no KFD/XDNA backends compiled in; MacOsDriver
+                 // (follow-up commit) will plug into the same array.
+                 0
 #endif
                  >
     discover_driver_funcs = {
+#if _WIN32
         KfdDriver::DiscoverDriver
-#ifdef __linux__
+#elif __linux__
+        KfdDriver::DiscoverDriver
         , XdnaDriver::DiscoverDriver
 #ifdef HSAKMT_VIRTIO_ENABLED
         , KfdVirtioDriver::DiscoverDriver

@@ -598,7 +598,10 @@ void GpuAgent::ReserveScratch()
     reserved_sz = MaxScratchDevice();
   }
 
-  size_t available;
+  // core::Driver::AvailableMemory takes uint64_t*; on Darwin arm64 size_t is
+  // unsigned long and uint64_t is unsigned long long — distinct typedefs
+  // even at identical width, so a pointer to size_t can't be passed.
+  uint64_t available;
   hsa_status_t err = driver().AvailableMemory(node_id(), &available);
   assert(err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
   std::lock_guard<std::mutex> lock(scratch_lock_);

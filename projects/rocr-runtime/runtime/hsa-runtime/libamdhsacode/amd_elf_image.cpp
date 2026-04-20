@@ -86,7 +86,13 @@
 #define _write write
 #define _lseek lseek
 #define _ftruncate ftruncate
+#if defined(__APPLE__)
+// Darwin has no <sys/sendfile.h>. copyfile(3) / fcopyfile(3) covers the
+// fd-to-fd zero-copy case and is available since 10.5.
+#include <copyfile.h>
+#else
 #include <sys/sendfile.h>
+#endif
 #else
 #define _ftruncate _chsize
 #endif // !_WIN32
@@ -227,6 +233,13 @@ namespace elf {
         return perror("lseek(3) failed");
       }
       if (_lseek(d, 0L, SEEK_SET) < 0) { return perror("lseek(3) failed"); }
+#if defined(__APPLE__)
+      // fcopyfile copies the full content in one call; no size tracking loop.
+      if (fcopyfile(in, d, NULL, COPYFILE_ALL) < 0) {
+        _close(in);
+        return perror("fcopyfile failed");
+      }
+#else
       ssize_t written;
       do {
         written = sendfile(d, in, NULL, size);
@@ -236,6 +249,7 @@ namespace elf {
         }
         size -= written;
       } while (size > 0);
+#endif
       _close(in);
       if (_lseek(d, 0L, SEEK_SET) < 0) { return perror("lseek(0) failed"); }
       return true;
@@ -876,15 +890,26 @@ namespace elf {
       if (!sections.empty()) {
         phdr.p_offset = sections[0]->offset();
       }
+      // On brew libelf (Darwin), Elf64_Xword is unsigned long and memAlign()
+      // returns uint64_t (unsigned long long) — std::max is ambiguous without
+      // a common type. Normalize everything here to uint64_t; the field
+      // widening to p_align is a no-op on 64-bit.
       for (Section* section : sections) {
-        phdr.p_align = (std::max)(phdr.p_align, section->memAlign());
+        phdr.p_align = (std::max)(static_cast<uint64_t>(phdr.p_align),
+                                  static_cast<uint64_t>(section->memAlign()));
       }
-      phdr.p_vaddr = alignUp(vaddr, (std::max)(phdr.p_align, (uint64_t) 1));
+      phdr.p_vaddr = alignUp(
+          static_cast<uint64_t>(vaddr),
+          (std::max)(static_cast<uint64_t>(phdr.p_align), static_cast<uint64_t>(1)));
       phdr.p_filesz = 0;
       phdr.p_memsz = 0;
       for (Section* section : sections) {
-        phdr.p_memsz = alignUp(phdr.p_memsz, (std::max)(section->memAlign(), (uint64_t) 1));
-        phdr.p_filesz = alignUp(phdr.p_filesz, (std::max)(section->memAlign(), (uint64_t) 1));
+        phdr.p_memsz = alignUp(
+            static_cast<uint64_t>(phdr.p_memsz),
+            (std::max)(static_cast<uint64_t>(section->memAlign()), static_cast<uint64_t>(1)));
+        phdr.p_filesz = alignUp(
+            static_cast<uint64_t>(phdr.p_filesz),
+            (std::max)(static_cast<uint64_t>(section->memAlign()), static_cast<uint64_t>(1)));
         if (!section->updateAddr(phdr.p_vaddr + phdr.p_memsz)) { return false; }
         phdr.p_filesz += (section->type() == SHT_NOBITS) ? 0 : section->size();
         phdr.p_memsz += section->memSize();
@@ -1002,7 +1027,10 @@ namespace elf {
           edata->d_align = data.align();
         }
       }
-      edata->d_align = (std::max)(edata->d_align, (uint64_t) 8);
+      // libelf's Elf_Data::d_align is size_t (unsigned long); on Darwin
+      // arm64 that's not the same typedef as uint64_t, so std::max is
+      // ambiguous. Cast both operands to a common size_t.
+      edata->d_align = (std::max)(edata->d_align, static_cast<size_t>(8));
       switch (hdr.sh_type) {
       case SHT_RELA:
         edata->d_type = ELF_T_RELA;

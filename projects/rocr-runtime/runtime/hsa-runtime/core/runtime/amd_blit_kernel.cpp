@@ -727,8 +727,12 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     // Phase 1 (byte copy) ends when destination is 0x100-aligned.
     uintptr_t src_start = uintptr_t(src);
     uintptr_t dst_start = uintptr_t(dst);
+    // Explicit cast: on Darwin arm64, size_t is unsigned long while uint64_t
+    // is unsigned long long — distinct typedefs at identical width, so
+    // std::min's template can't deduce a common type without help.
     uint64_t phase1_size =
-        std::min(size, uint64_t(0x100 - (dst_start & 0xFF)) & 0xFF);
+        std::min(static_cast<uint64_t>(size),
+                 uint64_t(0x100 - (dst_start & 0xFF)) & 0xFF);
 
     // Phase 2 (unrolled dwordx4 copy) ends when last whole block fits.
     uint64_t phase2_block = num_workitems * sizeof(uint32_t) *
@@ -899,7 +903,9 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
     // Ensure the packet body is written as header may get reordered when writing over PCIE
     _mm_sfence();
   }
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
+  // __atomic_store_n is a GCC/Clang builtin, available on both Linux glibc
+  // and Darwin libSystem; use it to avoid the C++20 std::atomic_ref path.
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),
                     kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
 #else

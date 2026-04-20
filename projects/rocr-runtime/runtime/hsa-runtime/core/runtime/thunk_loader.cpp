@@ -457,6 +457,13 @@ namespace core {
 LOAD_ERROR:
       fprintf(stderr, "GetExportAddress failed: %s\n", rocr::os::DlError());
     } else {
+#if defined(__APPLE__)
+      // Darwin doesn't link against libhsakmt (KFD is Linux /dev/kfd only).
+      // Leave the function-pointer table null — the MacOsDriver backend
+      // doesn't route through the thunk API, so these pointers are never
+      // dereferenced.
+      (void)0;
+#else
       HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)(&hsaKmtOpenKFD);
       HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)(&hsaKmtCloseKFD);
       HSAKMT_PFN(hsaKmtGetVersion) = (HSAKMT_DEF(hsaKmtGetVersion)*)(&hsaKmtGetVersion);
@@ -577,6 +584,7 @@ LOAD_ERROR:
 #if defined(__linux__)
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
 #endif
+#endif  // !defined(__APPLE__)
     }
   }
 

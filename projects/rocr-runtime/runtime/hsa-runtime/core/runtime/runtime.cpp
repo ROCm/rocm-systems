@@ -45,7 +45,11 @@
 #include <regex>
 #include <string>
 #if defined(__linux__)
+#if defined(__APPLE__)
+#include "core/inc/link_darwin.h"
+#else
 #include <link.h>
+#endif
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
@@ -894,9 +898,16 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
   const HSA_REGISTER_MEM_FLAGS reg_flags = {
       .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
 
+#if defined(__APPLE__)
+  // hsaKmt graphics-handle registration is Linux KFD only. On Darwin no
+  // KFD-backed agent exists; InteropMap has no backend to target.
+  (void)reg_flags;
+  return HSA_STATUS_ERROR;
+#else
   auto status =
       hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+#endif
 
   assert(num_agents > 0);
   auto& driver = agents[0]->driver();
@@ -1383,7 +1394,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // Export the dmabuf then close the file to get the reference to ensure the
   // deferred export will not run into this problem.
   int dmabuf_fd;
-  uint64_t dmabufOffset;
+  // core::Driver::ExportDMABuf takes size_t*; on Darwin arm64 size_t !=
+  // uint64_t as pointer-to typedefs (both 64-bit though).
+  size_t dmabufOffset;
   hsa_status_t err = agent->driver().ExportDMABuf(ptr, len, &dmabuf_fd, &dmabufOffset);
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
   if (err != HSA_STATUS_SUCCESS) return err;
@@ -1544,7 +1557,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   auto fixFragment = [&](HsaMemoryObjectHandle thunk_bo) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
-      len = Min(len, importSize - fragOffset);
+      len = Min(len, static_cast<size_t>(importSize - fragOffset));
     }
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
     allocation_map_.try_emplace(
@@ -3605,7 +3618,7 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
         }
 
         int fd;
-        uint64_t off;
+        size_t off;  // core::Driver::ExportDMABuf takes size_t*
         hsa_status_t err = mem->second.region->owner()->driver().ExportDMABuf(
             const_cast<void*>(ptr), size, &fd, &off);
 
@@ -3888,7 +3901,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
 
   int dmabuf_fd = 0;
-  uint64_t offset = 0;
+  size_t offset = 0;  // core::Driver::ExportDMABuf takes size_t*
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
   // Export memory from owner agent.
@@ -4181,7 +4194,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  uint64_t offset;
+  size_t offset;  // core::Driver::ExportDMABuf takes size_t*
 
   hsa_status_t err = memoryHandle->second.region->owner()->driver().ExportDMABuf(
       memoryHandle->second.thunk_handle, memoryHandle->second.size, dmabuf_fd, &offset);

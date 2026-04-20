@@ -50,6 +50,8 @@
 #include <libelf.h>
 #if defined(__linux__)
 #include <link.h>
+#elif defined(__APPLE__)
+#include "core/inc/link_darwin.h"
 #endif
 #include <list>
 #include <string>

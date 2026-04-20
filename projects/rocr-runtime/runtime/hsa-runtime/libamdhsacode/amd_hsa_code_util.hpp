@@ -188,6 +188,18 @@ inline uint32_t alignUp(uint32_t num, uint32_t align)
   return (num + align - 1) & ~(align - 1);
 }
 
+#if defined(__APPLE__)
+// On Darwin arm64, size_t is unsigned long while uint64_t is unsigned long
+// long — distinct typedefs at identical width. A call like `alignUp(size_t,
+// size_t)` is ambiguous between the uint64 and uint32 overloads because
+// neither matches exactly. Add an explicit size_t overload (ULP == uint64
+// on this platform, so delegate).
+inline size_t alignUp(size_t num, size_t align) {
+  return static_cast<size_t>(
+      alignUp(static_cast<uint64_t>(num), static_cast<uint64_t>(align)));
+}
+#endif
+
 std::string DumpFileName(const std::string& dir, const char* prefix, const char* ext, unsigned n, unsigned i = 0);
 
 }   //  namespace hsa

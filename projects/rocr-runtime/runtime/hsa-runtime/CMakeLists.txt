@@ -222,10 +222,16 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
-if (UNIX)
+if (UNIX AND NOT APPLE)
   set ( LNKSCR "hsacore.so.link" )
   set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
   set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags")
+elseif (APPLE)
+  # Darwin's ld64 doesn't accept -Bdynamic, -z options, --version-script,
+  # or --enable-new-dtags. Symbol visibility is handled by the per-symbol
+  # HSA_API annotations + -fvisibility=hidden already set in HSA_CXX_FLAGS.
+  # No link script equivalent; skip.
+  set(HSA_SHARED_LINK_FLAGS "")
 else()
   target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
   set(HSA_SHARED_LINK_FLAGS "")
@@ -470,8 +476,11 @@ if(${IMAGE_SUPPORT})
 
 endif()
 
-if (UNIX)
+if (UNIX AND NOT APPLE)
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+elseif (APPLE)
+  # Darwin has no librt; clock_gettime and friends live in libc.
+  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread )
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
