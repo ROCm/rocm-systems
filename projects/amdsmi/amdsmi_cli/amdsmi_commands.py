@@ -162,6 +162,7 @@ class AMDSMICommands:
             "sys": amdsmi_interface.AmdSmiClkType.SYS,
             "mem": amdsmi_interface.AmdSmiClkType.MEM,
             "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
             "soc": amdsmi_interface.AmdSmiClkType.SOC,
             "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
             # vclk and dclk currently do not support levels so average clk is given for frequency levels
@@ -4485,6 +4486,7 @@ class AMDSMICommands:
                     "cpu_dimm_pow_consumption",
                     "cpu_dimm_thermal_sensor",
                     "cpu_dimm_sb_reg",
+                    "cpu_svi3_vr_controller_temp",
                 ):
                     setattr(args, arg, True)
 
@@ -4659,7 +4661,7 @@ class AMDSMICommands:
                 # Only show util and ppt_limit for modes 4 and 5
                 if mode in [4, 5]:
                     static_dict["pwr_eff_mode"]["util"] = f"{util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit:.3f} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit} Watts"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -5076,7 +5078,7 @@ class AMDSMICommands:
             static_dict["ccd_power"] = {}
             try:
                 power = amdsmi_interface.amdsmi_get_cpu_core_ccd_power(args.core)
-                static_dict["ccd_power"]["value"] = f"{power:.3f} Watts"
+                static_dict["ccd_power"]["value"] = f"{power} Watts"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ccd_power"]["value"] = "N/A"
                 logging.debug(
@@ -7849,7 +7851,7 @@ class AMDSMICommands:
                 if mode in [4, 5]:
                     ppt_limit_watts = updated_ppt_limit / 1000.0  # Convert milliwatts to watts
                     static_dict["pwr_eff_mode"]["util"] = f"{updated_util}%"
-                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts:.3f} Watts"
+                    static_dict["pwr_eff_mode"]["ppt_limit"] = f"{ppt_limit_watts} Watts"
                 else:
                     # For modes 0-3, util and ppt_limit are not displayed
                     pass
@@ -8983,22 +8985,22 @@ class AMDSMICommands:
 
             # Validate the value against the extremum
             try:
-                # Parser only allows two options sclk or mclk
+                # Parser only allows three options sclk, mclk or fclk
                 if clk_type == "sclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.GFX
                 elif clk_type == "mclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.MEM
+                elif clk_type == "fclk":
+                    amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.DF
                 else:
-                    print(f"Valid clock types are: sclk, mclk\n")
+                    print(f"Valid clock types are: sclk, mclk, fclk\n")
                     self.logger.store_output(
                         args.gpu, "clk_limit", f"Invalid clock type {args.clk_limit.clk_type}"
                     )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
-
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
-
                 if lim_type == "min":
                     amdsmi_lim_type = amdsmi_interface.AmdSmiClkLimitType.MIN
                     if val > clk_tuple["max_clk"]:
@@ -9937,10 +9939,7 @@ class AMDSMICommands:
                 self.logger.clear_multiple_devices_output()
                 return
             if args.power_cap:
-                final_output = {
-                    "ppt0": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
-                    "ppt1": "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to reset to default power cap",
-                }
+                final_output = {"ppt0": "N/A", "ppt1": "N/A"}
                 power_limit_types = {}
                 for power_type in amdsmi_interface.AmdSmiPowerCapType:
                     # Strip 'AMDSMI_POWER_CAP_TYPE_' prefix and convert to lowercase

@@ -713,7 +713,7 @@ memory_cache_t<AddressType>::write_back (AddressType address,
         {
           /* The process has exited, simply discard the dirty cached bytes.  */
         }
-      catch (const memory_error_t &e)
+      catch (const memory_error_t &)
         {
           /* If we see memory errors, continue to try to write back all dirty
              lines.  The first exception seen will be rethrown at the end of

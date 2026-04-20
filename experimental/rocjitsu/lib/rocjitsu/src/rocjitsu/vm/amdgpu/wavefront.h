@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -27,6 +28,7 @@ enum class WfState : uint8_t {
   RUNNING, ///< In a running state and can be considered for scheduling.
   WAITCNT, ///< Stalled at a waitcnt.
   BARRIER, ///< Stalled at a barrier.
+  ENDING,  ///< s_endpgm executed but outstanding memory ops are draining.
 };
 
 /// @brief Allocation slice within a register file.
@@ -134,6 +136,14 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
+  /// @brief Return the per-wavefront scratch (private segment) base address.
+  /// @returns Byte address in GPU memory where this wavefront's scratch starts.
+  uint64_t scratch_base() const { return scratch_base_; }
+
+  /// @brief Set the per-wavefront scratch base address.
+  /// @param val Scratch base byte address (set at dispatch by CP).
+  void set_scratch_base(uint64_t val) { scratch_base_ = val; }
+
   /// @brief Return the wait counters for outstanding memory operations.
   /// @returns Reference to the wait counters.
   WaitCounters &wait_counters() { return wait_counters_; }
@@ -141,12 +151,105 @@ public:
   /// @returns Const reference to the wait counters.
   const WaitCounters &wait_counters() const { return wait_counters_; }
 
-  /// @brief Set the s_waitcnt target thresholds.
+  /// @brief Set the s_waitcnt target thresholds and stall if not yet satisfied.
+  ///
+  /// @details Used by GFX9 (CDNA1-4), GFX10 (RDNA1/2), and GFX11 (RDNA3/3.5)
+  /// for the monolithic S_WAITCNT instruction.  Sets vmcnt, lgkmcnt, expcnt
+  /// thresholds and transitions to WAITCNT if any counter currently exceeds
+  /// its target.
   /// @param vmcnt VM counter threshold.
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
-    wait_target_ = {vmcnt, lgkmcnt, expcnt};
+    wait_target_.vmcnt = vmcnt;
+    wait_target_.lgkmcnt = lgkmcnt;
+    wait_target_.expcnt = expcnt;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
+  void set_wait_target_vscnt(uint8_t threshold) {
+    wait_target_.vscnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the LOADCNT target (GFX11+ S_WAITCNT_VMCNT / S_WAIT_LOADCNT).
+  void set_wait_target_loadcnt(uint8_t threshold) {
+    wait_target_.vmcnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
+  void set_wait_target_storecnt(uint8_t threshold) {
+    wait_target_.vscnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the DSCNT target (GFX11+ S_WAITCNT_LGKMCNT / S_WAIT_DSCNT).
+  void set_wait_target_dscnt(uint8_t threshold) {
+    wait_target_.dscnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the KMCNT target (GFX11+ S_WAIT_KMCNT).
+  void set_wait_target_kmcnt(uint8_t threshold) {
+    wait_target_.kmcnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
+  void set_wait_target_storecnt_dscnt(uint8_t storecnt, uint8_t dscnt) {
+    wait_target_.vscnt = storecnt;
+    wait_target_.dscnt = dscnt;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set combined LOADCNT + DSCNT targets (GFX12 S_WAIT_LOADCNT_DSCNT).
+  void set_wait_target_loadcnt_dscnt(uint8_t loadcnt, uint8_t dscnt) {
+    wait_target_.vmcnt = loadcnt;
+    wait_target_.dscnt = dscnt;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set a single split-wait counter threshold by name.
+  ///
+  /// Used by the generated S_WAIT_* / S_WAITCNT_* instruction execute()
+  /// bodies.  Maps the instruction's semantic name to the correct target.
+  void set_wait_counter(const char *counter_name, uint16_t threshold) {
+    using namespace std::string_view_literals;
+    std::string_view name{counter_name};
+    auto t = static_cast<uint8_t>(threshold);
+    if (name == "wait_loadcnt")
+      set_wait_target_loadcnt(t);
+    else if (name == "wait_storecnt")
+      set_wait_target_storecnt(t);
+    else if (name == "wait_dscnt")
+      set_wait_target_dscnt(t);
+    else if (name == "wait_kmcnt")
+      set_wait_target_kmcnt(t);
+    else if (name == "wait_expcnt") {
+      wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
+      if (!wait_satisfied())
+        state_ = WfState::WAITCNT;
+    } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
+      wait_target_.vmcnt = t; // map to vmcnt
+      if (!wait_satisfied())
+        state_ = WfState::WAITCNT;
+    } else if (name == "wait_loadcnt_dscnt") {
+      set_wait_target_loadcnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
+                                    static_cast<uint8_t>(threshold & 0x3F));
+    } else if (name == "wait_storecnt_dscnt") {
+      set_wait_target_storecnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
+                                     static_cast<uint8_t>(threshold & 0x3F));
+    }
   }
 
   /// @brief Check whether all wait counter thresholds are satisfied.
@@ -179,8 +282,21 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
-  /// @brief Halt this wavefront.
+  /// @brief Halt this wavefront (immediate — all memory ops must be drained).
   void halt() { state_ = WfState::HALTED; }
+
+  /// @brief End program execution. If all memory ops are drained, halts
+  /// immediately. Otherwise, transitions to ENDING and lets the memory
+  /// pipeline drain remaining ops before halting.
+  void end() {
+    if (wait_counters_.empty())
+      halt();
+    else
+      state_ = WfState::ENDING;
+  }
+
+  /// @brief Log instruction count at end for trace/debug.
+  void trace_end_summary() const;
 
   /// @brief Reset dynamic dispatch state so this slot can be reused.
   ///
@@ -197,6 +313,7 @@ public:
     exec_ = ~0ULL;
     vcc_ = 0;
     m0_ = 0;
+    scratch_base_ = 0;
     wait_counters_ = {};
     wait_target_ = {};
     state_ = WfState::HALTED;
@@ -230,9 +347,14 @@ private:
   uint64_t exec_ = ~0ULL;           ///< EXEC mask -- one bit per lane (1 = active).
   uint64_t vcc_ = 0;                ///< Vector condition code (per-lane comparison result).
   uint32_t m0_ = 0;                 ///< M0 special register (misc addressing).
+  uint64_t scratch_base_ = 0;       ///< Per-wavefront scratch (private segment) base address.
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
-  WaitTarget wait_target_;          ///< Current s_waitcnt thresholds.
+
+public:
+  uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
+private:
+  WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
 };

@@ -267,6 +267,16 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
   }
 }
 
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported) {
+  int hipVmmSupported = 0, hipDmaBufSupported = 0, hipRDMAWithHipVMMSupported = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&hipRDMAWithHipVMMSupported, hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&hipVmmSupported, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&hipDmaBufSupported, hipDeviceAttributeDmaBufSupported, 0));
+  INFO("hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported: " << hipRDMAWithHipVMMSupported);
+  INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << hipVmmSupported);
+  INFO("hipDeviceAttributeDmaBufSupported: " << hipDmaBufSupported);
+  REQUIRE(hipRDMAWithHipVMMSupported == (hipVmmSupported && hipDmaBufSupported));
+}
 /**
  * End doxygen group DeviceTest.
  * @}

@@ -19,14 +19,16 @@ namespace detail {
 // I-type FP load instruction
 
 FlwInst::FlwInst(uint32_t raw)
-    : IType("flw", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : IType("flw", raw, make_exec_fn<FlwInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &offset;
+  src_operands_[1] = &rs1;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FlwInst::execute(HartState &ctx) {
+void FlwInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = static_cast<uint64_t>(h->read_xreg(rs1.encoding_value_) + imm());
@@ -37,14 +39,16 @@ void FlwInst::execute(HartState &ctx) {
 // S-type FP store instruction
 
 FswInst::FswInst(uint32_t raw)
-    : SType("fsw", raw), rs2_op(32, OperandType::OPR_FPR, inst_.rs2),
+    : SType("fsw", raw, make_exec_fn<FswInst>()), rs2_op(32, OperandType::OPR_FPR, inst_.rs2),
       rs1_op(64, OperandType::OPR_GPR, inst_.rs1), offset(12, OperandType::OPR_IMM, imm()) {
-  src_operands_.emplace_back(&rs2_op);
-  src_operands_.emplace_back(&offset);
-  src_operands_.emplace_back(&rs1_op);
+  src_operands_[0] = &rs2_op;
+  src_operands_[1] = &offset;
+  src_operands_[2] = &rs1_op;
+  num_src_ = 3;
+  num_dst_ = 0;
 }
 
-void FswInst::execute(HartState &ctx) {
+void FswInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   auto *m = current_memory();
   uint64_t addr = static_cast<uint64_t>(h->read_xreg(rs1_op.encoding_value_) + imm());
@@ -54,14 +58,16 @@ void FswInst::execute(HartState &ctx) {
 // R-type FP compute instructions (FPR -> FPR)
 
 FaddSInst::FaddSInst(uint32_t raw)
-    : RType("fadd.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fadd.s", raw, make_exec_fn<FaddSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FaddSInst::execute(HartState &ctx) {
+void FaddSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -70,14 +76,16 @@ void FaddSInst::execute(HartState &ctx) {
 }
 
 FsubSInst::FsubSInst(uint32_t raw)
-    : RType("fsub.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fsub.s", raw, make_exec_fn<FsubSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FsubSInst::execute(HartState &ctx) {
+void FsubSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -86,14 +94,16 @@ void FsubSInst::execute(HartState &ctx) {
 }
 
 FmulSInst::FmulSInst(uint32_t raw)
-    : RType("fmul.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fmul.s", raw, make_exec_fn<FmulSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FmulSInst::execute(HartState &ctx) {
+void FmulSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -102,14 +112,16 @@ void FmulSInst::execute(HartState &ctx) {
 }
 
 FdivSInst::FdivSInst(uint32_t raw)
-    : RType("fdiv.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fdiv.s", raw, make_exec_fn<FdivSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FdivSInst::execute(HartState &ctx) {
+void FdivSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -118,14 +130,16 @@ void FdivSInst::execute(HartState &ctx) {
 }
 
 FsgnjSInst::FsgnjSInst(uint32_t raw)
-    : RType("fsgnj.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fsgnj.s", raw, make_exec_fn<FsgnjSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FsgnjSInst::execute(HartState &ctx) {
+void FsgnjSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint32_t b1 = unbox(h->read_freg(rs1.encoding_value_));
   uint32_t b2 = unbox(h->read_freg(rs2.encoding_value_));
@@ -134,14 +148,16 @@ void FsgnjSInst::execute(HartState &ctx) {
 }
 
 FsgnjnSInst::FsgnjnSInst(uint32_t raw)
-    : RType("fsgnjn.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fsgnjn.s", raw, make_exec_fn<FsgnjnSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FsgnjnSInst::execute(HartState &ctx) {
+void FsgnjnSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint32_t b1 = unbox(h->read_freg(rs1.encoding_value_));
   uint32_t b2 = unbox(h->read_freg(rs2.encoding_value_));
@@ -150,14 +166,16 @@ void FsgnjnSInst::execute(HartState &ctx) {
 }
 
 FsgnjxSInst::FsgnjxSInst(uint32_t raw)
-    : RType("fsgnjx.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fsgnjx.s", raw, make_exec_fn<FsgnjxSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FsgnjxSInst::execute(HartState &ctx) {
+void FsgnjxSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint32_t b1 = unbox(h->read_freg(rs1.encoding_value_));
   uint32_t b2 = unbox(h->read_freg(rs2.encoding_value_));
@@ -166,14 +184,16 @@ void FsgnjxSInst::execute(HartState &ctx) {
 }
 
 FminSInst::FminSInst(uint32_t raw)
-    : RType("fmin.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fmin.s", raw, make_exec_fn<FminSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FminSInst::execute(HartState &ctx) {
+void FminSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -197,14 +217,16 @@ void FminSInst::execute(HartState &ctx) {
 }
 
 FmaxSInst::FmaxSInst(uint32_t raw)
-    : RType("fmax.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fmax.s", raw, make_exec_fn<FmaxSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FmaxSInst::execute(HartState &ctx) {
+void FmaxSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -230,13 +252,15 @@ void FmaxSInst::execute(HartState &ctx) {
 // R-type FP unary instruction (single source)
 
 FsqrtSInst::FsqrtSInst(uint32_t raw)
-    : RType("fsqrt.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fsqrt.s", raw, make_exec_fn<FsqrtSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FsqrtSInst::execute(HartState &ctx) {
+void FsqrtSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float result = std::sqrt(f1);
@@ -246,13 +270,15 @@ void FsqrtSInst::execute(HartState &ctx) {
 // R-type FP-to-int conversions (FPR -> GPR)
 
 FcvtWSInst::FcvtWSInst(uint32_t raw)
-    : RType("fcvt.w.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("fcvt.w.s", raw, make_exec_fn<FcvtWSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtWSInst::execute(HartState &ctx) {
+void FcvtWSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   int32_t result;
@@ -269,13 +295,15 @@ void FcvtWSInst::execute(HartState &ctx) {
 }
 
 FcvtWuSInst::FcvtWuSInst(uint32_t raw)
-    : RType("fcvt.wu.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("fcvt.wu.s", raw, make_exec_fn<FcvtWuSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtWuSInst::execute(HartState &ctx) {
+void FcvtWuSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   uint32_t result;
@@ -293,13 +321,15 @@ void FcvtWuSInst::execute(HartState &ctx) {
 }
 
 FcvtLSInst::FcvtLSInst(uint32_t raw)
-    : RType("fcvt.l.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("fcvt.l.s", raw, make_exec_fn<FcvtLSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtLSInst::execute(HartState &ctx) {
+void FcvtLSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   int64_t result;
@@ -316,13 +346,15 @@ void FcvtLSInst::execute(HartState &ctx) {
 }
 
 FcvtLuSInst::FcvtLuSInst(uint32_t raw)
-    : RType("fcvt.lu.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("fcvt.lu.s", raw, make_exec_fn<FcvtLuSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtLuSInst::execute(HartState &ctx) {
+void FcvtLuSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   uint64_t result;
@@ -341,13 +373,15 @@ void FcvtLuSInst::execute(HartState &ctx) {
 // R-type int-to-FP conversions (GPR -> FPR)
 
 FcvtSWInst::FcvtSWInst(uint32_t raw)
-    : RType("fcvt.s.w", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fcvt.s.w", raw, make_exec_fn<FcvtSWInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtSWInst::execute(HartState &ctx) {
+void FcvtSWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   int32_t val = static_cast<int32_t>(h->read_xreg(rs1.encoding_value_));
   float result = static_cast<float>(val);
@@ -355,13 +389,15 @@ void FcvtSWInst::execute(HartState &ctx) {
 }
 
 FcvtSWuInst::FcvtSWuInst(uint32_t raw)
-    : RType("fcvt.s.wu", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fcvt.s.wu", raw, make_exec_fn<FcvtSWuInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtSWuInst::execute(HartState &ctx) {
+void FcvtSWuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint32_t val = static_cast<uint32_t>(h->read_xreg(rs1.encoding_value_));
   float result = static_cast<float>(val);
@@ -369,13 +405,15 @@ void FcvtSWuInst::execute(HartState &ctx) {
 }
 
 FcvtSLInst::FcvtSLInst(uint32_t raw)
-    : RType("fcvt.s.l", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fcvt.s.l", raw, make_exec_fn<FcvtSLInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtSLInst::execute(HartState &ctx) {
+void FcvtSLInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   int64_t val = h->read_xreg(rs1.encoding_value_);
   float result = static_cast<float>(val);
@@ -383,13 +421,15 @@ void FcvtSLInst::execute(HartState &ctx) {
 }
 
 FcvtSLuInst::FcvtSLuInst(uint32_t raw)
-    : RType("fcvt.s.lu", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fcvt.s.lu", raw, make_exec_fn<FcvtSLuInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FcvtSLuInst::execute(HartState &ctx) {
+void FcvtSLuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint64_t val = static_cast<uint64_t>(h->read_xreg(rs1.encoding_value_));
   float result = static_cast<float>(val);
@@ -399,13 +439,15 @@ void FcvtSLuInst::execute(HartState &ctx) {
 // R-type move/classify (FPR -> GPR)
 
 FmvXWInst::FmvXWInst(uint32_t raw)
-    : RType("fmv.x.w", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("fmv.x.w", raw, make_exec_fn<FmvXWInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FmvXWInst::execute(HartState &ctx) {
+void FmvXWInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint32_t bits = unbox(h->read_freg(rs1.encoding_value_));
   // Sign-extend the 32-bit value to 64 bits per RISC-V spec
@@ -413,13 +455,15 @@ void FmvXWInst::execute(HartState &ctx) {
 }
 
 FclassSInst::FclassSInst(uint32_t raw)
-    : RType("fclass.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("fclass.s", raw, make_exec_fn<FclassSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FclassSInst::execute(HartState &ctx) {
+void FclassSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint32_t bits = unbox(h->read_freg(rs1.encoding_value_));
 
@@ -455,13 +499,15 @@ void FclassSInst::execute(HartState &ctx) {
 // R-type move (GPR -> FPR)
 
 FmvWXInst::FmvWXInst(uint32_t raw)
-    : RType("fmv.w.x", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : RType("fmv.w.x", raw, make_exec_fn<FmvWXInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(64, OperandType::OPR_GPR, inst_.rs1) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  num_src_ = 1;
+  num_dst_ = 1;
 }
 
-void FmvWXInst::execute(HartState &ctx) {
+void FmvWXInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   uint32_t bits = static_cast<uint32_t>(h->read_xreg(rs1.encoding_value_));
   h->write_freg(rd.encoding_value_, nan_box(bits));
@@ -470,14 +516,16 @@ void FmvWXInst::execute(HartState &ctx) {
 // R-type FP compare instructions (FPR -> GPR)
 
 FeqSInst::FeqSInst(uint32_t raw)
-    : RType("feq.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("feq.s", raw, make_exec_fn<FeqSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FeqSInst::execute(HartState &ctx) {
+void FeqSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -485,14 +533,16 @@ void FeqSInst::execute(HartState &ctx) {
 }
 
 FltSInst::FltSInst(uint32_t raw)
-    : RType("flt.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("flt.s", raw, make_exec_fn<FltSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FltSInst::execute(HartState &ctx) {
+void FltSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -500,14 +550,16 @@ void FltSInst::execute(HartState &ctx) {
 }
 
 FleSInst::FleSInst(uint32_t raw)
-    : RType("fle.s", raw), rd(64, OperandType::OPR_GPR, inst_.rd),
+    : RType("fle.s", raw, make_exec_fn<FleSInst>()), rd(64, OperandType::OPR_GPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  num_src_ = 2;
+  num_dst_ = 1;
 }
 
-void FleSInst::execute(HartState &ctx) {
+void FleSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -517,16 +569,18 @@ void FleSInst::execute(HartState &ctx) {
 // R4-type fused multiply-add instructions
 
 FmaddSInst::FmaddSInst(uint32_t raw)
-    : R4Type("fmadd.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : R4Type("fmadd.s", raw, make_exec_fn<FmaddSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
-void FmaddSInst::execute(HartState &ctx) {
+void FmaddSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -536,16 +590,18 @@ void FmaddSInst::execute(HartState &ctx) {
 }
 
 FmsubSInst::FmsubSInst(uint32_t raw)
-    : R4Type("fmsub.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : R4Type("fmsub.s", raw, make_exec_fn<FmsubSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
-void FmsubSInst::execute(HartState &ctx) {
+void FmsubSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -555,16 +611,18 @@ void FmsubSInst::execute(HartState &ctx) {
 }
 
 FnmsubSInst::FnmsubSInst(uint32_t raw)
-    : R4Type("fnmsub.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : R4Type("fnmsub.s", raw, make_exec_fn<FnmsubSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
-void FnmsubSInst::execute(HartState &ctx) {
+void FnmsubSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));
@@ -575,16 +633,18 @@ void FnmsubSInst::execute(HartState &ctx) {
 }
 
 FnmaddSInst::FnmaddSInst(uint32_t raw)
-    : R4Type("fnmadd.s", raw), rd(32, OperandType::OPR_FPR, inst_.rd),
+    : R4Type("fnmadd.s", raw, make_exec_fn<FnmaddSInst>()), rd(32, OperandType::OPR_FPR, inst_.rd),
       rs1(32, OperandType::OPR_FPR, inst_.rs1), rs2(32, OperandType::OPR_FPR, inst_.rs2),
       rs3(32, OperandType::OPR_FPR, inst_.rs3) {
-  dst_operands_.emplace_back(&rd);
-  src_operands_.emplace_back(&rs1);
-  src_operands_.emplace_back(&rs2);
-  src_operands_.emplace_back(&rs3);
+  dst_operands_[0] = &rd;
+  src_operands_[0] = &rs1;
+  src_operands_[1] = &rs2;
+  src_operands_[2] = &rs3;
+  num_src_ = 3;
+  num_dst_ = 1;
 }
 
-void FnmaddSInst::execute(HartState &ctx) {
+void FnmaddSInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
   float f2 = std::bit_cast<float>(unbox(h->read_freg(rs2.encoding_value_)));

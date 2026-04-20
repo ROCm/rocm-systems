@@ -1113,8 +1113,10 @@ typedef struct {
   rsmi_range_t curr_sclk_range;   //!< The current SCLK frequency range
   rsmi_range_t curr_mclk_range;   //!< The current MCLK frequency range;
                                   //!< (upper bound only)
+  rsmi_range_t curr_fclk_range;   //!< The current FCLK frequency range
   rsmi_range_t sclk_freq_limits;  //!< The range possible of SCLK values
   rsmi_range_t mclk_freq_limits;  //!< The range possible of MCLK values
+  rsmi_range_t fclk_freq_limits;  //!< The range possible of FCLK values
 
   /**
    * @brief The current voltage curve

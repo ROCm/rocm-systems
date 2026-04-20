@@ -669,6 +669,8 @@ api_map = {
   'hipOccupancyAvailableDynamicSMemPerBlock': '',
   'hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags': '',
   'hipOccupancyMaxPotentialBlockSize': '',
+  'hipOccupancyMaxActiveClusters': '',
+  'hipOccupancyMaxPotentialClusterSize': '',
   'hipMallocManaged': '',
   'hipOccupancyMaxActiveBlocksPerMultiprocessor': '',
   'hipGetErrorString': '',

@@ -153,18 +153,15 @@ static inline bool isGenericTarget(const void* image) {
   return getGenericVersion(image) >= EF_AMDGPU_GENERIC_VERSION_MIN;
 }
 
-bool UnbundleBitCode(const std::vector<char>& bundled_llvm_bitcode, const std::string& isa,
+bool UnbundleBitCode(std::string_view bundled_llvm_bitcode, const std::string& isa,
                      size_t& co_offset, size_t& co_size) {
-  std::string magic(bundled_llvm_bitcode.begin(),
-                    bundled_llvm_bitcode.begin() + bundle_magic_string_size);
+  std::string_view magic = bundled_llvm_bitcode.substr(0, bundle_magic_string_size);
   if (magic.compare(CLANG_OFFLOAD_BUNDLER_MAGIC_STR)) {
     // Handle case where the whole file is unbundled
     return true;
   }
 
-  std::string bundled_llvm_bitcode_s(bundled_llvm_bitcode.begin(),
-                                     bundled_llvm_bitcode.begin() + bundled_llvm_bitcode.size());
-  const void* data = reinterpret_cast<const void*>(bundled_llvm_bitcode_s.c_str());
+  const void* data = static_cast<const void*>(bundled_llvm_bitcode.data());
   const auto obheader = reinterpret_cast<const __ClangOffloadBundleHeader*>(data);
   const auto* desc = &obheader->desc[0];
   for (uint64_t idx = 0; idx < obheader->numOfCodeObjects;
@@ -186,7 +183,7 @@ bool UnbundleBitCode(const std::vector<char>& bundled_llvm_bitcode, const std::s
   return true;
 }
 
-bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, const std::vector<char>& source,
+bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
                     const std::string& name, const amd_comgr_data_kind_t type) {
   comgr_helper::ComgrDataUniqueHandle data;
   if (data.Create(type) != AMD_COMGR_STATUS_SUCCESS) {
@@ -248,14 +245,14 @@ bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataS
 
   std::vector<char> temp_bin;
   temp_bin.assign(binary, binary + binarySize);
-  bin = temp_bin;
+  bin = std::move(temp_bin);
   delete[] binary;
 
   return true;
 }
 
 bool createAction(comgr_helper::ComgrActionInfoUniqueHandle& action,
-                  std::vector<std::string>& options, const std::string& isa,
+                  const std::vector<std::string>& options, const std::string& isa,
                   const amd_comgr_language_t lang) {
   if (action.Create() != AMD_COMGR_STATUS_SUCCESS) {
     return false;
@@ -273,7 +270,7 @@ bool createAction(comgr_helper::ComgrActionInfoUniqueHandle& action,
 
   std::vector<const char*> optionsArgv;
   optionsArgv.reserve(options.size());
-  for (auto& option : options) {
+  for (const auto& option : options) {
     optionsArgv.push_back(option.c_str());
   }
 
@@ -290,8 +287,8 @@ bool createAction(comgr_helper::ComgrActionInfoUniqueHandle& action,
 }
 
 bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                         const std::string& isa, std::vector<std::string>& compileOptions,
-                         std::vector<std::string>& linkOptions, std::string& buildLog,
+                         const std::string& isa, const std::vector<std::string>& compileOptions,
+                         const std::vector<std::string>& linkOptions, std::string& buildLog,
                          std::vector<char>& exe) {
   amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrDataSetUniqueHandle reloc;
@@ -344,7 +341,7 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
 }
 
 bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
-                      const std::string& isa, std::vector<std::string>& compileOptions,
+                      const std::string& isa, const std::vector<std::string>& compileOptions,
                       std::string& buildLog, std::vector<char>& LLVMBitcode) {
   amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrActionInfoUniqueHandle compileAction;
@@ -376,19 +373,14 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
   return true;
 }
 
-bool CheckIfBundled(std::vector<char>& llvm_bitcode) {
-  std::string magic(llvm_bitcode.begin(), llvm_bitcode.begin() + bundle_magic_string_size);
-
-  if (magic.compare(CLANG_OFFLOAD_BUNDLER_MAGIC_STR) == 0) {
-    return true;
-  }
-  // File is not bundled
-  return false;
+bool CheckIfBundled(std::string_view llvm_bitcode) {
+  std::string_view magic = llvm_bitcode.substr(0, bundle_magic_string_size);
+  return magic.compare(CLANG_OFFLOAD_BUNDLER_MAGIC_STR) == 0;
 }
 // Unbundle Bitcode using COMGR action
 // Supports only 1 Bundle Entry ID for now
-bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
-                        std::vector<std::string>& linkOptions, std::string& buildLog,
+bool UnbundleUsingComgr(std::string_view source, const std::string& isa,
+                        const std::vector<std::string>& linkOptions, std::string& buildLog,
                         std::vector<char>& unbundled_bitcode, const char* bundleEntryIDs[],
                         size_t bundleEntryIDsCount) {
   comgr_helper::ComgrDataSetUniqueHandle linkinput;
@@ -438,7 +430,7 @@ bool UnbundleUsingComgr(std::vector<char>& source, const std::string& isa,
 }
 
 bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                     const std::string& isa, std::vector<std::string>& linkOptions,
+                     const std::string& isa, const std::vector<std::string>& linkOptions,
                      std::string& buildLog, std::vector<char>& LinkedLLVMBitcode) {
   const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrActionInfoUniqueHandle action;
@@ -469,7 +461,7 @@ bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
 }
 
 bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                          const std::string& isa, std::vector<std::string>& linkOptions,
+                          const std::string& isa, const std::vector<std::string>& linkOptions,
                           std::string& buildLog, std::vector<char>& LinkedLLVMBitcode) {
   comgr_helper::ComgrActionInfoUniqueHandle action;
 
@@ -499,7 +491,7 @@ bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInpu
 }
 
 bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
-                      const std::string& isa, std::vector<std::string>& exeOptions,
+                      const std::string& isa, const std::vector<std::string>& exeOptions,
                       std::string& buildLog, std::vector<char>& executable,
                       bool spirv_bc /* default false */) {
   comgr_helper::ComgrActionInfoUniqueHandle codegenAction;
@@ -650,8 +642,8 @@ std::string handleMangledName(std::string loweredName) {
   return loweredName;
 }
 
-bool fillMangledNames(std::vector<char>& dataVec, std::map<std::string, std::string>& mangledNames,
-                      bool isBitcode) {
+bool fillMangledNames(const std::vector<char>& dataVec,
+                      std::map<std::string, std::string>& mangledNames, bool isBitcode) {
   comgr_helper::ComgrDataUniqueHandle dataObject;
   if (dataObject.Create(isBitcode ? AMD_COMGR_DATA_KIND_BC : AMD_COMGR_DATA_KIND_EXECUTABLE) !=
       AMD_COMGR_STATUS_SUCCESS) {
@@ -1022,11 +1014,12 @@ amd_comgr_data_kind_t LinkProgram::GetCOMGRDataKind(hipJitInputType input_type) 
 }
 
 
-bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputType input_type,
+bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType input_type,
                                     const std::string& link_file_name) {
-  std::vector<char> llvm_code_object;
+  std::vector<char> llvm_code_object_storage;  // Temporary storage for bundled JIT input.
   is_bundled_ = helpers::CheckIfBundled(link_data);
 
+  std::string_view llvm_code_object_view = link_data;
   if (HIPRTC_USE_RUNTIME_UNBUNDLER && input_type == hipJitInputLLVMBundledBitcode) {
     if (!findIsa()) {
       return false;
@@ -1039,17 +1032,18 @@ bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputTyp
       return false;
     }
 
-    llvm_code_object.assign(link_data.begin() + co_offset, link_data.begin() + co_offset + co_size);
+    llvm_code_object_view = link_data.substr(co_offset, co_size);
   } else if (is_bundled_ && input_type == hipJitInputSpirv) {
     const char* bundleEntryIDs[] = {helpers::SPIRV_BUNDLE_ENTRY_ID};
     size_t bundleEntryIDsCount = sizeof(bundleEntryIDs) / sizeof(bundleEntryIDs[0]);
-    if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_, llvm_code_object,
-                                     bundleEntryIDs, bundleEntryIDsCount)) {
+    if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_,
+                                     llvm_code_object_storage, bundleEntryIDs,
+                                     bundleEntryIDsCount)) {
       LogError("Error in hip Linker: Unable to unbundle SPIRV Bitcode");
       return false;
     }
-  } else {
-    llvm_code_object.assign(link_data.begin(), link_data.end());
+    llvm_code_object_view =
+        std::string_view(llvm_code_object_storage.data(), llvm_code_object_storage.size());
   }
 
   if ((data_kind_ = GetCOMGRDataKind(input_type)) == AMD_COMGR_DATA_KIND_UNDEF) {
@@ -1057,7 +1051,7 @@ bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputTyp
     return false;
   }
 
-  if (!helpers::addCodeObjData(link_input_, llvm_code_object, link_file_name, data_kind_)) {
+  if (!helpers::addCodeObjData(link_input_, llvm_code_object_view, link_file_name, data_kind_)) {
     LogError("Error in hip Linker: unable to add linked code object");
     return false;
   }
@@ -1066,7 +1060,7 @@ bool LinkProgram::AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputTyp
 }
 
 
-bool LinkProgram::AddLinkerFile(const std::string &file_path, hipJitInputType input_type) {
+bool LinkProgram::AddLinkerFile(const std::string& file_path, hipJitInputType input_type) {
   std::ifstream file_stream{file_path, std::ios_base::in | std::ios_base::binary};
   if (!file_stream.good()) {
     return false;
@@ -1084,15 +1078,14 @@ bool LinkProgram::AddLinkerFile(const std::string &file_path, hipJitInputType in
 
   std::string link_file_name("LinkerProgram");
 
-  return AddLinkerDataImpl(link_file_info, input_type, link_file_name);
+  std::string_view link_file_view(link_file_info.data(), link_file_info.size());
+  return AddLinkerDataImpl(link_file_view, input_type, link_file_name);
 }
 
-bool LinkProgram::AddLinkerData(void* image_ptr, size_t image_size, const std::string &link_file_name,
-                                hipJitInputType input_type) {
-  char* image_char_buf = reinterpret_cast<char*>(image_ptr);
-  std::vector<char> llvm_code_object(image_char_buf, image_char_buf + image_size);
-
-  return AddLinkerDataImpl(llvm_code_object, input_type, link_file_name);
+bool LinkProgram::AddLinkerData(const void* image_ptr, size_t image_size,
+                                const std::string& link_file_name, hipJitInputType input_type) {
+  std::string_view llvm_code_object_view(static_cast<const char*>(image_ptr), image_size);
+  return AddLinkerDataImpl(llvm_code_object_view, input_type, link_file_name);
 }
 
 bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
@@ -1110,7 +1103,8 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
     }
 
     std::string linkedFileName = "LLVMBitcodeFromSPIRV.bc";
-    if (!helpers::addCodeObjData(link_input_, llvmbc_from_spirv, linkedFileName,
+    std::string_view llvmbc_from_spirv_view(llvmbc_from_spirv.data(), llvmbc_from_spirv.size());
+    if (!helpers::addCodeObjData(link_input_, llvmbc_from_spirv_view, linkedFileName,
                                  AMD_COMGR_DATA_KIND_BC)) {
       LogError("Error in hip Linker: unable to add linked LLVM bitcode");
       return false;
@@ -1124,7 +1118,9 @@ bool LinkProgram::LinkComplete(void** bin_out, size_t* size_out) {
   }
 
   std::string linkedFileName = "LLVMBitcode.bc";
-  if (!helpers::addCodeObjData(exec_input_, llvm_bitcode, linkedFileName, AMD_COMGR_DATA_KIND_BC)) {
+  std::string_view llvm_bitcode_view(llvm_bitcode.data(), llvm_bitcode.size());
+  if (!helpers::addCodeObjData(exec_input_, llvm_bitcode_view, linkedFileName,
+                               AMD_COMGR_DATA_KIND_BC)) {
     LogError("Error in hip linker: unable to add linked bitcode");
     return false;
   }

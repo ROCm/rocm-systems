@@ -22,7 +22,7 @@ include:
        kernel invocation divided by the
        :ref:`kernel cycles <kernel-cycles>`, that is, the total number of
        cycles the kernel executed as measured by the
-       :doc:`command processor <command-processor>`.
+       :doc:`command processor <cdna/command-processor>`.
 
    * - ``per_kernel``
      - The total value of the measured counter or metric that occurred per
@@ -32,7 +32,7 @@ include:
      - The total value of the measured counter or metric that occurred per
        kernel invocation divided by the :ref:`kernel time <kernel-time>`,
        that is, the total runtime of the kernel in seconds, as measured by the
-       :doc:`command processor <command-processor>`.
+       :doc:`command processor <cdna/command-processor>`.
 
 By default, ROCm Compute Profiler uses the ``per_kernel`` normalization.
 
