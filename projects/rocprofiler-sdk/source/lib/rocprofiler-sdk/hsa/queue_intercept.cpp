@@ -23,6 +23,8 @@
 #include "lib/rocprofiler-sdk/hsa/queue_intercept.hpp"
 #include "lib/common/static_object.hpp"
 
+#include <cstring>
+
 namespace rocprofiler
 {
 namespace hsa
@@ -112,6 +114,36 @@ uint64_t
 load_write_index_impl(const QueueState* state)
 {
     return state->virtual_wptr.load(std::memory_order_relaxed);
+}
+
+void
+process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell)
+{
+    std::lock_guard<std::mutex> lock(state->gate_lock);
+
+    uint64_t scan_end = state->virtual_wptr.load(std::memory_order_acquire);
+    uint64_t scan_pos = state->next_scan_pos;
+
+    for(uint64_t i = scan_pos; i < scan_end; i++)
+    {
+        auto* src = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(state->ring_buf) +
+                    (i & state->ring_mask);
+
+        uint64_t dest_idx = state->next_submit_pos;
+        auto*    dst      = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(state->ring_buf) +
+                    (dest_idx & state->ring_mask);
+
+        if(dst != src)
+        {
+            memcpy(dst, src, 64);
+        }
+
+        state->next_submit_pos = dest_idx + 1 + state->k_factor;
+    }
+
+    state->next_scan_pos = scan_end;
+    __atomic_store_n(state->real_wdid, state->next_submit_pos, __ATOMIC_RELEASE);
+    ring_doorbell(state->doorbell_signal, value);
 }
 
 }  // namespace queue_intercept

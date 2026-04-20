@@ -165,6 +165,105 @@ TEST(QueueIntercept, LoadWriteIndexReturnsVirtualWptr)
     EXPECT_EQ(load_write_index_impl(&state), 99u);
 }
 
+namespace
+{
+hsa_kernel_dispatch_packet_t*
+get_pkt(void* ring, uint64_t idx, uint32_t mask)
+{
+    return &reinterpret_cast<hsa_kernel_dispatch_packet_t*>(ring)[idx & mask];
+}
+}  // namespace
+
+TEST(QueueIntercept, DoorbellTraceOnlyCopiesPacket)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 256];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_wdid = 0;
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 256;
+    state.ring_mask = 255;
+    state.real_wdid = &real_wdid;
+    state.real_rdid = &real_rdid;
+    state.k_factor  = 0;
+
+    state.virtual_wptr.store(1);
+    auto* pkt          = get_pkt(ring, 0, 255);
+    pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    pkt->kernel_object = 0xDEADBEEF;
+
+    bool doorbell_rang = false;
+    process_doorbell_impl(
+        &state, 0, [&](hsa_signal_t, hsa_signal_value_t) { doorbell_rang = true; });
+
+    EXPECT_TRUE(doorbell_rang);
+    EXPECT_EQ(real_wdid, 1u);
+    EXPECT_EQ(state.next_submit_pos, 1u);
+    EXPECT_EQ(state.next_scan_pos, 1u);
+    auto* submitted = get_pkt(ring, 0, 255);
+    EXPECT_EQ(submitted->kernel_object, 0xDEADBEEFu);
+}
+
+TEST(QueueIntercept, DoorbellMultiplePacketsTraceOnly)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 256];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_wdid = 0;
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 256;
+    state.ring_mask = 255;
+    state.real_wdid = &real_wdid;
+    state.real_rdid = &real_rdid;
+    state.k_factor  = 0;
+
+    state.virtual_wptr.store(3);
+    for(uint64_t i = 0; i < 3; i++)
+    {
+        auto* pkt          = get_pkt(ring, i, 255);
+        pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+        pkt->kernel_object = static_cast<uint64_t>(0xA000 + i);
+    }
+
+    process_doorbell_impl(&state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
+
+    EXPECT_EQ(real_wdid, 3u);
+    EXPECT_EQ(state.next_submit_pos, 3u);
+    for(uint64_t i = 0; i < 3; i++)
+    {
+        auto* submitted = get_pkt(ring, i, 255);
+        EXPECT_EQ(submitted->kernel_object, static_cast<uint64_t>(0xA000 + i));
+    }
+}
+
+TEST(QueueIntercept, DoorbellNoNewPackets)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_wdid = 0;
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_wdid = &real_wdid;
+    state.real_rdid = &real_rdid;
+    state.k_factor  = 0;
+
+    state.virtual_wptr.store(0);
+    bool doorbell_rang = false;
+    process_doorbell_impl(
+        &state, 0, [&](hsa_signal_t, hsa_signal_value_t) { doorbell_rang = true; });
+
+    EXPECT_TRUE(doorbell_rang);
+    EXPECT_EQ(real_wdid, 0u);
+}
+
 }  // namespace
 }  // namespace queue_intercept
 }  // namespace hsa
