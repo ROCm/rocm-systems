@@ -220,18 +220,40 @@ void ROBackend::setup_team_shared() {
   int shm_rank = ipcImpl.shm_rank;
 
   /*
-   * pe_start/stride are placeholders; actual PE-to-world mapping is handled
-   * by pe_world_map_ since shared-memory ranks may not be uniformly strided.
+   * Determine pe_start/stride from the IPC PE list. The list is on
+   * device memory, so copy it to host for inspection.
    */
+  std::vector<int> team_shared_pes(shm_size);
+  CHECK_HIP(hipMemcpy(team_shared_pes.data(), ipcImpl.pes_with_ipc_avail,
+                       shm_size * sizeof(int), hipMemcpyDeviceToHost));
+
+  int pe_start = team_shared_pes[0];
+  int stride = (shm_size > 1) ? (team_shared_pes[1] - team_shared_pes[0]) : 1;
+  bool uniform = (stride > 0);
+  for (int i = 2; i < shm_size && uniform; i++) {
+    if (team_shared_pes[i] - team_shared_pes[i - 1] != stride) {
+      uniform = false;
+    }
+  }
+
+  if (!uniform) {
+    /*
+     * Node-local ranks are not uniformly strided, so TEAM_SHARED
+     * cannot be represented with pe_start/stride. Mark it invalid
+     * since context-based operations rely on the strided formula.
+     */
+    host::ROCSHMEM_TEAM_SHARED = ROCSHMEM_TEAM_INVALID;
+    set_team_shared_device(ROCSHMEM_TEAM_INVALID);
+    return;
+  }
+
   TeamInfo wrt_parent(nullptr, 0, 1, shm_size);
-  TeamInfo wrt_world(nullptr, 0, 1, shm_size);
+  TeamInfo wrt_world(nullptr, pe_start, stride, shm_size);
 
   ROTeam *team_shared{nullptr};
   CHECK_HIP(hipMalloc(&team_shared, sizeof(ROTeam)));
   new (team_shared) ROTeam(this, wrt_parent, wrt_world,
                            shm_size, shm_rank, MPI_COMM_NULL);
-
-  team_shared->pe_world_map_ = ipcImpl.pes_with_ipc_avail;
 
   team_tracker.set_team_shared(team_shared);
 
@@ -366,7 +388,6 @@ void ROBackend::ro_net_free_runtime() {
    */
   auto *team_shared{static_cast<ROTeam*>(team_tracker.get_team_shared())};
   if (team_shared) {
-    team_shared->pe_world_map_ = nullptr;
     team_shared->~ROTeam();
     CHECK_HIP(hipFree(team_shared));
   }

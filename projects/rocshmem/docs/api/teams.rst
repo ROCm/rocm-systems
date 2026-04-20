@@ -25,7 +25,8 @@ Predefined teams
    heap objects are directly load/store accessible by all PEs in the team
    (i.e. co-located on the same node). Available on both host and device.
    Set to ``ROCSHMEM_TEAM_INVALID`` when IPC is disabled at compile-time
-   or runtime.
+   or runtime, or when the node-local PE ranks are not uniformly strided
+   in ``ROCSHMEM_TEAM_WORLD``.
 
 .. cpp:var:: rocshmem_team_t ROCSHMEM_TEAM_INVALID
 

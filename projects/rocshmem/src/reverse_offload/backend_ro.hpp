@@ -212,10 +212,10 @@ class ROBackend : public Backend {
    *
    * TEAM_SHARED contains the PEs that share a common memory domain
    * (same node). Must be called after initIPC() since membership
-   * is determined from ipcImpl.pes_with_ipc_avail. Uses pe_world_map_
-   * for PE-to-world translation because node-local ranks may not be
-   * uniformly strided. Set to ROCSHMEM_TEAM_INVALID when IPC is
-   * disabled at compile-time or runtime.
+   * is determined from ipcImpl.pes_with_ipc_avail. Computes real
+   * pe_start/stride from the PE list; set to ROCSHMEM_TEAM_INVALID
+   * when IPC is disabled or when node-local ranks are not uniformly
+   * strided.
    */
   void setup_team_shared();
 

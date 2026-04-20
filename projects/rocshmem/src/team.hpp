@@ -167,21 +167,6 @@ class Team {
    */
   BackendType type{BackendType::RO_BACKEND};
 
-  /**
-   * @brief Optional explicit PE-to-world-rank mapping for teams whose
-   * members are not uniformly strided in TEAM_WORLD (e.g. TEAM_SHARED
-   * when MPI assigns non-contiguous ranks to a node).
-   *
-   * When non-null, get_pe_in_world() and get_pe_in_my_team() use this
-   * table instead of the pe_start/stride formula. Length == num_pes.
-   *
-   * Ownership is external. In the current TEAM_SHARED setup this
-   * aliases IPC-managed storage (ipcImpl.pes_with_ipc_avail), so
-   * Team must not free it. Backend teardown code must set this to
-   * nullptr before destroying the Team to avoid dangling references.
-   */
-  int* pe_world_map_{nullptr};
-
  private:
   /**
    * @brief Owns the device memory block for both TeamInfo objects.
