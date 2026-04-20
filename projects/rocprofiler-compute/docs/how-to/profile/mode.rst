@@ -840,23 +840,6 @@ option when profiling a PyTorch workload:
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
-Developer test: operator coverage vs. ROCTX (``inject_roctx``)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The pytest module ``tests/test_torch_trace_coverage.py`` (CTest name
-``test_torch_trace_coverage``) compares ``torch.profiler`` ground truth to
-rocprof-compute ``--torch-trace`` marker CSVs for a random sample of CUDA ATen
-ops. It requires PyTorch with CUDA and is labeled ``torch_trace`` like other
-torch-trace tests.
-
-* **Default / CI-sized run:** ``pytest tests/test_torch_trace_coverage.py -m torch_trace``
-* **Reproducible / exhaustive sampling:** pass ``--coverage-seed`` and raise
-  ``--coverage-n`` so it meets or exceeds the number of discovered CUDA ops plus
-  structural cases; use ``-s`` to keep per-operator PASS/SKIP lines in the log.
-* When changing ``inject_roctx.py`` or marker correlation, attach a full-run log
-  to the PR for reviewers (see the module docstring in
-  ``test_torch_trace_coverage.py`` for a concrete ``tee`` example).
-
 Output
 ------
 
