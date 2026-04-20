@@ -304,6 +304,7 @@ public:
   const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
   amd_dbgapi_register_properties_t
   register_properties (amdgpu_regnum_t regnum) const override;
+  bool register_is_client_readonly (amdgpu_regnum_t regnum) const override;
 
   bool is_pseudo_register_available (const wave_t &wave,
                                      amdgpu_regnum_t regnum) const override;
@@ -2130,9 +2131,10 @@ amd_dbgapi_register_properties_t
 amdgcn_architecture_t::register_properties (amdgpu_regnum_t regnum) const
 {
   amd_dbgapi_register_properties_t properties
-    = register_read_only_mask (regnum) != nullptr
-        ? AMD_DBGAPI_REGISTER_PROPERTY_READONLY_BITS
-        : AMD_DBGAPI_REGISTER_PROPERTY_NONE;
+    = ((register_read_only_mask (regnum) != nullptr
+        || register_is_client_readonly (regnum))
+       ? AMD_DBGAPI_REGISTER_PROPERTY_READONLY_BITS
+       : AMD_DBGAPI_REGISTER_PROPERTY_NONE);
 
   /* Writing to the vcc register may change the status.vccz bit.  */
   if (regnum == amdgpu_regnum_t::pseudo_status)
@@ -2155,6 +2157,24 @@ amdgcn_architecture_t::register_properties (amdgpu_regnum_t regnum) const
     properties |= AMD_DBGAPI_REGISTER_PROPERTY_INVALIDATE_VOLATILE;
 
   return properties;
+}
+
+bool
+amdgcn_architecture_t::register_is_client_readonly (
+  amdgpu_regnum_t regnum) const
+{
+  if (amdgpu_regnum_t::first_ttmp <= regnum
+      && regnum <= amdgpu_regnum_t::last_ttmp)
+    return true;
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::flat_scratch:
+    case amdgpu_regnum_t::pseudo_status:
+    case amdgpu_regnum_t::trapsts:
+      return true;
+    default:
+      return false;
+    }
 }
 
 bool
@@ -6339,6 +6359,8 @@ protected:
   amd_dbgapi_register_properties_t
   register_properties (amdgpu_regnum_t regnum) const override;
 
+  bool register_is_client_readonly (amdgpu_regnum_t regnum) const override;
+
   bool is_pseudo_register_available (const wave_t &wave,
                                      amdgpu_regnum_t regnum) const override;
 
@@ -6967,6 +6989,21 @@ gfx12_architecture_t::register_properties (amdgpu_regnum_t regnum) const
     properties |= AMD_DBGAPI_REGISTER_PROPERTY_VOLATILE;
 
   return properties;
+}
+
+bool
+gfx12_architecture_t::register_is_client_readonly (
+  amdgpu_regnum_t regnum) const
+{
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::excp_flag_priv:
+    case amdgpu_regnum_t::pseudo_state_priv:
+    case amdgpu_regnum_t::trap_ctrl:
+      return true;
+    default:
+      return gfx11_architecture_t::register_is_client_readonly (regnum);
+    }
 }
 
 bool

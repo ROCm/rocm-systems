@@ -640,6 +640,13 @@ amd_dbgapi_write_register (amd_dbgapi_wave_id_t wave_id,
     if (!wave->is_register_available (*regnum))
       THROW (AMD_DBGAPI_STATUS_ERROR_REGISTER_NOT_AVAILABLE);
 
+    /* Ignore writes to registers we expose to clients as read-only.
+       Note this is not handled at the wave_t::write_register level
+       because internally we do want to write to some of these
+       registers.  */
+    if (wave->architecture ().register_is_client_readonly (*regnum))
+      return AMD_DBGAPI_STATUS_SUCCESS;
+
     wave->write_register (*regnum, offset, value_size, value);
   }
   CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,

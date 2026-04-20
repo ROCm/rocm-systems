@@ -432,6 +432,12 @@ public:
   register_properties (amdgpu_regnum_t regnum) const
     = 0;
 
+  /* Returns true if REGNUM is exposed to the client as a read-only
+     register (while internally we do write to it).  This is
+     typically, though not limited to, client-visible registers which
+     can only be written with PRIV=1.  */
+  virtual bool register_is_client_readonly (amdgpu_regnum_t regnum) const = 0;
+
   std::set<amdgpu_regnum_t> register_set () const;
   bool is_register_available (amdgpu_regnum_t regnum) const;
 
