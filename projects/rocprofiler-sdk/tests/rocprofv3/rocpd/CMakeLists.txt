@@ -28,7 +28,6 @@ else()
 endif()
 
 if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
-    set(MULTIPROC_IS_DISABLED OFF) # fails on mi300 SLES for some unknown reason
 endif()
 
 #########################################################################################
@@ -413,8 +412,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-rocpd-package-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-summary-generation)
-#    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-package-generation-multiproc
@@ -429,7 +427,7 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-rocpd-package-generation-multiproc
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc rocprofv3-test-rocpd-summary-generation)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc)
 
 #########################################################################################
 #
