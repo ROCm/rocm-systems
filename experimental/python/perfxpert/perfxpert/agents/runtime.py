@@ -123,6 +123,16 @@ class AnalysisSession:
     FallbackProvider instance, populated when PERFXPERT_LLM_FALLBACK_CHAIN
     is set. It is always ``None`` in airgap mode.
 
+    ``progress_callback`` is an optional ``Callable[[str], None]`` that
+    receives short human-readable status strings as the session
+    progresses through each agent phase (``"entering <phase>"`` /
+    ``"exit <phase>"`` and ``"provider <prov> failed with rate-limit,
+    trying next"`` for fallback cascades). The CLI wires this to a Rich
+    spinner so users can see progress during long LLM calls; MCP
+    consumers generally leave it None and pay zero overhead. A per-call
+    callback argument on the ``run_*`` methods always overrides the
+    session-level default.
+
     Cycle-4 B3 — the ``run_*`` methods now actually USE the fallback chain
     on the hot path: if the primary provider raises anything rate-limit-y
     (OpenAI ``RateLimitError``, Anthropic ``RateLimitError``, or any
@@ -136,6 +146,7 @@ class AnalysisSession:
     provider: Optional[str]
     airgap: bool
     fallback_provider: Optional[Any] = field(default=None)
+    progress_callback: Optional[Callable[[str], None]] = field(default=None)
 
     def _fallback_chain(self) -> List[str]:
         """Return the ordered provider chain for this session.
@@ -160,10 +171,30 @@ class AnalysisSession:
                 chain.append(name)
         return chain
 
+    def _emit(
+        self,
+        callback: Optional[Callable[[str], None]],
+        msg: str,
+    ) -> None:
+        """Fire a progress callback, swallowing any exception it raises.
+
+        A buggy UI callback must never break the analysis pipeline. The
+        per-call ``callback`` argument always wins over ``self.progress_callback``;
+        both may be None.
+        """
+        cb = callback if callback is not None else self.progress_callback
+        if cb is None:
+            return
+        try:
+            cb(msg)
+        except Exception:  # pragma: no cover — defensive; log and move on
+            _LOG.debug("progress_callback raised; ignoring", exc_info=True)
+
     def _cascade(
         self,
         runner: Callable[[str], Any],
         op_name: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Any:
         """Execute ``runner(provider_name)`` across the fallback chain.
 
@@ -173,6 +204,11 @@ class AnalysisSession:
         immediately (auth / validation errors are not cascade-worthy).
         Returns the first successful result; raises
         ``ProviderChainExhausted`` when no provider succeeds.
+
+        When a ``progress_callback`` is supplied (per-call or via the
+        session) it is fired once per provider transition with a short
+        ``"provider <name> failed with rate-limit/transient, trying next"``
+        message so the CLI spinner can surface the cascade to the user.
         """
         chain = self._fallback_chain()
         if len(chain) == 1:
@@ -200,6 +236,10 @@ class AnalysisSession:
                     len(chain),
                     name,
                 )
+                self._emit(
+                    progress_callback,
+                    f"provider {name} failed with rate-limit/transient, trying next",
+                )
                 attempts.append((name, exc))
         # Everyone rate-limited — surface a typed chain-exhausted error.
         err = ProviderChainExhausted(providers=chain, attempts=attempts)
@@ -207,80 +247,140 @@ class AnalysisSession:
             raise err from attempts[-1][1]
         raise err
 
-    def run_root(self, payload: schemas.RootInput) -> schemas.RootOutput:
-        if self.airgap:
-            return root.run_root(payload, airgap=True)
-        return self._cascade(
-            lambda prov: root.run_root(payload, provider=prov),
-            op_name="run_root",
-        )
+    def run_root(
+        self,
+        payload: schemas.RootInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.RootOutput:
+        self._emit(progress_callback, "entering root")
+        try:
+            if self.airgap:
+                return root.run_root(payload, airgap=True)
+            return self._cascade(
+                lambda prov: root.run_root(payload, provider=prov),
+                op_name="run_root",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "exit root")
 
-    def run_analysis(self, payload: schemas.AnalysisInput) -> schemas.AnalysisOutput:
-        if self.airgap:
-            return analysis.run_analysis(payload, airgap=True)
-        return self._cascade(
-            lambda prov: analysis.run_analysis(payload, provider=prov),
-            op_name="run_analysis",
-        )
+    def run_analysis(
+        self,
+        payload: schemas.AnalysisInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> schemas.AnalysisOutput:
+        self._emit(progress_callback, "entering analysis")
+        try:
+            if self.airgap:
+                return analysis.run_analysis(payload, airgap=True)
+            return self._cascade(
+                lambda prov: analysis.run_analysis(payload, provider=prov),
+                op_name="run_analysis",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "exit analysis")
 
     def run_recommendation(
-        self, payload: schemas.RecommendationInput
+        self,
+        payload: schemas.RecommendationInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.RecommendationOutput:
-        if self.airgap:
-            return recommendation.run_recommendation(payload, airgap=True)
-        return self._cascade(
-            lambda prov: recommendation.run_recommendation(payload, provider=prov),
-            op_name="run_recommendation",
-        )
+        self._emit(progress_callback, "entering recommendation")
+        try:
+            if self.airgap:
+                return recommendation.run_recommendation(payload, airgap=True)
+            return self._cascade(
+                lambda prov: recommendation.run_recommendation(payload, provider=prov),
+                op_name="run_recommendation",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "exit recommendation")
 
     def run_correctness(
-        self, payload: schemas.CorrectnessInput
+        self,
+        payload: schemas.CorrectnessInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.CorrectnessOutput:
-        if self.airgap:
-            return correctness.run_correctness(payload, airgap=True)
-        return self._cascade(
-            lambda prov: correctness.run_correctness(payload, provider=prov),
-            op_name="run_correctness",
-        )
+        self._emit(progress_callback, "entering correctness")
+        try:
+            if self.airgap:
+                return correctness.run_correctness(payload, airgap=True)
+            return self._cascade(
+                lambda prov: correctness.run_correctness(payload, provider=prov),
+                op_name="run_correctness",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "exit correctness")
 
     def run_compute_specialist(
-        self, payload: schemas.ComputeSpecialistInput
+        self,
+        payload: schemas.ComputeSpecialistInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.ComputeSpecialistOutput:
         """Compute-Techniques specialist (Layer 2) via the session cascade."""
-        if self.airgap:
-            return compute_specialist.run_compute_specialist(payload, airgap=True)
-        return self._cascade(
-            lambda prov: compute_specialist.run_compute_specialist(
-                payload, provider=prov
-            ),
-            op_name="run_compute_specialist",
-        )
+        self._emit(progress_callback, "entering compute_specialist")
+        try:
+            if self.airgap:
+                return compute_specialist.run_compute_specialist(payload, airgap=True)
+            return self._cascade(
+                lambda prov: compute_specialist.run_compute_specialist(
+                    payload, provider=prov
+                ),
+                op_name="run_compute_specialist",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "exit compute_specialist")
 
     def run_memory_specialist(
-        self, payload: schemas.MemorySpecialistInput
+        self,
+        payload: schemas.MemorySpecialistInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.MemorySpecialistOutput:
         """Memory-Techniques specialist (Layer 2) via the session cascade."""
-        if self.airgap:
-            return memory_specialist.run_memory_specialist(payload, airgap=True)
-        return self._cascade(
-            lambda prov: memory_specialist.run_memory_specialist(
-                payload, provider=prov
-            ),
-            op_name="run_memory_specialist",
-        )
+        self._emit(progress_callback, "entering memory_specialist")
+        try:
+            if self.airgap:
+                return memory_specialist.run_memory_specialist(payload, airgap=True)
+            return self._cascade(
+                lambda prov: memory_specialist.run_memory_specialist(
+                    payload, provider=prov
+                ),
+                op_name="run_memory_specialist",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "exit memory_specialist")
 
     def run_latency_specialist(
-        self, payload: schemas.LatencySpecialistInput
+        self,
+        payload: schemas.LatencySpecialistInput,
+        *,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.LatencySpecialistOutput:
         """Latency-Techniques specialist (Layer 2) via the session cascade."""
-        if self.airgap:
-            return latency_specialist.run_latency_specialist(payload, airgap=True)
-        return self._cascade(
-            lambda prov: latency_specialist.run_latency_specialist(
-                payload, provider=prov
-            ),
-            op_name="run_latency_specialist",
-        )
+        self._emit(progress_callback, "entering latency_specialist")
+        try:
+            if self.airgap:
+                return latency_specialist.run_latency_specialist(payload, airgap=True)
+            return self._cascade(
+                lambda prov: latency_specialist.run_latency_specialist(
+                    payload, provider=prov
+                ),
+                op_name="run_latency_specialist",
+                progress_callback=progress_callback,
+            )
+        finally:
+            self._emit(progress_callback, "exit latency_specialist")
 
 
 def _airgap_from_env() -> bool:
@@ -292,6 +392,7 @@ def build_session(
     provider: Optional[str] = None,
     session_id: Optional[str] = None,
     airgap: Optional[bool] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> AnalysisSession:
     """Build an AnalysisSession handle.
 
@@ -313,6 +414,10 @@ def build_session(
                   Ignored when airgap=True.
         session_id: Explicit id for the task store; uuid4() if None.
         airgap: If True (or PERFXPERT_AIRGAP=1), skip LLM entirely.
+        progress_callback: Optional ``Callable[[str], None]`` that receives
+            short status strings as each agent phase enters / exits. Used
+            by the CLI to drive a Rich spinner during long LLM calls. A
+            ``None`` value disables the feature with zero overhead.
 
     Raises:
         ValueError: unknown provider.
@@ -354,6 +459,7 @@ def build_session(
         provider=prov,
         airgap=is_airgap,
         fallback_provider=fallback,
+        progress_callback=progress_callback,
     )
 
 
