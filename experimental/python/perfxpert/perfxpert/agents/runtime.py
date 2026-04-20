@@ -67,18 +67,37 @@ _RATE_LIMIT_TOKENS = (
 
 
 def _is_rate_limit_like(exc: BaseException) -> bool:
-    """Walk the __cause__/__context__ chain; True iff any link is rate-limit.
+    """Walk the __cause__/__context__ chain; True iff any link is rate-limit
+    or transient (but NOT quota/auth/fatal).
 
-    We match on exception class name AND message text — the OpenAI SDK
-    class is `openai.RateLimitError` and the Anthropic SDK class is
-    `anthropic.RateLimitError`, so the class-name check alone catches the
-    common cases; the text check is a belt-and-suspenders fallback for
-    providers that wrap errors in ``ProviderError(msg)``.
+    The cascade ONLY fires for errors where trying the next provider
+    could plausibly succeed — rate-limit and server-transient failures.
+    Quota-exhausted errors mean the account has no credit (next provider
+    might work, but we still want the user to know the first provider's
+    quota ran out so they can top up); auth errors mean the key is bad
+    and cascading hides the real fix; fatal errors need to surface.
+
+    Cycle-2 I8: only transient + rate-limit cascade; auth/fatal surface
+    immediately (per memory index).
     """
+    # New taxonomy types take precedence over substring matching.
+    from perfxpert.providers._exceptions import (
+        AuthError,
+        FatalError,
+        QuotaExceededError,
+        RateLimitError,
+        TransientError,
+    )
+
     seen: set[int] = set()
     current: Optional[BaseException] = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
+        # Explicit typed matches first — unambiguous classification.
+        if isinstance(current, (QuotaExceededError, AuthError, FatalError)):
+            return False
+        if isinstance(current, (RateLimitError, TransientError)):
+            return True
         class_name = type(current).__name__.lower()
         if "ratelimit" in class_name:
             return True

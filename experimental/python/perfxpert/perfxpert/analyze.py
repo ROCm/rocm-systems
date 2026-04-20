@@ -491,9 +491,19 @@ def _execute_agentic(
     except Exception as e:
         raise RuntimeError(f"Failed to build RootInput: {e}") from e
 
-    # Run root analysis via the agents session API
+    # Run root analysis via the agents session API.
+    #
+    # Let typed ProviderError subclasses (QuotaExceeded, AuthError,
+    # RateLimitError, TransientError, FatalError) propagate unchanged so
+    # the outermost CLI boundary in ``main()`` can render a one-line
+    # user-facing message instead of a 30-line traceback. Only non-taxonomy
+    # exceptions (schema / wiring bugs, our own code) get wrapped as
+    # RuntimeError with the "Agentic root analysis failed" diagnostic.
+    from perfxpert.providers._exceptions import ProviderError
     try:
         root_output = session.run_root(root_input)
+    except ProviderError:
+        raise  # let __main__.main render clean one-liner
     except Exception as e:
         raise RuntimeError(f"Agentic root analysis failed: {e}") from e
 
@@ -593,11 +603,79 @@ def main(argv=None) -> int:
         return 0
 
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        import traceback
+        return _render_cli_error(e)
 
-        traceback.print_exc()
-        return 1
+
+def _render_cli_error(exc: BaseException) -> int:
+    """Render a top-level CLI error as a one-line user message.
+
+    Typed :class:`ProviderError` subclasses get a concise, actionable
+    message. Anything else falls back to the short ``Error: ...`` line.
+    The full traceback is only printed when ``PERFXPERT_DEBUG=1`` is set
+    so interactive users don't see 30 lines of stack trace.
+    """
+    from perfxpert.providers._exceptions import (
+        AuthError,
+        FatalError,
+        QuotaExceededError,
+        RateLimitError,
+        TransientError,
+    )
+
+    debug = os.environ.get("PERFXPERT_DEBUG", "0") == "1"
+
+    if isinstance(exc, QuotaExceededError):
+        prov = exc.provider
+        model = exc.model or "<default>"
+        raw = getattr(exc, "raw_message", "") or ""
+        print(
+            f"⚠ LLM quota exhausted on {prov} ({model}). "
+            f"Top up the account or switch provider: "
+            f"PERFXPERT_AIRGAP=1 OR --llm <other>. "
+            f"Raw SDK message: {raw}",
+            file=sys.stderr,
+        )
+    elif isinstance(exc, AuthError):
+        prov = getattr(exc, "provider", "<unknown>")
+        env_var = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "claude-code": "ANTHROPIC_API_KEY",
+            "ollama": "PERFXPERT_LLM_LOCAL_URL",
+            "private": "PERFXPERT_LLM_PRIVATE_API_KEY",
+        }.get(prov, f"{prov.upper()}_API_KEY")
+        print(
+            f"⚠ LLM auth failed for {prov}. "
+            f"Check {env_var} is set correctly.",
+            file=sys.stderr,
+        )
+    elif isinstance(exc, RateLimitError):
+        prov = getattr(exc, "provider", "<unknown>")
+        print(
+            f"⚠ LLM rate-limited on {prov}; retry in a minute, or set "
+            f"PERFXPERT_LLM_FALLBACK_CHAIN to cascade providers.",
+            file=sys.stderr,
+        )
+    elif isinstance(exc, TransientError):
+        prov = getattr(exc, "provider", "<unknown>")
+        kind = getattr(exc, "kind", "transient") or "transient"
+        print(
+            f"⚠ LLM provider {prov} returned a transient error ({kind}); "
+            f"retry, or PERFXPERT_AIRGAP=1 for deterministic fallback.",
+            file=sys.stderr,
+        )
+    elif isinstance(exc, FatalError):
+        prov = getattr(exc, "provider", "<unknown>")
+        raw = getattr(exc, "raw_message", "") or str(exc)
+        print(f"⚠ LLM provider {prov} failed: {raw}", file=sys.stderr)
+    else:
+        print(f"Error: {exc}", file=sys.stderr)
+
+    if debug:
+        import traceback
+        traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
+
+    return 1
 
 
 if __name__ == "__main__":

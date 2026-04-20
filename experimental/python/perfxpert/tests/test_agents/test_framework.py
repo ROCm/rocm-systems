@@ -457,6 +457,131 @@ def test_sdk_invoke_claude_code_alias_routes_through_anthropic(monkeypatch):
     assert captured["model"].api_key == "sk-ant-fake-cc"
 
 
+# -- Fix 1 — SDK error classification ---------------------------------------
+
+
+def _install_fake_sdk_with_runner_error(monkeypatch, error_to_raise):
+    """Stub the openai-agents SDK so Runner.run_sync raises ``error_to_raise``."""
+    from perfxpert.agents import framework
+
+    class _FakeSdkAgent:
+        def __init__(self, *, name, instructions, tools, model):
+            pass
+
+    class _FakeRunner:
+        @staticmethod
+        def run_sync(*, starting_agent, input, max_turns, run_config):
+            raise error_to_raise
+
+    def _fake_function_tool(fn, *, name_override, strict_mode):
+        return {"name": name_override, "fn": fn}
+
+    monkeypatch.setattr(framework, "_SDK_AVAILABLE", True)
+    monkeypatch.setattr(framework, "SdkAgent", _FakeSdkAgent)
+    monkeypatch.setattr(framework, "SdkRunner", _FakeRunner)
+    monkeypatch.setattr(framework, "SdkRunConfig", lambda: object())
+    monkeypatch.setattr(framework, "sdk_function_tool", _fake_function_tool)
+
+
+def test_sdk_invoke_raises_quota_exceeded_on_429_insufficient_quota(monkeypatch):
+    """A 429 with ``insufficient_quota`` substring must surface as
+    ``QuotaExceededError`` (not a bare ``RuntimeError``), so the CLI
+    boundary can render the clean "top up / switch provider" message."""
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+    from perfxpert.providers._exceptions import QuotaExceededError
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+
+    # Simulate what the OpenAI SDK raises on a 429 insufficient_quota:
+    # the class name contains "ratelimit" and the message contains the
+    # insufficient_quota substring.
+    class _FakeRateLimit(Exception):
+        pass
+    _FakeRateLimit.__name__ = "RateLimitError"
+    err = _FakeRateLimit(
+        "Error code: 429 — You exceeded your current quota, please check your "
+        "plan and billing details. code=insufficient_quota"
+    )
+    _install_fake_sdk_with_runner_error(monkeypatch, err)
+
+    agent = Agent(
+        name="Q", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    with pytest.raises(QuotaExceededError) as excinfo:
+        _sdk_invoke(agent, {"q": "?"}, provider="openai")
+    # Preserves the raw first-line message for user display.
+    assert "quota" in str(excinfo.value).lower()
+    assert excinfo.value.provider == "openai"
+
+
+def test_sdk_invoke_raises_authentication_error_on_401(monkeypatch):
+    """A 401 / invalid_api_key must surface as ``AuthError`` so the CLI
+    boundary can tell the user which env var to fix."""
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+    from perfxpert.providers._exceptions import AuthError
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-bogus")
+
+    class _FakeAuth(Exception):
+        pass
+    _FakeAuth.__name__ = "AuthenticationError"
+    err = _FakeAuth("Error code: 401 — Incorrect API key provided: sk-bogus. invalid_api_key")
+    _install_fake_sdk_with_runner_error(monkeypatch, err)
+
+    agent = Agent(
+        name="A", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    with pytest.raises(AuthError) as excinfo:
+        _sdk_invoke(agent, {"q": "?"}, provider="openai")
+    assert excinfo.value.provider == "openai"
+    assert "auth" in str(excinfo.value).lower()
+
+
+def test_sdk_invoke_raises_rate_limit_on_bare_429(monkeypatch):
+    """A plain 429 ``rate_limit_exceeded`` (no quota substring) must surface
+    as ``RateLimitError``, not ``QuotaExceededError`` — users should retry
+    or use the fallback chain, not panic about their credit balance."""
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+    from perfxpert.providers._exceptions import QuotaExceededError, RateLimitError
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+
+    class _FakeRateLimit(Exception):
+        pass
+    _FakeRateLimit.__name__ = "RateLimitError"
+    # Classic provider-throttle response: 429 with rate_limit_exceeded and
+    # explicitly NO quota vocabulary.
+    err = _FakeRateLimit("Error code: 429 — rate_limit_exceeded: too many requests, retry in 60s")
+    _install_fake_sdk_with_runner_error(monkeypatch, err)
+
+    agent = Agent(
+        name="R", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    with pytest.raises(RateLimitError) as excinfo:
+        _sdk_invoke(agent, {"q": "?"}, provider="anthropic")
+    assert not isinstance(excinfo.value, QuotaExceededError)
+    assert excinfo.value.provider == "anthropic"
+
+
+def test_sdk_invoke_raises_transient_on_5xx(monkeypatch):
+    """A 503 / connection error / timeout must surface as ``TransientError``
+    so the CLI prompts the user to retry rather than panic."""
+    from perfxpert.agents.framework import Agent, _sdk_invoke
+    from perfxpert.providers._exceptions import TransientError
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+
+    err = Exception("Error code: 503 — service unavailable")
+    _install_fake_sdk_with_runner_error(monkeypatch, err)
+
+    agent = Agent(
+        name="T", layer=1, fence_path=None, input_schema=dict, output_schema=dict, tools=[]
+    )
+    with pytest.raises(TransientError) as excinfo:
+        _sdk_invoke(agent, {"q": "?"}, provider="openai")
+    assert excinfo.value.provider == "openai"
+
+
 def test_sdk_invoke_anthropic_does_not_double_prefix(monkeypatch):
     """If the user pins an already-prefixed model via PERFXPERT_ANTHROPIC_MODEL,
     we must not produce ``anthropic/anthropic/…`` nonsense."""

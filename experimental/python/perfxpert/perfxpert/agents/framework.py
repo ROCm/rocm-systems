@@ -491,7 +491,17 @@ def _sdk_invoke(agent: "Agent", input_payload: Any, provider: str) -> FakeProvid
             run_config=run_config,
         )
     except Exception as exc:
-        raise RuntimeError(f"framework: SDK Runner.run_sync failed: {exc}") from exc
+        # Classify SDK exceptions into the perfxpert taxonomy so the
+        # outermost boundary (analyze.execute / __main__.main) can surface
+        # a one-line, actionable message instead of a 30-line traceback.
+        # Only code defects should ever bubble up as RuntimeError — real
+        # provider failures (quota, auth, rate-limit, transient, fatal)
+        # become typed ProviderError subclasses.
+        from perfxpert.providers._exceptions import classify_sdk_error
+
+        model_name = _resolve_model(provider)
+        typed = classify_sdk_error(exc, provider=provider, model=model_name)
+        raise typed from exc
 
     return FakeProviderResponse(
         text=_final_output_text(run_result),

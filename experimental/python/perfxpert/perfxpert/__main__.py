@@ -160,6 +160,11 @@ def main(argv=None):
 
         try:
             analyze.execute(input_data, cfg, **kwargs)
+        except Exception as e:
+            # One-line user-facing message for known provider failures;
+            # full traceback gated on PERFXPERT_DEBUG=1.
+            rc = analyze._render_cli_error(e)
+            sys.exit(rc)
         finally:
             if input_data is not None:
                 input_data.close()
