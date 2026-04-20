@@ -37,13 +37,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 namespace hip { const HipDispatchTable* GetHipDispatchTable(); }
 
@@ -103,7 +103,7 @@ HipApiRecordExt* AllocChunk() {
 
 void FreeChunk(HipApiRecordExt* chunk) {
   for (size_t i = 0; i < kChunkSize; ++i)
-    GpuOps(chunk[i]).~vector<HipGpuActivityExt>();
+    delete[] chunk[i].gpu.gpu_ops;
   ::operator delete[](static_cast<void*>(chunk));
 }
 
@@ -195,8 +195,15 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
     // OP_ID_BARRIER: no payload fields — begin/end timestamps already written above.
     rec->gpu.gpu_op_count = 1;
   } else {
-    // Subsequent op (graph launch): spill into the overflow vector in _pad1.
-    HipGpuActivityExt entry{};  // gpu_op_count=0, gpu_ops=nullptr, _pad1={0}
+    // Subsequent op (graph launch): op-1 stays in rec->gpu; ops 2..N spill into gpu_ops.
+    // spill_count = number of entries already in gpu_ops (gpu_op_count - 1).
+    uint32_t spill_count = rec->gpu.gpu_op_count - 1;
+    HipGpuActivityExt* grown = new HipGpuActivityExt[spill_count + 1]{};
+    if (spill_count > 0)
+      std::memcpy(grown, rec->gpu.gpu_ops, spill_count * sizeof(HipGpuActivityExt));
+    delete[] const_cast<HipGpuActivityExt*>(rec->gpu.gpu_ops);
+
+    HipGpuActivityExt& entry = grown[spill_count];
     entry.op        = ar->op;
     entry.begin_ns  = ar->begin_ns;
     entry.end_ns    = ar->end_ns;
@@ -208,7 +215,8 @@ int HipActivityCallbackExt(activity_domain_t domain, uint32_t op_id, void* data)
       entry.bytes     = ar->bytes;
       entry.copy_kind = ToCopyKindExt(ar->kind);
     }
-    GpuOps(*rec).push_back(entry);
+
+    rec->gpu.gpu_ops = grown;
     rec->gpu.gpu_op_count++;
   }
 
@@ -341,10 +349,11 @@ void WriteJsonTraceImpl(const char* filepath) {
         emit_gpu_op(rec.gpu.op, rec.gpu.begin_ns, rec.gpu.end_ns,
                     rec.gpu.device_id, rec.gpu.queue_id,
                     rec.gpu.kernel_name, rec.gpu.bytes, rec.gpu.copy_kind);
-      for (const auto& gop : GpuOps(rec))
-        emit_gpu_op(gop.op, gop.begin_ns, gop.end_ns,
-                    gop.device_id, gop.queue_id,
-                    gop.kernel_name, gop.bytes, gop.copy_kind);
+      for (uint32_t g = 0; g + 1 < rec.gpu.gpu_op_count && rec.gpu.gpu_ops; ++g)
+        emit_gpu_op(rec.gpu.gpu_ops[g].op, rec.gpu.gpu_ops[g].begin_ns, rec.gpu.gpu_ops[g].end_ns,
+                    rec.gpu.gpu_ops[g].device_id, rec.gpu.gpu_ops[g].queue_id,
+                    rec.gpu.gpu_ops[g].kernel_name, rec.gpu.gpu_ops[g].bytes,
+                    rec.gpu.gpu_ops[g].copy_kind);
     }
   }
 
@@ -418,13 +427,15 @@ static void DrainAllDevices() {
   }
 }
 
+// atexit handler — registered only when GPU_CLR_PROFILE_OUTPUT is set.
+// Runs before static destructors so HIP devices are still alive for DrainAllDevices().
+static void ProfilerAtExit() {
+  DrainAllDevices();
+  WriteJsonTraceImpl(g_env_output_path.c_str());
+}
+
 struct HipClrProfilerFinalizer {
   ~HipClrProfilerFinalizer() {
-    // Auto-write when activated by env var.
-    if (!g_env_output_path.empty()) {
-      DrainAllDevices();
-      WriteJsonTraceImpl(g_env_output_path.c_str());
-    }
     for (auto* chunk : g_records) FreeChunk(chunk);
   }
 } g_finalizer;
@@ -489,6 +500,7 @@ void HipProfilerInitExt() {
   if (flagIsDefault(GPU_CLR_PROFILE_OUTPUT)) return;
 
   g_env_output_path = GPU_CLR_PROFILE_OUTPUT;
+  std::atexit(ProfilerAtExit);
   EnsureCallbackAndWrappers();
 }
 
