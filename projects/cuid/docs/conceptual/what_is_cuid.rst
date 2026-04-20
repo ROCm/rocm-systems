@@ -31,16 +31,16 @@ The following table shows the corresponding bits for device-specific data, which
 
        * SMBIOS platform serial number.
 
-       * ACPI or other architectural component identifier. If ACPI is not available, software-generated fingerprint from proprietary individual marker is used.
-       This serial number can be MSB 0-extended if smaller than 64 bit or truncated if larger.
+       * ACPI or other architectural component identifier. If ACPI is unavailable, a software-generated fingerprint from proprietary individual marker is used.
+       This serial number can be MSB 0-extended if smaller than 64 bits or truncated if larger.
 
    * - 64:71
      - UnitID (part 1)
-     - Used if component supports unit ID otherwise this value is 0.
+     - Used if the component supports a unit ID; otherwise, this value is 0.
 
    * - 72:79
      - RevisionID
-     - Used if component supports revision ID otherwise this value is 0.
+     - Used if the component supports revision ID; otherwise, this value is 0.
 
    * - 80:95
      - DeviceID
@@ -60,17 +60,17 @@ The following table shows the corresponding bits for device-specific data, which
 
        * SMBIOS vendor ID.
 
-       The vendor ID follows PCIe vendor ID 16 bit value definition such as 0x1022 or 0x1002 for AMD.
+       The vendor ID follows the PCIe vendor ID 16-bit value definition, such as 0x1022 or 0x1002 for AMD.
 
    * - 112:117
      - UnitID (part 2)
-     - Used only if UnitID value is >= 256, otherwise this value is considered 0.
+     - Used only if the UnitID value is >= 256; otherwise, this value is considered 0.
 
    * - 118:121
      - Device Type
      - Present as ``amdcuid_device_type_t`` in ``amd_cuid.h``.
 
-The values present in the corresponding bit positions (first column in the preceding table ) are further used to fill out a UUIDv8 style format to generate the primary CUID as shown in the following table:
+The values present in the corresponding bit positions (first column in the preceding table) are also used to fill out a UUIDv8 style format to generate the primary CUID as shown in the following table:
 
 .. list-table:: UUIDv8 style format
   :widths: 20 40 40
@@ -100,9 +100,13 @@ The values present in the corresponding bit positions (first column in the prece
     - ID value (part 3)
     - MSB of ID value.
 
-Since the device serial number is protected information, the primary CUID generated using the device serial number is also protected at the same level. Users with the right privilege can consider the primary CUID as the direct link between the device and its derived CUID.
+Because the device serial number is protected information, the primary CUID generated from it is also protected at the same level. Users with the right privilege can consider the primary CUID as the direct link between the device and its derived CUID.
 
 Derived CUID
 =============
 
-For typical day-to-day operations, the derived CUID is used. It is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) with a 256-bit key. The derived CUID obscures hardware details from lower-privilege software and prevents precomputed table attacks. To protect the serial number consisting sensitive information, the tool users must provide the 256-bit key required for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. The secure storage of the key might require additional management overhead. The key should only be accessible to privileged users or the privileged service, who can then use the key along with the primary CUID in the HMAC-SHA2-256 function to generate the derived CUID. Note that, if the key changes due to reasons such as key rotation operations, the derived CUID will also change. However, since the primary CUIDs always remain the same, these can always be used to trace the derived CUIDs back to their respective devices.
+For typical day-to-day operations, the derived CUID is used. It is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) using a 256-bit key. The derived CUID obscures hardware details from lower-privilege software and prevents precomputed table attacks. 
+
+To protect the serial number consisting sensitive information, the tool users must provide the 256-bit key required for the keyed hashing function, as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). This key must be unique, random, and protected from unauthorized use. The secure storage of the key might require additional management overhead. 
+
+The key should be accessible only to privileged users or the privileged service, which can then use the key, along with the primary CUID, in the HMAC-SHA2-256 function to generate the derived CUID. Note that if the key changes due to key rotation, the derived CUID will also change. However, because the primary CUIDs always remain the same, these can always be used to trace the derived CUIDs back to their respective devices.

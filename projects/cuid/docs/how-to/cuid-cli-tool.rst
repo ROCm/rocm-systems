@@ -5,7 +5,7 @@
 .. _cuid-cli-tool:
 
 ********************
-Using CUID CLI Tool
+Using CUID CLI 
 ********************
 
 The CUID library provides a command-line interface (CLI) for generating CUIDs and querying devices for their CUIDs. This topic discusses how to use this CUID CLI tool.
@@ -28,7 +28,7 @@ The following table lists the CUID CLI tool options:
 
   * - ``--generate-cuid``
     -
-      * Generates CUID registry for the discovered devices. For devices with existing CUID registry, this option refreshes the registry.
+      * Generates CUID registry for the discovered devices. For devices with an existing CUID registry, this option refreshes the registry.
 
       * Can be used with an existing key or with ``generate-key`` or ``set-key`` for a new key.
 
@@ -39,14 +39,14 @@ The following table lists the CUID CLI tool options:
     -
       * Generates a new random HMAC key.
 
-      * Used in conjunction with the ``generate-cuid`` option to generate CUID registry with a new random key.
+      * Used in conjunction with the ``generate-cuid`` option to generate a CUID registry with a new random key.
     - ``sudo /opt/rocm/core/bin/amdcuid_tool --generate-cuid --generate-key``
 
   * - ``--set-key <key_file>``
     -
-      * Sets 32 bytes HMAC key from the specified file.
+      * Sets 32-byte HMAC key from the specified file.
 
-      * Used in conjunction with the ``generate-cuid`` option to generate CUID registry with an existing key file.
+      * Used in conjunction with the ``generate-cuid`` option to generate a CUID registry with an existing key file.
     - ``sudo /opt/rocm/core/bin/amdcuid_tool --generate-cuid --set-key <path to the key file>``
 
   * - ``--notify-daemon``
@@ -62,7 +62,7 @@ The following table lists the CUID CLI tool options:
 
   * - ``--type <device-type>``
     -
-      * Lists the devices with their CUIDs filtered according to the specified device-type.
+      * Lists the devices with their CUIDs filtered according to the specified device type.
 
       * Used in conjunction with ``list`` or ``query-device`` option.
 
@@ -86,7 +86,7 @@ The following table lists the CUID CLI tool options:
       * Using BDF: ``/opt/rocm/core/bin/amdcuid_tool --query-device 0000:03:00.0 --type gpu``
 
   * - ``--version``
-    - Shows CUID library version
+    - Shows the CUID library version
     - ``/opt/rocm/core/bin/amdcuid_tool --version``
 
 To see the complete list of CUID tool option, run ``--help``, ``-h`` command.
@@ -94,7 +94,7 @@ To see the complete list of CUID tool option, run ``--help``, ``-h`` command.
 Tool usage
 ===========
 
-This section lists the commonly-used CUID CLI tool commands according to their purpose.
+This section lists commonly used CUID CLI commands by purpose.
 
 Generating CUID
 ----------------
@@ -114,12 +114,12 @@ To generate the CUIDs, use the ``--generate-cuid`` option:
 
   CUID registry refreshed successfully!
 
-Note that generating CUIDs requires root privileges as protected hardware information is required to create the CUIDs.
+Note that generating CUIDs requires root privileges, as protected hardware information is required to create the CUIDs.
 
 Managing hash key
 ------------------
 
-To generate the publicly available CUIDs, the CUID library uses a hash key for processing the protected hardware information. Therefore, a hash key is created during CUID library installation, which needs to be managed. While the key is auto-generated at first, users might want to employ a key rotation system to remove stale keys and create new ones.
+To generate publicly available CUIDs, the CUID library uses a hash key to process protected hardware information. Therefore, a hash key is created during CUID library installation and must be managed. While the key is auto-generated initially, users might want to use a key rotation system to remove stale keys and create new ones.
 
 To generate CUIDs using a new key, you can use the ``generate-key`` option while generating CUIDs:
 
@@ -149,7 +149,7 @@ To generate CUIDs using an existing key, use the ``set-key`` option and specify 
 
   CUID registry refreshed successfully!
 
-Note that a new key will necessarily create new derived CUIDs for all the devices, while their primary CUIDs will always remain the same. For more information about primary and derived CUIDs, see :ref:`what-is-cuid`
+Note that a new key will create new derived CUIDs for all the devices, while their primary CUIDs will always remain the same. For more information about primary and derived CUIDs, see :ref:`what-is-cuid`
 
 Getting CUIDs
 --------------

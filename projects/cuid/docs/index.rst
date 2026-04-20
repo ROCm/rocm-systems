@@ -8,11 +8,11 @@
 CUID documentation
 *********************
 
-In a data center environment, a variety of devices, including GPUs, CPUs, and NICs are managed using different tools. Each of these tools employs distinct methods for identifying devices, which complicates correlation efforts. For example, the :doc:`AMD SMI <amdsmi:index>` tool uses BDF as GPU index, while :doc:`RVS <rocmvalidationsuite:index>` utilizes the ``gpu_id`` from KFD as the GPU index. This inconsistency makes device management and standardization particularly challenging, especially when external vendors are involved.
+In a data center environment, a variety of devices, including GPUs, CPUs, and NICs are managed using different tools. Each of these tools uses distinct methods to identify devices, complicating correlation efforts. For example, the :doc:`AMD SMI <amdsmi:index>` tool uses BDF as the GPU index, while :doc:`ROCm Validation Suite <rocmvalidationsuite:index>` utilizes the ``gpu_id`` from KFD as the GPU index. This inconsistency makes device management and standardization particularly challenging, especially when external vendors are involved.
 
-The Component Unified Identifier (CUID or CUUID) library solves this problem by generating a stable and unique ID (CUID) for various AMD hardware devices including GPUs, CPUs, NICs, and platform devices in a deterministic manner. This unique ID acts as a bridge, facilitating seamless integration of different descriptions across the ecosystem. CUIDs are formatted as UUIDv8 values and are derived from hardware fingerprints using HMAC, allowing for consistent device identification across reboots and driver upgrades. To learn more about CUID, see :ref:`what-is-cuid`
+The Component Unified Identifier (CUID or CUUID) library solves this problem by generating a stable, unique ID (CUID) for various AMD hardware devices including GPUs, CPUs, NICs, and platform devices in a deterministic manner. This unique ID acts as a bridge, facilitating seamless integration of different descriptions across the ecosystem. CUIDs are formatted as UUIDv8 values and derived from hardware fingerprints using HMAC, enabling consistent device identification across reboots and driver upgrades. To learn more about CUID, see :ref:`what-is-cuid`
 
-The CUID library also provides a command-line (CLI) tool that uses the CUID library to detect devices and generate CUIDs. The CLI tool is useful to the administrators for simplifying device management and integration.
+The CUID library also provides a command-line (CLI) tool to detect devices and generate CUIDs. The CLI tool can help administrators simplify device management and integration.
 
 The code is open and hosted at `<https://github.com/ROCm/rocm-systems/blob/develop/projects/cuid>`_.
 
