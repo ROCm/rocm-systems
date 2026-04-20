@@ -54,6 +54,8 @@ _KNOWN_TOOLS: tuple[str, ...] = (
     "report",
     "analyze",
     "classify",
+    "run_root_analysis",
+    "workflow_next_step",
 )
 
 

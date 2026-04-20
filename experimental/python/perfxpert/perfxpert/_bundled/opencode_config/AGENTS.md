@@ -21,6 +21,14 @@ access to the perfxpert MCP server (stdio, command `perfxpert-mcp`).
    **Gate discipline for GPU-performance requests:**
    - FIRST call `perfxpert_intent_classify`, THEN `perfxpert_workflow_next_step`.
    - Do NOT call `bash`/`edit`/`read`/`glob`/`grep` BEFORE those two.
+   - When `perfxpert_intent_classify` returns intent `analyze`, the
+     NEXT tool call MUST be `perfxpert_run_root_analysis` — it wraps
+     the full Root → Analysis → Recommendation hierarchy (same brain
+     as the in-process `perfxpert analyze` path) and returns a single
+     structured verdict (narrative + primary_bottleneck +
+     recommendations + warnings + metadata). Do not hand-roll your own
+     analysis loop using the lower-level perfxpert tools before calling
+     this aggregator — the aggregator IS the decision hierarchy.
    - AFTER `perfxpert_workflow_next_step` returns a phase (profile /
      optimize / reprofile / analyze / build), the gate is LIFTED.
      At that point you MUST use `bash` to run the profiler (rocprofv3,
