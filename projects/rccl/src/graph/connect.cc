@@ -280,13 +280,201 @@ ncclResult_t ncclTreeBasePostset(struct ncclComm* comm,
   }
   return ncclSuccess;
 }
+
+static void generateWaleckiEven(int nNodes, int channel, int* order) {
+  int m = nNodes - 1; // Number of rotating nodes
+  int left = 0;
+  int right = m - 1;
+
+  for (int i = 0; i < m; i++) {
+    int val;
+    if (i % 2 == 0) {
+      val = (left + channel) % m;
+      left++;
+    } else {
+      val = (right + channel) % m;
+      right--;
+    }
+    order[i] = val;
+  }
+  // The pivot node is always at the end
+  order[nNodes - 1] = nNodes - 1;
+}
+
+static void generateWaleckiOdd(int nNodes, int channel, int* order) {
+  int left = 0;
+  int right = nNodes - 1;
+
+  for (int i = 0; i < nNodes; i++) {
+    if (i % 2 == 0) {
+      order[i] = (left + channel) % nNodes;
+      left++;
+    } else {
+      order[i] = (right + channel) % nNodes;
+      right--;
+    }
+  }
+}
+
 /**
- * connectRings: Assumes every node has entry and exit (ringRecv[channel][node] and ringSend[channel][node]) rank
+ * This function takes number of nodes in a fully connected graph and number target channels, and generates upto nChannel Hamiltonian cycles 
+ * In this function we initially generate Walecki Construction depending on (nNodes mod 2), upto nNodes / 2 channels. Then, based on edge usage
+ * heuristic, we construct rest of the cycles.
+ * 
+ * Assumptions : nodeOrder is pointer to flattened 2D array of size nNodes*nChannels*sizeof(int), and is pre-allocated before invoking this function.
+ */
+static void generateGreedyNodeOrder(int nNodes, int nChannels, int* nodeOrder) {
+  // --- SAFETY CHECK: Guard against invalid cluster sizes ---
+  if (nNodes <= 0 || nChannels <= 0 || nodeOrder == nullptr) return;
+  // Handle degenerate cases (N=1, N=2) where Hamiltonian diversity is impossible
+  if (nNodes < 3) {
+    for (int c = 0; c < nChannels; c++) {
+      for (int n = 0; n < nNodes; n++) {
+        nodeOrder[c * nNodes + n] = n;
+      }
+    }
+    return;
+  }
+
+  std::vector<std::vector<int>> edgeUsage(nNodes, std::vector<int>(nNodes, 0));
+  int startNode = 0;
+  for (int c = 0; c < nChannels; c++) {
+    // 1. Initial Seeding (Optional but good)
+    if (c < nNodes / 2) {
+      if (nNodes % 2 == 0)  {
+        generateWaleckiEven(nNodes, c, &nodeOrder[c*nNodes]);
+      } else { 
+        generateWaleckiOdd(nNodes, c, &nodeOrder[c*nNodes]); 
+      }
+
+      for (int i = 0; i < nNodes; i++) {
+        edgeUsage[nodeOrder[c*nNodes+i]][nodeOrder[c*nNodes+((i+1)%nNodes)]]++;
+      }
+      continue;
+    }
+
+    // 2. Balanced Greedy Search
+    std::vector<bool> visited(nNodes, false);
+    startNode = (startNode + 1) % nNodes; // Rotate start to vary first-hop pressure
+    int curr = startNode;
+    nodeOrder[c*nNodes + 0] = curr;
+    visited[curr] = true;
+
+    for (int step = 1; step < nNodes; step++) {
+      int bestNext = -1;
+      double minCost = 1e9;
+
+      for (int next = 0; next < nNodes; next++) {
+        if (!visited[next]) {
+          // Primary Cost: Usage of this specific directed edge
+          double cost = edgeUsage[curr][next];
+          // Forward-Looking Heuristic: 
+          // If this is the second-to-last node, factor in the cost of getting home
+          if (step == nNodes - 1) {
+            cost += edgeUsage[next][startNode]; 
+          }
+
+          if (cost < minCost) {
+            minCost = cost;
+            bestNext = next;
+          }
+        }
+      }
+      nodeOrder[c*nNodes + step] = bestNext;
+      visited[bestNext] = true;
+      edgeUsage[curr][bestNext]++;
+      curr = bestNext;
+    }
+    edgeUsage[curr][startNode]++;
+  }
+}
+
+/**
+ * connectRings : Assumes every node has entry and exit (ringRecv[channel][node] and ringSend[channel][node]) rank
+ * among all the ranks its holds i.e local ranks. This function internally constructs Walecki + heuristic edge usage 
+ * based Hamiltonian cycles ( where node in the graph correspond to physical nodes )
+ * For example for a 4 node system with 6 channels, we create [[0,2,1,3],[1,0,2,3],[1,2,0,3],[2,0,1,3],[3,0,1,2],[0,3,2,1]] as rings
+ * Each of the edge is used twice. This roughly gives Good network load balancing, assuming that all the nodes is P2P connected (via Switch)
+ * Iterates over all nodes [0 to nNodes-1] 
+ */
+
+static ncclResult_t connectRings(struct ncclComm* comm, int* ringRecv, int* ringSend, int* ringPrev, int* ringNext) {
+  int nChannels = comm->nChannels;
+  int nNodes = comm->nNodes;
+  int nRanks = comm->nRanks;
+
+  // 1. Allocate flat memory for nodeOrder [nChannels * nNodes]
+  int* nodeOrder = nullptr;
+  NCCLCHECK(ncclCalloc(&nodeOrder, nChannels * nNodes));
+
+  // 2. Populate the Diverse/Greedy Node Order
+  // Note: generateGreedyNodeOrder needs to handle the flat indexing (c * nNodes + i)
+  generateGreedyNodeOrder(nNodes, nChannels, nodeOrder);
+
+  for (int c = 0; c < nChannels; c++) {
+    // Correct offsets for global arrays
+    int* c_recv = ringRecv + c * nNodes;
+    int* c_send = ringSend + c * nNodes;
+    int* c_prev = ringPrev + c * nRanks;
+    int* c_next = ringNext + c * nRanks;
+    
+    // Current channel's node sequence
+    int* c_order = nodeOrder + (c * nNodes);
+
+    for (int i = 0; i < nNodes; i++) {
+      // Find the physical nodes in the logical ring sequence
+      int pNodeIdx = c_order[(i - 1 + nNodes) % nNodes]; // Physical Prev Node ID
+      int cNodeIdx = c_order[i];                         // Physical Curr Node ID
+      int nNodeIdx = c_order[(i + 1) % nNodes];          // Physical Next Node ID
+
+      // Link: Previous Node's EXIT rank -> Current Node's ENTRY rank
+      // recv[cNodeIdx] gives the rank on the current node that receives from outside
+      c_prev[c_recv[cNodeIdx]] = c_send[pNodeIdx];
+
+      // Link: Current Node's EXIT rank -> Next Node's ENTRY rank
+      c_next[c_send[cNodeIdx]] = c_recv[nNodeIdx];
+    }
+  }
+
+  // 3. Clean up internal allocation
+  free(nodeOrder);
+
+  // [RCCL] Print off the recv/send local ranks per node, per channel
+  if (comm->rank == 0)
+  {
+    char buff[2048] = "";
+    int offset = 0;
+    int inc;
+    int numChannels = (nChannels > MAXCHANNELS/2) ? 2 * nChannels : nChannels;
+
+    for (int c = 0; c < numChannels; c++) {
+      sprintf(buff + offset, "     %02d%n", c, &inc);
+      offset += inc;
+    }
+    INFO(NCCL_GRAPH, "[RINGS] %s", buff);
+
+    for (int n = 0; n < nNodes; n++) {
+      offset = 0;
+      for (int c = 0; c < nChannels; c++) {
+        int recvRank = comm->rankToLocalRank[ringRecv[c*comm->nNodes+n]];
+        int sendRank = comm->rankToLocalRank[ringSend[c*comm->nNodes+n]];
+        sprintf(buff + offset, " %02d->%02d%n",  recvRank, sendRank, &inc);
+        offset += inc;
+      }
+      INFO(NCCL_GRAPH, "[RINGS] %s", buff);
+    }
+  }
+
+  return ncclSuccess;
+}
+
+/**
+ * connectRingsOld: Assumes every node has entry and exit (ringRecv[channel][node] and ringSend[channel][node]) rank
  * among all the ranks its holds i.e local ranks. This function assumes node i and ((i + 1) mod nNodes) as logically 
  * adjacent and connects previous node exit -> current node entry  and current node exit to next node entry.
  * Iterates over all nodes [0 to nNodes-1] 
  */
-static ncclResult_t connectRings(struct ncclComm* comm, int* ringRecv, int* ringSend, int* ringPrev, int* ringNext) {
+static ncclResult_t connectRingsOld(struct ncclComm* comm, int* ringRecv, int* ringSend, int* ringPrev, int* ringNext) {
   int nChannels = comm->nChannels;
   int nNodes = comm->nNodes;
   for (int c=0; c<nChannels; c++) {
@@ -847,14 +1035,16 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   // Alternate rings to avoid crossing rails.
   // CrossNic values could be not the same on all nodes as it depends on the number of net devs and the NVLink bandwidth.
   // Therefore, it's only done if the rank obtained a solution with crossNic=2.
-  for (int r = 0; r < comm->nRanks; r++) {
-    if (allTopoRanks[r]->crossNicRing == 2 && (nChannels % 2) == 0 && (comm->rankToNode[r] % 2) == 1) {
-      // Exchange rings
-      for (int c=0; c<nChannels; c+=2) {
-        exchangeValues(allTopoRanks[r]->ringRecv+c, allTopoRanks[r]->ringRecv+(c^1));
-        exchangeValues(allTopoRanks[r]->ringSend+c, allTopoRanks[r]->ringSend+(c^1));
-        exchangeValues(allTopoRanks[r]->ringPrev+c, allTopoRanks[r]->ringPrev+(c^1));
-        exchangeValues(allTopoRanks[r]->ringNext+c, allTopoRanks[r]->ringNext+(c^1));
+  if ((nChannels % 2) == 0 && nChannels > 0) {
+    for (int r = 0; r < comm->nRanks; r++) {
+      if (allTopoRanks[r]->crossNicRing == 2 && (comm->rankToNode[r] % 2) == 1) {
+        // Exchange rings
+        for (int c=0; c<nChannels; c+=2) {
+          exchangeValues(allTopoRanks[r]->ringRecv+c, allTopoRanks[r]->ringRecv+(c^1));
+          exchangeValues(allTopoRanks[r]->ringSend+c, allTopoRanks[r]->ringSend+(c^1));
+          exchangeValues(allTopoRanks[r]->ringPrev+c, allTopoRanks[r]->ringPrev+(c^1));
+          exchangeValues(allTopoRanks[r]->ringNext+c, allTopoRanks[r]->ringNext+(c^1));
+        }
       }
     }
   }
