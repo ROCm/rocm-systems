@@ -161,7 +161,8 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
 
     state->next_scan_pos = scan_end;
     __atomic_store_n(state->real_wdid, state->next_submit_pos, __ATOMIC_RELEASE);
-    ring_doorbell(state->doorbell_signal, value);
+    // Pass real submit position as doorbell value, not app's virtual value
+    ring_doorbell(state->doorbell_signal, static_cast<hsa_signal_value_t>(state->next_submit_pos));
 }
 
 namespace
@@ -196,7 +197,7 @@ create_queue_state(const hsa_queue_t* queue,
                    uint64_t           k_factor)
 {
     auto state             = std::make_unique<QueueState>();
-    state->ring_buf        = reinterpret_cast<void*>(queue->base_address);
+    state->ring_buf        = queue->base_address;
     state->ring_size       = queue->size;
     state->ring_mask       = queue->size - 1;
     state->real_wdid       = wdid_addr;
@@ -212,11 +213,14 @@ create_queue_state(const hsa_queue_t* queue,
 void
 destroy_queue_state(const hsa_queue_t* queue)
 {
-    auto* state = lookup_queue_state(queue);
-    if(!state) return;
-
-    unregister_doorbell(state->doorbell_signal);
-    get_queue_registry().wlock([&](auto& map) { map.erase(queue); });
+    hsa_signal_t doorbell = {0};
+    get_queue_registry().wlock([&](auto& map) {
+        auto it = map.find(queue);
+        if(it == map.end()) return;
+        doorbell = it->second->doorbell_signal;
+        map.erase(it);
+    });
+    if(doorbell.handle != 0) unregister_doorbell(doorbell);
 }
 
 namespace
