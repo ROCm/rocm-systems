@@ -140,6 +140,9 @@ template <typename T, typename... Args> inline std::string ToString(T first, Arg
 inline hipError_t ConvertCLErrorIntoHIPError(cl_int cl_error) {
   hipError_t hip_error = hipSuccess;
   switch (cl_error) {
+    case CL_OUT_OF_RESOURCES:
+      hip_error = hipErrorLaunchOutOfResources;
+      break;
     case CL_INVALID_OPERATION:
       hip_error = hipErrorLaunchFailure;
       break;

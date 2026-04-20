@@ -429,7 +429,7 @@ class Device : public NullDevice {
   virtual bool globalFreeMemory(size_t* freeMemory) const override;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
-                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
+                          const void* agentInfo = nullptr, bool allowAllAgentsAccess = true) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const override;
 
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,
@@ -444,7 +444,7 @@ class Device : public NullDevice {
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
   void* deviceLocalAlloc(size_t size,
-                        const AllocationFlags& flags = AllocationFlags{}) const override;
+                        const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
   void releaseMemory(void* ptr, size_t size) const;
   void memFree(void* ptr, size_t size) const;
@@ -482,6 +482,11 @@ class Device : public NullDevice {
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const override;
   virtual void ReleaseGlobalSignal(void* signal) const override;
   virtual void RetainGlobalSignal(void* signal) const override;
+  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
+  virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual uint8_t* CreateBarrierPacket() const override;
+  virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
+                                   const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -565,7 +570,7 @@ class Device : public NullDevice {
   //! Initialize memory in AMD HMM on the current device or keeps it in the host memory
   bool SvmAllocInit(void* memory, size_t size) const;
 
-  void getGlobalCUMask(std::string cuMaskStr);
+  void getGlobalCUMask(std::string_view cuMaskStr);
 
   static hsa_status_t BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data);
 
@@ -588,8 +593,8 @@ class Device : public NullDevice {
 
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
-                              hsa_agent_t dstAgent, hsa_agent_t srcAgent) const {
-    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, dstAgent, srcAgent);
+                              hsa_agent_t peerAgent, hsa_agent_t copyAgent) const {
+    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, peerAgent, copyAgent);
   }
   void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
     sdma_engine_allocator_.ReleaseEngine(vgpu);
@@ -612,6 +617,9 @@ class Device : public NullDevice {
 
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
+
+  //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
+  void WaitForHsaAsyncHandlersIdle();
 
  private:
   bool create();
@@ -743,7 +751,7 @@ class Device : public NullDevice {
     //! Queries HSA for engine status and preferred engines, then allocates
     //! For inter-GPU copies, strongly prefers recommended engines even if already allocated
     uint32_t AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
-                           hsa_agent_t dstAgent, hsa_agent_t srcAgent);
+                           hsa_agent_t peerAgent, hsa_agent_t copyAgent);
 
     //! Release engine allocation for a VirtualGPU
     void ReleaseEngine(VirtualGPU* vgpu);

@@ -102,10 +102,12 @@ void CountedQueuesTest::CountedQueueBasicApiTest() {
   // Release the queue
   ASSERT_SUCCESS(hsa_amd_counted_queue_release(queue));
 
+#ifndef ROCRTST_ASAN  // Accessing the queue handle after release causes ASAN to report use-after-free
   // Check that ref count is back to 0 after release
   hsa_status_t status;
   status = hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &use_count);
   ASSERT_EQ(status, HSA_STATUS_ERROR_INVALID_ARGUMENT);
+#endif
 }
 
 void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
@@ -171,12 +173,14 @@ void CountedQueuesTest::CountedQueues_SamePriority_MaxLimitTest() {
     ASSERT_SUCCESS(hsa_amd_counted_queue_release(q));
   }
 
+#ifndef ROCRTST_ASAN  // Accessing the queue handle after release causes ASAN to report use-after-free
   // After release, querying use-count should return invalid argument
   for (auto* q : queues) {
     uint32_t tmp = 0;
     EXPECT_EQ(hsa_amd_queue_get_info(q, HSA_QUEUE_INFO_USE_COUNT, &tmp),
               HSA_STATUS_ERROR_INVALID_ARGUMENT);
   }
+#endif
 }
 
 void CountedQueuesTest::InvalidArgsTest() {
@@ -498,9 +502,11 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
   // Release the counted queue
   ASSERT_SUCCESS(hsa_amd_counted_queue_release(queue));
 
+#ifndef ROCRTST_ASAN  // Accessing the queue handle after release causes ASAN to report use-after-free
   // Verify queue info returns error after release
   status = hsa_amd_queue_get_info(queue, HSA_QUEUE_INFO_USE_COUNT, &use_count);
   ASSERT_EQ(status, HSA_STATUS_ERROR_INVALID_ARGUMENT);
+#endif
 
   // Cleanup
   ASSERT_SUCCESS(hsa_amd_memory_pool_free(kernarg_address));

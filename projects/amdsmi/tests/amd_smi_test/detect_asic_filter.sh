@@ -66,9 +66,9 @@ if [ -z "$ASIC_NAME" ] && command -v amd-smi >/dev/null 2>&1; then
         # Map gfx string to FILTER key via lookup table
         if [ -n "${GFX_TO_ASIC[$gfx_str]+x}" ]; then
             ASIC_NAME="${GFX_TO_ASIC[$gfx_str]}"
-            echo "KFD detection failed — amd-smi detected $gfx_str → $ASIC_NAME"
+            echo "KFD detection failed — amd-smi detected $gfx_str → $ASIC_NAME" >&2
         else
-            echo "KFD detection failed — amd-smi detected $gfx_str (no FILTER mapping)"
+            echo "KFD detection failed — amd-smi detected $gfx_str (no FILTER mapping)" >&2
         fi
     fi
 fi
@@ -87,16 +87,16 @@ fi
 # Start with the ASIC-specific blacklist, or fall back to the global one.
 if [ -n "$ASIC_NAME" ] && [ -n "${FILTER[$ASIC_NAME]+x}" ]; then
     GTEST_EXCLUDE="${FILTER[$ASIC_NAME]}"
-    echo "Detected ASIC: $ASIC_NAME — using device-specific blacklist"
+    echo "Detected ASIC: $ASIC_NAME — using device-specific blacklist" >&2
 else
     GTEST_EXCLUDE="${BLACKLIST_ALL_ASICS}"
-    echo "ASIC '${ASIC_NAME:-unknown}' has no specific filter — using global blacklist"
+    echo "ASIC '${ASIC_NAME:-unknown}' has no specific filter — using global blacklist" >&2
 fi
 
 # Layer on virtualization exclusions if running in a VM/VF.
 if [ -n "$VIRT_MODE" ] && [ -n "${FILTER[$VIRT_MODE]+x}" ]; then
     GTEST_EXCLUDE="${GTEST_EXCLUDE}${FILTER[$VIRT_MODE]}"
-    echo "Virtualization detected — appending virtualization blacklist"
+    echo "Virtualization detected — appending virtualization blacklist" >&2
 fi
 
-echo "Final gtest negative filter: -${GTEST_EXCLUDE}"
+echo "Final gtest negative filter: -${GTEST_EXCLUDE}" >&2

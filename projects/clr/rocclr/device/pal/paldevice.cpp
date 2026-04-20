@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
@@ -183,14 +169,10 @@ bool NullDevice::init() {
         (isa->xnack() == amd::Isa::Feature::Any)) {
       continue;
     }
-    bool isOnline = false;
+
     // Check if the particular device is online
-    for (size_t i = 0; i < devices.size(); i++) {
-      if (&(devices[i]->isa()) == isa) {
-        isOnline = true;
-        break;
-      }
-    }
+    bool isOnline = std::any_of(devices.begin(), devices.end(),
+                                [isa](Device* device) { return &(device->isa()) == isa; });
     if (isOnline) {
       continue;
     }
@@ -308,7 +290,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
                                ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
                                : palProp.gfxipProperties.shaderCore.numAvailableCus;
   info_.maxPhysicalComputeUnits_ = info_.maxComputeUnits_;
-  info_.numberOfShaderEngines = palProp.gfxipProperties.shaderCore.numShaderEngines;
+  info_.numberOfShaderEngines_ = palProp.gfxipProperties.shaderCore.numShaderEngines;
 
   // SI parts are scalar.  Also, reads don't need to be 128-bits to get peak rates.
   // For example, float4 is not faster than float as long as all threads fetch the same
@@ -626,6 +608,8 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #endif  // _WIN64
   }
   info_.virtualMemoryManagement_ = true;
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
   info_.virtualMemAllocGranularityMinimum_ =
       static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
   info_.virtualMemAllocGranularityRecommended_ =
@@ -984,8 +968,7 @@ bool Device::create(Pal::IDevice* device) {
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));
 
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -2350,7 +2333,7 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 }
 
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agentInfo, bool allowAllAgentsAccess) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
@@ -2723,8 +2706,7 @@ bool Device::createBlitProgram() {
   // note: It's not critical for runtime functionality to fail trap handler initialization
   auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
   if (asm_program != nullptr) {
-    std::vector<amd::Device*> devices;
-    devices.push_back(this);
+    std::vector<amd::Device*> devices{this};
     std::string opt = "-cl-internal-kernel ";
     if (auto retval =
             asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {

@@ -1163,7 +1163,7 @@ BlitQueue& ImageManagerKv::BlitQueueInit() {
       }
 
       // Get the kernel handles.
-      status = ImageRuntime::instance()->blit_kernel().BuildBlitCode(agent_, blit_code_catalog_);
+      status = ImageRuntime::instance()->blit_kernel().BuildImageBlitCode(agent_, blit_code_catalog_);
 
       if (HSA_STATUS_SUCCESS != status) {
         blit_code_catalog_.clear();

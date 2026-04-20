@@ -1,0 +1,120 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+ARG ROCKY_MAJOR_VERSION=9
+ARG ROCKY_VERSION=${ROCKY_MAJOR_VERSION}.6
+FROM rockylinux/rockylinux:${ROCKY_VERSION}-minimal
+LABEL org.opencontainers.image.source=https://github.com/ROCm/hipFile
+# Brings ROCKY_VERSION in-scope
+ARG ROCKY_MAJOR_VERSION
+ARG ROCKY_VERSION
+ARG ROCM_VERSION=7.2.2
+
+# If the target ROCm Version on the package repository is non-standard, you can forcibly
+# set the ROCm version used in the package repo URL.
+# Ex. Package 7.0_alpha installs 7.0.0
+ARG ROCM_PKG_REPO_OVERRIDE
+
+# Update repo and install program dependencies.
+# microdnf is too stripped down, install full dnf.
+RUN microdnf install -y \
+        dnf \
+        epel-release && \
+    dnf config-manager --set-enabled crb
+
+# Setup AMD/ROCm Repositories (using AMD RHEL repo)
+# Method 1: Using amdgpu_install.rpm - buggy
+# The ROCm repo works in mysterious ways in that someone visiting from
+# a browser can download a certain version, but a utility like curl will
+# not be allowed to download it. Sometimes we may need to just forcibly
+# specify the version to make this work...
+# ARG AMDGPU_INSTALL="amdgpu-install-6.4.60402-1.el9.noarch.rpm"
+# RUN : "${AMDGPU_INSTALL:=$( \
+#         curl -s https://repo.radeon.com/amdgpu-install/latest/rhel/${ROCKY_VERSION}/ | \
+#         grep -oP '(?<=href=")[^"]+' | \
+#         grep amdgpu-install)}" && \
+#     echo "AMDGPU_INSTALL is: ${AMDGPU_INSTALL}" && \
+#     curl https://repo.radeon.com/amdgpu-install/latest/rhel/${ROCKY_VERSION}/${AMDGPU_INSTALL} \
+#         -o amdgpu_install.rpm && \
+#     dnf install -y ./amdgpu_install.rpm
+# Method 2: Manually create repo file.
+
+# ROCM_PKG_REPO_VERSION normalizes the ROCm version used in the package repo URL.
+# If the PATCH component is 0, the PATCH of the version is dropped. Otherwise no
+# modification is made.
+RUN ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
+    cat <<EOF > /etc/yum.repos.d/rocm.repo
+[ROCm-${ROCM_VERSION}]
+name=ROCm${ROCM_VERSION}
+baseurl=https://repo.radeon.com/rocm/el${ROCKY_MAJOR_VERSION}/${ROCM_PKG_REPO_VERSION}/main
+enabled=1
+priority=50
+gpgcheck=1
+gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+EOF
+
+# Development Dependencies
+# clang version == 19
+# llvm-dev == llvm-devel
+# Defaults to gcc11. On 9.6 gcc14 seems to be present.
+#   Use gcc13 to match Ubuntu24.
+RUN dnf makecache && \
+    dnf install -y \
+        boost-devel \
+        clang \
+        cmake \
+        doxygen \
+        gcc-toolset-13 \
+        gdb \
+        git \
+        hip-devel \
+        libmount-devel \
+        llvm-devel \
+        rpm-build
+
+# Configure system linker for ROCm
+RUN cat <<EOF > /etc/ld.so.conf.d/rocm.conf
+/opt/rocm/lib
+/opt/rocm/lib64
+EOF
+RUN ldconfig
+
+# Install a minimal CUDA SDK
+# HIP depends on the ROCm libraries being installed.
+# This means we are unable to have a separate CUDA+HIP image
+# without ROCm.
+RUN curl https://developer.download.nvidia.com/compute/cuda/repos/rhel${ROCKY_MAJOR_VERSION}/x86_64/cuda-rhel${ROCKY_MAJOR_VERSION}.repo \
+        -o /etc/yum.repos.d/cuda-rhel${ROCKY_MAJOR_VERSION}.repo && \
+    dnf makecache
+
+# https://gitlab.com/nvidia/container-images/cuda/blob/master/dist/12.6.1/ubuntu2404/devel/Dockerfile
+# Attempt a "minimal" CUDA Dev install.
+# libcufile-dev-X.Y == libcufile-devel-X.Y
+# libnvidia-compute-570-server == nvidia-driver-cuda + kmod-nvidia-open-dkms
+RUN dnf module enable -y nvidia-driver:570-open && \
+    dnf install -y \
+        cuda-minimal-build-12-9 \
+        kmod-nvidia-open-dkms \
+        libcufile-devel-12-9 \
+        nvidia-driver-cuda
+
+# Add ROCm and CUDA bin directories to the path
+ENV PATH=/usr/local/cuda/bin:/opt/rocm/bin:${PATH}
+
+# Environment Build Arg for ROCm
+ENV ROCM_VERSION="${ROCM_VERSION}"
+
+# .rc and .profile files are not automatically read on non-login,
+# non-interactive shells. Tell Bash to read a minimal .profile
+# when a shell of any type is opened.
+# Uncomment to prefer newer version of GCC.
+# RUN echo 'source /opt/rh/gcc-toolset-13/enable' >> ~/.bashrc
+RUN echo 'source ~/.bashrc' >> ~/.bash_profile
+ENV BASH_ENV="~/.bashrc"
+
+# AIS Code Repository Mount Point
+VOLUME /mnt/ais
+
+# Generic Mount point for container to access AIS-capable storage.
+VOLUME /mnt/ais-fs

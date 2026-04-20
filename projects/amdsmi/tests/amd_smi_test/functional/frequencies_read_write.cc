@@ -19,7 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 #include "frequencies_read_write.h"
 
 #include <gtest/gtest.h>
@@ -65,7 +64,7 @@ void TestFrequenciesReadWrite::Close() {
 void TestFrequenciesReadWrite::Run(void) {
   amdsmi_status_t ret;
   amdsmi_frequencies_t f;
-  uint32_t freq_bitmask;
+  uint64_t freq_bitmask;
   amdsmi_clk_type_t amdsmi_clk;
   const std::map<amdsmi_clk_type_t, std::string> clk_type_map = {
       {AMDSMI_CLK_TYPE_SYS, "SYS"},     {AMDSMI_CLK_TYPE_GFX, "GFX"},
@@ -77,6 +76,7 @@ void TestFrequenciesReadWrite::Run(void) {
   };
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -95,10 +95,12 @@ void TestFrequenciesReadWrite::Run(void) {
             return false;  // Quietly skip PCIE clock
                            // Cannot read/write to PCIE clock in driver
           }
-          std::cout << "amdsmi_get_clk_freq(" << it->second << ", f)";
+          std::cout << "amdsmi_get_clk_freq(" << it->second << ", f)" << std::endl;
         }
 
+        DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
         ret = amdsmi_get_clk_freq(processor_handles_[dv_ind], amdsmi_clk, &f);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (auto it = clk_type_map.find(amdsmi_clk); it != clk_type_map.end()) {
           std::cout << ": " << smi_amdgpu_get_status_string(ret, false) << std::endl;
         }
@@ -130,7 +132,25 @@ void TestFrequenciesReadWrite::Run(void) {
         // Skip AMDSMI_CLK_TYPE_PCIE, which does not supported in rocm-smi.
         if (amdsmi_clk == AMDSMI_CLK_TYPE_PCIE) return;
 
-        freq_bitmask = 0b01100;  // Try the 3rd and 4th clocks
+        // Build the bitmask dynamically based on reported DPM levels.
+        // The deep sleep entry (if present) is not a valid DPM level,
+        // so exclude it from the count to stay within the valid range.
+        uint32_t dpm_levels = f.num_supported;
+        if (f.has_deep_sleep && dpm_levels > 0) {
+          dpm_levels--;
+        }
+
+        if (dpm_levels < 2) {
+          // Not enough DPM levels to test a non-trivial bitmask; skip.
+          IF_VERB(STANDARD) {
+            std::cout << "\t**Set " << FreqEnumToStr(amdsmi_clk) << ": Only " << dpm_levels
+                      << " DPM level(s), skipping write test." << std::endl;
+          }
+          return;
+        }
+
+        // Pick two valid DPM levels: the second-to-last and the last.
+        freq_bitmask = (1ULL << (dpm_levels - 2)) | (1ULL << (dpm_levels - 1));
 
         std::string freq_bm_str = std::bitset<AMDSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
 
@@ -140,7 +160,10 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "Setting frequency mask for " << FreqEnumToStr(amdsmi_clk) << " to 0b"
                     << freq_bm_str << " ..." << std::endl;
         }
+        DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
         ret = amdsmi_set_clk_freq(processor_handles_[dv_ind], amdsmi_clk, freq_bitmask);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
         // Certain ASICs does not allow to set particular clocks. If set function for a clock
         // returns permission error despite root access, manually set ret value to success and
         // return
@@ -155,7 +178,9 @@ void TestFrequenciesReadWrite::Run(void) {
         }
 
         CHK_ERR_ASRT(ret)
+        DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
         ret = amdsmi_get_clk_freq(processor_handles_[dv_ind], amdsmi_clk, &f);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (ret != AMDSMI_STATUS_SUCCESS) {
           return;
         }
@@ -164,10 +189,17 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "Frequency is now index " << f.current << std::endl;
           std::cout << "Resetting mask to all frequencies." << std::endl;
         }
-        ret = amdsmi_set_clk_freq(processor_handles_[dv_ind], amdsmi_clk, 0xFFFFFFFF);
+        // Build a valid "all DPM levels" bitmask instead of 0xFFFFFFFF,
+        // which would be rejected since it has bits beyond valid range.
+        uint32_t reset_levels = f.num_supported;
+        if (f.has_deep_sleep && reset_levels > 0) {
+          reset_levels--;
+        }
+        uint64_t all_levels_mask = (reset_levels > 0) ? (1ULL << reset_levels) - 1 : 0;
+        DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+        ret = amdsmi_set_clk_freq(processor_handles_[dv_ind], amdsmi_clk, all_levels_mask);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Set all frequencies: Not supported on this machine. Skipping..."
-                    << std::endl;
           ret = AMDSMI_STATUS_SUCCESS;
           return;
         }
@@ -175,10 +207,11 @@ void TestFrequenciesReadWrite::Run(void) {
           return;
         }
 
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
         ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Setting performance level is not supported on this machine. Skipping..."
-                    << std::endl;
           ret = AMDSMI_STATUS_SUCCESS;
           return;
         }

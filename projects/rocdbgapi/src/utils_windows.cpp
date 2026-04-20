@@ -18,6 +18,7 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#include "utils_windows.h"
 #include "utils.h"
 #include <io.h>
 #include <windows.h>
@@ -28,19 +29,65 @@ namespace amd::dbgapi
 namespace utils
 {
 
+std::string
+convert_to_string (std::wstring_view ws)
+{
+  if (ws.empty ())
+    return {};
+
+  int size_needed
+    = ::WideCharToMultiByte (CP_ACP, 0, ws.data (), (int)ws.size (),
+                             nullptr, 0, nullptr, nullptr);
+  if (size_needed <= 0)
+    return {};
+
+  std::string result (static_cast<size_t> (size_needed), '\0');
+
+  [[maybe_unused]] int size
+    = ::WideCharToMultiByte (CP_ACP, 0, ws.data (), (int)ws.size (),
+                             &result[0], size_needed, "?", nullptr);
+
+  dbgapi_assert (size == size_needed);
+
+  return result;
+}
+
 const char *
 get_self_name ()
 {
-  static char path[MAX_PATH];
-  HMODULE hmodule = nullptr;
+  static const auto self_name = [] () -> std::string
+  {
+    HMODULE h;
+    if (::GetModuleHandleExW (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                              | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              (LPCWSTR)&get_self_name, &h))
+      {
+        std::wstring wself_name;
+        DWORD size = MAX_PATH;
 
-  if (::GetModuleHandleEx (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-                             | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           static_cast<const char *> (path), &hmodule)
-      && ::GetModuleFileName (hmodule, path, sizeof (path)))
-    return path;
+        /* Loop to find the true length, thus handling long paths.  */
+        while (true)
+          {
+            wself_name.resize (size);
+            DWORD len = ::GetModuleFileNameW (h, &wself_name[0], size);
+            if (len == 0)
+              break;
 
-  return "";
+            if (len < size)
+              {
+                wself_name.resize (len);
+                return convert_to_string (wself_name);
+              }
+
+            /* Buffer was too small; double it and try again.  */
+            size *= 2;
+          }
+      }
+
+    return {};
+  } ();
+
+  return self_name.c_str ();
 }
 
 } /* namespace amd::dbgapi::utils.  */

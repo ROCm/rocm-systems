@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_RUNTIME_API_H
 #define HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_RUNTIME_API_H
@@ -43,6 +27,7 @@ THE SOFTWARE.
 #define CUDA_12000 12000
 #define CUDA_12020 12020
 #define CUDA_12030 12030
+#define CUDA_13000 13000
 
 #ifdef __cplusplus
 extern "C" {
@@ -1947,6 +1932,7 @@ typedef enum cudaMemLocationType hipMemLocationType;
 #define hipMemLocationTypeDevice cudaMemLocationTypeDevice
 #define hipMemLocationTypeHost cudaMemLocationTypeHost
 #define hipMemLocationTypeHostNuma cudaMemLocationTypeHostNuma
+#define hipMemLocationTypeHostNumaCurrent cudaMemLocationTypeHostNumaCurrent
 #define hipMemHandleTypeNone cudaMemHandleTypeNone
 #define hipMemHandleTypePosixFileDescriptor cudaMemHandleTypePosixFileDescriptor
 #define hipMemHandleTypeWin32 cudaMemHandleTypeWin32
@@ -2102,6 +2088,16 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
   return hipCUDAErrorTohipError(cudaMemPrefetchAsync_v2(dev_ptr, count, location, flags, stream));
 #endif
 }
+
+#if CUDA_VERSION >= CUDA_13000
+inline static hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                                  hipMemLocation* locations,
+                                                  size_t* location_indices, size_t num_locations,
+                                                  unsigned long long flags, hipStream_t stream) {
+  return hipCUDAErrorTohipError(cudaMemPrefetchBatchAsync(
+      dev_ptrs, sizes, count, locations, location_indices, num_locations, flags, stream));
+}
+#endif
 
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
@@ -3016,6 +3012,9 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeDmaBufSupported:
       return hipCUResultTohipError(
           cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+      return hipCUResultTohipError(cuDeviceGetAttribute(
+          pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       cdattr = cudaDevAttrMaxAccessPolicyWindowSize;
       break;

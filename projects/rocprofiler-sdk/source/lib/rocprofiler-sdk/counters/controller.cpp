@@ -79,7 +79,7 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
 
     auto& ctx = *ctx_p;
 
-    if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+    if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
 
     // FIXME: Due to the clock gating issue, counter collection and PC sampling service
     // cannot coexist in the same context for now.
@@ -145,7 +145,7 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
-    if(!ctx.counter_collection)
+    if(!ctx.dispatch_counter_collection)
     {
         // Disable PTL for all GPUs for dispatch counter collection
         for(const auto& agent : agent::get_agents())
@@ -160,12 +160,12 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
             }
         }
 
-        ctx.counter_collection =
+        ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
     }
 
-    auto& cb =
-        *ctx.counter_collection->callbacks.emplace_back(std::make_shared<counter_callback_info>());
+    auto& cb = *ctx.dispatch_counter_collection->callbacks.emplace_back(
+        std::make_shared<counter_callback_info>());
 
     cb.user_cb       = callback;
     cb.callback_args = callback_args;

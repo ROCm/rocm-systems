@@ -277,10 +277,12 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+
   std::string smclk_min_max_fullpath = "";
 
   bool sclk = false;
   bool mclk = false;
+  bool fclk = false;
   switch (domain) {
     case AMDSMI_CLK_TYPE_GFX:
       smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
@@ -308,14 +310,15 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
       fullpath += "/pp_dpm_socclk";
       break;
     case AMDSMI_CLK_TYPE_DF:
+      smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
       fullpath += "/pp_dpm_fclk";
+      fclk = true;
       break;
     default:
       return AMDSMI_STATUS_INVAL;
   }
 
   std::ifstream ranges(fullpath.c_str());
-
   if (ranges.fail()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
@@ -328,41 +331,50 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
   dpm = 0;
   sleep_freq = UINT_MAX;
   current_freq = 0;
-
-  // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
-  if (sclk || mclk) {
+  // if getting sclk, mclk or fclk info, read pp_od_clk_voltage for min and max info
+  if (sclk || mclk || fclk) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
     unsigned int smax = 0;
     unsigned int mmax = 0;
+    unsigned int fmax = 0;
     unsigned int smin = UINT_MAX;
     unsigned int mmin = UINT_MAX;
+    unsigned int fmin = UINT_MAX;
 
     // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
     if (!smclk_ranges.is_open()) {
       sclk = false;
       mclk = false;
+      fclk = false;
     } else {
-      // using bool to switch between recording for s or mclk. true will be sclk, false will be mclk
-      bool s_or_m = true;
+      // using enum to switch between recording for sclk, mclk, or fclk
+      enum ClkType { PARSING_SCLK = 0, PARSING_MCLK = 1, PARSING_FCLK = 2 };
+      ClkType current_clk_type = PARSING_SCLK;
       unsigned int dpm_level, freq;
       for (std::string line; getline(smclk_ranges, line);) {
         if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
-          s_or_m = true;
+          current_clk_type = PARSING_SCLK;
           continue;
         } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
-          s_or_m = false;
+          current_clk_type = PARSING_MCLK;
+          continue;
+        } else if (line.compare("FCLK:") == 0 || line.compare("OD_FCLK:") == 0) {
+          current_clk_type = PARSING_FCLK;
           continue;
         }
-        if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
+        if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
           // skip lines that don't conform to the format
           continue;
         }
-        if (s_or_m) {
+        if (current_clk_type == PARSING_SCLK) {
           if (freq > smax) smax = freq;
           if (freq < smin) smin = freq;
-        } else {
+        } else if (current_clk_type == PARSING_MCLK) {
           if (freq > mmax) mmax = freq;
           if (freq < mmin) mmin = freq;
+        } else if (current_clk_type == PARSING_FCLK) {
+          if (freq > fmax) fmax = freq;
+          if (freq < fmin) fmin = freq;
         }
       }
 
@@ -372,6 +384,9 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
       } else if (mclk) {
         max = mmax;
         min = mmin;
+      } else if (fclk) {
+        max = fmax;
+        min = fmin;
       }
 
       smclk_ranges.close();
@@ -383,7 +398,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 
     char firstChar = line[0];
     if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %d%s", &single_char, &sleep_freq, str) <= 2) {
+      if (sscanf(line.c_str(), "%c: %d%9s", &single_char, &sleep_freq, str) <= 2) {
         ranges.close();
         return AMDSMI_STATUS_NO_DATA;
       }
@@ -407,8 +422,9 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         current_freq = freq;
       }
 
-      // not * was detected so check for the min max if not s or mclk, which are user defined
-      if (!sclk && !mclk) {
+      // not * was detected so check for the min max if not sclk, mclk, or fclk, which are user
+      // defined
+      if (!sclk && !mclk && !fclk) {
         max = freq > max ? freq : max;
         min = freq < min ? freq : min;
       }
@@ -478,7 +494,7 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   }
 
   if (badPagesVec.size() == 0) {
-    num_pages = 0;
+    *num_pages = 0;
     return AMDSMI_STATUS_SUCCESS;
   }
   // Remove any *trailing* empty (whitespace) lines
@@ -579,10 +595,10 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
 
   std::string line;
   getline(f, line);
-  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->uncorrectable_count));
+  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->uncorrectable_count));
 
   getline(f, line);
-  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->correctable_count));
+  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->correctable_count));
 
   f.close();
 
@@ -795,7 +811,7 @@ std::vector<std::string> split_string(const std::string& line, char delim) {
 // rsmi_status_t ret - return value of RSMI API function
 // bool fullStatus - defaults to true, set to false to chop off description
 // Returns:
-// string - if fullStatus == true, returns full decription of return value
+// string - if fullStatus == true, returns full description of return value
 //      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'
@@ -846,7 +862,9 @@ amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::s
   char buffer[128];
 
   // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), pclose);
+  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
+    if (f) pclose(f);
+  });
   if (!pipe) {
     return AMDSMI_STATUS_API_FAILED;
   }
@@ -878,7 +896,7 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
   }
   // allocate memory
   sockets.resize(socket_count);
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -898,7 +916,7 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
     // Get all devices of the socket
-    ret = amdsmi_get_processor_handles(sockets[i], &device_count, &processor_handles[0]);
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles.data());
     ss << __PRETTY_FUNCTION__ << " | Processor Count: " << device_count << "\n";
     LOG_DEBUG(ss);
 
@@ -938,7 +956,7 @@ amdsmi_status_t smi_amdgpu_get_device_count(uint32_t* total_num_devices) {
   }
   // allocate memory
   sockets.resize(socket_count);
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -958,7 +976,7 @@ amdsmi_status_t smi_amdgpu_get_device_count(uint32_t* total_num_devices) {
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(processor_count);
     // Get all devices of the socket
-    ret = amdsmi_get_processor_handles(sockets[i], &processor_count, &processor_handles[0]);
+    ret = amdsmi_get_processor_handles(sockets[i], &processor_count, processor_handles.data());
     ss << __PRETTY_FUNCTION__ << " | Processor Count: " << processor_count << "\n";
     LOG_DEBUG(ss);
 
@@ -1008,7 +1026,7 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
   }
   // allocate memory
   sockets.resize(socket_count);
-  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1028,7 +1046,7 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
     // Allocate the memory for the device handlers on the socket
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
     // Get all devices of the socket
-    ret = amdsmi_get_processor_handles(sockets[i], &device_count, &processor_handles[0]);
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles.data());
     ss << __PRETTY_FUNCTION__ << " | Processor Count: " << device_count << "\n";
     LOG_DEBUG(ss);
 

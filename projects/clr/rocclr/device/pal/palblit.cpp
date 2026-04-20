@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/commandqueue.hpp"
 #include "device/pal/paldevice.hpp"
@@ -703,9 +689,6 @@ bool KernelBlitManager::createProgram(Device& device) {
       return false;
     }
   }
-
-  std::vector<amd::Device*> devices;
-  devices.push_back(&device);
 
   // Save context and program for this device
   context_ = device.blitProgram()->context_;
@@ -2456,11 +2439,12 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
 }
 
 // ================================================================================================
-bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
-                                       size_t sizeBytes) const {
+bool KernelBlitManager::streamOpsUpdate(uint blitType, device::Memory& memory, uint64_t value,
+                                        size_t offset, size_t sizeBytes) const {
+  assert(blitType == StreamOpsWrite || blitType == StreamOpsIncrement ||
+         blitType == StreamOpsDecrement);
   std::scoped_lock k(lockXferOps_);
   bool result = false;
-  uint blitType = StreamOpsWrite;
   size_t dim = 1;
   size_t globalWorkOffset[1] = {0};
   size_t globalWorkSize[1] = {1};
@@ -2484,6 +2468,24 @@ bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, s
   result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters);
   synchronize();
   return result;
+}
+
+// ================================================================================================
+bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
+                                       size_t sizeBytes) const {
+  return streamOpsUpdate(StreamOpsWrite, memory, value, offset, sizeBytes);
+}
+
+// ================================================================================================
+bool KernelBlitManager::streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
+                                           size_t sizeBytes) const {
+  return streamOpsUpdate(StreamOpsIncrement, memory, value, offset, sizeBytes);
+}
+
+// ================================================================================================
+bool KernelBlitManager::streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
+                                           size_t sizeBytes) const {
+  return streamOpsUpdate(StreamOpsDecrement, memory, value, offset, sizeBytes);
 }
 
 // ================================================================================================

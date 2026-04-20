@@ -458,6 +458,7 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
     std::cout << "Regular expression error:" << std::endl;
     std::cout << e.what() << std::endl;
     std::cout << "Regex error code: " << e.code() << std::endl;
+    closedir(hwmon_dir);
     return -3;
   }
   return 0;
@@ -496,7 +497,7 @@ static std::vector<uint64_t> get_intersection(std::vector<uint64_t>* v1,
 }
 
 // Use this enum to encode the monitor type into the monitor ID.
-// We can later use this to convert to rsmi-api sensor types; for exampple,
+// We can later use this to convert to rsmi-api sensor types; for example,
 // rsmi_temperature_type_t, which is what the caller will expect. Add
 // new types as needed.
 

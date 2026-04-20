@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-examples LANGUAGES C CXX)
 
@@ -29,8 +29,12 @@ if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
-                                   "Install rocprofiler-systems examples" OFF
+        "Install rocprofiler-systems examples" OFF
     )
+elseif(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # Standalone build of the full examples suite
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/standalone-helpers.cmake)
+    option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
 else()
     option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
 endif()
@@ -72,25 +76,37 @@ set(ROCPROFSYS_EXAMPLE_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 # defines function for creating causal profiling exes
 include(${CMAKE_CURRENT_LIST_DIR}/causal-helpers.cmake)
 
-add_subdirectory(transpose)
-add_subdirectory(parallel-overhead)
-add_subdirectory(code-coverage)
-add_subdirectory(user-api)
-add_subdirectory(openmp)
-add_subdirectory(mpi)
-add_subdirectory(python)
-add_subdirectory(lulesh)
-add_subdirectory(rccl)
-add_subdirectory(rewrite-caller)
-add_subdirectory(causal)
-add_subdirectory(trace-time-window)
-add_subdirectory(fork)
-add_subdirectory(videodecode)
-add_subdirectory(jpegdecode)
-add_subdirectory(roctx)
-add_subdirectory(thread-limit)
-add_subdirectory(transferBench)
-add_subdirectory(hpc)
-add_subdirectory(shmem)
-add_subdirectory(scratch-memory)
-add_subdirectory(sdma_test)
+# List of all example directories
+set(ROCPROFSYS_EXAMPLE_DIRS
+    transpose
+    parallel-overhead
+    code-coverage
+    user-api
+    openmp
+    mpi
+    python
+    lulesh
+    rccl
+    rewrite-caller
+    causal
+    trace-time-window
+    fork
+    videodecode
+    jpegdecode
+    roctx
+    thread-limit
+    transferBench
+    hpc
+    shmem
+    scratch-memory
+    sdma_test
+    unified-memory
+)
+
+foreach(_example_dir IN LISTS ROCPROFSYS_EXAMPLE_DIRS)
+    if(NOT "${_example_dir}" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+        add_subdirectory(${_example_dir})
+    else()
+        message(STATUS "[rocprofiler-systems] Skipping example: ${_example_dir}")
+    endif()
+endforeach()

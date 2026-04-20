@@ -1,22 +1,8 @@
-/* Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
@@ -32,6 +18,10 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocation location,
                                 hipStream_t stream);
+hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                     size_t num_prefetch_locs, unsigned long long flags,
+                                     hipStream_t stream);
 hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                          hipMemLocation location);
 
@@ -77,6 +67,26 @@ static_assert(static_cast<uint32_t>(hipMemRangeAttributeLastPrefetchLocation) ==
               "Enum mismatch with ROCclr!");
 
 // ================================================================================================
+static bool AllDevicesSupportPageableMemoryAccess() {
+  for (const auto& hip_device : g_devices) {
+    if (!hip_device->devices()[0]->info().hmmCpuMemoryAccessible_) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
+static bool AllDevicesSupportHmm() {
+  for (const auto& hip_device : g_devices) {
+    if (!hip_device->devices()[0]->info().hmmSupported_) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
 hipError_t hipMallocManaged(void** dev_ptr, size_t size, unsigned int flags) {
   HIP_INIT_API(hipMallocManaged, dev_ptr, size, flags);
 
@@ -118,6 +128,19 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(ihipMemPrefetchAsync(dev_ptr, count, location, stream));
+}
+
+// ================================================================================================
+hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                    hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                    size_t num_prefetch_locs, unsigned long long flags,
+                                    hipStream_t stream) {
+  HIP_INIT_API(hipMemPrefetchBatchAsync, dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs,
+               num_prefetch_locs, flags, stream);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  HIP_RETURN(ihipMemPrefetchBatchAsync(dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs,
+                                       num_prefetch_locs, flags, stream));
 }
 
 // ================================================================================================
@@ -355,6 +378,109 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
       *hip_stream, waitList, dev_ptr, count, dev, cpuAccess, targetDevice);
   command->enqueue();
   command->release();
+  return hipSuccess;
+}
+// ================================================================================================
+hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
+                                     size_t num_prefetch_locs, unsigned long long flags,
+                                     hipStream_t stream) {
+  if ((dev_ptrs == nullptr) || (sizes == nullptr) || (prefetch_locs == nullptr) ||
+      (prefetch_loc_idxs == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((count == 0) || (num_prefetch_locs == 0) || (num_prefetch_locs > count)) {
+    return hipErrorInvalidValue;
+  }
+
+  if ((flags != 0) || (stream == nullptr)) {
+    return hipErrorInvalidValue;
+  }
+
+  if (prefetch_loc_idxs[0] != 0) {
+    return hipErrorInvalidValue;
+  }
+
+  for (size_t idx = 0; idx < num_prefetch_locs; idx++) {
+    if (prefetch_loc_idxs[idx] >= count) {
+      return hipErrorInvalidValue;
+    }
+    if (idx > 0 && prefetch_loc_idxs[idx] <= prefetch_loc_idxs[idx - 1]) {
+      return hipErrorInvalidValue;
+    }
+  }
+
+  if (!AllDevicesSupportHmm()) {
+    return hipErrorInvalidValue;
+  }
+
+  getStreamPerThread(stream);
+
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  bool requires_pageable_support = false;
+  amd::SvmPrefetchBatchAsyncCommand* command = nullptr;
+  {
+    std::vector<void*> dev_ptrs_vec(count);
+    std::vector<size_t> sizes_vec(count);
+    std::vector<amd::Device*> devices_vec(count);
+
+    // Validate and prepare each operation
+    size_t current_loc = 0;
+    for (size_t op_idx = 0; op_idx < count; op_idx++) {
+      void* dev_ptr = dev_ptrs[op_idx];
+      size_t size = sizes[op_idx];
+
+      if (size == 0 || dev_ptr == nullptr) {
+        return hipErrorInvalidValue;
+      }
+
+      size_t offset = 0;
+      amd::Memory* mem_obj = getMemoryObject(dev_ptr, offset);
+      if ((mem_obj == nullptr) || (size > (mem_obj->getSize() - offset))) {
+        return hipErrorInvalidValue;
+      }
+
+      const bool is_managed_memory =
+          (mem_obj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR)) != 0;
+
+      requires_pageable_support |= !is_managed_memory;
+
+      if (current_loc + 1 < num_prefetch_locs && op_idx >= prefetch_loc_idxs[current_loc + 1]) {
+        current_loc++;
+      }
+      hipMemLocation location = prefetch_locs[current_loc];
+
+      amd::Device* dev = nullptr;
+      if (location.type == hipMemLocationTypeDevice) {
+        if (location.id < 0 || static_cast<size_t>(location.id) >= g_devices.size()) {
+          return hipErrorInvalidValue;
+        }
+        dev = g_devices[location.id]->devices()[0];
+      }
+
+      dev_ptrs_vec[op_idx] = dev_ptr;
+      sizes_vec[op_idx] = size;
+      devices_vec[op_idx] = dev;
+    }
+
+    if (requires_pageable_support && !AllDevicesSupportPageableMemoryAccess()) {
+      return hipErrorInvalidValue;
+    }
+
+    command =
+        new amd::SvmPrefetchBatchAsyncCommand(*hip_stream, dev_ptrs_vec, sizes_vec, devices_vec);
+  }
+  if (command == nullptr) {
+    return hipErrorOutOfMemory;
+  }
+  command->enqueue();
+  command->release();
+
   return hipSuccess;
 }
 // ================================================================================================

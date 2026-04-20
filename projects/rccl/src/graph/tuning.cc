@@ -394,7 +394,7 @@ static struct tuningModel tuning_model_6 {
   .treeCorrectionFactor = {                                                                    /*16M 32M  64M  128M 256M 512M  1G   2G  4G */
     { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9, 1.0, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, },
     { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 1.0, 0.1, 0.9, 0.9, 0.1, 0.1, },
-    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 0.15, 0.6, 0.1, 0.6, },
+    { 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.7, 0.15, 0.6, 0.7, 0.6, },
   },
 
   .ringCorrectionFactor = {
@@ -602,7 +602,7 @@ static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
 
 NCCL_PARAM(PatEnable, "PAT_ENABLE", 0);
 static int ncclPatEnable(struct ncclComm* comm) {
-  if (!ncclParamPatEnable()) return 0;
+  if (!ncclParamPatEnable() && !comm->forcePatEnable) return 0;
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (comm->minCompCap < 60) return 0; // Need SM60 or higher for CUDA atomics
 #endif

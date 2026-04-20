@@ -749,7 +749,7 @@ hsa_status_t hsa_queue_create(
 
   core::Queue* cmd_queue = nullptr;
   status = agent->QueueCreate(size, type, queue_create_flags, callback, data, private_segment_size,
-                              group_segment_size, &cmd_queue);
+                              group_segment_size, true, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   assert(cmd_queue != nullptr && "Queue not returned but status was success.\n");

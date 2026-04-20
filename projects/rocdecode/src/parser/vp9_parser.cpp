@@ -44,10 +44,10 @@ Vp9VideoParser::~Vp9VideoParser() {
 }
 
 rocDecStatus Vp9VideoParser::Initialize(RocdecParserParams *p_params) {
-    FunctionEntryLog(logger_);
+    FunctionEntryLog(g_rocdec_logger);
     rocDecStatus ret;
     if ((ret = RocVideoParser::Initialize(p_params)) != ROCDEC_SUCCESS) {
-        FunctionExitLog(logger_);
+        FunctionExitLog(g_rocdec_logger);
         return ret;
     }
     // Set display delay to at least DECODE_BUF_POOL_EXTENSION (2) to prevent synchronous submission
@@ -55,42 +55,42 @@ rocDecStatus Vp9VideoParser::Initialize(RocdecParserParams *p_params) {
         parser_params_.max_display_delay = DECODE_BUF_POOL_EXTENSION;
     }
     CheckAndAdjustDecBufPoolSize(VP9_BUFFER_POOL_MAX_SIZE);
-    FunctionExitLog(logger_);
+    FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Vp9VideoParser::UnInitialize() {
-    FunctionEntryLog(logger_);
-    FunctionExitLog(logger_);
+    FunctionEntryLog(g_rocdec_logger);
+    FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Vp9VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
-    FunctionEntryLog(logger_);
+    FunctionEntryLog(g_rocdec_logger);
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
-            logger_.ErrorLog(MakeMsg("Error occurred in ParsePictureData()."));
-            FunctionExitLog(logger_);
+            ErrorLog(g_rocdec_logger, "Error occurred in ParsePictureData().");
+            FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
-        FunctionExitLog(logger_);
+        FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     if (p_data->flags & ROCDEC_PKT_ENDOFSTREAM) {
         if (FlushDpb() != PARSER_OK) {
-            FunctionExitLog(logger_);
+            FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
     }
-    FunctionExitLog(logger_);
+    FunctionExitLog(g_rocdec_logger);
     return ROCDEC_SUCCESS;
 }
 
 ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size) {
-    FunctionEntryLog(logger_);
+    FunctionEntryLog(g_rocdec_logger);
     ParserResult ret = PARSER_OK;
 
     CheckSuperframe(p_stream, pic_data_size);
@@ -98,7 +98,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     uint8_t *pic_data_ptr = const_cast<uint8_t*>(p_stream);
     for (int frame_index = 0; frame_index < num_frames_in_chunck_; frame_index++) {
         if ((ret = ParseUncompressedHeader(pic_data_ptr, frame_sizes_[frame_index])) != PARSER_OK) {
-            logger_.ErrorLog(MakeMsg("Error occurred in ParseUncompressedHeader(). Skip this picture."));
+            ErrorLog(g_rocdec_logger, "Error occurred in ParseUncompressedHeader(). Skip this picture.");
         } else {
             // Init Roc decoder for the first time or reconfigure the existing decoder
             if (new_seq_activated_) {
@@ -114,7 +114,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
             if (uncompressed_header_.show_existing_frame) {
                 int disp_idx = dpb_buffer_.virtual_buffer_index[uncompressed_header_.frame_to_show_map_idx];
                 if (disp_idx == INVALID_INDEX) {
-                    logger_.ErrorLog(MakeMsg("Invalid existing frame index to show."));
+                    ErrorLog(g_rocdec_logger, "Invalid existing frame index to show.");
                     return PARSER_INVALID_ARG;
                 }
                 if (pfn_display_picture_cb_) {
@@ -126,7 +126,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                         output_pic_list_[num_output_pics_] = disp_idx;
                         num_output_pics_++;
                     } else {
-                        logger_.ErrorLog(MakeMsg("Display list size larger than decode buffer pool size!"));
+                        ErrorLog(g_rocdec_logger, "Display list size larger than decode buffer pool size!");
                         return PARSER_OUT_OF_RANGE;
                     }
                 }
@@ -145,7 +145,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     return ret;
                 }
                 if ((ret = SendPicForDecode()) != PARSER_OK) {
-                    logger_.ErrorLog(MakeMsg(STR("Failed to decode!")));
+                    ErrorLog(g_rocdec_logger, STR("Failed to decode!"));
                     return ret;
                 }
         #if DBGINFO
@@ -165,7 +165,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         }
         pic_data_ptr += frame_sizes_[frame_index];
     }
-    FunctionExitLog(logger_);
+    FunctionExitLog(g_rocdec_logger);
     return PARSER_OK;
 }
 void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size) {
@@ -206,7 +206,7 @@ void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_dat
 }
 
 ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_header) {
-    FunctionEntryLog(logger_);
+    FunctionEntryLog(g_rocdec_logger);
     video_format_params_.codec = rocDecVideoCodec_VP9;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -225,7 +225,7 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
     } else if (p_uncomp_header->color_config.subsampling_x == 0 && p_uncomp_header->color_config.subsampling_y == 0) {
         video_format_params_.chroma_format = rocDecVideoChromaFormat_444;
     } else {
-        logger_.ErrorLog(MakeMsg("Unsupported chroma format."));
+        ErrorLog(g_rocdec_logger, "Unsupported chroma format.");
         return PARSER_INVALID_FORMAT;
     }
 
@@ -250,17 +250,17 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
 
     // callback function with RocdecVideoFormat params filled out
     if (pfn_sequence_cb_(parser_params_.user_data, &video_format_params_) == 0) {
-        logger_.ErrorLog(MakeMsg("Sequence callback function failed."));
-        FunctionExitLog(logger_);
+        ErrorLog(g_rocdec_logger, "Sequence callback function failed.");
+        FunctionExitLog(g_rocdec_logger);
         return PARSER_FAIL;
     } else {
-        FunctionExitLog(logger_);
+        FunctionExitLog(g_rocdec_logger);
         return PARSER_OK;
     }
 }
 
 ParserResult Vp9VideoParser::SendPicForDecode() {
-    FunctionEntryLog(logger_);
+    FunctionEntryLog(g_rocdec_logger);
     Vp9UncompressedHeader *p_uncomp_header = &uncompressed_header_;
     dec_pic_params_ = {0};
 
@@ -348,11 +348,11 @@ ParserResult Vp9VideoParser::SendPicForDecode() {
 #endif // DBGINFO
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
-        logger_.ErrorLog(MakeMsg("Decode error occurred."));
-        FunctionExitLog(logger_);
+        ErrorLog(g_rocdec_logger, "Decode error occurred.");
+        FunctionExitLog(g_rocdec_logger);
         return PARSER_FAIL;
     } else {
-        FunctionExitLog(logger_);
+        FunctionExitLog(g_rocdec_logger);
         return PARSER_OK;
     }
 }
@@ -405,7 +405,7 @@ ParserResult Vp9VideoParser::FindFreeInDecBufPool() {
         }
     }
     if (dec_buf_index == dec_buf_pool_size_) {
-        logger_.ErrorLog(MakeMsg("Could not find a free buffer in decode buffer pool for decoded image."));
+        ErrorLog(g_rocdec_logger, "Could not find a free buffer in decode buffer pool for decoded image.");
         return PARSER_NOT_FOUND;
     }
     curr_pic_.dec_buf_idx = dec_buf_index;
@@ -422,7 +422,7 @@ ParserResult Vp9VideoParser::FindFreeInDpbAndMark() {
         }
     }
     if (i == VP9_BUFFER_POOL_MAX_SIZE) {
-        logger_.ErrorLog(MakeMsg("DPB buffer overflow!"));
+        ErrorLog(g_rocdec_logger, "DPB buffer overflow!");
         return PARSER_NOT_FOUND;
     }
     curr_pic_.pic_idx = i;
@@ -439,7 +439,7 @@ ParserResult Vp9VideoParser::FindFreeInDpbAndMark() {
             output_pic_list_[num_output_pics_] = disp_idx;
             num_output_pics_++;
         } else {
-            logger_.ErrorLog(MakeMsg("Display list size larger than decode buffer pool size!"));
+            ErrorLog(g_rocdec_logger, "Display list size larger than decode buffer pool size!");
             return PARSER_OUT_OF_RANGE;
         }
     }
@@ -468,7 +468,7 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     if (p_uncomp_header->profile == 3) {
         p_uncomp_header->reserved_zero = Parser::GetBit(p_stream, offset);
         if (p_uncomp_header->reserved_zero) {
-            logger_.ErrorLog(MakeMsg("Syntax error: reserved_zero in Uncompressed header is not 0 when Profile is 3"));
+            ErrorLog(g_rocdec_logger, "Syntax error: reserved_zero in Uncompressed header is not 0 when Profile is 3");
             return PARSER_INVALID_ARG;
         }
     }
@@ -544,7 +544,7 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
         }
     }
     if (p_uncomp_header->frame_size.frame_width == 0 && p_uncomp_header->frame_size.frame_height == 0) {
-        logger_.ErrorLog(MakeMsg("Invalid picture size: width = " + TOSTR(p_uncomp_header->frame_size.frame_width) + ", height = " + TOSTR(p_uncomp_header->frame_size.frame_height) + "."));
+        ErrorLog(g_rocdec_logger, "Invalid picture size: width = " + TOSTR(p_uncomp_header->frame_size.frame_width) + ", height = " + TOSTR(p_uncomp_header->frame_size.frame_height) + ".");
         return PARSER_WRONG_STATE;
     }
 
@@ -593,7 +593,7 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
             if (pic_width_ <= curr_surface_width_ && pic_height_ <= curr_surface_height_) {
                 reconfig_option_ = ROCDEC_RECONFIG_KEEP_SURFACES; // Keep the existing surfaces
             } else {
-                logger_.ErrorLog(MakeMsg("VP9 video size (up) change on non-key frames is not supported."));
+                ErrorLog(g_rocdec_logger, "VP9 video size (up) change on non-key frames is not supported.");
                 return PARSER_WRONG_STATE;
             }
         }
@@ -601,11 +601,11 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
     }
     uncomp_header_size_ = (offset + 7) >> 3;
     if (uncomp_header_size_ > size) {
-        logger_.ErrorLog(MakeMsg("Uncompressed header size (" + TOSTR(uncomp_header_size_) + ") exceeds frame data size (" + TOSTR(size) + ")"));
+        ErrorLog(g_rocdec_logger, "Uncompressed header size (" + TOSTR(uncomp_header_size_) + ") exceeds frame data size (" + TOSTR(size) + ")");
         return PARSER_WRONG_STATE;
     }
     if (p_uncomp_header->header_size_in_bytes > (size - uncomp_header_size_)) {
-        logger_.ErrorLog(MakeMsg("header_size_in_bytes (" + TOSTR(p_uncomp_header->header_size_in_bytes) + ") exceeds allowed size (" + TOSTR(size - uncomp_header_size_) + ")"));
+        ErrorLog(g_rocdec_logger, "header_size_in_bytes (" + TOSTR(p_uncomp_header->header_size_in_bytes) + ") exceeds allowed size (" + TOSTR(size - uncomp_header_size_) + ")");
         return PARSER_WRONG_STATE;
     }
     return PARSER_OK;
@@ -614,17 +614,17 @@ ParserResult Vp9VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
 ParserResult Vp9VideoParser::FrameSyncCode(const uint8_t *p_stream, size_t &offset, Vp9UncompressedHeader *p_uncomp_header) {
     p_uncomp_header->frame_sync_code.frame_sync_byte_0 = Parser::ReadBits(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_0 != 0x49) {
-        logger_.ErrorLog(MakeMsg("Syntax error: frame_sync_byte_0 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_0) + " but shall be equal to 0x49."));
+        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_0 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_0) + " but shall be equal to 0x49.");
         return PARSER_INVALID_ARG;
     }
     p_uncomp_header->frame_sync_code.frame_sync_byte_1 = Parser::ReadBits(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_1 != 0x83) {
-        logger_.ErrorLog(MakeMsg("Syntax error: frame_sync_byte_1 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_1) + " but shall be equal to 0x83."));
+        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_1 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_1) + " but shall be equal to 0x83.");
         return PARSER_INVALID_ARG;
     }
     p_uncomp_header->frame_sync_code.frame_sync_byte_2 = Parser::ReadBits(p_stream, offset, 8);
     if (p_uncomp_header->frame_sync_code.frame_sync_byte_2 != 0x42) {
-        logger_.ErrorLog(MakeMsg("Syntax error: frame_sync_byte_2 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_2) + " but shall be equal to 0x42."));
+        ErrorLog(g_rocdec_logger, "Syntax error: frame_sync_byte_2 is " + TOSTR(p_uncomp_header->frame_sync_code.frame_sync_byte_2) + " but shall be equal to 0x42.");
         return PARSER_INVALID_ARG;
     }
     return PARSER_OK;
@@ -639,7 +639,7 @@ ParserResult Vp9VideoParser::ColorConfig(const uint8_t *p_stream, size_t &offset
     }
     p_uncomp_header->color_config.color_space = Parser::ReadBits(p_stream, offset, 3);
     if (p_uncomp_header->profile_low_bit == 0 && p_uncomp_header->color_config.color_space == CS_RGB) {
-        logger_.ErrorLog(MakeMsg("It is a requirement of bitstream conformance that color_space is not equal to CS_RGB when profile_low_bit is equal to 0."));
+        ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that color_space is not equal to CS_RGB when profile_low_bit is equal to 0.");
         return PARSER_WRONG_STATE;
     }
     if (p_uncomp_header->color_config.color_space != CS_RGB) {
@@ -649,7 +649,7 @@ ParserResult Vp9VideoParser::ColorConfig(const uint8_t *p_stream, size_t &offset
             p_uncomp_header->color_config.subsampling_y = Parser::GetBit(p_stream, offset);
             p_uncomp_header->color_config.reserved_zero = Parser::GetBit(p_stream, offset);
             if (p_uncomp_header->color_config.reserved_zero) {
-                logger_.ErrorLog(MakeMsg("Syntax error: reserved_zero in color config is not 0 when Profile is 1 or 3"));
+                ErrorLog(g_rocdec_logger, "Syntax error: reserved_zero in color config is not 0 when Profile is 1 or 3");
                 return PARSER_INVALID_ARG;
             }
         } else {
@@ -663,13 +663,13 @@ ParserResult Vp9VideoParser::ColorConfig(const uint8_t *p_stream, size_t &offset
             p_uncomp_header->color_config.subsampling_y = 0;
             p_uncomp_header->color_config.reserved_zero = Parser::GetBit(p_stream, offset);
             if (p_uncomp_header->color_config.reserved_zero) {
-                logger_.ErrorLog(MakeMsg("Syntax error: reserved_zero in color config is not 0 when Profile is 1 or 3"));
+                ErrorLog(g_rocdec_logger, "Syntax error: reserved_zero in color config is not 0 when Profile is 1 or 3");
                 return PARSER_INVALID_ARG;
             }
         }
     }
     if (p_uncomp_header->profile_low_bit == 1 && p_uncomp_header->color_config.subsampling_x == 1 && p_uncomp_header->color_config.subsampling_y == 1) {
-        logger_.ErrorLog(MakeMsg("It is a requirement of bitstream conformance that either subsampling_x is equal to 0 or subsampling_y is equal to 0 when profile_low_bit is equal to 1."));
+        ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that either subsampling_x is equal to 0 or subsampling_y is equal to 0 when profile_low_bit is equal to 1.");
         return PARSER_WRONG_STATE;
     }
     return PARSER_OK;
@@ -819,7 +819,7 @@ ParserResult Vp9VideoParser::SegmentationParams(const uint8_t *p_stream, size_t 
                             uint8_t feature_sign = Parser::GetBit(p_stream, offset);
                             if (feature_sign) {
                                 if (p_uncomp_header->segmentation_params.segmentation_abs_or_delta_update == 1) {
-                                    logger_.ErrorLog(MakeMsg("It is a requirement of bitstream conformance that feature_sign is equal to 0 when segmentation_abs_or_delta_update is equal to 1."));
+                                    ErrorLog(g_rocdec_logger, "It is a requirement of bitstream conformance that feature_sign is equal to 0 when segmentation_abs_or_delta_update is equal to 1.");
                                     return PARSER_WRONG_STATE;
                                 }
                                 feature_value *= -1;

@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -170,16 +170,9 @@ enum QueueTypeSupport : uint32
 enum class SubEngineType : uint32
 {
     Primary        = 0, // Subqueue that is the queue itself, rather than an ancillary queue.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 914
     AsyncCompute   = 1, // Auxiliary ACE subqueue, together with a primary subqueue forms a "ganged" submit.
     ConstantEngine = 2, // CP constant update engine that runs in parallel with draw engine.
                         // Internal usage only.
-#else
-    ConstantEngine = 1, // CP constant update engine that runs in parallel with draw engine.
-    AsyncCompute   = 2, // Auxiliary ACE subqueue, together with a primary subqueue forms a "ganged" submit.
-    Pup            = 3, // Subqueue that is the queue itself but for PUP-style packets, rather than an
-                        // ancillary queue
-#endif
     Count,
 };
 
@@ -464,7 +457,8 @@ struct DirectCaptureInfo
             uint32 initCamera           :  1;  ///< Initialize the DirectCapture resource to access camera matrix
             uint32 requestHudLessImage  :  1;  ///< Request DirectCapture access to HUD less image if available
             uint32 initHudLessImage     :  1;  ///< Initialize the DirectCapture resource to access HUD less image
-            uint32 reserved             : 14;
+            uint32 partialMpoSupport    :  1;  ///< Enable MPO. DirectCapture resource only contains the game's plane
+            uint32 reserved             : 13;
         };
         uint32 u32All;
     } usageFlags;
