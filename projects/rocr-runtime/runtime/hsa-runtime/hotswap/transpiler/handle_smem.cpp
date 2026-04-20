@@ -140,6 +140,104 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
+  // gfx12+ scalar narrow loads: s_load_{u8,i8,u16,i16}. These fetch 1 or 2
+  // bytes from a uniform address materialised in an SGPR-pair base and
+  // zero/sign-extend the result into a 32-bit SGPR. MC operand shape
+  // matches the dword-granular s_load_* family (sbase + imm-or-sgpr
+  // offset), so operand decoding mirrors the S_LOAD_B* block above.
+  //
+  // Design notes (Position-α permissive lift, 2026-04-19):
+  // ------------------------------------------------------
+  //  * IR shape: `load iN, ptr addrspace(1) %p, align N` + `zext`/`sext`
+  //    to i32 → `storeSGPR32`. No AMDGPU-specific intrinsic exists for
+  //    narrow scalar loads; the backend's ISel matches the uniform-address
+  //    pattern directly.
+  //  * Same-target gfx1250 → gfx1250: the backend re-codegens to the
+  //    original `s_load_u16` / `s_load_u8` / etc. (identity-preserving).
+  //  * Cross-target gfx1250 → gfx942: the backend has no native narrow
+  //    SMEM load, so it lowers to VMEM (`global_load_ushort` / ubyte).
+  //    The lifted kernel stays correct — the value appears on every lane
+  //    with the same content, matching the SMEM broadcast semantics —
+  //    but the register class shifts SGPR→VGPR and the memory path
+  //    shifts scalar-cache→vector-cache. We permit this demotion rather
+  //    than refuse, because `load iN` IR is a semantically well-defined
+  //    lift (no silent miscompile), and the backend's VMEM choice is the
+  //    architecturally-correct lowering on an ISA without scalar narrow
+  //    loads. Consumers that require SMEM uniformity should gate their
+  //    lift pipeline on same-target at the raiser level, not here.
+  //  * Alignment: explicit `Align(1)` for byte, `Align(2)` for halfword,
+  //    mirroring the principled pattern handle_flat.cpp uses for
+  //    GLOBAL_LOAD sub-dword. Omitting this would let the IRBuilder
+  //    infer ABI alignment, which happens to match today but is fragile
+  //    against LLVM default-alignment changes.
+  //  * Kernarg-pointer defensive refusal: a narrow load through the
+  //    kernarg pointer (sbase == s[0:1]) is refused loudly. Kernarg
+  //    layouts in Salmon's metadata are dword-granular (see
+  //    `extractKernargDword` in kernarg_layout.cpp); sub-dword extraction
+  //    would require special-case bitfield logic that no corpus kernel
+  //    exercises today. If a future kernel does hit this shape, a loud
+  //    failure is better than silently decomposing a dword slot.
+  //
+  // Test back-reference: lit_tests/s_load_u16/ exercises the halfword
+  // same-target happy path (`s_load_u16 s*, s*, 0x*` → `load i16 align 2 +
+  // zext`). The byte (u8/i8) and signed (i8/i16) variants are covered
+  // transitively by the shared handler.
+  if (sop == SemOp::S_LOAD_U8 || sop == SemOp::S_LOAD_I8 ||
+      sop == SemOp::S_LOAD_U16 || sop == SemOp::S_LOAD_I16) {
+    bool isHalfWord =
+        (sop == SemOp::S_LOAD_U16 || sop == SemOp::S_LOAD_I16);
+    bool isSigned =
+        (sop == SemOp::S_LOAD_I8 || sop == SemOp::S_LOAD_I16);
+    Type *i16Ty = Type::getInt16Ty(ctx.C);
+    Type *narrowTy = isHalfWord ? i16Ty : ctx.i8Ty;
+    Align narrowAlign = Align(isHalfWord ? 2 : 1);
+    const char *narrowLoadName = isHalfWord ? "smem_load_h" : "smem_load_b";
+    const char *extName = isSigned ? "smem_load_sext" : "smem_load_zext";
+
+    ParsedReg dest = op.dst();
+    ParsedReg base = op.srcReg(0);
+
+    // Defensive refusal: narrow load against the kernarg pointer would
+    // require sub-dword extraction from a dword-granular kernarg layout.
+    // Uses the same `baseIdx == 0` convention as the S_LOAD_B* path above
+    // so the two codepaths stay in sync; a future improvement to route
+    // the kernarg-pointer SGPR index through the user-SGPR layout should
+    // update both sites together.
+    bool isKernarg = (base.kind == ParsedReg::SGPR && base.baseIdx == 0);
+    if (isKernarg) {
+      llvm::errs() << "transpiler: " << di.mnemonic
+                   << ": narrow scalar load directly off the kernarg pointer "
+                      "is not supported (would need sub-dword extraction from "
+                      "the dword-granular kernarg layout)\n";
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "SMEM",
+          "narrow s_load_* against the kernarg pointer would require "
+          "sub-dword extraction from the dword-granular kernarg layout");
+      return hr;
+    }
+
+    Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);
+    Value *ptr = ctx.B.CreateIntToPtr(baseAddr, ctx.ptrGlobalTy);
+    unsigned offIdx = op.srcIdx(1);
+    if (di.isImm(offIdx)) {
+      int64_t off = op.srcImm(1);
+      if (off != 0)
+        ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
+    } else {
+      Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
+      ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
+    }
+
+    Value *narrow = ctx.B.CreateAlignedLoad(narrowTy, ptr, narrowAlign,
+                                             narrowLoadName);
+    Value *ext = isSigned
+                     ? ctx.B.CreateSExt(narrow, ctx.i32Ty, extName)
+                     : ctx.B.CreateZExt(narrow, ctx.i32Ty, extName);
+    ctx.regs.storeSGPR32(ctx.B, dest.baseIdx, ext);
+    hr.handled = true;
+    return hr;
+  }
+
   // s_store_* (scalar store through SGPR base + imm/sgpr offset).
   // MC operand layout: (sdata, sbase, soffset/imm, cpol).
   if (sop == SemOp::S_STORE_B32 || sop == SemOp::S_STORE_B64 ||

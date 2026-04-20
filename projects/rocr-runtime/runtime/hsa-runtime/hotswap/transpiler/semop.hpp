@@ -25,6 +25,12 @@ enum class SemOp : uint16_t {
 
   // -- SMEM --
   S_LOAD_B32, S_LOAD_B64, S_LOAD_B96, S_LOAD_B128, S_LOAD_B256, S_LOAD_B512,
+  // gfx12+ scalar narrow loads: fetch 1 or 2 bytes from a uniform address and
+  // zero/sign-extend into a 32-bit SGPR. Older ISAs have no equivalent; on a
+  // cross-target lift to gfx942 the backend will lower the narrow `load iN`
+  // to VMEM (per-lane global_load_{ubyte,sbyte,ushort,sshort}) — semantically
+  // correct but uniformity-lossy. See handle_smem.cpp for the design notes.
+  S_LOAD_U8, S_LOAD_I8, S_LOAD_U16, S_LOAD_I16,
   S_STORE_B32, S_STORE_B64, S_STORE_B128,
 
   // -- SOPC --

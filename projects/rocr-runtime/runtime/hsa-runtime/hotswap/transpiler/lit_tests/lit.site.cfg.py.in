@@ -457,6 +457,36 @@ config.fixtures = {
     # the corpus exercises).
     "v_pk_int_b16":
         r"@LIT_FIXTURE_V_PK_INT_B16_CO@",
+    # s_load_u16 (SMEM, gfx12+ scalar narrow-load family) — pins the
+    # Position-α permissive-lift contract for the only shape the
+    # kerneldex corpus exercises today: an unsigned half-word scalar
+    # load through a runtime-materialised SGPR-pair base pointer
+    # (NOT the kernarg pointer — that case is routed to a separate
+    # defensive refusal branch that does not fire on any corpus
+    # kernel, see handle_smem.cpp's narrow-load block).
+    #
+    # Fixture pins:
+    #   * `load i16, ptr addrspace(1) %{{.*}}, align 2` — half-word
+    #     element type + global address space + explicit hardware-
+    #     mandated 2-byte alignment.
+    #   * `zext i16 %smem_load_h to i32` — zero-extension for the
+    #     unsigned variant. (The I16 sibling routes through the same
+    #     handler block with `sext` via the `isSigned` switch.)
+    #
+    # Two negative assertions guard the two adjacent mis-lifts:
+    #   * `load i32 ..., align 4` — catches a dword-widen-and-mask
+    #     lift that would risk OOB reads past a 2-byte allocation.
+    #   * `sext i16 %smem_load_h to i32` — catches an accidental
+    #     sign-extension that would corrupt every high-bit-set u16
+    #     silently.
+    #
+    # Sibling SemOps (S_LOAD_U8 / S_LOAD_I8 / S_LOAD_I16) share the
+    # shared handler body and differ only in element type, Align
+    # immediate, and zext/sext finale; they are covered transitively
+    # and are NOT given their own fixtures because no corpus producer
+    # exercises them today (no fixture without a producer).
+    "s_load_u16":
+        r"@LIT_FIXTURE_S_LOAD_U16_CO@",
     # scratch_refusal — pins the loud-failure contract of the early
     # `SIInstrFlags::FlatScratch` branch in handle_flat.cpp for the
     # entire FLAT scratch family (`scratch_load_*`, `scratch_store_*`,
