@@ -327,6 +327,45 @@ TEST(QueueIntercept, DoorbellTwoPacketsWithKFactor)
     EXPECT_EQ(get_pkt(ring, 8, 511)->kernel_object, static_cast<uint64_t>(0xBBBB));
 }
 
+TEST(QueueIntercept, ComputeInflatedRingSize)
+{
+    EXPECT_EQ(compute_inflated_ring_size(1024, 0), 1024u);
+    EXPECT_EQ(compute_inflated_ring_size(1024, 7), 16384u);
+    EXPECT_EQ(compute_inflated_ring_size(512, 7), 8192u);
+    EXPECT_EQ(compute_inflated_ring_size(1024, 1), 4096u);
+}
+
+TEST(QueueIntercept, CreateAndDestroyQueueState)
+{
+    alignas(64) char ring_mem[64 * 256];
+    hsa_queue_t      fake_queue{};
+    fake_queue.base_address    = reinterpret_cast<void*>(ring_mem);
+    fake_queue.size            = 256;
+    fake_queue.doorbell_signal = {.handle = 9999};
+
+    uint64_t fake_wdid = 0;
+    uint64_t fake_rdid = 0;
+
+    create_queue_state(&fake_queue, &fake_wdid, &fake_rdid, 7);
+
+    auto* state = lookup_queue_state(&fake_queue);
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->ring_buf, reinterpret_cast<void*>(ring_mem));
+    EXPECT_EQ(state->ring_size, 256u);
+    EXPECT_EQ(state->ring_mask, 255u);
+    EXPECT_EQ(state->real_wdid, &fake_wdid);
+    EXPECT_EQ(state->real_rdid, &fake_rdid);
+    EXPECT_EQ(state->k_factor, 7u);
+    EXPECT_EQ(state->doorbell_signal.handle, 9999u);
+
+    auto* by_doorbell = lookup_queue_state_by_doorbell({.handle = 9999});
+    EXPECT_EQ(by_doorbell, state);
+
+    destroy_queue_state(&fake_queue);
+    EXPECT_EQ(lookup_queue_state(&fake_queue), nullptr);
+    EXPECT_EQ(lookup_queue_state_by_doorbell({.handle = 9999}), nullptr);
+}
+
 }  // namespace
 }  // namespace queue_intercept
 }  // namespace hsa

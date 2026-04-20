@@ -146,6 +146,61 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
     ring_doorbell(state->doorbell_signal, value);
 }
 
+namespace
+{
+uint32_t
+next_power_of_two(uint32_t v)
+{
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v++;
+    return v;
+}
+}  // namespace
+
+uint32_t
+compute_inflated_ring_size(uint32_t requested_size, uint64_t k_factor)
+{
+    if(k_factor == 0) return requested_size;
+    uint64_t inflated = static_cast<uint64_t>(requested_size) * (1 + k_factor) * 2;
+    if(inflated > 262144) inflated = 262144;
+    return next_power_of_two(static_cast<uint32_t>(inflated));
+}
+
+void
+create_queue_state(const hsa_queue_t* queue,
+                   volatile uint64_t* wdid_addr,
+                   volatile uint64_t* rdid_addr,
+                   uint64_t           k_factor)
+{
+    auto state             = std::make_unique<QueueState>();
+    state->ring_buf        = reinterpret_cast<void*>(queue->base_address);
+    state->ring_size       = queue->size;
+    state->ring_mask       = queue->size - 1;
+    state->real_wdid       = wdid_addr;
+    state->real_rdid       = rdid_addr;
+    state->doorbell_signal = queue->doorbell_signal;
+    state->k_factor        = k_factor;
+
+    auto* raw_ptr = state.get();
+    get_queue_registry().wlock([&](auto& map) { map[queue] = std::move(state); });
+    get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = raw_ptr; });
+}
+
+void
+destroy_queue_state(const hsa_queue_t* queue)
+{
+    auto* state = lookup_queue_state(queue);
+    if(!state) return;
+
+    unregister_doorbell(state->doorbell_signal);
+    get_queue_registry().wlock([&](auto& map) { map.erase(queue); });
+}
+
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler
