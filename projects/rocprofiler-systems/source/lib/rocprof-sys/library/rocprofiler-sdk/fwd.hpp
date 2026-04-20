@@ -166,8 +166,7 @@ struct client_data
 inline client_data::context_id_vec_t
 client_data::get_all_contexts() const
 {
-    return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx,
-                             gpu_perf_counter_ctx };
+    return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx };
 }
 
 inline client_data::context_id_vec_t

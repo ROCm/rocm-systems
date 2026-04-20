@@ -39,7 +39,7 @@ struct gpu_perf_counter_traits
     using container_t       = std::vector<device_ptr_t>;
     using driver_t          = typename DriverProvider::driver_t;
 
-    static constexpr const char* device_name = "dummy";
+    static constexpr const char* device_name = "GPU perf counter";
 
     /**
      * @brief Get the device filter from settings.

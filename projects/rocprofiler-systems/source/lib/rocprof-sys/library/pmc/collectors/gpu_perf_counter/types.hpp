@@ -75,7 +75,7 @@ struct counter_value
  *
  * Unlike the GPU collector's fixed metrics struct, SDK PMC counters are dynamic
  * and user-specified. The counter list is determined at runtime from the
- * ROCPROFSYS_ROCM_EVENTS setting.
+ * ROCPROFSYS_GPU_PERF_COUNTERS setting.
  */
 struct metrics
 {

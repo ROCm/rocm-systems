@@ -52,14 +52,7 @@ postfork_child_reset_sampler_lock();
 
 void
 register_gpu_perf_counter_source(
-    uint64_t context_handle, const std::vector<uint64_t>& agent_ids,
-    const std::vector<uint64_t>&                 profile_configs,
-    const std::vector<size_t>&                   device_indices,
-    const std::vector<std::vector<std::string>>& counter_names_per_agent,
-    const std::vector<
-        std::vector<device_providers::rocprofiler_sdk::counter_instance_info>>&
-        instance_infos_per_agent,
-    const std::vector<std::vector<device_providers::rocprofiler_sdk::counter_metadata>>&
-        counter_meta_per_agent);
+    uint64_t                                                            context_handle,
+    const std::vector<device_providers::rocprofiler_sdk::agent_handle>& agent_handles);
 
 }  // namespace rocprofsys::pmc

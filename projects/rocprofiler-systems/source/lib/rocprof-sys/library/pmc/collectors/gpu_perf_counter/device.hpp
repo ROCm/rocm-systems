@@ -12,9 +12,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
@@ -69,6 +69,8 @@ public:
         {
             m_instance_map[info.instance_id] = std::move(info.qualified_name);
         }
+
+        m_record_buffer.resize(m_instance_map.size());
     }
 
     [[nodiscard]] bool is_supported() const noexcept { return !m_instance_map.empty(); }
@@ -143,15 +145,14 @@ public:
     {
         metrics result{};
 
-        static constexpr size_t      MAX_RECORDS = 32768;
-        rocprofiler_counter_record_t output_records[MAX_RECORDS];
-        size_t                       rec_count = MAX_RECORDS;
+        size_t rec_count = m_record_buffer.size();
 
         LOG_DEBUG("Sampling device {} (context={}, agent={}, profile={})", m_index,
                   m_context.handle, m_agent_id.handle, m_profile_config.handle);
 
         const auto status = m_driver_api->sample_device_counting_service(
-            m_context, {}, ROCPROFILER_COUNTER_FLAG_NONE, output_records, &rec_count);
+            m_context, {}, ROCPROFILER_COUNTER_FLAG_NONE, m_record_buffer.data(),
+            &rec_count);
 
         if(status != ROCPROFILER_STATUS_SUCCESS)
         {
@@ -166,20 +167,20 @@ public:
 
         for(size_t i = 0; i < rec_count; ++i)
         {
-            auto map_iter = m_instance_map.find(output_records[i].id);
+            auto map_iter = m_instance_map.find(m_record_buffer[i].id);
             if(map_iter == m_instance_map.end())
             {
                 LOG_DEBUG("Device {} record {} — unknown instance_id {}", m_index, i,
-                          output_records[i].id);
+                          m_record_buffer[i].id);
                 continue;
             }
 
             LOG_DEBUG("Device {} counter: {} = {}", m_index, map_iter->second,
-                      output_records[i].counter_value);
+                      m_record_buffer[i].counter_value);
 
-            result.counters.push_back(counter_value{ output_records[i].id,
+            result.counters.push_back(counter_value{ m_record_buffer[i].id,
                                                      map_iter->second,
-                                                     output_records[i].counter_value });
+                                                     m_record_buffer[i].counter_value });
         }
 
         return result;
@@ -196,8 +197,13 @@ private:
     std::string                     m_product_name;
     enabled_metrics                 m_supported_metrics;
 
-    // instance_id → qualified counter name (built at construction)
-    std::unordered_map<uint64_t, std::string> m_instance_map;
+    // instance_id → qualified counter name (built at construction, ordered for
+    // deterministic iteration)
+    std::map<uint64_t, std::string> m_instance_map;
+
+    // pre-allocated buffer for SDK sample output (sized from m_instance_map at
+    // construction)
+    std::vector<rocprofiler_counter_record_t> m_record_buffer;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

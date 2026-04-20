@@ -659,6 +659,7 @@ perfetto_processor_t::prepare_for_processing()
     initialize_perfetto();
     setup_perfetto();
     start_session();
+    initialize_pmc_track_map();
     LOG_TRACE("Perfetto processor prepared for processing");
 }
 
@@ -1179,7 +1180,7 @@ perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bt
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
+perfetto_processor_t::initialize_pmc_track_map()
 {
     using counter_collection_track =
         perfetto_counter_track<category::rocm_counter_collection>;
@@ -1269,7 +1270,11 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
                               comm_data_track::at(id, idx), ts, val);
             } } }
     };
+}
 
+void
+perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
+{
     const auto _track_name = _pmc.track_name;
     const auto _value      = _pmc.value;
     const auto _beg_ts     = _pmc.timestamp_ns;

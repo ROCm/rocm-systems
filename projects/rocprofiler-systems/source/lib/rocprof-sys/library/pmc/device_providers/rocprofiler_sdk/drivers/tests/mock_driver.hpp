@@ -42,6 +42,19 @@ public:
     MOCK_METHOD(rocprofiler_status_t, query_counter_info,
                 (rocprofiler_counter_id_t              counter,
                  rocprofiler_counter_info_version_id_t version, void* info));
+
+    MOCK_METHOD(rocprofiler_status_t, iterate_agent_supported_counters,
+                (rocprofiler_agent_id_t              agent_id,
+                 rocprofiler_available_counters_cb_t callback, void* user_data));
+
+    MOCK_METHOD(rocprofiler_status_t, create_profile_config,
+                (rocprofiler_agent_id_t agent_id, rocprofiler_counter_id_t* counters_list,
+                 size_t counters_count, rocprofiler_counter_config_id_t* config_id));
+
+    MOCK_METHOD(rocprofiler_status_t, configure_device_counting_service,
+                (rocprofiler_context_id_t context_id, rocprofiler_buffer_id_t buffer_id,
+                 rocprofiler_agent_id_t                   agent_id,
+                 rocprofiler_device_counting_service_cb_t callback, void* user_data));
 };
 
 /**

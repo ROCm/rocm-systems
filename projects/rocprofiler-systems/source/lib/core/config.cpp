@@ -2404,6 +2404,14 @@ get_sampling_gpus()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
+std::string
+get_gpu_perf_counters()
+{
+    auto _v = get_config()->find("ROCPROFSYS_GPU_PERF_COUNTERS");
+    if(_v == get_config()->end()) return {};
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
 bool
 get_trace_thread_locks()
 {

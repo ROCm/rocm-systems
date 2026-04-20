@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <memory>
 
+#include <rocprofiler-sdk/counter_config.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -17,15 +18,15 @@ namespace rocprofsys::pmc::drivers::rocprofiler_sdk
 /**
  * @brief Thin wrapper around rocprofiler-sdk C APIs used by the PMC subsystem.
  *
- * Only wraps APIs that the SDK PMC device and provider actually call.
- * Setup/configure APIs (create_context, create_buffer, create_profile_config, etc.)
- * are called directly by rocprofiler-sdk.cpp and are not part of this interface.
- *
- * This keeps the mockable surface minimal and the driver easy to extend —
- * add a new method here when a new SDK feature needs to be polled from the device.
+ * Wraps both runtime APIs (sampling, context start/stop) and setup APIs
+ * (counter enumeration, profile config, device counting configuration).
+ * The provider calls setup APIs during construction (within tool_init),
+ * and the device calls runtime APIs during sampling.
  */
 struct driver
 {
+    // --- Context lifecycle ---
+
     static rocprofiler_status_t start_context(rocprofiler_context_id_t context)
     {
         return rocprofiler_start_context(context);
@@ -35,6 +36,8 @@ struct driver
     {
         return rocprofiler_stop_context(context);
     }
+
+    // --- Runtime (hot path) ---
 
     static rocprofiler_status_t sample_device_counting_service(
         rocprofiler_context_id_t context, rocprofiler_user_data_t user_data,
@@ -56,6 +59,33 @@ struct driver
         void* info)
     {
         return rocprofiler_query_counter_info(counter, version, info);
+    }
+
+    // --- Setup (called by provider during construction) ---
+
+    static rocprofiler_status_t iterate_agent_supported_counters(
+        rocprofiler_agent_id_t agent_id, rocprofiler_available_counters_cb_t callback,
+        void* user_data)
+    {
+        return rocprofiler_iterate_agent_supported_counters(agent_id, callback,
+                                                            user_data);
+    }
+
+    static rocprofiler_status_t create_profile_config(
+        rocprofiler_agent_id_t agent_id, rocprofiler_counter_id_t* counters_list,
+        size_t counters_count, rocprofiler_counter_config_id_t* config_id)
+    {
+        return rocprofiler_create_profile_config(agent_id, counters_list, counters_count,
+                                                 config_id);
+    }
+
+    static rocprofiler_status_t configure_device_counting_service(
+        rocprofiler_context_id_t context_id, rocprofiler_buffer_id_t buffer_id,
+        rocprofiler_agent_id_t                   agent_id,
+        rocprofiler_device_counting_service_cb_t callback, void* user_data)
+    {
+        return rocprofiler_configure_device_counting_service(
+            context_id, buffer_id, agent_id, callback, user_data);
     }
 };
 

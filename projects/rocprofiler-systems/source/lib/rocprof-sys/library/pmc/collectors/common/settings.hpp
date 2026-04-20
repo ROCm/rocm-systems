@@ -177,50 +177,51 @@ struct settings_policy
     static gpu_perf_counter::enabled_metrics
     get_gpu_perf_counter_enabled_metrics() noexcept
     {
-        static auto _enabled = []() {
-            auto setting = get_setting_value<std::string>("ROCPROFSYS_GPU_PERF_COUNTERS");
-            if(!setting.has_value() || setting.value().empty())
-            {
-                return gpu_perf_counter::enabled_metrics{};
-            }
+        auto value_str = rocprofsys::get_gpu_perf_counters();
+        if(value_str.empty())
+        {
+            return gpu_perf_counter::enabled_metrics{};
+        }
 
-            gpu_perf_counter::enabled_metrics result;
-            auto                              value_str = setting.value();
+        gpu_perf_counter::enabled_metrics result;
 
-            std::string trimmed;
-            trimmed.reserve(value_str.size());
-            for(auto ch : value_str)
-            {
-                if(ch != '\t' && ch != ' ') trimmed.push_back(ch);
-            }
+        std::string trimmed;
+        trimmed.reserve(value_str.size());
+        for(auto chr : value_str)
+        {
+            if(chr != '\t' && chr != ' ') trimmed.push_back(chr);
+        }
 
-            if(trimmed == "all" || trimmed == "ALL")
-            {
-                result.value       = 1;
-                result.collect_all = true;
-                return result;
-            }
-
-            std::stringstream ss(trimmed);
-            std::string       token;
-            while(std::getline(ss, token, ','))
-            {
-                std::stringstream ss2(token);
-                std::string       subtoken;
-                while(std::getline(ss2, subtoken, ';'))
-                {
-                    if(!subtoken.empty()) result.counter_names.push_back(subtoken);
-                }
-            }
-
-            if(!result.counter_names.empty())
-            {
-                result.value = 1;
-                result.build_lookup();
-            }
+        if(trimmed == "all" || trimmed == "ALL")
+        {
+            result.value       = 1;
+            result.collect_all = true;
             return result;
-        }();
-        return _enabled;
+        }
+
+        constexpr auto device_qualifier = std::string_view{ ":device=" };
+
+        std::stringstream stream(trimmed);
+        std::string       token;
+        while(std::getline(stream, token, ','))
+        {
+            std::stringstream sub_stream(token);
+            std::string       subtoken;
+            while(std::getline(sub_stream, subtoken, ';'))
+            {
+                if(subtoken.empty()) continue;
+                auto pos = subtoken.find(device_qualifier);
+                if(pos != std::string::npos) subtoken = subtoken.substr(0, pos);
+                if(!subtoken.empty()) result.counter_names.push_back(subtoken);
+            }
+        }
+
+        if(!result.counter_names.empty())
+        {
+            result.value = 1;
+            result.build_lookup();
+        }
+        return result;
     }
 
 private:

@@ -112,7 +112,7 @@ std::shared_ptr<provider_t> g_device_provider;
 
 std::unique_ptr<gpu_collector_t>              g_gpu_collector;
 std::shared_ptr<gpu_perf_counter_provider_t>  g_gpu_perf_counter_provider;
-std::shared_ptr<gpu_perf_counter_collector_t> g_gpu_perf_counter_collector;
+std::unique_ptr<gpu_perf_counter_collector_t> g_gpu_perf_counter_collector;
 #if defined(ROCPROFSYS_BUILD_AINIC)
 std::unique_ptr<nic_collector_t> g_nic_collector;
 #endif
@@ -343,51 +343,22 @@ postfork_child_reset_sampler_lock()
 
 void
 register_gpu_perf_counter_source(
-    uint64_t context_handle, const std::vector<uint64_t>& agent_ids,
-    const std::vector<uint64_t>&                 profile_configs,
-    const std::vector<size_t>&                   device_indices,
-    const std::vector<std::vector<std::string>>& counter_names_per_agent,
-    const std::vector<
-        std::vector<device_providers::rocprofiler_sdk::counter_instance_info>>&
-        instance_infos_per_agent,
-    const std::vector<std::vector<device_providers::rocprofiler_sdk::counter_metadata>>&
-        counter_meta_per_agent)
+    uint64_t                                                            context_handle,
+    const std::vector<device_providers::rocprofiler_sdk::agent_handle>& agent_handles)
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     try
     {
-        using agent_info = pmc::device_providers::rocprofiler_sdk::agent_info;
-        using instance_info_t =
-            pmc::device_providers::rocprofiler_sdk::counter_instance_info;
-        using counter_meta_t = pmc::device_providers::rocprofiler_sdk::counter_metadata;
-
         auto context = rocprofiler_context_id_t{ context_handle };
-        auto agents  = std::vector<agent_info>{};
-        agents.reserve(agent_ids.size());
+        auto enabled =
+            collectors::settings_policy::get_gpu_perf_counter_enabled_metrics();
 
-        for(size_t i = 0; i < agent_ids.size(); ++i)
-        {
-            auto names     = (i < counter_names_per_agent.size())
-                                 ? counter_names_per_agent[i]
-                                 : std::vector<std::string>{};
-            auto instances = (i < instance_infos_per_agent.size())
-                                 ? instance_infos_per_agent[i]
-                                 : std::vector<instance_info_t>{};
-            auto meta      = (i < counter_meta_per_agent.size())
-                                 ? counter_meta_per_agent[i]
-                                 : std::vector<counter_meta_t>{};
-            agents.push_back(agent_info{
-                rocprofiler_agent_id_t{ agent_ids[i] },
-                rocprofiler_counter_config_id_t{ profile_configs[i] }, device_indices[i],
-                std::move(names), std::move(instances), std::move(meta) });
-        }
-
-        g_gpu_perf_counter_provider =
-            std::make_shared<gpu_perf_counter_provider_t>(context, std::move(agents));
+        g_gpu_perf_counter_provider = std::make_shared<gpu_perf_counter_provider_t>(
+            context, agent_handles, enabled);
         g_gpu_perf_counter_provider->start();
         g_gpu_perf_counter_collector =
-            std::make_shared<gpu_perf_counter_collector_t>(g_gpu_perf_counter_provider);
+            std::make_unique<gpu_perf_counter_collector_t>(g_gpu_perf_counter_provider);
 
         g_gpu_perf_counter_collector->setup();
         g_gpu_perf_counter_collector->config();

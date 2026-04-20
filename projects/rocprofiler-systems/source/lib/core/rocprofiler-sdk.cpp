@@ -347,6 +347,14 @@ config_settings(const std::shared_ptr<settings>& _config)
         "is collected on every available device",
         "", "rocm", "hardware_counters");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_GPU_PERF_COUNTERS",
+        "GPU hardware counters to collect via device counting service (PMC polled "
+        "sampling). Comma-separated counter names or 'all'. Independent from "
+        "ROCPROFSYS_ROCM_EVENTS which controls kernel dispatch counters. "
+        "If empty, no PMC sampling is performed",
+        "", "rocm", "hardware_counters", "pmc");
+
     _skip_domains.emplace("kernel_dispatch");
     _skip_domains.emplace("page_migration");
 
@@ -657,14 +665,6 @@ get_rocm_events()
     return tim::delimit(
         get_setting_value<std::string>("ROCPROFSYS_ROCM_EVENTS").value_or(std::string{}),
         " ,;\t\n");
-}
-
-std::vector<std::string>
-get_gpu_perf_counters()
-{
-    return tim::delimit(get_setting_value<std::string>("ROCPROFSYS_GPU_PERF_COUNTERS")
-                            .value_or(std::string{}),
-                        " ,;\t\n");
 }
 
 bool
