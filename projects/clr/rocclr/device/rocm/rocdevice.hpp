@@ -543,13 +543,17 @@ class Device : public NullDevice {
   hsa_queue_t* acquireQueue(
       uint32_t queue_size_hint, bool coop_queue = false, const std::vector<uint32_t>& cuMask = {},
       amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal,
-      bool managed = false, bool dedicated_queue = false);
+      bool managed = false, bool dedicated_queue = false,
+      hsa_queue_t* preferred = nullptr,
+      const std::unordered_set<uint64_t>* excluded_ids = nullptr);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
                     bool managed = false);
 
-  hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority);
+  hsa_queue_t* AcquireActiveQueue(amd::CommandQueue::Priority priority,
+                                   hsa_queue_t* preferred = nullptr,
+                                   const std::unordered_set<uint64_t>* excluded_ids = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
 
   //! Return multi GPU grid launch sync buffer
@@ -714,7 +718,9 @@ class Device : public NullDevice {
   std::atomic<uint32_t> num_queues_[QueuePriority::Total] = {};  //!< Per-priority queue counters
 
   //! Use dynamic queues mode to get a queue from pool
-  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false);
+  hsa_queue_t* getQueueFromPool(const uint qIndex, bool force_reuse = false,
+                                hsa_queue_t* preferred = nullptr,
+                                const std::unordered_set<uint64_t>* excluded_ids = nullptr);
 
   //! returns value for corresponding LinkAttrbutes in a vector given Memory pool.
   virtual bool findLinkInfo(const hsa_amd_memory_pool_t& pool,

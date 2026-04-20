@@ -18,9 +18,6 @@
 [submodule "projects/rocprofiler-register/external/glog"]
 	path = projects/rocprofiler-register/external/glog
 	url = https://github.com/google/glog.git
-[submodule "projects/rocprofiler-sdk/external/glog"]
-	path = projects/rocprofiler-sdk/external/glog
-	url = https://github.com/google/glog.git
 [submodule "projects/rocprofiler-sdk/external/fmt"]
 	path = projects/rocprofiler-sdk/external/fmt
 	url = https://github.com/fmtlib/fmt.git
@@ -109,3 +106,6 @@
 	path = projects/rocprofiler-systems/external/onetbb
 	url = https://github.com/uxlfoundation/oneTBB.git
 	tag = v2022.3.0
+[submodule "projects/rocprofiler-sdk/external/abseil-cpp"]
+	path = projects/rocprofiler-sdk/external/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git

@@ -19,6 +19,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Logging improvement: Added function entry and exit logs (at Info log level).
 * Logging improvement: Added duration to function exit logs and optimized log message formatting to reduce runtime overhead.
 * Logging improvement: Merged all logger instances into one global instance.
+* Logging improvement: Unified logging format in utility classes with core library logging format.
 * Feature: support for user set output surface format.
 
 ## rocDecode 1.7.0 for ROCm 7.2.1

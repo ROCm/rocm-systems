@@ -1080,6 +1080,30 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 }
 
 // ================================================================================================
+void VirtualGPU::AcquireQueueWithPreference() {
+  std::scoped_lock lock(execution());
+  if (!dedicated_queue_ && gpu_queue_ == nullptr && last_hwq_ != nullptr) {
+    gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, last_hwq_);
+    last_hwq_ = nullptr;
+  }
+}
+
+// ================================================================================================
+bool VirtualGPU::ReacquireQueueExcluding(const std::unordered_set<uint64_t>& excluded_ids) {
+  std::scoped_lock lock(execution());
+  if (gpu_queue_ != nullptr) {
+    // Detach from the current queue: decrements refCount in the pool but never
+    // destroys the queue.
+    // Unlike ReleaseActiveQueue, this is unconditional — we are switching queues,
+    // not conditionally reclaiming under pressure.
+    roc_device_.releaseQueue(gpu_queue_, std::vector<uint32_t>{}, false, true);
+    gpu_queue_ = nullptr;
+  }
+  gpu_queue_ = roc_device_.AcquireActiveQueue(priority_, nullptr, &excluded_ids);
+  return gpu_queue_ != nullptr;
+}
+
+// ================================================================================================
 uint64_t VirtualGPU::getQueueID() {
   std::scoped_lock lock(execution());
   // Dedicated queues keep their HW queue, never acquire from pool
@@ -2068,8 +2092,8 @@ void VirtualGPU::ReleaseAllHwQueues() {
 
 // ================================================================================================
 void VirtualGPU::ReleaseHwQueue() {
-  // Dedicated queues keep their HW queue, never release to pool
-  if (dedicated_queue_) {
+  // Dedicated queues and pinned graph queues keep their HW queue
+  if (dedicated_queue_ || queue_pinned_) {
     return;
   }
 
@@ -2083,6 +2107,7 @@ void VirtualGPU::ReleaseHwQueue() {
     if (execution().try_lock()) {
       if (gpu_queue_ != nullptr) {
         if (IsQueueIdle()) {
+          last_hwq_ = gpu_queue_;
           if (roc_device_.ReleaseActiveQueue(gpu_queue_, priority_)) {
             metadata_preloader_.Detach();
             gpu_queue_ = nullptr;
