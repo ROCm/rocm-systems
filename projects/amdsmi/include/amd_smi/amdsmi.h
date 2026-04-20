@@ -5966,7 +5966,7 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *
  *  @details Given a source processor handle @p processor_handle_src and
  *  a destination processor handle @p processor_handle_dst, and a pointer to an
- *  uint64_t @p hops and a pointer to an AMDSMI_INK_TYPE @p type,
+ *  uint64_t @p hops and a pointer to an AMDSMI_LINK_TYPE @p type,
  *  this function will write the number of hops and the connection type
  *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
  *  pointed to by @p hops and @p type.
