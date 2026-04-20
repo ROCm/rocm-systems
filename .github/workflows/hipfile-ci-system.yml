@@ -211,13 +211,13 @@ jobs:
           shopt -s dotglob
           rm -rf ${GITHUB_WORKSPACE}/*
 
-#  build_FIO:
-#    uses: ROCm/fio/.github/workflows/build-fio.yml@hipFile
-#    with:
-#      ais_hipfile_pkg_filename: ${{ inputs.ais_hipfile_pkg_filename }}
-#      ais_hipfile_pkg_dev_filename: ${{ inputs.ais_hipfile_pkg_dev_filename }}
-#      platform: ${{ inputs.platform }}
-#
+  build_FIO:
+    uses: ROCm/fio/.github/workflows/build-fio.yml@hipFile
+    with:
+      ais_hipfile_pkg_filename: ${{ inputs.ais_hipfile_pkg_filename }}
+      ais_hipfile_pkg_dev_filename: ${{ inputs.ais_hipfile_pkg_dev_filename }}
+      platform: ${{ inputs.platform }}
+
 #  run_FIO_tests:
 #    runs-on: [linux, AIS]
 #    needs: [build_FIO]
