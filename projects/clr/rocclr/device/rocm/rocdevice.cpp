@@ -3620,13 +3620,19 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
 
     // Patch the flat buffer copy (dispatched to GPU) directly.
     // The original dispatchPackets pointer is retained for UpdateAQLPacket matching.
-    auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(
-        patch.flat_packet ? patch.flat_packet : patch.packet);
-    if (patch.dep_slot < 0) {
-      // dep_slot == -1: patch the packet's completion signal (segment completion)
+    uint8_t* raw = patch.flat_packet ? patch.flat_packet : patch.packet;
+
+    if (patch.dep_slot == HwEventPatch::kExtDispatchDepSignal) {
+      // Patch dep_signal in hsa_amd_ext_kernel_dispatch_packet_t via offset-based
+      static constexpr size_t kExtDepSignalOffset =
+          offsetof(hsa_amd_ext_kernel_dispatch_packet_t, dep_signal);
+      memcpy(raw + kExtDepSignalOffset, &sig, sizeof(sig));
+    } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
+      auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
     } else {
-      // dep_slot >= 0: patch a dependency signal slot (cross-segment wait)
+      // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
+      auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->dep_signal[patch.dep_slot] = sig;
     }
   }

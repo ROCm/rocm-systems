@@ -2081,10 +2081,13 @@ class Device : public RuntimeObject {
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   struct HwEventPatch {
+    static constexpr int kCompletionSignal = -1;
+    static constexpr int kExtDispatchDepSignal = -2;
+
     uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
-    int dep_slot;  // -1 = completion_signal, 0-4 = dep_signal[slot]
+    int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }

@@ -440,33 +440,57 @@ void GraphExec::BuildSyncPlan() {
 
     auto& firstBatch = segBatch.packet_batches[0];
 
-    // Prepend barrier packets for segments with dependencies
+    // Prepend barrier packets for segments with dependencies.
+    // Optimization: when there is exactly 1 dependency and the first captured
+    // packet is an ext kernel dispatch, embed the dep_signal directly into
+    // that packet instead of creating a separate barrier.
     if (!info.barrier_dep_indices.empty()) {
       int num_deps = static_cast<int>(info.barrier_dep_indices.size());
-      int barrier_count = (num_deps + 4) / 5;
+      bool use_ext_dep = false;
+      if (num_deps == 1 && !firstBatch.dispatchPackets.empty()) {
+        const uint8_t* pkt = firstBatch.dispatchPackets[0];
+        uint16_t first_hdr;
+        memcpy(&first_hdr, pkt, sizeof(first_hdr));
+        constexpr uint16_t kPktTypeMask = 0xFF;
+        constexpr uint16_t kVendorSpecificType = 0;
+        constexpr uint8_t kExtKernelDispatchFormat = 3;
+        uint8_t amd_format = pkt[2];
+        use_ext_dep = ((first_hdr & kPktTypeMask) == kVendorSpecificType)
+                      && (first_hdr != 0)
+                      && (amd_format == kExtKernelDispatchFormat);
+      }
 
-      for (int b = 0; b < barrier_count; ++b) {
-        uint8_t* barrier_pkt = device->CreateBarrierPacket();
-        sync_plan_.barrier_packets.push_back(barrier_pkt);
+      if (use_ext_dep) {
+        uint8_t* first_dispatch = firstBatch.dispatchPackets[0];
+        int dep_segment_id = info.barrier_dep_indices[0];
+        sync_plan_.patch_list.push_back(
+            {first_dispatch, nullptr, dep_segment_id,
+             amd::Device::HwEventPatch::kExtDispatchDepSignal});
+      } else {
+        int barrier_count = (num_deps + 4) / 5;
 
-        int start_dep = b * 5;
-        int end_dep = std::min(start_dep + 5, num_deps);
-        for (int d = start_dep; d < end_dep; ++d) {
-          int dep_segment_id = info.barrier_dep_indices[d];
-          sync_plan_.patch_list.push_back({barrier_pkt, nullptr, dep_segment_id, d - start_dep});
+        for (int b = 0; b < barrier_count; ++b) {
+          uint8_t* barrier_pkt = device->CreateBarrierPacket();
+          sync_plan_.barrier_packets.push_back(barrier_pkt);
+
+          int start_dep = b * 5;
+          int end_dep = std::min(start_dep + 5, num_deps);
+          for (int d = start_dep; d < end_dep; ++d) {
+            int dep_segment_id = info.barrier_dep_indices[d];
+            sync_plan_.patch_list.push_back({barrier_pkt, nullptr, dep_segment_id, d - start_dep});
+          }
+
+          firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
+          firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
+                                                &kBarrierKernelName);
         }
 
-        firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
-        firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
-                                              &kBarrierKernelName);
+        // nodeRanges[i].startIndex was recorded before barrier packets were prepended.
+        // Update all node range indices in firstBatch to account for the inserted barriers.
+        for (auto& nodeRange : firstBatch.nodeRanges) {
+          nodeRange.startIndex += static_cast<size_t>(barrier_count);
+        }
       }
-
-      // nodeRanges[i].startIndex was recorded before barrier packets were prepended.
-      // Update all node range indices in firstBatch to account for the inserted barriers.
-      for (auto& nodeRange : firstBatch.nodeRanges) {
-        nodeRange.startIndex += static_cast<size_t>(barrier_count);
-      }
-
     }
 
     // Patch the completion signal:
@@ -483,10 +507,14 @@ void GraphExec::BuildSyncPlan() {
       lastBatch.dispatchPackets.push_back(completion_barrier);
       lastBatch.dispatchKernelNames.push_back(&kBarrierKernelName);
 
-      sync_plan_.patch_list.push_back({completion_barrier, nullptr, segment.id, -1});
+      sync_plan_.patch_list.push_back(
+          {completion_barrier, nullptr, segment.id,
+           amd::Device::HwEventPatch::kCompletionSignal});
     } else if (!lastBatch.dispatchPackets.empty()) {
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
-      sync_plan_.patch_list.push_back({last_pkt, nullptr, segment.id, -1});
+      sync_plan_.patch_list.push_back(
+          {last_pkt, nullptr, segment.id,
+           amd::Device::HwEventPatch::kCompletionSignal});
     }
 
     if (segment.segment_ids_edges.empty()) {

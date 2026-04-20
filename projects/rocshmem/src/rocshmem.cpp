@@ -479,6 +479,29 @@ static void setFilesLimit() {
   return -1;
 }
 
+[[maybe_unused]] __host__ void rocshmem_info_get_version(int *major,
+                                                         int *minor) {
+  *major = ROCSHMEM_MAJOR_VERSION;
+  *minor = ROCSHMEM_MINOR_VERSION;
+}
+
+[[maybe_unused]] __host__ void rocshmem_info_get_name(char *name) {
+  size_t i = 0;
+  for (; i < ROCSHMEM_MAX_NAME_LEN - 1 && ROCSHMEM_VENDOR_STRING[i] != '\0';
+       ++i) {
+    name[i] = ROCSHMEM_VENDOR_STRING[i];
+  }
+  name[i] = '\0';
+}
+
+[[maybe_unused]] __host__ void rocshmem_vendor_get_version_info(int *major,
+                                                                int *minor,
+                                                                int *patch) {
+  *major = ROCSHMEM_VENDOR_MAJOR_VERSION;
+  *minor = ROCSHMEM_VENDOR_MINOR_VERSION;
+  *patch = ROCSHMEM_VENDOR_PATCH_VERSION;
+}
+
 [[maybe_unused]] __host__ void *rocshmem_malloc(size_t size) {
   VERIFY_BACKEND();
 
