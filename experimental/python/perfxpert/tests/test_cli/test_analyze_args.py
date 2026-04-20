@@ -197,7 +197,7 @@ def test_execute_agentic_warns_on_unknown_kwargs(tmp_path, monkeypatch):
     class _StubSession:
         session_id = "stub"
 
-        def run_root(self, _payload):
+        def run_root(self, _payload, *, progress_callback=None):
             class _Out:
                 narrative = ""
                 recommendations = []

@@ -304,6 +304,20 @@ def add_args(parser: argparse.ArgumentParser):
         ),
     )
 
+    llm_options.add_argument(
+        "--no-progress",
+        action="store_true",
+        default=False,
+        dest="no_progress",
+        help=(
+            "Disable live progress feedback during LLM analysis. Useful "
+            "for CI and log-capture contexts where spinner escape codes "
+            "or repeated status lines would pollute output. Progress is "
+            "only emitted when --llm is set; this flag is a no-op under "
+            "airgap."
+        ),
+    )
+
     def process_args(input: RocpdImportData, args: argparse.Namespace):
         """Process and return valid arguments as dictionary.
 
@@ -328,6 +342,7 @@ def add_args(parser: argparse.ArgumentParser):
             "verbose",
             "llm_local",
             "llm_local_model",
+            "no_progress",
         ]
         # Argparse defaults argparse emits for flags not passed by the
         # user; we skip these so kwargs do not carry noise that the
@@ -340,6 +355,7 @@ def add_args(parser: argparse.ArgumentParser):
             "verbose": False,
             "top_kernels": 10,
             "min_duration": 0.0,
+            "no_progress": False,
         }
         ret = {}
         for itr in valid_args:
@@ -555,6 +571,87 @@ def _format_agentic_output(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Live-progress plumbing — spinner on TTY, plain lines on non-TTY, silent
+# when --no-progress or no --llm. The callback is fed to
+# ``perfxpert.api.agent_root`` which forwards it through the agents
+# runtime (``AnalysisSession`` + ``_cascade``) so every phase transition
+# is surfaced to the user without tight coupling to Rich or any UI lib.
+# ---------------------------------------------------------------------------
+
+
+def _progress_context(*, enable_llm: bool, no_progress: bool, verbose: bool):
+    """Return ``(progress_cb, contextmanager)`` — the callback fed to
+    ``api.agent_root`` plus the CM that owns the spinner / log-line UI.
+
+    The CM is always-safe: pushing ``None`` as the callback means zero
+    overhead on the agents hot path (cascade + phase emit short-circuit
+    when no callback is set).
+
+    Rules (per the Phase 8 design):
+
+    * No ``--llm`` → silent (airgap path, nothing to surface).
+    * ``--no-progress`` → silent even with ``--llm``.
+    * ``--verbose`` → silent (verbose logging already narrates).
+    * stderr is a TTY → Rich ``Live`` spinner on stderr, transient=True.
+    * stderr is not a TTY → plain ``[perfxpert] <phase>`` on stderr.
+
+    If Rich is not installed the TTY branch falls back to plain lines
+    (same as non-TTY) so core install still works.
+    """
+    import contextlib
+
+    # Silent modes — callback is None, zero overhead.
+    if not enable_llm or no_progress or verbose:
+        @contextlib.contextmanager
+        def _silent():
+            yield
+        return None, _silent()
+
+    # stderr decides whether we draw a spinner or plain lines. The
+    # progress stream belongs on stderr so piping stdout (JSON / HTML)
+    # remains clean.
+    stderr_is_tty = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+
+    def _plain_callback(msg: str) -> None:
+        print(f"[perfxpert] {msg}", file=sys.stderr, flush=True)
+
+    if not stderr_is_tty:
+        @contextlib.contextmanager
+        def _plain():
+            yield
+        return _plain_callback, _plain()
+
+    # TTY path — try to build a Rich spinner; fall back to plain lines
+    # if Rich isn't installed. We deliberately DON'T require rich for
+    # core install.
+    try:
+        from rich.console import Console
+        from rich.live import Live
+        from rich.spinner import Spinner
+        from rich.text import Text
+    except ImportError:
+        @contextlib.contextmanager
+        def _plain_tty():
+            yield
+        return _plain_callback, _plain_tty()
+
+    console = Console(stderr=True)
+    current_phase = Text("waiting on agent", style="cyan")
+    spinner = Spinner("dots", text=current_phase)
+
+    def _rich_callback(msg: str) -> None:
+        current_phase.plain = msg
+        current_phase.style = "cyan"
+
+    @contextlib.contextmanager
+    def _rich_ctx():
+        with Live(spinner, console=console, refresh_per_second=8, transient=True):
+            yield
+
+    return _rich_callback, _rich_ctx()
+
+
 # -- known kwargs accepted by `_execute_agentic` ---------------------------
 # Any kwarg not in this set that is forwarded from `execute()` will emit a
 # WARNING so future argparse additions cannot silently drop through the
@@ -581,6 +678,7 @@ _KNOWN_EXECUTE_KWARGS = frozenset({
     "min_duration",
     # Execution flags
     "verbose",
+    "no_progress",
 })
 
 
@@ -640,6 +738,27 @@ def _execute_agentic(
 
     enable_llm = kwargs.get("enable_llm", False)
     llm_provider = kwargs.get("llm_provider")
+    no_progress = bool(kwargs.get("no_progress", False))
+    verbose = bool(kwargs.get("verbose", False))
+
+    # Build progress feedback (spinner / plain lines / silent) based on
+    # whether LLM mode is active and the terminal / flag state.
+    progress_cb, progress_cm = _progress_context(
+        enable_llm=enable_llm,
+        no_progress=no_progress,
+        verbose=verbose,
+    )
+
+    # Tier-0 (source-only) path doesn't run through the agentic Root
+    # today — emit one status line before the scan and one after when
+    # it's the only work happening. agent_root below still runs for the
+    # combined -i + --source-dir path.
+    tier0_only = input is None and source_dir and progress_cb is not None
+    if tier0_only:
+        import time as _time
+        _t0 = _time.monotonic()
+    else:
+        _t0 = None
 
     # Route the agentic path through the public Python API — same
     # function the MCP server wraps as ``agent_root``.
@@ -652,17 +771,26 @@ def _execute_agentic(
     # RuntimeError with the "Agentic root analysis failed" diagnostic.
     from perfxpert.providers._exceptions import ProviderError
     try:
-        root_output = perfxpert_api.agent_root(
-            user_query=custom_prompt or "Analyze this GPU performance trace.",
-            database_path=database_path if input else None,
-            source_dir=source_dir,
-            provider=llm_provider if enable_llm else None,
-            airgap=(not enable_llm),
-        )
+        with progress_cm:
+            root_output = perfxpert_api.agent_root(
+                user_query=custom_prompt or "Analyze this GPU performance trace.",
+                database_path=database_path if input else None,
+                source_dir=source_dir,
+                provider=llm_provider if enable_llm else None,
+                airgap=(not enable_llm),
+                progress_callback=progress_cb,
+            )
     except ProviderError:
         raise  # let __main__.main render clean one-liner
     except Exception as e:
         raise RuntimeError(f"Agentic root analysis failed: {e}") from e
+
+    # Tier-0 timing emit — only if the scan was the primary work AND it
+    # took > 500 ms (per the phase-8 design).
+    if tier0_only and progress_cb is not None and _t0 is not None:
+        import time as _time
+        if (_time.monotonic() - _t0) > 0.5:
+            progress_cb("scanning sources: done")
 
     # Format output according to requested format.
     #
