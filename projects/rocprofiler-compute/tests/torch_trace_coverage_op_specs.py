@@ -93,6 +93,7 @@ class OpSpec:
 # Compact tensor factories used by builders
 # -----------------------------------------------------------------------------
 
+
 def _f(device: str, *shape: int, dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """Float tensor from ``torch.randn``."""
     return torch.randn(shape, device=device, dtype=dtype)
@@ -127,6 +128,7 @@ def _spd(device: str, n: int = 4) -> torch.Tensor:
 # -----------------------------------------------------------------------------
 # Multi-line builder helpers (kept out of the table for readability)
 # -----------------------------------------------------------------------------
+
 
 def _linalg_householder_product(device: str) -> Tuple[List[Any], Dict[str, Any]]:
     """Build ``(input, tau)`` for ``linalg_householder_product`` across torch builds.
@@ -214,17 +216,17 @@ def _convolution_backward(device: str) -> Tuple[List[Any], Dict[str, Any]]:
     #   transposed, output_padding, groups, output_mask[3]
     return (
         [
-            torch.randn(1, 1, 6, 6, device=device),   # grad_output (N,C_out,H,W)
-            torch.randn(1, 1, 8, 8, device=device),   # input
-            torch.randn(1, 1, 3, 3, device=device),   # weight
-            None,                                      # bias_sizes (no bias)
-            [1, 1],                                    # stride
-            [0, 0],                                    # padding
-            [1, 1],                                    # dilation
-            False,                                     # transposed
-            [0, 0],                                    # output_padding
-            1,                                         # groups
-            [True, True, False],                       # output_mask
+            torch.randn(1, 1, 6, 6, device=device),  # grad_output (N,C_out,H,W)
+            torch.randn(1, 1, 8, 8, device=device),  # input
+            torch.randn(1, 1, 3, 3, device=device),  # weight
+            None,  # bias_sizes (no bias)
+            [1, 1],  # stride
+            [0, 0],  # padding
+            [1, 1],  # dilation
+            False,  # transposed
+            [0, 0],  # output_padding
+            1,  # groups
+            [True, True, False],  # output_mask
         ],
         {},
     )
@@ -237,14 +239,14 @@ def _batch_norm_backward_common(device: str) -> Tuple[List[Any], Dict[str, Any]]
         [
             torch.randn(2, 3, 4, 4, device=device),  # grad_out
             torch.randn(2, 3, 4, 4, device=device),  # input
-            torch.ones(3, device=device),            # weight
-            torch.zeros(3, device=device),           # running_mean
-            torch.ones(3, device=device),            # running_var
-            torch.zeros(3, device=device),           # save_mean
-            torch.ones(3, device=device),            # save_invstd
-            True,                                    # train
-            1e-5,                                    # eps
-            [True, True, True],                      # output_mask
+            torch.ones(3, device=device),  # weight
+            torch.zeros(3, device=device),  # running_mean
+            torch.ones(3, device=device),  # running_var
+            torch.zeros(3, device=device),  # save_mean
+            torch.ones(3, device=device),  # save_invstd
+            True,  # train
+            1e-5,  # eps
+            [True, True, True],  # output_mask
         ],
         {},
     )
@@ -257,14 +259,14 @@ def _native_group_norm_backward(device: str) -> Tuple[List[Any], Dict[str, Any]]
         [
             torch.randn(2, 6, 4, 4, device=device),  # grad_out
             torch.randn(2, 6, 4, 4, device=device),  # input
-            torch.zeros(2, 2, device=device),        # mean (N, groups)
-            torch.ones(2, 2, device=device),         # rstd (N, groups)
-            torch.ones(6, device=device),            # weight
-            2,                                        # N
-            6,                                        # C
-            16,                                       # HxW
-            2,                                        # group
-            [True, True, True],                      # output_mask
+            torch.zeros(2, 2, device=device),  # mean (N, groups)
+            torch.ones(2, 2, device=device),  # rstd (N, groups)
+            torch.ones(6, device=device),  # weight
+            2,  # N
+            6,  # C
+            16,  # HxW
+            2,  # group
+            [True, True, True],  # output_mask
         ],
         {},
     )
@@ -304,14 +306,14 @@ def _native_layer_norm_backward(device: str) -> Tuple[List[Any], Dict[str, Any]]
     #          output_mask[3]). mean/rstd broadcast across non-normalized dims.
     return (
         [
-            torch.randn(2, 4, 4, device=device),     # grad_out
-            torch.randn(2, 4, 4, device=device),     # input
-            [4],                                     # normalized_shape
-            torch.randn(2, 4, 1, device=device),     # mean
-            torch.randn(2, 4, 1, device=device),     # rstd
-            torch.ones(4, device=device),            # weight
-            torch.zeros(4, device=device),           # bias
-            [True, True, True],                      # output_mask
+            torch.randn(2, 4, 4, device=device),  # grad_out
+            torch.randn(2, 4, 4, device=device),  # input
+            [4],  # normalized_shape
+            torch.randn(2, 4, 1, device=device),  # mean
+            torch.randn(2, 4, 1, device=device),  # rstd
+            torch.ones(4, device=device),  # weight
+            torch.zeros(4, device=device),  # bias
+            [True, True, True],  # output_mask
         ],
         {},
     )
@@ -455,7 +457,6 @@ OP_SPECS: Dict[str, OpSpec] = {
         "emitter supports the list-of-_CoverageTensorArg form, but a "
         "consistent shape contract (values / offsets / max_lengths) is TBD.",
     ),
-
     # ---------------------------------------------------------------
     # matmul / batched matmul / conv
     # ---------------------------------------------------------------
@@ -492,7 +493,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "addr": OpSpec(build=lambda d: ([_f(d, 4, 4), _f(d, 4), _f(d, 4)], {})),
     "dot": OpSpec(build=lambda d: ([_f(d, 4), _f(d, 4)], {})),
     "vdot": OpSpec(build=lambda d: ([_f(d, 4), _f(d, 4)], {})),
-
     # ---------------------------------------------------------------
     # embedding / embedding_bag
     # ---------------------------------------------------------------
@@ -526,7 +526,9 @@ OP_SPECS: Dict[str, OpSpec] = {
                 _f(d, 10, 8),
                 _i1(d, 6),
                 torch.tensor([0, 3], device=d, dtype=torch.int64),
-                False, 0, False,
+                False,
+                0,
+                False,
             ],
             {},
         ),
@@ -543,7 +545,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_embedding_bag_per_sample_weights_backward": OpSpec(
         skip="Requires offset2bag from matched forward run.",
     ),
-
     # ---------------------------------------------------------------
     # Linalg / Cholesky (need structured input)
     # ---------------------------------------------------------------
@@ -587,7 +588,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "linalg_solve_triangular": OpSpec(build=_solve_triangular),
     "lu_unpack": OpSpec(build=_lu_unpack),
     "ormqr": OpSpec(build=_ormqr),
-
     # ---------------------------------------------------------------
     # Loss functions
     # ---------------------------------------------------------------
@@ -630,13 +630,13 @@ OP_SPECS: Dict[str, OpSpec] = {
     "nll_loss_backward": OpSpec(
         build=lambda d: (
             [
-                torch.tensor(1.0, device=d),                   # grad_output
-                _f(d, 4, 5).log_softmax(1),                    # self
-                torch.randint(0, 5, (4,), device=d),           # target
-                None,                                           # weight
-                1,                                              # reduction (Mean)
-                -100,                                           # ignore_index
-                torch.tensor(4.0, device=d),                   # total_weight
+                torch.tensor(1.0, device=d),  # grad_output
+                _f(d, 4, 5).log_softmax(1),  # self
+                torch.randint(0, 5, (4,), device=d),  # target
+                None,  # weight
+                1,  # reduction (Mean)
+                -100,  # ignore_index
+                torch.tensor(4.0, device=d),  # total_weight
             ],
             {},
         ),
@@ -658,13 +658,13 @@ OP_SPECS: Dict[str, OpSpec] = {
     "nll_loss2d_backward": OpSpec(
         build=lambda d: (
             [
-                torch.tensor(1.0, device=d),                   # grad_output
-                _f(d, 2, 5, 4, 4).log_softmax(1),              # self
-                torch.randint(0, 5, (2, 4, 4), device=d),      # target
-                None,                                           # weight
-                1,                                              # reduction (Mean)
-                -100,                                           # ignore_index
-                torch.tensor(32.0, device=d),                  # total_weight
+                torch.tensor(1.0, device=d),  # grad_output
+                _f(d, 2, 5, 4, 4).log_softmax(1),  # self
+                torch.randint(0, 5, (2, 4, 4), device=d),  # target
+                None,  # weight
+                1,  # reduction (Mean)
+                -100,  # ignore_index
+                torch.tensor(32.0, device=d),  # total_weight
             ],
             {},
         ),
@@ -677,7 +677,9 @@ OP_SPECS: Dict[str, OpSpec] = {
             [
                 _f(d, 4, 5),
                 torch.randint(0, 5, (4,), device=d),
-                1.0, 1.0, None,
+                1.0,
+                1.0,
+                None,
             ],
             {},
         ),
@@ -688,21 +690,37 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Norm / batch / group / layer
     # ---------------------------------------------------------------
     "batch_norm": OpSpec(
         build=lambda d: (
-            [_f(d, 2, 3, 4, 4), _f(d, 3), _f(d, 3), _f(d, 3), _f(d, 3),
-             True, 0.1, 1e-5, False],
+            [
+                _f(d, 2, 3, 4, 4),
+                _f(d, 3),
+                _f(d, 3),
+                _f(d, 3),
+                _f(d, 3),
+                True,
+                0.1,
+                1e-5,
+                False,
+            ],
             {},
         ),
     ),
     "native_batch_norm": OpSpec(
         build=lambda d: (
-            [_f(d, 2, 3, 4, 4), _f(d, 3), _f(d, 3), _f(d, 3), _f(d, 3),
-             True, 0.1, 1e-5],
+            [
+                _f(d, 2, 3, 4, 4),
+                _f(d, 3),
+                _f(d, 3),
+                _f(d, 3),
+                _f(d, 3),
+                True,
+                0.1,
+                1e-5,
+            ],
             {},
         ),
     ),
@@ -727,14 +745,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     "miopen_batch_norm_backward": OpSpec(
         build=lambda d: (
             [
-                _f(d, 2, 3, 4, 4),                 # input
-                _f(d, 2, 3, 4, 4),                 # grad_output
-                torch.ones(3, device=d),           # weight
-                torch.zeros(3, device=d),          # running_mean
-                torch.ones(3, device=d),           # running_var
-                torch.zeros(3, device=d),          # save_mean
-                torch.ones(3, device=d),           # save_var
-                1e-5,                               # epsilon
+                _f(d, 2, 3, 4, 4),  # input
+                _f(d, 2, 3, 4, 4),  # grad_output
+                torch.ones(3, device=d),  # weight
+                torch.zeros(3, device=d),  # running_mean
+                torch.ones(3, device=d),  # running_var
+                torch.zeros(3, device=d),  # save_mean
+                torch.ones(3, device=d),  # save_var
+                1e-5,  # epsilon
             ],
             {},
         ),
@@ -759,7 +777,11 @@ OP_SPECS: Dict[str, OpSpec] = {
                 _f(d, 2, 6, 4, 4),
                 torch.ones(6, device=d),
                 torch.zeros(6, device=d),
-                2, 6, 16, 2, 1e-5,
+                2,
+                6,
+                16,
+                2,
+                1e-5,
             ],
             {},
         ),
@@ -783,12 +805,12 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_fused_rms_norm_backward": OpSpec(
         build=lambda d: (
             [
-                _f(d, 2, 4, 4),                   # grad_out
-                _f(d, 2, 4, 4),                   # input
-                [4],                               # normalized_shape
-                torch.ones(2, 4, 1, device=d),    # rstd
-                torch.ones(4, device=d),          # weight
-                [True, True],                      # output_mask
+                _f(d, 2, 4, 4),  # grad_out
+                _f(d, 2, 4, 4),  # input
+                [4],  # normalized_shape
+                torch.ones(2, 4, 1, device=d),  # rstd
+                torch.ones(4, device=d),  # weight
+                [True, True],  # output_mask
             ],
             {},
         ),
@@ -797,7 +819,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "native_batch_norm_backward": OpSpec(build=_batch_norm_backward_common),
     "native_group_norm_backward": OpSpec(build=_native_group_norm_backward),
     "native_layer_norm_backward": OpSpec(build=_native_layer_norm_backward),
-
     # ---------------------------------------------------------------
     # Pooling + unpooling (strict shape requirements)
     # ---------------------------------------------------------------
@@ -837,9 +858,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     "avg_pool2d_backward": OpSpec(
         build=lambda d: (
             [
-                _f(d, 1, 1, 4, 4), _f(d, 1, 1, 8, 8),
-                [2, 2], [2, 2], [0, 0],
-                True, True, None,
+                _f(d, 1, 1, 4, 4),
+                _f(d, 1, 1, 8, 8),
+                [2, 2],
+                [2, 2],
+                [0, 0],
+                True,
+                True,
+                None,
             ],
             {},
         ),
@@ -850,8 +876,12 @@ OP_SPECS: Dict[str, OpSpec] = {
             [
                 _f(d, 1, 1, 4, 4, 4),
                 _f(d, 1, 1, 8, 8, 8),
-                [2, 2, 2], [2, 2, 2], [0, 0, 0],
-                False, True, None,
+                [2, 2, 2],
+                [2, 2, 2],
+                [0, 0, 0],
+                False,
+                True,
+                None,
             ],
             {},
         ),
@@ -860,7 +890,9 @@ OP_SPECS: Dict[str, OpSpec] = {
     "fractional_max_pool2d": OpSpec(
         build=lambda d: (
             [
-                _f(d, 1, 3, 8, 8), [2, 2], [4, 4],
+                _f(d, 1, 3, 8, 8),
+                [2, 2],
+                [4, 4],
                 torch.rand(1, 3, 2, device=d),
             ],
             {},
@@ -879,11 +911,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     "max_pool2d_with_indices_backward": OpSpec(
         build=lambda d: (
             [
-                _f(d, 1, 1, 4, 4),                # grad_output
-                _f(d, 1, 1, 8, 8),                # self
-                [2, 2], [2, 2], [0, 0], [1, 1],   # kernel, stride, padding, dilation
-                False,                             # ceil_mode
-                _i(d, 1, 1, 4, 4),                # indices
+                _f(d, 1, 1, 4, 4),  # grad_output
+                _f(d, 1, 1, 8, 8),  # self
+                [2, 2],
+                [2, 2],
+                [0, 0],
+                [1, 1],  # kernel, stride, padding, dilation
+                False,  # ceil_mode
+                _i(d, 1, 1, 4, 4),  # indices
             ],
             {},
         ),
@@ -892,7 +927,11 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: (
             [
                 _f(d, 1, 1, 8, 8, 8),
-                [2, 2, 2], [2, 2, 2], [0, 0, 0], [1, 1, 1], False,
+                [2, 2, 2],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
+                False,
             ],
             {},
         ),
@@ -900,11 +939,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     "max_pool3d_with_indices_backward": OpSpec(
         build=lambda d: (
             [
-                _f(d, 1, 1, 4, 4, 4),             # grad_output
-                _f(d, 1, 1, 8, 8, 8),             # self
-                [2, 2, 2], [2, 2, 2], [0, 0, 0], [1, 1, 1],
+                _f(d, 1, 1, 4, 4, 4),  # grad_output
+                _f(d, 1, 1, 8, 8, 8),  # self
+                [2, 2, 2],
+                [2, 2, 2],
+                [0, 0, 0],
+                [1, 1, 1],
                 False,
-                _i(d, 1, 1, 4, 4, 4),             # indices
+                _i(d, 1, 1, 4, 4, 4),  # indices
             ],
             {},
         ),
@@ -915,13 +957,15 @@ OP_SPECS: Dict[str, OpSpec] = {
     "max_unpool3d": OpSpec(
         build=lambda d: (
             [
-                _f(d, 1, 1, 2, 2, 2), _i(d, 1, 1, 2, 2, 2),
-                [4, 4, 4], [2, 2, 2], [0, 0, 0],
+                _f(d, 1, 1, 2, 2, 2),
+                _i(d, 1, 1, 2, 2, 2),
+                [4, 4, 4],
+                [2, 2, 2],
+                [0, 0, 0],
             ],
             {},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Upsample
     # ---------------------------------------------------------------
@@ -980,7 +1024,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Grid sampler / im2col
     # ---------------------------------------------------------------
@@ -995,11 +1038,13 @@ OP_SPECS: Dict[str, OpSpec] = {
     "grid_sampler_2d_backward": OpSpec(
         build=lambda d: (
             [
-                _f(d, 1, 1, 8, 8),                    # grad_output
-                _f(d, 1, 1, 8, 8),                    # input
-                torch.zeros(1, 8, 8, 2, device=d),    # grid
-                0, 0, False,
-                [True, True],                          # output_mask
+                _f(d, 1, 1, 8, 8),  # grad_output
+                _f(d, 1, 1, 8, 8),  # input
+                torch.zeros(1, 8, 8, 2, device=d),  # grid
+                0,
+                0,
+                False,
+                [True, True],  # output_mask
             ],
             {},
         ),
@@ -1013,10 +1058,12 @@ OP_SPECS: Dict[str, OpSpec] = {
     "grid_sampler_3d_backward": OpSpec(
         build=lambda d: (
             [
-                _f(d, 1, 1, 4, 4, 4),                     # grad_output
-                _f(d, 1, 1, 4, 4, 4),                     # input
-                torch.zeros(1, 4, 4, 4, 3, device=d),     # grid
-                0, 0, False,
+                _f(d, 1, 1, 4, 4, 4),  # grad_output
+                _f(d, 1, 1, 4, 4, 4),  # input
+                torch.zeros(1, 4, 4, 4, 3, device=d),  # grid
+                0,
+                0,
+                False,
                 [True, True],
             ],
             {},
@@ -1037,7 +1084,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Padding
     # ---------------------------------------------------------------
@@ -1077,7 +1123,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Integer / bitwise (CUDA rejects float)
     # ---------------------------------------------------------------
@@ -1112,7 +1157,6 @@ OP_SPECS: Dict[str, OpSpec] = {
         ),
     ),
     "lcm_": OpSpec(build=lambda d: ([_i(d, 4, 4), _i(d, 4, 4)], {})),
-
     # ---------------------------------------------------------------
     # Random distributions
     # ---------------------------------------------------------------
@@ -1140,7 +1184,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "geometric_": OpSpec(build=lambda d: ([_f(d, 4, 4), 0.5], {})),
     "repeat_interleave": OpSpec(build=lambda d: ([_i1(d, 16)], {})),
     "bincount": OpSpec(build=lambda d: ([_i1(d, 32).clamp_min(0)], {})),
-
     # ---------------------------------------------------------------
     # Masks / clamp
     # ---------------------------------------------------------------
@@ -1167,7 +1210,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     "native_dropout_backward": OpSpec(
         build=lambda d: ([_f(d, 4, 4), _b(d), 0.5], {}),
     ),
-
     # ---------------------------------------------------------------
     # Indexing / scatter / gather
     # ---------------------------------------------------------------
@@ -1263,15 +1305,14 @@ OP_SPECS: Dict[str, OpSpec] = {
     "_segment_reduce_backward": OpSpec(
         build=lambda d: (
             [
-                torch.randn(2, device=d),     # grad (output shape)
-                torch.randn(2, device=d),     # output
-                torch.randn(8, device=d),     # data
-                "sum",                         # reduce
+                torch.randn(2, device=d),  # grad (output shape)
+                torch.randn(2, device=d),  # output
+                torch.randn(8, device=d),  # data
+                "sum",  # reduce
             ],
             {"lengths": torch.tensor([4, 4], device=d, dtype=torch.int64)},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Misc shape / dtype / layout
     # ---------------------------------------------------------------
@@ -1307,7 +1348,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     # Schema: glu_backward(grad_output, self, dim).  grad_output matches the
     # glu output shape (self halved along ``dim``); don't swap the two.
     "glu_backward": OpSpec(build=lambda d: ([_f(d, 2, 4), _f(d, 2, 8), 1], {})),
-
     # ---------------------------------------------------------------
     # FFT
     #
@@ -1315,7 +1355,6 @@ OP_SPECS: Dict[str, OpSpec] = {
     # declared as skips at the top of this table — they SIGSEGV under
     # ``torch.profiler`` on ROCm even with correctly-typed complex input.
     # ---------------------------------------------------------------
-
     # ---------------------------------------------------------------
     # Quantized / packed matmul (keep the few that work with synthetic args;
     # the int4/int8 packed-mm and scaled-grouped-mm variants are declared
@@ -1336,7 +1375,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Softmax backward (mixed-dtype accumulation)
     # ---------------------------------------------------------------
@@ -1362,7 +1400,6 @@ OP_SPECS: Dict[str, OpSpec] = {
             {},
         ),
     ),
-
     # ---------------------------------------------------------------
     # Misc / AMP / assertions
     # ---------------------------------------------------------------
@@ -1372,8 +1409,8 @@ OP_SPECS: Dict[str, OpSpec] = {
         build=lambda d: (
             [
                 [_f(d, 4), _f(d, 4)],
-                torch.zeros(1, device=d),   # found_inf
-                torch.ones(1, device=d),    # inv_scale
+                torch.zeros(1, device=d),  # found_inf
+                torch.ones(1, device=d),  # inv_scale
             ],
             {},
         ),
@@ -1395,18 +1432,15 @@ OP_SPECS: Dict[str, OpSpec] = {
     "nonzero_static": OpSpec(
         build=lambda d: ([_f(d, 4, 4)], {"size": 8}),
     ),
-
     # ---------------------------------------------------------------
     # Convolution backward (needs explicit output_sizes + masks)
     # ---------------------------------------------------------------
     "convolution_backward": OpSpec(build=_convolution_backward),
-
     # ---------------------------------------------------------------
     # Fused optimizers (list-of-tensors + scalar state_steps)
     # ---------------------------------------------------------------
     "_fused_adam_": OpSpec(build=_fused_adam_args),
     "_fused_adamw_": OpSpec(build=_fused_adam_args),
-
     # ---------------------------------------------------------------
     # Backend-gated families: skip rather than fake args.
     #

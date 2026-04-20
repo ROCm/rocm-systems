@@ -115,6 +115,7 @@ class OpCompareOutcome(NamedTuple):
     reason: str
     log_lines: Tuple[str, ...]
 
+
 # Standalone runner source: one torch.profiler window per op, dumped to JSON.
 # Stored as a string so the generated workload stays free of profiler/JSON code.
 COVERAGE_GROUND_TRUTH_RUNNER_SOURCE = textwrap.dedent(
@@ -399,7 +400,7 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
         and op_name.endswith(".__call__")
         and op_name != "nn.Module.__call__"
     ):
-        cls = op_name[len("nn.Module."):-len(".__call__")]
+        cls = op_name[len("nn.Module.") : -len(".__call__")]
         if marker_leaf.endswith(f".{cls}.forward") or marker_leaf == (
             f"nn.Module.{cls}.forward"
         ):
@@ -411,7 +412,7 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
         and op_name.endswith(".step")
         and op_name != "Optimizer.step"
     ):
-        cls = op_name[len("Optimizer."):-len(".step")]
+        cls = op_name[len("Optimizer.") : -len(".step")]
         if cls and marker_leaf.endswith(f".{cls}.step"):
             return True
         return False
@@ -501,9 +502,7 @@ def _factory_expr_for_dtype(shape: Tuple[Any, ...], dtype: torch.dtype) -> str:
     if dtype.is_floating_point or dtype.is_complex:
         return f"torch.randn({shape}, device=device, dtype={dtype!r})"
     low, high = (-4, 4) if dtype == torch.int8 else (0, 4)
-    return (
-        f"torch.randint({low}, {high}, {shape}, device=device, dtype={dtype!r})"
-    )
+    return f"torch.randint({low}, {high}, {shape}, device=device, dtype={dtype!r})"
 
 
 def _workload_emit_assignment(vname: str, rhs: str) -> List[str]:
@@ -535,10 +534,7 @@ def _workload_emit_tensor_spd_setup(
     n = shape[0]
     return [
         f"{vname}_a = torch.randn({shape}, device=device)",
-        (
-            f"{vname} = "
-            f"{vname}_a @ {vname}_a.mT + {n} * torch.eye({n}, device=device)"
-        ),
+        (f"{vname} = {vname}_a @ {vname}_a.mT + {n} * torch.eye({n}, device=device)"),
     ]
 
 
@@ -628,17 +624,23 @@ _COVERAGE_TENSOR_ARG_EMITTERS: Dict[
 ] = {
     "rand": lambda a, v: _workload_emit_tensor_rand_setup(v, a.shape),
     "rand_uniform": lambda a, v: _workload_emit_tensor_rand_uniform_setup(
-        v, a.shape, a.scale,
+        v,
+        a.shape,
+        a.scale,
     ),
     "spd": lambda a, v: _workload_emit_tensor_spd_setup(v, a.shape),
     "pivots_1based": lambda a, v: _workload_emit_tensor_pivots_1based_setup(
-        v, a.shape,
+        v,
+        a.shape,
     ),
     "cumsum_offsets": lambda a, v: _workload_emit_tensor_cumsum_offsets_setup(
-        v, a.shape, int(a.scale),
+        v,
+        a.shape,
+        int(a.scale),
     ),
     "bool_all_true": lambda a, v: _workload_emit_tensor_bool_all_true_setup(
-        v, a.shape,
+        v,
+        a.shape,
     ),
 }
 
@@ -674,7 +676,9 @@ def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
     if isinstance(argument_value, torch.Tensor):
         return (
             _workload_emit_tensor_random_setup(
-                vname, tuple(argument_value.shape), argument_value.dtype,
+                vname,
+                tuple(argument_value.shape),
+                argument_value.dtype,
             ),
             vname,
         )
@@ -751,10 +755,7 @@ def _builder_optimizer_step(optimizer_ctor: str) -> StructuralBuilder:
                 "import torch.nn as nn",
                 f"_m_{safe_var} = nn.Linear(4, 4).cuda()",
                 f"_opt_{safe_var} = {optim_src}",
-                (
-                    f"_m_{safe_var}(torch.randn(2, 4, device=device))"
-                    ".sum().backward()"
-                ),
+                (f"_m_{safe_var}(torch.randn(2, 4, device=device)).sum().backward()"),
             ],
             f"_opt_{safe_var}.step",
             "",
@@ -994,6 +995,7 @@ _OPTIMIZER_BUILDERS: Dict[str, str] = {
 
 # Autograd builders: tiny Linear + scalar loss so backward launches real kernels.
 
+
 def _builder_autograd_grad(safe_var: str) -> Tuple[List[str], str, str]:
     """``torch.autograd.grad(loss, params)`` on a 1-layer MLP."""
     return (
@@ -1039,10 +1041,7 @@ def _builder_autograd_function_apply(safe_var: str) -> Tuple[List[str], str, str
             "    def backward(ctx, grad_output):",
             "        (x,) = ctx.saved_tensors",
             "        return grad_output * 2.0",
-            (
-                f"_x_{safe_var} = torch.randn("
-                "4, 4, device=device, requires_grad=True)"
-            ),
+            (f"_x_{safe_var} = torch.randn(4, 4, device=device, requires_grad=True)"),
         ],
         f"_Fn_{safe_var}.apply",
         f"_x_{safe_var}",
@@ -1105,6 +1104,7 @@ def _builder_autograd_functional_jvp(safe_var: str) -> Tuple[List[str], str, str
 
 # Compile / JIT builders: best-effort — compile/trace failures map to SKIP.
 
+
 def _builder_torch_compile(safe_var: str) -> Tuple[List[str], str, str]:
     """Compile a trivial fn with ``torch.compile`` and invoke it once."""
     return (
@@ -1126,10 +1126,7 @@ def _builder_torch_jit_trace(safe_var: str) -> Tuple[List[str], str, str]:
             "import torch.nn as nn",
             f"_m_{safe_var} = nn.Linear(4, 4).cuda().eval()",
             f"_ex_{safe_var} = torch.randn(2, 4, device=device)",
-            (
-                f"_tr_{safe_var} = torch.jit.trace("
-                f"_m_{safe_var}, _ex_{safe_var})"
-            ),
+            (f"_tr_{safe_var} = torch.jit.trace(_m_{safe_var}, _ex_{safe_var})"),
         ],
         f"_tr_{safe_var}",
         f"_ex_{safe_var}",
@@ -1152,6 +1149,7 @@ def _builder_torch_jit_script(safe_var: str) -> Tuple[List[str], str, str]:
 
 # CUDA utilities: mostly host-side. "Marker present, no kernels" counts as PASS
 # in :func:`compare_single_op`, so a missing marker flags a wrapper gap.
+
 
 def _builder_cuda_synchronize(_safe_var: str) -> Tuple[List[str], str, str]:
     return [], "torch.cuda.synchronize", ""
@@ -1223,6 +1221,7 @@ def _builder_cuda_event(safe_var: str) -> Tuple[List[str], str, str]:
 
 # Assembly of the registry ----------------------------------------------------
 
+
 def _build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
     """Flat ``name -> StructuralBuilder`` map. Duplicate names raise."""
     registry: Dict[str, StructuralBuilder] = {}
@@ -1276,7 +1275,9 @@ def _build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
         if name in registry:
             raise AssertionError(f"duplicate structural builder: {name!r}")
         registry[name] = _builder_nn_module_call(
-            ctor, input_expr, extra_setup=extra_setup,
+            ctor,
+            input_expr,
+            extra_setup=extra_setup,
         )
 
     for name, optim_ctor in _OPTIMIZER_BUILDERS.items():
@@ -1302,33 +1303,50 @@ def _build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
         ("torch.jit.trace", _builder_torch_jit_trace),
         ("torch.jit.script", _builder_torch_jit_script),
         ("torch.distributed.all_reduce", _builder_distributed("_dist.all_reduce")),
-        ("torch.distributed.broadcast", _builder_distributed(
-            "_dist.broadcast", call_args="_t, src=0",
-        )),
-        ("torch.distributed.reduce", _builder_distributed(
-            "_dist.reduce", call_args="_t, dst=0",
-        )),
-        ("torch.distributed.all_gather", _builder_distributed(
-            "_dist.all_gather",
-            tensor_setup=(
-                "_t = torch.randn(4, 4, device=device)",
-                "_out = [torch.empty_like(_t)]",
+        (
+            "torch.distributed.broadcast",
+            _builder_distributed(
+                "_dist.broadcast",
+                call_args="_t, src=0",
             ),
-            call_args="_out, _t",
-        )),
-        ("torch.distributed.reduce_scatter", _builder_distributed(
-            "_dist.reduce_scatter",
-            tensor_setup=(
-                "_t = torch.randn(4, 4, device=device)",
-                "_inp = [torch.randn(4, 4, device=device)]",
+        ),
+        (
+            "torch.distributed.reduce",
+            _builder_distributed(
+                "_dist.reduce",
+                call_args="_t, dst=0",
             ),
-            call_args="_t, _inp",
-        )),
-        ("torch.distributed.barrier", _builder_distributed(
-            "_dist.barrier",
-            tensor_setup=(),
-            call_args="",
-        )),
+        ),
+        (
+            "torch.distributed.all_gather",
+            _builder_distributed(
+                "_dist.all_gather",
+                tensor_setup=(
+                    "_t = torch.randn(4, 4, device=device)",
+                    "_out = [torch.empty_like(_t)]",
+                ),
+                call_args="_out, _t",
+            ),
+        ),
+        (
+            "torch.distributed.reduce_scatter",
+            _builder_distributed(
+                "_dist.reduce_scatter",
+                tensor_setup=(
+                    "_t = torch.randn(4, 4, device=device)",
+                    "_inp = [torch.randn(4, 4, device=device)]",
+                ),
+                call_args="_t, _inp",
+            ),
+        ),
+        (
+            "torch.distributed.barrier",
+            _builder_distributed(
+                "_dist.barrier",
+                tensor_setup=(),
+                call_args="",
+            ),
+        ),
         ("torch.cuda.synchronize", _builder_cuda_synchronize),
         ("torch.cuda.current_device", _builder_cuda_current_device),
         ("torch.cuda.device_count", _builder_cuda_device_count),
@@ -1914,9 +1932,7 @@ def _extract_device_fault_banner(stderr_text: str) -> str:
         hints.append("Device-dead banner(s):")
         hints.extend(f"  {d}" for d in dead)
     if last_start is not None and last_start != last_terminal_label:
-        hints.append(
-            f"Last START without matching OK/FAIL: {last_start}"
-        )
+        hints.append(f"Last START without matching OK/FAIL: {last_start}")
     return "\n".join(hints)
 
 
@@ -1931,9 +1947,7 @@ def run_ground_truth_torch_profiler_subprocess(
     """Run ``coverage_ground_truth_runner.py`` (torch.profiler + JSON write)."""
     repro = ""
     if coverage_seed is not None and coverage_sample_budget is not None:
-        repro = (
-            f" (seed={coverage_seed}, n={coverage_sample_budget})"
-        )
+        repro = f" (seed={coverage_seed}, n={coverage_sample_budget})"
     argv = [
         sys.executable,
         str(Path(runner_script_path).resolve()),
@@ -1956,9 +1970,7 @@ def run_ground_truth_torch_profiler_subprocess(
         out_tail = _stderr_tail_collapsed(exc.stdout or "", max_lines=8)
         err_tail = _stderr_tail_collapsed(exc.stderr or "")
         fault_hint = _extract_device_fault_banner(exc.stderr or "")
-        hint_block = (
-            f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
-        )
+        hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
         pytest.fail(
             f"Op workload failed: {due}.{repro}{copy_note}\n\n"
             f"{hint_block}"
@@ -1979,9 +1991,7 @@ def run_ground_truth_torch_profiler_subprocess(
         out_tail = _stderr_tail_collapsed(completed.stdout or "", max_lines=12)
         cmdline = subprocess.list2cmdline(argv)
         fault_hint = _extract_device_fault_banner(completed.stderr or "")
-        hint_block = (
-            f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
-        )
+        hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
         pytest.fail(
             f"Op workload failed: {due}.{repro}{copy_note}\n\n"
             f"{exit_expl}\n\n"
@@ -2224,5 +2234,3 @@ def _kernels_by_marker_leaf(
         if kernels:
             op_to_kernels[leaf] = kernels
     return op_to_kernels
-
-
