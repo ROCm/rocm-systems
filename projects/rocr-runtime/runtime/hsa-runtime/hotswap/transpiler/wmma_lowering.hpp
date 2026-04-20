@@ -58,14 +58,24 @@ enum class WMMAInputType {
 ///
 /// This ports the proven approach from the original hotswap prototype
 /// (hotswap/transpiler.cpp, WMMA→MFMA translation block) to principled
-/// LLVM IR using two intrinsic families:
+/// LLVM IR using three intrinsic families:
 ///
-///   @llvm.amdgcn.ds.bpermute  — cross-lane data reads (EXEC-independent)
+///   @llvm.amdgcn.ds.bpermute  — cross-lane data reads
 ///   @llvm.amdgcn.mfma.*       — hardware matrix multiply (reads all 64 lanes)
+///   @llvm.amdgcn.strict.wwm   — run the redistribute / MFMA / collect
+///                               chain with EXEC = -1 so partial-wave
+///                               launches (e.g. blockDim == 32 on gfx942)
+///                               still update the upper-half lanes' VGPRs
+///                               that MFMA and the collect-time bpermute
+///                               read back. See wmma_lowering.cpp,
+///                               file-header "Whole-wave mode".
 ///
-/// No strict_wwm wrapper is needed because both ds_bpermute and MFMA read
-/// from all lanes regardless of EXEC, and matmul kernels execute with a
-/// non-divergent control flow (full EXEC mask).
+/// `ds_bpermute` and `v_mfma_*` both READ from all 64 source lanes
+/// regardless of EXEC, but their per-lane WRITE is EXEC-gated — hence
+/// the whole-wave-mode wrapper, which forces EXEC = -1 across the
+/// collective so every lane's MFMA input / MFMA output / collected
+/// result VGPR is written and subsequent cross-lane reads see fresh
+/// data rather than stale / poison bits.
 ///
 /// Source fragment shapes (Wave32, 8 VGPRs per side either way):
 ///   16-bit (F16 / BF16):  A/B = <16 x {half|bfloat}> per lane
@@ -99,6 +109,60 @@ llvm::Value *emitWMMAtoMFMA(RaiseContext &ctx,
                             llvm::Value *b,
                             llvm::Value *c,
                             WMMAInputType inputType);
+
+/// Lower a Wave32 v_wmma_f32_16x16x4_f32 (gfx1250 RDNA4 VOP3P opcode
+/// 0x05D) to Wave64 mfma_f32_16x16x4f32 (gfx942 CDNA3) using
+/// ds_bpermute lane redistribution.
+///
+/// This K=4 f32 variant is STRUCTURALLY DISTINCT from the K=32 / K=64
+/// family covered by `emitWMMAtoMFMA` above:
+///
+///   * A/B fragment per Wave32 lane is `<2 x f32>` (2 VGPRs) — not
+///     the <16 x t> (16-bit element) or <8 x i32> (8-bit element)
+///     8-VGPR fragments used by the K=32 / K=64 variants.
+///   * Only ONE MFMA call per Wave32 group — not 2 chained. The
+///     source WMMA is already K=4, which exactly matches the target
+///     `mfma_f32_16x16x4f32` K dimension; there is no K-tiling to do
+///     inside a group.
+///   * The MFMA A/B input is a single `float` per Wave64 lane — not
+///     `<4 x t>` (16-bit) or `i64` (8-bit).
+///
+/// The C/D fragment shape (<8 x f32> per Wave32 lane, Wave32 C-layout
+/// equation `i = 8*floor(lane/16) + GPR`) is IDENTICAL to the K=32 /
+/// K=64 variants, so the accumulator redistribution and the final
+/// result collection reuse the same internal helpers as `emitWMMAtoMFMA`.
+///
+/// LAYOUT NOTE. The gfx1250 V_WMMA_F32_16x16x4_F32 per-lane A/B
+/// (i, k) layout is extrapolated from the documented K=32 / K=64
+/// pattern — the AMD Matrix Instruction Calculator does not yet list
+/// the K=4 f32 variant. We assume:
+///
+///   A/B input (<2 x f32> per lane):
+///     i = lane % 16
+///     k = 2*floor(lane/16) + GPR
+///   Per-lane:
+///     Lanes 0-15, GPR 0 → k=0    GPR 1 → k=1
+///     Lanes 16-31, GPR 0 → k=2   GPR 1 → k=3
+///
+/// This is the unique natural extension of the K=32/K=64 layout
+/// documented in wmma_lowering.cpp (lower half holds lower k-range,
+/// upper half holds upper k-range; GPR indexes along k within a
+/// lane-half). The layout is validated out-of-band by the hipBLASLt
+/// Tensile `SS_SS_HA_Bias_SAV_UA` f32 GEMM kernels (macro-tile
+/// `MT32x32x16`, WMMA shape `MI16x16x1`, wave32) — see
+/// `tools/tensile_gold_verify/verify_transpile.py`, which compares
+/// the lifted gfx942 output against the gfx1250 reference. A layout
+/// mismatch would surface as a numerical regression there, not a
+/// silent wrong answer.
+///
+/// \param a  WMMA source A fragment (<2 x f32> in Wave32)
+/// \param b  WMMA source B fragment (<2 x f32> in Wave32)
+/// \param c  WMMA accumulator fragment (<8 x f32> in Wave32)
+/// \returns  `<8 x float>` — result in Wave32 C-layout.
+llvm::Value *emitWMMAtoMFMA_F32_16x16x4(RaiseContext &ctx,
+                                         llvm::Value *a,
+                                         llvm::Value *b,
+                                         llvm::Value *c);
 
 } // namespace transpiler
 

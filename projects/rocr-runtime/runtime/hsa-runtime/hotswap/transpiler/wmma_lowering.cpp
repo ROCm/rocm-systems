@@ -108,13 +108,47 @@
 //
 // After both passes, a lane-ID-based select picks the correct group's result.
 //
-// Why no strict_wwm wrapper
-// -------------------------
-// ds_bpermute reads from ANY lane regardless of EXEC.  MFMA on CDNA reads
-// source operands from ALL 64 lanes regardless of EXEC (EXEC only gates the
-// destination write).  WMMA operations occur in non-divergent code (EXEC is
-// all-ones).  mbcnt_lo/hi with mask=-1 computes a pure bit-count independent
-// of EXEC.
+// Whole-wave mode (WWM)
+// ---------------------
+// The redistribute / MFMA / collect pipeline is semantically a Wave64
+// collective: every MFMA input and every collect-time bpermute source
+// is physically stored in SOME lane of the Wave64, and each destination
+// lane's VGPR must hold the correct value for the next stage to read
+// it back.
+//
+// `ds_bpermute` and `v_mfma_*` both READ all 64 source lanes regardless
+// of EXEC — but the WRITE of their per-lane result is EXEC-gated.  So
+// a lane with EXEC=0 silently skips updating its destination VGPR, and
+// any later cross-lane read of that VGPR returns stale / poison data.
+//
+// This is invisible when the kernel is launched with a blockDim that
+// fills an entire Wave64 (every lane is active; MFMA inputs / outputs
+// are written everywhere).  It manifests as a catastrophic correctness
+// failure on partial-wave launches — e.g. a Wave32 WMMA kernel
+// launched with blockDim == 32 runs as a single Wave64 with EXEC =
+// 0x0000_0000_FFFF_FFFF on gfx942.  Lanes 32-63 never update their
+// mfmaA/B/C VGPRs, so MFMA reads garbage for k=2,3 (for the K=4 f32
+// path) or for the entire upper k-half (for the K=32/K=64 path), and
+// the collect-stage bpermute's reads from lanes 32-63 of the MFMA
+// output return garbage too.  Rows 8-15 of the output come out as
+// undefined / zero, and rows 0-7 get only a partial K-accumulation.
+//
+// The fix is to run the entire cross-lane pipeline in whole-wave mode
+// via `@llvm.amdgcn.strict.wwm`.  The intrinsic acts as a compile-time
+// marker: the backend walks the def-chain from its operand and wraps
+// every transitive cross-lane / MFMA / select / bitcast instruction
+// in a single WWM region bracketed by `s_or_saveexec` / `s_mov_b64
+// exec, saved`.  Inside the region EXEC = -1 so all 64 lanes write
+// their destinations, the Wave64 collective is exact, and the stale-
+// VGPR read chain is broken.  Outside the region (the final select
+// against `lane_id >= 32` and the Wave32-layout result) normal EXEC
+// is restored and only the originally-active lanes produce observable
+// writes to the WMMA destination VGPRs — which is exactly the
+// semantics of the source Wave32 WMMA.
+//
+// `mbcnt_lo/hi` with mask=-1 stays outside the WWM region: it takes
+// an explicit lane mask operand and ignores EXEC, so its per-lane
+// result (0..63) is correct under either EXEC setting.
 //
 // ============================================================================
 
@@ -136,6 +170,43 @@ static Value *emitDSBpermute(IRBuilder<> &B, Module &M,
   Function *fn = Intrinsic::getOrInsertDeclaration(
       &M, Intrinsic::amdgcn_ds_bpermute);
   return B.CreateCall(fn, {byteOffset, srcVal}, "bperm");
+}
+
+/// Wrap a value in `@llvm.amdgcn.strict.wwm`. See the "Whole-wave mode"
+/// section of the file-header comment for why the redistribute / MFMA /
+/// collect pipeline MUST execute with EXEC = all-ones regardless of
+/// the kernel-level EXEC mask. The intrinsic acts as a compile-time
+/// marker — the backend walks the def-chain from `val` and wraps the
+/// whole transitive cone of dependent instructions in a single WWM
+/// region bracketed by `s_or_saveexec` / `s_mov_b64 exec, saved`.
+static Value *wrapStrictWWM(IRBuilder<> &B, Module &M, Value *val) {
+  Function *fn = Intrinsic::getOrInsertDeclaration(
+      &M, Intrinsic::amdgcn_strict_wwm, {val->getType()});
+  return B.CreateCall(fn, {val}, "wwm");
+}
+
+/// Pack an array of 8 i32 dwords into `<8 x i32>`, wrap that single
+/// vector in `@llvm.amdgcn.strict.wwm`, and unpack back to individual
+/// dwords.
+///
+/// One vector-grained wwm marker is intentional. Wrapping each of the
+/// 8 dwords in its own `strict.wwm` call would let the backend split
+/// them across eight independent WWM regions — with redundant
+/// EXEC-save / restore sequences and (worse) the risk of duplicated
+/// cross-lane work feeding each region separately. Packing into a
+/// single vector gives the backend exactly one "WWM ends here" marker
+/// for the whole group pass, so the redistribute → MFMA → collect
+/// def-chain coalesces into ONE region bracketed by a single
+/// `s_or_saveexec` / `s_mov_b64 exec, saved` pair.
+static void wwmWrap8Dwords(IRBuilder<> &B, Module &M, Type *i32Ty,
+                            Value **dwords) {
+  auto *vecTy = FixedVectorType::get(i32Ty, 8);
+  Value *packed = PoisonValue::get(vecTy);
+  for (unsigned i = 0; i < 8; ++i)
+    packed = B.CreateInsertElement(packed, dwords[i], i, "wwm_pack");
+  Value *wwm = wrapStrictWWM(B, M, packed);
+  for (unsigned i = 0; i < 8; ++i)
+    dwords[i] = B.CreateExtractElement(wwm, i, "wwm_unpack");
 }
 
 static Value *emitLaneId(IRBuilder<> &B, Module &M, Type *i32Ty) {
@@ -257,7 +328,9 @@ static void collectResult(IRBuilder<> &B, Module &M,
 }
 
 /// Run one full pass for a virtual Wave32 group:
-/// redistribute → 2× MFMA → collect.
+/// redistribute → 2× MFMA → collect, wrapped in a single whole-wave
+/// region so the cross-lane pipeline runs with EXEC = -1 regardless
+/// of the caller-level EXEC mask (see file-header "Whole-wave mode").
 ///
 /// \param groupBase  0 for group 0 (W64 lanes 0-31), 32 for group 1 (lanes 32-63)
 /// \param inputType  selects MFMA intrinsic + per-MFMA pack/bitcast type.
@@ -379,6 +452,16 @@ static void runGroupPass(IRBuilder<> &B, Module &M, RaiseContext &ctx,
 
   Value *w32Lane = B.CreateAnd(laneId, B.getInt32(31), "w32_lane");
   collectResult(B, M, mfmaDst, w32Lane, resultDwords);
+
+  // Fence the whole redistribute → MFMA → collect chain into a single
+  // whole-wave-mode region. Without this, partial-wave launches (e.g.
+  // a Wave32 WMMA kernel running as blockDim == 32 on gfx942 with
+  // EXEC = 0x0000_0000_FFFF_FFFF) skip the VGPR writes on lanes
+  // 32-63, MFMA then reads garbage for the upper K-half, and the
+  // collect-time bpermute reads garbage back from the upper half of
+  // the Wave64 MFMA output. See the file-header "Whole-wave mode"
+  // section for the full correctness argument.
+  wwmWrap8Dwords(B, M, ctx.i32Ty, resultDwords);
 }
 
 Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
@@ -408,6 +491,160 @@ Value *emitWMMAtoMFMA(RaiseContext &ctx, Value *a, Value *b, Value *c,
   // semantics.
   Type *resultElemTy = (inputType == WMMAInputType::IU8) ? ctx.i32Ty : ctx.f32Ty;
   auto *resultTy = FixedVectorType::get(resultElemTy, 8);
+  Value *finalDwords[8];
+  for (unsigned i = 0; i < 8; ++i)
+    finalDwords[i] = B.CreateSelect(isGroup1, result1[i], result0[i], "sel");
+
+  return packDwords(B, finalDwords, 8, ctx.i32Ty, resultTy);
+}
+
+// ----------------------------------------------------------------------
+// v_wmma_f32_16x16x4_f32 → mfma_f32_16x16x4f32 lowering
+// ----------------------------------------------------------------------
+//
+// Source (gfx1250 RDNA4, Wave32):
+//   int_amdgcn_wmma_f32_16x16x4_f32 — `<8 x f32>` = (…, <2 x f32> A,
+//   …, <2 x f32> B, …, <8 x f32> C, …)
+//
+// Target (gfx942 CDNA3, Wave64):
+//   int_amdgcn_mfma_f32_16x16x4f32 — `<4 x f32>` = (f32 A, f32 B,
+//   <4 x f32> C, i32 cbsz, i32 abid, i32 blgp)
+//
+// Register-layout equations
+// -------------------------
+// Source WMMA (Wave32, per-lane fragment):
+//   A/B  — <2 x f32> (2 VGPRs):  i = lane%16,  k = 2*floor(lane/16) + GPR
+//     Lanes 0-15 GPR 0→k=0, GPR 1→k=1
+//     Lanes 16-31 GPR 0→k=2, GPR 1→k=3
+//   C/D  — <8 x f32> (8 VGPRs):  i = 8*floor(lane/16) + GPR,  j = lane%16
+//     Lanes 0-15 → rows 0-7;   Lanes 16-31 → rows 8-15
+//
+// Target MFMA (Wave64, per-lane fragment):
+//   A/B  — f32 (1 VGPR):          i = lane%16,  k = floor(lane/16)
+//     LG0 (lanes 0-15)  → k=0
+//     LG1 (lanes 16-31) → k=1
+//     LG2 (lanes 32-47) → k=2
+//     LG3 (lanes 48-63) → k=3
+//   C/D  — <4 x f32> (4 VGPRs):   i = 4*floor(lane/16) + GPR, j = lane%16
+//     (same layout equation as the K=32/K=64 MFMA family, so the C
+//     redistribution + result collection helpers above are reused
+//     verbatim.)
+//
+// Redistribution
+// --------------
+// Per-group pass (`groupBase ∈ {0, 32}`): the W32-group-N's data is
+// held by W64 lanes `[groupBase .. groupBase+31]`. Each MFMA call
+// spreads ONE Wave32 group's 32-lane × 2-dword A across all 64 Wave64
+// lanes:
+//
+//   loAddr = 4 * ((lane%16) + groupBase)       // source for k=0..1
+//   hiAddr = 4 * ((lane%16) + groupBase + 16)  // source for k=2..3
+//
+//   LG0 (lanes 0-15,  k=0): bpermute(loAddr, aDwords[0])
+//   LG1 (lanes 16-31, k=1): bpermute(loAddr, aDwords[1])
+//   LG2 (lanes 32-47, k=2): bpermute(hiAddr, aDwords[0])
+//   LG3 (lanes 48-63, k=3): bpermute(hiAddr, aDwords[1])
+//
+// All four reads deliver the full K=4 range for ONE virtual Wave32
+// group, which matches the K=4 MFMA signature — so there is exactly
+// ONE MFMA call per group (not 2 chained as in the K=32/K=64 path).
+//
+// B redistribution mirrors A exactly (same layout equation). The C
+// redistribution reuses `redistributeAcc` (same WMMA C layout) and
+// the result collection reuses `collectResult` (same WMMA D layout).
+//
+// Whole-wave mode: as for the K=32/K=64 path, the group-pass output
+// is packed into a `<8 x i32>` and handed to `@llvm.amdgcn.strict.wwm`
+// so the redistribute / MFMA / collect chain executes with EXEC = -1
+// across all 64 Wave64 lanes.  See the file-header "Whole-wave mode"
+// section for the partial-wave correctness argument.
+static void runGroupPassF32K4(IRBuilder<> &B, Module &M, RaiseContext &ctx,
+                               unsigned groupBase, Value *laneId,
+                               Value **aDwords, Value **bDwords,
+                               Value **cDwords,
+                               Value **resultDwords) {
+  Value *laneMod16 = B.CreateAnd(laneId, B.getInt32(15), "lane16");
+  Value *loLane = B.CreateAdd(laneMod16, B.getInt32(groupBase), "lo_lane");
+  Value *hiLane = B.CreateAdd(laneMod16, B.getInt32(groupBase + 16), "hi_lane");
+  Value *addrLo = B.CreateShl(loLane, B.getInt32(2), "addr_lo");
+  Value *addrHi = B.CreateShl(hiLane, B.getInt32(2), "addr_hi");
+  Value *laneGroup = B.CreateLShr(laneId, B.getInt32(4), "lane_grp");
+
+  // A input: single-dword MFMA fragment, one bpermute per (lane-group,
+  // GPR) combination. aDwords[0] carries k=0 and k=2; aDwords[1]
+  // carries k=1 and k=3 (lower vs upper WMMA half selects the +16
+  // lane offset).
+  Value *aLG0 = emitDSBpermute(B, M, addrLo, aDwords[0]);
+  Value *aLG1 = emitDSBpermute(B, M, addrLo, aDwords[1]);
+  Value *aLG2 = emitDSBpermute(B, M, addrHi, aDwords[0]);
+  Value *aLG3 = emitDSBpermute(B, M, addrHi, aDwords[1]);
+  Value *mfmaA_i32 =
+      selectByLaneGroup(B, laneGroup, aLG0, aLG1, aLG2, aLG3);
+
+  Value *bLG0 = emitDSBpermute(B, M, addrLo, bDwords[0]);
+  Value *bLG1 = emitDSBpermute(B, M, addrLo, bDwords[1]);
+  Value *bLG2 = emitDSBpermute(B, M, addrHi, bDwords[0]);
+  Value *bLG3 = emitDSBpermute(B, M, addrHi, bDwords[1]);
+  Value *mfmaB_i32 =
+      selectByLaneGroup(B, laneGroup, bLG0, bLG1, bLG2, bLG3);
+
+  Value *mfmaC[4];
+  redistributeAcc(B, M, cDwords, addrLo, addrHi, laneGroup, mfmaC);
+
+  // Pack per-lane MFMA operands. The signatures are:
+  //   A:f32         (scalar dword, not packed)
+  //   B:f32         (scalar dword, not packed)
+  //   C:<4 x f32>
+  // The redistribution produced i32 dwords; bitcast A/B to f32 and
+  // pack C into `<4 x float>` via the existing helper (which also
+  // bitcasts).
+  auto *mfmaAccPackTy = FixedVectorType::get(ctx.f32Ty, 4);
+  Value *mfmaA = B.CreateBitCast(mfmaA_i32, ctx.f32Ty, "mfma_a");
+  Value *mfmaB = B.CreateBitCast(mfmaB_i32, ctx.f32Ty, "mfma_b");
+  Value *acc = packDwords(B, mfmaC, 4, ctx.i32Ty, mfmaAccPackTy);
+
+  // cbsz / abid / blgp are the per-matrix broadcast-and-shift
+  // modifiers hard-coded to zero here; the corpus kernels emit the
+  // MFMA equivalent with these defaulted, matching what gfx1250
+  // WMMA surfaces for the failing kerneldex Tensile GEMMs.
+  Value *cbsz = B.getInt32(0), *abid = B.getInt32(0), *blgp = B.getInt32(0);
+
+  Function *mfmaFn = Intrinsic::getOrInsertDeclaration(
+      &M, Intrinsic::amdgcn_mfma_f32_16x16x4f32);
+  Value *mfma = B.CreateCall(mfmaFn,
+                             {mfmaA, mfmaB, acc, cbsz, abid, blgp},
+                             "mfma");
+
+  Value *mfmaDst[4];
+  unpackDwords(B, mfma, 4, ctx.i32Ty, mfmaDst);
+
+  Value *w32Lane = B.CreateAnd(laneId, B.getInt32(31), "w32_lane");
+  collectResult(B, M, mfmaDst, w32Lane, resultDwords);
+
+  // Fence the whole redistribute → MFMA → collect chain into a single
+  // whole-wave-mode region (same partial-wave argument as the K=32 /
+  // K=64 path above; see the file-header "Whole-wave mode" section).
+  wwmWrap8Dwords(B, M, ctx.i32Ty, resultDwords);
+}
+
+Value *emitWMMAtoMFMA_F32_16x16x4(RaiseContext &ctx, Value *a, Value *b,
+                                   Value *c) {
+  IRBuilder<> &B = ctx.B;
+  Module &M = ctx.M;
+
+  Value *aDwords[2], *bDwords[2], *cDwords[8];
+  unpackDwords(B, a, 2, ctx.i32Ty, aDwords);
+  unpackDwords(B, b, 2, ctx.i32Ty, bDwords);
+  unpackDwords(B, c, 8, ctx.i32Ty, cDwords);
+
+  Value *laneId = emitLaneId(B, M, ctx.i32Ty);
+
+  Value *result0[8], *result1[8];
+  runGroupPassF32K4(B, M, ctx, 0,  laneId, aDwords, bDwords, cDwords, result0);
+  runGroupPassF32K4(B, M, ctx, 32, laneId, aDwords, bDwords, cDwords, result1);
+
+  Value *isGroup1 = B.CreateICmpUGE(laneId, B.getInt32(32), "is_group1");
+  auto *resultTy = FixedVectorType::get(ctx.f32Ty, 8);
   Value *finalDwords[8];
   for (unsigned i = 0; i < 8; ++i)
     finalDwords[i] = B.CreateSelect(isGroup1, result1[i], result0[i], "sel");

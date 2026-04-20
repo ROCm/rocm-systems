@@ -38,6 +38,15 @@
 ;      A regression that switched to a different accumulator width
 ;      would surface as `<N x float>` for N != 4 here.
 ;
+;   5. Each Wave32 group pass is wrapped in ONE
+;      `@llvm.amdgcn.strict.wwm.v8i32` call fencing the whole
+;      redistribute -> MFMA1 -> MFMA2 -> collect chain in
+;      Whole-Wave Mode, so lanes 32-63 execute the lower-half
+;      group even when the kernel is launched at blockDim == 32
+;      (partial-wave Wave32 launch on gfx942 Wave64). See the
+;      "Whole-wave mode" section in wmma_lowering.cpp / .hpp for
+;      the full correctness argument.
+;
 ; NEGATIVE PINS:
 ;
 ;   * NO `mfma.f32.16x16x16f16` calls in this kernel — that would
@@ -63,10 +72,17 @@
 ; First group pass:
 ; CHECK: %mfma1 = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k(<4 x i16> %{{[^,]+}}, <4 x i16> %{{[^,]+}}, <4 x float> %{{[^,]+}}, i32 0, i32 0, i32 0)
 ; CHECK: %mfma2 = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k(<4 x i16> %{{[^,]+}}, <4 x i16> %{{[^,]+}}, <4 x float> %mfma1, i32 0, i32 0, i32 0)
+; CHECK: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(<8 x i32> %{{[^)]+}})
 
 ; Second group pass (lane indices 32..63):
 ; CHECK: %mfma1{{[0-9]+}} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k(<4 x i16> %{{[^,]+}}, <4 x i16> %{{[^,]+}}, <4 x float> %{{[^,]+}}, i32 0, i32 0, i32 0)
 ; CHECK: %mfma2{{[0-9]+}} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k(<4 x i16> %{{[^,]+}}, <4 x i16> %{{[^,]+}}, <4 x float> %mfma1{{[0-9]+}}, i32 0, i32 0, i32 0)
+; CHECK: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(<8 x i32> %{{[^)]+}})
+
+; Exactly 2 strict.wwm fences (one per Wave32 virtual group).
+; Anchored AFTER the per-group positive pins above, so any extra
+; fence would surface here as an unexpected match.
+; CHECK-NOT: call <8 x i32> @llvm.amdgcn.strict.wwm.v8i32(
 
 ; Negative pin: the F16 intrinsic must NOT appear in this kernel
 ; (would indicate BF16 dispatch fell through to F16).

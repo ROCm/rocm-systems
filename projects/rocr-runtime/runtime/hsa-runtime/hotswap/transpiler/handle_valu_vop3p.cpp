@@ -277,23 +277,17 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
   // (`AMDGPUWMMAIntrinsicsGFX12`, gated by `hasWMMA12` =
   // FeatureWMMA{128,256}bInsts) does NOT include it. Same-target
   // lift therefore gates on `ctx.targetIsa.hasTensorOps`
-  // (FeatureGFX1250Insts), not `hasWMMA12`. Cross-target lift to
-  // gfx942 would need a new K=4 MFMA decomposition path (gfx942
-  // has `mfma_f32_16x16x4f32`) that no kernel in the current
-  // corpus exercises, so we refuse loudly instead of silently
-  // mis-lowering.
+  // (FeatureGFX1250Insts), not `hasWMMA12`.
+  //
+  // Cross-target on gfx942 we lower to `mfma_f32_16x16x4f32` via the
+  // dedicated `emitWMMAtoMFMA_F32_16x16x4` helper in
+  // `wmma_lowering.cpp` — gfx942 has a direct K=4 MFMA equivalent
+  // so the decomposition is 1 MFMA per Wave32 group (not 2 chained
+  // like the K=32/K=64 path). The shared ds_bpermute redistribution
+  // math is documented alongside the helper. Targets with neither
+  // `hasTensorOps` nor `hasMFMA` (e.g. gfx12 RDNA4 base) get a
+  // principled refusal — they have no K=4 f32 matrix path at all.
   case SemOp::V_WMMA_F32_16x16x4_F32: {
-    if (!ctx.targetIsa.hasTensorOps) {
-      hr.failure = RaiseFailure::unsupportedShape(
-          di, "VOP3P",
-          "v_wmma_f32_16x16x4_f32 is a gfx1250-only intrinsic "
-          "(int_amdgcn_wmma_f32_16x16x4_f32 lives in "
-          "AMDGPUWMMAIntrinsicsGFX1250, not the gfx12 WMMA family); "
-          "cross-target lift to gfx942 would need a K=4 MFMA "
-          "decomposition via mfma_f32_16x16x4f32 — no corpus kernel "
-          "exercises this path");
-      return hr;
-    }
     auto *abIRTy = FixedVectorType::get(ctx.f32Ty, 2);
     auto *cdIRTy = FixedVectorType::get(ctx.f32Ty, 8);
 
@@ -305,21 +299,36 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
     Value *b = ctx.regs.readRegVec(ctx.B, srcB, abIRTy);
     Value *c = ctx.regs.readRegVec(ctx.B, srcC, cdIRTy);
 
-    Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
-        &ctx.M, Intrinsic::amdgcn_wmma_f32_16x16x4_f32, {cdIRTy, abIRTy});
-    // AMDGPUWmmaIntrinsicModsAllReuse:
-    //   (A_mod, A, B_mod, B, C_mod, C, reuse_a, reuse_b)
-    // A_mod / B_mod carry per-element negation (i1) and C_mod
-    // carries the i16 source-modifier bitfield (op_sel etc.). The
-    // gfx1250 corpus emits the instruction without those modifiers
-    // set; defaulting to false / 0 matches what the disassembler
-    // surfaces for the failing kernels.
-    Value *result_val = ctx.B.CreateCall(wmmaFn, {
-        ctx.B.getFalse(), a,
-        ctx.B.getFalse(), b,
-        ConstantInt::get(Type::getInt16Ty(ctx.C), 0), c,
-        ctx.B.getFalse(), ctx.B.getFalse()
-    }, "wmma");
+    Value *result_val;
+    if (ctx.targetIsa.hasTensorOps) {
+      Function *wmmaFn = Intrinsic::getOrInsertDeclaration(
+          &ctx.M, Intrinsic::amdgcn_wmma_f32_16x16x4_f32, {cdIRTy, abIRTy});
+      // AMDGPUWmmaIntrinsicModsC (6 args, see IntrinsicsAMDGPU.td):
+      //   (A, B, C_mod, C, matrix_a_reuse, matrix_b_reuse)
+      // C_mod is the i16 source-modifier bitfield (op_sel etc.) and
+      // matrix_*_reuse are i1 flags. K=4 f32 WMMA has NO per-element
+      // A_mod / B_mod slots (unlike the 16-/8-bit ModsAllReuse /
+      // ModsABClamp classes used by the K=32 / K=64 family). The
+      // gfx1250 corpus emits the instruction without those modifiers
+      // set; defaulting to 0 / false matches what the disassembler
+      // surfaces for the failing kernels.
+      result_val = ctx.B.CreateCall(wmmaFn, {
+          a, b,
+          ConstantInt::get(Type::getInt16Ty(ctx.C), 0), c,
+          ctx.B.getFalse(), ctx.B.getFalse()
+      }, "wmma");
+    } else if (ctx.targetIsa.hasMFMA) {
+      result_val = emitWMMAtoMFMA_F32_16x16x4(ctx, a, b, c);
+    } else {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "VOP3P",
+          "v_wmma_f32_16x16x4_f32 cross-target requires either "
+          "hasTensorOps (native gfx1250 intrinsic "
+          "int_amdgcn_wmma_f32_16x16x4_f32) or hasMFMA (gfx942 "
+          "mfma_f32_16x16x4f32 decomposition); this target has "
+          "neither — no K=4 f32 matrix path is available");
+      return hr;
+    }
 
     ctx.writeRegVec(dest, result_val);
     hr.handled = true;

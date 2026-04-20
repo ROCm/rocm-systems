@@ -15,7 +15,7 @@
 // only 2 dwords — versus `<16 x t>` (16-bit) or `<8 x i32>`
 // (8-bit), and (b) the shared `emitWMMAtoMFMA` decomposition path
 // (transpiler/wmma_lowering.cpp) is parameterised on 16-/8-bit
-// element packing and has NO K=4 f32 codepath today.
+// element packing and does NOT cover the K=4 f32 case.
 //
 // The native intrinsic `int_amdgcn_wmma_f32_16x16x4_f32` is
 // declared inside `AMDGPUWMMAIntrinsicsGFX1250` (gated by
@@ -25,11 +25,17 @@
 // Same-target lift therefore keys on `ISAProfile::hasTensorOps`
 // (FeatureGFX1250Insts) — matching the LLVM intrinsic's actual
 // subtarget gating — rather than `hasWMMA12`. Cross-target lift
-// to gfx942 would need a new K=4 MFMA decomposition via
-// `mfma_f32_16x16x4f32` that no kernel in the current corpus
-// exercises, so we refuse loudly via
-// `RaiseFailure::unsupportedShape` to surface the gap immediately
-// rather than silently degrade.
+// to gfx942 goes through `emitWMMAtoMFMA_F32_16x16x4`
+// (transpiler/wmma_lowering.cpp), a dedicated K=4 helper that
+// decomposes the Wave32 WMMA into one `mfma_f32_16x16x4f32` call
+// per virtual Wave32 group via ds.bpermute lane redistribution
+// (gfx942 has a direct K=4 MFMA, so the K-dimension matches
+// exactly and no K-tiling is required inside a group — a
+// structural simplification versus the K=32/K=64 family's 2×
+// chained-MFMA decomposition). Targets with neither `hasTensorOps`
+// nor `hasMFMA` refuse loudly via
+// `RaiseFailure::unsupportedShape` (no K=4 f32 matrix path is
+// available on e.g. gfx12 RDNA4 base).
 //
 // MAINTENANCE: the kernel must NEVER be dispatched — only the
 // raiser pre-translation contract is exercised. The clang builtin

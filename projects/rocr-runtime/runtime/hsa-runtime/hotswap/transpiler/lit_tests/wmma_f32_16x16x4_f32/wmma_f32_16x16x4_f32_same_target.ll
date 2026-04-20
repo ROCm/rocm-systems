@@ -21,15 +21,19 @@
 ; The native intrinsic `int_amdgcn_wmma_f32_16x16x4_f32` is declared
 ; inside `AMDGPUWMMAIntrinsicsGFX1250` (gated by `isGFX125xOnly` in
 ; IntrinsicsAMDGPU.td:4113-4114). The matching call shape is
-; `AMDGPUWmmaIntrinsicModsAllReuse` (8 args):
+; `AMDGPUWmmaIntrinsicModsC` (6 args — this K=4 f32 variant has NO
+; per-element A_mod / B_mod slots, unlike the 16-/8-bit
+; ModsAllReuse / ModsABClamp classes used by the K=32 / K=64 WMMA
+; family):
 ;
 ;   <8 x float> llvm.amdgcn.wmma.f32.16x16x4.f32(
-;       i1 a_neg, <2 x float> a,
-;       i1 b_neg, <2 x float> b,
-;       i16 c_mod, <8 x float> c,
+;       <2 x float> a,
+;       <2 x float> b,
+;       i16 c_mod,
+;       <8 x float> c,
 ;       i1 a_reuse, i1 b_reuse)
 ;
-; The handler emits the modifier args as `i1 false` / `i16 0` to
+; The handler emits the modifier args as `i16 0` / `i1 false` to
 ; match what the disassembler surfaces for the failing kerneldex
 ; kernels (clang's `_Constant` builtin args constrain modifiers to
 ; constants, and the failing GEMMs always emit them at default).
@@ -46,8 +50,14 @@
 ;      K=32 / K=64 dispatch would emit `<16 x t>` or `<8 x i32>`
 ;      fragments instead.
 ;
-;   3. The modifier args use the canonical defaults: `i1 false` for
-;      a_neg/b_neg/a_reuse/b_reuse and `i16 0` for c_mod.
+;   3. The modifier args use the canonical defaults: `i16 0` for
+;      c_mod and `i1 false` for matrix_a_reuse / matrix_b_reuse.
+;
+;   4. The call is 6-args, NOT 8 — pinning against a regression
+;      that dispatches the K=4 variant through the 16-bit
+;      ModsAllReuse shape (8 args: A_mod, A, B_mod, B, C_mod, C,
+;      a_reuse, b_reuse) or the 8-bit-iu8 ModsABClamp shape
+;      (8 args incl. clamp).
 ;
 ; NEGATIVE PINS:
 ;
@@ -62,13 +72,11 @@
 
 ; The native gfx1250 WMMA intrinsic, with the K=4 f32 fragment
 ; shape reflected in the mangled types `.v8f32.v2f32`. Modifier
-; args are all defaulted (i1 false / i16 0) to match what clang's
+; args are defaulted (i16 0 / i1 false) to match what clang's
 ; `_Constant` builtin args produce for the failing kerneldex GEMMs.
-; IR: %wmma{{[0-9]*}} = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x4.f32.v8f32.v2f32(
-; IR-SAME: i1 false, <2 x float> %{{[^,]+}},
-; IR-SAME: i1 false, <2 x float> %{{[^,]+}},
-; IR-SAME: i16 0, <8 x float> %{{[^,]+}},
-; IR-SAME: i1 false, i1 false)
+; The call is 6-args matching AMDGPUWmmaIntrinsicModsC (no per-
+; element A_mod / B_mod slots).
+; IR: %wmma{{[0-9]*}} = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x4.f32.v8f32.v2f32(<2 x float> %{{[^,]+}}, <2 x float> %{{[^,]+}}, i16 0, <8 x float> %{{[^,]+}}, i1 false, i1 false)
 
 ; Negative: no MFMA fallback (K=4 f32 has no decomposition path).
 ; IR-NOT: @llvm.amdgcn.mfma.
