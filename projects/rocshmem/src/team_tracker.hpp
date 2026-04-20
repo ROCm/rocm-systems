@@ -98,7 +98,7 @@ class TeamTracker {
    *
    * @return number of teams currently being tracked
    */
-  int get_num_user_teams() { return teams_.size(); }
+  size_t get_num_user_teams() { return teams_.size(); }
 
   /**
    * @brief Get maximum number of teams supported by tracker
