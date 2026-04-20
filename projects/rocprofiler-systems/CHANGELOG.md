@@ -20,6 +20,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Topic-based help system: `--help` now shows a compact summary with essential options and a list of help topics. Use `--help=<topic>` (e.g., `--help=sampling`, `--help=gpu`, `--help=tracing`) to see only relevant options. Use `--help=all` for the full option listing.
 - Post-run output summary during library finalization showing result file locations.
 - JSON schema file (`share/rocprofiler-systems/presets/schema.json`) for preset validation.
+- Documentation (`docs/how-to/instrumenting-rewriting-binary-application.rst`) describing what to do when Dyninst reports a "Failed to transform trace" error during instrumentation.
 
 ### Changed
 
