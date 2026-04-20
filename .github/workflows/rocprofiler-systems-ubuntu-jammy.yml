@@ -186,11 +186,10 @@ jobs:
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
-          -DROCPROFSYS_TEST_LABELS_EXCLUDE="gpu" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=OFF \
           -- \
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5
@@ -374,11 +373,10 @@ jobs:
           -DROCPROFSYS_STRIP_LIBRARIES=OFF \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv;videodecode;jpegdecode;network" \
-          -DROCPROFSYS_TEST_LABELS_EXCLUDE="gpu" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
           -- \
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"
 
     - name: Install
       timeout-minutes: 10
@@ -521,7 +519,6 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11" \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp" \
-          -DROCPROFSYS_TEST_LABELS_EXCLUDE="gpu" \
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
           -- \
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"

@@ -202,8 +202,7 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "rocm" \
-            -LE "rccl|runtime|ompvv"
+            -L "rocm"
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5

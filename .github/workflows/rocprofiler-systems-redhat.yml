@@ -167,10 +167,9 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
           -DROCPROFSYS_TEST_PYTHON_VERSIONS="3.8;3.9;3.10;3.11"
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload"
-          -DROCPROFSYS_TEST_LABELS_EXCLUDE="gpu"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5

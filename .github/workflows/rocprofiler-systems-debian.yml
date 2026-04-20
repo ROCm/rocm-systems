@@ -148,12 +148,11 @@ jobs:
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_USE_OMPT=OFF \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network" \
-          -DROCPROFSYS_TEST_LABELS_EXCLUDE="gpu" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
           -DUSE_CLANG_OMP=OFF \
           -- \
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "network|gpu"
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5

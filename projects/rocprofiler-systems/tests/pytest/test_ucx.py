@@ -160,7 +160,7 @@ class TestUCX(RocprofsysTest):
 
         result = self.run_test(
             mode,
-            "mpi-example",
+            "mpi-send-recv",
             env=ucx_env,
             rewrite_args=REWRITE_ARGS,
             launcher="mpi",
