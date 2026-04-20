@@ -3,7 +3,7 @@
 // Fixture for the Class-4 "lane-position-dependent EXEC writes"
 // obstruction (lit_tests/c4_lane_dep_cmpx).
 //
-// SPE_DESIGN.md §3 Class 4: a v_cmpx_* (or s_*_saveexec_b32 derived
+// Class 4 (hotswap/docs/wave-size-translation.md §6): a v_cmpx_* (or s_*_saveexec_b32 derived
 // from mbcnt_hi) whose gating expression depends on the ABSOLUTE
 // lane position within the wave. Under modulo-replication the EXEC
 // mask is projected by `lane_id mod W_s`, but the compare operates

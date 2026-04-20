@@ -3,7 +3,7 @@
 // Fixture for the Class-3 "inter-replica communication via shared
 // state" obstruction (lit_tests/c3_atomic_cas).
 //
-// SPE_DESIGN.md §3 Class 3: atomics with non-commutative semantics
+// Class 3 (hotswap/docs/wave-size-translation.md §6): atomics with non-commutative semantics
 // (cmpxchg / xchg) at an address derived from lane-local state
 // create a new race under modulo-replication — target lanes i and
 // i + W_s collide on the same address, producing an outcome the
@@ -11,8 +11,9 @@
 // but the source intended both to win in their respective
 // single-wave executions).
 //
-// Commutative atomics (add / max / min) have a rewrite in §4's
-// table (per-replica gate); non-commutative ones do not. The
+// Commutative atomics (add / max / min) have a rewrite path (a
+// per-replica gate); non-commutative ones do not, and so appear in
+// the unrewritable table at wave-size-translation.md §7. The
 // classifier must therefore refuse at C3_NonCommutativeAtomic.
 //
 // NOTE. gpt-oss-derisking.md §4 observes that GPT-OSS / hipBLASLt /

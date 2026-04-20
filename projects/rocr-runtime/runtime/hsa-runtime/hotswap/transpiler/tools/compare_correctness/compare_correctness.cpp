@@ -46,6 +46,8 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -192,10 +194,15 @@ struct Recipe {
 
   // Elementwise comparator over the first `outElems` output elements.
   // Returns (numMismatches, maxAbsErr, firstMismatchIndex,
-  // firstExpected, firstActual).
+  // firstExpected, firstActual).  N and blockSize are passed so recipes
+  // whose output structure depends on the shape (e.g. Triton recipes
+  // with multiple per-output dtype/comparator slices) can re-derive
+  // their per-buffer layout without smuggling shape state across calls.
+  // HIP recipes that ignore them are free to do so.
   std::function<std::tuple<int, double, int, double, double>(
       const std::vector<uint8_t> &gold,
-      const std::vector<uint8_t> &actual, int outElems)>
+      const std::vector<uint8_t> &actual,
+      int N, int blockSize, int outElems)>
       compare;
 
   // Optional guard on (N, block).  If the recipe cannot produce a
@@ -282,7 +289,8 @@ Recipe makeVecaddRecipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int outElems) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
     const float *g = reinterpret_cast<const float *>(gold.data());
     const float *a = reinterpret_cast<const float *>(actual.data());
     double maxAbs = 0.0;
@@ -386,7 +394,8 @@ Recipe makeBlockSumRecipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int outElems) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
     const float *g = reinterpret_cast<const float *>(gold.data());
     const float *a = reinterpret_cast<const float *>(actual.data());
     double maxAbs = 0.0;
@@ -486,7 +495,8 @@ Recipe makeLaneSwapRecipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int outElems) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
     const float *g = reinterpret_cast<const float *>(gold.data());
     const float *a = reinterpret_cast<const float *>(actual.data());
     double maxAbs = 0.0;
@@ -636,7 +646,8 @@ Recipe makeCvtPkrtzRecipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -715,7 +726,8 @@ Recipe makeCvtPkF16Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -789,7 +801,8 @@ Recipe makeBfmB32Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -862,7 +875,8 @@ Recipe makeSwapB32Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -922,7 +936,8 @@ Recipe makeMovB64Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     const uint64_t *g = reinterpret_cast<const uint64_t *>(gold.data());
     const uint64_t *a = reinterpret_cast<const uint64_t *>(actual.data());
     int mismatches = 0, firstIdx = -1;
@@ -1007,7 +1022,8 @@ Recipe makeCvtF32Bf16Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     // Bit-exact on u32 reinterpretation of floats.  Necessary because
     // NaN inputs produce NaNs whose bit pattern must be preserved, and
     // naive float subtraction would treat any NaN as mismatch noise.
@@ -1084,7 +1100,8 @@ Recipe makeVAddLshlU32Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -1179,7 +1196,8 @@ Recipe makeVBfeI32Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -1279,7 +1297,8 @@ Recipe makeSBfeI32Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -1348,7 +1367,8 @@ Recipe makeSBitset0B32Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     return compareU32Exact(gold, actual, n);
   };
   return r;
@@ -1434,7 +1454,8 @@ Recipe makeSBitset0B64Recipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                 const std::vector<uint8_t> &actual, int n) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int n) {
     // Elementwise 64-bit exact compare.  Mirrors compareU32Exact shape.
     const uint64_t *g = reinterpret_cast<const uint64_t *>(gold.data());
     const uint64_t *a = reinterpret_cast<const uint64_t *>(actual.data());
@@ -1456,8 +1477,9 @@ Recipe makeSBitset0B64Recipe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Recipe: c4_lane_dep_cmpx — runtime evidence for SPE_DESIGN.md §3
-// Class 4 (lane-position-dependent EXEC writes).
+// Recipe: c4_lane_dep_cmpx — runtime evidence for Class 4 (lane-
+// position-dependent EXEC writes) per hotswap/docs/wave-size-
+// translation.md §6.
 //
 // Companion to lit_tests/c4_lane_dep_cmpx (offline classifier pin).
 // The harness runs the same kernel under native / legacy / salmon:
@@ -1543,7 +1565,8 @@ Recipe makeC4LaneDepCmpxRecipe() {
   };
 
   r.compare = [](const std::vector<uint8_t> &gold,
-                  const std::vector<uint8_t> &actual, int outElems) {
+                 const std::vector<uint8_t> &actual,
+                 int /*N*/, int /*blockSize*/, int outElems) {
     const int *g = reinterpret_cast<const int *>(gold.data());
     const int *a = reinterpret_cast<const int *>(actual.data());
     int mismatches = 0, firstIdx = -1;
@@ -2119,10 +2142,34 @@ int64_t evalCached(const CachedExpr &e,
 // dispatch against the current shape and constexprs (e.g. "N" or "M * K").
 // Multi-dim shapes are supported at the expression level; only the
 // top-level shape sweep is single-dim in Phase 1.
+//
+// Inputs may carry an optional uniform-random range [rangeLo, rangeHi).
+// The defaults ([-1, 1)) suit elementwise kernels whose outputs stay in a
+// well-behaved range; reduction kernels (softmax, layernorm) typically
+// want a tighter range like [-0.1, 0.1) so per-row sums don't overflow
+// the fp16 representable range.  Integer dtypes ignore the range fields
+// (they always sample full-range bits).
+//
+// Outputs may carry an optional per-output comparator that overrides the
+// recipe-level comparator.  This is useful when a single recipe produces
+// outputs with very different numerical properties (e.g. layer_norm
+// returns Y, mean, rstd: Y wants relative error, rstd wants absolute).
+// `hasComparator == false` means "fall back to TritonRecipe::comparator".
+struct TritonComparator {
+  std::string kind;  // "abs", "rel", or "rel-rms"
+  double tol = 1e-5;
+};
+
 struct TritonBufferDesc {
   std::string name;        // must match a signature arg
-  std::string dtype;       // "fp16", "fp32", "i32", …
+  std::string dtype;       // "fp16", "bf16", "fp32", "fp64", "i32", "i64"
   CachedExpr elems;        // expression in identifiers from shape/constexprs
+  // Inputs: uniform-random range for float dtypes (ignored for ints).
+  double rangeLo = -1.0;
+  double rangeHi =  1.0;
+  // Outputs: optional per-output comparator override.
+  bool hasComparator = false;
+  TritonComparator comparator;
 };
 
 struct TritonRecipe {
@@ -2130,7 +2177,20 @@ struct TritonRecipe {
   std::string kernelSymbol;   // symbol to look up via hipModuleGetFunction
   int numWarps = 4;
   std::vector<TritonSigArg> signature;
+  // Triton-side constexprs.  Triton bakes these as compile-time constants
+  // into the .co; their names must match `: tl.constexpr` parameters of
+  // the kernel function.  They *also* land in the C++ scope so `elems` /
+  // `grid` expressions can reference them by name.
   std::map<std::string, int> constexprs;
+  // Harness-only scope entries.  These feed the integer scope used by
+  // `elems` / `grid` / `scalar_args` expression eval, but they are NOT
+  // passed to Triton — useful for "logical" recipe dimensions that
+  // aren't kernel parameters at all (e.g. layer-norm's row count `M`,
+  // which is encoded purely via the launch grid), or for runtime sig
+  // args that the harness wants to hold constant across the sweep
+  // without having Triton bake them as constexprs (e.g. softmax's
+  // `n_rows`, where baking would also drop the kernarg slot).
+  std::map<std::string, int> harnessConstants;
   // Sweep: each entry is one scalar shape value (Phase 1 limits Triton shapes
   // to a single scalar dimension whose name is `shapeDimName`, e.g. "N").
   // The harness sweeps one run per value.  Multi-dim shapes can be added in
@@ -2144,10 +2204,24 @@ struct TritonRecipe {
   struct { CachedExpr x, y, z; } grid;
   std::vector<TritonBufferDesc> inputs;   // materialized from deterministic RNG
   std::vector<TritonBufferDesc> outputs;  // read back and compared
-  struct {
-    std::string kind;  // "abs" or "rel"
-    double tol = 1e-5;
-  } comparator;
+  // Default comparator applied to any output that doesn't carry its own.
+  TritonComparator comparator;
+  // Computed scalar args.  Each entry maps a scalar sig arg name to an
+  // expression evaluated at dispatch time against (shapeDim + constexprs).
+  // For integer sig types the expression is the usual integer expr (same
+  // grammar as `elems` and `grid`).  For floating-point sig types the
+  // expression is a literal numeric value (e.g. "1e-5") parsed once at
+  // sidecar-load time into `scalarArgsFloat`.
+  //
+  // A scalar sig arg may be resolved by, in priority order:
+  //   1. scalarArgsInt[name]   (integer expression)
+  //   2. scalarArgsFloat[name] (float literal; only for fp* sig types)
+  //   3. scope[name]           (legacy: arg name == constexpr/shape-dim key)
+  //
+  // The legacy fallback is what makes vecadd's `N` work without a
+  // scalar_args entry.
+  std::map<std::string, CachedExpr> scalarArgsInt;
+  std::map<std::string, double>     scalarArgsFloat;
   std::map<std::string, TritonArchMeta> archMeta;  // keyed by "gfx942", "gfx1250"
 };
 
@@ -2211,6 +2285,19 @@ TritonRecipe parseTritonSidecar(const std::string &path) {
     for (const auto &kv : ce->objectVal)
       t.constexprs[kv.first] = static_cast<int>(kv.second.asInt());
   }
+  if (const auto *hc = root.find("harness_constants"); hc && hc->isObject()) {
+    for (const auto &kv : hc->objectVal) {
+      // Harness constants share the integer scope with constexprs and
+      // the shape dim.  Overlap would make the scope's value depend on
+      // insertion order — refuse loudly so the recipe writer picks one
+      // place to declare each name.
+      if (t.constexprs.count(kv.first))
+        die("triton sidecar: harness_constants[%s] also appears in "
+            "constexprs; declare each name in exactly one place.",
+            kv.first.c_str());
+      t.harnessConstants[kv.first] = static_cast<int>(kv.second.asInt());
+    }
+  }
   const auto &shape = root.get("shape");
   t.shapeDimName = shape.get("dim").asString();
   for (const auto &sv : shape.get("values").asArray())
@@ -2224,8 +2311,9 @@ TritonRecipe parseTritonSidecar(const std::string &path) {
     t.grid.y = makeCachedExpr(grid.get("y").asString());
     t.grid.z = makeCachedExpr(grid.get("z").asString());
   }
-  // Buffer descriptions: parse the elems expression once per buffer.
-  auto loadBuffers = [&](const char *section,
+  // Buffer descriptions: parse the elems expression once per buffer, plus
+  // the optional input range and optional per-output comparator override.
+  auto loadBuffers = [&](const char *section, bool isInput,
                          std::vector<TritonBufferDesc> &dst) {
     for (const auto &b : root.get(section).asArray()) {
       TritonBufferDesc d;
@@ -2234,29 +2322,83 @@ TritonRecipe parseTritonSidecar(const std::string &path) {
       ParseContextScope sub(
           ctx_str(section, " elems for ", d.name, " in ", path));
       d.elems = makeCachedExpr(b.get("elems").asString());
+      if (isInput) {
+        if (const auto *lo = b.find("range_lo")) d.rangeLo = lo->asDouble();
+        if (const auto *hi = b.find("range_hi")) d.rangeHi = hi->asDouble();
+        if (!(d.rangeLo < d.rangeHi))
+          die("triton sidecar: input %s has invalid range [%g, %g) "
+              "(rangeLo must be strictly less than rangeHi)",
+              d.name.c_str(), d.rangeLo, d.rangeHi);
+      } else {
+        if (const auto *c = b.find("comparator")) {
+          d.hasComparator    = true;
+          d.comparator.kind  = c->get("kind").asString();
+          d.comparator.tol   = c->get("tol").asDouble();
+        }
+      }
       dst.push_back(std::move(d));
     }
   };
-  loadBuffers("inputs",  t.inputs);
-  loadBuffers("outputs", t.outputs);
-  // Phase 1 limitation: tritonCompare reinterprets the entire output blob
-  // as the first output's dtype.  Mixed-dtype outputs would silently
-  // misinterpret the buffer (and worse, a bit pattern that decodes to NaN
-  // would always trip the NaN-mismatch path).  Until the comparator grows
-  // a per-slice path, refuse such recipes at load time.  (aot_compile.py
-  // also enforces this at AOT time so the failure surface is shifted left
-  // to the build, but we keep the C++ check as a defence in depth.)
+  loadBuffers("inputs",  /*isInput=*/true,  t.inputs);
+  loadBuffers("outputs", /*isInput=*/false, t.outputs);
   if (t.outputs.empty())
     die("triton sidecar: at least one output is required");
-  for (size_t i = 1; i < t.outputs.size(); ++i) {
-    if (t.outputs[i].dtype != t.outputs.front().dtype)
-      die("triton sidecar: Phase 1 requires all outputs share dtype "
-          "(got '%s' and '%s'); split the recipe or extend tritonCompare",
-          t.outputs.front().dtype.c_str(), t.outputs[i].dtype.c_str());
-  }
+  // Recipe-level comparator: required, applied to any output that doesn't
+  // carry its own override.
   const auto &cmp = root.get("comparator");
   t.comparator.kind = cmp.get("kind").asString();
   t.comparator.tol  = cmp.get("tol").asDouble();
+  // Optional `scalar_args`: maps a scalar sig arg name to either an
+  // integer expression (string) or a numeric literal (number).  The
+  // type of the corresponding scalar sig arg decides how to interpret
+  // the value.  Strings → integer expression; numbers → float literal.
+  // Anything that doesn't match the sig type is a hard error here, not
+  // a silent reinterpret.
+  if (const auto *sa = root.find("scalar_args"); sa && sa->isObject()) {
+    auto sigArgType = [&](const std::string &name) -> const std::string & {
+      for (const auto &s : t.signature)
+        if (s.name == name) return s.type;
+      die("triton sidecar: scalar_args refers to unknown sig arg %s",
+          name.c_str());
+    };
+    auto isFloatType = [](const std::string &type) {
+      return type == "fp16" || type == "bf16" ||
+             type == "fp32" || type == "fp64";
+    };
+    auto isIntType = [](const std::string &type) {
+      return type == "i1"  || type == "i8"   || type == "u8"  ||
+             type == "i16" || type == "u16"  ||
+             type == "i32" || type == "u32"  ||
+             type == "i64" || type == "u64";
+    };
+    for (const auto &kv : sa->objectVal) {
+      const std::string &name = kv.first;
+      const JsonValue   &val  = kv.second;
+      const std::string &type = sigArgType(name);
+      ParseContextScope sub(
+          ctx_str("scalar_args entry ", name, " in ", path));
+      if (val.kind == JsonValue::StringK) {
+        if (!isIntType(type))
+          die("triton sidecar: scalar_args[%s] is a string expression but "
+              "sig type is %s; expression-form is integer-only.  Use a "
+              "numeric literal for float sig types.",
+              name.c_str(), type.c_str());
+        t.scalarArgsInt.emplace(name, makeCachedExpr(val.stringVal));
+      } else if (val.kind == JsonValue::IntK ||
+                 val.kind == JsonValue::DoubleK) {
+        if (!isFloatType(type))
+          die("triton sidecar: scalar_args[%s] is a numeric literal but "
+              "sig type is %s; numeric-literal form is float-only.  Use "
+              "a string expression for integer sig types (e.g. \"%s\").",
+              name.c_str(), type.c_str(), name.c_str());
+        t.scalarArgsFloat.emplace(name, val.asDouble());
+      } else {
+        die("triton sidecar: scalar_args[%s] must be a string (integer "
+            "expression) or a number (float literal); got JSON kind=%d.",
+            name.c_str(), static_cast<int>(val.kind));
+      }
+    }
+  }
   const auto &meta = root.get("metadata");
   if (const auto *m942  = meta.find("gfx942"))  t.archMeta["gfx942"]  = parseArchMeta(*m942);
   if (const auto *m1250 = meta.find("gfx1250")) t.archMeta["gfx1250"] = parseArchMeta(*m1250);
@@ -2416,20 +2558,28 @@ const std::set<std::string> &implicitUnsafeKinds() {
   static const std::set<std::string> s = {
       "hidden_hostcall_buffer",  // tl.device_print would dereference
       "hidden_heap_v1",          // tl.malloc would dereference
-      // The block-count slots can be read by some Triton lowerings to
-      // resolve `tl.num_programs`; since we never set them, refuse loudly
-      // rather than silently pass zero.
-      "hidden_block_count_x",
-      "hidden_block_count_y",
-      "hidden_block_count_z",
+      // hidden_block_count_{x,y,z} are *not* unsafe: tritonDispatch fills
+      // them from the launch grid before calling hipModuleLaunchKernel.
+      // They used to live here back when the harness left implicit slots
+      // at zero, which silently made `tl.num_programs` return 0.
   };
   return s;
 }
 
-// Build the (shape + constexprs) scope used to evaluate grid/elems exprs.
+// Build the integer scope used to evaluate grid / elems / scalar_args
+// expressions.  The scope is the union of (constexprs, harness_constants,
+// shape_dim).  Overlap between constexprs and harness_constants is already
+// rejected at parse time; overlap with shape_dim is rejected here.
 std::map<std::string, int>
 tritonScope(const TritonRecipe &t, int shapeValue) {
   std::map<std::string, int> scope = t.constexprs;
+  for (const auto &kv : t.harnessConstants) {
+    scope[kv.first] = kv.second;  // overlap-with-constexprs already rejected
+  }
+  if (scope.count(t.shapeDimName))
+    die("triton %s: shape_dim %s also appears in constexprs / "
+        "harness_constants; the swept value would be silently ignored",
+        t.name.c_str(), t.shapeDimName.c_str());
   scope[t.shapeDimName] = shapeValue;
   return scope;
 }
@@ -2493,7 +2643,8 @@ tritonMakeInput(const TritonRecipe &t, int shapeValue) {
     if (b.dtype == "fp16") {
       auto *out = reinterpret_cast<uint16_t *>(buf.data() + off);
       size_t n = sz / 2;
-      std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+      std::uniform_real_distribution<float> dist(
+          static_cast<float>(b.rangeLo), static_cast<float>(b.rangeHi));
       for (size_t i = 0; i < n; ++i) {
         float f = dist(rng);
         // IEEE 754 f32 → f16 RTZ.  Approximate is fine — identical bytes
@@ -2508,15 +2659,29 @@ tritonMakeInput(const TritonRecipe &t, int shapeValue) {
         else                h = static_cast<uint16_t>(sign | (exp << 10) | mant);
         out[i] = h;
       }
+    } else if (b.dtype == "bf16") {
+      // bf16 = top 16 bits of fp32, truncated (no rounding).  Both paths
+      // see the identical byte pattern, so the truncation choice is moot
+      // for cross-ISA comparison; what matters is determinism.
+      auto *out = reinterpret_cast<uint16_t *>(buf.data() + off);
+      size_t n = sz / 2;
+      std::uniform_real_distribution<float> dist(
+          static_cast<float>(b.rangeLo), static_cast<float>(b.rangeHi));
+      for (size_t i = 0; i < n; ++i) {
+        float f = dist(rng);
+        uint32_t u; std::memcpy(&u, &f, sizeof(u));
+        out[i] = static_cast<uint16_t>(u >> 16);
+      }
     } else if (b.dtype == "fp32") {
       auto *out = reinterpret_cast<float *>(buf.data() + off);
       size_t n = sz / 4;
-      std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+      std::uniform_real_distribution<float> dist(
+          static_cast<float>(b.rangeLo), static_cast<float>(b.rangeHi));
       for (size_t i = 0; i < n; ++i) out[i] = dist(rng);
     } else if (b.dtype == "fp64") {
       auto *out = reinterpret_cast<double *>(buf.data() + off);
       size_t n = sz / 8;
-      std::uniform_real_distribution<double> dist(-1.0, 1.0);
+      std::uniform_real_distribution<double> dist(b.rangeLo, b.rangeHi);
       for (size_t i = 0; i < n; ++i) out[i] = dist(rng);
     } else if (b.dtype == "i32") {
       auto *out = reinterpret_cast<int32_t *>(buf.data() + off);
@@ -2530,6 +2695,13 @@ tritonMakeInput(const TritonRecipe &t, int shapeValue) {
       for (size_t i = 0; i < n; ++i) {
         uint32_t u = static_cast<uint32_t>(rng());
         std::memcpy(&out[i], &u, sizeof(uint32_t));
+      }
+    } else if (b.dtype == "i64") {
+      auto *out = reinterpret_cast<int64_t *>(buf.data() + off);
+      size_t n = sz / 8;
+      for (size_t i = 0; i < n; ++i) {
+        uint64_t u = rng();
+        std::memcpy(&out[i], &u, sizeof(int64_t));
       }
     } else {
       die("triton %s: makeInput doesn't handle dtype=%s (extend when needed)",
@@ -2660,15 +2832,16 @@ tritonDispatch(const TritonRecipe &t, hipModule_t mod,
 
       std::memcpy(kargBuf.data() + slot.offset, &dptr, 8);
     } else {
-      // Scalar sig arg.  Its value must be resolvable from the shape scope —
-      // either the shape dim (e.g. N) or a constexpr name matching the sig
-      // arg name (e.g. M/N/K for matmul, if we declared them in the shape +
-      // constexprs).
-      auto sit = scope.find(sa.name);
-      if (sit == scope.end())
-        die("triton %s: scalar arg %s not resolvable from shape/constexprs",
-            t.name.c_str(), sa.name.c_str());
-      int64_t val = sit->second;
+      // Scalar sig arg.  Resolve in priority order:
+      //   1. scalarArgsInt[name]   (integer expression)
+      //   2. scalarArgsFloat[name] (float literal; only for fp* sig types)
+      //   3. scope[name]           (legacy: arg name == constexpr/shape-dim
+      //                             key, e.g. vecadd's `N`)
+      // A scalar arg that resolves through none of these is a recipe bug;
+      // surface loudly with the full lookup chain so the user knows what
+      // to fix.
+      bool isFloat = (sa.type == "fp16" || sa.type == "bf16" ||
+                      sa.type == "fp32" || sa.type == "fp64");
 
       // Validate the metadata slot size matches what the user typed.
       // Catches "sig says i32, metadata slot is 8 bytes" — that would
@@ -2684,16 +2857,80 @@ tritonDispatch(const TritonRecipe &t, hipModule_t mod,
             t.name.c_str(), sa.name.c_str(), sa.type.c_str(),
             expectedBytes, slot.size);
 
-      // We currently sweep integer-valued shape/constexpr scopes.  fp32
-      // scalars would need a separate scope-of-doubles to round-trip
-      // exactly; until a kernel needs that, refuse so we don't silently
-      // pass an integer where a float is expected.
-      if (sa.type == "fp16" || sa.type == "bf16" || sa.type == "fp32" ||
-          sa.type == "fp64") {
-        die("triton %s: scalar arg %s sig_type=%s is floating-point; "
-            "the integer-only shape scope can't represent it.  Add a "
-            "real-valued scope path before using float scalar args.",
-            t.name.c_str(), sa.name.c_str(), sa.type.c_str());
+      if (isFloat) {
+        auto fit = t.scalarArgsFloat.find(sa.name);
+        if (fit == t.scalarArgsFloat.end())
+          die("triton %s: float scalar arg %s sig_type=%s has no value; "
+              "add scalar_args[%s] = <numeric literal> to the recipe.",
+              t.name.c_str(), sa.name.c_str(), sa.type.c_str(),
+              sa.name.c_str());
+        double dval = fit->second;
+        if (sa.type == "fp64") {
+          double v = dval;
+          std::memcpy(kargBuf.data() + slot.offset, &v, 8);
+        } else if (sa.type == "fp32") {
+          float v = static_cast<float>(dval);
+          std::memcpy(kargBuf.data() + slot.offset, &v, 4);
+        } else if (sa.type == "fp16") {
+          // Encode IEEE 754 binary16 from a finite double.  We only
+          // need to handle the values a user will reasonably write
+          // here (small positive eps, etc.); subnormals and ±inf are
+          // out of scope.  Round-to-nearest-even via float32 hop.
+          float f32 = static_cast<float>(dval);
+          uint32_t u32;
+          std::memcpy(&u32, &f32, 4);
+          uint32_t sign = (u32 >> 31) & 0x1;
+          int32_t  exp  = static_cast<int32_t>((u32 >> 23) & 0xFF) - 127;
+          uint32_t mant = u32 & 0x7FFFFF;
+          uint16_t h;
+          if (exp > 15) {
+            // Overflow → ±inf, surface so the user notices.
+            die("triton %s: fp16 scalar arg %s value %g overflows fp16",
+                t.name.c_str(), sa.name.c_str(), dval);
+          } else if (exp < -14) {
+            die("triton %s: fp16 scalar arg %s value %g is fp16-subnormal "
+                "or zero; encode it through a non-subnormal path or "
+                "extend the dispatch encoder",
+                t.name.c_str(), sa.name.c_str(), dval);
+          } else {
+            uint32_t hexp = static_cast<uint32_t>(exp + 15);
+            uint32_t hmant = mant >> 13;
+            // Round-to-nearest-even on the dropped 13 bits.
+            uint32_t low = mant & 0x1FFF;
+            if (low > 0x1000 || (low == 0x1000 && (hmant & 1)))
+              hmant++;
+            if (hmant == 0x400) { hmant = 0; hexp++; }
+            h = static_cast<uint16_t>((sign << 15) | (hexp << 10) | hmant);
+          }
+          std::memcpy(kargBuf.data() + slot.offset, &h, 2);
+        } else if (sa.type == "bf16") {
+          // bf16 = top 16 bits of fp32 with round-to-nearest-even.
+          float f32 = static_cast<float>(dval);
+          uint32_t u32;
+          std::memcpy(&u32, &f32, 4);
+          uint32_t rounding_bias = 0x7FFF + ((u32 >> 16) & 1);
+          uint16_t b = static_cast<uint16_t>((u32 + rounding_bias) >> 16);
+          std::memcpy(kargBuf.data() + slot.offset, &b, 2);
+        }
+        continue;
+      }
+
+      // Integer scalar.
+      int64_t val;
+      auto eit = t.scalarArgsInt.find(sa.name);
+      if (eit != t.scalarArgsInt.end()) {
+        val = evalCached(eit->second, scope);
+      } else {
+        auto sit = scope.find(sa.name);
+        if (sit == scope.end())
+          die("triton %s: integer scalar arg %s not resolvable.  Lookup "
+              "chain tried: scalar_args[%s] (computed expression), "
+              "scope[%s] (shape dim or constexpr by name).  Add the "
+              "arg to scalar_args or rename the shape dim / constexpr "
+              "to match.",
+              t.name.c_str(), sa.name.c_str(),
+              sa.name.c_str(), sa.name.c_str());
+        val = sit->second;
       }
 
       if (slot.size == 1) {
@@ -2715,40 +2952,94 @@ tritonDispatch(const TritonRecipe &t, hipModule_t mod,
     }
   }
 
-  // Trailing implicit kernarg slots (i >= signature.size()) are zeroed in
-  // the kernarg buffer.  That's safe only for slots whose value_kind the
-  // kernel either ignores or treats null as "feature disabled".  Refuse
-  // any kind that isn't on the safe-list, with a special path for
-  // explicitly-known-unsafe kinds so the message is more helpful.
+  // We need the launch grid extents for two reasons: the actual launch
+  // below, and filling the hidden_block_count / hidden_group_size /
+  // hidden_remainder / hidden_grid_dims implicit kernarg slots that
+  // Triton lowerings read for tl.num_programs / tl.program_id / etc.
+  int64_t gx = evalCached(t.grid.x, scope);
+  int64_t gy = evalCached(t.grid.y, scope);
+  int64_t gz = evalCached(t.grid.z, scope);
+  int wgSize = M.maxFlatWorkgroupSize > 0 ? M.maxFlatWorkgroupSize : 256;
+  // The launch we issue below uses (wgSize, 1, 1) for the workgroup
+  // shape; if that ever changes, mirror the new shape here too or
+  // tl.program_id will read stale group sizes.
+  uint32_t bx = static_cast<uint32_t>(wgSize), by = 1, bz = 1;
+
+  // Trailing implicit kernarg slots (i >= signature.size()).  Categorise
+  // each slot:
+  //   * Some have well-defined values the harness must fill (block
+  //     counts, group sizes, remainders, grid_dims).  Filling them
+  //     correctly is what makes any non-trivial Triton kernel — anything
+  //     that calls tl.num_programs / tl.program_id under a non-default
+  //     lowering — actually compute the right answer.
+  //   * Some are NULL-safe (offsets, dynamic LDS, scratch base, etc.)
+  //     and stay at the zero-initialised value in kargBuf.
+  //   * Some require runtime infra we haven't built (hostcall, heap)
+  //     and we refuse loudly.
+  // Anything else surfaces a hard error so an unrecognised slot doesn't
+  // get silently zeroed.
+  auto fill32 = [&](const TritonArchMeta::Arg &slot, uint32_t v,
+                    const char *what) {
+    if (slot.size != 4)
+      die("triton %s: implicit slot %s expected size=4, got %d",
+          t.name.c_str(), what, slot.size);
+    std::memcpy(kargBuf.data() + slot.offset, &v, 4);
+  };
+  auto fill16 = [&](const TritonArchMeta::Arg &slot, uint16_t v,
+                    const char *what) {
+    if (slot.size != 2)
+      die("triton %s: implicit slot %s expected size=2, got %d",
+          t.name.c_str(), what, slot.size);
+    std::memcpy(kargBuf.data() + slot.offset, &v, 2);
+  };
   for (size_t i = t.signature.size(); i < M.args.size(); ++i) {
     const auto &slot = M.args[i];
-    if (implicitUnsafeKinds().count(slot.valueKind)) {
+    const std::string &k = slot.valueKind;
+    // Block counts: 32-bit each.  tl.num_programs(N) lowers to a load
+    // from these.
+    if (k == "hidden_block_count_x") { fill32(slot, static_cast<uint32_t>(gx), k.c_str()); continue; }
+    if (k == "hidden_block_count_y") { fill32(slot, static_cast<uint32_t>(gy), k.c_str()); continue; }
+    if (k == "hidden_block_count_z") { fill32(slot, static_cast<uint32_t>(gz), k.c_str()); continue; }
+    // Workgroup sizes: 16-bit each.  Some Triton lowerings of
+    // tl.program_id rebuild the program id from these.
+    if (k == "hidden_group_size_x")  { fill16(slot, static_cast<uint16_t>(bx), k.c_str()); continue; }
+    if (k == "hidden_group_size_y")  { fill16(slot, static_cast<uint16_t>(by), k.c_str()); continue; }
+    if (k == "hidden_group_size_z")  { fill16(slot, static_cast<uint16_t>(bz), k.c_str()); continue; }
+    // Remainders: 16-bit each.  For a uniform grid (block count is
+    // fixed across the launch) the remainder is 0.  We don't expose
+    // partial-workgroup launches, so 0 is correct here.
+    if (k == "hidden_remainder_x" || k == "hidden_remainder_y" ||
+        k == "hidden_remainder_z") { fill16(slot, 0, k.c_str()); continue; }
+    // Number of *meaningful* grid dims (1, 2, or 3).  Pick the highest
+    // dim with extent > 1.  Triton lowerings sometimes use this to
+    // skip work on collapsed dims.
+    if (k == "hidden_grid_dims") {
+      uint16_t nd = (gz > 1) ? 3 : (gy > 1 ? 2 : 1);
+      fill16(slot, nd, k.c_str());
+      continue;
+    }
+    if (implicitUnsafeKinds().count(k)) {
       die("triton %s on %s: trailing implicit kernarg slot %zu has "
           "value_kind=%s, which the kernel will dereference at runtime "
-          "(printf/malloc/grid-info).  The harness leaves implicit slots "
-          "at zero; this recipe is unsupported in Phase 1.",
-          t.name.c_str(), gCurrentChildIsa.c_str(), i,
-          slot.valueKind.c_str());
+          "(printf/malloc).  The harness leaves implicit slots at zero; "
+          "this recipe is unsupported in Phase 1.",
+          t.name.c_str(), gCurrentChildIsa.c_str(), i, k.c_str());
     }
-    if (!implicitSafeKinds().count(slot.valueKind)) {
+    if (!implicitSafeKinds().count(k)) {
       die("triton %s on %s: trailing implicit kernarg slot %zu has "
           "unknown value_kind=%s.  The harness only allows a known-safe "
           "whitelist; investigate whether this slot needs a real value, "
           "and either extend implicitSafeKinds() or refuse to launch.",
-          t.name.c_str(), gCurrentChildIsa.c_str(), i,
-          slot.valueKind.c_str());
+          t.name.c_str(), gCurrentChildIsa.c_str(), i, k.c_str());
     }
   }
 
-  // Launch.
-  int64_t gx = evalCached(t.grid.x, scope);
-  int64_t gy = evalCached(t.grid.y, scope);
-  int64_t gz = evalCached(t.grid.z, scope);
+  // Launch.  wgSize was already computed above so the implicit-slot
+  // filler could pass it into hidden_group_size_*.
   size_t kSize = kargBuf.size();
   void *cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, kargBuf.data(),
                  HIP_LAUNCH_PARAM_BUFFER_SIZE,   &kSize,
                  HIP_LAUNCH_PARAM_END};
-  int wgSize = M.maxFlatWorkgroupSize > 0 ? M.maxFlatWorkgroupSize : 256;
   // Static LDS (group_segment_fixed_size) is allocated by HIP from the
   // kernel descriptor automatically.  The 7th hipModuleLaunchKernel arg is
   // *dynamic* LDS — what the kernel reads via `extern __shared__` — and is
@@ -2797,121 +3088,253 @@ tritonDispatch(const TritonRecipe &t, hipModule_t mod,
   return outBlob;
 }
 
-// Comparator for Triton recipes: flat elementwise over a concatenation of
-// all output buffers.  We use the first output's dtype to interpret elements
-// (parseTritonSidecar enforces uniform dtype across outputs in Phase 1).
+// Decode IEEE 754 binary16 → binary32, full-precision (no flush-to-zero).
+// Subnormals are normalised to f32 normals; NaNs propagate (mantissa
+// preserved); ±inf preserved.  Hoisted out of tritonCompare so the bf16
+// path can sit next to it without duplicating the structure.
+inline double half2double(uint16_t h) {
+  uint32_t sign = (uint32_t(h & 0x8000u)) << 16;
+  uint32_t exp  = (h & 0x7c00u) >> 10;
+  uint32_t mant = (h & 0x03ffu);
+  uint32_t u;
+  if (exp == 0) {
+    if (mant == 0) {
+      u = sign;  // ±0
+    } else {
+      // Subnormal half (value = mant * 2^-24).  Renormalise into f32 by
+      // left-shifting until the implicit bit appears, then assemble with
+      // the appropriate biased exponent.
+      int e = -1;
+      do { ++e; mant <<= 1; } while ((mant & 0x400) == 0);
+      mant &= 0x3ff;
+      u = sign | static_cast<uint32_t>((127 - 15 - e) << 23) | (mant << 13);
+    }
+  } else if (exp == 31) {
+    // inf or NaN — preserve sign and mantissa (mant != 0 ⇒ NaN).
+    u = sign | 0x7f800000u | (mant << 13);
+  } else {
+    u = sign | ((exp + 127 - 15) << 23) | (mant << 13);
+  }
+  float f; std::memcpy(&f, &u, 4); return f;
+}
+
+// Decode bf16 → fp32: bf16 is the top 16 bits of fp32, so reinflating is
+// just `(bf << 16)` and a memcpy.  No subnormal renormalisation is needed
+// because bf16 and fp32 share an exponent range.
+inline double bf162double(uint16_t b) {
+  uint32_t u = static_cast<uint32_t>(b) << 16;
+  float f; std::memcpy(&f, &u, 4);
+  return f;
+}
+
+// Comparator for Triton recipes: walk each declared output, decode its
+// slice with the right dtype, and judge it with the right comparator
+// (per-output override if set, else the recipe-level default).
 //
-// NaN handling: NaN-vs-NaN is treated as a match (the established
-// convention for numerical correctness checks; both paths agree on
-// "no defined value here").  NaN-vs-finite (or finite-vs-NaN) is always a
-// mismatch.
+// `shapeValue` is the resolved scalar shape (e.g. 1024 for vecadd N=1024).
+// We re-derive the per-output byte slices from shape + constexprs so each
+// output is judged on its own elements, even when outputs differ in dtype
+// or in element count (no longer pinned to "same dtype, same elems").
 //
-// Subnormal handling: fp16 denormals are decoded properly (no flush-to-zero)
-// so a kernel that produces denormals on one path and ±0 on the other is
-// reported as a mismatch instead of a silent agreement.
+// NaN handling: NaN-vs-NaN is treated as a match (both paths agree on "no
+// defined value here").  NaN-vs-finite is always a mismatch.  Both ±inf
+// with matching sign agree (kernels routinely saturate to ±inf on
+// overflow; agreeing on the sign is the desired invariant).
+//
+// Subnormal handling: fp16 denormals are decoded properly (no flush-to-
+// zero) so a kernel that produces denormals on one path and ±0 on the
+// other is reported as a mismatch instead of a silent agreement.
+//
+// Comparator kinds:
+//   abs      — |g - a| <= tol, per element
+//   rel      — |g - a| / max(|g|, 1e-6) <= tol, per element
+//   rel-rms  — sqrt(mean((g-a)^2)) / max(sqrt(mean(g^2)), 1e-6) <= tol,
+//              one verdict per output buffer.  Robust to per-element
+//              reordering (typical of cross-wave-size reductions).  When
+//              the verdict is "bad", the mismatch counter is set to the
+//              full element count of the buffer and firstIdx points at
+//              the worst element so the report shows where to look.
 std::tuple<int, double, int, double, double>
 tritonCompare(const TritonRecipe &t,
               const std::vector<uint8_t> &gold,
-              const std::vector<uint8_t> &actual, int outElems) {
-  if (gold.size() != actual.size())
-    return std::make_tuple(outElems, 1.0, 0,
+              const std::vector<uint8_t> &actual, int shapeValue) {
+  if (gold.size() != actual.size()) {
+    int total = static_cast<int>(gold.size() / 1);  // bytes; coarse but loud
+    return std::make_tuple(total, 1.0, 0,
                            static_cast<double>(gold.size()),
                            static_cast<double>(actual.size()));
-  const auto &dtype = t.outputs.front().dtype;
-  int mismatches = 0, firstIdx = -1;
-  double maxAbs = 0.0, firstG = 0.0, firstA = 0.0;
-  auto judge = [&](double gv, double av, int i) {
-    bool gNaN = std::isnan(gv);
-    bool aNaN = std::isnan(av);
-    if (gNaN && aNaN) return;  // both NaN → agree, no contribution
-    bool gInf = std::isinf(gv);
-    bool aInf = std::isinf(av);
-    // Both ±inf with matching sign → agree (kernels routinely saturate to
-    // ±inf on overflow; both paths agreeing on the sign of the saturation
-    // is the desired correctness invariant, and `inf - inf` would
-    // otherwise produce NaN and trip the mismatch path below).
-    if (gInf && aInf && std::signbit(gv) == std::signbit(av)) return;
-    double d;
-    if (gNaN || aNaN || (gInf != aInf) ||
-        (gInf && aInf /* opposite signs */)) {
-      d = std::numeric_limits<double>::infinity();
-    } else {
-      d = std::fabs(gv - av);
-    }
-    if (std::isfinite(d) && d > maxAbs) maxAbs = d;
-    bool bad;
-    if (t.comparator.kind == "abs") {
-      bad = !(d <= t.comparator.tol);
-    } else if (t.comparator.kind == "rel") {
-      double denom = std::max(std::fabs(gv), 1e-6);
-      bad = !(d / denom <= t.comparator.tol);
-    } else {
-      die("triton %s: unsupported comparator kind %s",
-          t.name.c_str(), t.comparator.kind.c_str());
-    }
-    if (bad) {
-      if (mismatches++ == 0) { firstIdx = i; firstG = gv; firstA = av; }
-    }
-  };
-  if (dtype == "fp16") {
-    const auto *g = reinterpret_cast<const uint16_t *>(gold.data());
-    const auto *a = reinterpret_cast<const uint16_t *>(actual.data());
-    int n = static_cast<int>(gold.size() / 2);
-    // IEEE 754 binary16 → binary32, full-precision (no flush-to-zero).
-    // Subnormals are normalised to f32 normals; NaNs propagate (mantissa
-    // preserved); ±inf preserved.
-    auto h2f = [](uint16_t h) -> double {
-      uint32_t sign = (uint32_t(h & 0x8000u)) << 16;
-      uint32_t exp  = (h & 0x7c00u) >> 10;
-      uint32_t mant = (h & 0x03ffu);
-      uint32_t u;
-      if (exp == 0) {
-        if (mant == 0) {
-          u = sign;  // ±0
-        } else {
-          // Subnormal half (value = mant * 2^-24).  Renormalise into f32
-          // by left-shifting until the implicit bit appears, then
-          // assemble with the appropriate biased exponent.
-          int e = -1;
-          do { ++e; mant <<= 1; } while ((mant & 0x400) == 0);
-          mant &= 0x3ff;
-          u = sign | static_cast<uint32_t>((127 - 15 - e) << 23) | (mant << 13);
-        }
-      } else if (exp == 31) {
-        // inf or NaN — preserve sign and mantissa (mant != 0 ⇒ NaN).
-        u = sign | 0x7f800000u | (mant << 13);
-      } else {
-        u = sign | ((exp + 127 - 15) << 23) | (mant << 13);
-      }
-      float f; std::memcpy(&f, &u, 4); return f;
-    };
-    for (int i = 0; i < n; ++i) judge(h2f(g[i]), h2f(a[i]), i);
-  } else if (dtype == "fp32") {
-    const auto *g = reinterpret_cast<const float *>(gold.data());
-    const auto *a = reinterpret_cast<const float *>(actual.data());
-    int n = static_cast<int>(gold.size() / 4);
-    for (int i = 0; i < n; ++i) judge(g[i], a[i], i);
-  } else if (dtype == "fp64") {
-    const auto *g = reinterpret_cast<const double *>(gold.data());
-    const auto *a = reinterpret_cast<const double *>(actual.data());
-    int n = static_cast<int>(gold.size() / 8);
-    for (int i = 0; i < n; ++i) judge(g[i], a[i], i);
-  } else if (dtype == "i32") {
-    const auto *g = reinterpret_cast<const int32_t *>(gold.data());
-    const auto *a = reinterpret_cast<const int32_t *>(actual.data());
-    int n = static_cast<int>(gold.size() / 4);
-    for (int i = 0; i < n; ++i)
-      if (g[i] != a[i] && mismatches++ == 0) {
-        firstIdx = i; firstG = g[i]; firstA = a[i]; maxAbs = 1.0;
-      }
-  } else {
-    die("triton %s: compare doesn't handle dtype=%s",
-        t.name.c_str(), dtype.c_str());
   }
-  (void)outElems;  // outElems is declared by the Recipe layer but we honour
-                   // gold.size() directly because Triton outputs may mix
-                   // dtypes in the future.
-  return std::make_tuple(mismatches, maxAbs, firstIdx, firstG, firstA);
+  auto scope = tritonScope(t, shapeValue);
+
+  int    totalMismatches = 0;
+  double maxAbs          = 0.0;
+  int    firstIdx        = -1;     // global element index across all outputs
+  double firstG          = 0.0;
+  double firstA          = 0.0;
+  size_t globalOffsetEl  = 0;      // running element index across outputs
+  size_t globalOffsetByt = 0;      // running byte offset across outputs
+
+  for (const auto &out : t.outputs) {
+    int64_t n = evalCached(out.elems, scope);
+    int es = dtypeBytes(out.dtype);
+    size_t bytes = static_cast<size_t>(n) * static_cast<size_t>(es);
+    if (globalOffsetByt + bytes > gold.size())
+      die("triton %s: output %s wants %zu bytes but only %zu remain in the "
+          "blob (recipe and dispatch disagree on output sizing)",
+          t.name.c_str(), out.name.c_str(), bytes,
+          gold.size() - globalOffsetByt);
+    const auto &cmp = out.hasComparator ? out.comparator : t.comparator;
+
+    // Per-output running stats; merged into the global stats below.
+    int    bufMismatches = 0;
+    double bufMaxAbs     = 0.0;
+    int    bufFirstIdx   = -1;
+    double bufFirstG     = 0.0;
+    double bufFirstA     = 0.0;
+    // For rel-rms we accumulate sums of squares; per-element judging is
+    // skipped and a single verdict is assembled at the end of the buffer.
+    double sumDiff2 = 0.0;
+    double sumGold2 = 0.0;
+    int    rmsWorstIdx = -1;
+    double rmsWorstD   = 0.0;
+    double rmsWorstG   = 0.0;
+    double rmsWorstA   = 0.0;
+
+    auto judge = [&](double gv, double av, int i) {
+      bool gNaN = std::isnan(gv);
+      bool aNaN = std::isnan(av);
+      if (gNaN && aNaN) return;  // both NaN → agree
+      bool gInf = std::isinf(gv);
+      bool aInf = std::isinf(av);
+      if (gInf && aInf && std::signbit(gv) == std::signbit(av)) return;
+      double d;
+      if (gNaN || aNaN || (gInf != aInf) ||
+          (gInf && aInf /* opposite signs */)) {
+        d = std::numeric_limits<double>::infinity();
+      } else {
+        d = std::fabs(gv - av);
+      }
+      if (std::isfinite(d) && d > bufMaxAbs) bufMaxAbs = d;
+
+      if (cmp.kind == "rel-rms") {
+        // Track the worst single-element diff for reporting; the verdict
+        // itself is computed once at end-of-buffer.
+        double gv2 = std::isfinite(gv) ? gv * gv : 0.0;
+        sumGold2 += gv2;
+        if (std::isfinite(d)) {
+          sumDiff2 += d * d;
+          if (d > rmsWorstD) {
+            rmsWorstD = d; rmsWorstIdx = i; rmsWorstG = gv; rmsWorstA = av;
+          }
+        } else {
+          // Treat inf-vs-finite or NaN-vs-finite as catastrophic for the
+          // RMS — bias the squared sum to definitely fail the threshold.
+          sumDiff2 = std::numeric_limits<double>::infinity();
+          if (rmsWorstIdx < 0) {
+            rmsWorstIdx = i; rmsWorstG = gv; rmsWorstA = av;
+            rmsWorstD = std::numeric_limits<double>::infinity();
+          }
+        }
+        return;
+      }
+
+      bool bad;
+      if (cmp.kind == "abs") {
+        bad = !(d <= cmp.tol);
+      } else if (cmp.kind == "rel") {
+        double denom = std::max(std::fabs(gv), 1e-6);
+        bad = !(d / denom <= cmp.tol);
+      } else {
+        die("triton %s output %s: unsupported comparator kind %s",
+            t.name.c_str(), out.name.c_str(), cmp.kind.c_str());
+      }
+      if (bad) {
+        if (bufMismatches++ == 0) {
+          bufFirstIdx = i; bufFirstG = gv; bufFirstA = av;
+        }
+      }
+    };
+
+    const uint8_t *gp = gold.data()   + globalOffsetByt;
+    const uint8_t *ap = actual.data() + globalOffsetByt;
+    int ne = static_cast<int>(n);
+
+    if (out.dtype == "fp16") {
+      const auto *g = reinterpret_cast<const uint16_t *>(gp);
+      const auto *a = reinterpret_cast<const uint16_t *>(ap);
+      for (int i = 0; i < ne; ++i)
+        judge(half2double(g[i]), half2double(a[i]), i);
+    } else if (out.dtype == "bf16") {
+      const auto *g = reinterpret_cast<const uint16_t *>(gp);
+      const auto *a = reinterpret_cast<const uint16_t *>(ap);
+      for (int i = 0; i < ne; ++i)
+        judge(bf162double(g[i]), bf162double(a[i]), i);
+    } else if (out.dtype == "fp32") {
+      const auto *g = reinterpret_cast<const float *>(gp);
+      const auto *a = reinterpret_cast<const float *>(ap);
+      for (int i = 0; i < ne; ++i) judge(g[i], a[i], i);
+    } else if (out.dtype == "fp64") {
+      const auto *g = reinterpret_cast<const double *>(gp);
+      const auto *a = reinterpret_cast<const double *>(ap);
+      for (int i = 0; i < ne; ++i) judge(g[i], a[i], i);
+    } else if (out.dtype == "i32") {
+      const auto *g = reinterpret_cast<const int32_t *>(gp);
+      const auto *a = reinterpret_cast<const int32_t *>(ap);
+      for (int i = 0; i < ne; ++i)
+        if (g[i] != a[i] && bufMismatches++ == 0) {
+          bufFirstIdx = i; bufFirstG = g[i]; bufFirstA = a[i];
+          if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+        }
+    } else if (out.dtype == "i64") {
+      const auto *g = reinterpret_cast<const int64_t *>(gp);
+      const auto *a = reinterpret_cast<const int64_t *>(ap);
+      for (int i = 0; i < ne; ++i)
+        if (g[i] != a[i] && bufMismatches++ == 0) {
+          bufFirstIdx = i;
+          bufFirstG = static_cast<double>(g[i]);
+          bufFirstA = static_cast<double>(a[i]);
+          if (bufMaxAbs < 1.0) bufMaxAbs = 1.0;
+        }
+    } else {
+      die("triton %s output %s: compare doesn't handle dtype=%s",
+          t.name.c_str(), out.name.c_str(), out.dtype.c_str());
+    }
+
+    // Per-buffer rel-rms verdict.
+    if (cmp.kind == "rel-rms") {
+      // Numerator: RMS of the diff.  Denominator: RMS of the gold,
+      // floored at 1e-6 so a near-zero gold doesn't divide by ~0 and
+      // turn every tiny diff into "infinitely wrong".
+      double rmsDiff = std::sqrt(sumDiff2 / std::max<double>(1, ne));
+      double rmsGold = std::sqrt(sumGold2 / std::max<double>(1, ne));
+      double denom = std::max(rmsGold, 1e-6);
+      double ratio = rmsDiff / denom;
+      bool bad = !(ratio <= cmp.tol);
+      if (bad) {
+        // Mark the whole buffer as failing; the worst element drives the
+        // diagnostic columns so the user knows where to dig.
+        bufMismatches = ne;
+        bufMaxAbs     = std::max(bufMaxAbs, rmsWorstD);
+        bufFirstIdx   = rmsWorstIdx >= 0 ? rmsWorstIdx : 0;
+        bufFirstG     = rmsWorstG;
+        bufFirstA     = rmsWorstA;
+      }
+    }
+
+    // Merge per-buffer stats into global; first mismatch wins (no
+    // overwrite from a later, larger-index buffer).
+    if (bufMaxAbs > maxAbs) maxAbs = bufMaxAbs;
+    if (totalMismatches == 0 && bufMismatches > 0) {
+      firstIdx = static_cast<int>(globalOffsetEl) + bufFirstIdx;
+      firstG = bufFirstG;
+      firstA = bufFirstA;
+    }
+    totalMismatches += bufMismatches;
+
+    globalOffsetEl  += static_cast<size_t>(ne);
+    globalOffsetByt += bytes;
+  }
+  return std::make_tuple(totalMismatches, maxAbs, firstIdx, firstG, firstA);
 }
 
 // Convert a TritonRecipe into a Recipe the existing harness understands.
@@ -2948,8 +3371,10 @@ Recipe tritonToRecipe(const TritonRecipe &t) {
     return tritonDispatch(*tp, mod, input, v);
   };
   r.compare = [tp](const std::vector<uint8_t> &gold,
-                   const std::vector<uint8_t> &actual, int outElems) {
-    return tritonCompare(*tp, gold, actual, outElems);
+                   const std::vector<uint8_t> &actual,
+                   int N, int /*blockSize*/, int /*outElems*/) {
+    int v = tp->defaultShapeValues.at(static_cast<size_t>(N));
+    return tritonCompare(*tp, gold, actual, v);
   };
   // NativeExecution gold source => cpuReference is never invoked.  Leave it
   // empty; runOne's branch skips the call.
@@ -3075,18 +3500,6 @@ std::string selfExe() {
   return std::string(buf);
 }
 
-std::string drainFd(int fd, size_t maxBytes) {
-  std::string out;
-  char buf[4096];
-  while (out.size() < maxBytes) {
-    ssize_t n = read(fd, buf, std::min(sizeof(buf), maxBytes - out.size()));
-    if (n < 0) { if (errno == EINTR) continue; break; }
-    if (n == 0) break;
-    out.append(buf, static_cast<size_t>(n));
-  }
-  return out;
-}
-
 std::string tail(const std::string &s, size_t n) {
   return s.size() <= n ? s : s.substr(s.size() - n);
 }
@@ -3136,16 +3549,87 @@ ChildRun spawnChild(const std::string &exe, Mode mode,
     _exit(127);
   }
   close(errPipe[1]);
-  std::string err = drainFd(errPipe[0], /*maxBytes=*/32 * 1024);
-  close(errPipe[0]);
-  int wstatus = 0;
-  for (;;) {
-    pid_t w = waitpid(pid, &wstatus, 0);
-    if (w == pid) break;
-    if (w < 0 && errno == EINTR) continue;
-    cr.stderrTail = std::string("waitpid: ") + std::strerror(errno);
-    return cr;
+  // Per-child timeout.  Without it, a single hanging child (most often a
+  // salmon transpilation that never completes, or a transpiled kernel
+  // that hangs the GPU) blocks the entire run.  We need to interleave
+  // pipe draining with child-status polling so neither blocks the
+  // other: a pure read() blocks until EOF (which never comes if the
+  // child hangs), and a pure waitpid() hides any stderr the child
+  // already produced.  poll() on the pipe with a small timeout, plus
+  // non-blocking waitpid in the same loop, gives us both.
+  long timeoutSec = 60;
+  if (const char *t = std::getenv("COMPARE_CORRECTNESS_CHILD_TIMEOUT_S")) {
+    char *end = nullptr;
+    long v = std::strtol(t, &end, 10);
+    if (end != t) timeoutSec = v;
   }
+  std::string err;
+  err.reserve(4096);
+  const size_t maxStderr = 32 * 1024;
+  bool stderrEof = false;
+  bool timedOut = false;
+  int wstatus = 0;
+  auto deadline = std::chrono::steady_clock::now() +
+                  std::chrono::seconds(timeoutSec);
+  for (;;) {
+    // Drain any available stderr without blocking.
+    if (!stderrEof) {
+      pollfd pfd{errPipe[0], POLLIN, 0};
+      int pr = poll(&pfd, 1, /*timeout_ms=*/100);
+      if (pr > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+        char buf[4096];
+        ssize_t n = read(errPipe[0], buf, sizeof(buf));
+        if (n > 0) {
+          if (err.size() < maxStderr) {
+            size_t take = std::min(static_cast<size_t>(n),
+                                   maxStderr - err.size());
+            err.append(buf, take);
+          }
+        } else if (n == 0) {
+          stderrEof = true;
+        } else if (errno != EINTR && errno != EAGAIN) {
+          stderrEof = true;
+        }
+      }
+    }
+    // Non-blocking child-status check.
+    pid_t w = waitpid(pid, &wstatus, WNOHANG);
+    if (w == pid) break;
+    if (w < 0 && errno != EINTR) {
+      cr.stderrTail = std::string("waitpid: ") + std::strerror(errno);
+      close(errPipe[0]);
+      return cr;
+    }
+    if (timeoutSec > 0 && std::chrono::steady_clock::now() >= deadline) {
+      // SIGKILL — a hung HIP child usually doesn't process SIGTERM
+      // because it's stuck inside a driver ioctl.  Reap synchronously.
+      kill(pid, SIGKILL);
+      timedOut = true;
+      for (;;) {
+        pid_t w2 = waitpid(pid, &wstatus, 0);
+        if (w2 == pid) break;
+        if (w2 < 0 && errno == EINTR) continue;
+        cr.stderrTail = std::string("waitpid after SIGKILL: ") +
+                        std::strerror(errno);
+        close(errPipe[0]);
+        return cr;
+      }
+      break;
+    }
+  }
+  // Final drain after the child exits — anything still buffered in the
+  // pipe is now flushed; without this we'd lose the tail of the message
+  // any child that printed-then-exited produced.
+  if (!stderrEof) {
+    char buf[4096];
+    while (err.size() < maxStderr) {
+      ssize_t n = read(errPipe[0], buf, sizeof(buf));
+      if (n <= 0) break;
+      size_t take = std::min(static_cast<size_t>(n), maxStderr - err.size());
+      err.append(buf, take);
+    }
+  }
+  close(errPipe[0]);
   auto t1 = std::chrono::steady_clock::now();
   cr.durationMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
   cr.launched = true;
@@ -3156,6 +3640,16 @@ ChildRun spawnChild(const std::string &exe, Mode mode,
     cr.signal = WTERMSIG(wstatus);
   }
   cr.stderrTail = tail(err, 800);
+  if (timedOut) {
+    // Append (don't prepend) so the timeout note survives any later
+    // tail() trimming the reporter does — the captured err is often
+    // dominated by hotswap chatter and would otherwise crowd this out.
+    std::string note = "  [TIMEOUT after " + std::to_string(timeoutSec) +
+                       "s; harness sent SIGKILL.  Override with "
+                       "COMPARE_CORRECTNESS_CHILD_TIMEOUT_S=<seconds>.]";
+    cr.stderrTail = cr.stderrTail.empty() ? note
+                                          : (cr.stderrTail + "\n" + note);
+  }
   return cr;
 }
 
@@ -3235,7 +3729,8 @@ RunResult runOne(const std::string &exe, const Recipe &r, int N, int blockSize) 
       }
     }
     if (mr.output && !skipCompare) {
-      auto [mm, mab, idx, g, a] = r.compare(rr.cpuGold, *mr.output, rr.outElems);
+      auto [mm, mab, idx, g, a] =
+          r.compare(rr.cpuGold, *mr.output, N, blockSize, rr.outElems);
       mr.mismatches = mm;
       mr.maxAbsErr = mab;
       mr.firstIdx = idx;
@@ -3460,10 +3955,20 @@ void printReport(const std::vector<RunResult> &all) {
       ++cnt[i][static_cast<int>(c)];
       bool ok = (c == ResultCat::Match) || (c == ResultCat::Gold);
       if (!ok) {
-        fails[i].push_back({rr.recipe->name, shapeLabel,
-                            (c == ResultCat::GoldMissing)
-                                ? "gold-missing"
-                                : failureDetail(*mm[i], rr.outElems)});
+        std::string detail;
+        if (c == ResultCat::GoldMissing) {
+          // Two flavours of GoldMissing:
+          //   - i == 0  (native column): the gold itself failed; surface
+          //     the actual child stderr so the user can see WHY native
+          //     died, not just that it did.
+          //   - i  > 0  (legacy / salmon): we never spawned this child
+          //     because there was no gold; reflect that.
+          if (i == 0) detail = failureDetail(*mm[i], rr.outElems);
+          else        detail = "gold-missing (native failed to produce output)";
+        } else {
+          detail = failureDetail(*mm[i], rr.outElems);
+        }
+        fails[i].push_back({rr.recipe->name, shapeLabel, detail});
       }
     }
     printf("%-*s %-*s  %-*s  %-*s  %-*s\n",

@@ -24,9 +24,9 @@ using namespace llvm;
 // ----------------------------------------------------------------------------
 // Taxonomy rendering. The text in each branch is the label that
 // surfaces in the classifier trace and that lit tests assert on. The
-// SPE_DESIGN.md §3 Class number is included parenthetically so
-// operators reading the trace can cross-reference the design doc
-// without mental translation.
+// obstruction-class number (Class 1..4, see hotswap/docs/wave-size-
+// translation.md §6) is included parenthetically so operators reading
+// the trace can cross-reference the spec without mental translation.
 // ----------------------------------------------------------------------------
 
 const char *obstructionKindName(ObstructionKind k) {
@@ -148,7 +148,8 @@ std::optional<int64_t> extractLaneOperandImm(const DecodedInst &di) {
 
 // Decide whether a `ds_swizzle_b32` immediate encodes a swizzle mode
 // that is *structurally* wave-size-oblivious under modulo-replication
-// (SPE_DESIGN.md §7's coverage-ladder rung 1).
+// (the projection-ladder's first rung, see hotswap/docs/wave-size-
+// translation.md §2.2).
 //
 // The 16-bit imm encodes one of seven modes (SIDefines.h
 // `Swizzle::Id`). Per AMDGPU SIDefines.h `Swizzle::EncBits`:
@@ -397,8 +398,9 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       site.inst = &di;
       site.kind = ObstructionKind::DsSwizzle;
       site.rewrite = RewriteId::P6_DsSwizzle;
-      // P6 (CROSS_LANE_SURVEY.md item 6) landed: the handler in
-      // handle_ds.cpp emits `llvm.amdgcn.ds.swizzle(value, offset)`
+      // P6 landed (see the DS_SWIZZLE_B32 row of hotswap/docs/wave-
+      // size-translation.md §5.3): the handler in handle_ds.cpp emits
+      // `llvm.amdgcn.ds.swizzle(value, offset)`
       // with the 16-bit immediate plumbed through. The lift is only
       // wave-size-oblivious for the QUAD_PERM and BITMASK_PERM
       // sub-modes (see `dsSwizzleSafeForModRep` above for the
@@ -455,8 +457,9 @@ ObstructionReport buildObstructionReport(ArrayRef<DecodedInst> insts,
       // accepts (outcome b) while DPP8 refuses loudly (outcome c
       // pending a P5 extension to `llvm.amdgcn.mov.dpp8`). The
       // `tsFlags & SIInstrFlags::DPP` check still fires for both
-      // forms — both are a Class-2 cross-lane site by SPE_DESIGN.md
-      // taxonomy; the flipped-by-form `rewriteImplemented` bit is
+      // forms — both are a Class-2 cross-lane site by the hotswap/
+      // docs/wave-size-translation.md §6 taxonomy; the flipped-by-
+      // form `rewriteImplemented` bit is
       // what separates "handled" from "pending" without mucking with
       // the taxonomy.
       site.rewriteImplemented = di.hasDpp;
@@ -596,10 +599,11 @@ std::string renderObstructionTrace(const ObstructionReport &report,
 
   if (report.hasUnrewritable()) {
     os << "  outcome: (c) refuse — at least one obstruction has no rewrite "
-          "in SPE_DESIGN.md \u00a74's rewrite table\n";
+          "in wave-size-translation.md \u00a77's unrewritable table\n";
   } else if (report.hasPendingRewrite()) {
     os << "  outcome: (c) refuse — rewrite(s) exist on paper but the "
-          "matching handler(s) have not yet landed (CROSS_LANE_SURVEY.md)\n";
+          "matching handler(s) have not yet landed "
+          "(wave-size-translation.md \u00a77's pending-rewrite table)\n";
   } else {
     os << "  outcome: (b) rewrite-then-emit — all obstruction sites have "
           "an implemented rewrite; emit modulo-replication\n";

@@ -666,7 +666,8 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
   if (sop == SemOp::DS_SWIZZLE_B32) {
-    // CROSS_LANE_SURVEY.md item P6 — lift `ds_swizzle_b32` through
+    // P6 lowering — see the ds_swizzle_b32 row of hotswap/docs/wave-
+    // size-translation.md §5.3: lift `ds_swizzle_b32` through
     // `llvm.amdgcn.ds.swizzle`. The intrinsic signature is
     //   declare i32 @llvm.amdgcn.ds.swizzle(i32 %src, i32 immarg %offset)
     // (`ImmArg<ArgIndex<1>>`), so the second operand MUST be a

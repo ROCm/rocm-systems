@@ -1,5 +1,6 @@
-// Probe for SPE_DESIGN.md §3 Class 4 — lane-position-dependent EXEC
-// writes. Mirrors lit_tests/c4_lane_dep_cmpx (offline classifier pin);
+// Probe for the Class 4 obstruction (lane-position-dependent EXEC
+// writes) defined in hotswap/docs/wave-size-translation.md §6.
+// Mirrors lit_tests/c4_lane_dep_cmpx (offline classifier pin);
 // this file provides the runtime evidence that (a) native gfx942
 // produces a specific output, (b) legacy half-wave-masking produces a
 // DIFFERENT output (upper target half dead), and (c) the

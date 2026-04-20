@@ -1,5 +1,7 @@
 // Source for permlane16_swap_gfx1250.hsaco — pinned end-to-end test
-// for CROSS_LANE_SURVEY P4 (`v_permlane16_swap_b32` lift).
+// for the P4 rewrite (`v_permlane16_swap_b32` lift; see the
+// permlane16_swap row of hotswap/docs/wave-size-translation.md
+// §5.3).
 //
 // This is the source kernel for a Gfx1250Gpu GTest that:
 //   1. Reads the pre-built gfx1250 (wave32) `.hsaco`.

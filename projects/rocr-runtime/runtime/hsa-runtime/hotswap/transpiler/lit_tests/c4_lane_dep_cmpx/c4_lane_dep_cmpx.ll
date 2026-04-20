@@ -2,10 +2,11 @@
 ; RUN:     --emit-ir=c4_lane_dep_cmpx_kernel 2>&1 \
 ; RUN:   | %FileCheck %s --check-prefix=STDERR
 ;
-; SPE_DESIGN.md §3 Class 4 "lane-position-dependent EXEC writes".
-; The v_cmpx's LHS flows from v_mbcnt_lo, which makes the compare
-; semantically "enable lanes below an absolute-lane-id threshold".
-; This pattern has no rewrite in §4's table — modulo-replication
+; Class 4 "lane-position-dependent EXEC writes" (hotswap/docs/
+; wave-size-translation.md §6). The v_cmpx's LHS flows from
+; v_mbcnt_lo, which makes the compare semantically "enable lanes
+; below an absolute-lane-id threshold". This pattern has no
+; rewrite in §7's unrewritable table — modulo-replication
 ; would enable target lanes {0..15, 32..47} under the source's
 ; wave32 semantics, but the raised IR would enable only target
 ; lanes 0..15 (because v_mbcnt_lo runs on target hardware and

@@ -1,6 +1,7 @@
 // Source for ds_swizzle_gfx1250.hsaco — pinned end-to-end test for
-// CROSS_LANE_SURVEY P6 (`ds_swizzle_b32` lift via
-// llvm.amdgcn.ds.swizzle).
+// the P6 rewrite (`ds_swizzle_b32` lift via llvm.amdgcn.ds.swizzle;
+// see the ds_swizzle_b32 row of hotswap/docs/wave-size-
+// translation.md §5.3).
 //
 // Per the same principle as permlane16_swap_kernel.hip (P4) and
 // dpp_quad_perm_kernel.hip (P5), this fixture gives the P6 lift a

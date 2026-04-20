@@ -2,13 +2,14 @@
 ; RUN:     --emit-ir=c1_lane_id_leak_kernel 2>&1 \
 ; RUN:   | %FileCheck %s --check-prefix=STDERR
 ;
-; SPE_DESIGN.md §3 Class 1: v_mbcnt_hi_u32_b32 on a wave32 source
-; binary leaks the absolute target-hardware lane position into an
-; observable value whenever the raised IR runs on a wider target
-; wave. No rewrite in §4's rewrite table recovers the original
-; wave32 semantics (the source never named "lane_id mod W_s" as a
-; distinct quantity), so the only correct outcome is the (c) refusal
-; branch of the 3-outcome decision procedure.
+; hotswap/docs/wave-size-translation.md §6 Class 1:
+; v_mbcnt_hi_u32_b32 on a wave32 source binary leaks the absolute
+; target-hardware lane position into an observable value whenever
+; the raised IR runs on a wider target wave. No rewrite in §7's
+; unrewritable table recovers the original wave32 semantics (the
+; source never named "lane_id mod W_s" as a distinct quantity), so
+; the only correct outcome is the (c) refusal branch of §7's
+; 3-outcome decision procedure.
 ;
 ; The classifier must flag the v_mbcnt_hi site at raise time and
 ; abort with the stable diagnostic substrings asserted below.
@@ -24,8 +25,8 @@
 
 ; The per-site trace emitted after the abort line names the
 ; ObstructionKind in human-readable form and includes the
-; SPE_DESIGN.md §3 cross-reference parenthetically. We key on
-; stable substrings only.
+; Class 1..4 cross-reference (wave-size-translation.md §6)
+; parenthetically. We key on stable substrings only.
 ; STDERR: MbcntHiLaneIdLeak
 ; STDERR-SAME: Class 1
 ; STDERR: outcome: (c) refuse

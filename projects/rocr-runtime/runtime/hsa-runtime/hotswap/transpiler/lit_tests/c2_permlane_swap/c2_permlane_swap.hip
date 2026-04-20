@@ -3,11 +3,12 @@
 // Fixture for the Class-2 "wave-size-baked cross-lane op" obstruction,
 // rewritable-subclass sub-category (lit_tests/c2_permlane_swap).
 //
-// SPE_DESIGN.md §3 Class 2 catalogues cross-lane primitives whose
-// semantics are parameterised by the source wave size. Some variants
-// (e.g. v_permlane64_b32) have no wave32 meaning at all and are
-// unrewritable. Others — the permlane16_swap / permlanex16 family
-// listed in CROSS_LANE_SURVEY.md items P2–P4 — do have a clean
+// Class 2 (hotswap/docs/wave-size-translation.md §6) catalogues
+// cross-lane primitives whose semantics are parameterised by the
+// source wave size. Some variants (e.g. v_permlane64_b32) have no
+// wave32 meaning at all and are unrewritable. Others — the
+// permlane16_swap / permlanex16 family listed as P2–P4 in wave-
+// size-translation.md §5.3 — do have a clean
 // intrinsic lift that preserves the source's cross-lane data
 // movement once the raiser lowers them through
 // llvm.amdgcn.permlane16. The classifier therefore flags this class

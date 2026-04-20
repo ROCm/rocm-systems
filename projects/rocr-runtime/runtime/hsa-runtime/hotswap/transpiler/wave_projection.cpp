@@ -129,10 +129,11 @@ Value *ModuloReplicationProjection::extractLaneBitFromWaveMask(
 }
 
 // ----------------------------------------------------------------------------
-// ThreadLoopProjection — SPE_DESIGN.md §7 second rung, not yet
-// implemented. Every virtual override report_fatal_errors so a build
-// that silently instantiates it (e.g. a bad decider branch) surfaces
-// as a loud runtime abort rather than wrong code.
+// ThreadLoopProjection — second rung of the coverage ladder described
+// in hotswap/docs/wave-size-translation.md §2.2, not yet implemented.
+// Every virtual override report_fatal_errors so a build that silently
+// instantiates it (e.g. a bad decider branch) surfaces as a loud
+// runtime abort rather than wrong code.
 // ----------------------------------------------------------------------------
 
 ThreadLoopProjection::ThreadLoopProjection(const ISAProfile &srcIsa,
@@ -140,10 +141,11 @@ ThreadLoopProjection::ThreadLoopProjection(const ISAProfile &srcIsa,
                                             Type *i32Ty, Type *i64Ty)
     : WaveProjection(srcIsa, tgtIsa, i32Ty, i64Ty) {
   report_fatal_error(
-      "ThreadLoopProjection is a placeholder for SPE_DESIGN.md \u00a77's "
-      "coverage-ladder second rung; its emission semantics are not yet "
-      "implemented. See ThreadLoopProjection's header comment for the "
-      "MAINTENANCE protocol that lands the implementation.");
+      "ThreadLoopProjection is a placeholder for the second rung of the "
+      "coverage ladder described in hotswap/docs/wave-size-translation.md "
+      "\u00a72.2; its emission semantics are not yet implemented. See "
+      "ThreadLoopProjection's header comment for the MAINTENANCE protocol "
+      "that lands the implementation.");
 }
 
 Value *ThreadLoopProjection::emitLaneActiveBit(IRBuilder<> & /*B*/,
@@ -231,8 +233,8 @@ bool emitCrossWaveWarning(const WaveProjection &proj, const MCState &mc,
               "independent (pointwise ops with bounds checks against a "
               "uniform >= target_wave_bits). The Phase 1.4.5 classifier "
               "(wave_size_obstruction.cpp) is the principled path for "
-              "deciding between outcome (a)/(b)/(c) per SPE_DESIGN.md "
-              "\u00a74.\n";
+              "deciding between outcome (a)/(b)/(c) per hotswap/docs/"
+              "wave-size-translation.md \u00a77.\n";
   });
   return true;
 }

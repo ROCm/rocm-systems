@@ -1,6 +1,7 @@
 // Source for dpp_quad_perm_gfx1250.hsaco — pinned end-to-end test
-// for CROSS_LANE_SURVEY P5 (DPP modifier lift via
-// llvm.amdgcn.update.dpp).
+// for the P5 rewrite (DPP modifier lift via
+// llvm.amdgcn.update.dpp; see the DPP row of hotswap/docs/wave-
+// size-translation.md §5.3).
 //
 // Per the same principle as permlane16_swap_kernel.hip (P4), this
 // fixture gives the P5 emulation a CI-resident regression gate:

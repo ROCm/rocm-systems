@@ -15,9 +15,9 @@ namespace transpiler {
 
 // Cross-lane primitives: V_READFIRSTLANE_B32, V_READLANE_B32,
 // V_WRITELANE_B32, V_MBCNT_{LO,HI}_U32_B32, V_PERMLANE{16,X16,64}_B32,
-// V_PERMLANE{16,32}_SWAP_B32. Isolated because the new cross-wave
-// strategy (SPE_DESIGN.md §4 / CROSS_LANE_SURVEY.md) keeps iterating
-// on exactly this surface.
+// V_PERMLANE{16,32}_SWAP_B32. Isolated because the cross-wave
+// strategy (hotswap/docs/wave-size-translation.md §§5.3 and 7) keeps
+// iterating on exactly this surface.
 HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
                                     OpResolver &op);
 

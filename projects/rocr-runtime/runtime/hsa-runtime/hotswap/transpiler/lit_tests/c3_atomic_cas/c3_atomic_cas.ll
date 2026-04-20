@@ -2,9 +2,10 @@
 ; RUN:     --emit-ir=c3_atomic_cas_kernel 2>&1 \
 ; RUN:   | %FileCheck %s --check-prefix=STDERR
 ;
-; SPE_DESIGN.md §3 Class 3 "inter-replica race via shared state" —
-; non-commutative atomics have no rewrite that preserves the source
-; semantics on a wider target wave. The classifier must refuse.
+; Class 3 "inter-replica race via shared state" — see hotswap/docs/
+; wave-size-translation.md §6. Non-commutative atomics have no
+; rewrite that preserves the source semantics on a wider target
+; wave. The classifier must refuse.
 ;
 ; gpt-oss-derisking.md §4 reports 0/170 kernels use this pattern,
 ; so this test exists as a guard / regression fence, not because

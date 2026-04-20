@@ -3,15 +3,16 @@
 // Fixture for the Class-2 DPP-modifier cross-lane sub-category
 // (lit_tests/c2_dpp_quad_perm).
 //
-// SPE_DESIGN.md §3 Class 2 / gpt-oss-derisking.md §7.3 flag DPP
-// modifiers as the single largest outstanding correctness hazard in
-// the GPT-OSS corpus today — 5 of 15 kernels use DPP. The raiser
-// canonicalises DPP modifiers away before any handler sees them
-// (opcode_map.cpp:buildDppToBaseMap), producing same-lane IR for an
-// instruction whose intent is cross-lane. Until CROSS_LANE_SURVEY.md
-// item P5 (`update.dpp` intrinsic lift) lands, every kernel that
-// uses any DPP modifier is silently miscompiled on the cross-wave
-// path.
+// Class 2 (hotswap/docs/wave-size-translation.md §6) and
+// hotswap/docs/gpt-oss-derisking.md §7.3 flag DPP modifiers as the
+// single largest outstanding correctness hazard in the GPT-OSS
+// corpus today — 5 of 15 kernels use DPP. The raiser canonicalises
+// DPP modifiers away before any handler sees them
+// (opcode_map.cpp:buildDppToBaseMap), producing same-lane IR for
+// an instruction whose intent is cross-lane. Until the P5 rewrite
+// (`update.dpp` intrinsic lift; see the DPP row of wave-size-
+// translation.md §5.3) lands, every kernel that uses any DPP
+// modifier is silently miscompiled on the cross-wave path.
 //
 // This fixture pins `v_mov_b32_dpp quad_perm:[1,0,3,2]` — a
 // pairwise-swap shuffle inside each 4-lane quad. It is one of the

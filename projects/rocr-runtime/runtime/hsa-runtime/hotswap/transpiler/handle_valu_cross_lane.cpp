@@ -18,19 +18,19 @@ namespace transpiler {
 // Cross-lane VALU primitives — the subset of VALU opcodes whose result
 // in lane L depends on values held by lane L' != L. Isolated from the
 // rest of handleVALU because this is exactly the surface the cross-
-// wave strategy (SPE_DESIGN.md §4 / CROSS_LANE_SURVEY.md) keeps
-// iterating on: every rewrite from the "wave-size-baked cross-lane"
-// rewrite table lands in this file, not scattered through the VALU
-// arithmetic sections.
+// wave strategy (hotswap/docs/wave-size-translation.md §§5.3 and 7)
+// keeps iterating on: every rewrite from the "wave-size-baked cross-
+// lane" rewrite table lands in this file, not scattered through the
+// VALU arithmetic sections.
 //
 // Each branch MUST use a genuine cross-lane LLVM intrinsic
 // (`llvm.amdgcn.readlane`, `writelane`, `readfirstlane`, `mbcnt.{lo,
 // hi}`, etc.). A "same-lane" stub that ignores the source-lane
 // selector is a silent miscompile for any kernel that feeds divergent
 // operands into the primitive. Several permlane variants here are
-// known broken (see CROSS_LANE_SURVEY.md items P2..P5); they stay
-// same-lane for now but any new cross-lane SemOp must be modelled
-// correctly before landing.
+// known broken (see the pending-rewrite table in wave-size-
+// translation.md §7); they stay same-lane for now but any new cross-
+// lane SemOp must be modelled correctly before landing.
 HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
                                     OpResolver &op) {
   HandlerResult hr;
@@ -39,7 +39,8 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   switch (sop) {
 
   // ---- v_permlane16_b32 / v_permlanex16_b32 ----
-  // CROSS_LANE_SURVEY.md P2 lowering. Target constraint: `v_permlane16`
+  // P2 lowering — see the permlane16 / permlanex16 row of hotswap/
+  // docs/wave-size-translation.md §5.3. Target constraint: `v_permlane16`
   // and `v_permlanex16` are RDNA/gfx10+ instructions and DO NOT exist
   // on CDNA (gfx9/gfx94x). Emitting `llvm.amdgcn.permlane16` or
   // `permlanex16` directly fails isel on gfx942 with "Cannot select:
@@ -77,8 +78,9 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   //   byte_addr    = src_lane_abs << 2
   //   result       = ds_bpermute(byte_addr, src0)
   //
-  // Wave-width correctness under modulo-replication (SPE_DESIGN.md
-  // §2): the source gfx1250 kernel is wave32 so its selector values
+  // Wave-width correctness under modulo-replication (hotswap/docs/
+  // wave-size-translation.md §6's wave-size-obliviousness theorem):
+  // the source gfx1250 kernel is wave32 so its selector values
   // encode a shuffle pattern over 2 × 16-lane groups. On wave64
   // target each modrep replica occupies 2 × 16-lane groups (R=2),
   // and the `group ^ 0x10` swap stays within a replica (0↔1 within
@@ -181,7 +183,9 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   }
 
   // ---- v_permlane64_b32 ----
-  // KNOWN LIMITATION (CROSS_LANE_SURVEY P3): no wave32 analogue, so
+  // KNOWN LIMITATION — see the v_permlane64_b32 row in the
+  // unrewritable table of hotswap/docs/wave-size-translation.md §7:
+  // no wave32 analogue, so
   // the Phase 1.4.5 classifier refuses this op in any cross-wave
   // lift (it is taxonomised as FullWaveRotate / unrewritable). The
   // same-lane fallback here only runs in same-wave (wave64 → wave64)
@@ -197,7 +201,8 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
 
   // ---- gfx950 lane-swap: v_permlane16_swap_b32 ----
   //
-  // CROSS_LANE_SURVEY.md P4 lowering. Exchanges two VGPRs across
+  // P4 lowering — see the permlane16_swap row of hotswap/docs/wave-
+  // size-translation.md §5.3. Exchanges two VGPRs across
   // lanes 0..15 ↔ 16..31 within each 32-lane group. Two defs
   // (vdst, src0_out) and two tied uses (vdst_in tied to vdst,
   // src0 tied to src0_out). Effect:
@@ -253,7 +258,8 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // we cannot directly compare emulation-vs-native on this target;
   // probing other targets (e.g. gfx950 which has the native
   // instruction) is left for hardware-availability work and is the
-  // P4.b sub-item in CROSS_LANE_SURVEY.md. The emulation
+  // P4.b sub-item recorded in hotswap/docs/wave-size-translation.md
+  // §10 (known gaps). The emulation
   // independently maps onto the published .td swap semantics
   // (VOP_PERMLANE_SWAP profile), so per-target hardware-vs-
   // emulation parity follows from emulation-correctness +
@@ -282,8 +288,9 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
   // bit-exact correct under this emulation. We accept all four
   // fi/bc combinations and document the EXEC=full assumption.
   //
-  // P4.b future-hardening (CROSS_LANE_SURVEY.md): a "true fi=0
-  // emulation" would zero inactive lanes' VGPR contribution before
+  // P4.b future-hardening (hotswap/docs/wave-size-translation.md §10):
+  // a "true fi=0 emulation" would zero inactive lanes' VGPR
+  // contribution before
   // the bpermute, e.g. by `select EXEC[L], src0_in[L], 0` and
   // `select EXEC[L], vdst_in[L], 0` immediately before the
   // intrinsic calls. That delivers bit-exact `fi=0` semantics at
@@ -370,8 +377,9 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
         di, "VALU",
         "v_permlane32_swap_b32 has no wave32 analogue (XOR-32 "
         "partner spans wave64 32-lane halves); source is not "
-        "wave32 — CROSS_LANE_SURVEY.md P4 keeps this variant "
-        "unrewritable");
+        "wave32 — see the P4 permlane32_swap entry in the pending-"
+        "rewrite table of hotswap/docs/wave-size-translation.md "
+        "\u00a77");
     return hr;
   }
 

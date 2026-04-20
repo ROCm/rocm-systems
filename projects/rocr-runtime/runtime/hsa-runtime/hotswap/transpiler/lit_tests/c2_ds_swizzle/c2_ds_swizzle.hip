@@ -3,13 +3,15 @@
 // Fixture for the Class-2 ds_swizzle_b32 sub-category
 // (lit_tests/c2_ds_swizzle).
 //
-// SPE_DESIGN.md §3 Class 2 / gpt-oss-derisking.md §5 flag
-// ds_swizzle_b32 in the `sum_bitmatrix_rows` kernel of GPT-OSS.
-// The swizzle descriptor (encoded in the instruction's offset
-// immediate) selects a cross-lane pattern whose semantics depend
-// on the source wave size. CROSS_LANE_SURVEY.md item P6 is the
-// rewrite path (lift through llvm.amdgcn.ds.swizzle); until that
-// handler lands the classifier must refuse.
+// Class 2 (hotswap/docs/wave-size-translation.md §6) and
+// hotswap/docs/gpt-oss-derisking.md §5 flag ds_swizzle_b32 in the
+// `sum_bitmatrix_rows` kernel of GPT-OSS. The swizzle descriptor
+// (encoded in the instruction's offset immediate) selects a cross-
+// lane pattern whose semantics depend on the source wave size. The
+// P6 rewrite path (lift through llvm.amdgcn.ds.swizzle; see the
+// ds_swizzle_b32 row of wave-size-translation.md §5.3) covers the
+// structurally safe swizzle modes; anything outside that envelope
+// the classifier must refuse.
 //
 // The immediate `offset:0x041f` here encodes the 32-wide
 // fft-butterfly-style swizzle pattern that

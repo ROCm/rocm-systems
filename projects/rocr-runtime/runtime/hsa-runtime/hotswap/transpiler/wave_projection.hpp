@@ -21,9 +21,10 @@ struct MCState;
 // A *projection* maps a source-ISA wavefront onto a target-ISA wavefront
 // when the two wave widths differ. This is an abstract base; see
 // `ModuloReplicationProjection` below for the sole concrete policy in
-// use today. SPE_DESIGN.md §7 catalogues the alternatives
-// (thread-loop, scalarisation, half-wave-masking) that are not yet
-// implemented but whose implementations would each be a new subclass.
+// use today. hotswap/docs/wave-size-translation.md §2.2 catalogues the
+// alternatives (thread-loop, scalarisation, half-wave-masking) that
+// are not yet implemented but whose implementations would each be a
+// new subclass.
 //
 // Every call site on the raiser side names this base class; the choice
 // of projection is made exactly once in `raiseToIR` when we construct
@@ -112,9 +113,9 @@ protected:
 //   * A wave-level mask projected back onto a per-lane bit indexes by
 //     `lane_id mod W_src` (`extractLaneBitFromWaveMask`).
 //
-// None of that is a hardware fact — it is a *choice*. See SPE_DESIGN.md
-// §2 for the correctness theorem (wave-size-obliviousness) and §7 for
-// the alternatives.
+// None of that is a hardware fact — it is a *choice*. See hotswap/
+// docs/wave-size-translation.md §6 for the correctness theorem
+// (wave-size-obliviousness) and §2.2 for the alternatives.
 class ModuloReplicationProjection final : public WaveProjection {
 public:
   using WaveProjection::WaveProjection;
@@ -130,36 +131,42 @@ public:
 };
 
 // ============================================================================
-// ThreadLoopProjection — placeholder subclass for the SPE_DESIGN.md §7
-// coverage ladder's second rung.
+// ThreadLoopProjection — placeholder subclass for the second rung of
+// the coverage ladder described in hotswap/docs/wave-size-
+// translation.md §2.2.
 //
 // The thread-loop rung wraps the raised IR body in `for iter in 0..R:`
 // with R = W_tgt / W_src, using only the lower W_src target lanes per
-// iteration. It naturally handles SPE_DESIGN.md §3 Class 3 (no
-// replicas, no inter-replica races) and Class 4 (per-iteration EXEC),
-// trading full-wave throughput for expanded coverage. It does NOT
-// dissolve Class 2 cross-lane obstructions (see §7 "The hard wall that
-// no projection crosses").
+// iteration. It naturally handles Class 3 obstructions (no replicas,
+// no inter-replica races) and Class 4 (per-iteration EXEC) as
+// catalogued in wave-size-translation.md §6, trading full-wave
+// throughput for expanded coverage. It does NOT dissolve Class 2
+// cross-lane obstructions (see wave-size-translation.md §7's
+// unrewritable and pending tables).
 //
-// Today no corpus kernel reaches this rung (gpt-oss-derisking.md §9.1
-// reports every GPT-OSS / hipBLASLt / Gluon kernel is outcome (a) or
-// (b) under modulo-replication). The class is declared here so §7's
-// type hierarchy is visible in code; constructing it today is a
-// principled `report_fatal_error` rather than silent acceptance,
-// because the projection's emission semantics require a structural
-// rewrite of the raiser's main loop that has not been implemented.
+// Today no corpus kernel reaches this rung (hotswap/docs/gpt-oss-
+// derisking.md §9.1 reports every GPT-OSS / hipBLASLt / Gluon kernel
+// is outcome (a) or (b) under modulo-replication). The class is
+// declared here so the projection ladder described in wave-size-
+// translation.md §2.2 has a type-level anchor in code; constructing
+// it today is a principled `report_fatal_error` rather than silent
+// acceptance, because the projection's emission semantics require a
+// structural rewrite of the raiser's main loop that has not been
+// implemented.
 //
 // MAINTENANCE. When implementing thread-loop (expected trigger: a
 // corpus kernel in outcome (c) under modulo-replication that would be
 // outcome (a) under thread-loop), the steps are:
 //   1. Populate the overridden emitters with thread-loop semantics
-//      (see SPE_DESIGN.md §7 "Projection 4").
+//      (follow the projection sketch in wave-size-translation.md
+//      §2.2's projections table).
 //   2. Add the additional correctness obligations the thread-loop
 //      projection introduces — barrier hoisting, LDS-aliasing — as
 //      extra checks in `buildObstructionReport` gated on the current
 //      projection choice.
 //   3. Extend `decideProjection` to try thread-loop after modulo-
-//      replication refuses, per the ladder in SPE_DESIGN.md §7.
+//      replication refuses, per the ladder in wave-size-
+//      translation.md §2.2.
 class ThreadLoopProjection final : public WaveProjection {
 public:
   // Placeholder ctor: aborts loudly so a typo that instantiates this

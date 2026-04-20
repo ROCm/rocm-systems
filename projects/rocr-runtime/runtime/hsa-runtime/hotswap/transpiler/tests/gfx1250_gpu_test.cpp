@@ -314,7 +314,8 @@ static void doTestSoftmax() {
 }
 
 // ============================================================================
-// Cross-lane regression tests (CROSS_LANE_SURVEY P4 / P5 / P6)
+// Cross-lane regression tests (P4 / P5 / P6 rewrites; see
+// hotswap/docs/wave-size-translation.md §5.3)
 // ============================================================================
 //
 // CI-resident hardware regression gates for the cross-lane
@@ -582,7 +583,8 @@ static void doTestDsSwizzle() {
 // ============================================================================
 class Gfx1250Gpu : public GpuTest {};
 
-// Cross-lane regression block (CROSS_LANE_SURVEY P2/P4/P5/P6 + Triton corpus).
+// Cross-lane regression block (P2/P4/P5/P6 rewrites from
+// hotswap/docs/wave-size-translation.md §5.3 + Triton corpus).
 TEST_F(Gfx1250Gpu, Softmax)        { doTestSoftmax(); }        // P2 (permlanex16) implicit
 TEST_F(Gfx1250Gpu, Permlane16Swap) { doTestPermlane16Swap(); } // P4 explicit
 TEST_F(Gfx1250Gpu, DppQuadPerm)    { doTestDppQuadPerm(); }    // P5 explicit

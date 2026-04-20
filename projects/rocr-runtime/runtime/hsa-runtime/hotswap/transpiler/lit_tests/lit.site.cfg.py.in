@@ -28,8 +28,9 @@ config.fixtures = {
     "v_cmpx_ballot": r"@LIT_FIXTURE_V_CMPX_BALLOT_CO@",
     "global_load_ushort_saddr": r"@LIT_FIXTURE_GLOBAL_LOAD_USHORT_SADDR_CO@",
     "ds_bpermute_b32": r"@LIT_FIXTURE_DS_BPERMUTE_B32_CO@",
-    # Wave-size obstruction classifier fixtures — one per SPE_DESIGN.md §3
-    # class. See wave_size_obstruction.{hpp,cpp} for the classifier.
+    # Wave-size obstruction classifier fixtures — one per obstruction
+    # class (Class 1..4) defined in hotswap/docs/wave-size-translation.md
+    # §6. See wave_size_obstruction.{hpp,cpp} for the classifier.
     "c1_lane_id_leak": r"@LIT_FIXTURE_C1_LANE_ID_LEAK_CO@",
     "c2_permlane_swap": r"@LIT_FIXTURE_C2_PERMLANE_SWAP_CO@",
     "c2_permlane16": r"@LIT_FIXTURE_C2_PERMLANE16_CO@",
@@ -328,13 +329,15 @@ config.fixtures = {
     # single `.co` fixture shared by two complementary lit tests in
     # the `wmma_f32_16x16x4_f32/` directory:
     #   * `wmma_f32_16x16x4_f32.ll` — pins the cross-target
-    #     (gfx1250 -> gfx942) loud refusal contract. Stands alone
-    #     from the K=32/K=64 WMMA family because the K=4 f32
-    #     fragment shape (`<2 x f32>` per lane) has no codepath in
-    #     the parameterised `emitWMMAtoMFMA` helper, and the LLVM
-    #     intrinsic `int_amdgcn_wmma_f32_16x16x4_f32`
-    #     (IntrinsicsAMDGPU.td:4113-4114) is itself
-    #     `isGFX125xOnly`.
+    #     (gfx1250 -> gfx942) lift contract. The handler in
+    #     `handle_valu_vop3p.cpp` dispatches to
+    #     `emitWMMAtoMFMA_F32_16x16x4` (`wmma_lowering.cpp`),
+    #     which decomposes the Wave32 WMMA into one
+    #     `mfma_f32_16x16x4f32` call per virtual Wave32 group via
+    #     ds.bpermute lane redistribution. The K=4 MFMA matches
+    #     the WMMA's K exactly, so the per-group K-tiling that the
+    #     K=32/K=64 family does is NOT needed — exactly 2 MFMAs
+    #     total instead of 4.
     #   * `wmma_f32_16x16x4_f32_same_target.ll` — pins the
     #     same-target (gfx1250 -> gfx1250) intrinsic-emit shape:
     #     the `<2 x f32>` A/B fragments and `<8 x float>`

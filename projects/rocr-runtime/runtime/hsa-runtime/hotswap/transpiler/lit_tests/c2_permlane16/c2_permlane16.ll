@@ -2,8 +2,10 @@
 ; RUN:     --emit-ir=c2_permlane16_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s
 ;
-; CROSS_LANE_SURVEY.md item P2 (permlane16 / permlanex16 lift) has
-; landed. The classifier's LaneGroupShuffle site accepts
+; The P2 rewrite (permlane16 / permlanex16 lift) has landed — see
+; the permlane16/permlanex16 row of hotswap/docs/wave-size-
+; translation.md §5.3. The classifier's LaneGroupShuffle site
+; accepts
 ; V_PERMLANE16_B32 and V_PERMLANEX16_B32 as outcome (b) because
 ; `handle_valu_cross_lane.cpp` emulates both through
 ; `llvm.amdgcn.ds.bpermute`.

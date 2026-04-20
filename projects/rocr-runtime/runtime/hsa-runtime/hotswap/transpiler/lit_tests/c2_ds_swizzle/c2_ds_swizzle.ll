@@ -2,7 +2,8 @@
 ; RUN:     --emit-ir=c2_ds_swizzle_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s
 ;
-; CROSS_LANE_SURVEY.md item P6 (ds_swizzle intrinsic lift) has landed.
+; The P6 rewrite (ds_swizzle intrinsic lift) has landed — see the
+; ds_swizzle_b32 row of hotswap/docs/wave-size-translation.md §5.3.
 ; The classifier's DsSwizzle site accepts the QUAD_PERM and
 ; BITMASK_PERM swizzle sub-modes as outcome (b) because
 ; `handle_ds.cpp` emits `llvm.amdgcn.ds.swizzle(value, offset_imm)`

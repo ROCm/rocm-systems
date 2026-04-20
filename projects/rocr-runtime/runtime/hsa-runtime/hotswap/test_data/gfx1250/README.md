@@ -31,7 +31,8 @@ cp triton/gfx1250_kernels/*.hsaco \
 `permlane16_swap_gfx1250.hsaco`, `dpp_quad_perm_gfx1250.hsaco`,
 `ds_swizzle_gfx1250.hsaco` are minimal HIP kernels using inline
 asm to encode a specific cross-lane primitive. They give the
-CROSS_LANE_SURVEY P4 / P5 / P6 handlers CI-resident hardware
+P4 / P5 / P6 handlers (see the cross-lane rewrite table at
+hotswap/docs/wave-size-translation.md §5.3) CI-resident hardware
 regression gates — see `tests/gfx1250_gpu_test.cpp::doTestPermlane16Swap
 / doTestDppQuadPerm / doTestDsSwizzle` for the GTest pattern.
 

@@ -36,20 +36,37 @@ enum class RaiseFailureReason : uint16_t {
   TargetMachineCreationFailed,
   // Phase 7: `verifyModule` rejected the emitted IR.
   IRVerificationFailed,
-  // Phase 1.4.5 wave-size-obstruction classifier (SPE_DESIGN.md §4).
+  // Phase 1.4.5 wave-size-obstruction classifier (hotswap/docs/
+  // wave-size-translation.md §7's three-outcome decision procedure).
   // One reason per refusal *decision* so `batch_raise_test` and
   // `corpus_test` can bucket failures without parsing the failure
   // text. See `wave_size_obstruction.hpp` for the classifier
   // taxonomy and the mapping between these reasons and the more
   // specific `ObstructionKind` values.
   //
-  // The §3 Class 1..4 grouping is preserved as cross-references in
-  // the comments below; it is not part of the enum-value identity.
-  CrossWaveLaneIdLeak,             // §3 Class 1: MbcntHiLaneIdLeak / OutOfRangeLaneOperand.
-  CrossWaveUnrewritableShuffle,    // §3 Class 2: FullWaveRotate (no §4 rewrite available).
-  CrossWaveShuffleRewritePending,  // §3 Class 2: shuffle with CROSS_LANE_SURVEY P-item, handler not landed.
-  CrossWaveReplicaRace,            // §3 Class 3: NonCommutativeAtomic.
-  CrossWaveLanePredicatedExec,     // §3 Class 4: CmpxFromLaneId / SaveExecFromLaneId.
+  // The Class 1..4 grouping from wave-size-translation.md §6 is
+  // preserved as cross-references in the comments below; it is not
+  // part of the enum-value identity.
+  CrossWaveLaneIdLeak,             // Class 1: MbcntHiLaneIdLeak / OutOfRangeLaneOperand.
+  CrossWaveUnrewritableShuffle,    // Class 2: FullWaveRotate (no §7 rewrite available).
+  CrossWaveShuffleRewritePending,  // Class 2: shuffle with a §5.3 P-item whose handler has not landed.
+  CrossWaveReplicaRace,            // Class 3: NonCommutativeAtomic.
+  CrossWaveLanePredicatedExec,     // Class 4: CmpxFromLaneId / SaveExecFromLaneId.
+  // `HSA_SALMON_STRICT=1`-only refusal (see `pipeline.hpp::isStrictMode`).
+  // A handler recognised the SemOp and *would* have lifted it under the
+  // existing warn-and-continue policy, but strict mode requires the
+  // honest "unsupported, may silently miscompile" verdict instead.
+  // Today this covers MODE-register writes (`handle_sopk.cpp`) and
+  // `implicitarg.ptr` lifts (`handle_smem.cpp`); see
+  // `tools/triton_corpus_runner/INTEGRATION_GAP.md` for the
+  // diagnosis behind each site.
+  StrictUnsafeLowering,
+  // Phase 4 init: extractKernelMeta failed to read the kernel descriptor
+  // from .rodata via the `<name>.kd` symbol. Without the KD we cannot
+  // derive UserSgprLayout (which kernel_code_properties bits are set,
+  // how many dwords are preloaded, where workgroup-id SGPRs live), so
+  // every Phase-4 SGPR seed would be a guess. We refuse the lift.
+  MissingKernelDescriptor,
 };
 
 // Human-readable name for a `RaiseFailureReason`. Stable enough for
@@ -114,14 +131,15 @@ struct RaiseFailure {
   // `err` carries the verifier's diagnostic text for the `detail` field.
   static RaiseFailure irVerificationFailed(const llvm::Twine &err);
 
-  // Phase 1.4.5 wave-size-obstruction classifier (SPE_DESIGN.md §4).
-  // `di` supplies the offending mnemonic + offset. `kindDetail`
-  // should carry the human-readable `ObstructionKind` name (from
-  // `obstructionKindName`), the CROSS_LANE_SURVEY.md P-item (where
-  // applicable), and any operand-level context the classifier
-  // extracted (e.g. "operand value N >= W_s=M"). The resulting
-  // failure is renderable by `reasonString` for batch-test bucketing
-  // without parsing `detail`.
+  // Phase 1.4.5 wave-size-obstruction classifier (hotswap/docs/
+  // wave-size-translation.md §7). `di` supplies the offending
+  // mnemonic + offset. `kindDetail` should carry the human-readable
+  // `ObstructionKind` name (from `obstructionKindName`), the P-item
+  // identifier from the §5.3 rewrite table (where applicable), and
+  // any operand-level context the classifier extracted (e.g.
+  // "operand value N >= W_s=M"). The resulting failure is renderable
+  // by `reasonString` for batch-test bucketing without parsing
+  // `detail`.
   static RaiseFailure crossWaveLaneIdLeak(const DecodedInst &di,
                                            const llvm::Twine &kindDetail);
   static RaiseFailure crossWaveUnrewritableShuffle(const DecodedInst &di,
@@ -132,6 +150,21 @@ struct RaiseFailure {
                                             const llvm::Twine &kindDetail);
   static RaiseFailure crossWaveLanePredicatedExec(const DecodedInst &di,
                                                    const llvm::Twine &kindDetail);
+
+  // `HSA_SALMON_STRICT=1` refusal. `site` is a short stable label
+  // (e.g. `"HWREG_MODE_write"`, `"implicitarg.ptr"`) that
+  // `batch_raise_test` / `corpus_test` can bucket on without parsing
+  // `detail`; `detail` carries the human-readable explanation of *why*
+  // the lowering would silently miscompile.
+  static RaiseFailure strictUnsafeLowering(const DecodedInst &di,
+                                            llvm::StringRef site,
+                                            const llvm::Twine &detail);
+
+  // Phase 4 init: kernel descriptor was not parsed from .rodata so
+  // UserSgprLayout cannot be derived. `kernelName` is captured for the
+  // diagnostic; there is no `DecodedInst` because the failure happens
+  // before the disassembly is consumed.
+  static RaiseFailure missingKernelDescriptor(llvm::StringRef kernelName);
 };
 
 } // namespace transpiler

@@ -157,20 +157,24 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   emitCrossWaveWarning(projection, mc, insts, sourceISA,
                        compilationTargetISA);
 
-  // ==== Phase 1.4.5: Wave-size obstruction classifier (SPE_DESIGN.md §4) ====
+  // ==== Phase 1.4.5: Wave-size obstruction classifier
+  // (hotswap/docs/wave-size-translation.md §7) ====
   //
   // The classifier walks the decoded instruction stream and tags every
-  // site that violates the wave-size-obliviousness theorem (§2). The
+  // site that violates the wave-size-obliviousness theorem (see
+  // wave-size-translation.md §6 for the precise definition). The
   // decider then applies the 3-outcome procedure:
   //   (a) no obstructions, or every obstruction is covered by an
   //       implemented rewrite → emit modulo-replication.
-  //   (b) at least one obstruction has a rewrite pending in
-  //       CROSS_LANE_SURVEY.md but not yet implemented → refuse with a
+  //   (b) at least one obstruction has a rewrite structurally
+  //       recognised but not yet implemented (the "Pending rewrite"
+  //       table in wave-size-translation.md §7) → refuse with a
   //       `CrossWaveShuffleRewritePending` diagnostic naming the P-item.
-  //   (c) at least one obstruction has no rewrite in §4's table →
-  //       refuse with the kind-specific CrossWave* diagnostic
-  //       (`CrossWaveLaneIdLeak`, `CrossWaveUnrewritableShuffle`,
-  //       `CrossWaveReplicaRace`, `CrossWaveLanePredicatedExec`).
+  //   (c) at least one obstruction has no rewrite in the decision
+  //       procedure's unrewritable table → refuse with the kind-
+  //       specific CrossWave* diagnostic (`CrossWaveLaneIdLeak`,
+  //       `CrossWaveUnrewritableShuffle`, `CrossWaveReplicaRace`,
+  //       `CrossWaveLanePredicatedExec`).
   //
   // Refusal diagnostics are written to `errs()` (user-visible) AND the
   // full per-site trace is routed through LLVM_DEBUG so operators can
@@ -201,8 +205,10 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
              << " on '" << f.mnemonic << "' at offset "
              << format_hex(f.offset, 1) << " \u2014 "
              << (report.firstUnrewritable()
-                     ? "no rewrite in SPE_DESIGN.md \u00a74"
-                     : "rewrite pending (CROSS_LANE_SURVEY.md)")
+                     ? "no rewrite in wave-size-translation.md "
+                       "\u00a77's unrewritable table"
+                     : "rewrite pending (wave-size-translation.md "
+                       "\u00a77's pending-rewrite table)")
              << "\n"
              << trace;
       result.failure = std::move(f);

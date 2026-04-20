@@ -3,7 +3,7 @@
 // Fixture for the Class-1 "absolute lane-ID leak" obstruction
 // (lit_tests/c1_lane_id_leak).
 //
-// SPE_DESIGN.md §3 Class 1 names the constructs through which the
+// Class 1 (hotswap/docs/wave-size-translation.md §6) names the constructs through which the
 // absolute target-hardware lane position leaks into observable
 // values: v_mbcnt_hi_u32_b32 (the canonical abs-lane-id path on
 // wave64), v_readlane / v_writelane with operand >= W_s, and the

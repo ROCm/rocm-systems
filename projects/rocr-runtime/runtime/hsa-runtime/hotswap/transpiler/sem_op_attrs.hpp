@@ -15,8 +15,9 @@ class OpcodeMap;
 
 // Per-SemOp metadata that the raiser cross-references at its pre-
 // translation gates. Grows incrementally as new per-writer predicates
-// are needed (today only `routesExecThroughStoreExec`; SPE_DESIGN §4's
-// wave-size-obliviousness predicate will attach here too).
+// are needed (today only `routesExecThroughStoreExec`; the wave-size-
+// obliviousness predicate from hotswap/docs/wave-size-translation.md
+// §7's decision procedure will attach here too).
 //
 // Default-constructed attrs mean "no declared guarantees" — the gate
 // aborts for any EXEC-writer encountered that does not have its

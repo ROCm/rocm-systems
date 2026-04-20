@@ -2,7 +2,8 @@
 //
 // Fixture for the Class-2 LaneGroupShuffle positive case — the
 // non-swap `v_permlane16_b32` / `v_permlanex16_b32` primitives that
-// CROSS_LANE_SURVEY.md P2 covers. Companion to
+// the P2 row of hotswap/docs/wave-size-translation.md §5.3 covers.
+// Companion to
 // `lit_tests/c2_permlane_swap` which pins the still-pending P4
 // (permlane*_swap) refusal path; the two fixtures together exercise
 // both branches of the per-SemOp `rewriteImplemented` dispatch in

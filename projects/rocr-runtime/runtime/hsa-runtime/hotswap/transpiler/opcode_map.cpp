@@ -675,9 +675,11 @@ static const Entry kCanonTable[] = {
     E(DS_WRITE_B8_D16_HI, DS_WRITE_B8_D16_HI),
     E(DS_BPERMUTE_B32, DS_BPERMUTE_B32),
     // ds_swizzle_b32 — wave-width-specific cross-lane shuffle. The
-    // handler refuses with `unsupportedShape` until CROSS_LANE_SURVEY
-    // P6 lands; the wave-size classifier (Phase 1.4.5) flags it as
-    // SPE_DESIGN.md §3 Class 2 in the cross-wave case.
+    // handler refuses with `unsupportedShape` until the P6 rewrite
+    // lands (see the ds_swizzle_b32 row of hotswap/docs/wave-size-
+    // translation.md §5.3); the wave-size classifier (Phase 1.4.5)
+    // flags it as a Class 2 obstruction (wave-size-translation.md
+    // §6) in the cross-wave case.
     E(DS_SWIZZLE_B32, DS_SWIZZLE_B32),
 
     // ---------------------------------------------------------------------
@@ -745,8 +747,9 @@ static const Entry kCanonTable[] = {
     MUBUF4(BUFFER_ATOMIC_AND, BUFFER_ATOMIC_AND),
     MUBUF4(BUFFER_ATOMIC_OR, BUFFER_ATOMIC_OR),
     MUBUF4(BUFFER_ATOMIC_XOR, BUFFER_ATOMIC_XOR),
-    // SPE_DESIGN.md §3 Class 3 non-commutative atomics. The
-    // wave-size classifier flags them in the cross-wave case before
+    // Class 3 non-commutative atomics (hotswap/docs/wave-size-
+    // translation.md §6). The wave-size classifier flags them in
+    // the cross-wave case before
     // dispatch ever reaches handle_mubuf.cpp's switch (which would
     // otherwise refuse them via the default branch since they don't
     // fit the AtomicRMW commutative model).

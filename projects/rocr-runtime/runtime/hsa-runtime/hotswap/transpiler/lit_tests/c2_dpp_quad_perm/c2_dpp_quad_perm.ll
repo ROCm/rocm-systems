@@ -2,8 +2,9 @@
 ; RUN:     --emit-ir=c2_dpp_quad_perm_kernel 2>/dev/null \
 ; RUN:   | %FileCheck %s
 ;
-; CROSS_LANE_SURVEY.md item P5 (DPP modifier intrinsic lift) has
-; landed; this test was originally a refuse-loud fixture asserting
+; The P5 rewrite (DPP modifier intrinsic lift) has landed — see
+; the DPP row of hotswap/docs/wave-size-translation.md §5.3. This
+; test was originally a refuse-loud fixture asserting
 ; `cross-wave-shuffle-rewrite-pending`. Per its MAINTENANCE block we
 ; flipped it to a positive test that asserts:
 ;

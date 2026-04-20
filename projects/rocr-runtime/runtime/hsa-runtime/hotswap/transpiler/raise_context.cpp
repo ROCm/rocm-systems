@@ -409,7 +409,8 @@ Value *RaiseContext::readOp64(const DecodedInst &di, unsigned opIdx) {
 Value *RaiseContext::emitUpdateDpp(Value *oldVal, Value *src, uint16_t ctrl,
                                     uint8_t rowMask, uint8_t bankMask,
                                     bool boundCtrl) {
-  // CROSS_LANE_SURVEY.md P5: lift the DPP src-pathway modifier through
+  // P5 lowering — see the DPP row of hotswap/docs/wave-size-
+  // translation.md §5.3: lift the DPP src-pathway modifier through
   // `llvm.amdgcn.update.dpp`. The intrinsic is type-overloaded
   // (`llvm_any_ty`). We route through integer overloads sized to match
   // the input's bit-width and bitcast through when the input is a

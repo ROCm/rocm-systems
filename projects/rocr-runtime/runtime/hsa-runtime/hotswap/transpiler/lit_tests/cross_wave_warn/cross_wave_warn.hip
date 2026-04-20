@@ -8,7 +8,8 @@
 // another (e.g. gfx1250 authored for wave32, raised for a gfx942
 // wave64 target), because `emitLaneActiveBit` then relies on
 // modulo-replication, which is not provably correct in general. See
-// SPE_DESIGN.md ("Cross-wave translation policy").
+// hotswap/docs/wave-size-translation.md §§5–7 for the cross-wave
+// translation policy.
 //
 // Today the policy is warn-only — the raiser prints a `transpiler:
 // WARNING: cross-wave translation ...` diagnostic and continues — so

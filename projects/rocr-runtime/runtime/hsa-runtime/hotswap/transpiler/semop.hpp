@@ -597,10 +597,11 @@ enum class SemOp : uint16_t {
   // a separate set with their own tied-source dest_in handling.
   DS_WRITE_B16_D16_HI, DS_WRITE_B8_D16_HI,
   DS_BPERMUTE_B32,
-  // SPE_DESIGN.md §3 Class 2 (DsSwizzle). Wave-width-specific
-  // cross-lane shuffle. The handler refuses with `unsupportedShape`
-  // until CROSS_LANE_SURVEY.md item P6 (lift through
-  // llvm.amdgcn.ds.swizzle) lands; the wave-size classifier
+  // Class 2 DsSwizzle (hotswap/docs/wave-size-translation.md §6).
+  // Wave-width-specific cross-lane shuffle. The handler refuses with
+  // `unsupportedShape` until the P6 rewrite (lift through
+  // llvm.amdgcn.ds.swizzle — see wave-size-translation.md §5.3 row
+  // P6) lands; the wave-size classifier
   // (wave_size_obstruction.cpp) flags it before the handler is even
   // dispatched in the cross-wave case.
   DS_SWIZZLE_B32,
@@ -631,7 +632,8 @@ enum class SemOp : uint16_t {
   // `RaiseFailure::unsupportedShape("unsupported buffer atomic")`.
   BUFFER_ATOMIC_ADD, BUFFER_ATOMIC_SUB,
   BUFFER_ATOMIC_AND, BUFFER_ATOMIC_OR, BUFFER_ATOMIC_XOR,
-  // SPE_DESIGN.md §3 Class 3 non-commutative atomics (NonCommutativeAtomic).
+  // Class 3 non-commutative atomics (NonCommutativeAtomic), see
+  // hotswap/docs/wave-size-translation.md §6.
   // The wave-size classifier flags these in the cross-wave case;
   // commutative AtomicRMW dispatch in handle_mubuf.cpp does not
   // model the cmpxchg / xchg semantics, so the handler's default

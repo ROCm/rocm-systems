@@ -18,22 +18,24 @@ struct MCState;
 // ============================================================================
 // Wave-size obstruction classifier.
 //
-// Implements SPE_DESIGN.md §3's obstruction catalog + §4's 3-outcome
-// decision procedure. Given a decoded instruction stream for a source
-// kernel whose target wave size differs from the source's, this pass
-// produces an `ObstructionReport` whose sites enumerate every construct
-// in the kernel that violates the wave-size-obliviousness theorem
-// (§2), tagged with (a) the obstruction class, (b) the rewrite entry
-// in §4's table (if any) that would discharge it, and (c) whether the
-// rewrite is implemented in the current raiser.
+// Implements the obstruction catalog + 3-outcome decision procedure
+// specified in hotswap/docs/wave-size-translation.md §§6–7. Given a
+// decoded instruction stream for a source kernel whose target wave
+// size differs from the source's, this pass produces an
+// `ObstructionReport` whose sites enumerate every construct in the
+// kernel that violates the wave-size-obliviousness theorem (see
+// wave-size-translation.md §6 for the precise definition), tagged
+// with (a) the obstruction class, (b) the rewrite entry in §7's
+// landed-rewrites table (if any) that would discharge it, and
+// (c) whether the rewrite is implemented in the current raiser.
 //
 // The decider function `decideProjection` consumes that report and
 // returns either a projection to run (outcome a / b) or a structured
 // `RaiseFailure` to propagate (outcome c). The projection today is
-// always `ModuloReplicationProjection` — §7's coverage ladder
-// envisions `ThreadLoopProjection` / `ScalarizationProjection` as
-// future rungs, but no corpus kernel reaches them (see
-// gpt-oss-derisking.md §9.1–9.3).
+// always `ModuloReplicationProjection` — wave-size-translation.md
+// §2.2's coverage ladder envisions `ThreadLoopProjection` /
+// `ScalarizationProjection` as future rungs, but no corpus kernel
+// reaches them (see hotswap/docs/gpt-oss-derisking.md §9.1–9.3).
 //
 // Analysis strategy — syntactic for now, dataflow later.
 // ============================================================================
@@ -89,38 +91,39 @@ struct MCState;
 // Obstruction taxonomy.
 //
 // Each enum value names the *specific failure mode* the classifier
-// detected. The §3 Class 1..4 grouping in SPE_DESIGN.md is preserved
-// as the comment headers below; that grouping is the stable design-
-// doc cross-reference, but it is not part of the code-level identity
-// of an obstruction (a reader should not have to bounce to the doc
-// to know what `ObstructionKind::DppCrossLane` means).
+// detected. The Class 1..4 grouping from hotswap/docs/wave-size-
+// translation.md §6 is preserved as the comment headers below; that
+// grouping is the stable design-doc cross-reference, but it is not
+// part of the code-level identity of an obstruction (a reader should
+// not have to bounce to the doc to know what
+// `ObstructionKind::DppCrossLane` means).
 // ----------------------------------------------------------------------------
 
 enum class ObstructionKind : uint8_t {
   None = 0,
 
-  // ── SPE_DESIGN.md §3 Class 1: absolute lane-ID leaks ───────────
+  // ── Class 1 (wave-size-translation.md §6): absolute lane-ID leaks ──
   // The kernel exposes the absolute target-hardware lane position
   // through one of these constructs; under modulo-replication the
   // value diverges from what the wave32 source intended.
   MbcntHiLaneIdLeak,        // v_mbcnt_hi_u32_b32 — no rewrite.
   OutOfRangeLaneOperand,    // v_readlane/writelane with static const operand >= W_s — no rewrite.
 
-  // ── SPE_DESIGN.md §3 Class 2: cross-lane shuffles whose
-  //                              semantics bake in the wave width ──
+  // ── Class 2 (wave-size-translation.md §6): cross-lane shuffles whose
+  //                                            semantics bake in the wave width ──
   FullWaveRotate,           // v_permlane64_b32 — no wave32 analogue, unrewritable.
-  LaneGroupShuffle,         // permlane16 / permlanex16 / permlane*_swap_b32 — CROSS_LANE_SURVEY P2/P3/P4.
-  DsSwizzle,                // ds_swizzle_b32 — CROSS_LANE_SURVEY P6.
-  DppCrossLane,             // any `_dpp` variant — CROSS_LANE_SURVEY P5.
-  DsBpermuteGather,         // ds_bpermute_b32 — CROSS_LANE_SURVEY P1 (handler landed).
+  LaneGroupShuffle,         // permlane16 / permlanex16 / permlane*_swap_b32 — wave-size-translation.md §5.3 rows P2 / P4 (and the pending-table P4 entry for permlane32_swap).
+  DsSwizzle,                // ds_swizzle_b32 — wave-size-translation.md §5.3 row P6.
+  DppCrossLane,             // any `_dpp` variant — wave-size-translation.md §5.3 row P5.
+  DsBpermuteGather,         // ds_bpermute_b32 — wave-size-translation.md §5.3 row P1 (handler landed).
 
-  // ── SPE_DESIGN.md §3 Class 3: replica races on shared state ────
+  // ── Class 3 (wave-size-translation.md §6): replica races on shared state ──
   // Modulo-replication introduces racers on the same address from
   // target lanes i and i + W_s; for non-commutative atomics this
   // produces an outcome the source program never expressed.
   NonCommutativeAtomic,     // atomic_cmpswap / atomic_swap / atomic_xchg — no rewrite.
 
-  // ── SPE_DESIGN.md §3 Class 4: lane-predicated EXEC writes ──────
+  // ── Class 4 (wave-size-translation.md §6): lane-predicated EXEC writes ──
   // The EXEC mask the kernel writes depends on the absolute lane
   // position; under modulo-replication the projection does not
   // reproduce the source's intent.
@@ -129,7 +132,9 @@ enum class ObstructionKind : uint8_t {
 };
 
 // Identifier for the rewrite rule that would discharge an obstruction
-// site, cross-referenced to CROSS_LANE_SURVEY.md's P-items.
+// site. Names follow the "P-item" convention enumerated in the
+// cross-lane rewrite table at hotswap/docs/wave-size-translation.md
+// §5.3 (and partitioned into landed / pending / unrewritable in §7).
 enum class RewriteId : uint8_t {
   None = 0,                 // no rewrite available (outcome-c class).
   P1_DsBpermute,            // llvm.amdgcn.ds.bpermute lift.

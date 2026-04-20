@@ -3,7 +3,8 @@
 // Negative-case fixture for the Class-2 ds_swizzle_b32 sub-category
 // (lit_tests/c2_ds_swizzle_unsafe).
 //
-// CROSS_LANE_SURVEY.md item P6 lifted ds_swizzle_b32 through
+// The P6 rewrite (see the ds_swizzle_b32 row of hotswap/docs/
+// wave-size-translation.md §5.3) lifted ds_swizzle_b32 through
 // `llvm.amdgcn.ds.swizzle`, and after the audit follow-up that
 // widened the safe set with empirical evidence (gfx942 wave64
 // preserves bit 5 of lane id across all four valid swizzle-mode

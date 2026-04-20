@@ -23,8 +23,10 @@ set_tests_properties(Gfx1250Gpu.Matmul128x128 PROPERTIES
 )
 
 # Gfx1250Gpu.Softmax graduated from XFAIL to expected-pass once
-# CROSS_LANE_SURVEY.md P2 (v_permlane16 / v_permlanex16 emulation
-# via ds_bpermute_b32) landed on top of P5 (DPP intrinsic lift). The
+# the P2 rewrite (v_permlane16 / v_permlanex16 emulation via
+# ds_bpermute_b32; see the permlane16/permlanex16 row of
+# hotswap/docs/wave-size-translation.md §5.3) landed on top of P5
+# (DPP intrinsic lift). The
 # kernel's two remaining classifier-blocked sites — a single
 # `v_permlanex16_b32` and the DPP pattern — now both surface in the
 # classifier trace as `[implemented]`, and the end-to-end test runs
