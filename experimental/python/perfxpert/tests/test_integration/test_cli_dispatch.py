@@ -133,7 +133,14 @@ def test_analyze_webview_output_is_html():
 
 def test_analyze_text_output_is_structured():
     """`--format text` must be structured plaintext (section separators,
-    bullets), NOT raw narrative prose."""
+    banner, bullets), NOT raw narrative prose.
+
+    The text formatter now dispatches to the legacy ``format_analysis_output``
+    for the deterministic skeleton and splices the agent narrative + primary
+    bottleneck under a "SUMMARY" heading — the legacy renderer uses
+    ``========`` double-bar dividers + a centred "ROCPD AI PERFORMANCE
+    ANALYSIS" banner.
+    """
     out = analyze_mod._format_agentic_output(
         _FakeRootOutput(
             narrative="Narrative body goes here.",
@@ -143,11 +150,13 @@ def test_analyze_text_output_is_structured():
         ),
         "text",
     )
-    # The structured plaintext renderer uses `== section ==` headings
-    # and long ``=`` bars.
-    assert "== Summary ==" in out or "== Recommendations ==" in out, (
-        f"Text output not structured; got:\n{out}"
-    )
+    # The structured plaintext renderer uses banner + centred section
+    # titles + long ``=`` bars rather than the old ``== section ==`` marker.
+    assert "SUMMARY" in out, f"Text output missing SUMMARY section; got:\n{out[:400]}"
+    assert (
+        "PERFXPERT ANALYSIS" in out
+        or "ROCPD AI PERFORMANCE ANALYSIS" in out
+    ), f"Text output missing analysis banner; got:\n{out[:400]}"
     assert "=" * 40 in out, "Text output missing horizontal section bars"
     assert "latency" in out.lower()
 

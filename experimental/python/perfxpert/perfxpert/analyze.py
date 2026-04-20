@@ -403,22 +403,17 @@ def _format_agentic_output(
     output_format: str,
     *,
     database_path: str = "",
+    analysis_payload: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Render a :class:`RootOutput` (or its ``model_dump`` dict) via the
-    shared formatters.
+    """Render an agentic RootOutput + deterministic analysis payload.
 
-    The legacy formatters expect a rich dict of analysis metrics
-    (``time_breakdown``, ``hotspots``, ``memory_analysis``, …). The
-    agentic pipeline today only passes the narrative + recommendations
-    up through Root, so we construct a *minimal* analysis dict: it has
-    all the keys the formatters check for (so they don't KeyError) but
-    the kernel / counter / memcpy sections are intentionally empty,
-    letting the formatters short-circuit those sections cleanly.
-
-    Downstream work will lift ``time_breakdown`` + ``hotspots`` from the
-    Analysis agent's output up through Root's metadata so the report is
-    richer; until then we render the narrative inside a proper Markdown /
-    HTML skeleton with a recommendations table.
+    The agentic pipeline supplies the brain (narrative, primary_bottleneck,
+    recommendations, warnings); ``analysis_payload`` supplies the
+    deterministic dataset (time_breakdown, hotspots, memory_analysis,
+    hardware_counters, kernel_resources, api_overhead, thread_trace,
+    tier0_findings). Both are merged so every format renders the full
+    contract — tables + stats + narrative + recommendations — regardless of
+    whether an LLM is in the loop.
 
     ``root_output`` may be either:
       - a :class:`perfxpert.agents.schemas.RootOutput` (Pydantic model),
@@ -426,68 +421,177 @@ def _format_agentic_output(
       - a plain ``dict`` (e.g. the return value of
         :func:`perfxpert.api.agent_root`), in which case the same five
         keys are read via ``dict.get``.
+
+    When ``analysis_payload`` only carries a ``tier0_findings`` section and
+    no database-backed sections (i.e. ``--source-dir`` without ``-i``), the
+    tier-0-specific formatters are used for a source-only report.
     """
+    from .analysis.payload import merge_recommendations, tier0_dict_to_ns
+
     def _read(name: str, default: Any) -> Any:
         if isinstance(root_output, dict):
             return root_output.get(name, default)
         return getattr(root_output, name, default)
 
     narrative = _read("narrative", "") or ""
-    recommendations = list(_read("recommendations", []) or [])
+    llm_recs = list(_read("recommendations", []) or [])
     primary_bottleneck = _read("primary_bottleneck", "mixed") or "mixed"
     warnings = list(_read("warnings", []) or [])
     metadata = dict(_read("metadata", {}) or {})
 
-    if output_format == "json":
-        import json as _json
-        return _json.dumps(
-            {
-                "narrative": narrative,
-                "recommendations": recommendations,
-                "primary_bottleneck": primary_bottleneck,
-                "warnings": warnings,
-                "metadata": metadata,
-            },
-            indent=2,
+    payload = analysis_payload or {}
+
+    time_breakdown = payload.get("time_breakdown") or {}
+    hotspots = payload.get("hotspots") or []
+    memory_analysis = payload.get("memory_analysis") or {}
+    hardware_counters = payload.get("hardware_counters") or {}
+    kernel_resources = payload.get("kernel_resources") or {}
+    api_overhead = payload.get("api_overhead") or {}
+    thread_trace = payload.get("thread_trace")
+    tier0_findings = payload.get("tier0_findings")
+    det_recs = list(payload.get("recommendations_deterministic") or [])
+
+    # Merge LLM + deterministic recommendations (dedupe by (type,target) or
+    # (category,issue)). LLM recs keep their verdict; deterministic citations
+    # / code snippets are carried across when they disambiguate the same rec.
+    merged_recs = merge_recommendations(llm_recs, det_recs)
+
+    # Source-only path: dispatch entirely to the tier-0 formatters when
+    # there is no DB-side data at all.
+    tier0_only = (
+        tier0_findings is not None
+        and not time_breakdown
+        and not hotspots
+        and not memory_analysis
+    )
+    if tier0_only:
+        # Attach narrative + merged recs onto the tier-0 result so the
+        # tier-0 formatters carry the agent brain through the output.
+        tier0_ns = tier0_dict_to_ns(tier0_findings)
+        if narrative and not getattr(tier0_ns, "llm_explanation", None):
+            tier0_ns.llm_explanation = narrative
+        if merged_recs:
+            existing = list(getattr(tier0_ns, "recommendations", None) or [])
+            tier0_ns.recommendations = merged_recs + existing
+
+        if output_format == "json":
+            # Tier-0 JSON is already schema-shaped, but top-level schema
+            # callers expect the agentic keys too (narrative / primary_bottleneck /
+            # warnings) so we merge them in post-hoc.
+            import json as _json
+            base = _format_tier0_json(tier0_ns)
+            try:
+                doc = _json.loads(base)
+            except Exception:
+                doc = {}
+            doc["narrative"] = narrative
+            doc["primary_bottleneck"] = primary_bottleneck
+            doc["warnings"] = warnings
+            # Flat convenience keys so `jq '.time_breakdown'` returns {} not null.
+            doc.setdefault("time_breakdown", {})
+            doc.setdefault("memory_analysis", {})
+            doc.setdefault("hardware_counters", doc.get("hardware_counters") or {"has_counters": False})
+            doc.setdefault("tier0_findings", tier0_findings)
+            return _json.dumps(doc, indent=2)
+        if output_format == "markdown":
+            md = _format_tier0_markdown(tier0_ns)
+            if narrative:
+                md = ("\n## Summary\n\n" + narrative.rstrip() + "\n\n---\n\n") + md
+            if warnings:
+                md += "\n\n## Warnings\n\n"
+                for w in warnings:
+                    md += f"- {w}\n"
+            return md
+        if output_format == "webview":
+            html = _format_tier0_webview(tier0_ns)
+            if narrative:
+                import html as _html_mod
+                narrative_panel = (
+                    '<section class="card" id="agentic-narrative">'
+                    '<h2>Summary</h2>'
+                    f'<pre style="white-space:pre-wrap;">{_html_mod.escape(narrative)}</pre>'
+                    '</section>'
+                )
+                if "</main>" in html:
+                    html = html.replace("</main>", narrative_panel + "</main>", 1)
+                elif "</body>" in html:
+                    html = html.replace("</body>", narrative_panel + "</body>", 1)
+                else:
+                    html += "\n" + narrative_panel
+            return html
+        # text: prepend "PERFXPERT ANALYSIS" banner so tests that assert
+        # the title remain green even on the tier-0-only path.
+        tier0_text = _format_tier0_text(tier0_ns)
+        width = 80
+        banner = (
+            "=" * width + "\n"
+            + "PERFXPERT ANALYSIS".center(width) + "\n"
+            + "=" * width + "\n"
         )
+        if "PERFXPERT ANALYSIS" not in tier0_text:
+            tier0_text = banner + tier0_text
+        if narrative:
+            summary = (
+                "\n" + ("\u2501" * width) + "\n"
+                + "SUMMARY".center(width) + "\n"
+                + ("\u2501" * width) + "\n"
+                + narrative.rstrip() + "\n"
+            )
+            tier0_text = summary + tier0_text
+        return tier0_text
 
-    # The Analysis agent's time_breakdown could flow up through Root.metadata
-    # if the pipeline is wired to do so. Default to an empty-but-shaped dict
-    # so the formatters emit their skeleton without failing.
-    time_breakdown = metadata.get("time_breakdown") or {}
-    hotspots = metadata.get("hotspots") or []
-    memory_analysis = metadata.get("memory_analysis") or {}
-    hardware_counters = metadata.get("hardware_counters") or {}
-
-    # Normalise recommendations to the shape the formatters expect.
-    # Agentic recs carry ``type`` / ``target`` / ``summary`` — map them
-    # onto the legacy ``category`` / ``issue`` / ``suggestion`` keys so
-    # the rendered report reads sensibly.
-    normalised_recs: list = []
-    for rec in recommendations:
-        if not isinstance(rec, dict):
-            continue
-        r = dict(rec)
-        r.setdefault("priority", "INFO")
-        r.setdefault("category", r.get("type", "analysis"))
-        r.setdefault("issue", r.get("summary", ""))
-        r.setdefault("suggestion", r.get("summary", ""))
-        normalised_recs.append(r)
+    if output_format == "json":
+        base_json = _format_as_json(
+            time_breakdown=time_breakdown,
+            hotspots=hotspots,
+            memory_analysis=memory_analysis,
+            recommendations=merged_recs,
+            hardware_counters=hardware_counters,
+            database_path=database_path,
+            att_analysis=thread_trace,
+            kernel_resources=kernel_resources,
+            api_overhead=api_overhead,
+        )
+        import json as _json
+        try:
+            doc = _json.loads(base_json)
+        except Exception:
+            doc = {}
+        # Merge the agentic brain on top of the deterministic doc so the
+        # JSON contract has EVERY section: narrative + primary_bottleneck +
+        # warnings + tier0_findings, on top of time_breakdown / hotspots /
+        # memory_analysis / hardware_counters.
+        doc["narrative"] = narrative
+        doc["primary_bottleneck"] = primary_bottleneck
+        doc["warnings"] = warnings
+        # Preserve a flat ``recommendations`` key in addition to the
+        # structured ``recommendations`` inside the schema so callers that
+        # do ``jq '.recommendations | length'`` continue to work.
+        doc["recommendations"] = merged_recs
+        doc["metadata"] = {**doc.get("metadata", {}), **metadata}
+        if tier0_findings is not None:
+            doc["tier0_findings"] = tier0_findings
+        # Flat convenience keys for the test contract.
+        doc.setdefault("time_breakdown", time_breakdown)
+        doc.setdefault("hotspots", hotspots)
+        doc.setdefault("memory_analysis", memory_analysis)
+        doc.setdefault("hardware_counters", hardware_counters)
+        doc.setdefault("kernel_resources", kernel_resources)
+        doc.setdefault("api_overhead", api_overhead)
+        return _json.dumps(doc, indent=2)
 
     if output_format == "markdown":
         md = _format_as_markdown(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
             memory_analysis=memory_analysis,
-            recommendations=normalised_recs,
+            recommendations=merged_recs,
             hardware_counters=hardware_counters,
             database_path=database_path,
         )
-        # Inject the LLM / airgap narrative between the title and the
-        # metric sections so the report reads as a cohesive document.
+        # Splice the agent narrative in as a summary section under the H1.
         if narrative:
             narrative_block = "\n## Summary\n\n" + narrative.rstrip() + "\n"
-            # Splice after the first blank line following the H1 title.
             parts = md.split("\n", 3)
             if len(parts) >= 2 and parts[0].startswith("# "):
                 md = parts[0] + "\n" + (parts[1] + "\n" if len(parts) > 1 else "") + \
@@ -500,6 +604,10 @@ def _format_agentic_output(
             md += "\n\n## Warnings\n\n"
             for w in warnings:
                 md += f"- {w}\n"
+        if tier0_findings is not None:
+            tier0_ns = tier0_dict_to_ns(tier0_findings)
+            md += "\n\n---\n\n## Tier 0 — Source Scan\n\n"
+            md += _format_tier0_markdown(tier0_ns)
         return md
 
     if output_format == "webview":
@@ -507,13 +615,13 @@ def _format_agentic_output(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
             memory_analysis=memory_analysis,
-            recommendations=normalised_recs,
+            recommendations=merged_recs,
             hardware_counters=hardware_counters,
             database_path=database_path,
+            att_analysis=thread_trace,
         )
-        # The template places a narrative only if summary / findings land
-        # in _build_summary; for a pure agentic RootOutput we splice the
-        # narrative into a prose panel so the HTML isn't empty of text.
+        # Splice the narrative in as a prose panel so the HTML isn't silent
+        # on LLM / airgap reasoning.
         if narrative:
             import html as _html_mod
             narrative_panel = (
@@ -522,7 +630,6 @@ def _format_agentic_output(
                 f'<pre style="white-space:pre-wrap;">{_html_mod.escape(narrative)}</pre>'
                 '</section>'
             )
-            # Inject right before </main> if present, else before </body>.
             if "</main>" in html:
                 html = html.replace("</main>", narrative_panel + "</main>", 1)
             elif "</body>" in html:
@@ -531,44 +638,56 @@ def _format_agentic_output(
                 html = html + "\n" + narrative_panel
         return html
 
-    # text: structured plaintext with section separators — NOT raw narrative.
+    # Default: structured text — dispatch to the legacy text formatter for
+    # the deterministic skeleton, then splice narrative + primary_bottleneck
+    # + warnings on top.
+    base_text = format_analysis_output(
+        time_breakdown=time_breakdown,
+        hotspots=hotspots,
+        memory_analysis=memory_analysis,
+        recommendations=merged_recs,
+        hardware_counters=hardware_counters,
+        database_path=database_path,
+        att_analysis=thread_trace,
+        kernel_resources=kernel_resources,
+        api_overhead=api_overhead,
+        tier0_result=tier0_dict_to_ns(tier0_findings) if tier0_findings else None,
+        source_only=False,
+        output_format="text",
+    )
+
+    # Prepend a Summary block with narrative + primary_bottleneck so the
+    # user sees the agent brain before the tables.
+    head_lines = []
     width = 80
-    lines = []
-    lines.append("=" * width)
-    lines.append("PERFXPERT ANALYSIS".center(width))
-    lines.append("=" * width)
-    if database_path:
-        lines.append(f"Database: {database_path}")
-    lines.append(f"Primary bottleneck: {primary_bottleneck}")
-    lines.append("")
-    lines.append("== Summary ==")
-    lines.append("")
-    lines.append(narrative.rstrip() or "(no narrative — airgap / empty response)")
-    lines.append("")
-    if normalised_recs:
-        lines.append("== Recommendations ==")
-        lines.append("")
-        for i, rec in enumerate(normalised_recs, 1):
-            prio = rec.get("priority", "INFO")
-            cat = rec.get("category", "")
-            issue = rec.get("issue", "") or rec.get("summary", "")
-            lines.append(f"  {i}. [{prio}] {cat}")
-            if issue:
-                lines.append(f"     * {issue}")
-            suggestion = rec.get("suggestion", "")
-            if suggestion and suggestion != issue:
-                lines.append(f"     * suggestion: {suggestion}")
-        lines.append("")
+    head_lines.append("")
+    head_lines.append("\u2501" * width)
+    head_lines.append("SUMMARY".center(width))
+    head_lines.append("\u2501" * width)
+    head_lines.append(f"Primary bottleneck: {primary_bottleneck}")
+    head_lines.append("")
+    if narrative:
+        head_lines.append(narrative.rstrip())
+        head_lines.append("")
     if warnings:
-        lines.append("== Warnings ==")
-        lines.append("")
+        head_lines.append("Warnings:")
         for w in warnings:
-            lines.append(f"  * {w}")
-        lines.append("")
-    lines.append("=" * width)
-    lines.append("Analysis complete.".center(width))
-    lines.append("=" * width)
-    return "\n".join(lines)
+            head_lines.append(f"  \u26a0  {w}")
+        head_lines.append("")
+
+    # Splice head_lines BEFORE the existing "TIME BREAKDOWN" section so the
+    # summary sits at the top of the report under the title.
+    split_token = "TIME BREAKDOWN"
+    idx = base_text.find(split_token)
+    if idx != -1:
+        # Find start of the line holding TIME BREAKDOWN (go back to preceding \n)
+        line_start = base_text.rfind("\n", 0, idx)
+        # Also back up one more line for the box rule above "TIME BREAKDOWN"
+        line_start = base_text.rfind("\n", 0, line_start) if line_start > 0 else line_start
+        if line_start < 0:
+            line_start = 0
+        return base_text[:line_start] + "\n" + "\n".join(head_lines) + base_text[line_start:]
+    return "\n".join(head_lines) + "\n" + base_text
 
 
 # ---------------------------------------------------------------------------
@@ -861,6 +980,9 @@ def _execute_agentic(
     llm_api_key = kwargs.get("llm_api_key")
     no_progress = bool(kwargs.get("no_progress", False))
     verbose = bool(kwargs.get("verbose", False))
+    att_dir = kwargs.get("att_dir")
+    top_kernels = int(kwargs.get("top_kernels") or 10)
+    min_duration = float(kwargs.get("min_duration") or 0.0)
 
     # Bug 3 — pre-flight auth check. Surface a clean ``AuthError`` BEFORE
     # building the session + making any network call when the selected
@@ -928,6 +1050,47 @@ def _execute_agentic(
         if (_time.monotonic() - _t0) > 0.5:
             progress_cb("scanning sources: done")
 
+    # Deterministic analysis pass — runs in parallel with the LLM brain so
+    # every format populates the full contract (time_breakdown / hotspots /
+    # memory_analysis / hardware_counters / tier-0 / …) regardless of
+    # whether an LLM is in the loop. The airgap path takes this path too;
+    # only the LLM narrative is skipped under airgap.
+    from perfxpert.analysis.payload import build_analysis_payload as _build_payload
+    try:
+        analysis_payload = _build_payload(
+            input,
+            source_dir=source_dir,
+            att_dir=att_dir,
+            top_kernels=top_kernels,
+            min_duration=min_duration,
+            progress_callback=progress_cb,
+        )
+    except Exception as _payload_exc:
+        # Never fail analysis for a deterministic-pass hiccup — degrade
+        # gracefully by emitting an empty payload the formatters can
+        # still render a skeleton from.
+        import warnings as _warnings
+        _warnings.warn(
+            f"perfxpert.analyze: deterministic pass failed ({_payload_exc}); "
+            "formats will render the LLM-only skeleton.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        analysis_payload = {
+            "database_path": database_path,
+            "time_breakdown": {},
+            "hotspots": [],
+            "memory_analysis": {},
+            "hardware_counters": {"has_counters": False, "metrics": {}, "counters": {}},
+            "kernel_resources": {},
+            "api_overhead": {},
+            "warmup_issues": {},
+            "thread_trace": None,
+            "tier0_findings": None,
+            "recommendations_deterministic": [],
+            "metadata": {},
+        }
+
     # Format output according to requested format.
     #
     # The legacy formatters (_format_as_markdown / _format_as_webview)
@@ -936,7 +1099,12 @@ def _execute_agentic(
     # real Markdown (not raw narrative prose) and `--format webview`
     # emits a real HTML report (not a plaintext narrative).
     output_format = kwargs.get("output_format", "text")
-    output = _format_agentic_output(root_output, output_format, database_path=database_path)
+    output = _format_agentic_output(
+        root_output,
+        output_format,
+        database_path=database_path,
+        analysis_payload=analysis_payload,
+    )
 
     # Handle output writing
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
