@@ -219,6 +219,229 @@ destroy_queue_state(const hsa_queue_t* queue)
     get_queue_registry().wlock([&](auto& map) { map.erase(queue); });
 }
 
+namespace
+{
+// --- Saved original function pointers (14 total) ---
+
+// add_write_index (4 variants)
+static decltype(CoreApiTable::hsa_queue_add_write_index_relaxed_fn) s_orig_add_relaxed = nullptr;
+static decltype(CoreApiTable::hsa_queue_add_write_index_scacq_screl_fn) s_orig_add_scacq_screl =
+    nullptr;
+static decltype(CoreApiTable::hsa_queue_add_write_index_scacquire_fn) s_orig_add_scacquire =
+    nullptr;
+static decltype(CoreApiTable::hsa_queue_add_write_index_screlease_fn) s_orig_add_screlease =
+    nullptr;
+
+// store_write_index (2 variants)
+static decltype(CoreApiTable::hsa_queue_store_write_index_relaxed_fn) s_orig_store_relaxed =
+    nullptr;
+static decltype(CoreApiTable::hsa_queue_store_write_index_screlease_fn) s_orig_store_screlease =
+    nullptr;
+
+// cas_write_index (4 variants)
+static decltype(CoreApiTable::hsa_queue_cas_write_index_relaxed_fn) s_orig_cas_relaxed = nullptr;
+static decltype(CoreApiTable::hsa_queue_cas_write_index_scacq_screl_fn) s_orig_cas_scacq_screl =
+    nullptr;
+static decltype(CoreApiTable::hsa_queue_cas_write_index_scacquire_fn) s_orig_cas_scacquire =
+    nullptr;
+static decltype(CoreApiTable::hsa_queue_cas_write_index_screlease_fn) s_orig_cas_screlease =
+    nullptr;
+
+// load_write_index (2 variants)
+static decltype(CoreApiTable::hsa_queue_load_write_index_relaxed_fn) s_orig_load_relaxed = nullptr;
+static decltype(CoreApiTable::hsa_queue_load_write_index_scacquire_fn) s_orig_load_scacquire =
+    nullptr;
+
+// signal_store (2 variants)
+static decltype(CoreApiTable::hsa_signal_store_relaxed_fn)   s_orig_sig_relaxed   = nullptr;
+static decltype(CoreApiTable::hsa_signal_store_screlease_fn) s_orig_sig_screlease = nullptr;
+
+// --- add_write_index wrappers (4) ---
+
+uint64_t
+wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s, v);
+    return s_orig_add_relaxed(q, v);
+}
+
+uint64_t
+wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s, v);
+    return s_orig_add_scacq_screl(q, v);
+}
+
+uint64_t
+wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s, v);
+    return s_orig_add_scacquire(q, v);
+}
+
+uint64_t
+wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return add_write_index_impl(s, v);
+    return s_orig_add_screlease(q, v);
+}
+
+// --- store_write_index wrappers (2) ---
+
+void
+wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
+{
+    auto* s = lookup_queue_state(q);
+    if(s)
+    {
+        store_write_index_impl(s, v);
+        return;
+    }
+    s_orig_store_relaxed(q, v);
+}
+
+void
+wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
+{
+    auto* s = lookup_queue_state(q);
+    if(s)
+    {
+        store_write_index_impl(s, v);
+        return;
+    }
+    s_orig_store_screlease(q, v);
+}
+
+// --- cas_write_index wrappers (4) ---
+
+uint64_t
+wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s, expected, value);
+    return s_orig_cas_relaxed(q, expected, value);
+}
+
+uint64_t
+wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s, expected, value);
+    return s_orig_cas_scacq_screl(q, expected, value);
+}
+
+uint64_t
+wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s, expected, value);
+    return s_orig_cas_scacquire(q, expected, value);
+}
+
+uint64_t
+wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t value)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return cas_write_index_impl(s, expected, value);
+    return s_orig_cas_screlease(q, expected, value);
+}
+
+// --- load_write_index wrappers (2) ---
+
+uint64_t
+wrap_load_write_index_relaxed(const hsa_queue_t* q)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return load_write_index_impl(s);
+    return s_orig_load_relaxed(q);
+}
+
+uint64_t
+wrap_load_write_index_scacquire(const hsa_queue_t* q)
+{
+    auto* s = lookup_queue_state(q);
+    if(s) return load_write_index_impl(s);
+    return s_orig_load_scacquire(q);
+}
+
+// --- signal_store wrappers (2) ---
+
+void
+wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
+{
+    auto* s = lookup_queue_state_by_doorbell(sig);
+    if(s)
+    {
+        process_doorbell_impl(
+            s, val, [](hsa_signal_t db, hsa_signal_value_t v) { s_orig_sig_relaxed(db, v); });
+        return;
+    }
+    s_orig_sig_relaxed(sig, val);
+}
+
+void
+wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
+{
+    auto* s = lookup_queue_state_by_doorbell(sig);
+    if(s)
+    {
+        process_doorbell_impl(
+            s, val, [](hsa_signal_t db, hsa_signal_value_t v) { s_orig_sig_screlease(db, v); });
+        return;
+    }
+    s_orig_sig_screlease(sig, val);
+}
+
+}  // namespace
+
+void
+install_intercept(CoreApiTable& core_table)
+{
+    // Save originals
+    s_orig_add_relaxed     = core_table.hsa_queue_add_write_index_relaxed_fn;
+    s_orig_add_scacq_screl = core_table.hsa_queue_add_write_index_scacq_screl_fn;
+    s_orig_add_scacquire   = core_table.hsa_queue_add_write_index_scacquire_fn;
+    s_orig_add_screlease   = core_table.hsa_queue_add_write_index_screlease_fn;
+
+    s_orig_store_relaxed   = core_table.hsa_queue_store_write_index_relaxed_fn;
+    s_orig_store_screlease = core_table.hsa_queue_store_write_index_screlease_fn;
+
+    s_orig_cas_relaxed     = core_table.hsa_queue_cas_write_index_relaxed_fn;
+    s_orig_cas_scacq_screl = core_table.hsa_queue_cas_write_index_scacq_screl_fn;
+    s_orig_cas_scacquire   = core_table.hsa_queue_cas_write_index_scacquire_fn;
+    s_orig_cas_screlease   = core_table.hsa_queue_cas_write_index_screlease_fn;
+
+    s_orig_load_relaxed   = core_table.hsa_queue_load_write_index_relaxed_fn;
+    s_orig_load_scacquire = core_table.hsa_queue_load_write_index_scacquire_fn;
+
+    s_orig_sig_relaxed   = core_table.hsa_signal_store_relaxed_fn;
+    s_orig_sig_screlease = core_table.hsa_signal_store_screlease_fn;
+
+    // Install wrappers
+    core_table.hsa_queue_add_write_index_relaxed_fn     = wrap_add_write_index_relaxed;
+    core_table.hsa_queue_add_write_index_scacq_screl_fn = wrap_add_write_index_scacq_screl;
+    core_table.hsa_queue_add_write_index_scacquire_fn   = wrap_add_write_index_scacquire;
+    core_table.hsa_queue_add_write_index_screlease_fn   = wrap_add_write_index_screlease;
+
+    core_table.hsa_queue_store_write_index_relaxed_fn   = wrap_store_write_index_relaxed;
+    core_table.hsa_queue_store_write_index_screlease_fn = wrap_store_write_index_screlease;
+
+    core_table.hsa_queue_cas_write_index_relaxed_fn     = wrap_cas_write_index_relaxed;
+    core_table.hsa_queue_cas_write_index_scacq_screl_fn = wrap_cas_write_index_scacq_screl;
+    core_table.hsa_queue_cas_write_index_scacquire_fn   = wrap_cas_write_index_scacquire;
+    core_table.hsa_queue_cas_write_index_screlease_fn   = wrap_cas_write_index_screlease;
+
+    core_table.hsa_queue_load_write_index_relaxed_fn   = wrap_load_write_index_relaxed;
+    core_table.hsa_queue_load_write_index_scacquire_fn = wrap_load_write_index_scacquire;
+
+    core_table.hsa_signal_store_relaxed_fn   = wrap_signal_store_relaxed;
+    core_table.hsa_signal_store_screlease_fn = wrap_signal_store_screlease;
+}
+
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler
