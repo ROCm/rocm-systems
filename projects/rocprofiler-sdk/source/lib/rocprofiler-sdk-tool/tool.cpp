@@ -2951,16 +2951,27 @@ generate_output(cleanup_mode _cleanup_mode)
                              outdata.num_output,
                              (outdata.num_bytes / 1024));
 
+    double csv_write_sec   = 0.0;
+    double rocpd_write_sec = 0.0;
+
     if(tool::get_config().csv_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _csv_write_timer = common::simple_timer{"[rocprofv3] csv write"};
         tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
+        _csv_write_timer.stop();
+        _csv_write_timer.set_quiet(true);
+        csv_write_sec += _csv_write_timer.get();
     }
 
     if(tool::get_config().stats && tool::get_config().csv_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _csv_stats_write_timer = common::simple_timer{"[rocprofv3] csv stats write"};
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
+        _csv_stats_write_timer.stop();
+        _csv_stats_write_timer.set_quiet(true);
+        csv_write_sec += _csv_stats_write_timer.get();
     }
 
     if(tool::get_config().json_output && outdata.num_output > 0 &&
@@ -3015,6 +3026,7 @@ generate_output(cleanup_mode _cleanup_mode)
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
+        auto _rocpd_write_timer = common::simple_timer{"[rocprofv3] rocpd write"};
         tool::write_rocpd(tool::get_config(),
                           *tool_metadata,
                           agents_output,
@@ -3029,6 +3041,9 @@ generate_output(cleanup_mode _cleanup_mode)
                           rccl_output.get_generator(),
                           rocdecode_output.get_generator(),
                           counters_output.get_generator());
+        _rocpd_write_timer.stop();
+        _rocpd_write_timer.set_quiet(true);
+        rocpd_write_sec += _rocpd_write_timer.get();
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
@@ -3099,6 +3114,22 @@ generate_output(cleanup_mode _cleanup_mode)
 
             decoder.parse(in_path, out_path, att_filename_data.second, codeobj, perf, formats);
         }
+    }
+
+    const auto write_timing_path =
+        fs::path{tool::format_path(tool::get_config().output_path)} / "write_timing.json";
+    auto write_timing_stream = std::ofstream{write_timing_path};
+    if(!write_timing_stream)
+    {
+        ROCP_WARNING << "Failed to open write timing output file: " << write_timing_path.string();
+    }
+    else
+    {
+        write_timing_stream << "{\n"
+                            << fmt::format(R"(  "csv_write_sec": {:.9f},)", csv_write_sec)
+                            << "\n"
+                            << fmt::format(R"(  "rocpd_write_sec": {:.9f})", rocpd_write_sec)
+                            << "\n}\n";
     }
 
     run_cleanup();
