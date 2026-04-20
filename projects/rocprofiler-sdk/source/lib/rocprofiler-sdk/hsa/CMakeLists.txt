@@ -10,6 +10,7 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     pc_sampling.hpp
     profile_serializer.cpp
     queue_controller.cpp
+    queue_intercept.cpp
     queue.cpp
     scratch_memory.cpp)
 
@@ -24,6 +25,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     pc_sampling.cpp
     profile_serializer.hpp
     queue_controller.hpp
+    queue_intercept.hpp
     queue.hpp
     queue_info_session.hpp
     rocprofiler_packet.hpp
