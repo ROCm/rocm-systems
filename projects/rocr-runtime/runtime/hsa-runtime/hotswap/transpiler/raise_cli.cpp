@@ -143,20 +143,26 @@ int main(int argc, char **argv) {
   if (coPath.empty())
     return usage();
 
+  // Read the file up-front so we can fall back to the ELF e_flags
+  // ISA when the filename heuristic fails (kerneldex corpora often
+  // store kernels under hashed names with no `gfx*` substring; the
+  // ELF MACH field is the only deterministic source).
+  auto coData = transpiler::readFile(coPath);
+  if (coData.empty()) {
+    std::fprintf(stderr, "raise_cli: cannot read %s\n", coPath.c_str());
+    return 2;
+  }
+
   if (isa.empty()) {
     isa = autoDetectIsa(coPath);
+    if (isa.empty())
+      isa = transpiler::detectIsaFromElf(coData);
     if (isa.empty()) {
       std::fprintf(stderr,
                    "raise_cli: could not infer ISA from %s; pass --isa=<arch>\n",
                    coPath.c_str());
       return 2;
     }
-  }
-
-  auto coData = transpiler::readFile(coPath);
-  if (coData.empty()) {
-    std::fprintf(stderr, "raise_cli: cannot read %s\n", coPath.c_str());
-    return 2;
   }
 
   auto kernelNames = transpiler::listKernelNames(coData);
@@ -202,8 +208,10 @@ int main(int argc, char **argv) {
       }
     }
     auto meta = transpiler::extractKernelMeta(coData, target);
+    uint64_t kernelOffset =
+        transpiler::findKernelSymbolOffset(coData, target);
     auto raised = transpiler::raiseToIR(text.bytes, isa, target, meta,
-                                        /*kernelOffset=*/0, targetIsa);
+                                        kernelOffset, targetIsa);
     if (!raised.success) {
       // Contract: raiseToIR only populates RaiseResult::irText on the
       // success path (the last write before setting `success = true`),

@@ -40,6 +40,80 @@ void parseBracketList3(StringRef text, StringRef key, int out[3]) {
   }
 }
 
+// Read the C (accumulator) operand of a WMMA instruction, handling the
+// three encoding shapes LLVM's AMDGPU backend emits:
+//
+//   * _twoaddr form: C is tied to D (same VGPR slot, no separate `src2`
+//     operand on the disassembled line). `op.isSrcReg(2)` is TRUE and
+//     `srcReg(2)` returns the D VGPR — we read the live VGPR value.
+//   * _threeaddr form with a VGPR C: `isSrcReg(2)` TRUE and `srcReg(2)`
+//     returns the explicit C VGPR. Same path as twoaddr — just a
+//     different VGPR index.
+//   * _threeaddr form with an inline-constant C: LLVM picks this
+//     encoding whenever the accumulator source is a constant that fits
+//     in the VOP3P src2 inline-constant table (the important case is
+//     `C = 0`, which Clang emits for every fresh accumulator built from
+//     a zero-initialised `v8f c = {0, ..., 0}`). Here `isSrcReg(2)` is
+//     FALSE; we MUST materialise the inline constant directly.
+//
+// The previous fallback `srcC = dest` was silently wrong for the third
+// case: reading the D VGPR before the WMMA writes to it surfaces
+// whatever stale (or undef) bits happened to be in those 8 VGPR slots,
+// which on a cold kernel is typically zero by accident for the first
+// WMMA in a wave but nondeterministic for any subsequent WMMA whose
+// D range was never explicitly zero-initialised by the SGPR/VGPR
+// prologue. In the `wmma_parallel{2,4,16}` probes the second and
+// later WMMAs land on fresh D VGPRs (v[24:31], v[32:39], ...) that
+// the compiler skipped zeroing — precisely because it knew the
+// threeaddr-imm-0 encoding would satisfy C.
+//
+// We handle only inline constant `0` today: it is the only src2 inline
+// the AMDGPU backend actually emits for the WMMA family (Clang folds
+// non-zero accumulator constants through a VGPR mov before the WMMA).
+// Any other immediate surfaces as a structured `unsupportedShape`
+// failure rather than silently miscompiling.
+//
+// On failure the helper populates `hr.failure` and returns nullptr; the
+// caller must short-circuit.
+llvm::Value *readWMMAAccumC(RaiseContext &ctx, const DecodedInst &di,
+                             OpResolver &op, const ParsedReg &dest,
+                             llvm::Type *cdIRTy, HandlerResult &hr) {
+  if (op.nSrcs() < 3) {
+    // No src2 operand on the instruction at all (e.g. a hypothetical
+    // encoding with C implicitly zero and no disassembler-surfaced
+    // slot). Safest to refuse — the caller expects to have read C.
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "VOP3P",
+        "WMMA instruction has no src2 (accumulator) operand; "
+        "cannot recover C input");
+    return nullptr;
+  }
+  if (op.isSrcReg(2)) {
+    ParsedReg srcC = op.srcReg(2);
+    return ctx.regs.readRegVec(ctx.B, srcC, cdIRTy);
+  }
+  // Inline-constant src2. Today we only model `0`.
+  unsigned srcIdx2 = op.srcIdx(2);
+  if (!di.isImm(srcIdx2)) {
+    // Could be a symbolic constant slot (e.g. SRC_EXEC_LO/HI, SRC_PC).
+    // None of those are valid semantics for a WMMA accumulator; refuse.
+    hr.failure = RaiseFailure::unsupportedShape(
+        di, "VOP3P",
+        "WMMA src2 is neither a register nor an immediate; no "
+        "accumulator C input path is defined for this encoding");
+    return nullptr;
+  }
+  int64_t immC = di.getImm(srcIdx2);
+  if (immC == 0)
+    return llvm::ConstantAggregateZero::get(cdIRTy);
+  hr.failure = RaiseFailure::unsupportedShape(
+      di, "VOP3P",
+      "WMMA src2 inline-constant other than 0 is not yet modelled; "
+      "extend readWMMAAccumC if a corpus kernel surfaces this");
+  (void)dest;
+  return nullptr;
+}
+
 } // namespace
 
 HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
@@ -293,11 +367,12 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
 
     ParsedReg dest = op.dst();
     ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
-    ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
 
     Value *a = ctx.regs.readRegVec(ctx.B, srcA, abIRTy);
     Value *b = ctx.regs.readRegVec(ctx.B, srcB, abIRTy);
-    Value *c = ctx.regs.readRegVec(ctx.B, srcC, cdIRTy);
+    Value *c = readWMMAAccumC(ctx, di, op, dest, cdIRTy, hr);
+    if (!c)
+      return hr;
 
     Value *result_val;
     if (ctx.targetIsa.hasTensorOps) {
@@ -364,11 +439,12 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
 
     ParsedReg dest = op.dst();
     ParsedReg srcA = op.srcReg(0), srcB = op.srcReg(1);
-    ParsedReg srcC = op.isSrcReg(2) ? op.srcReg(2) : dest;
 
     Value *a = ctx.regs.readRegVec(ctx.B, srcA, abIRTy);
     Value *b = ctx.regs.readRegVec(ctx.B, srcB, abIRTy);
-    Value *c = ctx.regs.readRegVec(ctx.B, srcC, cdIRTy);
+    Value *c = readWMMAAccumC(ctx, di, op, dest, cdIRTy, hr);
+    if (!c)
+      return hr;
 
     auto wmmaInputType = [&]() -> WMMAInputType {
       switch (sop) {
