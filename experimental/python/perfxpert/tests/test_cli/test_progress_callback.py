@@ -31,7 +31,7 @@ from perfxpert.agents import schemas
 
 def test_agent_root_forwards_callback():
     """``api.agent_root`` threads the callback into the session so both
-    ``entering root`` and ``exit root`` fire on an airgap invocation."""
+    ``Routing your query (Root agent)`` and ``Root agent done`` fire on an airgap invocation."""
     events: list[str] = []
     api.agent_root(
         airgap=True,
@@ -39,9 +39,9 @@ def test_agent_root_forwards_callback():
         progress_callback=events.append,
     )
     # Order matters: the enter comes before the exit.
-    assert "entering root" in events, events
-    assert "exit root" in events, events
-    assert events.index("entering root") < events.index("exit root")
+    assert "Routing your query (Root agent)" in events, events
+    assert "Root agent done" in events, events
+    assert events.index("Routing your query (Root agent)") < events.index("Root agent done")
 
 
 # --- 2. session-level: run_analysis forwards the callback ----------------
@@ -49,7 +49,7 @@ def test_agent_root_forwards_callback():
 
 def test_session_run_analysis_forwards_callback(tmp_path):
     """``AnalysisSession.run_analysis`` must fire
-    ``entering analysis`` / ``exit analysis`` around the inner call."""
+    ``Analyzing trace (Analysis agent)`` / ``Analysis agent done`` around the inner call."""
     events: list[str] = []
     session = runtime_mod.build_session(airgap=True)
     # Airgap path needs a real-ish AnalysisInput shape: fabricate a db
@@ -59,8 +59,8 @@ def test_session_run_analysis_forwards_callback(tmp_path):
     db_path.write_bytes(b"")
     payload = schemas.AnalysisInput(database_path=str(db_path))
     session.run_analysis(payload, progress_callback=events.append)
-    assert "entering analysis" in events
-    assert "exit analysis" in events
+    assert "Analyzing trace (Analysis agent)" in events
+    assert "Analysis agent done" in events
 
 
 def test_build_session_accepts_progress_callback_default():
@@ -71,8 +71,8 @@ def test_build_session_accepts_progress_callback_default():
         airgap=True, progress_callback=events.append
     )
     session.run_root(schemas.RootInput(user_query="?"))
-    assert "entering root" in events
-    assert "exit root" in events
+    assert "Routing your query (Root agent)" in events
+    assert "Root agent done" in events
 
 
 # --- 3. CLI non-TTY: plain status lines on stderr ------------------------

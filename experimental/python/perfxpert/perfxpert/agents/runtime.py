@@ -302,7 +302,7 @@ class AnalysisSession:
                 )
                 self._emit(
                     progress_callback,
-                    f"provider {name} failed with rate-limit/transient, trying next",
+                    f"Provider {name} rate-limited — falling back to next provider",
                 )
                 attempts.append((name, exc))
         # Everyone rate-limited — surface a typed chain-exhausted error.
@@ -317,7 +317,7 @@ class AnalysisSession:
         *,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.RootOutput:
-        self._emit(progress_callback, "entering root")
+        self._emit(progress_callback, "Routing your query (Root agent)")
         try:
             if self.airgap:
                 return root.run_root(payload, airgap=True)
@@ -336,7 +336,7 @@ class AnalysisSession:
             _ensure_nonempty_llm_output(out, provider=self.provider or DEFAULT_PROVIDER)
             return out
         finally:
-            self._emit(progress_callback, "exit root")
+            self._emit(progress_callback, "Root agent done")
 
     def run_analysis(
         self,
@@ -344,7 +344,7 @@ class AnalysisSession:
         *,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.AnalysisOutput:
-        self._emit(progress_callback, "entering analysis")
+        self._emit(progress_callback, "Analyzing trace (Analysis agent)")
         try:
             if self.airgap:
                 return analysis.run_analysis(payload, airgap=True)
@@ -354,7 +354,7 @@ class AnalysisSession:
                 progress_callback=progress_callback,
             )
         finally:
-            self._emit(progress_callback, "exit analysis")
+            self._emit(progress_callback, "Analysis agent done")
 
     def run_recommendation(
         self,
@@ -362,7 +362,7 @@ class AnalysisSession:
         *,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.RecommendationOutput:
-        self._emit(progress_callback, "entering recommendation")
+        self._emit(progress_callback, "Generating recommendations")
         try:
             if self.airgap:
                 return recommendation.run_recommendation(payload, airgap=True)
@@ -372,7 +372,7 @@ class AnalysisSession:
                 progress_callback=progress_callback,
             )
         finally:
-            self._emit(progress_callback, "exit recommendation")
+            self._emit(progress_callback, "Recommendations ready")
 
     def run_correctness(
         self,
@@ -380,7 +380,7 @@ class AnalysisSession:
         *,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.CorrectnessOutput:
-        self._emit(progress_callback, "entering correctness")
+        self._emit(progress_callback, "Checking correctness gate")
         try:
             if self.airgap:
                 return correctness.run_correctness(payload, airgap=True)
@@ -390,7 +390,7 @@ class AnalysisSession:
                 progress_callback=progress_callback,
             )
         finally:
-            self._emit(progress_callback, "exit correctness")
+            self._emit(progress_callback, "Correctness gate passed")
 
     def run_compute_specialist(
         self,
@@ -399,7 +399,7 @@ class AnalysisSession:
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.ComputeSpecialistOutput:
         """Compute-Techniques specialist (Layer 2) via the session cascade."""
-        self._emit(progress_callback, "entering compute_specialist")
+        self._emit(progress_callback, "Consulting compute specialist")
         try:
             if self.airgap:
                 return compute_specialist.run_compute_specialist(payload, airgap=True)
@@ -411,7 +411,7 @@ class AnalysisSession:
                 progress_callback=progress_callback,
             )
         finally:
-            self._emit(progress_callback, "exit compute_specialist")
+            self._emit(progress_callback, "Compute specialist done")
 
     def run_memory_specialist(
         self,
@@ -420,7 +420,7 @@ class AnalysisSession:
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.MemorySpecialistOutput:
         """Memory-Techniques specialist (Layer 2) via the session cascade."""
-        self._emit(progress_callback, "entering memory_specialist")
+        self._emit(progress_callback, "Consulting memory specialist")
         try:
             if self.airgap:
                 return memory_specialist.run_memory_specialist(payload, airgap=True)
@@ -432,7 +432,7 @@ class AnalysisSession:
                 progress_callback=progress_callback,
             )
         finally:
-            self._emit(progress_callback, "exit memory_specialist")
+            self._emit(progress_callback, "Memory specialist done")
 
     def run_latency_specialist(
         self,
@@ -441,7 +441,7 @@ class AnalysisSession:
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> schemas.LatencySpecialistOutput:
         """Latency-Techniques specialist (Layer 2) via the session cascade."""
-        self._emit(progress_callback, "entering latency_specialist")
+        self._emit(progress_callback, "Consulting launch-latency specialist")
         try:
             if self.airgap:
                 return latency_specialist.run_latency_specialist(payload, airgap=True)
@@ -453,7 +453,7 @@ class AnalysisSession:
                 progress_callback=progress_callback,
             )
         finally:
-            self._emit(progress_callback, "exit latency_specialist")
+            self._emit(progress_callback, "Latency specialist done")
 
 
 def _ensure_nonempty_llm_output(output: Any, *, provider: str) -> None:

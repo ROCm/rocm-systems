@@ -309,7 +309,7 @@ def build_analysis_payload(
                 # spinner glitch
                 pass
 
-    _progress("deterministic analysis: running")
+    _progress("Running deterministic analysis (hotspots, memory, counters…)")
 
     database_path = ""
     if connection is not None and hasattr(connection, "_paths") and connection._paths:
@@ -424,7 +424,7 @@ def build_analysis_payload(
             list(payload["recommendations_deterministic"]) + tier0_recs
         )
 
-    _progress("deterministic analysis: done")
+    _progress("Deterministic analysis done")
 
     return payload
 

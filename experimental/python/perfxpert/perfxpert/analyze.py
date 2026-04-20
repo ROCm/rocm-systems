@@ -1048,7 +1048,7 @@ def _execute_agentic(
     if tier0_only and progress_cb is not None and _t0 is not None:
         import time as _time
         if (_time.monotonic() - _t0) > 0.5:
-            progress_cb("scanning sources: done")
+            progress_cb("Source scan done")
 
     # Deterministic analysis pass — runs in parallel with the LLM brain so
     # every format populates the full contract (time_breakdown / hotspots /
