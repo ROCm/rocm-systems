@@ -202,6 +202,11 @@ def main():
         # Skip legacy ai_analysis tree — being deleted by the agentic refactor
         if 'ai_analysis' in md_file.parts:
             continue
+        # Skip the upstream opencode submodule (MIT). Its README translations
+        # and bun node_modules contain non-executable bash samples (curl
+        # installers, translated docs) that are out of our scope.
+        if 'opencode' in md_file.parts or 'node_modules' in md_file.parts:
+            continue
 
         samples = extract_samples(md_file)
         for sample in samples:
