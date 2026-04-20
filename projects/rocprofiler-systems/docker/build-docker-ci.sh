@@ -9,7 +9,7 @@ set -e
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.188}
 : ${BOOST_VERSION:=1.79.0}
-: ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
+: ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${GPU_TYPE:=""}
@@ -149,16 +149,18 @@ else
     DOCKER_FILE=Dockerfile.${DISTRO}.ci
 fi
 
-if [ ! -f ${DOCKER_FILE} ]; then cd docker; fi
+# Build context is projects/rocprofiler-systems/ so that requirements.txt
+# is reachable.
+if [ ! -f docker/${DOCKER_FILE} ] && [ -f ${DOCKER_FILE} ]; then cd ..; fi
 
-if [ ! -f ${DOCKER_FILE} ]; then
+if [ ! -f docker/${DOCKER_FILE} ]; then
     echo "Error! Execute script from source directory"
     exit 1
 fi
 
-verbose-run rm -rf ./dyninst-source
-verbose-run cp -r ../external/dyninst ./dyninst-source
-verbose-run rm -rf ./dyninst-source/{build,install}*
+verbose-run rm -rf ./docker/dyninst-source
+verbose-run cp -r ./external/dyninst ./docker/dyninst-source
+verbose-run rm -rf ./docker/dyninst-source/{build,install}*
 
 set -e
 
@@ -174,7 +176,7 @@ for VERSION in ${VERSIONS}
 do
     verbose-run docker build . \
         ${PULL} \
-        -f ${DOCKER_FILE} \
+        -f docker/${DOCKER_FILE} \
         --tag ${USER}/rocprofiler-systems:ci-${TYPE}-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
@@ -193,4 +195,4 @@ if [ "${PUSH}" -gt 0 ]; then
     done
 fi
 
-verbose-run rm -rf ./dyninst-source
+verbose-run rm -rf ./docker/dyninst-source

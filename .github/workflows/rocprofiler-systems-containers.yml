@@ -12,6 +12,7 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-containers.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - 'projects/rocprofiler-systems/requirements.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -25,6 +26,7 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-containers.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - 'projects/rocprofiler-systems/requirements.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
