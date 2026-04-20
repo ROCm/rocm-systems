@@ -66,6 +66,12 @@ from .recommendations import (
     _is_code_change_rec,
 )
 
+from .payload import (
+    build_analysis_payload,
+    merge_recommendations,
+    scan_tier0_sources,
+)
+
 __all__ = [
     # core.py
     "compute_time_breakdown",
@@ -97,4 +103,8 @@ __all__ = [
     "_filter_rec_commands",
     "generate_recommendations",
     "_is_code_change_rec",
+    # payload.py
+    "build_analysis_payload",
+    "merge_recommendations",
+    "scan_tier0_sources",
 ]
