@@ -162,7 +162,15 @@ def main(argv=None):
             analyze.execute(input_data, cfg, **kwargs)
         except Exception as e:
             # One-line user-facing message for known provider failures;
-            # full traceback gated on PERFXPERT_DEBUG=1.
+            # full traceback gated on PERFXPERT_DEBUG=1. ProviderError
+            # gets rc=2 (misconfigured credentials / quota / empty LLM
+            # response) AND a half-written-output cleanup pass so the
+            # user never finds an empty HTML file alongside the error.
+            from perfxpert.providers._exceptions import ProviderError
+            if isinstance(e, ProviderError):
+                analyze._cleanup_empty_output(args)
+                analyze._render_cli_error(e)
+                sys.exit(2)
             rc = analyze._render_cli_error(e)
             sys.exit(rc)
         finally:

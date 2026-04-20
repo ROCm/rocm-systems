@@ -11,6 +11,9 @@ Phase 8.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -260,3 +263,91 @@ def test_airgap_empty_narrative_does_not_raise():
     # Airgap returns a real narrative; no exception expected.
     out = session.run_root(schemas.RootInput(user_query="?"))
     assert out is not None
+
+
+# ---------------------------------------------------------------------------
+# 5 — End-to-end: CLI exits rc=2 on ProviderError and leaves no empty
+#     output file behind.
+# ---------------------------------------------------------------------------
+
+
+def test_preflight_auth_error_main_returns_rc_2(monkeypatch, tmp_path):
+    """The outer ``analyze.main()`` wraps the AuthError as rc=2 (distinct
+    from the generic rc=1 bucket) and writes no HTML file."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("PERFXPERT_LLM_ANTHROPIC_KEY", raising=False)
+
+    # Need an input arg for the argparser; use an empty placeholder.
+    db = tmp_path / "empty.db"
+    db.write_bytes(b"")
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    rc = analyze.main(
+        [
+            "-i",
+            str(db),
+            "--llm",
+            "anthropic",
+            "--format",
+            "webview",
+            "-d",
+            str(outdir),
+        ]
+    )
+    assert rc == 2, f"expected rc=2 for AuthError, got {rc}"
+    # No output file written.
+    assert not any(p.name.endswith(".html") for p in outdir.iterdir()), (
+        f"auth pre-flight failure must not produce HTML; dir={list(outdir.iterdir())}"
+    )
+
+
+def test_webview_no_empty_file_on_failure(tmp_path):
+    """Full subprocess CLI invocation: patch ``agent_root`` to raise
+    ``FatalError`` and verify ``perfxpert analyze`` exits rc=2 with a
+    clean stderr one-liner and no empty *.html file."""
+    db = tmp_path / "fake.db"
+    db.write_bytes(b"")
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+
+    env = os.environ.copy()
+    env["ANTHROPIC_API_KEY"] = "sk-clearly-bogus"
+    env["PYTHONPATH"] = os.pathsep.join(
+        [
+            str(Path(__file__).resolve().parents[2]),
+            env.get("PYTHONPATH", ""),
+        ]
+    )
+
+    driver = (
+        "import sys\n"
+        "from unittest.mock import patch\n"
+        "from perfxpert.providers._exceptions import FatalError\n"
+        "from perfxpert import analyze\n"
+        "def raise_fatal(*a, **kw):\n"
+        "    raise FatalError('anthropic', 'bogus key rejected')\n"
+        "with patch('perfxpert.api.agent_root', side_effect=raise_fatal):\n"
+        f"    rc = analyze.main(['-i', {str(db)!r}, '--llm', 'anthropic', "
+        f"'--format', 'webview', '-d', {str(outdir)!r}])\n"
+        "sys.exit(rc)\n"
+    )
+    res = subprocess.run(
+        [sys.executable, "-c", driver],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+    # rc=2 for ProviderError.
+    assert res.returncode == 2, (
+        f"expected rc=2, got {res.returncode}\nstdout={res.stdout!r}\n"
+        f"stderr={res.stderr!r}"
+    )
+    # stderr has a one-liner naming the provider.
+    assert "anthropic" in res.stderr.lower()
+    # No empty HTML file left behind.
+    leftover = [p for p in outdir.iterdir() if p.suffix == ".html"]
+    assert not leftover, (
+        f"CLI must not produce *.html on FatalError; found {leftover}"
+    )

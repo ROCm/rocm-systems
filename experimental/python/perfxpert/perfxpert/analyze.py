@@ -1016,7 +1016,51 @@ def main(argv=None) -> int:
         return 0
 
     except Exception as e:
+        # Bug 2/3 — ProviderError (AuthError / FatalError / …) is the
+        # "user misconfigured something" path. Delete any half-written
+        # output file the formatter may have touched, and return rc=2
+        # to distinguish from unrelated failures (rc=1).
+        from perfxpert.providers._exceptions import ProviderError
+        if isinstance(e, ProviderError):
+            _cleanup_empty_output(args)
+            _render_cli_error(e)
+            return 2
         return _render_cli_error(e)
+
+
+def _cleanup_empty_output(args: argparse.Namespace) -> None:
+    """Delete any zero-byte output file that may have been created mid-flow.
+
+    When the agentic pipeline raises a ProviderError after the
+    formatter has opened the output file but before writing, the file
+    lives on disk as an empty HTML / markdown blob. That was the
+    original bug symptom. Clean up defensively so the user never finds
+    an empty report alongside a clean stderr error message.
+
+    Scans the output directory for files matching the selected format
+    extension and removes the ones that are zero bytes. The exact
+    filename depends on the input db stem (e.g. ``890189_results.html``)
+    which the CLI computes deep inside ``_execute_agentic`` — pruning
+    by extension + size avoids threading that detail back out through
+    the exception handler.
+    """
+    output_path = getattr(args, "output_path", None) or getattr(args, "output_dir", None)
+    if not output_path or not os.path.isdir(output_path):
+        return
+    ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
+    ext = ext_map.get(getattr(args, "output_format", "text"), ".txt")
+    try:
+        for entry in os.listdir(output_path):
+            if not entry.endswith(ext):
+                continue
+            full = os.path.join(output_path, entry)
+            try:
+                if os.path.isfile(full) and os.path.getsize(full) == 0:
+                    os.remove(full)
+            except OSError:
+                pass  # best-effort cleanup; don't mask the original error
+    except OSError:
+        pass
 
 
 def _render_cli_error(exc: BaseException) -> int:
