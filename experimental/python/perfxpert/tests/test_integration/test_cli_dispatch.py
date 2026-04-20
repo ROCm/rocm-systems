@@ -168,3 +168,62 @@ def test_analyze_json_output_has_schema_keys():
     parsed = _json.loads(out)
     for key in ("narrative", "recommendations", "primary_bottleneck", "warnings", "metadata"):
         assert key in parsed, f"JSON output missing schema key {key!r}: {parsed}"
+
+
+# -- Blocker 2 / Blocker 6: airgap + Tier 0 paths also honor format ---------
+
+
+@pytest.mark.parametrize("fmt,ext,checks", [
+    (
+        "markdown",
+        ".md",
+        lambda s: any(l.startswith("# ") for l in s.splitlines()),
+    ),
+    (
+        "webview",
+        ".html",
+        lambda s: s.lstrip().lower().startswith("<!doctype"),
+    ),
+    (
+        "text",
+        ".txt",
+        lambda s: "PERFXPERT ANALYSIS" in s and "=" * 40 in s,
+    ),
+    (
+        "json",
+        ".json",
+        lambda s: (
+            lambda d: all(
+                k in d
+                for k in ("narrative", "recommendations", "primary_bottleneck", "warnings", "metadata")
+            )
+        )(__import__("json").loads(s)),
+    ),
+])
+def test_analyze_airgap_tier0_honors_format(
+    fmt: str, ext: str, checks, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Airgap + Tier 0 (source-dir only) must route through the real
+    formatter dispatch, not fall back to plaintext narrative. This
+    regression-guards Blocker 2 + Blocker 6 (Docker validator finding
+    that airgap-webview produced 477-byte plain-text HTML).
+    """
+    monkeypatch.setenv("PERFXPERT_AIRGAP", "1")
+    # Minimal source dir so Tier 0 has something to look at.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "hello.cpp").write_text("#include <hip/hip_runtime.h>\n")
+    out_dir = tmp_path / "out"
+    from perfxpert import output_config
+    cfg = output_config.output_config(
+        output_file="report", output_path=str(out_dir)
+    )
+    analyze_mod.execute(None, cfg, source_dir=str(src), output_format=fmt)
+    written = out_dir / f"report{ext}"
+    assert written.is_file(), f"expected {written} to be written"
+    body = written.read_text()
+    assert body, f"{fmt}: report file is empty"
+    assert checks(body), (
+        f"airgap+tier0 output for --format {fmt} is not shape-appropriate; "
+        f"first 200 chars:\n{body[:200]}"
+    )
