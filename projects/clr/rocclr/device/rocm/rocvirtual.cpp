@@ -4638,9 +4638,16 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
 
   // Zero-initialize the occupied bitfield
   uint32_t zero = 0;
-  blitMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero),
-                       amd::Coord3D(occupiedSize, 1, 1), amd::Coord3D(0, 0, 0),
-                       amd::Coord3D(occupiedSize, 1, 1), true);
+  if (!blitMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero),
+                            amd::Coord3D(occupiedSize, 1, 1), amd::Coord3D(0, 0, 0),
+                            amd::Coord3D(occupiedSize, 1, 1), true)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to initialize occupied bitfield for hostcall buffer");
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
 
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
           "Created hostcall buffer %p (numPackets == %d, size == %d, align == "
