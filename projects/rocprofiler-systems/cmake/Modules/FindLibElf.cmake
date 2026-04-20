@@ -50,7 +50,7 @@ find_library(
 set(_max_ver 0.0)
 set(_max_ver_lib)
 foreach(l ${LibElf_LIBRARIES})
-    get_filename_component(_elf_realpath ${LibElf_LIBRARIES} REALPATH)
+    get_filename_component(_elf_realpath ${l} REALPATH)
     string(REGEX MATCH "libelf\\-(.+)\\.so\\.*$" res ${_elf_realpath})
 
     # The library version number is stored in CMAKE_MATCH_1
@@ -73,12 +73,19 @@ elseif(EXISTS "${LibElf_INCLUDE_DIR}/elfutils/version.h")
 endif()
 
 if("${_max_ver}" VERSION_EQUAL "0.0" AND NOT "x${_version_file_path}" STREQUAL "x")
-    file(STRINGS "${_version_file_path}" _version_line REGEX "^#define _ELFUTILS_VERSION[ \t]+[0-9]+")
-	string(REGEX MATCH "[0-9]+" _version "${_version_line}")
-	if(NOT "x${_version}" STREQUAL "x")
-		set(_max_ver "0.${_version}")
-	endif()
+    file(
+        STRINGS
+        "${_version_file_path}"
+        _version_line
+        REGEX "^#define _ELFUTILS_VERSION[ \t]+[0-9]+"
+    )
+    string(REGEX MATCH "[0-9]+" _version "${_version_line}")
+    if(NOT "x${_version}" STREQUAL "x")
+        set(_max_ver "0.${_version}")
+    endif()
 endif()
+unset(_version_line)
+unset(_version)
 
 # Set the exported variables to the best match
 set(LibElf_LIBRARIES ${_max_ver_lib})
