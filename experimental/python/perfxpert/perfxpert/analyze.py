@@ -195,20 +195,25 @@ def add_args(parser: argparse.ArgumentParser):
     # LLM Enhancement Options
     llm_options = parser.add_argument_group(
         "LLM enhancement options (optional)",
-        "Enable natural language explanations via Anthropic Claude or OpenAI GPT. "
-        "Requires API key - see https://console.anthropic.com/ or https://platform.openai.com/api-keys",
+        "Enable natural language explanations via one of five LLM providers: "
+        "anthropic, openai, ollama (local), private (self-hosted OpenAI-compatible), "
+        "or opencode (bundled CLI). Requires API key or local endpoint - see "
+        "https://console.anthropic.com/ , https://platform.openai.com/api-keys , "
+        "or the matching PERFXPERT_LLM_* environment variable.",
     )
 
     llm_options.add_argument(
         "--llm",
         type=str,
         dest="llm_provider",
-        choices=["anthropic", "openai"],
+        choices=["anthropic", "openai", "ollama", "private", "opencode"],
         default=None,
         help=(
-            "Enable LLM-powered analysis enhancement. "
-            "'anthropic' uses the Anthropic API (requires ANTHROPIC_API_KEY). "
-            "'openai' uses the OpenAI API (requires OPENAI_API_KEY). "
+            "Enable LLM-powered analysis enhancement. Choose one of: "
+            "'anthropic' (ANTHROPIC_API_KEY), 'openai' (OPENAI_API_KEY), "
+            "'ollama' (local daemon, PERFXPERT_LLM_LOCAL_URL), "
+            "'private' (self-hosted OpenAI-compatible endpoint, PERFXPERT_LLM_PRIVATE_URL + _API_KEY), "
+            "'opencode' (bundled opencode CLI, PERFXPERT_OPENCODE_PATH). "
             "Local analysis always runs first; LLM provides additional natural language insights."
         ),
     )
@@ -217,9 +222,10 @@ def add_args(parser: argparse.ArgumentParser):
         "--llm-api-key",
         type=str,
         default=None,
-        help="API key for LLM provider. Alternatively, set environment variable: "
-        "ANTHROPIC_API_KEY for Anthropic Claude, or OPENAI_API_KEY for OpenAI GPT. "
-        "Example: --llm anthropic --llm-api-key sk-ant-... "
+        help="API key for LLM provider. Alternatively, set the matching environment "
+        "variable: ANTHROPIC_API_KEY (anthropic), OPENAI_API_KEY (openai), "
+        "PERFXPERT_LLM_PRIVATE_API_KEY (private). ollama/opencode typically do not "
+        "require a key. Example: --llm anthropic --llm-api-key sk-ant-... "
         "Or: export ANTHROPIC_API_KEY='sk-ant-...' && perfxpert analyze --llm anthropic",
     )
 
