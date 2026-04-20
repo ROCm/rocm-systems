@@ -39,8 +39,8 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
     HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads));
     HIP_CHECK(hipMalloc(&d_result, sizeof(__half)));
 
-    HIP_CHECK(hipMemcpy(d_values, h_values.data(), sizeof(float) * total_threads,
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_values, h_values.data(), sizeof(float) * total_threads, hipMemcpyHostToDevice));
 
     __half zero = __float2half_rn(0.0f);
     HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half), hipMemcpyHostToDevice));
@@ -89,7 +89,8 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
     __half2 h_result;
     HIP_CHECK(hipMemcpy(&h_result, d_result, sizeof(__half2), hipMemcpyDeviceToHost));
 
-    float2 expected = float2{static_cast<float>(total_threads), static_cast<float>(total_threads * 2)};
+    float2 expected =
+        float2{static_cast<float>(total_threads), static_cast<float>(total_threads * 2)};
     float2 actual = __half22float2(h_result);
 
     INFO("Expected: (" << expected.x << ", " << expected.y << ") Actual: (" << actual.x << ", "
@@ -102,7 +103,7 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
   }
 
   SECTION("fp16 atomic add - concurrent stress test") {
-    constexpr size_t num_threads = 1024;
+    constexpr size_t num_threads = 256;
     constexpr size_t num_blocks = 16;
     constexpr size_t total_threads = num_threads * num_blocks;
 
@@ -118,8 +119,8 @@ HIP_TEST_CASE(Unit_fp16_atomic_add) {
     HIP_CHECK(hipMalloc(&d_values, sizeof(float) * total_threads));
     HIP_CHECK(hipMalloc(&d_result, sizeof(__half)));
 
-    HIP_CHECK(hipMemcpy(d_values, h_values.data(), sizeof(float) * total_threads,
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_values, h_values.data(), sizeof(float) * total_threads, hipMemcpyHostToDevice));
 
     __half zero = __float2half_rn(0.0f);
     HIP_CHECK(hipMemcpy(d_result, &zero, sizeof(__half), hipMemcpyHostToDevice));

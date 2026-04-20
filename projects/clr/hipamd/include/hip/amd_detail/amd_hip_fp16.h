@@ -867,38 +867,25 @@ inline __HOST_DEVICE__ __half2 __h2div(__half2 x, __half2 y) {
 // Device specific functions
 #if defined(__clang__) && defined(__HIP__)
 inline __device__ __half atomicAdd(__half* const address, const __half value) {
-  static_assert(sizeof(__half) == sizeof(unsigned short));
-  union u_hold {
-    __half_raw h;
-    unsigned short s;
-  };
-  u_hold old_val, new_val;
-  old_val.s = __hip_atomic_load((unsigned short*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  do {
-    __half temp = __hadd(__half{old_val.h}, value);
-    new_val.h = static_cast<__half_raw>(temp);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned short*)address, &old_val.s, new_val.s,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_SYSTEM));
-  return __half{old_val.h};
+  return static_cast<__half>(
+      __atomic_fetch_add((_Float16*)address, static_cast<_Float16>(value), __ATOMIC_SEQ_CST));
 }
 
 inline __device__ __half2 atomicAdd(__half2* const address, const __half2 value) {
-  static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
-  union u_hold {
-    __half2_raw h2r;
+  static_assert(sizeof(_Float16_2) == sizeof(unsigned int));
+  union {
+    _Float16_2 vec;
     unsigned int u32;
-  };
-  u_hold old_val, new_val;
-  old_val.u32 =
-      __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  } expected, desired;
+
+  unsigned int* atomic_ptr = (unsigned int*)address;
+  expected.u32 = __atomic_load_n(atomic_ptr, __ATOMIC_RELAXED);
+
   do {
-    __half2 temp = __hadd2(__half2{old_val.h2r}, value);
-    new_val.h2r = static_cast<__half2_raw>(temp);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned int*)address, &old_val.u32, new_val.u32,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_SYSTEM));
-  return __half2{old_val.h2r};
+    desired.vec = expected.vec + static_cast<_Float16_2>(value);
+  } while (!__atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0, __ATOMIC_ACQ_REL,
+                                        __ATOMIC_ACQUIRE));
+  return static_cast<__half2>(expected.vec);
 }
 
 inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {

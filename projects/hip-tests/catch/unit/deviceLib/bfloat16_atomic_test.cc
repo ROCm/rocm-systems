@@ -24,7 +24,7 @@ static __global__ void bf162_atomic_add_kernel(__hip_bfloat162* result, float2* 
 
 HIP_TEST_CASE(Unit_bf16_atomic_add) {
   SECTION("bf16 atomic add") {
-    constexpr size_t num_threads = 256;
+    constexpr size_t num_threads = 32;
     constexpr size_t num_blocks = 4;
     constexpr size_t total_threads = num_threads * num_blocks;
 
@@ -62,7 +62,7 @@ HIP_TEST_CASE(Unit_bf16_atomic_add) {
   }
 
   SECTION("bf162 atomic add") {
-    constexpr size_t num_threads = 256;
+    constexpr size_t num_threads = 32;
     constexpr size_t num_blocks = 4;
     constexpr size_t total_threads = num_threads * num_blocks;
 

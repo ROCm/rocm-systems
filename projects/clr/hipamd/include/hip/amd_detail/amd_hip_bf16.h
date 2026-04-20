@@ -1900,20 +1900,8 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 h2trunc(const __hip_bfloat162 h) {
  * \brief Atomic add bfloat16
  */
 inline __device__ __hip_bfloat16 atomicAdd(__hip_bfloat16* address, __hip_bfloat16 value) {
-  static_assert(sizeof(__hip_bfloat16_raw) == sizeof(unsigned short));
-  union u_hold {
-    __hip_bfloat16_raw h;
-    unsigned short s;
-  };
-  u_hold old_val, new_val;
-  old_val.s =
-      __hip_atomic_load((unsigned short*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  do {
-    new_val.h = __hadd(old_val.h, value);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned short*)address, &old_val.s, new_val.s,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_AGENT));
-  return __hip_bfloat16{old_val.h};
+  return static_cast<__hip_bfloat16>(
+      __atomic_fetch_add((__bf16*)address, static_cast<__bf16>(value), __ATOMIC_SEQ_CST));
 }
 
 /**
@@ -1921,20 +1909,22 @@ inline __device__ __hip_bfloat16 atomicAdd(__hip_bfloat16* address, __hip_bfloat
  * \brief Atomic add bfloat162
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat162 atomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
-  static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
-  union u_hold {
-    __hip_bfloat162_raw h2r;
+  typedef __bf16 __bf16_2 __attribute__((ext_vector_type(2)));
+  static_assert(sizeof(__bf16_2) == sizeof(unsigned int));
+
+  union {
+    __bf16_2 vec;
     unsigned int u32;
-  };
-  u_hold old_val, new_val;
-  old_val.u32 =
-      __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  } expected, desired;
+
+  unsigned int* atomic_ptr = (unsigned int*)address;
+  expected.u32 = __atomic_load_n(atomic_ptr, __ATOMIC_RELAXED);
+
   do {
-    new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong((unsigned int*)address, &old_val.u32, new_val.u32,
-                                                 __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                                 __HIP_MEMORY_SCOPE_AGENT));
-  return __hip_bfloat162{old_val.h2r};
+    desired.vec = expected.vec + static_cast<__bf16_2>(value);
+  } while (!__atomic_compare_exchange_n(atomic_ptr, &expected.u32, desired.u32, 0, __ATOMIC_ACQ_REL,
+                                        __ATOMIC_ACQUIRE));
+  return static_cast<__hip_bfloat162>(expected.vec);
 }
 
 /**
