@@ -18,3 +18,5 @@ target_link_libraries(
     ${target}
     PRIVATE rocprofiler-compute-tool gtest_main gmock gsl_assert fmt::fmt
 )
+
+add_test(NAME ${target} COMMAND ${target})

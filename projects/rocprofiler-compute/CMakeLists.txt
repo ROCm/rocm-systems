@@ -27,8 +27,7 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 set(ROCPROFCOMPUTE_FULL_VERSION "${FULL_VERSION_STRING}")
 string(
-    REGEX REPLACE
-    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
     "\\1.\\2.\\3"
     ROCPROFCOMPUTE_VERSION
     "${FULL_VERSION_STRING}"
@@ -141,7 +140,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -410,6 +409,14 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_metric_validation.xml ${COV_OPTION}
         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_native_tool
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_native_tool.xml ${COV_OPTION} tests/test_native_tool.py
+        ${WORKING_DIR_OPTION}
 )
 
 set_tests_properties(
