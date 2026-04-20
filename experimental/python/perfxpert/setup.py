@@ -90,8 +90,12 @@ _HERE = Path(__file__).resolve().parent
 _BUILD_SCRIPT = _HERE / "scripts" / "build-bundled-opencode.sh"
 _BUNDLE_PATH = _HERE / "perfxpert" / "_bundled" / "opencode"
 _PATCHES_DIR = _HERE / ".patches"
+_OPENCODE_DIR = _HERE / "opencode"
+_OPENCODE_URL = "https://github.com/sst/opencode.git"
+_OPENCODE_TAG = "v1.4.11"
 _SKIP_ENV = "PERFXPERT_SKIP_BUNDLED_BUILD"
 _SKIP_BUN_ENV = "PERFXPERT_SKIP_BUN_DOWNLOAD"
+_SKIP_OPENCODE_FETCH_ENV = "PERFXPERT_SKIP_OPENCODE_FETCH"
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +266,188 @@ def _ensure_bun_on_path() -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# opencode source checkout (scoped submodule init / fallback direct clone).
+# ---------------------------------------------------------------------------
+
+
+def _opencode_dir_is_populated() -> bool:
+    """Return True if the vendored opencode/ source tree is populated.
+
+    ``package.json`` is the load-bearing file the build script checks
+    (``build-bundled-opencode.sh`` step 1); if it's present, opencode is
+    good to go regardless of whether the directory came from a git
+    submodule, a tarball extraction, or a direct clone.
+    """
+    return (_OPENCODE_DIR / "package.json").is_file()
+
+
+def _run_git(args: list[str], cwd: Path | None = None, timeout: int = 300) -> bool:
+    """Run a git command silently. Return True on exit-0, False otherwise.
+
+    Never raises — callers treat a False return as "try the next
+    fallback" so a transient git failure never aborts `pip install`.
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd) if cwd is not None else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(
+            f"[perfxpert/setup.py] git {' '.join(args)} failed: {exc}",
+            file=sys.stderr,
+        )
+        return False
+    if result.returncode != 0:
+        print(
+            f"[perfxpert/setup.py] git {' '.join(args)} exited "
+            f"{result.returncode}: {result.stderr.strip()[:400]}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def _ensure_opencode_checkout() -> bool:
+    """Populate ``opencode/`` if empty, using the cheapest strategy that works.
+
+    The build hook requires the opencode source tree. Normally it's
+    present because either (a) the user ran ``git submodule update
+    --init`` on the rocm-systems checkout, or (b) pip's built-in
+    recursive submodule init populated it during the VCS install.
+
+    When a user invokes ``scripts/pip-install-from-git.sh`` (or sets
+    ``GIT_CONFIG_COUNT``/``submodule.active`` env vars manually to skip
+    pip's expensive all-submodule init), opencode is intentionally left
+    un-initialised — scoped down to just the opencode path. This
+    function handles that scoped case plus the pathological case where
+    opencode didn't get populated at all.
+
+    Strategy, in order (stops at the first one that succeeds):
+
+    1. ``opencode/package.json`` already exists — nothing to do.
+    2. ``_HERE`` sits inside a git work-tree and
+       ``experimental/python/perfxpert/opencode`` is a registered
+       submodule of that tree — run a scoped
+       ``git submodule update --init --depth 1 -- <path>`` so only
+       opencode gets initialised.
+    3. Direct shallow clone of ``sst/opencode`` at the pinned tag into
+       ``opencode/`` — the hard fallback for wheel-extracted trees /
+       sdist installs where no enclosing .git exists.
+
+    Opt-out via ``PERFXPERT_SKIP_OPENCODE_FETCH=1`` for air-gap CI.
+    """
+    if _opencode_dir_is_populated():
+        return True
+
+    if os.environ.get(_SKIP_OPENCODE_FETCH_ENV, "").strip() in {"1", "true", "yes"}:
+        print(
+            f"[perfxpert/setup.py] {_SKIP_OPENCODE_FETCH_ENV}=1 — "
+            "not fetching opencode source; bundled build will be skipped.",
+            file=sys.stderr,
+        )
+        return False
+
+    # Strategy 2: scoped submodule init in the enclosing git work-tree.
+    # We look upward from _HERE for the repo root. If opencode is
+    # registered as a submodule relative to that root, init only that
+    # one path — cheap, honors the pinned SHA recorded in the tree.
+    repo_root = None
+    for parent in (_HERE, *_HERE.parents):
+        if (parent / ".git").exists():
+            repo_root = parent
+            break
+    if repo_root is not None:
+        rel_opencode = str(_OPENCODE_DIR.relative_to(repo_root))
+        gitmodules = repo_root / ".gitmodules"
+        if gitmodules.is_file():
+            # Confirm the submodule is actually registered at the
+            # expected path — ``git config -f .gitmodules --get-regexp``
+            # is the portable query. Exit-0 = registered, non-zero =
+            # not registered (fall through to direct clone).
+            probed = subprocess.run(
+                [
+                    "git",
+                    "config",
+                    "-f",
+                    str(gitmodules),
+                    "--get-regexp",
+                    rf"^submodule\..*\.path$",
+                    rf"^{rel_opencode}$",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if probed.returncode == 0 and rel_opencode in probed.stdout:
+                print(
+                    f"[perfxpert/setup.py] opencode/ is empty — running scoped "
+                    f"`git submodule update --init --depth 1 -- {rel_opencode}`",
+                    file=sys.stderr,
+                )
+                if _run_git(
+                    [
+                        "submodule",
+                        "update",
+                        "--init",
+                        "--depth",
+                        "1",
+                        "--",
+                        rel_opencode,
+                    ],
+                    cwd=repo_root,
+                ):
+                    if _opencode_dir_is_populated():
+                        return True
+                # Fall through to direct clone on failure.
+
+    # Strategy 3: direct shallow clone at the pinned tag.
+    print(
+        f"[perfxpert/setup.py] opencode/ is empty — cloning {_OPENCODE_URL} "
+        f"@ {_OPENCODE_TAG} (shallow) into {_OPENCODE_DIR}",
+        file=sys.stderr,
+    )
+    # git clone refuses to populate a non-empty directory. Remove the
+    # empty dir first (it's a git submodule placeholder — no tracked
+    # files inside, just a .git pointer file at most).
+    if _OPENCODE_DIR.exists():
+        try:
+            shutil.rmtree(_OPENCODE_DIR)
+        except OSError as exc:
+            print(
+                f"[perfxpert/setup.py] could not remove empty opencode/ "
+                f"placeholder: {exc} — bundled build will be skipped.",
+                file=sys.stderr,
+            )
+            return False
+    if _run_git(
+        [
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            _OPENCODE_TAG,
+            _OPENCODE_URL,
+            str(_OPENCODE_DIR),
+        ]
+    ):
+        if _opencode_dir_is_populated():
+            return True
+
+    print(
+        "[perfxpert/setup.py] WARNING: opencode source checkout failed. "
+        "Library + analyze + MCP paths still work; `perfxpert-code` will "
+        "exit with a helpful error until opencode is checked out.",
+        file=sys.stderr,
+    )
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Build-hook entry points.
 # ---------------------------------------------------------------------------
 
@@ -287,6 +473,21 @@ def _run_opencode_build() -> None:
     should_build, reason = _opencode_build_needed()
     print(f"[perfxpert/setup.py] opencode build: {reason}", file=sys.stderr)
     if not should_build:
+        return
+    # Belt-and-suspenders: the opencode source tree is normally populated
+    # by the enclosing git submodule init, but when the user invokes
+    # `scripts/pip-install-from-git.sh` (or sets `submodule.active`
+    # themselves) to skip pip's slow all-submodule init, the source can
+    # be missing here. Check + fetch on-demand before the build script
+    # tries to find package.json.
+    if not _ensure_opencode_checkout():
+        print(
+            "[perfxpert/setup.py] WARNING: opencode source tree unavailable — "
+            "bundled opencode binary NOT built. Library + analyze + MCP "
+            "paths still work; `perfxpert-code` will exit with a helpful "
+            "error at first launch.",
+            file=sys.stderr,
+        )
         return
     build_path = _ensure_bun_on_path()
     if build_path is None:
