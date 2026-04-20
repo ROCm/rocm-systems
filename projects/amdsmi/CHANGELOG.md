@@ -3,6 +3,7 @@
 Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
 
 ***All information listed below is for reference and subject to change.***
+
 ## amd_smi_lib for ROCm 7.13.0
 
 ### Added
@@ -22,14 +23,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - `AMDSMI_MAX_NUM_MID` (2)
     - `AMDSMI_MAX_NUM_CLKS_PER_AID` (2)
     - `AMDSMI_MAX_NUM_CLKS_PER_MID` (2)
-
-### Changed
-
-- **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
-
-## amd_smi_lib for ROCm 7.13.0
-
-### Added
 
 - **Added VRAM and GTT tuning interface**.  
   - New `amd-smi static --mem-carveout` to view VRAM carveout options.
@@ -84,6 +77,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
 
 ### Changed
+
+- **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
 
 - **Removed references to deprecated `amd-smi reset -r`**.  
   - CLI help text and memory partition change warnings no longer reference `amd-smi reset -r` for driver reloading.
