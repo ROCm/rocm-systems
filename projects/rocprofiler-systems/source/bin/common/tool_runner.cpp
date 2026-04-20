@@ -156,6 +156,7 @@ make_sample_config()
   1. Profile:   rocprof-sys-sample --preset=balanced -- ./app
   2. Analyze:   cat rocprof-sys-output/wall_clock.txt
   3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev)";
+    cfg.output_prefix  = "ROCPROFSYS: ";
     cfg.force_sampling = true;
     cfg.disable_cputime_on_realtime_only = true;
     cfg.deprecated_flags                 = {
