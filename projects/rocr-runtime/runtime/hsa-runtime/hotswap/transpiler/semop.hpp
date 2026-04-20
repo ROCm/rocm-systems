@@ -329,7 +329,23 @@ enum class SemOp : uint16_t {
   // IEEE-754 2019 maximum/minimum: propagate NaN (distinct from maxnum/minnum).
   V_MAXIMUM_F32, V_MINIMUM_F32,
   V_DIV_FIXUP_F32, V_DIV_FMAS_F32, V_DIV_SCALE_F32,
-  V_FMA_MIX_F32,
+  // Mixed-precision FMA, VOP3P (VOP3PInstructions.td:109). Both
+  // variants take three sources and reduce to
+  //   fma(cvt_f32(src0_part), cvt_f32(src1_part), cvt_f32(src2_part))
+  // where `*_part` is selected by the per-source op_sel / op_sel_hi
+  // modifiers:
+  //   op_sel_hi[i]==0  -> source i is the full f32 VGPR
+  //   op_sel_hi[i]==1  -> source i is the 16-bit lo (op_sel[i]==0) or
+  //                       hi (op_sel[i]==1) half, interpreted as the
+  //                       mnemonic's narrow type
+  // V_FMA_MIX_F32       : narrow type = f16  (all gfx targets)
+  // V_FMA_MIX_F32_BF16  : narrow type = bf16 (gfx9.5+/gfx1250; the bf16
+  //                       narrow half → f32 extension is
+  //                       cross-target-universal via `fpext bfloat to
+  //                       float`, so no refusal is needed on gfx942)
+  // Both SemOps share the op_sel/op_sel_hi parser and write-back shape
+  // in handle_valu_vop3p.cpp; only the narrow element type differs.
+  V_FMA_MIX_F32, V_FMA_MIX_F32_BF16,
   V_ADD_F16, V_MUL_F16, V_SUB_F16, V_SUBREV_F16, V_MAC_F16, V_FMAC_F16,
   // VOP2 F16 multiply-add-with-literal pseudos (mirror of
   // V_FMAMK_F32 / V_FMAAK_F32 for the f16 lane). Defined in

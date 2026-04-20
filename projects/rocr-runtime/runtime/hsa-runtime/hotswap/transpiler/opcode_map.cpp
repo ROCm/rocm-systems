@@ -417,6 +417,14 @@ static const Entry kCanonTable[] = {
     E(V_BITOP3_B32_e64, V_BITOP3_B32),
     E(V_BITOP3_B16_e64, V_BITOP3_B16),
     E(V_FMA_MIX_F32, V_FMA_MIX_F32),
+    // gfx9.5+/gfx1250 BF16-narrow sibling (VOP3PInstructions.td:109).
+    // Same VOP3P operand shape (3 srcs + op_sel / op_sel_hi modifiers)
+    // as V_FMA_MIX_F32; only the narrow-half element type changes
+    // (bf16 vs f16). The real form V_FMA_MIX_F32_BF16_gfx1250 is
+    // canonicalized onto this pseudo via the MC->pseudo step in
+    // `canonicalize` (getMCOpcode-derived table), mirroring the
+    // V_FMA_MIX_F32 entry above.
+    E(V_FMA_MIX_F32_BF16, V_FMA_MIX_F32_BF16),
     E(V_ADD_F16_e64, V_ADD_F16),
     E(V_MUL_F16_e64, V_MUL_F16),
     E(V_SUB_F16_e64, V_SUB_F16),

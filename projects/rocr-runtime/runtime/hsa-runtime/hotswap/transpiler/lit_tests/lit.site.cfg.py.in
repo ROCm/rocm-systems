@@ -109,6 +109,20 @@ config.fixtures = {
     # in handle_ds.cpp; the fixture pins the generic `<3 x i32>`
     # vector-load/store path the handler routes both ops through.
     "ds_load_b96": r"@LIT_FIXTURE_DS_LOAD_B96_CO@",
+    # v_fma_mix_f32 + v_fma_mix_f32_bf16 (VOP3P mixed-precision FMA
+    # family) — pins the shared narrow-half extraction + fpext chain
+    # for both mnemonics in one fixture.  The BF16 sibling is the
+    # gfx9.5+/gfx1250 variant that closes the kerneldex `_attn_fwd`
+    # corpus blocker (one `v_fma_mix_f32_bf16` at
+    # op_sel:[0,1,0] op_sel_hi:[1,1,0]).  Fixture runs the lift under
+    # `--target-isa=gfx942` specifically to prove the BF16 narrow
+    # half does not require a cross-target refusal — `fpext bfloat`
+    # is universally lowered on every AMDGPU target.  The handler in
+    # handle_valu_vop3p.cpp folds both variants through one
+    # `narrowTy`-parameterised switch case; this fixture is the
+    # regression guard for that shared path.
+    "v_fma_mix_f32_bf16":
+        r"@LIT_FIXTURE_V_FMA_MIX_F32_BF16_CO@",
     # ds_load_2addr_b32 / ds_load_2addr_stride64_b32 (DS) — gfx11+
     # two-address LDS loads.  See SemOp::DS_READ2_B32 /
     # DS_READ2ST64_B32 in semop.hpp and the dedicated `ds2Classify`

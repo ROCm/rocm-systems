@@ -580,11 +580,37 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
     return hr;
   }
 
-  // ---- v_fma_mix_f32: mixed-precision FMA (VOP3P) ----
+  // ---- v_fma_mix_f32 / v_fma_mix_f32_bf16: mixed-precision FMA (VOP3P) ----
+  //
   // dst = fma(cvt_f32(src0_part), cvt_f32(src1_part), cvt_f32(src2_part))
-  // op_sel_hi[i]==1 → source i is f16 (lo/hi selected by op_sel[i])
-  // op_sel_hi[i]==0 → source i is full f32
-  case SemOp::V_FMA_MIX_F32: {
+  //
+  // Per-source selection is driven by the VOP3P op_sel / op_sel_hi
+  // modifier pair (parsed off the disassembly text because MC does not
+  // surface op_sel_hi as a first-class operand for VOP3P; see the
+  // V_PK_* handlers above for the same approach):
+  //
+  //   op_sel_hi[i]==0  -> source i is the full f32 VGPR
+  //   op_sel_hi[i]==1  -> source i is the 16-bit half selected by
+  //                       op_sel[i] (0=lo [15:0], 1=hi [31:16])
+  //                       interpreted as the mnemonic's narrow type
+  //                       (f16 for V_FMA_MIX_F32, bf16 for
+  //                       V_FMA_MIX_F32_BF16), then fpext'd to f32.
+  //
+  // The BF16 variant does NOT need a cross-target refusal because
+  // `fpext bfloat to float` is universally lowered (it's a shift-left-16
+  // + bitcast on every AMDGPU target); only the narrow element type
+  // switches. Unparsed op_sel / op_sel_hi bracket lists fall through to
+  // all-zero, which matches the hardware default (full-width f32
+  // sources on all three slots) — never silently corrupted.
+  case SemOp::V_FMA_MIX_F32:
+  case SemOp::V_FMA_MIX_F32_BF16: {
+    Type *narrowTy = (sop == SemOp::V_FMA_MIX_F32_BF16)
+                         ? Type::getBFloatTy(ctx.C)
+                         : ctx.f16Ty;
+    const char *cvtName = (sop == SemOp::V_FMA_MIX_F32_BF16)
+                              ? "mix_cvt_bf16"
+                              : "mix_cvt";
+
     int opSel[3] = {0, 0, 0};
     int opSelHi[3] = {0, 0, 0};
     StringRef text(di.fullText);
@@ -604,8 +630,8 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       else
         bits = ctx.B.CreateTrunc(ctx.B.CreateLShr(raw, 16),
                                   Type::getInt16Ty(ctx.C));
-      Value *f16Val = ctx.B.CreateBitCast(bits, ctx.f16Ty);
-      return ctx.B.CreateFPExt(f16Val, ctx.f32Ty, "mix_cvt");
+      Value *narrowVal = ctx.B.CreateBitCast(bits, narrowTy);
+      return ctx.B.CreateFPExt(narrowVal, ctx.f32Ty, cvtName);
     };
 
     Value *s0 = readMixSrc(0);
