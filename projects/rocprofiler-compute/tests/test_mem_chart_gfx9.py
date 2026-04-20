@@ -103,13 +103,16 @@ class TestPlotMemChartInstrDispatch:
 
 
 # =============================================================================
-# Smoke: full sample dict (migrated from the `if __name__ == "__main__"` block
-# in mem_chart_gfx9.py per the in-source TODO)
+# Smoke: full sample dict covering every gfx9 Memory Chart panel-YAML key
 # =============================================================================
 
 
 def _full_sample_metric_dict() -> dict[str, int]:
-    """Reproduces the sample dict from mem_chart_gfx9.py's __main__ block."""
+    """Representative gfx9 Memory Chart fixture covering every panel-YAML key.
+
+    Values are sequential integers (1..53) chosen only to be visually
+    distinguishable in the rendered chart; they have no physical meaning.
+    """
     return {
         "Wavefront Occupancy": 1,
         "Wave Life": 2,

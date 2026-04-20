@@ -100,9 +100,7 @@ class TestInsertChartDataMfma:
             ("BR", "br", 88),
         ],
     )
-    def test_other_instr_ids_unaffected(
-        self, yaml_key: str, text_id: str, value: int
-    ):
+    def test_other_instr_ids_unaffected(self, yaml_key: str, text_id: str, value: int):
         """Sanity check: every other InstrDispatch row keeps its YAML mapping."""
         mem_data, base_data = _make_workload([(yaml_key, value)])
         result = gui_memchart.insert_chart_data(mem_data, base_data)
