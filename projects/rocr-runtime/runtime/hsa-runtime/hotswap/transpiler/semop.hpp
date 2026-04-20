@@ -503,6 +503,18 @@ enum class SemOp : uint16_t {
   DS_READ_B96,
   DS_READ_B128,
   DS_READ2_B32, DS_READ2_B64,
+  // gfx11+ stride-64 two-address LDS load forms
+  // (DSInstructions.td:1529,1542 — `ds_load_2addr_stride64_b{32,64}`).
+  // Semantics parallel DS_READ2_B{32,64}, but the per-access byte
+  // offset is `rawFieldValue * 256` (B32) or `* 512` (B64) instead of
+  // `* 4` / `* 8`, extending reach with the same 8-bit offset field
+  // at the cost of a 64-dword stride granularity. Handled jointly
+  // with the non-ST64 variants in handle_ds.cpp's dedicated
+  // READ2/WRITE2 block; placed adjacent in the enum so the existing
+  // `sop >= DS_READ_B32 && sop <= DS_READ_I8` range check continues
+  // to classify them as DS reads (the dedicated block intercepts
+  // before the single-offset generic handler ever sees them).
+  DS_READ2ST64_B32, DS_READ2ST64_B64,
   DS_READ_U16, DS_READ_I16, DS_READ_U8, DS_READ_I8,
   DS_WRITE_B32, DS_WRITE_B64,
   // Symmetric write-side for `ds_load_b96`: gfx11+ asm spelling is
@@ -513,6 +525,10 @@ enum class SemOp : uint16_t {
   DS_WRITE_B96,
   DS_WRITE_B128,
   DS_WRITE2_B32, DS_WRITE2_B64,
+  // gfx11+ stride-64 two-address LDS store forms (mirror the
+  // DS_READ2ST64 block above; see the read-side comment for the
+  // offset-scaling rationale and enum-placement reasoning).
+  DS_WRITE2ST64_B32, DS_WRITE2ST64_B64,
   DS_WRITE_B16, DS_WRITE_B8,
   // D16_HI partial-store family (gfx8+ HasD16LoadStore):
   // store the upper 16 bits (B16_D16_HI) or bits [23:16] (B8_D16_HI)

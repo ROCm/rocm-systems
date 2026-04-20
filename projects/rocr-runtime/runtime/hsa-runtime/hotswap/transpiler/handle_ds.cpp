@@ -24,11 +24,21 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
   HandlerResult hr;
   SemOp sop = di.semOp;
 
-  // Map SemOp to {dwords, loadBits, isSigned} for DS read/write
+  // Map SemOp to {dwords, loadBits, isSigned} for SINGLE-OFFSET DS
+  // read/write. The two-offset DS_READ2/WRITE2 family (including the
+  // gfx11+ *ST64 variants) has fundamentally different memory
+  // semantics — two independent accesses at raw-field-scaled byte
+  // offsets — and is intercepted by the dedicated block below BEFORE
+  // this classifier runs. Keeping the two-offset SemOps out of this
+  // table is how we prevent the former silent-miscompile shape
+  // (single contiguous `<N x i32>` load at raw offset0) from ever
+  // being reachable again; if a handler ever falls through to here
+  // with a DS_READ2* SemOp the dsClassify default returns {-1, 0, …}
+  // and the generic block below surfaces it as `unsupportedShape`
+  // rather than silently emitting wrong IR.
   auto dsClassify = [](SemOp s) -> std::tuple<int, int, bool> {
     switch (s) {
     case SemOp::DS_READ_B128:  case SemOp::DS_WRITE_B128:
-    case SemOp::DS_READ2_B64:  case SemOp::DS_WRITE2_B64:
       return {4, 128, false};
     // 96-bit (3 x i32) LDS load/store. gfx11+ asm spellings are
     // `ds_load_b96` / `ds_store_b96`; LLVM MC keeps the legacy
@@ -41,7 +51,6 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     case SemOp::DS_READ_B96:   case SemOp::DS_WRITE_B96:
       return {3, 96, false};
     case SemOp::DS_READ_B64:   case SemOp::DS_WRITE_B64:
-    case SemOp::DS_READ2_B32:  case SemOp::DS_WRITE2_B32:
       return {2, 64, false};
     case SemOp::DS_READ_B32:   case SemOp::DS_WRITE_B32:
       return {1, 32, false};
@@ -306,10 +315,198 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // ---------------------------------------------------------------------
+  // DS_READ2 / DS_WRITE2 family — two independent memory accesses at
+  // per-offset, unit-scaled byte addresses.
+  //
+  // Hardware contract (DSInstructions.td DS_1A_Off8_RET /
+  // DS_1A2D_Off8_NORET base classes):
+  //
+  //   Access 0 target byte address = vaddr + offset0 * unit
+  //   Access 1 target byte address = vaddr + offset1 * unit
+  //
+  // where `offsetN` is the raw 8-bit MCInst field value (0..255) and
+  // `unit` is fixed per opcode:
+  //
+  //     DS_READ2_B32      / DS_WRITE2_B32      : unit =   4  (dword)
+  //     DS_READ2_B64      / DS_WRITE2_B64      : unit =   8  (qword)
+  //     DS_READ2ST64_B32  / DS_WRITE2ST64_B32  : unit = 256  (64 dwords)
+  //     DS_READ2ST64_B64  / DS_WRITE2ST64_B64  : unit = 512  (64 qwords)
+  //
+  // The two accesses are semantically INDEPENDENT: the compiler selects
+  // DS_READ2_B32 with a gap routinely (e.g. `offset0:0 offset1:2` reads
+  // bytes 0 and 8, leaving bytes 4-7 untouched), and the *ST64 variants
+  // are specifically designed to reach byte offsets a plain
+  // offset0+1-raw DS_READ2 cannot (every raw-field-1 increment jumps
+  // 64 dwords in the *ST64 case vs 1 dword in the non-*ST64 case).
+  //
+  // Prior lift shape — a single contiguous `<N x i32>` load at
+  // `vaddr + offset0` (byte offset *unscaled*, offset1 ignored) — was
+  // a silent miscompile for any (offset0,offset1) pair other than the
+  // happy (0,1) case, where the two bugs cancel because bytes 0..7 of
+  // a contiguous `<2 x i32>` load coincide with the hardware's bytes 0
+  // and 4 reads. The corpus repeatedly violates that happy case (see
+  // e.g. kerneldex scope_discovery___matmul_ogs_*: `offset0:4 offset1:6`,
+  // `offset0:64 offset1:66`, …). This block therefore emits two
+  // independent loads/stores at the correctly-scaled byte addresses,
+  // writing the two results into the dest VGPR pair in MCInst order
+  // (dw0 <- access 0, dw1 <- access 1 for B32; four-dword destination
+  // in lo/hi pairs for B64).
+  //
+  // MC operand layouts (from DSInstructions.td):
+  //
+  //   DS_1A_Off8_RET     : (outs vdst) (ins addr, offset0, offset1, gds)
+  //   DS_1A2D_Off8_NORET : (outs)      (ins addr, data0, data1,
+  //                                          offset0, offset1, gds)
+  //
+  // `buildSrcMap` records all non-modifier sources in MCInst order, so
+  //   READ2  : srcMap = [addr,   offset0, offset1, gds]
+  //   WRITE2 : srcMap = [addr,   data0,   data1,   offset0, offset1, gds]
+  //
+  // We resolve the two immediate offsets via `OpName::offset0` /
+  // `OpName::offset1` rather than positional srcMap indexing — the
+  // named lookup documents intent and is robust against future srcMap
+  // layout changes.
+  //
+  // EXEC gating mirrors the single-offset DS_READ_*/DS_WRITE_* paths:
+  // reads are not EXEC-guarded (writing to a dead destination VGPR on
+  // inactive lanes is semantically equivalent under the scalar SPMD
+  // model); writes go through `emitUnderExec` so that LDS side effects
+  // are confined to active lanes.
+  //
+  // Alignment on the emitted loads/stores equals the access width
+  // (Align(4) for B32, Align(8) for B64). AMDGPU LDS hardware requires
+  // that granularity and the source ISA's encoding guarantees it;
+  // stating it explicitly on `CreateAlignedLoad` / `CreateAlignedStore`
+  // prevents the backend from falling back to a conservative Align(1)
+  // and emitting byte-granular expansions.
+  auto ds2Classify = [](SemOp s) -> std::tuple<bool /*isRead*/,
+                                                int  /*widthBits*/,
+                                                int  /*unitBytes*/> {
+    switch (s) {
+    case SemOp::DS_READ2_B32:       return {true,  32,   4};
+    case SemOp::DS_READ2_B64:       return {true,  64,   8};
+    case SemOp::DS_READ2ST64_B32:   return {true,  32, 256};
+    case SemOp::DS_READ2ST64_B64:   return {true,  64, 512};
+    case SemOp::DS_WRITE2_B32:      return {false, 32,   4};
+    case SemOp::DS_WRITE2_B64:      return {false, 64,   8};
+    case SemOp::DS_WRITE2ST64_B32:  return {false, 32, 256};
+    case SemOp::DS_WRITE2ST64_B64:  return {false, 64, 512};
+    default:                        return {false,  0,   0};
+    }
+  };
+  {
+    auto [ds2IsRead, ds2WidthBits, ds2UnitBytes] = ds2Classify(sop);
+    if (ds2UnitBytes > 0) {
+      unsigned opc = di.inst.getOpcode();
+      int off0Idx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::offset0);
+      int off1Idx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::offset1);
+      if (off0Idx < 0 || off1Idx < 0 ||
+          (unsigned)off0Idx >= di.inst.getNumOperands() ||
+          (unsigned)off1Idx >= di.inst.getNumOperands() ||
+          !di.inst.getOperand((unsigned)off0Idx).isImm() ||
+          !di.inst.getOperand((unsigned)off1Idx).isImm()) {
+        hr.failure = RaiseFailure::unsupportedShape(
+            di, "DS",
+            "DS_READ2/WRITE2 missing OpName::offset0 or OpName::offset1 "
+            "immediate operand — operand table mismatch");
+        return hr;
+      }
+      int64_t rawOff0 = di.inst.getOperand((unsigned)off0Idx).getImm();
+      int64_t rawOff1 = di.inst.getOperand((unsigned)off1Idx).getImm();
+      int64_t byteOff0 = rawOff0 * ds2UnitBytes;
+      int64_t byteOff1 = rawOff1 * ds2UnitBytes;
+
+      Value *vaddr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds2_addr");
+      auto *ldsPtrTy = PointerType::get(ctx.C, 3);
+      auto makePtr = [&](int64_t byteOff, const char *name) -> Value * {
+        Value *a = byteOff == 0
+                       ? vaddr
+                       : ctx.B.CreateAdd(vaddr,
+                                         ConstantInt::get(ctx.i64Ty, byteOff),
+                                         "ds2_off");
+        return ctx.B.CreateIntToPtr(a, ldsPtrTy, name);
+      };
+      Value *ptr0 = makePtr(byteOff0, "ds2_p0");
+      Value *ptr1 = makePtr(byteOff1, "ds2_p1");
+      Align access((uint64_t)(ds2WidthBits / 8));
+
+      if (ds2IsRead) {
+        ParsedReg dest = op.dst();
+        auto subReg = [&dest](int off) {
+          ParsedReg r = dest;
+          r.baseIdx = dest.baseIdx + off;
+          r.width = 1;
+          return r;
+        };
+        if (ds2WidthBits == 32) {
+          Value *v0 = ctx.B.CreateAlignedLoad(ctx.i32Ty, ptr0, access, "ds2_ld0");
+          Value *v1 = ctx.B.CreateAlignedLoad(ctx.i32Ty, ptr1, access, "ds2_ld1");
+          ctx.regs.writeReg32(ctx.B, subReg(0), v0);
+          ctx.regs.writeReg32(ctx.B, subReg(1), v1);
+        } else { // 64
+          Value *v0 = ctx.B.CreateAlignedLoad(ctx.i64Ty, ptr0, access, "ds2_ld0");
+          Value *v1 = ctx.B.CreateAlignedLoad(ctx.i64Ty, ptr1, access, "ds2_ld1");
+          Value *lo0 = ctx.B.CreateTrunc(v0, ctx.i32Ty, "ds2_ld0_lo");
+          Value *hi0 = ctx.B.CreateTrunc(
+              ctx.B.CreateLShr(v0, ConstantInt::get(ctx.i64Ty, 32)),
+              ctx.i32Ty, "ds2_ld0_hi");
+          Value *lo1 = ctx.B.CreateTrunc(v1, ctx.i32Ty, "ds2_ld1_lo");
+          Value *hi1 = ctx.B.CreateTrunc(
+              ctx.B.CreateLShr(v1, ConstantInt::get(ctx.i64Ty, 32)),
+              ctx.i32Ty, "ds2_ld1_hi");
+          ctx.regs.writeReg32(ctx.B, subReg(0), lo0);
+          ctx.regs.writeReg32(ctx.B, subReg(1), hi0);
+          ctx.regs.writeReg32(ctx.B, subReg(2), lo1);
+          ctx.regs.writeReg32(ctx.B, subReg(3), hi1);
+        }
+        hr.handled = true;
+        return hr;
+      } else {
+        ParsedReg data0 = op.srcReg(1);
+        ParsedReg data1 = op.srcReg(2);
+        if (ds2WidthBits == 32) {
+          Value *v0 = ctx.regs.readReg32(ctx.B, data0);
+          Value *v1 = ctx.regs.readReg32(ctx.B, data1);
+          ctx.emitUnderExec([&] {
+            ctx.B.CreateAlignedStore(v0, ptr0, access);
+            ctx.B.CreateAlignedStore(v1, ptr1, access);
+          });
+        } else { // 64
+          Value *v0 = ctx.regs.readReg64(ctx.B, data0);
+          Value *v1 = ctx.regs.readReg64(ctx.B, data1);
+          ctx.emitUnderExec([&] {
+            ctx.B.CreateAlignedStore(v0, ptr0, access);
+            ctx.B.CreateAlignedStore(v1, ptr1, access);
+          });
+        }
+        hr.handled = true;
+        return hr;
+      }
+    }
+  }
+
   bool isDsRead = sop >= SemOp::DS_READ_B32 && sop <= SemOp::DS_READ_I8;
   bool isDsWrite = sop >= SemOp::DS_WRITE_B32 && sop <= SemOp::DS_WRITE_B8;
   if (isDsRead || isDsWrite) {
     auto [dwords, loadBits, isSigned] = dsClassify(sop);
+
+    // dsClassify returns `{-1, 0, false}` for any SemOp it doesn't
+    // model as single-offset (notably the DS_READ2/WRITE2 family,
+    // whose SemOps sit inside the DS_READ_*/DS_WRITE_* enum range
+    // but are intercepted by the dedicated two-offset block above).
+    // Reaching here with `dwords < 0` means a new DS SemOp landed in
+    // the enum range without a classifier entry and without a
+    // dedicated-block intercept — loud-fail before the generic
+    // vector-load path would otherwise produce a bogus
+    // `FixedVectorType::get(i32, (unsigned)-1)` crash.
+    if (dwords < 0) {
+      hr.failure = RaiseFailure::unsupportedShape(
+          di, "DS",
+          "single-offset DS generic path reached with an unclassified "
+          "SemOp — add a dsClassify entry or a dedicated handler block");
+      return hr;
+    }
 
     Value *addr = ctx.B.CreateZExt(op.src(0), ctx.i64Ty, "ds_addr");
 

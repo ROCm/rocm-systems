@@ -617,6 +617,13 @@ static const Entry kCanonTable[] = {
     E(DS_READ_B96, DS_READ_B96),
     E(DS_READ_B128, DS_READ_B128),
     E(DS_READ2_B32, DS_READ2_B32), E(DS_READ2_B64, DS_READ2_B64),
+    // gfx11+ stride-64 two-address LDS loads (DSInstructions.td:1529,
+    // 1542 — `ds_load_2addr_stride64_b{32,64}`). Same two-offset MC
+    // shape as the non-ST64 siblings; the canonicalization chain
+    // collapses the _gfx9/_gfx11/_gfx12 reals onto the pseudo
+    // forms here, mirroring the DS_READ2_B{32,64} entries above.
+    E(DS_READ2ST64_B32, DS_READ2ST64_B32),
+    E(DS_READ2ST64_B64, DS_READ2ST64_B64),
     E(DS_READ_U16, DS_READ_U16), E(DS_READ_I16, DS_READ_I16),
     E(DS_READ_U8, DS_READ_U8), E(DS_READ_I8, DS_READ_I8),
     E(DS_WRITE_B32, DS_WRITE_B32), E(DS_WRITE_B64, DS_WRITE_B64),
@@ -626,6 +633,10 @@ static const Entry kCanonTable[] = {
     E(DS_WRITE_B96, DS_WRITE_B96),
     E(DS_WRITE_B128, DS_WRITE_B128),
     E(DS_WRITE2_B32, DS_WRITE2_B32), E(DS_WRITE2_B64, DS_WRITE2_B64),
+    // gfx11+ stride-64 two-address LDS stores — mirror of the
+    // DS_READ2ST64 read-side entries above.
+    E(DS_WRITE2ST64_B32, DS_WRITE2ST64_B32),
+    E(DS_WRITE2ST64_B64, DS_WRITE2ST64_B64),
     E(DS_WRITE_B16, DS_WRITE_B16), E(DS_WRITE_B8, DS_WRITE_B8),
     // gfx8+ HasD16LoadStore D16_HI store family (DSInstructions.td
     // §604-606). Stores bits [31:16] (B16_HI) or bits [23:16] (B8_HI)

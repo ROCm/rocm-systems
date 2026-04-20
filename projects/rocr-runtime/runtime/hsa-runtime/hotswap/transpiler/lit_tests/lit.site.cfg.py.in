@@ -109,6 +109,19 @@ config.fixtures = {
     # in handle_ds.cpp; the fixture pins the generic `<3 x i32>`
     # vector-load/store path the handler routes both ops through.
     "ds_load_b96": r"@LIT_FIXTURE_DS_LOAD_B96_CO@",
+    # ds_load_2addr_b32 / ds_load_2addr_stride64_b32 (DS) — gfx11+
+    # two-address LDS loads.  See SemOp::DS_READ2_B32 /
+    # DS_READ2ST64_B32 in semop.hpp and the dedicated `ds2Classify`
+    # block in handle_ds.cpp; the fixture pins the correct per-offset-
+    # independent lowering (two `load i32, ptr addrspace(3)` at
+    # raw-field-scaled byte offsets) for BOTH the dword-unit variant
+    # (unit=4) and the stride-64 variant (unit=256).  Guards against
+    # regression to the pre-rewrite silent-miscompile shape that
+    # lifted every DS_READ2_B32 into a single contiguous
+    # `load <2 x i32>` at `vaddr + raw_offset0`, correct only for
+    # the (0,1) offset pair.
+    "ds_load_2addr_b32":
+        r"@LIT_FIXTURE_DS_LOAD_2ADDR_B32_CO@",
     # buffer_atomic_add_u32 (MUBUF/VBUFFER) — gfx11+/gfx1250 VBUFFER
     # encoding for what the legacy MUBUF named BUFFER_ATOMIC_ADD.  The
     # SemOp + handler already existed for the legacy MUBUF addressing
