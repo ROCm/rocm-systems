@@ -2231,7 +2231,9 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
     }
 
     if (current->status() == CL_SUBMITTED) {
-      current->setStatus(CL_RUNNING, startTimeStamp);
+      if (!amd::IS_HIP || current->profilingInfo().enabled_) {
+        current->setStatus(CL_RUNNING, startTimeStamp);
+      }
       current->setStatus(CL_COMPLETE, endTimeStamp);
     } else if (current->status() != CL_COMPLETE) {
       LogPrintfError("Unexpected command status - %d.", current->status());

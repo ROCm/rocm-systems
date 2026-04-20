@@ -117,11 +117,12 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
   }
 
   if (amd::IS_HIP) {
-    // HIP API doesn't have any event, associated with a callback. Hence the SW status of
-    // the event is irrelevant, during the actual callback. At the same time HIP API requires
-    // to finish the callback before HIP stream can continue. Hence runtime has to process
-    // the callback first and then update the status.
-    if (callbacks_ != (CallBackEntry*)0) {
+    // HIP API doesn't have any event, associated with a callback and callbacks can only be set for
+    // when all commands in a stream are completed. Hence the SW status of the event is irrelevant,
+    // during the actual callback. At the same time HIP API requires to finish the callback before
+    // HIP stream can continue. Hence runtime has to process the callback first and then update the
+    // status.
+    if (status == CL_COMPLETE && callbacks_ != (CallBackEntry*)0) {
       processCallbacks(status);
     }
     if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
@@ -191,6 +192,8 @@ bool Event::resetStatus(int32_t status) {
 bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* data,
                         bool blocking) {
   assert(status >= CL_COMPLETE && status <= CL_QUEUED && "Invalid status");
+  assert((status == CL_COMPLETE || !amd::IS_HIP) &&
+         "HIP callbacks can only be set to command full completion");
 
   CallBackEntry* entry = new CallBackEntry(status, callback, data, blocking);
   if (entry == NULL) {
