@@ -360,12 +360,6 @@ const char* ncclSymkKernelIdToString(int kernelId) {
   return kernelName[kernelId];
 }
 
-#ifndef GENERATE_SYM_KERNELS
-void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
-  return nullptr;
-}
-#endif
-
 /* this function fills in the devWork except nextWorkOffset */
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork) {
   outDevWork->rootRank = task->root;
@@ -379,3 +373,9 @@ ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* tas
   outDevWork->nChannels = 0;
   return ncclSuccess;
 }
+
+#ifndef GENERATE_SYM_KERNELS
+void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
+  return nullptr;
+}
+#endif

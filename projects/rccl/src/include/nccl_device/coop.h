@@ -52,7 +52,11 @@ struct ncclCoopTile { // An aligned pow2 set of threads within the warp.
     return (ncclCoopMask_t(-1)>>(WARP_SIZE-nThreadsPow2))<<(nccl::utility::lane() & -nThreadsPow2);
   }
   NCCL_DEVICE_INLINE void sync() {
+#if ROCM_VERSION >= 70000
     __syncwarp(laneMask());
+#else
+    __syncthreads();
+#endif
   }
 };
 #endif
@@ -78,7 +82,11 @@ struct ncclCoopLanes { // Some lanes of this warp.
     return ncclCoopPopc(lmask);
   }
   NCCL_DEVICE_INLINE void sync() {
+#if ROCM_VERSION >= 70000
     __syncwarp(lmask);
+#else
+    __syncthreads();
+#endif
   }
 };
 #endif
@@ -155,8 +163,11 @@ NCCL_DEVICE_INLINE constexpr bool ncclCoopIsThread(ncclCoopCta) { return false; 
 #if __CUDACC__
 // Pick threads of our warp that are safe to use collectively.
 NCCL_DEVICE_INLINE ncclCoopLanes ncclCoopCoalesced() {
-  // return ncclCoopLanes{__activemask()};
+#if ROCM_VERSION >= 70000
   return ncclCoopLanes{static_cast<ncclCoopMask_t>(__activemask())};
+#else
+  return ncclCoopLanes{static_cast<ncclCoopMask_t>(__ballot(1))};
+#endif
 }
 #endif
 

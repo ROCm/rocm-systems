@@ -542,6 +542,9 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
+if("${hip_version_string}" VERSION_GREATER_EQUAL "7.12.60540")
+  target_compile_definitions(rccl PRIVATE HIP_VMM_UNCACHED_MEMORY)
+endif()
 
 # ==== rocSHMEM integration (optional) ====
 if (ENABLE_ROCSHMEM)
