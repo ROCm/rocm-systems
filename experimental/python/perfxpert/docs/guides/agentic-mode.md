@@ -138,10 +138,22 @@ perfxpert analyze -i trace.db --llm anthropic
 ```
 
 When set, `build_session(provider="anthropic", ...)` wraps the primary
-provider in a `FallbackProvider` that cascades down the chain on typed
-error classes (`RateLimitError`, `AuthError`, `TimeoutError`). The
-`recursion_guard` still applies to each candidate — `opencode` cannot
-be chosen from inside an already-running opencode session.
+provider in a `FallbackProvider` that cascades down the chain. The
+full typed-error taxonomy (defined in
+`perfxpert/providers/_exceptions.py`):
+
+| Exception | Cascades? | Meaning |
+|-----------|-----------|---------|
+| `RateLimitError` | yes | HTTP 429 / short-term throttle — next provider tried |
+| `TransientError` | yes | 5xx / timeout / connection reset — next provider tried |
+| `TimeoutError` | yes (as a subset of transient) | Per-call timeout budget exceeded |
+| `AuthError` | **no** | Bad API key / missing credential — surfaces immediately |
+| `QuotaExceededError` | **no** | `insufficient_quota` / account out of credit — surfaces immediately; retry is futile |
+| `FatalError` | **no** | Anything else — surfaces immediately so operators see the root cause |
+| `ProviderChainExhausted` | n/a | Raised by `FallbackProvider` when every entry failed. `.attempts` preserves the per-provider history; the last exception chains via `__cause__` |
+
+The `recursion_guard` still applies to each candidate — `opencode`
+cannot be chosen from inside an already-running opencode session.
 
 Unset or empty: no fallback. A typed error surfaces to the caller
 unchanged.

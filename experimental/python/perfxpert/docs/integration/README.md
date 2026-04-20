@@ -5,7 +5,8 @@ importing the Python package directly.
 
 | Topic | Doc | Audience |
 |-------|-----|----------|
-| MCP server (`perfxpert-mcp`) — 34 READ_ONLY tools re-exposed to any MCP-compatible client (opencode, Claude Desktop, Cursor, …) over stdio. Also documents the dot→underscore tool-name mangling. | [mcp-server.md](mcp-server.md) | External MCP client authors; integrators that need read-only access to PerfXpert's knowledge and classifiers |
+| MCP server (`perfxpert-mcp`) — 41 READ_ONLY tools re-exposed to any MCP-compatible client (opencode, Claude Desktop, Cursor, …) over stdio. **7 of the 41 are agent-hierarchy tools** (`perfxpert_agent_root`, `perfxpert_agent_analysis`, `perfxpert_agent_recommendation`, `perfxpert_agent_correctness`, `perfxpert_agent_compute_specialist`, `perfxpert_agent_memory_specialist`, `perfxpert_agent_latency_specialist`) — 1:1 mirrored in `perfxpert.api`. Also documents the dot→underscore tool-name mangling. | [mcp-server.md](mcp-server.md) | External MCP client authors; integrators that need read-only access to PerfXpert's knowledge and classifiers |
+| Python API (`perfxpert.api`) — 1:1 mirror of the 7 agent MCP tools for in-process embedding without an MCP server. Same schemas, same return shapes. | [../guides/python-api.md](../guides/python-api.md) | Library callers embedding PerfXpert's analysis brain in their own scripts / tools |
 
 ## See also
 

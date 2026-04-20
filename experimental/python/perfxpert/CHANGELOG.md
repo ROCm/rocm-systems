@@ -3,6 +3,84 @@
 All notable changes to perfxpert will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **Agents-as-MCP-tools (7 new READ_ONLY tools).** The MCP server now
+  exposes every agent in the hierarchy as its own tool:
+  `perfxpert_agent_root`, `perfxpert_agent_analysis`,
+  `perfxpert_agent_recommendation`, `perfxpert_agent_correctness`,
+  `perfxpert_agent_compute_specialist`,
+  `perfxpert_agent_memory_specialist`,
+  `perfxpert_agent_latency_specialist`. Backend TUIs (Claude Code,
+  Gemini CLI, Codex CLI, opencode) read the agent hierarchy as
+  reference in `AGENTS.md` and freely pick whichever of the 41
+  tools matches the user's intent. MCP tool count is now **41**
+  (was 34). Schemas remain frozen per `perfxpert/agents/schemas.py`.
+- **Public Python API (`perfxpert.api`).** 1:1 mirror of the 7 agent
+  MCP tools (`api.agent_root`, `api.agent_analysis`, etc.) for
+  in-process embedding without standing up an MCP server. The
+  `perfxpert analyze` CLI now calls `perfxpert.api.agent_root(...)`
+  internally — same function the MCP tool wraps.
+- **Scoped submodule-init fast-install path.**
+  `scripts/pip-install-from-git.sh` (new wrapper) + the equivalent
+  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=submodule.active
+  GIT_CONFIG_VALUE_0=experimental/python/perfxpert/opencode pip
+  install …` incantation drops the rocm-systems submodule-init time
+  from ~141 sec (recursive init of ~34 unrelated submodules) down
+  to ~30 ms. Detailed measurements + rationale in
+  `docs/guides/getting-started.md` §1.2. The plain recursive
+  one-liner still works for users who want it.
+
+### Changed
+- **`--llm` providers.** All five providers —
+  `anthropic`, `openai`, `ollama`, `private`, `opencode` — are
+  selectable from the CLI **and** from `perfxpert.api.agent_root(...,
+  provider=<name>)`. `claude-code` stays removed (single-provider
+  wrapper, superseded by the `opencode` + backend-adapter stack).
+- **No forced aggregator tool.** The backend LLM no longer must
+  call a single `perfxpert_run_root_analysis` after
+  `perfxpert_intent_classify`. The "MUST call
+  `perfxpert_run_root_analysis`" contract is gone; backends choose
+  any of the 41 MCP tools based on intent. The tool-priority gate
+  still requires `perfxpert_intent_classify` as the first call.
+- **FallbackProvider exception taxonomy.** Documented the full
+  typed-error set — `AuthError`, `RateLimitError`,
+  `QuotaExceededError`, `TransientError`, `FatalError`,
+  `TimeoutError`, `ProviderChainExhausted`. Only
+  transient + rate-limit cascade; auth / quota / fatal surface
+  immediately because retry is futile. See
+  `docs/guides/agentic-mode.md` §"Fallback chain".
+
+### Docs
+- `README.md` — MCP count 34→41, 5-provider list restored, pip
+  upgrade hint, fast-install wrapper surfaced.
+- `docs/guides/getting-started.md` — MCP count refreshed in 3
+  places, §10 LLM Providers rebuilt for all 5 providers with
+  CLI/API parity, duplicate §3/4/5/6 heading numbering fixed
+  (continued into §7-§14), §1.2 scoped-submodule content
+  retained. Footer marker reintroduced.
+- `docs/guides/backends.md` — MCP count refreshed, forced-tool-call
+  language removed.
+- `docs/guides/agentic-mode.md` — typed-error taxonomy table
+  added.
+- `docs/integration/README.md` — MCP count refreshed, agent-tools
+  line added.
+- `docs/integration/mcp-server.md` — MCP count refreshed in 5
+  places, "Snapshot: agent-hierarchy tools" section added,
+  `_safety` machinery reference rewritten as "private
+  `_`-prefixed skip list".
+- `docs/architecture.md` — providers documented as CLI- AND
+  library-accessible.
+- `docs/architecture/README.md` — `backend-adapter.md` index row
+  added.
+- `docs/architecture/agent-hierarchy.md` — agent MCP + API surface
+  cross-reference added; "only reachable via Root" implication
+  removed.
+- **NEW** `docs/guides/python-api.md` — embedding guide with one
+  example per agent, links back to
+  `docs/integration/mcp-server.md`.
+
 ## [0.2.0] — 2026-04-19 (release cut)
 
 This is the first tagged perfxpert release. It consolidates the

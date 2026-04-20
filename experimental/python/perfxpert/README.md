@@ -15,6 +15,14 @@ AI-powered AMD ROCm GPU trace analysis.
 
 ### Install
 
+> **First-time tip (stock Ubuntu / `rocm/dev-ubuntu-22.04` images):** the
+> default pip (22.x) misreads perfxpert's PEP-621 metadata and aborts the
+> wheel build. Upgrade pip once before installing:
+>
+> ```bash
+> pip install -U pip setuptools wheel
+> ```
+
 ```bash
 # SKIP-SAMPLE — install from PyPI (when published)
 pip install "perfxpert[all]"
@@ -53,7 +61,9 @@ actually needs; see `docs/guides/getting-started.md` §1.2 for the
 measurements.
 
 `[all]` pulls in the optional LLM providers (anthropic, openai,
-claude-agent-sdk) plus rich for pretty terminal output.
+litellm) plus rich for pretty terminal output. All five providers
+— `anthropic`, `openai`, `ollama`, `private`, `opencode` — work
+out of the box; pick one with `--llm <name>`.
 
 ### Run
 
@@ -97,12 +107,14 @@ perfxpert doctor
 │                          ▼                                   │
 │             OpenAI Agents SDK hierarchy                      │
 │   (Root → Analysis → Recommendation → Specialists)           │
+│   — all 7 agents callable via MCP + perfxpert.api            │
 │                          │                                   │
 │                          ▼                                   │
 │    Deterministic middleware (gate_cascade, intent router)    │
 │                          │                                   │
 │                          ▼                                   │
-│            ~45 pure-Python tools + ~22 knowledge YAMLs       │
+│  41 READ_ONLY MCP tools (7 agent + 34 classifier/knowledge)  │
+│            + ~22 knowledge YAMLs                             │
 │                                                              │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -182,7 +194,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
     - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
 - **Integration**
   - [Integration index](docs/integration/README.md)
-    - [MCP server (`perfxpert-mcp`) — 34 READ_ONLY tools](docs/integration/mcp-server.md)
+    - [MCP server (`perfxpert-mcp`) — 41 READ_ONLY tools (7 agent-hierarchy + 34 knowledge/classifier)](docs/integration/mcp-server.md)
+    - [Python API (`perfxpert.api`) — 1:1 mirror of the 7 agent MCP tools](docs/guides/python-api.md)
 - **Contributing**
   - [CONTRIBUTING.md](CONTRIBUTING.md)
   - [Contributing index](docs/contributing/README.md)

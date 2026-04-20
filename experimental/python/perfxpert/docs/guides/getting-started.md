@@ -191,7 +191,7 @@ doctor checks:
 
 - `perfxpert` version + Python ≥ 3.10
 - openai-agents SDK
-- MCP server reachable (`perfxpert-mcp` boots + 34 tools registered)
+- MCP server reachable (`perfxpert-mcp` boots + 41 tools registered — 7 agent-hierarchy + 34 classifier/knowledge)
 - task store (`~/.perfxpert` or `$PERFXPERT_TASK_ROOT`)
 - bundled opencode binary + bundled opencode config dir
 - LLM providers configured (counts `N/5` against
@@ -211,10 +211,12 @@ agent runtime.
   a rocprofv3 `.db`, emits a single report (text / JSON / markdown /
   webview HTML). Deterministic with `--llm` omitted; LLM-augmented
   with `--llm {anthropic,openai}`.
-- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 34
-  READ-ONLY analysis tools over JSON-RPC. Meant to be spawned by an
-  MCP client (Claude Desktop, Claude Code, Codex CLI, Gemini CLI,
-  opencode). See `../integration/mcp-server.md`.
+- **`perfxpert-mcp`** — stdio MCP server that re-exposes the 41
+  READ-ONLY analysis tools over JSON-RPC (7 agent-hierarchy entry
+  points — Root, Analysis, Recommendation, Correctness, +3
+  specialists — plus 34 classifier / knowledge tools). Meant to be
+  spawned by an MCP client (Claude Desktop, Claude Code, Codex CLI,
+  Gemini CLI, opencode). See `../integration/mcp-server.md`.
 - **`perfxpert-code`** — interactive TUI (the patched opencode
   bundle). Conversational optimization loop with the Root → Analysis
   → Recommendation → Specialist agent hierarchy and gate-cascade
@@ -368,6 +370,12 @@ returns bottleneck + narrative only (verbatim from the rule tables).
 
 ### LLM-enabled
 
+All five supported providers are selectable from the CLI with `--llm
+<name>`: `anthropic`, `openai`, `ollama`, `private`, `opencode`. The
+same five are also reachable from Python via
+`perfxpert.api.agent_root(..., provider=<name>)` — the CLI is a thin
+wrapper over the public Python API.
+
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and an LLM credential
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -377,9 +385,12 @@ export OPENAI_API_KEY="sk-..."
 perfxpert analyze -i trace.db --llm openai
 ```
 
+For the full provider matrix, model-selection ladder, and fallback
+chain, see §10 LLM Providers below.
+
 ---
 
-## 3. Tier 0: Source Code Scanning
+## 7. Tier 0: Source Code Scanning
 
 Analyze your source code before profiling — no GPU or trace database needed.
 
@@ -405,7 +416,7 @@ The output includes a profiling plan with the exact `rocprofv3` command to run, 
 
 ---
 
-## 4. Agentic TUI Workflow (The Star Feature)
+## 8. Agentic TUI Workflow (The Star Feature)
 
 The agentic TUI automates the full optimization loop: profile, analyze,
 AI-edit code, recompile, re-profile, compare. As of v0.2.0 this is the
@@ -461,7 +472,7 @@ change automatically; see `docs/architecture/gate-cascade.md` for the full
 
 ---
 
-## 5. MPI Multi-GPU Profiling
+## 9. MPI Multi-GPU Profiling (detailed)
 
 PerfXpert auto-detects MPI launchers and restructures the profiling command so each rank gets its own profiler instance.
 
@@ -489,9 +500,21 @@ The tool:
 
 ---
 
-## 6. LLM Providers
+## 10. LLM Providers
 
-Five LLM providers are supported. LLM is optional — all analysis runs locally without internet.
+All five LLM providers are selectable via `--llm <name>` on the CLI
+**and** via `provider=<name>` on `perfxpert.api.agent_root(...)` — the
+same registry backs both surfaces. LLM is optional; all analysis runs
+locally without internet when you omit `--llm` (or set
+`PERFXPERT_AIRGAP=1`).
+
+| `--llm` | Env vars | Purpose |
+|---------|----------|---------|
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude API (production default) |
+| `openai` | `OPENAI_API_KEY` | OpenAI hosted API |
+| `ollama` | `OLLAMA_HOST` (default `http://localhost:11434`) | Local Ollama daemon — fully offline once the model is pulled |
+| `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, optional `PERFXPERT_LLM_PRIVATE_API_KEY` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
+| `opencode` | none required (bundled) | Bundled opencode CLI — subprocess wrapper |
 
 ```bash
 # SKIP-SAMPLE — requires a real trace.db and an LLM credential
@@ -505,6 +528,13 @@ perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o
 export PERFXPERT_LLM_PRIVATE_URL="https://llm.corp.internal/v1"
 export PERFXPERT_LLM_PRIVATE_MODEL="llama-3-70b"
 perfxpert analyze -i trace.db --llm private
+
+# Local Ollama (no network after model pull)
+export OLLAMA_HOST="http://localhost:11434"
+perfxpert analyze -i trace.db --llm ollama --llm-model llama3:70b
+
+# Bundled opencode (no credential — used internally by perfxpert-code)
+perfxpert analyze -i trace.db --llm opencode
 ```
 
 Model selection ladder (first hit wins, resolved at session boot):
@@ -532,7 +562,7 @@ retry so the fallback chain takes over on the first 429. See
 `../guides/agentic-mode.md` for the full provider-resolution contract
 and the recursion-guard rules.
 
-## 7. Interactive sessions via `perfxpert-code`
+## 11. Interactive sessions via `perfxpert-code`
 
 One-shot non-interactive:
 
@@ -571,16 +601,17 @@ Session state is auto-saved. List / resume with `perfxpert-code
 session list` and `perfxpert-code session <id>` (pass-through to the
 underlying opencode `session` subcommand).
 
-## 8. Connecting other MCP clients
+## 12. Connecting other MCP clients
 
-Any MCP-compatible client can consume the 34 READ-ONLY tools exposed
-by `perfxpert-mcp`. Configuration snippets for Claude Desktop, Claude
-Code, Codex CLI, Gemini CLI, and generic stdio clients live in
+Any MCP-compatible client can consume the 41 READ-ONLY tools exposed
+by `perfxpert-mcp` (7 agent-hierarchy entry points + 34
+classifier/knowledge tools). Configuration snippets for Claude Desktop,
+Claude Code, Codex CLI, Gemini CLI, and generic stdio clients live in
 `../integration/mcp-server.md` under §"Client integration". The
 bundled opencode inside `perfxpert-code` wires `perfxpert-mcp`
 automatically — no client-side setup required.
 
-## 9. Troubleshooting
+## 13. Troubleshooting
 
 **`perfxpert-code` launches the unpatched upstream binary.**
 Check that `PERFXPERT_OPENCODE_PATH` is either unset or points at the
@@ -614,7 +645,7 @@ The client's `PATH` is narrower than your login shell. Use the
 absolute path returned by `which perfxpert-mcp` when registering the
 server.
 
-## 10. Next steps
+## 14. Next steps
 
 - `../architecture/agent-hierarchy.md` — 7-agent tier map + fence
   slices
@@ -624,3 +655,12 @@ server.
   integration
 - `../guides/agentic-mode.md` — air-gap vs LLM + provider ladder +
   fallback chain
+- `../guides/python-api.md` — `perfxpert.api` (1:1 mirror of the 7
+  agent MCP tools) for embedding PerfXpert's analysis brain in your
+  own tooling
+
+<!-- footer marker: perfxpert v0.2.0 — getting-started.md audit 2026-04-20 -->
+<!-- The footer marker above is moved in lockstep with the version bump in
+     pyproject.toml / perfxpert/__init__.py / CMakeLists.txt (see
+     CHANGELOG.md under [0.2.0]). Do not remove without bumping the
+     corresponding version entries. -->

@@ -74,13 +74,14 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (~34)
+## Tools exposed (41)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
-`_class` and `_safety` (hardcoded in `_registry.py:21`) because they
-are machinery, not tools. Current set (enumerate yourself at any time
-by running the Python snippet below):
+a small private `_`-prefixed skip list (currently `_class`; hardcoded
+in `_registry.py:21`) because those entries are machinery, not
+tools. Current set (enumerate yourself at any time by running the
+Python snippet below):
 
 ```python
 # Print every READ_ONLY tool the MCP server exposes at boot time.
@@ -89,7 +90,35 @@ for name in sorted(discover_read_only_tools()):
     print(name)
 ```
 
-Snapshot at v0.2.0 (34 tools):
+### Snapshot: agent-hierarchy tools (7)
+
+These are the seven agent entry points. Each is a READ_ONLY MCP tool
+AND a 1:1-mirrored callable on [`perfxpert.api`](../guides/python-api.md)
+— invoking `mcp__perfxpert__agent_root` from a client and calling
+`perfxpert.api.agent_root(...)` from Python produce the same output.
+
+```
+agents.root.agent_root
+agents.analysis.agent_analysis
+agents.recommendation.agent_recommendation
+agents.correctness.agent_correctness
+agents.compute.agent_compute_specialist
+agents.memory.agent_memory_specialist
+agents.latency.agent_latency_specialist
+```
+
+On the MCP wire these become `perfxpert_agent_root`,
+`perfxpert_agent_analysis`, … (dot→underscore, see §"Naming
+convention"). Input/output schemas for each agent are defined in
+`perfxpert/agents/schemas.py` — see
+[../guides/python-api.md](../guides/python-api.md) for field-level
+examples.
+
+### Snapshot: classifier / knowledge tools (34)
+
+Lower-level building blocks the agents themselves compose. External
+clients can call these directly when they want the raw classifier
+output without routing through the agent hierarchy.
 
 ```
 arch.lookup_peaks
@@ -249,7 +278,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 34 READ_ONLY tools. The
+any MCP-compatible client can consume the 41 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -273,7 +302,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 34 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 41 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 

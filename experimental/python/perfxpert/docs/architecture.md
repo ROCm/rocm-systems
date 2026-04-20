@@ -50,7 +50,15 @@ CI validates every YAML against its schema on every PR.
 - Private (any OpenAI-compatible endpoint)
 - Opencode (bundled subprocess wrapper)
 
-All five verified nightly via `.github/workflows/perfxpert-nightly.yml`.
+All five are reachable from both surfaces:
+
+- **CLI**: `perfxpert analyze --llm {anthropic,openai,ollama,private,opencode}`
+- **Python API**: `perfxpert.api.agent_root(..., provider=<name>)`
+
+The CLI is a thin wrapper that forwards into
+`perfxpert.api.agent_root(...)`; both paths resolve providers through
+the same `PROVIDER_REGISTRY`. All five verified nightly via
+`.github/workflows/perfxpert-nightly.yml`.
 
 ## Runtime middleware (spec §5)
 

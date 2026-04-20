@@ -46,15 +46,18 @@ re-introducing live guidance.
 
 ## Ship state (2026-04-20)
 
-- Test suite: ~1390 passed / 0 failed / 3-5 env-skipped (OpenAI quota,
-  `gemini`/`codex` CLI missing, opencode submodule not initialised).
-  Phase 8 landed 3 LitellmModel wiring tests, 1 MCP tool-discovery test,
-  1 consent-denied dispatcher test, 4 airgap+tier-0 format-cell tests,
-  5 `perfxpert_run_root_analysis` unit tests.
+- Test suite: **1424 passed / 3 skipped / 0 failed** on the Phase 9
+  tip. Skips are environment-only (OpenAI quota, `gemini`/`codex`
+  CLI missing, opencode submodule not initialised).
 - All three docs scanners (`scripts/lint.sh`, `scripts/link-checker.py`,
   `scripts/test-samples.py`) green in `--strict` mode; enforced by
   `tests/test_docs_tooling/test_ship_readiness.py`.
-- End-to-end Docker install validated in `rocm/dev-ubuntu-22.04:latest`:
-  single `pip install "perfxpert[all] @ git+…"` completes in ~3 min,
-  auto-downloads bun if not on PATH, compiles bundled opencode, yields
-  `perfxpert doctor` → **ALL CLEAN**.
+- End-to-end Docker install validated in `rocm/dev-ubuntu-22.04:latest`
+  with the **scoped submodule init** path
+  (`scripts/pip-install-from-git.sh` or `GIT_CONFIG_COUNT=1 …`):
+  completes in ~30 sec + build, auto-downloads bun if not on PATH,
+  compiles bundled opencode, yields `perfxpert doctor` → **ALL
+  CLEAN**. The plain recursive `pip install "perfxpert[all] @ git+…"`
+  one-liner still works but pays a 3-6 min penalty initialising
+  unrelated rocm-systems submodules — see the fast-install wrapper
+  under `docs/guides/getting-started.md` §1.2.

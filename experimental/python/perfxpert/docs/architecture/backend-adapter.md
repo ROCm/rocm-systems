@@ -192,7 +192,8 @@ Steps to add a fifth backend (example: `aider`):
 - [../guides/backends.md](../guides/backends.md) — user-facing
   install/uninstall recipes
 - [../integration/mcp-server.md](../integration/mcp-server.md) —
-  the 34 READ_ONLY tools every adapter exposes to its backend
+  the 41 READ_ONLY tools every adapter exposes to its backend
+  (7 agent-hierarchy entry points + 34 classifier/knowledge tools)
 - Local Claude hook-surface decision record — why the Claude adapter
   uses the native `PreToolUse` hook instead of `permissions.deny`.
 - Local multi-backend implementation plan — the 14-task PR 1 + PR 2

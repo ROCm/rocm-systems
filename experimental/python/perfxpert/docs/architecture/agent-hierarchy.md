@@ -6,11 +6,32 @@ is the authoritative reference for how the agents relate, how the
 fence-slice pattern keeps each agent's system prompt narrow, and where
 to look in source.
 
+**Each of the 7 agents is callable from two surfaces:**
+
+- **MCP:** `perfxpert_agent_root`, `perfxpert_agent_analysis`,
+  `perfxpert_agent_recommendation`, `perfxpert_agent_correctness`,
+  `perfxpert_agent_compute_specialist`,
+  `perfxpert_agent_memory_specialist`,
+  `perfxpert_agent_latency_specialist` (READ_ONLY, auto-registered
+  from `perfxpert.tools.agents.*`).
+- **Python API:** `perfxpert.api.agent_root(...)`,
+  `perfxpert.api.agent_analysis(...)`, etc. — **1:1 mirror** of the
+  MCP tools (same function, same schema).
+
+The two surfaces resolve to the same underlying Python function; the
+MCP registration is a thin wrapper around the `perfxpert.api.*`
+callable. Agents are reachable from any entry point — the Root is NOT
+the only way into the hierarchy. Backend TUIs (Claude Code, Gemini
+CLI, Codex CLI, opencode) pick whichever agent matches the user's
+intent based on the `AGENTS.md` reference.
+
 Cross-links:
 - [Gate cascade](gate-cascade.md) — the 5 deterministic correctness
   gates that sit between agents
 - [MCP server](../integration/mcp-server.md) — how READ_ONLY tools are
   re-exposed to external clients
+- [Python API](../guides/python-api.md) — in-process embedding with
+  the same schemas as the MCP tools
 - [Agentic mode guide](../guides/agentic-mode.md) — end-user provider
   ladder and air-gap behavior
 
