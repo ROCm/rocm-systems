@@ -44,6 +44,12 @@
 #include "core/inc/runtime.h"
 #include "core/util/locks.h"
 
+#if defined(__APPLE__)
+#include <chrono>
+#include <cstdlib>
+#include <thread>
+#endif
+
 namespace rocr {
 namespace core {
 
@@ -76,6 +82,17 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
   event_descriptor.NodeId = 0;
 
   HsaEvent* ret = NULL;
+#if defined(__APPLE__)
+  // Darwin has no libhsakmt — synthesize a zero-filled HsaEvent that
+  // the signal object can use as an opaque handle. SetEvent /
+  // WaitOnEvent are no-ops on this path (no GPU interrupt source is
+  // wired up yet); signals still work for CPU-side CAS / polling.
+  (void)manual_reset;
+  ret = static_cast<HsaEvent*>(std::calloc(1, sizeof(HsaEvent)));
+  if (ret) {
+    ret->EventData.EventType = type;
+  }
+#else
   if (HSAKMT_STATUS_SUCCESS ==
       HSAKMT_CALL(hsaKmtCreateEvent(&event_descriptor, manual_reset, false, &ret))) {
     if (type == HSA_EVENTTYPE_MEMORY) {
@@ -85,11 +102,17 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
       memset(&ret->EventData.EventData.HwException, 0, sizeof(HsaHwException));
     }
   }
-
+#endif
   return ret;
 }
 
-void InterruptSignal::DestroyEvent(HsaEvent* evt) { HSAKMT_CALL(hsaKmtDestroyEvent(evt)); }
+void InterruptSignal::DestroyEvent(HsaEvent* evt) {
+#if defined(__APPLE__)
+  std::free(evt);
+#else
+  HSAKMT_CALL(hsaKmtDestroyEvent(evt));
+#endif
+}
 
 InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event)
     : LocalSignal(initial_value, false), Signal(signal()) {
@@ -194,7 +217,16 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
     );
 
+#if defined(__APPLE__)
+    // No interrupt source on Darwin yet — fall back to a short
+    // userspace sleep so the spin loop doesn't burn a CPU core. Real
+    // MSI-X delivery will route through libmacgpu's EnableMSI +
+    // WaitInterrupt escapes in a follow-up commit.
+    (void)event_age;
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::min<uint32_t>(wait_ms, 10)));
+#else
     HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age));
+#endif
   }
 }
 
@@ -372,7 +404,12 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
 }
   /// @brief Notify driver of signal value change if necessary.
   void InterruptSignal::SetEvent() {
+#if defined(__APPLE__)
+    // No libhsakmt — the spin-loop wake happens via the short sleep
+    // in WaitRelaxed above. Nothing to notify.
+#else
     if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
+#endif
   }
 
 }  // namespace core

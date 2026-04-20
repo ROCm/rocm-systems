@@ -44,9 +44,14 @@
 
 #include "core/inc/amd_macos_driver.h"
 
+#include <sys/mman.h>
 #include <sys/sysctl.h>
+#include <unistd.h>
 
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
 #include <utility>
 
 #include "core/inc/memory_region.h"
@@ -147,7 +152,11 @@ hsa_status_t MacOsDriver::GetNodeProperties(HsaNodeProperties& node_props,
   }
   node_props.NumCPUCores = static_cast<HSAuint32>(ncpu);
   node_props.NumFComputeCores = 0;   // no GPU agent yet
-  node_props.NumMemoryBanks = 0;
+  // One memory bank so CpuAgent::InitRegionList builds the host-memory
+  // regions (fine-grain, coarse-grain, kernargs). Without this, ROCR's
+  // shared allocator stays unset and hsa_init crashes on the first
+  // async-signal allocation.
+  node_props.NumMemoryBanks = 1;
   node_props.NumCaches = 0;
   node_props.NumIOLinks = 0;
   // Vendor / device identification that downstream consumers look at.
@@ -165,11 +174,27 @@ hsa_status_t MacOsDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>& io
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MacOsDriver::GetMemoryProperties(uint32_t,
+hsa_status_t MacOsDriver::GetMemoryProperties(uint32_t node_id,
                                               std::vector<HsaMemoryProperties>& mem_props) const {
-  // No memory banks exposed yet — GPU VRAM + system memory plumbing
-  // lands with MacGpuAgent.
-  mem_props.clear();
+  if (node_id != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // GetNodeProperties reported NumMemoryBanks=1 → caller resized the
+  // vector to 1. Populate the single entry with system RAM so that
+  // CpuAgent::InitRegionList builds its fine-grain / coarse-grain /
+  // kernargs regions over host memory.
+  if (mem_props.size() < 1) mem_props.resize(1);
+
+  uint64_t mem_bytes = 0;
+  size_t len = sizeof(mem_bytes);
+  int mib[2] = {CTL_HW, HW_MEMSIZE};
+  if (sysctl(mib, 2, &mem_bytes, &len, nullptr, 0) != 0) {
+    mem_bytes = 0;  // Leave ROCR with a best-effort zero if sysctl fails.
+  }
+
+  std::memset(&mem_props[0], 0, sizeof(HsaMemoryProperties));
+  mem_props[0].HeapType = HSA_HEAPTYPE_SYSTEM;
+  mem_props[0].SizeInBytes = mem_bytes;
+  mem_props[0].VirtualBaseAddress = 0;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -179,13 +204,66 @@ hsa_status_t MacOsDriver::GetCacheProperties(uint32_t, uint32_t,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MacOsDriver::AllocateMemory(const core::MemoryRegion&,
-                                         core::MemoryRegion::AllocateFlags,
-                                         void**, size_t, uint32_t) {
-  return HSA_STATUS_ERROR;
+namespace {
+// Tracks host allocations so FreeMemory can route untyped void* back to
+// the right deallocator. MVP: host memory only (system fine/coarse
+// grain + kernargs). GPU local memory lands later via macgpu_alloc_dma.
+struct HostAllocRegistry {
+  std::mutex m;
+  std::unordered_map<void*, size_t> allocations;
+};
+HostAllocRegistry& GetHostAllocRegistry() {
+  static HostAllocRegistry reg;
+  return reg;
+}
+}  // namespace
+
+hsa_status_t MacOsDriver::AllocateMemory(const core::MemoryRegion& /*mem_region*/,
+                                         core::MemoryRegion::AllocateFlags /*alloc_flags*/,
+                                         void** mem, size_t size,
+                                         uint32_t /*node_id*/) {
+  if (!mem) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *mem = nullptr;
+  // MVP: host-backed allocation only. The only memory regions on a
+  // Darwin node today are the CPU agent's fine-grain / coarse-grain /
+  // kernargs system regions — none of them are GPU-local. GPU VRAM
+  // allocation lands later when MacGpuAgent registers its own
+  // AMD::MemoryRegion with IsLocalMemory() and this routes through
+  // libmacgpu's macgpu_alloc_dma().
+
+  // mmap gives us zero-filled, page-aligned host memory with RW perms —
+  // matches what the Linux path produces from hsaKmtAllocMemory for a
+  // system-heap region. Round up to page size so munmap() in FreeMemory
+  // uses the same size.
+  const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+  const size_t page = page_size > 0 ? page_size : 4096;
+  const size_t rounded = (size + page - 1) & ~(page - 1);
+  void* ptr = ::mmap(nullptr, rounded, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANON, -1, 0);
+  if (ptr == MAP_FAILED) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  {
+    auto& reg = GetHostAllocRegistry();
+    std::lock_guard<std::mutex> g(reg.m);
+    reg.allocations[ptr] = rounded;
+  }
+  *mem = ptr;
+  return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t MacOsDriver::FreeMemory(void*, size_t) { return HSA_STATUS_ERROR; }
+hsa_status_t MacOsDriver::FreeMemory(void* mem, size_t /*size*/) {
+  if (!mem) return HSA_STATUS_SUCCESS;
+  auto& reg = GetHostAllocRegistry();
+  size_t rounded = 0;
+  {
+    std::lock_guard<std::mutex> g(reg.m);
+    auto it = reg.allocations.find(mem);
+    if (it == reg.allocations.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    rounded = it->second;
+    reg.allocations.erase(it);
+  }
+  if (::munmap(mem, rounded) != 0) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
 
 hsa_status_t MacOsDriver::CreateQueue(uint32_t, HSA_QUEUE_TYPE, uint32_t,
                                       HSA::hsa_amd_queue_priority_internal_t,
