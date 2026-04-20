@@ -170,7 +170,21 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
         if (byteOffset != 0)
           ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(byteOffset));
       } else {
-        Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
+        // gfx12+ SMEM: when the `scale_offset` (CPol::SCAL) bit is
+        // set the SGPR offset is an element index, not a byte
+        // offset — hardware multiplies it by the load's data-type
+        // size before adding to sbase. Mirror that here (the
+        // FLAT/GLOBAL counterparts in flat_addr.cpp do the same
+        // against `elemBytes`). The "element size" for the scalar
+        // dword family is the full load width: 4B for B32, 8B for
+        // B64, 16B for B128, etc. — i.e. `loadBytes`. Ignoring the
+        // scale produced a silent off-by-N* miscompile on
+        // `mask[blockIdx.x]`-style uses of a uniform SGPR index.
+        Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "smem_roff");
+        if (di.hasScaleOffset)
+          regOff = ctx.B.CreateMul(regOff,
+                                   ConstantInt::get(ctx.i64Ty, loadBytes),
+                                   "smem_roff_scaled");
         ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
       }
       for (int d = 0; d < loadDwords; d++) {
@@ -272,7 +286,15 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
       if (off != 0)
         ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
     } else {
-      Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
+      // Narrow SMEM element size for `scale_offset`: 1B for byte,
+      // 2B for halfword. Same SCAL-scales-the-SGPR-offset rule as
+      // the dword family above.
+      int narrowBytes = isHalfWord ? 2 : 1;
+      Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "smem_nroff");
+      if (di.hasScaleOffset && narrowBytes != 1)
+        regOff = ctx.B.CreateMul(regOff,
+                                 ConstantInt::get(ctx.i64Ty, narrowBytes),
+                                 "smem_nroff_scaled");
       ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
     }
 
@@ -304,6 +326,7 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
     }
     Value *baseAddr = ctx.regs.loadSGPR64(ctx.B, base.baseIdx);
     Value *ptr = ctx.B.CreateIntToPtr(baseAddr, ctx.ptrGlobalTy);
+    int storeBytes = storeDwords * 4;
     if (op.nSrcs() >= 3) {
       unsigned offIdx = op.srcIdx(2);
       if (di.isImm(offIdx)) {
@@ -311,7 +334,14 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
         if (off != 0)
           ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
       } else if (di.isReg(offIdx)) {
-        Value *regOff = ctx.B.CreateZExt(op.src(2), ctx.i64Ty);
+        // Same `scale_offset` scaling as the S_LOAD path — the
+        // SCAL bit multiplies the SGPR offset by the store's
+        // data-type size (4/8/16B for B32/B64/B128).
+        Value *regOff = ctx.B.CreateZExt(op.src(2), ctx.i64Ty, "smem_st_roff");
+        if (di.hasScaleOffset)
+          regOff = ctx.B.CreateMul(regOff,
+                                   ConstantInt::get(ctx.i64Ty, storeBytes),
+                                   "smem_st_roff_scaled");
         ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
       }
     }
@@ -345,7 +375,12 @@ HandlerResult handleSMEM(RaiseContext &ctx, const DecodedInst &di,
       if (off != 0)
         ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, ctx.B.getInt64(off));
     } else {
-      Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty);
+      // S_ATOMIC_SWAP is a dword op, so `scale_offset` multiplies
+      // the SGPR offset by 4. Same rule as the other SMEM paths.
+      Value *regOff = ctx.B.CreateZExt(op.src(1), ctx.i64Ty, "smem_at_roff");
+      if (di.hasScaleOffset)
+        regOff = ctx.B.CreateMul(regOff, ConstantInt::get(ctx.i64Ty, 4),
+                                 "smem_at_roff_scaled");
       ptr = ctx.B.CreateInBoundsGEP(ctx.i8Ty, ptr, regOff);
     }
 

@@ -386,6 +386,24 @@ HandlerResult handleVALU(RaiseContext &ctx, const DecodedInst &di,
     hr.handled = true;
     return hr;
   }
+  // v_bfi_b32: VOP3 bit-field insert.
+  //   D.u = (S0.u & S1.u) | (~S0.u & S2.u)
+  // S0 is the mask: bits set in S0 take the corresponding bit from
+  // S1, bits clear in S0 take the corresponding bit from S2.
+  // VOP3Instructions.td emits `AMDGPUbfiPattern` which is exactly
+  // the mask-and-merge formula; no hardware masking of any operand,
+  // no modifiers beyond the standard B32 set. gfx942 has the same
+  // opcode, so the AMDGPU backend will isel this pair of and/or
+  // back to a single v_bfi_b32 on the way down.
+  if (sop == SemOp::V_BFI_B32) {
+    Value *mask = op.src(0), *one = op.src(1), *zero = op.src(2);
+    Value *picked_one  = ctx.B.CreateAnd(mask, one);
+    Value *picked_zero = ctx.B.CreateAnd(ctx.B.CreateNot(mask), zero);
+    ctx.writeReg32(op.dst(),
+                   ctx.B.CreateOr(picked_one, picked_zero, "vbfi"));
+    hr.handled = true;
+    return hr;
+  }
   // v_mbcnt_{lo,hi}_u32_b32 are handled in handle_valu_cross_lane.cpp.
   // ---- 64-bit float ops ----
   if (sop == SemOp::V_ADD_F64) {

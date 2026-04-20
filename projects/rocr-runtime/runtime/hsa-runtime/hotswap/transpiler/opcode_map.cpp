@@ -413,6 +413,15 @@ static const Entry kCanonTable[] = {
     E(V_ADD_NC_U16_e64, V_ADD_NC_U16),
     E(V_BFE_U32_e64, V_BFE_U32),
     E(V_BFE_I32_e64, V_BFE_I32),
+    // gfx6+ VOP3 bit-field insert. Ternary, e64-only (no VOP1/VOP2
+    // form). Hardware semantic: `dst = (src0 & src1) | (~src0 & src2)`
+    // — src0 is the mask, src1 provides bits where mask=1, src2
+    // provides bits where mask=0. See VOP3Instructions.td
+    // `AMDGPUbfiPattern`. Same canonical opcode across gfx11/gfx12;
+    // libdevice's asin lowering emits this as its sign-stitching
+    // step, which was the real-world coverage gap that motivated
+    // the handler.
+    E(V_BFI_B32_e64, V_BFI_B32),
     E(V_PERM_B32_e64, V_PERM_B32),
     E(V_MBCNT_LO_U32_B32_e64, V_MBCNT_LO_U32_B32),
     E(V_MBCNT_HI_U32_B32_e64, V_MBCNT_HI_U32_B32),

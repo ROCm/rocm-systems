@@ -363,7 +363,7 @@ enum class SemOp : uint16_t {
   // dst op_sel is set so the preserved half survives the
   // read-modify-write.
   V_ADD_NC_U16,
-  V_BFE_U32, V_BFE_I32, V_PERM_B32,
+  V_BFE_U32, V_BFE_I32, V_BFI_B32, V_PERM_B32,
   V_MBCNT_LO_U32_B32, V_MBCNT_HI_U32_B32,
   V_READLANE_B32, V_WRITELANE_B32,
   V_MED3_F32, V_MAX3_F32, V_MIN3_F32, V_MAX3_NUM_F32,
