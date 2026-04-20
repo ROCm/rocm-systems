@@ -4612,17 +4612,49 @@ void *VirtualGPU::getOrCreateHostcallBuffer() {
     return nullptr;
   }
 
+  // Allocate the occupied bitfield in device-local memory
+  uint32_t occupiedWords = (numPackets + 31) / 32;
+  size_t occupiedSize = occupiedWords * sizeof(uint32_t);
+  amd::Buffer* occupiedBuf = new (dev().context()) amd::Buffer(
+      dev().context(), CL_MEM_READ_WRITE, occupiedSize, nullptr);
+  if (!occupiedBuf || !occupiedBuf->create()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to allocate occupied bitfield for hostcall buffer");
+    if (occupiedBuf) occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+  device::Memory* occupiedMem = occupiedBuf->getDeviceMemory(dev());
+  if (!occupiedMem) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to get device memory for occupied bitfield");
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+  // Zero-initialize the occupied bitfield
+  uint32_t zero = 0;
+  blitMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero),
+                       amd::Coord3D(occupiedSize, 1, 1), amd::Coord3D(0, 0, 0),
+                       amd::Coord3D(occupiedSize, 1, 1), true);
+
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
           "Created hostcall buffer %p (numPackets == %d, size == %d, align == "
           "%d) for virtual "
           "queue %p\n",
           hostcallBuffer_, numPackets, size, align, this);
 
-  if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets)) {
+  if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets, occupiedBuf)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
             "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
+    occupiedBuf->release();
     dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
     return nullptr;
   }
   return hostcallBuffer_;
