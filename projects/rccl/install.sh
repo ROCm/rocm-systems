@@ -133,7 +133,7 @@ while true; do
     case "${1}" in
          --address-sanitizer)        build_address_sanitizer=true;                                                                     shift ;;
          --amdgpu_targets)           build_amdgpu_targets=${2};                                                                        shift 2 ;;
-         --cmake-options)            custom_cmake_options=${2};                                                                         shift 2 ;;
+         --cmake-options)            custom_cmake_options=${2};                                                                        shift 2 ;;
          --debug)                    build_release=false;                                                                              shift ;;
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
