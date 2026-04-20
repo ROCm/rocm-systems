@@ -132,6 +132,56 @@ register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell);
 void
 unregister_doorbell(hsa_signal_t doorbell);
 
+/**
+ * @brief Atomically add to virtual write pointer
+ *
+ * Increments the virtual write pointer by the given value and returns
+ * the previous value. This is used to claim packet slots in the queue.
+ *
+ * @param state Queue state
+ * @param value Amount to add
+ * @return Previous value of virtual_wptr
+ */
+uint64_t
+add_write_index_impl(QueueState* state, uint64_t value);
+
+/**
+ * @brief Store a new value to virtual write pointer
+ *
+ * Sets the virtual write pointer to the given value. This is typically
+ * used for queue resets or initialization.
+ *
+ * @param state Queue state
+ * @param value New value to store
+ */
+void
+store_write_index_impl(QueueState* state, uint64_t value);
+
+/**
+ * @brief Compare-and-swap on virtual write pointer
+ *
+ * Atomically compares the virtual write pointer to expected and, if equal,
+ * replaces it with value. Returns the previous value.
+ *
+ * @param state Queue state
+ * @param expected Expected current value
+ * @param value New value to store if comparison succeeds
+ * @return Previous value of virtual_wptr
+ */
+uint64_t
+cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value);
+
+/**
+ * @brief Load virtual write pointer
+ *
+ * Returns the current value of the virtual write pointer.
+ *
+ * @param state Queue state
+ * @return Current value of virtual_wptr
+ */
+uint64_t
+load_write_index_impl(const QueueState* state);
+
 }  // namespace queue_intercept
 }  // namespace hsa
 }  // namespace rocprofiler
