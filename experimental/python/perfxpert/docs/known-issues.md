@@ -3,6 +3,43 @@
 Active, living list. Entries that correspond to shipped fixes have been
 removed; check `CHANGELOG.md` for history.
 
+## Fixed: `--llm <prov>` produced structurally-thin reports in all 4 formats
+
+Before Phase 8 commit `78ad3257f8`, running
+
+```
+perfxpert analyze --llm <prov> -i trace.db --source-dir . \
+    --format {text,json,markdown,webview} -d out
+```
+
+would leave a file on disk with only the agent narrative + a
+recommendations list — no `time_breakdown`, no hotspot table, no
+memory analysis, no hardware-counter section, no Tier-0 findings.
+The root cause was `_format_agentic_output` building a minimal dict
+from `RootOutput.metadata` while the actual deterministic analysis
+pass (`compute_time_breakdown`, `identify_hotspots`,
+`analyze_memory_copies`, `analyze_hardware_counters`,
+`analyze_kernel_resources`, `analyze_api_overhead`,
+`detect_warmup_issues`, `analyze_thread_trace`,
+`generate_recommendations`) was never invoked in the agentic code path.
+
+**Fix (Phase 8 SHA `78ad3257f8`)**: `_execute_agentic` now runs
+`build_analysis_payload` alongside `perfxpert.api.agent_root()` and
+forwards the rich deterministic dict to `_format_agentic_output`.
+The agent brain (narrative + primary_bottleneck + recommendations
++ warnings) is merged with the deterministic sections via
+`merge_recommendations` (dedupe by `(type, target)` or
+`(category, issue)`; LLM verdict wins but deterministic citations
+and code snippets are preserved). Every format — text / JSON /
+markdown / webview — now populates every section of the report
+contract documented in
+[`getting-started.md`](guides/getting-started.md#report-contents-every-format).
+
+The airgap path runs the deterministic pass identically; only the
+LLM narrative is replaced by the airgap template. Tier-0-only
+(`--source-dir` without `-i`) dispatches to the tier-0 formatters
+with the agent narrative spliced in.
+
 ## Fixed: empty HTML on `--llm-api-key` passed a model name
 
 Before Phase 8, running

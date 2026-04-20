@@ -316,6 +316,56 @@ The webview format produces a self-contained HTML file (AMD dark
 theme, SVG gauges, collapsible recommendation cards) suitable for
 sharing over email.
 
+### Report contents (every format)
+
+Every format — text, JSON, markdown, webview — carries the same
+dataset. The deterministic pass runs unconditionally (even with
+`--llm <prov>` or under airgap); the LLM supplies narrative +
+primary-bottleneck + recommendation prose on top. The four formats
+differ only in rendering, not in completeness. Every report
+contains:
+
+- **Agent narrative** — the LLM prose (or the airgap template in
+  deterministic mode), spliced at the top of the report under a
+  "Summary" heading.
+- **Primary bottleneck** — explicit label (compute / memory_transfer
+  / latency / mixed / data_insufficient).
+- **Time breakdown** — kernel / memcpy / API-overhead percentages
+  plus total runtime and kernel count.
+- **Hotspot list** — top-N kernels ranked by total duration, with
+  call count, avg / min / max duration, percent of total.
+- **Memory analysis** — H2D / D2H / D2D volumes, total duration, and
+  average bandwidth per direction.
+- **Hardware counters** — Tier-2 derived metrics (GPU utilization,
+  avg waves, HBM utilization) plus the raw collected counter table.
+  Shows a graceful "not collected" placeholder when the `.db` was
+  captured without `--pmc`.
+- **Kernel resources / occupancy** — VGPR / SGPR / LDS / scratch and
+  theoretical occupancy for each hotspot kernel when the trace
+  carries kernel-symbol metadata.
+- **API overhead breakdown** — top HIP / HSA API calls by total time
+  plus warmup outliers when detected.
+- **Thread-trace (Tier 3)** — included when `--att-dir` is set;
+  per-instruction stall ratio and bottleneck category (VMEM,
+  LDS-bank, dep-chain, branch-divergence).
+- **Tier-0 source findings** — included when `--source-dir` is set;
+  detected kernels, anti-patterns, suggested counters, and the
+  suggested first-profiling command.
+- **Recommendations (merged)** — LLM + deterministic recommendations
+  merged and deduped by target, each with category / issue /
+  suggestion / citation / code-snippet-before / code-snippet-after
+  (where available).
+- **Warnings** — alert block (empty when no warnings fire).
+- **Metadata** — GPU arch, DB path, kernel count, total runtime,
+  provider, model (footer).
+
+The JSON format exposes each section under a flat top-level key
+(`.time_breakdown`, `.hotspots`, `.memory_analysis`,
+`.hardware_counters`, `.kernel_resources`, `.api_overhead`,
+`.tier0_findings`, `.recommendations`, `.narrative`,
+`.primary_bottleneck`, `.warnings`, `.metadata`) — so `jq` pipelines
+can slice the report without reaching into nested schema shapes.
+
 ## 5. Multi-GPU / MPI workflows
 
 **Correct pattern — MPI OUTSIDE, rocprofv3 INSIDE, per rank.** Each
