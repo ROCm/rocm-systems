@@ -21,9 +21,10 @@ Trust-gate behavior (plan Task 10):
   4. trusted → project-scope `<cwd>/.codex/config.toml`.
 
 MCP registration prefers `codex mcp add` shell-out; falls back to
-direct TOML edit via **lazy-imported `tomlkit`** (cycle-2 I7 —
-imported inside the fallback branch ONLY; the primary code path must
-never pay the import cost).
+direct TOML edit via **lazy-imported `tomlkit`** (historically
+cycle-2 I7, superseded by commit 3547736829 which made tomlkit a
+required runtime dep — imported inside the fallback branch ONLY;
+the primary code path must never pay the import cost).
 
 Prompt staging writes to `<scope_dir>/.perfxpert/AGENTS.md`, NEVER to
 a tracked `AGENTS.md` unless `--allow-agents-md-append` is given.
@@ -560,15 +561,17 @@ class CodexAdapter:
 
         Uses lazy-imported `tomlkit` for lossless round-trip; falls
         back to a minimal hand-rolled rewrite if `tomlkit` is not
-        installed (plan I7 says the fallback is rare — most users
-        install the `[backends]` extra).
+        installed. Historically `tomlkit` came from an optional
+        `[backends]` extra (plan I7), but commit 3547736829 promoted
+        it to a required runtime dep, so the fallback is now truly
+        defensive rather than user-facing.
 
         **Git-tracked refusal.** If `~/.codex/config.toml` is tracked
         in an enclosing git repo (dotfiles-style), raise
         `ConfigClobber` rather than silently rewriting a versioned
         file. The user must move it outside version control before
         we'll touch it. Mirrors the git-tracked rule the Claude
-        adapter applies to `.claude/CLAUDE.md`.
+        adapter applies to `CLAUDE.local.md`.
         """
         cfg = self._user_codex_config_path(home)
         self._refuse_if_git_tracked(cfg)
@@ -698,9 +701,11 @@ class CodexAdapter:
         it).
 
         **Lazy-import.** `tomlkit` is ONLY imported here — never at
-        module import time — per plan cycle-2 I7. Users who never hit
-        the fallback (i.e. whose `codex mcp add` works) don't need
-        `tomlkit` installed.
+        module import time. Originally motivated by plan cycle-2 I7
+        (tomlkit was an optional `[backends]` extra); commit
+        3547736829 promoted tomlkit to a required dep, but the lazy
+        import pattern is preserved so the primary `codex mcp add`
+        path never pays the tomlkit import cost.
         """
         self._refuse_if_git_tracked(config_toml)
 
@@ -1088,10 +1093,11 @@ def _lazy_import_tomlkit(reason: str):
 def _parse_toml_read_only(source: str) -> dict | None:
     """Parse TOML using the stdlib `tomllib` (Python 3.11+).
 
-    Keeps `_check_trust` tomlkit-free so the trust probe doesn't
-    require users to install the `[backends]` extra just to READ
-    their own config. Writes still use tomlkit for round-trip
-    preservation.
+    Keeps `_check_trust` tomlkit-free so the trust probe uses only
+    stdlib — historically this mattered because `tomlkit` came from
+    an optional `[backends]` extra; commit 3547736829 promoted it
+    to a required dep, but staying stdlib-only here keeps the read
+    path lean. Writes still use tomlkit for round-trip preservation.
     """
     try:
         import tomllib  # type: ignore[import-not-found]
