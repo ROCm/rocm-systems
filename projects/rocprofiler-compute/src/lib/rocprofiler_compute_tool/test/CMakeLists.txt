@@ -2,7 +2,8 @@
 ## SPDX-License-Identifier:  MIT
 set(target test_rocprofiler_compute)
 
-add_executable(${target}
+add_executable(
+    ${target}
     test_rocprofiler_compute_tool.h
     test_rocprofiler_compute_tool.cpp
     test_sdk_callbacks.h
