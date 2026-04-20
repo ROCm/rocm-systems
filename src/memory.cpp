@@ -34,6 +34,7 @@
 #include <fcntl.h>
 #include "impl/wddm/gpu_memory.h"
 #include "util/simple_heap.h"
+#include "hsakmttypes_legacy.h"
 
 struct Allocation {
   Allocation()
@@ -543,9 +544,26 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
     HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
 {
     CHECK_DXG_OPEN();
-    amdgpu_device_handle devhandle =  (amdgpu_device_handle)import_desc->device_handle;
+
+    HSAint32 fd;
+    HsaExternalHandleType etype;
+    amdgpu_device_handle devhandle;
+    HSAuint16 desc_size = dxg_runtime->detected_abi_.SizeOfHsaExternalHandleDesc;
+    if (desc_size == sizeof(HsaExternalHandleDesc)) {
+        // Current layout: int64 fd + mem field
+        devhandle = (amdgpu_device_handle)import_desc->device_handle;
+        fd = (HSAint32)import_desc->fd;
+        etype = import_desc->type;
+    } else {
+        // Old layout or unknown (desc_size == 0): int32 fd, no mem
+        auto *legacy = reinterpret_cast<const HsaExternalHandleDesc_712*>(import_desc);
+        devhandle = (amdgpu_device_handle)legacy->device_handle;
+        fd = legacy->fd;
+        etype = legacy->type;
+    }
+
     enum amdgpu_bo_handle_type type;
-    switch (import_desc->type) {
+    switch (etype) {
     case HSA_EXTERNAL_HANDLE_GEM_FLINK_NAME:
         type = amdgpu_bo_handle_type_gem_flink_name;
         break;
@@ -558,7 +576,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
         break;
     }
     struct amdgpu_bo_import_result res;
-    int ret = amdgpu_bo_import_impl(devhandle, type, import_desc->fd, &res);
+    int ret = amdgpu_bo_import_impl(devhandle, type, fd, &res);
     if (ret) {
         return HSAKMT_STATUS_ERROR;
     }
