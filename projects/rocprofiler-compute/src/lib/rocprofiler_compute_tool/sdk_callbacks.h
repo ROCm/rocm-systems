@@ -89,16 +89,20 @@ struct tool_data_t
 class SdkCallbacks
 {
 public:
-    virtual ~SdkCallbacks()                                  = default;
+    virtual ~SdkCallbacks() = default;
+
     virtual void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                                   rocprofiler_counter_config_id_t*             config,
-                                   void* callback_data_args) = 0;
+
+                                   rocprofiler_counter_config_id_t* config,
+                                   void*                            callback_data_args) = 0;
+
     virtual void record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                                  rocprofiler_counter_record_t*                record_data,
                                  size_t                                       record_count,
-                                 void* callback_data_args)   = 0;
+                                 void* callback_data_args) = 0;
+
     virtual void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                       void*                                 callback_data)  = 0;
+                                       void*                                 callback_data) = 0;
 };
 
 class SdkCallbacksImpl : public SdkCallbacks
