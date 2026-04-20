@@ -46,13 +46,14 @@ jobs:
     steps:
       - name: Install baseline OS dependencies
         run: |
+          add-apt-repository ppa:git-core/ppa
           apt-get update
           apt-get install -y git
           apt-get install -y python3-pip
           apt-get install -y cmake
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v5
         with:
           submodules: recursive
           sparse-checkout: |
