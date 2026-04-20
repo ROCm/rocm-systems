@@ -141,8 +141,12 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """
     # If custom environment variables are specified, use them exclusively
     if custom_rank_env is not None and custom_size_env is not None:
-        rank = int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
-        size = int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        rank = (
+            int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
+        )
+        size = (
+            int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        )
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
@@ -412,10 +416,10 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd, feather)",
         nargs="+",
         default=None,
-        choices=("csv", "json", "pftrace", "otf2", "rocpd"),
+        choices=("csv", "json", "pftrace", "otf2", "rocpd", "feather"),
         type=str.lower,
     )
     add_parser_bool_argument(
@@ -621,7 +625,9 @@ For attachment profiling of running processes:
         type=int,
     )
 
-    post_processing_options = parser.add_argument_group("Post-processing tracing options")
+    post_processing_options = parser.add_argument_group(
+        "Post-processing tracing options"
+    )
 
     add_parser_bool_argument(
         post_processing_options,
@@ -1444,7 +1450,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
         ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
     )
-    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
+    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(
+        ROCPROF_ATTACH_TOOL_LIBRARY, args
+    )
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1489,7 +1497,10 @@ def run(app_args, args, **kwargs):
         args.output_format = ["rocpd"]
 
     update_env(
-        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
+        "ROCPROF_OUTPUT_FORMAT",
+        ",".join(args.output_format),
+        append=True,
+        join_char=",",
     )
 
     if args.kokkos_trace:
@@ -1631,7 +1642,9 @@ def run(app_args, args, **kwargs):
                 f"rocprofv3 tracing options are required when ROCPROFILER_CI={rocprofiler_ci_env}"
             )
 
-    _summary_groups = "##@@##".join(args.summary_groups) if args.summary_groups else None
+    _summary_groups = (
+        "##@@##".join(args.summary_groups) if args.summary_groups else None
+    )
     _summary_output_fname = args.summary_output_file
     if args.summary and _summary_output_fname is None:
         _summary_output_fname = "stderr"
@@ -1842,7 +1855,9 @@ def run(app_args, args, **kwargs):
         )
 
     if args.kernel_iteration_range:
-        update_env("ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range))
+        update_env(
+            "ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range)
+        )
 
     if args.agent_index:
         update_env("ROCPROF_AGENT_INDEX", args.agent_index)
@@ -1850,7 +1865,9 @@ def run(app_args, args, **kwargs):
     if args.extra_counters is not None:
         with open(args.extra_counters, "r") as e_file:
             e_file_contents = e_file.read()
-            update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
+            update_env(
+                "ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True
+            )
 
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
@@ -1909,7 +1926,6 @@ def run(app_args, args, **kwargs):
             )
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
-
         if (
             not args.pc_sampling_beta_enabled
             and os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is None
@@ -2137,7 +2153,9 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
-    use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+    use_multipass = (
+        cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+    )
 
     if not use_multipass:
         # Single-pass mode: only one source of PMC (either CLI or input file, but not both)
