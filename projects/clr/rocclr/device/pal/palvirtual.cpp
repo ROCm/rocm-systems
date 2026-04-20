@@ -606,7 +606,7 @@ void VirtualGPU::Queue::DumpMemoryReferences() const {
       for (size_t i = 0; i < signature.numParameters(); ++i) {
         const amd::KernelParameterDescriptor& desc = signature.at(i);
         // Find if the current argument is a memory object
-        if ((desc.type_ == T_POINTER) && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
+        if ((desc.type_ == amd::KernelArgValueType::Pointer) && (desc.addressQualifier_ != amd::KernelArgAddressQualifier::Local)) {
           dump << " " << desc.name_ << ": " << std::endl;
         }
       }
@@ -3707,9 +3707,9 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
     const amd::KernelParameterDescriptor::InfoData& info = desc.info_;
 
     // Find if current argument is a buffer
-    if (desc.type_ == T_POINTER) {
+    if (desc.type_ == amd::KernelArgValueType::Pointer) {
       // If it is a local pointer
-      if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+      if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
         ldsAddress = amd::alignUp(ldsAddress, desc.info_.arrayIndex_);
         if (desc.size_ == 8) {
           // Save the original LDS size
@@ -3816,7 +3816,7 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           }
         }
       }
-    } else if (desc.type_ == T_VOID) {
+    } else if (desc.type_ == amd::KernelArgValueType::Void) {
       if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
         // Copy the current structure into CB1
         size_t gpuPtr =
@@ -3827,9 +3827,9 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
         WriteAqlArgAt(const_cast<address>(params), gpuPtr, sizeof(size_t), it->second);
         addVmMemory(cb(1)->ActiveMemory());
       }
-    } else if (desc.type_ == T_SAMPLER) {
+    } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
       srdResource = true;
-    } else if (desc.type_ == T_QUEUE) {
+    } else if (desc.type_ == amd::KernelArgValueType::Queue) {
       uint32_t index = desc.info_.arrayIndex_;
       const amd::DeviceQueue* queue =
           reinterpret_cast<amd::DeviceQueue* const*>(params + kernelParams.queueObjOffset())[index];

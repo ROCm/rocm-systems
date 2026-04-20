@@ -1552,16 +1552,16 @@ RUNTIME_ENTRY(cl_int, clSetKernelArg,
   }
 
   const amd::KernelParameterDescriptor& desc = signature.at(arg_index);
-  const bool is_local = (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL);
-  if (((arg_value == NULL) && !is_local && (desc.type_ != T_POINTER)) ||
+  const bool is_local = (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local);
+  if (((arg_value == NULL) && !is_local && (desc.type_ != amd::KernelArgValueType::Pointer)) ||
       ((arg_value != NULL) && is_local)) {
     as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
-    if (desc.type_ == T_SAMPLER) {
+    if (desc.type_ == amd::KernelArgValueType::Sampler) {
       return CL_INVALID_SAMPLER;
     }
     return CL_INVALID_ARG_VALUE;
   }
-  if (!is_local && (desc.type_ == T_POINTER) && (arg_value != NULL)) {
+  if (!is_local && (desc.type_ == amd::KernelArgValueType::Pointer) && (arg_value != NULL)) {
     cl_mem memObj = *static_cast<const cl_mem*>(arg_value);
     amd::RuntimeObject* pObject = as_amd(memObj);
     amd::Memory* pMem = as_amd(memObj);
@@ -1571,16 +1571,16 @@ RUNTIME_ENTRY(cl_int, clSetKernelArg,
         return CL_INVALID_MEM_OBJECT;
       }
       else {
-        if (((desc.accessQualifier_ == CL_KERNEL_ARG_ACCESS_WRITE_ONLY) && 
-          (pMem->getMemFlags() == CL_MEM_READ_ONLY)) ||
-          ((desc.accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) && 
-          (pMem->getMemFlags() == CL_MEM_WRITE_ONLY))){
+        if (((desc.accessQualifier_ == amd::KernelArgAccessQualifier::WriteOnly) &&
+          (pMem->getMemFlags() == amd::MemFlags::ReadOnly)) ||
+          ((desc.accessQualifier_ == amd::KernelArgAccessQualifier::ReadOnly) &&
+          (pMem->getMemFlags() == amd::MemFlags::WriteOnly))){
             as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
             return CL_INVALID_ARG_VALUE;
         }
       }
     }
-  } else if (desc.type_ == T_QUEUE) {
+  } else if (desc.type_ == amd::KernelArgValueType::Queue) {
     cl_command_queue queue = *static_cast<const cl_command_queue*>(arg_value);
     if (!is_valid(queue)) {
       as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
@@ -1592,7 +1592,7 @@ RUNTIME_ENTRY(cl_int, clSetKernelArg,
     }
   }
   if ((!is_local && (arg_size != desc.size_)) || (is_local && (arg_size == 0))) {
-    if (LP64_ONLY(true ||)((desc.type_ != T_POINTER) && (desc.type_ != T_SAMPLER)) ||
+    if (LP64_ONLY(true ||)((desc.type_ != amd::KernelArgValueType::Pointer) && (desc.type_ != amd::KernelArgValueType::Sampler)) ||
         (arg_size != sizeof(void*))) {
       as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
       return CL_INVALID_ARG_SIZE;
@@ -1731,11 +1731,13 @@ RUNTIME_ENTRY(cl_int, clGetKernelArgInfo,
   // Get the corresponded parameters
   switch (param_name) {
     case CL_KERNEL_ARG_ADDRESS_QUALIFIER: {
-      cl_kernel_arg_address_qualifier qualifier = desc.addressQualifier_;
+      cl_kernel_arg_address_qualifier qualifier =
+          static_cast<cl_kernel_arg_address_qualifier>(desc.addressQualifier_);
       return amd::clGetInfo(qualifier, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_ARG_ACCESS_QUALIFIER: {
-      cl_kernel_arg_access_qualifier qualifier = desc.accessQualifier_;
+      cl_kernel_arg_access_qualifier qualifier =
+          static_cast<cl_kernel_arg_access_qualifier>(desc.accessQualifier_);
       return amd::clGetInfo(qualifier, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_ARG_TYPE_NAME: {
@@ -1744,7 +1746,8 @@ RUNTIME_ENTRY(cl_int, clGetKernelArgInfo,
       return amd::clGetInfo(typeName, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_ARG_TYPE_QUALIFIER: {
-      cl_kernel_arg_type_qualifier qualifier = desc.typeQualifier_;
+      cl_kernel_arg_type_qualifier qualifier =
+          static_cast<cl_kernel_arg_type_qualifier>(desc.typeQualifier_);
       return amd::clGetInfo(qualifier, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_ARG_NAME: {

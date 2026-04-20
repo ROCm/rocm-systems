@@ -9,7 +9,6 @@
 
 #include "top.hpp"
 #include "device/device.hpp"
-#include "amdocl/cl_profile_amd.h"
 
 namespace amd {
 
@@ -26,7 +25,8 @@ namespace amd {
  */
 class PerfCounter : public RuntimeObject {
  public:
-  typedef std::unordered_map<cl_perfcounter_property, ulong> Properties;
+  // cl_perfcounter_property is typedef cl_ulong (uint64_t)
+  typedef std::unordered_map<uint64_t, ulong> Properties;
 
   //! Constructor of the performance counter object
   PerfCounter(const Device& device,    //!< device object

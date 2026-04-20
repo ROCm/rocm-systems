@@ -9,7 +9,6 @@
 
 #include "top.hpp"
 #include "device/device.hpp"
-#include "amdocl/cl_thread_trace_amd.h"
 
 
 namespace amd {
@@ -52,13 +51,13 @@ class ThreadTrace : public RuntimeObject {
           cu_(0),
           sh_(0),
           simdMask_(0xF),
-          vmIdMask_(CL_THREAD_TRACE_VM_ID_MASK_SINGLE),
-          tokenMask_(CL_THREAD_TRACE_TOKEN_MASK_ALL_SI),
-          regMask_(CL_THREAD_TRACE_REG_MASK_ALL_SI),
-          instMask_(CL_THREAD_TRACE_INST_MASK_ALL),
+          vmIdMask_(0),        // CL_THREAD_TRACE_VM_ID_MASK_SINGLE = 0
+          tokenMask_(0x0000ffff), // CL_THREAD_TRACE_TOKEN_MASK_ALL_SI = 0x0000ffff
+          regMask_(0x000000ff), // CL_THREAD_TRACE_REG_MASK_ALL_SI = 0x000000ff
+          instMask_(0),        // CL_THREAD_TRACE_INST_MASK_ALL = 0
           randomSeed_(0xFFF),
           userData_(0),
-          captureMode_(CL_THREAD_TRACE_CAPTURE_ALL),
+          captureMode_(0),     // CL_THREAD_TRACE_CAPTURE_ALL = 0
           isUserData_(false),
           isWrapped_(false) {
       configSize_ = sizeof(struct ThreadTraceConfigRec);

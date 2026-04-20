@@ -304,8 +304,8 @@ class NullDevice : public amd::Device {
     return false;
   }
 
-  bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                    cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override {
+  bool SetClockMode(const amd::SetDeviceClockModeInput setClockModeInput,
+                    amd::SetDeviceClockModeOutput* pSetClockModeOutput) override {
     return true;
   }
 
@@ -474,8 +474,8 @@ class Device : public NullDevice {
 
   virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) override;
 
-  virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                            cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override;
+  virtual bool SetClockMode(const amd::SetDeviceClockModeInput setClockModeInput,
+                            amd::SetDeviceClockModeOutput* pSetClockModeOutput) override;
 
   virtual bool IsHwEventReady(const amd::Event& event, bool wait = false,
                               amd::SyncPolicy policy = amd::SyncPolicy::Auto) const override;

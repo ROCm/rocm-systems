@@ -51,7 +51,7 @@ struct KernelParameterDescriptor {
     HiddenLast = 31,
     MaxSize = 32,
   };
-  clk_value_type_t type_;  //!< The parameter's type
+  amd::KernelArgValueType type_;  //!< The parameter's type
   size_t offset_;          //!< Its offset in the parameter's stack
   size_t size_;            //!< Its size in bytes
   union InfoData {
@@ -69,11 +69,11 @@ struct KernelParameterDescriptor {
     InfoData() : allValues_(0) {}
   } info_;
 
-  cl_kernel_arg_address_qualifier addressQualifier_ =
-      CL_KERNEL_ARG_ADDRESS_PRIVATE;  //!< Argument's address qualifier
-  cl_kernel_arg_access_qualifier accessQualifier_ =
-      CL_KERNEL_ARG_ACCESS_NONE;                //!< Argument's access qualifier
-  cl_kernel_arg_type_qualifier typeQualifier_;  //!< Argument's type qualifier
+  amd::KernelArgAddressQualifier addressQualifier_ =
+      amd::KernelArgAddressQualifier::Private;  //!< Argument's address qualifier
+  amd::KernelArgAccessQualifier accessQualifier_ =
+      amd::KernelArgAccessQualifier::None;         //!< Argument's access qualifier
+  amd::KernelArgTypeQualifier typeQualifier_;      //!< Argument's type qualifier
 
   std::string name_;      //!< The parameter's name in the source
   std::string typeName_;  //!< Argument's type name

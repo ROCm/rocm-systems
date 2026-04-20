@@ -920,8 +920,8 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
     amd::Memory* mem = nullptr;
 
     // Find if current argument is a buffer
-    if (desc.type_ == T_POINTER) {
-      if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+    if (desc.type_ == amd::KernelArgValueType::Pointer) {
+      if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
         // Align the LDS on the alignment requirement of type pointed to
         ldsAddress = amd::alignUp(ldsAddress, desc.info_.arrayIndex_);
         if (desc.size_ == 8) {
@@ -967,12 +967,13 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
           // Validate memory for a dependency in the queue
           memoryDependency().validate(*this, gpuMem, (desc.info_.readOnly_ == 1));
 
-          assert((desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_GLOBAL ||
-                  desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT) &&
+          assert((desc.addressQualifier_ == amd::KernelArgAddressQualifier::Global ||
+                  desc.addressQualifier_ == amd::KernelArgAddressQualifier::Constant) &&
                  "Unsupported address qualifier");
 
-          const bool readOnly = (desc.typeQualifier_ == CL_KERNEL_ARG_TYPE_CONST) ||
-                                ((mem->getMemFlags() & CL_MEM_READ_ONLY) != 0);
+          const bool readOnly =
+              static_cast<bool>(desc.typeQualifier_ & amd::KernelArgTypeQualifier::Const) ||
+              static_cast<bool>(mem->getMemFlags() & amd::MemFlags::ReadOnly);
 
           if (!readOnly) {
             mem->signalWrite(&dev());
@@ -1011,7 +1012,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
           }
         }
       }
-    } else if (desc.type_ == T_QUEUE) {
+    } else if (desc.type_ == amd::KernelArgValueType::Queue) {
       uint32_t index = desc.info_.arrayIndex_;
       const amd::DeviceQueue* queue =
           reinterpret_cast<amd::DeviceQueue* const*>(params + kernelParams.queueObjOffset())[index];
@@ -1021,7 +1022,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
       }
       uint64_t vqVA = getVQVirtualAddress();
       WriteAqlArgAt(const_cast<address>(params), vqVA, sizeof(vqVA), desc.offset_);
-    } else if (desc.type_ == T_VOID) {
+    } else if (desc.type_ == amd::KernelArgValueType::Void) {
       const_address srcArgPtr = params + desc.offset_;
       if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
         void* mem = allocKernArg(desc.size_, 128);
@@ -1056,7 +1057,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
                   desc.size_);
         }
       }
-    } else if (desc.type_ == T_SAMPLER) {
+    } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
       uint32_t index = desc.info_.arrayIndex_;
       const amd::Sampler* sampler =
           reinterpret_cast<amd::Sampler* const*>(params + kernelParams.samplerObjOffset())[index];

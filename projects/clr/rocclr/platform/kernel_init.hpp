@@ -42,15 +42,18 @@ const amd::Kernel::ArgValueKindType amd::Kernel::kArgValueKind[] = {
     {"HiddenHostcallBuffer", amd::KernelParameterDescriptor::HiddenHostcallBuffer}};
 
 const amd::Kernel::ArgAccQualType amd::Kernel::kArgAccQual[] = {
-    {"Default", CL_KERNEL_ARG_ACCESS_NONE},
-    {"ReadOnly", CL_KERNEL_ARG_ACCESS_READ_ONLY},
-    {"WriteOnly", CL_KERNEL_ARG_ACCESS_WRITE_ONLY},
-    {"ReadWrite", CL_KERNEL_ARG_ACCESS_READ_WRITE}};
+    {"Default",    amd::KernelArgAccessQualifier::None},
+    {"ReadOnly",   amd::KernelArgAccessQualifier::ReadOnly},
+    {"WriteOnly",  amd::KernelArgAccessQualifier::WriteOnly},
+    {"ReadWrite",  amd::KernelArgAccessQualifier::ReadWrite}};
 
 const amd::Kernel::ArgAddrSpaceQualType amd::Kernel::kArgAddrSpaceQual[] = {
-    {"Private", CL_KERNEL_ARG_ADDRESS_PRIVATE},   {"Global", CL_KERNEL_ARG_ADDRESS_GLOBAL},
-    {"Constant", CL_KERNEL_ARG_ADDRESS_CONSTANT}, {"Local", CL_KERNEL_ARG_ADDRESS_LOCAL},
-    {"Generic", CL_KERNEL_ARG_ADDRESS_GLOBAL},    {"Region", CL_KERNEL_ARG_ADDRESS_PRIVATE}};
+    {"Private",  amd::KernelArgAddressQualifier::Private},
+    {"Global",   amd::KernelArgAddressQualifier::Global},
+    {"Constant", amd::KernelArgAddressQualifier::Constant},
+    {"Local",    amd::KernelArgAddressQualifier::Local},
+    {"Generic",  amd::KernelArgAddressQualifier::Global},
+    {"Region",   amd::KernelArgAddressQualifier::Private}};
 
 const amd::Kernel::AttrFieldMapType amd::Kernel::kAttrFieldMap[] = {
     {"ReqdWorkGroupSize", AttrField::ReqdWorkGroupSize},
@@ -73,15 +76,18 @@ const amd::Kernel::CodePropFieldMapType amd::Kernel::kCodePropFieldMap[] = {
     {"NumSpilledVGPRs", CodePropField::NumSpilledVGPRs}};
 
 const amd::Kernel::ArgAccQualV3Type amd::Kernel::kArgAccQualV3[] = {
-    {"default", CL_KERNEL_ARG_ACCESS_NONE},
-    {"read_only", CL_KERNEL_ARG_ACCESS_READ_ONLY},
-    {"write_only", CL_KERNEL_ARG_ACCESS_WRITE_ONLY},
-    {"read_write", CL_KERNEL_ARG_ACCESS_READ_WRITE}};
+    {"default",     amd::KernelArgAccessQualifier::None},
+    {"read_only",   amd::KernelArgAccessQualifier::ReadOnly},
+    {"write_only",  amd::KernelArgAccessQualifier::WriteOnly},
+    {"read_write",  amd::KernelArgAccessQualifier::ReadWrite}};
 
 const amd::Kernel::ArgAddrSpaceQualV3Type amd::Kernel::kArgAddrSpaceQualV3[] = {
-    {"private", CL_KERNEL_ARG_ADDRESS_PRIVATE},   {"global", CL_KERNEL_ARG_ADDRESS_GLOBAL},
-    {"constant", CL_KERNEL_ARG_ADDRESS_CONSTANT}, {"local", CL_KERNEL_ARG_ADDRESS_LOCAL},
-    {"generic", CL_KERNEL_ARG_ADDRESS_GLOBAL},    {"region", CL_KERNEL_ARG_ADDRESS_PRIVATE}};
+    {"private",  amd::KernelArgAddressQualifier::Private},
+    {"global",   amd::KernelArgAddressQualifier::Global},
+    {"constant", amd::KernelArgAddressQualifier::Constant},
+    {"local",    amd::KernelArgAddressQualifier::Local},
+    {"generic",  amd::KernelArgAddressQualifier::Global},
+    {"region",   amd::KernelArgAddressQualifier::Private}};
 
 const amd::Kernel::KernelFieldMapV3Type amd::Kernel::kKernelFieldMapV3[] = {
     {".symbol", KernelField::SymbolName},
@@ -164,12 +170,13 @@ V amd::Kernel::FindValue(const T (&structure)[N], const std::string& name) {
   return V::MaxSize;
 }
 
-// Templated find function to retrieve cl_int values.
+// Templated find function to retrieve int32_t values.
+// Uses static_cast so it works with both plain integer and enum class value fields.
 template <typename T, size_t N>
-cl_int amd::Kernel::FindValue(const T (&structure)[N], const std::string& name) {
+int32_t amd::Kernel::FindValue(const T (&structure)[N], const std::string& name) {
   for (size_t idx = 0; idx < N; ++idx) {
     if (std::string(structure[idx].name) == name) {
-      return structure[idx].value;
+      return static_cast<int32_t>(structure[idx].value);
     }
   }
   return 0;

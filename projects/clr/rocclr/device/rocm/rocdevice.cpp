@@ -2901,8 +2901,8 @@ VirtualGPU* Device::xferQueue() const {
 }
 
 // ================================================================================================
-bool Device::SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                          cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
+bool Device::SetClockMode(const amd::SetDeviceClockModeInput setClockModeInput,
+                          amd::SetDeviceClockModeOutput* pSetClockModeOutput) {
   bool result = true;
   return result;
 }

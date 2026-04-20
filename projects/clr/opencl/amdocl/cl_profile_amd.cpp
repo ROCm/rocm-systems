@@ -362,7 +362,14 @@ RUNTIME_ENTRY(cl_int, clSetDeviceClockModeAMD,
     return CL_INVALID_VALUE;
   }
   amd::Device* amdDevice = as_amd(device);
-  bool ret = amdDevice->SetClockMode(set_clock_mode_input, set_clock_mode_output);
+  amd::SetDeviceClockModeInput amdInput{
+      static_cast<amd::DeviceClockMode>(set_clock_mode_input.clock_mode)};
+  amd::SetDeviceClockModeOutput amdOutput{};
+  bool ret = amdDevice->SetClockMode(amdInput, &amdOutput);
+  if (ret && set_clock_mode_output != nullptr) {
+    set_clock_mode_output->memory_clock_ratio_to_peak = amdOutput.memoryClockRatioToPeak;
+    set_clock_mode_output->engine_clock_ratio_to_peak = amdOutput.engineClockRatioToPeak;
+  }
   return (ret == true) ? CL_SUCCESS : CL_INVALID_OPERATION;
 }
 RUNTIME_EXIT

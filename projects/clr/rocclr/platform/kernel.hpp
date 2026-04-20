@@ -10,8 +10,6 @@
 #include "top.hpp"
 #include "platform/object.hpp"
 
-#include "amdocl/cl_kernel.h"
-
 #include <vector>
 #include <cstdlib>  // for malloc
 #include <string>
@@ -324,9 +322,9 @@ class Kernel : public RuntimeObject {
   template <typename V, typename T, size_t N>
   static V FindValue(const T (&structure)[N], const std::string& name);
 
-  // Templated find function to retrieve cl_int values.
+  // Templated find function to retrieve int32_t values.
   template <typename T, size_t N>
-  static cl_int FindValue(const T (&structure)[N], const std::string& name);
+  static int32_t FindValue(const T (&structure)[N], const std::string& name);
 
   struct ArgFieldMapType {
     const char* name;
@@ -340,12 +338,12 @@ class Kernel : public RuntimeObject {
 
   struct ArgAccQualType {
     const char* name;
-    cl_kernel_arg_access_qualifier value;
+    amd::KernelArgAccessQualifier value;
   };
 
   struct ArgAddrSpaceQualType {
     const char* name;
-    cl_kernel_arg_address_qualifier value;
+    amd::KernelArgAddressQualifier value;
   };
 
   struct AttrFieldMapType {
@@ -360,12 +358,12 @@ class Kernel : public RuntimeObject {
 
   struct ArgAccQualV3Type {
     const char* name;
-    cl_kernel_arg_access_qualifier value;
+    amd::KernelArgAccessQualifier value;
   };
 
   struct ArgAddrSpaceQualV3Type {
     const char* name;
-    cl_kernel_arg_address_qualifier value;
+    amd::KernelArgAddressQualifier value;
   };
 
   struct KernelFieldMapV3Type {

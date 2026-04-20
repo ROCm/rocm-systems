@@ -911,8 +911,9 @@ RUNTIME_ENTRY(cl_int, clSetKernelArgSVMPointer,
   }
 
   const amd::KernelParameterDescriptor& desc = signature.at(arg_index);
-  if (desc.type_ != T_POINTER ||
-      !(desc.addressQualifier_ & (CL_KERNEL_ARG_ADDRESS_GLOBAL | CL_KERNEL_ARG_ADDRESS_CONSTANT))) {
+  if (desc.type_ != amd::KernelArgValueType::Pointer ||
+      !((desc.addressQualifier_ == amd::KernelArgAddressQualifier::Global) ||
+        (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Constant))) {
     as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
     return CL_INVALID_ARG_VALUE;
   }

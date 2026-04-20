@@ -638,14 +638,14 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
   const amd::KernelParameterDescriptor& desc = kernel->signature().at(index);
 
   void* param = kernel->parameters().values() + desc.offset_;
-  assert((desc.type_ == T_POINTER || value != NULL ||
-          (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL)) &&
+  assert((desc.type_ == amd::KernelArgValueType::Pointer || value != NULL ||
+          (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local)) &&
          "not a valid local mem arg");
 
   uint32_t uint32_value = 0;
   uint64_t uint64_value = 0;
 
-  if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
+  if (desc.type_ == amd::KernelArgValueType::Pointer && (desc.addressQualifier_ != amd::KernelArgAddressQualifier::Local)) {
     if ((value == NULL) || (static_cast<const cl_mem*>(value) == NULL)) {
       LP64_SWITCH(uint32_value, uint64_value) = 0;
       reinterpret_cast<Memory**>(kernel->parameters().values() +
@@ -674,19 +674,19 @@ inline void KernelBlitManager::setArgument(amd::Kernel* kernel, size_t index, si
         LP64_SWITCH(uint32_value, uint64_value) = addr + offset;
       }
     }
-  } else if (desc.type_ == T_SAMPLER) {
+  } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
     assert(false && "No sampler support in blit manager! Use internal samplers!");
   } else {
     switch (desc.size_) {
       case 4:
-        if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+        if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
           uint32_value = size;
         } else {
           uint32_value = *static_cast<const uint32_t*>(value);
         }
         break;
       case 8:
-        if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+        if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
           uint64_value = size;
         } else {
           uint64_value = *static_cast<const uint64_t*>(value);

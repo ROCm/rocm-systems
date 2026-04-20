@@ -29,7 +29,6 @@ extern void PalDeviceUnload();
 #include "platform/runtime.hpp"
 #include "platform/program.hpp"
 #include "thread/monitor.hpp"
-#include "amdocl/cl_common.hpp"
 #include "utils/options.hpp"
 #include "utils/versions.hpp"  // AMD_PLATFORM_INFO
 
@@ -51,8 +50,8 @@ namespace {
 
 constexpr char hsaIsaNamePrefix[] = "amdgcn-amd-amdhsa--";
 
-// OpenCL extension strings used by getExtensionString() to build the
-// device extension string from the Settings extension bitmask.
+// Extension strings used by getExtensionString() to build the device extension
+// string from the Settings extension bitmask.
 // Must stay in sync with the OclExtensions enum in device.hpp.
 static constexpr const char* OclExtensionsString[] = {"cl_khr_fp64 ",
                                                       "cl_amd_fp64 ",

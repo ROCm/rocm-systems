@@ -21,13 +21,13 @@
 namespace amd::device {
 
 // ================================================================================================
-static constexpr clk_value_type_t ClkValueMapType[6][6] = {
-    {T_CHAR, T_CHAR2, T_CHAR3, T_CHAR4, T_CHAR8, T_CHAR16},
-    {T_SHORT, T_SHORT2, T_SHORT3, T_SHORT4, T_SHORT8, T_SHORT16},
-    {T_INT, T_INT2, T_INT3, T_INT4, T_INT8, T_INT16},
-    {T_LONG, T_LONG2, T_LONG3, T_LONG4, T_LONG8, T_LONG16},
-    {T_FLOAT, T_FLOAT2, T_FLOAT3, T_FLOAT4, T_FLOAT8, T_FLOAT16},
-    {T_DOUBLE, T_DOUBLE2, T_DOUBLE3, T_DOUBLE4, T_DOUBLE8, T_DOUBLE16},
+static constexpr amd::KernelArgValueType ClkValueMapType[6][6] = {
+    {amd::KernelArgValueType::Char,   amd::KernelArgValueType::Char2,   amd::KernelArgValueType::Char3,   amd::KernelArgValueType::Char4,   amd::KernelArgValueType::Char8,   amd::KernelArgValueType::Char16},
+    {amd::KernelArgValueType::Short,  amd::KernelArgValueType::Short2,  amd::KernelArgValueType::Short3,  amd::KernelArgValueType::Short4,  amd::KernelArgValueType::Short8,  amd::KernelArgValueType::Short16},
+    {amd::KernelArgValueType::Int,    amd::KernelArgValueType::Int2,    amd::KernelArgValueType::Int3,    amd::KernelArgValueType::Int4,    amd::KernelArgValueType::Int8,    amd::KernelArgValueType::Int16},
+    {amd::KernelArgValueType::Long,   amd::KernelArgValueType::Long2,   amd::KernelArgValueType::Long3,   amd::KernelArgValueType::Long4,   amd::KernelArgValueType::Long8,   amd::KernelArgValueType::Long16},
+    {amd::KernelArgValueType::Float,  amd::KernelArgValueType::Float2,  amd::KernelArgValueType::Float3,  amd::KernelArgValueType::Float4,  amd::KernelArgValueType::Float8,  amd::KernelArgValueType::Float16},
+    {amd::KernelArgValueType::Double, amd::KernelArgValueType::Double2, amd::KernelArgValueType::Double3, amd::KernelArgValueType::Double4, amd::KernelArgValueType::Double8, amd::KernelArgValueType::Double16},
 };
 
 // ================================================================================================
@@ -147,39 +147,43 @@ static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
       lcArg->info_.arrayIndex_ = atoi(buf.c_str());
       break;
     case ArgField::AddrSpaceQual: {
-      cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQual, buf);
-      if (itAddrSpaceQual == static_cast<cl_int>(0)) {
+      int32_t itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQual, buf);
+      if (itAddrSpaceQual == 0) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      lcArg->addressQualifier_ = itAddrSpaceQual;
+      lcArg->addressQualifier_ = static_cast<amd::KernelArgAddressQualifier>(itAddrSpaceQual);
     } break;
     case ArgField::AccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-      if (itAccQual == static_cast<cl_int>(0)) {
+      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
+      if (itAccQual == 0) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      lcArg->accessQualifier_ = itAccQual;
+      lcArg->accessQualifier_ = static_cast<amd::KernelArgAccessQualifier>(itAccQual);
       lcArg->info_.readOnly_ =
-          (lcArg->accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
+          (lcArg->accessQualifier_ == amd::KernelArgAccessQualifier::ReadOnly) ? true : false;
     } break;
     case ArgField::ActualAccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-      if (itAccQual == static_cast<cl_int>(0)) {
+      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
+      if (itAccQual == 0) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      // lcArg->mActualAccQual = itAccQual->second;
+      // lcArg->mActualAccQual = static_cast<amd::KernelArgAccessQualifier>(itAccQual);
     } break;
     case ArgField::IsConst:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_CONST : 0;
+      if (buf.compare("true") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Const;
       break;
     case ArgField::IsRestrict:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_RESTRICT : 0;
+      if (buf.compare("true") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Restrict;
       break;
     case ArgField::IsVolatile:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_VOLATILE : 0;
+      if (buf.compare("true") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Volatile;
       break;
     case ArgField::IsPipe:
-      lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_PIPE : 0;
+      if (buf.compare("true") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Pipe;
       break;
     default:
       return AMD_COMGR_STATUS_ERROR;
@@ -401,42 +405,48 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
       lcArg->info_.arrayIndex_ = atoi(buf.c_str());
       break;
     case ArgField::AddrSpaceQual: {
-      cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQualV3, buf);
-      if (itAddrSpaceQual == static_cast<cl_int>(0)) {
+      int32_t itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQualV3, buf);
+      if (itAddrSpaceQual == 0) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      lcArg->addressQualifier_ = itAddrSpaceQual;
+      lcArg->addressQualifier_ = static_cast<amd::KernelArgAddressQualifier>(itAddrSpaceQual);
     } break;
     case ArgField::AccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
-      if (itAccQual == static_cast<cl_int>(0)) {
+      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
+      if (itAccQual == 0) {
         return AMD_COMGR_STATUS_ERROR;
       }
-      lcArg->accessQualifier_ = itAccQual;
+      lcArg->accessQualifier_ = static_cast<amd::KernelArgAccessQualifier>(itAccQual);
       if (!lcArg->info_.isReadOnlyByCompiler) {
         lcArg->info_.readOnly_ =
-            (lcArg->accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
+            (lcArg->accessQualifier_ == amd::KernelArgAccessQualifier::ReadOnly) ? true : false;
       }
     } break;
     case ArgField::ActualAccQual: {
-      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
-      if (itAccQual == static_cast<cl_int>(0)) {
+      int32_t itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
+      if (itAccQual == 0) {
         return AMD_COMGR_STATUS_ERROR;
       }
       lcArg->info_.isReadOnlyByCompiler = true;
-      lcArg->info_.readOnly_ = (itAccQual == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
+      lcArg->info_.readOnly_ =
+          (static_cast<amd::KernelArgAccessQualifier>(itAccQual) ==
+           amd::KernelArgAccessQualifier::ReadOnly) ? true : false;
     } break;
     case ArgField::IsConst:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_CONST : 0;
+      if (buf.compare("1") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Const;
       break;
     case ArgField::IsRestrict:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_RESTRICT : 0;
+      if (buf.compare("1") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Restrict;
       break;
     case ArgField::IsVolatile:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_VOLATILE : 0;
+      if (buf.compare("1") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Volatile;
       break;
     case ArgField::IsPipe:
-      lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_PIPE : 0;
+      if (buf.compare("1") == 0)
+        lcArg->typeQualifier_ = lcArg->typeQualifier_ | amd::KernelArgTypeQualifier::Pipe;
       break;
     default:
       return AMD_COMGR_STATUS_ERROR;
@@ -942,7 +952,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
       switch (desc.info_.oclObject_) {
         case amd::KernelParameterDescriptor::MemoryObject:
         case amd::KernelParameterDescriptor::ImageObject:
-          desc.type_ = T_POINTER;
+          desc.type_ = amd::KernelArgValueType::Pointer;
           if (desc.info_.shared_) {
             if (desc.info_.arrayIndex_ == 0) {
               LogWarning("Missing DynamicSharedPointer alignment");
@@ -953,27 +963,27 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
           }
           break;
         case amd::KernelParameterDescriptor::SamplerObject:
-          desc.type_ = T_SAMPLER;
-          desc.addressQualifier_ = CL_KERNEL_ARG_ADDRESS_PRIVATE;
+          desc.type_ = amd::KernelArgValueType::Sampler;
+          desc.addressQualifier_ = amd::KernelArgAddressQualifier::Private;
           break;
         case amd::KernelParameterDescriptor::QueueObject:
-          desc.type_ = T_QUEUE;
+          desc.type_ = amd::KernelArgValueType::Queue;
           break;
         default:
-          desc.type_ = T_VOID;
+          desc.type_ = amd::KernelArgValueType::Void;
           break;
       }
     }
 
     if ((desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) ||
-        (desc.typeQualifier_ & CL_KERNEL_ARG_TYPE_PIPE)) {
+        static_cast<bool>(desc.typeQualifier_ & amd::KernelArgTypeQualifier::Pipe)) {
       // LC doesn't report correct address qualifier for images and pipes,
       // hence overwrite it
       // We will remove this when newer LC is ready
-      desc.addressQualifier_ = CL_KERNEL_ARG_ADDRESS_GLOBAL;
+      desc.addressQualifier_ = amd::KernelArgAddressQualifier::Global;
     } else {
-      // According to CL spec, otherwise must be CL_KERNEL_ARG_ACCESS_NONE,
-      desc.accessQualifier_ = CL_KERNEL_ARG_ACCESS_NONE;
+      // According to CL spec, otherwise must be KernelArgAccessQualifier::None,
+      desc.accessQualifier_ = amd::KernelArgAccessQualifier::None;
     }
 
     size_t size = desc.size_;
@@ -1011,7 +1021,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
 
     if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
       flags_.imageEna_ = true;
-      if (desc.accessQualifier_ != CL_KERNEL_ARG_ACCESS_READ_ONLY) {
+      if (desc.accessQualifier_ != amd::KernelArgAccessQualifier::ReadOnly) {
         flags_.imageWriteEna_ = true;
       }
     }

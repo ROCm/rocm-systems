@@ -14,12 +14,10 @@
 #include "platform/object.hpp"
 #include "platform/memory.hpp"
 #include "utils/util.hpp"
-#include "amdocl/cl_kernel.h"
 #include "elf/elf.hpp"
 #include "appprofile.hpp"
 #include "devprogram.hpp"
 #include "devkernel.hpp"
-#include "amdocl/cl_profile_amd.h"
 #include "devsignal.hpp"
 
 #if defined(__clang__)
@@ -197,10 +195,6 @@ enum OclExtensions {
 #endif
   ClExtTotal
 };
-
-// OclExtensionsString[] has been moved to opencl/amdocl/cl_device.cpp
-// (opencl-layer only; rocclr uses getExtensionString() which accesses it
-// through the file-local definition in device.cpp)
 
 static constexpr int AmdVendor = 0x1002;
 
@@ -2017,8 +2011,8 @@ class Device : public RuntimeObject {
     return true;
   };
 
-  virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                            cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
+  virtual bool SetClockMode(const amd::SetDeviceClockModeInput setClockModeInput,
+                            amd::SetDeviceClockModeOutput* pSetClockModeOutput) {
     return true;
   };
 

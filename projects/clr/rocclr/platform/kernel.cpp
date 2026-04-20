@@ -59,7 +59,7 @@ size_t KernelParameters::localMemSize(size_t minDataTypeAlignment) const {
 
   for (size_t i = 0; i < signature_.numParameters(); ++i) {
     const KernelParameterDescriptor& desc = signature_.at(i);
-    if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+    if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
       if (desc.size_ == 8) {
         memSize = alignUp(memSize, minDataTypeAlignment) +
                   *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
@@ -103,7 +103,7 @@ bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, siz
     if (kernelParams == nullptr && ((desc.offset_ + desc.size_) > kernArgsSize)) {
       value = &uint64_value;
     }
-    if (desc.type_ == T_POINTER) {
+    if (desc.type_ == amd::KernelArgValueType::Pointer) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
       Memory* memArg = nullptr;
       if (!AMD_DIRECT_DISPATCH) {
@@ -114,7 +114,7 @@ bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, siz
       }
       memories[desc.info_.arrayIndex_] = memArg;
     } else {
-      assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
+      assert((desc.type_ != amd::KernelArgValueType::Sampler && desc.type_ != amd::KernelArgValueType::Queue) &&
              "Unexpected argument type for a HIP kernel");
       switch (desc.size_) {
         case 4:
@@ -145,14 +145,14 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
   KernelParameterDescriptor& desc = signature_.params()[index];
 
   void* param = values_ + desc.offset_;
-  assert((desc.type_ == T_POINTER || value != NULL ||
-          (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL)) &&
+  assert((desc.type_ == amd::KernelArgValueType::Pointer || value != NULL ||
+          (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local)) &&
          "not a valid local mem arg");
 
   uint32_t uint32_value = 0;
   uint64_t uint64_value = 0;
 
-  if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
+  if (desc.type_ == amd::KernelArgValueType::Pointer && (desc.addressQualifier_ != amd::KernelArgAddressQualifier::Local)) {
     if (svmBound) {
       desc.info_.rawPointer_ = true;
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
@@ -166,24 +166,24 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
       // convert cl_mem to amd::Memory*
       memoryObjects_[desc.info_.arrayIndex_] = as_amd(*static_cast<const cl_mem*>(value));
     }
-  } else if (desc.type_ == T_SAMPLER) {
+  } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
     // convert cl_sampler to amd::Sampler*
     samplerObjects_[desc.info_.arrayIndex_] = as_amd(*static_cast<const cl_sampler*>(value));
-  } else if (desc.type_ == T_QUEUE) {
+  } else if (desc.type_ == amd::KernelArgValueType::Queue) {
     // convert cl_command_queue to amd::DeviceQueue*
     queueObjects_[desc.info_.arrayIndex_] =
         as_amd(*static_cast<const cl_command_queue*>(value))->asDeviceQueue();
   } else {
     switch (desc.size_) {
       case 4:
-        if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+        if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
           uint32_value = size;
         } else {
           uint32_value = *static_cast<const uint32_t*>(value);
         }
         break;
       case 8:
-        if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+        if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
           uint64_value = size;
         } else {
           uint64_value = *static_cast<const uint64_t*>(value);
@@ -224,7 +224,7 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
 
     for (size_t i = 0; i < signature_.numParameters(); ++i) {
       const KernelParameterDescriptor& desc = signature_.at(i);
-      if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
+      if (desc.type_ == amd::KernelArgValueType::Pointer && (desc.addressQualifier_ != amd::KernelArgAddressQualifier::Local)) {
         Memory* memArg = memoryObjects_[desc.info_.arrayIndex_];
         if (memArg != nullptr) {
           if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
@@ -245,7 +245,7 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
           if (!device.isFineGrainedSystem(true)) {
           }
         }
-      } else if (desc.type_ == T_SAMPLER) {
+      } else if (desc.type_ == amd::KernelArgValueType::Sampler) {
         Sampler* samplerArg = samplerObjects_[desc.info_.arrayIndex_];
         if (samplerArg != nullptr) {
           device::Sampler* deviceSampler = samplerArg->getDeviceSampler(device);
@@ -258,14 +258,14 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
           *reinterpret_cast<uintptr_t*>(mem + desc.offset_) =
               static_cast<uintptr_t>(samplerArg->getDeviceSampler(device)->hwSrd());
         }
-      } else if (desc.type_ == T_QUEUE) {
+      } else if (desc.type_ == amd::KernelArgValueType::Queue) {
         DeviceQueue* queue = queueObjects_[desc.info_.arrayIndex_];
         if (queue != nullptr) {
           queue->retain();
           // todo: It's uint64_t type
           *reinterpret_cast<uintptr_t*>(mem + desc.offset_) = 0;
         }
-      } else if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+      } else if (desc.addressQualifier_ == amd::KernelArgAddressQualifier::Local) {
         if (desc.size_ == 8) {
           lclMemSize = alignUp(lclMemSize, device.info().minDataTypeAlignSize_) +
                        *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
@@ -376,17 +376,17 @@ KernelSignature::KernelSignature(const std::vector<KernelParameterDescriptor>& p
       last = i;
     }
     // Collect all OCL memory objects
-    if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
+    if (desc.type_ == amd::KernelArgValueType::Pointer && (desc.addressQualifier_ != amd::KernelArgAddressQualifier::Local)) {
       params_[i].info_.arrayIndex_ = numMemories_;
       ++numMemories_;
     }
     // Collect all OCL sampler objects
-    else if (desc.type_ == T_SAMPLER) {
+    else if (desc.type_ == amd::KernelArgValueType::Sampler) {
       params_[i].info_.arrayIndex_ = numSamplers_;
       ++numSamplers_;
     }
     // Collect all OCL queues
-    else if (desc.type_ == T_QUEUE) {
+    else if (desc.type_ == amd::KernelArgValueType::Queue) {
       params_[i].info_.arrayIndex_ = numQueues_;
       ++numQueues_;
     }

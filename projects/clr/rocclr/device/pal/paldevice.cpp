@@ -2744,11 +2744,11 @@ void Device::SrdManager::fillResourceList(VirtualGPU& gpu) {
   }
 }
 
-bool Device::SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
-                          cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
+bool Device::SetClockMode(const amd::SetDeviceClockModeInput setClockModeInput,
+                          amd::SetDeviceClockModeOutput* pSetClockModeOutput) {
   Pal::SetClockModeInput setClockMode = {};
   Pal::DeviceClockMode palClockMode =
-      static_cast<Pal::DeviceClockMode>(setClockModeInput.clock_mode);
+      static_cast<Pal::DeviceClockMode>(setClockModeInput.clockMode);
   setClockMode.clockMode = palClockMode;
   bool result =
       (Pal::Result::Success ==
