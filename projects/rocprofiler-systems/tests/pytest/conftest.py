@@ -2256,6 +2256,8 @@ def assert_perfetto(
     """Fixture that returns an assert_perfetto function.
 
     Args not from validate_perfetto_trace:
+        match_by_label: If True, validate slices by kernel name (omit ``counts`` for
+            presence-only, omit ``depths``).
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
         perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.proto)
         pass_regex: (Optional) Regex patterns that must be found in validation.stdout
@@ -2281,6 +2283,7 @@ def assert_perfetto(
         trace_processor_path: Optional[Path] = None,
         print_output: bool = True,
         timeout: int = 120,
+        match_by_label: bool = False,
         pass_regex: Optional[list[str]] = None,
         fail_regex: Optional[list[str]] = None,
         skip_on_fail: bool = False,
@@ -2313,6 +2316,7 @@ def assert_perfetto(
                 trace_processor_path=trace_processor_path,
                 print_output=print_output,
                 timeout=timeout,
+                match_by_label=match_by_label,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:

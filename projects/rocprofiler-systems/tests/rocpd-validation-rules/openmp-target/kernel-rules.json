@@ -18,9 +18,9 @@
                     "query": "SELECT COUNT(*) FROM top_kernels WHERE name IS NULL"
                 },
                 {
-                    "comparison": "equals",
-                    "description": "Check for 3 unique kernels",
-                    "error_message": "Expecting 3 unique kernels",
+                    "comparison": "greater_than_or_equal",
+                    "description": "At least 3 unique kernels in top_kernels (allow extra e.g. LLVM helpers)",
+                    "error_message": "Expecting at least 3 unique kernels in top_kernels",
                     "expected_result": 3,
                     "query": "SELECT COUNT(*) FROM top_kernels"
                 }
@@ -47,9 +47,9 @@
                     "query": "SELECT COUNT(*) as count FROM kernels WHERE name IS NULL"
                 },
                 {
-                    "comparison": "equals",
-                    "description": "Check that we have 12 kernel dispatches",
-                    "error_message": "Expecting 12 kernel dispatches",
+                    "comparison": "greater_than_or_equal",
+                    "description": "At least 12 kernel dispatches (allow extra e.g. LLVM helpers)",
+                    "error_message": "Expecting at least 12 kernel dispatches",
                     "expected_result": 12,
                     "query": "SELECT COUNT(*) as count FROM kernels"
                 },
