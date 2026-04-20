@@ -345,4 +345,14 @@ else()
     endif()
 endif()
 
+#
+# Apache Arrow + Parquet (for Parquet output)
+#
+if(ROCPROFILER_BUILD_PARQUET)
+    find_package(Arrow REQUIRED)
+    find_package(Parquet REQUIRED)
+    target_link_libraries(rocprofiler-sdk-arrow INTERFACE Arrow::arrow_shared
+                                                         Parquet::parquet_shared)
+endif()
+
 cmake_policy(POP)

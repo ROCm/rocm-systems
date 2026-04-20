@@ -82,9 +82,10 @@ output_config::parse_env()
     pftrace_output = entries.count("PFTRACE") > 0;
     otf2_output    = entries.count("OTF2") > 0;
     rocpd_output   = entries.count("ROCPD") > 0 || entries.empty();
+    parquet_output = entries.count("PARQUET") > 0;
 
     const auto supported_formats =
-        std::set<std::string_view>{"CSV", "JSON", "PFTRACE", "OTF2", "ROCPD"};
+        std::set<std::string_view>{"CSV", "JSON", "PFTRACE", "OTF2", "ROCPD", "PARQUET"};
     for(const auto& itr : entries)
     {
         LOG_IF(FATAL, supported_formats.count(itr) == 0)
