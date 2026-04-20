@@ -282,4 +282,15 @@ static_assert(static_cast<uint32_t>(amd::DeviceClockMode::Count)         == CL_D
 // Verify SetDeviceClockModeOutput struct layout matches cl_set_device_clock_mode_output_amd.
 static_assert(sizeof(amd::SetDeviceClockModeOutput) == sizeof(cl_set_device_clock_mode_output_amd));
 
+// Verify FilterMode values match CL_FILTER_* constants.
+static_assert(static_cast<uint32_t>(amd::FilterMode::Nearest) == CL_FILTER_NEAREST);
+static_assert(static_cast<uint32_t>(amd::FilterMode::Linear)  == CL_FILTER_LINEAR);
+
+// Verify AddressingMode values match CL_ADDRESS_* constants.
+static_assert(static_cast<uint32_t>(amd::AddressingMode::None)           == CL_ADDRESS_NONE);
+static_assert(static_cast<uint32_t>(amd::AddressingMode::ClampToEdge)    == CL_ADDRESS_CLAMP_TO_EDGE);
+static_assert(static_cast<uint32_t>(amd::AddressingMode::Clamp)          == CL_ADDRESS_CLAMP);
+static_assert(static_cast<uint32_t>(amd::AddressingMode::Repeat)         == CL_ADDRESS_REPEAT);
+static_assert(static_cast<uint32_t>(amd::AddressingMode::MirroredRepeat) == CL_ADDRESS_MIRRORED_REPEAT);
+
 }  // namespace amd::cl

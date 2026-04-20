@@ -485,4 +485,19 @@ struct SetDeviceClockModeOutput {
   float engineClockRatioToPeak; // cl_float engine_clock_ratio_to_peak
 };
 
+// Replaces CL_FILTER_* constants (cl_filter_mode = cl_uint = uint32_t)
+enum class FilterMode : uint32_t {
+  Nearest = 0x1140, // CL_FILTER_NEAREST
+  Linear  = 0x1141, // CL_FILTER_LINEAR
+};
+
+// Replaces CL_ADDRESS_* constants (cl_addressing_mode = cl_uint = uint32_t)
+enum class AddressingMode : uint32_t {
+  None           = 0x1130, // CL_ADDRESS_NONE
+  ClampToEdge    = 0x1131, // CL_ADDRESS_CLAMP_TO_EDGE
+  Clamp          = 0x1132, // CL_ADDRESS_CLAMP
+  Repeat         = 0x1133, // CL_ADDRESS_REPEAT
+  MirroredRepeat = 0x1134, // CL_ADDRESS_MIRRORED_REPEAT
+};
+
 }  // namespace amd

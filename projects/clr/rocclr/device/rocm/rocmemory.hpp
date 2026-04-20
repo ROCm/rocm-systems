@@ -233,7 +233,7 @@ class Image : public roc::Memory {
   bool AddView(amd::Image* image);
 
   //! Finds an image view of this original image from the cache
-  amd::Image* FindView(cl_image_format format) const;
+  amd::Image* FindView(amd::ImageFormat format) const;
 
  private:
   //! Disable copy constructor

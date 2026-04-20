@@ -8,8 +8,6 @@
 #include <unistd.h>
 #endif
 
-#include "CL/cl_ext.h"
-
 #include "utils/util.hpp"
 #include "device/device.hpp"
 #include "device/rocm/rocmemory.hpp"
@@ -1119,55 +1117,55 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
 
 // ======================================= roc::Image =============================================
 typedef struct ChannelOrderMap {
-  uint32_t cl_channel_order;
+  uint32_t channel_order;
   hsa_ext_image_channel_order_t hsa_channel_order;
 } ChannelOrderMap;
 
 typedef struct ChannelTypeMap {
-  uint32_t cl_channel_type;
+  uint32_t channel_type;
   hsa_ext_image_channel_type_t hsa_channel_type;
 } ChannelTypeMap;
 
 static constexpr ChannelOrderMap kChannelOrderMapping[] = {
-    {CL_R, HSA_EXT_IMAGE_CHANNEL_ORDER_R},
-    {CL_A, HSA_EXT_IMAGE_CHANNEL_ORDER_A},
-    {CL_RG, HSA_EXT_IMAGE_CHANNEL_ORDER_RG},
-    {CL_RA, HSA_EXT_IMAGE_CHANNEL_ORDER_RA},
-    {CL_RGB, HSA_EXT_IMAGE_CHANNEL_ORDER_RGB},
-    {CL_RGBA, HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA},
-    {CL_BGRA, HSA_EXT_IMAGE_CHANNEL_ORDER_BGRA},
-    {CL_ARGB, HSA_EXT_IMAGE_CHANNEL_ORDER_ARGB},
-    {CL_INTENSITY, HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY},
-    {CL_LUMINANCE, HSA_EXT_IMAGE_CHANNEL_ORDER_LUMINANCE},
-    {CL_Rx, HSA_EXT_IMAGE_CHANNEL_ORDER_RX},
-    {CL_RGx, HSA_EXT_IMAGE_CHANNEL_ORDER_RGX},
-    {CL_RGBx, HSA_EXT_IMAGE_CHANNEL_ORDER_RGBX},
-    {CL_DEPTH, HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH},
-    {CL_DEPTH_STENCIL, HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL},
-    {CL_sRGB, HSA_EXT_IMAGE_CHANNEL_ORDER_SRGB},
-    {CL_sRGBx, HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX},
-    {CL_sRGBA, HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA},
-    {CL_sBGRA, HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA},
-    {CL_ABGR, HSA_EXT_IMAGE_CHANNEL_ORDER_ABGR},
+    {static_cast<uint32_t>(amd::ChannelOrder::R),            HSA_EXT_IMAGE_CHANNEL_ORDER_R},
+    {static_cast<uint32_t>(amd::ChannelOrder::A),            HSA_EXT_IMAGE_CHANNEL_ORDER_A},
+    {static_cast<uint32_t>(amd::ChannelOrder::RG),           HSA_EXT_IMAGE_CHANNEL_ORDER_RG},
+    {static_cast<uint32_t>(amd::ChannelOrder::RA),           HSA_EXT_IMAGE_CHANNEL_ORDER_RA},
+    {static_cast<uint32_t>(amd::ChannelOrder::RGB),          HSA_EXT_IMAGE_CHANNEL_ORDER_RGB},
+    {static_cast<uint32_t>(amd::ChannelOrder::RGBA),         HSA_EXT_IMAGE_CHANNEL_ORDER_RGBA},
+    {static_cast<uint32_t>(amd::ChannelOrder::BGRA),         HSA_EXT_IMAGE_CHANNEL_ORDER_BGRA},
+    {static_cast<uint32_t>(amd::ChannelOrder::ARGB),         HSA_EXT_IMAGE_CHANNEL_ORDER_ARGB},
+    {static_cast<uint32_t>(amd::ChannelOrder::Intensity),    HSA_EXT_IMAGE_CHANNEL_ORDER_INTENSITY},
+    {static_cast<uint32_t>(amd::ChannelOrder::Luminance),    HSA_EXT_IMAGE_CHANNEL_ORDER_LUMINANCE},
+    {static_cast<uint32_t>(amd::ChannelOrder::Rx),           HSA_EXT_IMAGE_CHANNEL_ORDER_RX},
+    {static_cast<uint32_t>(amd::ChannelOrder::RGx),          HSA_EXT_IMAGE_CHANNEL_ORDER_RGX},
+    {static_cast<uint32_t>(amd::ChannelOrder::RGBx),         HSA_EXT_IMAGE_CHANNEL_ORDER_RGBX},
+    {static_cast<uint32_t>(amd::ChannelOrder::Depth),        HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH},
+    {static_cast<uint32_t>(amd::ChannelOrder::DepthStencil), HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL},
+    {static_cast<uint32_t>(amd::ChannelOrder::sRGB),         HSA_EXT_IMAGE_CHANNEL_ORDER_SRGB},
+    {static_cast<uint32_t>(amd::ChannelOrder::sRGBx),        HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBX},
+    {static_cast<uint32_t>(amd::ChannelOrder::sRGBA),        HSA_EXT_IMAGE_CHANNEL_ORDER_SRGBA},
+    {static_cast<uint32_t>(amd::ChannelOrder::sBGRA),        HSA_EXT_IMAGE_CHANNEL_ORDER_SBGRA},
+    {static_cast<uint32_t>(amd::ChannelOrder::ABGR),         HSA_EXT_IMAGE_CHANNEL_ORDER_ABGR},
 };
 
 static constexpr ChannelTypeMap kChannelTypeMapping[] = {
-    {CL_SNORM_INT8, HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8},
-    {CL_SNORM_INT16, HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16},
-    {CL_UNORM_INT8, HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8},
-    {CL_UNORM_INT16, HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT16},
-    {CL_UNORM_SHORT_565, HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565},
-    {CL_UNORM_SHORT_555, HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555},
-    {CL_UNORM_INT_101010, HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010},
-    {CL_SIGNED_INT8, HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT8},
-    {CL_SIGNED_INT16, HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT16},
-    {CL_SIGNED_INT32, HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT32},
-    {CL_UNSIGNED_INT8, HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8},
-    {CL_UNSIGNED_INT16, HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16},
-    {CL_UNSIGNED_INT32, HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32},
-    {CL_HALF_FLOAT, HSA_EXT_IMAGE_CHANNEL_TYPE_HALF_FLOAT},
-    {CL_FLOAT, HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT},
-    {CL_UNORM_INT24, HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24},
+    {static_cast<uint32_t>(amd::ChannelDataType::SNormInt8),       HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8},
+    {static_cast<uint32_t>(amd::ChannelDataType::SNormInt16),      HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16},
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormInt8),       HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8},
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormInt16),      HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT16},
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormShort565),   HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_565},
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormShort555),   HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_555},
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormInt101010),  HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_SHORT_101010},
+    {static_cast<uint32_t>(amd::ChannelDataType::SignedInt8),      HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT8},
+    {static_cast<uint32_t>(amd::ChannelDataType::SignedInt16),     HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT16},
+    {static_cast<uint32_t>(amd::ChannelDataType::SignedInt32),     HSA_EXT_IMAGE_CHANNEL_TYPE_SIGNED_INT32},
+    {static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt8),    HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT8},
+    {static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt16),   HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT16},
+    {static_cast<uint32_t>(amd::ChannelDataType::UnsignedInt32),   HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32},
+    {static_cast<uint32_t>(amd::ChannelDataType::HalfFloat),       HSA_EXT_IMAGE_CHANNEL_TYPE_HALF_FLOAT},
+    {static_cast<uint32_t>(amd::ChannelDataType::Float),           HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT},
+    {static_cast<uint32_t>(amd::ChannelDataType::UNormInt24),      HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT24},
 };
 
 
@@ -1233,7 +1231,8 @@ void Image::populateImageDescriptor() {
 
   const int kChannelOrderCount = sizeof(kChannelOrderMapping) / sizeof(ChannelOrderMap);
   for (int i = 0; i < kChannelOrderCount; i++) {
-    if (image->getImageFormat().image_channel_order == kChannelOrderMapping[i].cl_channel_order) {
+    if (static_cast<uint32_t>(image->getImageFormat().channelOrder) ==
+        kChannelOrderMapping[i].channel_order) {
       imageDescriptor_.format.channel_order = kChannelOrderMapping[i].hsa_channel_order;
       break;
     }
@@ -1241,7 +1240,8 @@ void Image::populateImageDescriptor() {
 
   const int kChannelTypeCount = sizeof(kChannelTypeMapping) / sizeof(ChannelTypeMap);
   for (int i = 0; i < kChannelTypeCount; i++) {
-    if (image->getImageFormat().image_channel_data_type == kChannelTypeMapping[i].cl_channel_type) {
+    if (static_cast<uint32_t>(image->getImageFormat().channelDataType) ==
+        kChannelTypeMapping[i].channel_type) {
       imageDescriptor_.format.channel_type = kChannelTypeMapping[i].hsa_channel_type;
       break;
     }
@@ -1646,11 +1646,11 @@ bool Image::AddView(amd::Image* image) {
 }
 
 // ================================================================================================
-amd::Image* Image::FindView(cl_image_format format) const {
+amd::Image* Image::FindView(amd::ImageFormat format) const {
   std::scoped_lock l(owner()->lockMemoryOps());
   for (auto it : view_cache_) {
-    if ((it->getImageFormat().image_channel_data_type == format.image_channel_data_type) &&
-        (it->getImageFormat().image_channel_order == format.image_channel_order)) {
+    if ((it->getImageFormat().channelDataType == format.channelDataType) &&
+        (it->getImageFormat().channelOrder == format.channelOrder)) {
       return it;
     }
   }

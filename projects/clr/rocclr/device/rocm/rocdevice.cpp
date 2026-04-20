@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "cl.h"
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
 #include "os/os.hpp"
@@ -13,7 +12,6 @@
 #include "utils/options.hpp"
 #include "utils/versions.hpp"
 #include "thread/monitor.hpp"
-#include "CL/cl_ext.h"
 
 #include "vdi_common.hpp"
 #include "device/comgrctx.hpp"
@@ -80,7 +78,7 @@ bool NullDevice::create(const amd::Isa& isa) {
 
   online_ = false;
   // Mark the device as GPU type
-  info_.type_ = CL_DEVICE_TYPE_GPU;
+  info_.type_ = amd::DeviceType::GPU;
   info_.vendorId_ = 0x1002;
 
   roc::Settings* hsaSettings = new roc::Settings();
@@ -493,7 +491,7 @@ bool Device::init() {
     // Allocate a staging buffer for P2P emulation path
     if ((devices.size() >= 1) && !p2p_available) {
       amd::Buffer* buf =
-          new (*glb_ctx_) amd::Buffer(*glb_ctx_, CL_MEM_ALLOC_HOST_PTR, kP2PStagingSize);
+          new (*glb_ctx_) amd::Buffer(*glb_ctx_, amd::MemFlags::AllocHostPtr, kP2PStagingSize);
       if ((buf != nullptr) && buf->create()) {
         p2p_stage_ = buf;
       } else {
@@ -655,7 +653,7 @@ bool Device::create() {
     return false;
   }
 
-  info_.deviceTopology_.pcie.type = CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD;
+  info_.deviceTopology_.pcie.type = 1; // CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD
   info_.deviceTopology_.pcie.bus = (hsa_bdf_id & (0xFF << 8)) >> 8;
   info_.deviceTopology_.pcie.device = (hsa_bdf_id & (0x1F << 3)) >> 3;
   info_.deviceTopology_.pcie.function = (hsa_bdf_id & 0x07);
@@ -926,14 +924,15 @@ bool Device::createSampler(const amd::Sampler& owner, device::Sampler** sampler)
 
 void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
                                    const amd::Sampler& sampler) const {
-  samplerDescriptor.filter_mode = sampler.filterMode() == CL_FILTER_NEAREST
-                                      ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
-                                      : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
+  samplerDescriptor.filter_mode =
+      sampler.filterMode() == static_cast<uint>(amd::FilterMode::Nearest)
+          ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
+          : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
   switch (sampler.mipFilter()) {
-    case CL_FILTER_NEAREST:
+    case static_cast<uint>(amd::FilterMode::Nearest):
       samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_NEAREST;
       break;
-    case CL_FILTER_LINEAR:
+    case static_cast<uint>(amd::FilterMode::Linear):
       samplerDescriptor.mipmap_filter_mode = HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
       break;
     default:
@@ -944,19 +943,19 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
                                           : HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED;
   for (int i = 0; i < 3; i++) {
     switch (sampler.addressingMode(i)) {
-      case CL_ADDRESS_CLAMP_TO_EDGE:
+      case static_cast<uint>(amd::AddressingMode::ClampToEdge):
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_EDGE;
         break;
-      case CL_ADDRESS_REPEAT:
+      case static_cast<uint>(amd::AddressingMode::Repeat):
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_REPEAT;
         break;
-      case CL_ADDRESS_CLAMP:
+      case static_cast<uint>(amd::AddressingMode::Clamp):
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_BORDER;
         break;
-      case CL_ADDRESS_MIRRORED_REPEAT:
+      case static_cast<uint>(amd::AddressingMode::MirroredRepeat):
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_MIRRORED_REPEAT;
         break;
-      case CL_ADDRESS_NONE:
+      case static_cast<uint>(amd::AddressingMode::None):
         samplerDescriptor.address_modes[i] = HSA_EXT_SAMPLER_ADDRESSING_MODE_UNDEFINED;
         break;
       default:
@@ -991,7 +990,8 @@ Memory* Device::getGpuMemory(amd::Memory* mem) const {
 }
 
 const bool Device::isFineGrainSupported() const {
-  bool result = (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
+  bool result = (info().svmCapabilities_ & amd::SvmCapabilities::Atomics) !=
+                static_cast<amd::SvmCapabilities>(0);
   if (result) {
     if (gpu_fine_grained_segment_.handle != 0) {
       return true;
@@ -1077,9 +1077,9 @@ bool Device::populateOCLDeviceConstants() {
   assert(cachesize[0] > 0);
   info_.globalMemCacheSize_ = cachesize[0];
 
-  info_.globalMemCacheType_ = CL_READ_WRITE_CACHE;
+  info_.globalMemCacheType_ = amd::MemCacheType::ReadWriteCache;
 
-  info_.type_ = CL_DEVICE_TYPE_GPU;
+  info_.type_ = amd::DeviceType::GPU;
 
   info_.extensions_ = getExtensionString();
   info_.nativeVectorWidthDouble_ = info_.preferredVectorWidthDouble_ =
@@ -1317,13 +1317,13 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxConstantArgs_ = 8;
   info_.preferredConstantBufferSize_ = 16 * Ki;
   info_.maxConstantBufferSize_ = info_.maxMemAllocSize_;
-  info_.localMemType_ = CL_LOCAL;
+  info_.localMemType_ = amd::LocalMemType::Local;
   info_.errorCorrectionSupport_ = false;
   info_.profilingTimerResolution_ = 1;
   info_.littleEndian_ = true;
   info_.compilerAvailable_ = true;
-  info_.executionCapabilities_ = CL_EXEC_KERNEL;
-  info_.queueProperties_ = CL_QUEUE_PROFILING_ENABLE;
+  info_.executionCapabilities_ = amd::ExecCapabilities::Kernel;
+  info_.queueProperties_ = amd::QueueProperties::Profiling;
   info_.platform_ = AMD_PLATFORM;
   info_.profile_ = "FULL_PROFILE";
   ::strncpy(info_.vendor_, "Advanced Micro Devices, Inc.", sizeof(info_.vendor_) - 1);
@@ -1369,15 +1369,16 @@ bool Device::populateOCLDeviceConstants() {
 
   // Populate the single config setting.
   info_.singleFPConfig_ =
-      CL_FP_ROUND_TO_NEAREST | CL_FP_ROUND_TO_ZERO | CL_FP_ROUND_TO_INF | CL_FP_INF_NAN | CL_FP_FMA;
+      amd::FpConfig::RoundToNearest | amd::FpConfig::RoundToZero | amd::FpConfig::RoundToInf |
+      amd::FpConfig::InfNan | amd::FpConfig::Fma;
 
   if (settings().doublePrecision_) {
-    info_.doubleFPConfig_ = info_.singleFPConfig_ | CL_FP_DENORM;
-    info_.singleFPConfig_ |= CL_FP_CORRECTLY_ROUNDED_DIVIDE_SQRT;
+    info_.doubleFPConfig_ = info_.singleFPConfig_ | amd::FpConfig::Denorm;
+    info_.singleFPConfig_ = info_.singleFPConfig_ | amd::FpConfig::CorrectlyRounded;
   }
 
   if (settings().singleFpDenorm_) {
-    info_.singleFPConfig_ |= CL_FP_DENORM;
+    info_.singleFPConfig_ = info_.singleFPConfig_ | amd::FpConfig::Denorm;
   }
 
   if (settings().checkExtension(ClKhrFp16)) {
@@ -1503,17 +1504,17 @@ bool Device::populateOCLDeviceConstants() {
 
   // Enable SVM Capabilities of Hsa device. Ensure
   // user has not setup memory to be non-coherent
-  info_.svmCapabilities_ = 0;
+  info_.svmCapabilities_ = static_cast<amd::SvmCapabilities>(0);
   if (!settings().enableNCMode_) {
-    info_.svmCapabilities_ = CL_DEVICE_SVM_COARSE_GRAIN_BUFFER;
-    info_.svmCapabilities_ |= CL_DEVICE_SVM_FINE_GRAIN_BUFFER;
+    info_.svmCapabilities_ = amd::SvmCapabilities::CoarseGrainBuffer;
+    info_.svmCapabilities_ = info_.svmCapabilities_ | amd::SvmCapabilities::FineGrainBuffer;
     // Report fine-grain system only on full profile
     if (agent_profile_ == HSA_PROFILE_FULL) {
-      info_.svmCapabilities_ |= CL_DEVICE_SVM_FINE_GRAIN_SYSTEM;
+      info_.svmCapabilities_ = info_.svmCapabilities_ | amd::SvmCapabilities::FineGrainSystem;
     }
     if (amd::IS_HIP) {
       if (info_.iommuv2_ || isa().versionMajor() >= 8) {
-        info_.svmCapabilities_ |= CL_DEVICE_SVM_ATOMICS;
+        info_.svmCapabilities_ = info_.svmCapabilities_ | amd::SvmCapabilities::Atomics;
       }
     }
   }
@@ -1604,7 +1605,7 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxPipeArgs_ = 16;
 
   info_.queueOnDeviceProperties_ =
-      CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
+      amd::QueueProperties::OutOfOrderExec | amd::QueueProperties::Profiling;
   info_.queueOnDevicePreferredSize_ = 256 * Ki;
   info_.queueOnDeviceMaxSize_ = 8 * Mi;
   info_.maxOnDeviceQueues_ = 1;
@@ -1744,7 +1745,7 @@ bool Device::populateOCLDeviceConstants() {
 device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
   std::scoped_lock lock(vgpusAccess());
 
-  bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
+  bool profiling = (queue != nullptr) && queue->properties().test(amd::QueueProperties::Profiling);
   bool cooperative = false;
   bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&
                          (settings().dynamic_queues_ >= 2);
@@ -1966,7 +1967,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
     memory->setAllowedPeerAccess(true);
   }
   // Initialize if the memory is a pipe object
-  if (owner.getType() == CL_MEM_OBJECT_PIPE) {
+  if (owner.getType() == amd::MemObjectType::Pipe) {
     // Pipe initialize in order read_idx, write_idx, end_idx. Refer clk_pipe_t structure.
     // Init with 3 DWORDS for 32bit addressing and 6 DWORDS for 64bit
     size_t pipeInit[3] = {0, 0, owner.asPipe()->getMaxNumPackets()};
@@ -1976,7 +1977,8 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
   // Transfer data only if OCL context has one device.
   // Cache coherency layer will update data for multiple devices
   if (!memory->isHostMemDirectAccess() && owner.asImage() && (owner.parent() == nullptr) &&
-      (owner.getMemFlags() & CL_MEM_COPY_HOST_PTR) && (owner.getContext().devices().size() == 1)) {
+      (owner.getMemFlags() & amd::MemFlags::CopyHostPtr) != amd::MemFlags::None &&
+      (owner.getContext().devices().size() == 1)) {
     // To avoid recurssive call to Device::createMemory, we perform
     // data transfer to the view of the image
     amd::Image* imageView = owner.asImage()->createView(
@@ -2527,7 +2529,8 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
                                  bool first_alloc, bool use_cpu, int numa_id) const {
   if ((settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) && !first_alloc) {
     amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
-    if ((nullptr == svm_mem) || ((svm_mem->getMemFlags() & CL_MEM_ALLOC_HOST_PTR) == 0) ||
+    if ((nullptr == svm_mem) ||
+        ((svm_mem->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::None) ||
         // Validate the range of provided memory
         ((svm_mem->getSize() - (reinterpret_cast<const_address>(dev_ptr) -
                                 reinterpret_cast<address>(svm_mem->getSvmPtr()))) < count)) {
@@ -2617,7 +2620,8 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
                               size_t num_attributes, const void* dev_ptr, size_t count) const {
   amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
   if (settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) {
-    if ((nullptr == svm_mem) || ((svm_mem->getMemFlags() & CL_MEM_ALLOC_HOST_PTR) == 0) ||
+    if ((nullptr == svm_mem) ||
+        ((svm_mem->getMemFlags() & amd::MemFlags::AllocHostPtr) == amd::MemFlags::None) ||
         // Validate the range of provided memory
         ((svm_mem->getSize() - (reinterpret_cast<const_address>(dev_ptr) -
                                 reinterpret_cast<address>(svm_mem->getSvmPtr()))) < count)) {
@@ -2651,7 +2655,8 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
       }
       // If coherency is still indeterminate
       if (ptr_info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM) {
-        if (svm_mem != nullptr && (svm_mem->getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER)) {
+        if (svm_mem != nullptr &&
+            (svm_mem->getMemFlags() & amd::MemFlags::SvmFineGrain) != amd::MemFlags::None) {
           *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED;
         } else {
           *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
@@ -3531,25 +3536,25 @@ device::Signal* Device::createSignal() const { return new roc::Signal(); }
 
 // ================================================================================================
 hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data) {
-  cl_int gpu_error = CL_SUCCESS;
+  int gpu_error = 0; // 0 == CL_SUCCESS
   switch (event->event_type) {
     case HSA_AMD_GPU_MEMORY_FAULT_EVENT:
-      gpu_error = CL_INVALID_MEM_OBJECT;
+      gpu_error = -38; // CL_INVALID_MEM_OBJECT
       LogError("Memory Fault Error");
       break;
     case HSA_AMD_GPU_HW_EXCEPTION_EVENT:
-      gpu_error = CL_INVALID_OPERATION;
+      gpu_error = -59; // CL_INVALID_OPERATION
       LogError("HW Exception Error");
       break;
     case HSA_AMD_GPU_MEMORY_ERROR_EVENT:
-      gpu_error = CL_DEVICE_NOT_AVAILABLE;
+      gpu_error = -2; // CL_DEVICE_NOT_AVAILABLE
       LogError("GPU Memory Error");
       break;
     case HSA_AMD_SYSTEM_SHUTDOWN_EVENT:
       // This is not a fatal error just ignore it.
       return HSA_STATUS_SUCCESS;
     default:
-      gpu_error = CL_DEVICE_NOT_AVAILABLE;
+      gpu_error = -2; // CL_DEVICE_NOT_AVAILABLE
       LogError("Unknown Event Type ");
       break;
   }
@@ -3938,45 +3943,45 @@ ProfilingSignal::~ProfilingSignal() {
 }
 
 // ================================================================================================
-cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
-  cl_int cl_error = CL_SUCCESS;
+int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
+  int cl_error = 0; // CL_SUCCESS
   switch (hsa_status) {
     case HSA_STATUS_ERROR_OUT_OF_RESOURCES:
       cl_error = CL_OUT_OF_RESOURCES;
       break;
     case HSA_STATUS_ERROR_EXCEPTION:
-      cl_error = CL_INVALID_OPERATION;
+      cl_error = -59; // CL_INVALID_OPERATION
       break;
     case HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS:
-      cl_error = CL_INVALID_ARG_VALUE;
+      cl_error = -50; // CL_INVALID_ARG_VALUE
       break;
     case HSA_STATUS_ERROR_INVALID_ALLOCATION:
-      cl_error = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+      cl_error = -4; // CL_MEM_OBJECT_ALLOCATION_FAILURE
       break;
     case HSA_STATUS_ERROR_INVALID_CODE_OBJECT:
-      cl_error = CL_INVALID_PROGRAM;
+      cl_error = -44; // CL_INVALID_PROGRAM
       break;
     case HSA_STATUS_ERROR_INVALID_PACKET_FORMAT:
-      cl_error = CL_INVALID_OPERATION;
+      cl_error = -59; // CL_INVALID_OPERATION
       break;
     case HSA_STATUS_ERROR_INVALID_ARGUMENT:
-      cl_error = CL_INVALID_ARG_VALUE;
+      cl_error = -50; // CL_INVALID_ARG_VALUE
       break;
     case HSA_STATUS_ERROR_INVALID_ISA:
-      cl_error = CL_INVALID_KERNEL;
+      cl_error = -48; // CL_INVALID_KERNEL
       break;
     case (hsa_status_t)HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:
-      cl_error = CL_BUILD_PROGRAM_FAILURE;
+      cl_error = -11; // CL_BUILD_PROGRAM_FAILURE
       break;
     case (hsa_status_t)HSA_STATUS_ERROR_MEMORY_FAULT:
-      cl_error = CL_INVALID_MEM_OBJECT;
+      cl_error = -38; // CL_INVALID_MEM_OBJECT
       break;
     case (hsa_status_t)HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION:
-      cl_error = CL_INVALID_MEM_OBJECT;
+      cl_error = -38; // CL_INVALID_MEM_OBJECT
       break;
     case HSA_STATUS_ERROR:
     default:
-      cl_error = CL_DEVICE_NOT_AVAILABLE;
+      cl_error = -2; // CL_DEVICE_NOT_AVAILABLE
       break;
   }
   return cl_error;

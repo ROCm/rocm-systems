@@ -7,7 +7,6 @@
 #pragma once
 
 #include "top.hpp"
-#include "CL/cl.h"
 #include "device/device.hpp"
 #include "platform/command.hpp"
 #include "platform/program.hpp"
