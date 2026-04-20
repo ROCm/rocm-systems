@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#pragma once
+#ifndef HIP_PROFILER_EXT_H
+#define HIP_PROFILER_EXT_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -209,3 +210,5 @@ hipError_t hipProfilerWriteJsonExt(const char* filepath);
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* HIP_PROFILER_EXT_H */
