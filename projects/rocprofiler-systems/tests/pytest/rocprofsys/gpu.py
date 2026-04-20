@@ -31,6 +31,11 @@ class GPUInfo:
     categories: set[str]
 
     @property
+    def _is_gfx1250(self) -> bool:
+        """Check if the GPU is MI450 (gfx1250)."""
+        return "gfx1250" in self.architectures
+
+    @property
     def _is_mi300_or_later(self) -> bool:
         """Check if the GPU is a MI300 or later."""
         for arch in self.architectures:
@@ -41,16 +46,18 @@ class GPUInfo:
     @property
     def rocm_events_for_test(self) -> str:
         """Get appropriate ROCm events for testing based on architecture."""
-        mi300_or_later = self._is_mi300_or_later
-        if mi300_or_later:
+        if self._is_gfx1250:
+            return "GRBM_COUNT,SQ_WAVES:device=0"
+        if self._is_mi300_or_later:
             return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY"
         return "SQ_WAVES"
 
     @property
     def counter_names(self) -> list[str]:
         """Get counter names for validation based on architecture"""
-        mi300_or_later = self._is_mi300_or_later
-        if mi300_or_later:
+        if self._is_gfx1250:
+            return ["GRBM_COUNT", "SQ_WAVES"]
+        if self._is_mi300_or_later:
             return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
         return ["SQ_WAVES"]
 
@@ -159,6 +166,7 @@ def lookup_gpu_category(
         "gfx90a",
         "gfx942",
         "gfx950",
+        "gfx1250",
     ]
 
     # Also includes PRO GPUs

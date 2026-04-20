@@ -85,6 +85,9 @@ if(ROCPROFSYS_GFX_TARGETS)
     foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
         rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORY)
         if("instinct" IN_LIST GPU_CATEGORY)
+            if("${arch}" STREQUAL "gfx1250")
+                set(GFX1250_DETECTED TRUE)
+            endif()
             continue()
         endif()
         set(NAVI_DETECTED TRUE)
@@ -92,7 +95,12 @@ if(ROCPROFSYS_GFX_TARGETS)
     endforeach()
 endif()
 
-if(NAVI_DETECTED)
+if(GFX1250_DETECTED)
+    # gfx1250: SQ_INSTS_VALU and TA_TA_BUSY are unavailable
+    # (SQ_INSTS_VALU missing from aqlprofile defaults, TA block merged into TX)
+    set(ROCPROFSYS_ROCM_EVENTS_TEST "GRBM_COUNT,SQ_WAVES:device=0")
+    set(ROCPROFSYS_COUNTER_NAMES_ARG "GRBM_COUNT" "SQ_WAVES")
+elseif(NAVI_DETECTED)
     set(ROCPROFSYS_ROCM_EVENTS_TEST "SQ_WAVES")
     set(ROCPROFSYS_COUNTER_NAMES_ARG "SQ_WAVES")
 else()
@@ -178,6 +186,16 @@ endforeach()
 #
 # -------------------------------------------------------------------------------------- #
 
+if(GFX1250_DETECTED)
+    set(_AMD_SMI_RULES_FILE
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/amd-smi-rules-gfx1250.json"
+    )
+else()
+    set(_AMD_SMI_RULES_FILE
+        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/amd-smi-rules.json"
+    )
+endif()
+
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
     set_property(TEST transpose-sampling APPEND PROPERTY LABELS rocpd)
 
@@ -187,7 +205,7 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
         ARGS --validation-rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/validation-rules.json"
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/amd-smi-rules.json"
+        "${_AMD_SMI_RULES_FILE}"
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/cpu-metrics-rules.json"
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/timer-sampling-rules.json"
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/sdk-metrics-rules.json"

@@ -546,8 +546,7 @@ function(ROCPROFILER_SYSTEMS_PRINT_ENABLED_FEATURES)
                     )
                 else()
                     string(
-                        REGEX REPLACE
-                        "^${PROJECT_NAME}_USE_"
+                        REGEX REPLACE "^${PROJECT_NAME}_USE_"
                         ""
                         _feature_tmp
                         "${_feature}"
@@ -1195,6 +1194,7 @@ function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
         "gfx90a"
         "gfx942"
         "gfx950"
+        "gfx1250"
     )
 
     # Also includes PRO GPUs
