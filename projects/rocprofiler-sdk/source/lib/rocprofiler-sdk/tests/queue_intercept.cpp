@@ -264,6 +264,69 @@ TEST(QueueIntercept, DoorbellNoNewPackets)
     EXPECT_EQ(real_wdid, 0u);
 }
 
+TEST(QueueIntercept, DoorbellWithKFactor)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 512];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_wdid = 0;
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 512;
+    state.ring_mask = 511;
+    state.real_wdid = &real_wdid;
+    state.real_rdid = &real_rdid;
+    state.k_factor  = 7;
+
+    state.virtual_wptr.store(1);
+    auto* pkt          = get_pkt(ring, 0, 511);
+    pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    pkt->kernel_object = 0xCAFE;
+
+    process_doorbell_impl(&state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
+
+    // With K=7: 1 app packet at submit pos 0, next_submit_pos advances to 0 + 1 + 7 = 8
+    EXPECT_EQ(real_wdid, 8u);
+    EXPECT_EQ(state.next_submit_pos, 8u);
+    EXPECT_EQ(state.next_scan_pos, 1u);
+
+    auto* submitted = get_pkt(ring, 0, 511);
+    EXPECT_EQ(submitted->kernel_object, static_cast<uint64_t>(0xCAFE));
+}
+
+TEST(QueueIntercept, DoorbellTwoPacketsWithKFactor)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 512];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_wdid = 0;
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 512;
+    state.ring_mask = 511;
+    state.real_wdid = &real_wdid;
+    state.real_rdid = &real_rdid;
+    state.k_factor  = 7;
+
+    state.virtual_wptr.store(2);
+    get_pkt(ring, 0, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 0, 511)->kernel_object = 0xAAAA;
+    get_pkt(ring, 1, 511)->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    get_pkt(ring, 1, 511)->kernel_object = 0xBBBB;
+
+    process_doorbell_impl(&state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
+
+    // 2 app packets * (1 + 7) = 16 total
+    EXPECT_EQ(real_wdid, 16u);
+    EXPECT_EQ(state.next_submit_pos, 16u);
+
+    // First app packet at submit pos 0, second at submit pos 8
+    EXPECT_EQ(get_pkt(ring, 0, 511)->kernel_object, static_cast<uint64_t>(0xAAAA));
+    EXPECT_EQ(get_pkt(ring, 8, 511)->kernel_object, static_cast<uint64_t>(0xBBBB));
+}
+
 }  // namespace
 }  // namespace queue_intercept
 }  // namespace hsa
