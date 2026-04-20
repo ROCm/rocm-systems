@@ -321,11 +321,20 @@ class AnalysisSession:
         try:
             if self.airgap:
                 return root.run_root(payload, airgap=True)
-            return self._cascade(
+            out = self._cascade(
                 lambda prov: root.run_root(payload, provider=prov),
                 op_name="run_root",
                 progress_callback=progress_callback,
             )
+            # Bug 2: a live LLM round-trip that returns an empty narrative
+            # used to silently produce a blank HTML file because the
+            # webview formatter renders whatever narrative (even "") it
+            # receives. Raise FatalError instead so the CLI surfaces a
+            # one-liner and writes nothing. The airgap path above is
+            # exempt because its template narrative is deterministic and
+            # always populated.
+            _ensure_nonempty_llm_output(out, provider=self.provider or DEFAULT_PROVIDER)
+            return out
         finally:
             self._emit(progress_callback, "exit root")
 
@@ -445,6 +454,31 @@ class AnalysisSession:
             )
         finally:
             self._emit(progress_callback, "exit latency_specialist")
+
+
+def _ensure_nonempty_llm_output(output: Any, *, provider: str) -> None:
+    """Raise :class:`FatalError` when a live LLM returned an empty payload.
+
+    A provider call that succeeds but returns an empty narrative used to
+    flow through the formatters untouched, producing a zero-content
+    HTML / Markdown file (Bug 2). Surfacing the problem as a typed
+    ``FatalError`` routes through ``main()``'s renderer and the user
+    sees a single-line error instead of an empty report.
+
+    Called only on the non-airgap path (airgap templates always
+    populate a narrative).
+    """
+    from perfxpert.providers._exceptions import FatalError
+
+    narrative = getattr(output, "narrative", None)
+    if narrative is None and isinstance(output, dict):
+        narrative = output.get("narrative")
+    if not (narrative and str(narrative).strip()):
+        raise FatalError(
+            provider,
+            "provider returned empty response "
+            "(no narrative) — check API key / quota / model availability",
+        )
 
 
 def _airgap_from_env() -> bool:

@@ -1,9 +1,11 @@
-"""Tests for `--llm-api-key` CLI flag wiring through the agentic runtime
-and the pre-flight auth check that precedes every live LLM call.
+"""Tests for `--llm-api-key` CLI flag wiring through the agentic runtime,
+the pre-flight auth check that precedes every live LLM call, and the
+empty-response ``FatalError`` guard that prevents the formatter from
+writing a blank HTML / markdown report.
 
-These tests exercise the Bug 1 (flag wiring) and Bug 3 (pre-flight
-credential validation) fixes landed in Phase 8. Empty-response and
-end-to-end output-file-cleanup tests live in companion commits.
+These tests exercise the Bug 1 (flag wiring), Bug 2 (empty-response
+guard), and Bug 3 (pre-flight credential validation) fixes landed in
+Phase 8.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from perfxpert import analyze
-from perfxpert.providers._exceptions import AuthError
+from perfxpert.providers._exceptions import AuthError, FatalError
 
 
 # ---------------------------------------------------------------------------
@@ -213,3 +215,48 @@ def test_build_session_airgap_discards_api_key():
         provider="anthropic", api_key="sk-test", airgap=True
     )
     assert session.api_key is None
+
+
+# ---------------------------------------------------------------------------
+# 4 — Empty LLM response raises FatalError instead of silently writing
+#     an empty HTML / markdown file.
+# ---------------------------------------------------------------------------
+
+
+def test_empty_llm_response_raises_fatal(monkeypatch, tmp_path):
+    """When ``agent_root`` returns an empty narrative, ``run_root`` raises
+    ``FatalError`` so the CLI doesn't write a blank report."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-dummy")
+
+    # Bypass the live network entirely — exercise run_root's guard via
+    # session build + a stub that returns an empty-narrative RootOutput.
+    from perfxpert.agents import runtime as runtime_mod
+    from perfxpert.agents import schemas
+
+    def _empty_root(payload, provider="anthropic"):
+        return schemas.RootOutput(
+            narrative="",
+            recommendations=[],
+            primary_bottleneck="mixed",
+            warnings=[],
+            metadata={},
+        )
+
+    session = runtime_mod.build_session(provider="anthropic", airgap=False)
+    with patch("perfxpert.agents.root.run_root", side_effect=_empty_root):
+        with pytest.raises(FatalError) as excinfo:
+            session.run_root(schemas.RootInput(user_query="?"))
+    assert "empty response" in str(excinfo.value).lower()
+
+
+def test_airgap_empty_narrative_does_not_raise():
+    """The airgap path must not trigger the empty-response guard (its
+    template narrative is deterministic and always populated; guard
+    is off in airgap mode)."""
+    from perfxpert.agents import runtime as runtime_mod
+    from perfxpert.agents import schemas
+
+    session = runtime_mod.build_session(airgap=True)
+    # Airgap returns a real narrative; no exception expected.
+    out = session.run_root(schemas.RootInput(user_query="?"))
+    assert out is not None
