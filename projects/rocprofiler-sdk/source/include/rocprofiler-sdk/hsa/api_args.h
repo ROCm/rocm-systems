@@ -1526,6 +1526,29 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_external_semaphore_t sem;
     } hsa_amd_external_semaphore_handle_close;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+    struct
+    {
+        hsa_agent_t                          agent;
+        const hsa_ext_image_descriptor_v2_t* image_descriptor;
+        const hsa_amd_image_descriptor_t*    image_layout;
+        const void*                          image_data;
+        hsa_access_permission_t              access_permission;
+        hsa_ext_image_t*                     image;
+    } hsa_amd_image_create_v2;
+    struct
+    {
+        uint32_t         num_agents;
+        hsa_agent_t*     agents;
+        hsa_handle_t     interop_handle;
+        uint32_t         flags;
+        size_t           size_hint;
+        size_t*          size;
+        void**           ptr;
+        size_t*          metadata_size;
+        const void**     metadata;
+    } hsa_amd_interop_map_buffer_with_size;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

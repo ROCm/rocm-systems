@@ -1,8 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
 # SPDX-License-Identifier: MIT
-set(GLEW_INCLUDE_DIR "c:/glew-2.3.1/include")
-set(GLEW_SHARED_LIBRARY_RELEASE "c:/glew-2.3.1/lib/Release/x64/glew32.lib")
+
 set(TEST_SRC
     hipGLGetDevices.cc
     hipGLContextSwitch.cc

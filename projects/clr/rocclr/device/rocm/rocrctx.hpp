@@ -91,6 +91,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_;
   decltype(hsa_amd_memory_unlock)* hsa_amd_memory_unlock_;
   decltype(hsa_amd_interop_map_buffer)* hsa_amd_interop_map_buffer_;
+  decltype(hsa_amd_interop_map_buffer_with_size)* hsa_amd_interop_map_buffer_with_size_;
   decltype(hsa_amd_interop_unmap_buffer)* hsa_amd_interop_unmap_buffer_;
   decltype(hsa_amd_image_create)* hsa_amd_image_create_;
   decltype(hsa_amd_image_create_v2)* hsa_amd_image_create_v2_;
@@ -392,6 +393,14 @@ class Hsa : public amd::AllStatic {
                                          const void** metadata) {
     return ROCR_DYN(hsa_amd_interop_map_buffer)(num_agents, agents, interop_handle, flags, size, ptr,
                                                 metadata_size, metadata);
+  }
+  static hsa_status_t interop_map_buffer_with_size(uint32_t num_agents, hsa_agent_t* agents,
+                                                   hsa_handle_t interop_handle, uint32_t flags,
+                                                   size_t size_hint, size_t* size, void** ptr,
+                                                   size_t* metadata_size, const void** metadata) {
+    return ROCR_DYN(hsa_amd_interop_map_buffer_with_size)(num_agents, agents, interop_handle,
+                                                          flags, size_hint, size, ptr,
+                                                          metadata_size, metadata);
   }
   static hsa_status_t interop_unmap_buffer(void* ptr) {
     return ROCR_DYN(hsa_amd_interop_unmap_buffer)(ptr);

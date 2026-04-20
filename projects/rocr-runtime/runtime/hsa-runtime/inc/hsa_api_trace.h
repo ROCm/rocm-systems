@@ -224,7 +224,6 @@ struct AmdExtTable {
   decltype(hsa_amd_interop_map_buffer)* hsa_amd_interop_map_buffer_fn;
   decltype(hsa_amd_interop_unmap_buffer)* hsa_amd_interop_unmap_buffer_fn;
   decltype(hsa_amd_image_create)* hsa_amd_image_create_fn;
-  decltype(hsa_amd_image_create_v2)* hsa_amd_image_create_v2_fn;
   decltype(hsa_amd_pointer_info)* hsa_amd_pointer_info_fn;
   decltype(hsa_amd_pointer_info_set_userdata)* hsa_amd_pointer_info_set_userdata_fn;
   decltype(hsa_amd_ipc_memory_create)* hsa_amd_ipc_memory_create_fn;
@@ -282,6 +281,8 @@ struct AmdExtTable {
   decltype(hsa_amd_signal_get_event_id)* hsa_amd_signal_get_event_id_fn;
   decltype(hsa_amd_external_semaphore_handle_open)*  hsa_amd_external_semaphore_handle_open_fn;
   decltype(hsa_amd_external_semaphore_handle_close)* hsa_amd_external_semaphore_handle_close_fn;
+  decltype(hsa_amd_image_create_v2)* hsa_amd_image_create_v2_fn;
+  decltype(hsa_amd_interop_map_buffer_with_size)* hsa_amd_interop_map_buffer_with_size_fn;
 };
 
 // Table to export HSA Core Runtime Apis
