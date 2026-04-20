@@ -57,6 +57,22 @@ link_directories(${LLVM_LIBRARY_DIRS})
 # --- LLVM definitions ---------------------------------------------------------
 add_definitions(${LLVM_DEFINITIONS})
 
+# --- No-RTTI discipline -------------------------------------------------------
+# LLVM itself is built with `-fno-rtti` by default (LLVM_ENABLE_RTTI=OFF), and
+# every public LLVM type we consume — Value, Type, Instruction, MCInst, ... —
+# relies on LLVM's hand-rolled RTTI (`isa<>` / `cast<>` / `dyn_cast<>`) rather
+# than C++ `typeid` / `dynamic_cast`. Mixing an RTTI-on TU with RTTI-off LLVM
+# libraries produces undefined-reference errors for `typeinfo` symbols on any
+# class that has a virtual method but was compiled without RTTI on the LLVM
+# side. Force the flag on every transpiler target so the whole chain agrees
+# with libLLVM.
+set(HOTSWAP_TRANSPILER_NO_RTTI_FLAG "")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU|AppleClang")
+  set(HOTSWAP_TRANSPILER_NO_RTTI_FLAG "-fno-rtti")
+elseif(MSVC)
+  set(HOTSWAP_TRANSPILER_NO_RTTI_FLAG "/GR-")
+endif()
+
 # --- Raiser + Pipeline library ------------------------------------------------
 add_library(hotswap-transpiler STATIC
   raiser.cpp
@@ -111,6 +127,11 @@ target_include_directories(hotswap-transpiler PRIVATE
 # Allow this static library to be linked into a shared library
 # (libhsa-runtime64.so when consumed from ROCR).
 set_target_properties(hotswap-transpiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(HOTSWAP_TRANSPILER_NO_RTTI_FLAG)
+  target_compile_options(hotswap-transpiler PRIVATE
+    ${HOTSWAP_TRANSPILER_NO_RTTI_FLAG})
+endif()
 
 # Public headers consumed by parent projects (pipeline.hpp, transpiler.hpp).
 # Use the hotswap/ root so consumers can write `#include "hotswap/transpiler/pipeline.hpp"`
@@ -189,6 +210,9 @@ if(HOTSWAP_TRANSPILER_BUILD_TOOLS)
 # outside the test harness and be invoked directly as a coverage tool.
 add_executable(raise_cli raise_cli.cpp)
 target_link_libraries(raise_cli PRIVATE hotswap-transpiler)
+if(HOTSWAP_TRANSPILER_NO_RTTI_FLAG)
+  target_compile_options(raise_cli PRIVATE ${HOTSWAP_TRANSPILER_NO_RTTI_FLAG})
+endif()
 
 # --- GoogleTest-based unified test binary -------------------------------------
 find_package(GTest REQUIRED)
@@ -229,6 +253,11 @@ else()
 endif()
 
 add_executable(transpiler_tests ${TEST_SOURCES})
+
+if(HOTSWAP_TRANSPILER_NO_RTTI_FLAG)
+  target_compile_options(transpiler_tests PRIVATE
+    ${HOTSWAP_TRANSPILER_NO_RTTI_FLAG})
+endif()
 
 target_compile_definitions(transpiler_tests PRIVATE
   TRANSPILER_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
