@@ -224,10 +224,22 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
         if detected_kernels else ""
     )
 
-    # A few deterministic tier-0 recommendations
-    recs: List[Dict[str, Any]] = []
+    # Bug 3 — two-bucket separation:
+    #
+    #   profiling_plan_actions : instrumentation advice (what counters to
+    #     collect, what rocprofv3 command to run first). These NEVER flow
+    #     into the main recommendations list — they belong under the
+    #     dedicated "Tier-0: Source Scan" section.
+    #
+    #   code_patterns          : actual code-level perf issues inferred
+    #     from the source (e.g. multiple synchronous hipMemcpy calls).
+    #     These DO feed recommendations_deterministic because they describe
+    #     a real performance issue in the user's source.
+    profiling_plan_actions: List[Dict[str, Any]] = []
+    code_patterns: List[Dict[str, Any]] = []
+
     if detected_kernels:
-        recs.append({
+        profiling_plan_actions.append({
             "priority": "INFO",
             "category": "Tier-0 Profiling Plan",
             "issue": f"Found {len(detected_kernels)} GPU kernel(s) in {files_scanned} source file(s)",
@@ -235,12 +247,27 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
             "actions": [suggested_cmd] if suggested_cmd else [],
         })
     if pattern_counts.get("memcpy_sync", 0) >= 3:
-        recs.append({
+        code_patterns.append({
             "priority": "MEDIUM",
             "category": "Memory Transfer",
             "issue": "Multiple synchronous hipMemcpy calls detected — may bottleneck end-to-end time.",
             "suggestion": "Consider pinned memory + hipMemcpyAsync with an explicit stream.",
         })
+
+    # Build the ``profiling_plan`` dict surfaced under
+    # ``tier0_findings.profiling_plan`` — the dedicated section formatters
+    # render side-by-side with detected code patterns.
+    profiling_plan = {
+        "suggested_first_command": suggested_cmd,
+        "suggested_counters": list(suggested_counters),
+        "actions": [suggested_cmd] if suggested_cmd else [],
+        "kernel_count": len(detected_kernels),
+        "programming_model": model,
+        "description": (
+            "Start with a --sys-trace baseline then add --pmc for hardware "
+            "counters."
+        ),
+    }
 
     return {
         "source_dir": str(root),
@@ -252,7 +279,14 @@ def scan_tier0_sources(source_dir: str) -> Optional[Dict[str, Any]]:
         "detected_kernels": detected_kernels[:100],
         "detected_patterns": patterns,
         "risk_areas": risks,
-        "recommendations": recs,
+        # ``recommendations`` is the legacy contract — now carries ONLY
+        # code-level perf issues (profiling-plan entries live under
+        # ``profiling_plan`` so they land in the dedicated Tier-0 section,
+        # not the main recommendations list). Bug 3.
+        "recommendations": code_patterns,
+        "profiling_plan": profiling_plan,
+        "profiling_plan_actions": profiling_plan_actions,
+        "code_patterns": code_patterns,
         "suggested_counters": suggested_counters,
         "suggested_first_command": suggested_cmd,
         "already_instrumented": roctx_count > 0,
@@ -416,12 +450,22 @@ def build_analysis_payload(
     except Exception:
         payload["recommendations_deterministic"] = []
 
-    # Extend deterministic recs with tier-0 recs if any, so the final "merged"
-    # recommendations list surfaces source-level findings too.
+    # Bug 3 — only ``code_patterns`` (real code-level perf issues) feed the
+    # main deterministic recommendations list. Profiling-plan instrumentation
+    # advice lives under ``tier0_findings.profiling_plan`` and is surfaced
+    # in the dedicated "Tier-0: Source Scan" section, never in the main
+    # recommendations table.
     if payload.get("tier0_findings"):
-        tier0_recs = list(payload["tier0_findings"].get("recommendations") or [])
+        # ``code_patterns`` is the post-Bug-3 field; ``recommendations`` is
+        # kept in sync for legacy callers but now also holds only code-level
+        # items. Falling back keeps pre-refactor tier0 dicts working.
+        code_recs = list(
+            payload["tier0_findings"].get("code_patterns")
+            or payload["tier0_findings"].get("recommendations")
+            or []
+        )
         payload["recommendations_deterministic"] = (
-            list(payload["recommendations_deterministic"]) + tier0_recs
+            list(payload["recommendations_deterministic"]) + code_recs
         )
 
     _progress("Deterministic analysis done")
