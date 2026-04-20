@@ -27,6 +27,7 @@
 #include <hsa/hsa.h>
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -181,6 +182,25 @@ cas_write_index_impl(QueueState* state, uint64_t expected, uint64_t value);
  */
 uint64_t
 load_write_index_impl(const QueueState* state);
+
+/// Type alias for doorbell function callback
+using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;
+
+/**
+ * @brief Process doorbell ring in trace-only mode (K=0)
+ *
+ * This function scans the write-ahead zone (from next_scan_pos to virtual_wptr),
+ * copies application packets to their submit positions, advances the real write
+ * doorbell index, and calls the provided doorbell function.
+ *
+ * For trace-only mode (k_factor=0), packets are copied in-place (src == dst).
+ *
+ * @param state Queue state
+ * @param value Signal value to pass to doorbell
+ * @param ring_doorbell Callback to ring the actual hardware doorbell
+ */
+void
+process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t ring_doorbell);
 
 }  // namespace queue_intercept
 }  // namespace hsa
