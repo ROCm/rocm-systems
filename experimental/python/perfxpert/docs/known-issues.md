@@ -3,6 +3,55 @@
 Active, living list. Entries that correspond to shipped fixes have been
 removed; check `CHANGELOG.md` for history.
 
+## Fixed in `6b03ae998a`: structural bugs across all 4 report formats
+
+Four structural issues were visible in every airgap-run webview / markdown
+/ text / json emitted from `perfxpert analyze`:
+
+- **Summary used ad-hoc `.card` markup and a raw `<pre>`.** The agent
+  narrative was emitted as `<section class="card" id="agentic-narrative">
+  <h2>Summary</h2><pre style="white-space:pre-wrap;">…</pre></section>`,
+  which did not match the `.scard / .shdr / .sbody` template every other
+  section uses. Fix: the Summary renders through
+  `_build_summary_scard`, a standard `.scard` with the primary
+  bottleneck surfaced as a `sbadge-info` header pill and warnings as a
+  `.findings` list.
+
+- **Summary landed AFTER `</body></html>`.** The splice helper fell back
+  to replacing `</body>` whenever the template's non-existent `</main>`
+  anchor failed. Combined with the Tier-0 splice this produced
+  `</body></html></section></body></html>` at EOF. Fix:
+  `_splice_after_overview` now anchors on `<h2>Overview</h2>` and
+  inserts the Summary as the FIRST `.scard` after the Overview card
+  inside `<div class="wrap">`, so it always lands at the top of the
+  report.
+
+- **Tier-0 splice embedded a complete nested `<!DOCTYPE html>…</html>`
+  document.** `_format_tier0_webview` produces a self-contained HTML
+  page; splicing it verbatim gave browsers a nested `<head>` / `<body>`
+  / `<style>` / `<script>` tree (~300 redundant lines). Fix:
+  `_build_tier0_wrapper_scard` extracts only the child
+  `<section class="scard">` elements from the tier-0 output and wraps
+  them in one parent `.scard` labelled "Tier-0 Source Scan"
+  (id `tier0-scan`). Nested scaffolding is stripped entirely — one
+  `<!DOCTYPE html>`, one `</body>`, one `</html>`.
+
+- **Markdown metadata mashup.** `**Database:** / **Analysis Date:** /
+  **Analysis Tier:**` ran directly into the narrative without a visual
+  break. Fix: the Summary block now emits
+  `## Summary\n\n**Primary bottleneck:** …\n\n<narrative>\n\n- ⚠
+  <warning>\n\n---\n\n**Database:** …`. Warnings keep the `- ` prefix
+  so existing tests that assert bullet presence still pass.
+
+The JSON formatter bumps `schema_version` to `"0.3.0"` on every
+agentic run to reflect the combined agentic-pipeline + tier-0-separation
++ Summary-section contract. `narrative` is the canonical agent-brain
+field; the legacy `llm_enhanced_explanation` mirrors it for
+backwards compat.
+
+Regression tests: `tests/test_formatters/test_report_structure.py`
+(5 cases covering all 4 formats).
+
 ## Fixed in `ec1bb44b40` / `58b1cec4ed` / `871a32981b`: report narrative + Tier-0 leakage
 
 Three related bugs in `perfxpert analyze` report output were fixed on

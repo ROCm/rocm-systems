@@ -370,39 +370,61 @@ can slice the report without reaching into nested schema shapes.
 
 Every report renders the same top-level sections in a fixed order. The
 main take-away: **the Tier-0 source scan always lives in its own
-section — NEVER folded into the main recommendations table**. Listed
-top-to-bottom:
+section — NEVER folded into the main recommendations table**.
 
-1. **Summary** — agent narrative (findings-derived: dominant kernel +
+The webview emits the following 7 top-level sections, in order:
+
+1. **Overview** — bottleneck verdict, total runtime, kernel-time KPI,
+   analysis tier (all inside the first `.scard` card right after the
+   `<header>`).
+2. **Summary** — agent narrative (findings-derived: dominant kernel +
    metric evidence + primary-bottleneck verdict). Never routing prose.
-2. **Time breakdown** — kernel / memcpy / API-overhead percentages.
-3. **Hotspots** — top-N kernels by total duration.
-4. **Memory analysis** — per-direction volume, duration, bandwidth.
-5. **Hardware counters** — Tier-2 derived metrics + raw table.
-6. **Kernel resources / occupancy** — VGPR / SGPR / LDS / scratch.
-7. **API overhead** — top HIP / HSA calls + warmup outliers.
-8. **Thread trace (Tier 3)** — only when `--att-dir` is set.
-9. **Recommendations** — merged LLM + deterministic recommendations,
-   deduped by target. **Only real perf-issue items** (e.g. hot-kernel
-   triage, cache-unfriendly access, synchronous hipMemcpy patterns).
-   Instrumentation advice (what counters to collect, what rocprofv3
-   command to run first) is **NOT** in this list.
-10. **Tier-0: Source Scan** — only when `--source-dir` is set. Split
-    into two clearly-labelled subsections:
-    - **Profiling Plan** — suggested first `rocprofv3 --sys-trace …`
-      command, suggested counters, other instrumentation actions.
-    - **Detected Code Patterns** — actual code-level perf issues found
-      by the scanner (these ALSO appear in the main Recommendations
-      list so they don't get overlooked).
-11. **Warnings** — block (empty when no warnings fire).
-12. **Metadata** — GPU arch, DB path, provider, model (footer).
+   Emitted as a `.scard` labelled "Summary" with the primary bottleneck
+   surfaced as a header pill and warnings as a findings list.
+3. **Execution Breakdown** — stacked kernel / memcpy / API-overhead /
+   GPU-idle bar + per-row details.
+4. **Top Kernel Hotspots** — top-N kernels by total duration.
+5. **Hardware Counters** — Tier-2 gauges (GPU utilization, wave
+   occupancy) + raw counter table. Renders a Tier-1 placeholder when
+   counters are missing.
+6. **Optimization Recommendations** — merged LLM + deterministic
+   recommendations, deduped by target. **Only real perf-issue items**
+   (e.g. hot-kernel triage, cache-unfriendly access, synchronous
+   hipMemcpy patterns). Instrumentation advice (what counters to
+   collect, what rocprofv3 command to run first) is **NOT** in this
+   list.
+7. **Tier-0 Source Scan** — only when `--source-dir` is set. Emitted
+   as a single wrapper `.scard` (id `tier0-scan`) containing
+   `<h3>Profiling Plan</h3>` (suggested `rocprofv3 --sys-trace …`
+   command, suggested counters, other instrumentation actions) and a
+   **Detected Code Patterns** table with actual code-level perf issues
+   found by the scanner (these ALSO appear in the main Recommendations
+   list so they don't get overlooked).
 
-In the JSON format the Tier-0 block lives under
-`.tier0_findings.profiling_plan` +
-`.tier0_findings.code_patterns`. The webview carries it under
-`<section id="tier0">` with `<h3>Profiling Plan</h3>` and a Detected
-Code Patterns table, inserted AFTER the main recommendations so the
-two groups remain visually distinct.
+The Markdown format mirrors this exactly: `# PerfXpert AI Performance
+Analysis` → `## Summary` (narrative + warnings) → `---` horizontal rule
+→ `**Database:**` / `**Analysis Date:**` / `**Analysis Tier:**`
+metadata block → `## Time Breakdown` → `## Top Kernel Hotspots` → …
+→ `## Recommendations` → (if `--source-dir`) `---` →
+`## Tier 0 — Source Scan`.
+
+The Text format prepends a SUMMARY banner (with the primary bottleneck,
+narrative, and warnings) above the TIME BREAKDOWN table, keeps every
+other section in the same order as the webview, and ends with the
+TIER-0: PROFILING PLAN + DETECTED CODE PATTERNS banners when
+`--source-dir` is set.
+
+The JSON format exposes each section under a flat top-level key
+(`.time_breakdown`, `.hotspots`, `.memory_analysis`,
+`.hardware_counters`, `.kernel_resources`, `.api_overhead`,
+`.tier0_findings`, `.recommendations`, `.narrative`,
+`.primary_bottleneck`, `.warnings`, `.metadata`). The Tier-0 block
+lives under `.tier0_findings.profiling_plan` +
+`.tier0_findings.code_patterns`. The document carries
+`"schema_version": "0.3.0"` on every agentic run (bumps to `"0.4.0"`
+when ATT data is present). The legacy `.llm_enhanced_explanation` key
+mirrors `.narrative` for backwards compat; new consumers should read
+`.narrative` directly.
 
 ## 5. Multi-GPU / MPI workflows
 
