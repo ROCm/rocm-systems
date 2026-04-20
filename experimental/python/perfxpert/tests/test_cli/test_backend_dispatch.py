@@ -466,3 +466,35 @@ def test_main_default_still_uses_opencode(
     assert rc == 0
     assert len(calls) == 1
     assert calls[0][0][0] == str(fake_bin)
+
+
+# ---------------------------------------------------------------------------
+# Blocker 5 — consent declined MUST return rc=1 (not rc=0).
+# ---------------------------------------------------------------------------
+
+
+def test_consent_denied_returns_rc_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the adapter's install raises ConsentDenied, the dispatcher
+    must surface a non-zero rc. Previously a silent rc=0 let CI pipelines
+    tag a consent-declined install as green.
+    """
+    import perfxpert.cli._backend.claude as claude_mod
+    from perfxpert.cli._backend.protocol import ConsentDenied
+
+    def _fake_install(self, cwd, **kw):
+        raise ConsentDenied("user declined install (unit test)")
+
+    monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "install", _fake_install)
+    # spawn should NEVER be called after a consent denial.
+    def _no_spawn(self, a, e, c):
+        raise AssertionError("spawn must not be called when consent denied")
+
+    monkeypatch.setattr(claude_mod.ClaudeCodeAdapter, "spawn", _no_spawn)
+    monkeypatch.setenv("PERFXPERT_CODE_NO_BANNER", "1")
+    monkeypatch.delenv(RECURSION_GUARD_ENV, raising=False)
+
+    rc = _backend_dispatch._exec_backend("claude", ["--quiet", "--dry-run", "hello"])
+    assert rc == 1, (
+        "consent-declined install must return rc=1 so CI pipelines "
+        "don't green-light a failed install (Blocker 5)"
+    )
