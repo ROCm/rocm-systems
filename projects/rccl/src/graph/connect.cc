@@ -18,11 +18,78 @@
 /******************************************************************/
 /********************* Internode connection ***********************/
 /******************************************************************/
-
-ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph** graphs, struct ncclTopoRanks* topoRanks) {
+/**
+ * ncclTopoPreset: Maps high-level topology graphs to local channel resources.
+ *
+ * This function bridges the gap between hardware discovery and active communication.
+ * It populates the local rank's neighbor info (prev/next for Rings, up/down for Trees)
+ * for every communication channel based on pre-calculated optimal paths.
+ *
+ * PRE-CONDITIONS & ASSUMPTIONS:
+ * 1. Topology Detection: The hardware (PCIe/NVLink) must already be scanned into comm->topo.
+ * 2. Graph Calculation: graphs[algo]->intra must be pre-populated. This function assumes 
+ * the 'intra' array contains local global ranks in their optimal traversal order, 
+ * indexed by [channel * localRanks + i].
+ * 3. Rank Identity: comm->rank must be set. The function "finds" itself in the intra 
+ * list to identify its immediate neighbors.
+ * 4. Resource Allocation: comm->channels must be allocated with enough space for 
+ * channel duplication (typically 2 * nChannels).
+ *
+ * LOGIC DETAILS:
+ * - Intra-node Mapping: Iterates through local GPUs to identify neighbors for Ring, 
+ * Tree, and CollNet algorithms.
+ * - Channel Duplication (Factor of 2): Clones the first N channels into the next N 
+ * slots. This maximizes bandwidth by utilizing multiple SMs and hardware paths 
+ * for the same logical operation, pushing utilization closer to physical limits 
+ * without over-congesting hardware command queues.
+ * - NVLS Setup: Identifies unique "Head" ranks for NVLink Switch groups to coordinate 
+ * multi-GPU data movement.
+ *
+ * CAVEATS:
+ * - Unbalanced Ranks: Assumes 'localRanks' is consistent with the graph's 'intra' layout.
+ * - Tree Indexing: If localRanks < 2, ensure treeIntra indices don't overflow.
+ * - Scale: Logic is O(nChannels * localRanks).
+ *
+ * @param comm     [in,out] The local communicator instance.
+ * @param graphs   [in,out] Array of pre-computed topology templates (Ring, Tree, NVLS, etc.).
+ * @param topoRanks[out] Scratchpad structure to store identified neighbor ranks.
+ * @return          ncclSuccess on successful mapping, or internal error on failure.
+ */
+ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graphs)[NCCL_NUM_ALGORITHMS], struct ncclTopoRanks* topoRanks) {
+  // --- STAGE 1: NULL Pointer & Basic State Checks ---
+  if (comm == NULL || graphs == NULL || topoRanks == NULL) return ncclInvalidArgument;
+  if (comm->topo == NULL || comm->channels == NULL) {
+    WARN("TopoPreset: Communicator state is incomplete");
+    return ncclInternalError;
+  }
+  
   int rank = comm->rank;
   int localRanks = comm->topo->nodes[GPU].count;
   int nChannels = comm->nChannels;
+
+  // --- STAGE 2: Bounds & Resource Checks ---
+  if (nChannels > MAXCHANNELS) {
+    WARN("TopoPreset: nChannels (%d) exceeds MAXCHANNELS (%d)", nChannels, MAXCHANNELS);
+    return ncclInvalidUsage;
+  }
+
+  // Ensure mandatory algorithms are present in the graphs array
+  if (!graphs[NCCL_ALGO_RING] || !graphs[NCCL_ALGO_TREE]) {
+    WARN("TopoPreset: Required topology graphs (Ring/Tree) are missing");
+    return ncclInternalError;
+  }
+
+  // --- STAGE 3: Pre-validation of Rank Presence ---
+  // We check the first channel of the Ring to ensure this rank is even part of the plan
+  bool rankFound = false;
+  int* firstRing = graphs[NCCL_ALGO_RING]->intra;
+  for (int i = 0; i < localRanks; i++) {
+    if (firstRing[i] == rank) { rankFound = true; break; }
+  }
+  if (!rankFound) {
+    WARN("TopoPreset: Local rank %d not found in intra-node graph. Topology misconfiguration.", rank);
+    return ncclInternalError;
+  }
 
   topoRanks->crossNicRing = graphs[NCCL_ALGO_RING]->crossNic;
   topoRanks->nvlsHeadNum = 0;
@@ -213,7 +280,12 @@ ncclResult_t ncclTreeBasePostset(struct ncclComm* comm,
   }
   return ncclSuccess;
 }
-
+/**
+ * connectRings: Assumes every node has entry and exit (ringRecv[channel][node] and ringSend[channel][node]) rank
+ * among all the ranks its holds i.e local ranks. This function assumes node i and ((i + 1) mod nNodes) as logically 
+ * adjacent and connects previous node exit -> current node entry  and current node exit to next node entry.
+ * Iterates over all nodes [0 to nNodes-1] 
+ */
 static ncclResult_t connectRings(struct ncclComm* comm, int* ringRecv, int* ringSend, int* ringPrev, int* ringNext) {
   int nChannels = comm->nChannels;
   int nNodes = comm->nNodes;
@@ -706,6 +778,39 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
   return ncclSuccess;
 }
 
+
+// Check if search actually filled all requested channels
+// This is temporary. It is expected that these structures are filled by 
+// individual ranks followed by bootstrap allgather. Just for debugging.
+static ncclResult_t repairMissingChannels(struct ncclTopoRanks** allTopoRanks, int nranks, int nChannels) {
+  for (int r = 0; r < nranks; r++) {
+    for (int c = 1; c < nChannels; c++) {
+      // 1. RING REPAIR: Handle uninitialized Ring data
+      // Check if current channel is 0 (uninitialized) but Channel 0 has data
+      if (allTopoRanks[r]->ringNext[c] == 0 && allTopoRanks[r]->ringPrev[c] == 0) {
+        allTopoRanks[r]->ringNext[c] = allTopoRanks[r]->ringNext[0];
+        allTopoRanks[r]->ringPrev[c] = allTopoRanks[r]->ringPrev[0];
+        allTopoRanks[r]->ringSend[c] = allTopoRanks[r]->ringSend[0];
+        allTopoRanks[r]->ringRecv[c] = allTopoRanks[r]->ringRecv[0];
+      }
+
+      // 2. TREE REPAIR: Trees use -1 as the 'None' sentinel
+      if (allTopoRanks[r]->treeToParent[c] == -1 && 
+          allTopoRanks[r]->treeToChild0[c] == -1) {
+        allTopoRanks[r]->treeToParent[c] = allTopoRanks[r]->treeToParent[0];
+        allTopoRanks[r]->treeToChild0[c] = allTopoRanks[r]->treeToChild0[0];
+        allTopoRanks[r]->treeToChild1[c] = allTopoRanks[r]->treeToChild1[0];
+      }
+
+      // 3. NVLS REPAIR: Check pointer validity before access
+      if (allTopoRanks[r]->nvlsHeads && allTopoRanks[r]->nvlsHeads[c] == 0) {
+        allTopoRanks[r]->nvlsHeads[c] = allTopoRanks[r]->nvlsHeads[0];
+      }
+    }
+  }
+  return ncclSuccess;
+}
+
 NCCL_PARAM(UnpackDoubleNChannels, "UNPACK_DOUBLE_NCHANNELS", 1);
 RCCL_PARAM(OutputTrees, "OUTPUT_TREES", 0);
 
@@ -738,6 +843,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   NCCLCHECKGOTO(ncclCalloc(&treeToChild1, nNodes*MAXCHANNELS), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&nvlsHeads, nNodes*MAXCHANNELS), ret, fail);
 
+  repairMissingChannels(allTopoRanks,nranks,nChannels);
   // Alternate rings to avoid crossing rails.
   // CrossNic values could be not the same on all nodes as it depends on the number of net devs and the NVLink bandwidth.
   // Therefore, it's only done if the rank obtained a solution with crossNic=2.
@@ -967,7 +1073,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     comm->collChannels = std::min(comm->collChannels, comm->nChannels);
   }
 
-  // Create rings array and check all is fine
   NCCLCHECKGOTO(ncclBuildRings(nChannels, rings, comm->rank, comm->nRanks, ringPrev, ringNext), ret, fail);
 
 exit:
