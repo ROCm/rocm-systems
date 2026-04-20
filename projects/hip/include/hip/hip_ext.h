@@ -10,6 +10,7 @@
 #if defined(__cplusplus)
 #include <tuple>
 #include <type_traits>
+#include <array>
 #endif
 /** @addtogroup Execution Execution Control
  *  @{
@@ -126,15 +127,19 @@ inline void hipExtLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& d
                                   std::uint32_t sharedMemBytes, hipStream_t stream,
                                   hipEvent_t startEvent, hipEvent_t stopEvent, std::uint32_t flags,
                                   Args... args) {
-  constexpr size_t count = sizeof...(Args);
-  auto tup_ = std::tuple<Args...>{args...};
-  auto tup = validateArgsCountType(kernel, tup_);
-  void* _Args[count];
-  pArgs<0>(tup, _Args);
-
+  validateArgs(kernel);
   auto k = reinterpret_cast<void*>(kernel);
-  hipExtLaunchKernel(k, numBlocks, dimBlocks, _Args, sharedMemBytes, stream, startEvent, stopEvent,
-                     (int)flags);
+
+  if constexpr (std::is_same_v<F, void (*)(Args...)>) {
+    std::array<void*, sizeof...(Args)> ptrArgsArr{static_cast<void*>(&args)...};
+    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
+                       startEvent, stopEvent, (int)flags);
+  } else {
+    auto formals = validateArgsCountType(kernel, args...);
+    auto ptrArgsArr = pArgs(formals);
+    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
+                       startEvent, stopEvent, (int)flags);
+  }
 }
 
 #endif  // defined(__cplusplus)

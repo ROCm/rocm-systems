@@ -7,7 +7,7 @@ setup(
     author="AMD",
     author_email="amd-smi.support@amd.com",
     description="AMDSMI Python LIB - AMD GPU Monitoring Library",
-    url="https://github.com/ROCm/amdsmi",
+    url="https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",

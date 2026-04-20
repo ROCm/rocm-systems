@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -76,7 +76,9 @@ struct QueueSemaphoreCreateInfo
             uint32 gpuOnly                :  1;
             /// This queue semaphore will be a monitored fence if this flag set, even if OS supports native fence.
             uint32 forceUseMonitoredFence :  1;
-            uint32 reserved               : 25;  ///< Reserved for future use.
+            /// This queue semaphore can be shared across adapters
+            uint32 crossAdapter           :  1;
+            uint32 reserved               : 24;  ///< Reserved for future use.
         };
         uint32 u32All;              ///< Flags packed as 32-bit uint.
     } flags;                        ///< Queue semaphore creation flags.
@@ -125,11 +127,6 @@ struct ExternalQueueSemaphoreOpenInfo
 
     OsExternalHandle externalSemaphore; ///< External shared semaphore handle.
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 882
-#if defined(__unix__) && PAL_KMT_BUILD
-    uint64           syncFdSignalValue; ///< Signal timeline value when importing the state of a sync file
-#endif
-#endif
 };
 
 /// Specifies parameters for exporting a queue semaphore. Input structure to IQueueSemaphore::ExportExternalHandle().

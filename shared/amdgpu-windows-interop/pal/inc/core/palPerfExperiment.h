@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -148,10 +148,6 @@ enum class PerfTraceMarkerType : uint32
 {
     SqttA = 0x0,
     SqttB = 0x1,
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 874
-    A = SqttA,
-    B = SqttB,
-#endif
     SpmA  = 0x2,
     SpmB  = 0x3,
     SpmC  = 0x4,
@@ -302,6 +298,15 @@ enum ThreadTraceRegTypeFlags : Pal::uint32
     AllReadsAndWrites     = 0xFFFFFFFF  ///< All reads and writes. Not encouraged. This can cause a GPU hang.
 };
 
+/// Enumeration of SQ Thread Trace wavestart extension modes. All versions of Thread Trace (TT) are represented.
+enum ThreadTraceWaveStartExt : Pal::uint32
+{
+    ExtShort = 0x00000000, ///< No extensions enabled on wavestart tokens. TT 3.0.
+    ExtAlloc = 0x00000001, ///< Wavestart tokens extended with VGPR and LDS base addresses. TT 3.0.
+    ExtPbbId = 0x00000002, ///< Wavestart tokens extended with relative draw ID for PBB. TT 3.0.
+    ExtWgId  = 0x00000003  ///< Wavestart tokens extended with workgroup (WG) ID and flags for dynamic VGPRs and last wave in WG. TT 3.3.
+};
+
 /// Represents thread trace token types and register types that can be enabled to be reported in the trace data. If
 /// a particular token type or reg type is unsupported, no error is returned and the thread trace is configured with
 /// the minimum supported tokens in the user provided config.
@@ -326,26 +331,27 @@ struct ThreadTraceInfo
         struct
         {
             // Options common to all traces
-            uint32 bufferSize                            :  1;
+            uint32                  bufferSize                            :  1;
 
             // Thread trace only options
-            uint32 threadTraceTargetSh                   :  1;
-            uint32 threadTraceTargetCu                   :  1;
-            uint32 threadTraceSh0CounterMask             :  1;
-            uint32 threadTraceSh1CounterMask             :  1;
-            uint32 threadTraceSimdMask                   :  1;
-            uint32 threadTraceVmIdMask                   :  1;
-            uint32 threadTraceRandomSeed                 :  1;
-            uint32 threadTraceShaderTypeMask             :  1;
-            uint32 threadTraceIssueMask                  :  1;
-            uint32 threadTraceWrapBuffer                 :  1;
-            uint32 threadTraceStallBehavior              :  1;
-            uint32 threadTraceTokenConfig                :  1;
-            uint32 threadTraceStallAllSimds              :  1;
-            uint32 threadTraceExcludeNonDetailShaderData :  1;
-            uint32 threadTraceEnableExecPop              :  1;
-            uint32 placeholder3                          :  1;
-            uint32 reserved                              : 15;
+            uint32                  threadTraceTargetSh                   :  1;
+            uint32                  threadTraceTargetCu                   :  1;
+            uint32                  threadTraceSh0CounterMask             :  1;
+            uint32                  threadTraceSh1CounterMask             :  1;
+            uint32                  threadTraceSimdMask                   :  1;
+            uint32                  threadTraceVmIdMask                   :  1;
+            uint32                  threadTraceRandomSeed                 :  1;
+            uint32                  threadTraceShaderTypeMask             :  1;
+            uint32                  threadTraceIssueMask                  :  1;
+            uint32                  threadTraceWrapBuffer                 :  1;
+            uint32                  threadTraceStallBehavior              :  1;
+            uint32                  threadTraceTokenConfig                :  1;
+            uint32                  threadTraceStallAllSimds              :  1;
+            uint32                  threadTraceExcludeNonDetailShaderData :  1;
+            uint32                  threadTraceEnableExecPop              :  1;
+            ThreadTraceWaveStartExt threadTraceWaveStartExt               :  2;
+            uint32                  placeholder3                          :  1;
+            uint32                  reserved                              : 13;
         };
         uint32 u32All;
     } optionFlags;

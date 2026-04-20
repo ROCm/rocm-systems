@@ -44,81 +44,17 @@ deviceLib:
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
     tags: [memory]
-  Unit_deviceAllocation_New_PerThread_PrimitiveDataType:
-    <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_Malloc_PerThread_StructDataType:
-    <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_New_PerThread_StructDataType:
-    <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_InOneThread_AccessInAllThreads:
-    <<: *level_2
-    # (amd_windows) Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # (amd_windows) all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    # (amd_wsl) SWDEV-427101:Below test fails randomly in PSDB
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_Malloc_AcrossKernels:
+  Unit_deviceAllocation_ComplexDataType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
     tags: [memory]
-  Unit_deviceAllocation_New_AcrossKernels:
+  Unit_deviceAllocation_CodeObjects:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_Malloc_ComplexDataType:
-    <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows]
-    tags: [memory]
-  Unit_deviceAllocation_New_ComplexDataType:
-    <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_Malloc_UnionType:
-    <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_New_UnionType:
-    <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_Malloc_SingleCodeObj:
-    <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_New_SingleCodeObj:
-    <<: *level_2
-    # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
-    # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm:
-    <<: *level_2
-    tags: [memory]
-  Unit_deviceAllocation_New_PerThread_MultKerMultStrm:
-    <<: *level_2
     tags: [memory]
   Unit_deviceAllocation_Malloc_PerThread_Graph:
     <<: *level_2
@@ -132,12 +68,7 @@ deviceLib:
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
     tags: [memory]
-  Unit_deviceAllocation_Malloc_DeviceFunc:
-    <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_New_DeviceFunc:
+  Unit_deviceAllocation_DeviceFunc:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
@@ -147,20 +78,7 @@ deviceLib:
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
     tags: [memory]
-  Unit_deviceAllocation_Malloc_MulKernels_MulThreads:
-    <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_New_MulKernels_MulThreads:
-    <<: *level_2
-    # Note: devicelib hangs and failures
-    disabled: [amd_windows, amd_wsl]
-    tags: [memory]
-  Unit_deviceAllocation_Malloc_SingKernels_MulThreads:
-    <<: *level_2
-    tags: [memory]
-  Unit_deviceAllocation_New_SingKernels_MulThreads:
+  Unit_deviceAllocation_SingKernels_MulThreads:
     <<: *level_2
     tags: [memory]
   Unit_deviceAllocation_Malloc_MulCodeObj:
@@ -360,16 +278,7 @@ deviceLib:
   Unit_bf162_floor_ceil:
     <<: *level_2
     tags: [types]
-  Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger:
-    <<: *level_2
-    tags: [atomics]
-  Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat:
-    <<: *level_2
-    tags: [atomics]
-  Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger:
-    <<: *level_2
-    tags: [atomics]
-  Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat:
+  Unit_AtomicsWithRandomActiveLanesInWavefront:
     <<: *level_2
     tags: [atomics]
   Unit_fp16_arith:
@@ -462,22 +371,10 @@ deviceLib:
   Unit_ocp_fp4_from_double_full_range_device:
     <<: *level_2
     tags: [types]
-  Unit_AtomicAdd_CoherentwithUnsafeflag:
+  Unit_AtomicAdd_Coherent:
     <<: *level_2
     tags: [atomics]
-  Unit_AtomicAdd_Coherentwithoutflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_AtomicAdd_Coherentwithnounsafeflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_AtomicAdd_NonCoherentwithoutflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_AtomicAdd_NonCoherentwithnounsafeflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_AtomicAdd_NonCoherentwithUnsafeflag:
+  Unit_AtomicAdd_NonCoherent:
     <<: *level_2
     tags: [atomics]
   Unit_BuiltinAtomics_fmaxCoherentGlobalMem:
@@ -522,22 +419,10 @@ deviceLib:
   Unit_unsafeAtomicAdd_NonCoherentRTC:
     <<: *level_2
     tags: [atomics]
-  Unit_unsafeAtomicAdd_CoherentwithUnsafeflag:
+  Unit_unsafeAtomicAdd_Coherent:
     <<: *level_2
     tags: [atomics]
-  Unit_unsafeAtomicAdd_Coherentwithoutflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_unsafeAtomicAdd_CoherentwithnoUnsafeflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_unsafeAtomicAdd_NonCoherentwithoutflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag:
-    <<: *level_2
-    tags: [atomics]
-  Unit_unsafeAtomicAdd_NonCoherentwithunsafeatomicsflag:
+  Unit_unsafeAtomicAdd_NonCoherent:
     <<: *level_2
     tags: [atomics]
   Unit_fp8_fnuz_compare_host_device:

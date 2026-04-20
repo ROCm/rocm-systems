@@ -1316,7 +1316,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 			pr_info("failed to get marketing name for device ID 0x%x\n", props->DeviceId);
 
 		/* Get VGPR/SGPR size in byte per CU */
-		props->SGPRSizePerCU = SGPR_SIZE_PER_CU;
+		props->SGPRSizePerCU = hsakmt_get_sgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
 		props->VGPRSizePerCU = hsakmt_get_vgpr_size_per_cu(HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
 
 	} else if (props->DeviceId)

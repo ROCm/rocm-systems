@@ -254,22 +254,22 @@ module:
     # (amd_windows) Below tests are failing PSDB
     # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
     disabled: [amd_windows, nvidia_windows]
-    tags: [resource]
+    tags: [resource, image]
   Unit_hipModuleGetTexRef_Negative_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-    tags: [resource]
+    tags: [resource, image]
   Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-166
     disabled: [amd_windows]
-    tags: [resource]
+    tags: [resource, image]
   Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-167
     disabled: [amd_windows]
-    tags: [resource]
+    tags: [resource, image]
   Unit_hipFuncSetAttribute_Basic:
     <<: *level_2
     tags: [function]
