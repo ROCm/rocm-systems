@@ -30,6 +30,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_examples VERSION 1.0.0 LANGUAGES CXX)
 
 find_package(MPI)
+find_package(PMIx)
 find_package(hip REQUIRED PATHS /opt/rocm)
 if (NOT TARGET roc::rocshmem)
   find_package(rocshmem REQUIRED PATHS /opt/rocm)
@@ -64,6 +65,12 @@ foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
     PRIVATE
       roc::rocshmem
       $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+      $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
+  )
+  target_compile_definitions(
+    ${EXECUTABLE_NAME}
+    PRIVATE
+      $<$<TARGET_EXISTS:PMIx::pmix>:HAVE_PMIX=1>
   )
 endforeach()
 
