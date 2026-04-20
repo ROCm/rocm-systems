@@ -37,7 +37,7 @@ no user-side install is required for the tool-priority gate to work.
 | Backend | Subcommand | LLM | Config location | Scope | Gate hook | MCP tool prefix |
 |---------|-----------|-----|-----------------|-------|-----------|-----------------|
 | **opencode** (default, bundled) | `perfxpert-code` | Any (via opencode provider) | `~/.cache/perfxpert/opencode/opencode.json` | Per-bundle | Patched system prompt + fork patches 0010, 0020 | `perfxpert_*` |
-| **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./.claude/CLAUDE.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
+| **Claude Code** | `perfxpert-code claude` | Anthropic Claude | `./.mcp.json` + `./CLAUDE.local.md` + `./.claude/settings.json` | Project | Native `PreToolUse` hook (event-based lift) | `mcp__perfxpert__*` |
 | **Gemini CLI** | `perfxpert-code gemini` | Google Gemini | `~/.gemini/settings.json` + `./.perfxpert/AGENTS.md` | User (MCP) + project (prompt) | `allowedTools` restriction (event-based lift) | `mcp_perfxpert_*` |
 | **Codex CLI** | `perfxpert-code codex` | OpenAI | `~/.codex/config.toml` (TOML: trust + MCP) + `./.perfxpert/AGENTS.md` | User (MCP + trust) + project (prompt) | Prompt-layer-only (Codex `PreToolUse` is Bash-only — see decision record) | `mcp_perfxpert_*` |
 
@@ -64,8 +64,8 @@ perfxpert-code
 
 Registers perfxpert in the project `.mcp.json`, stages the rendered
 prompt at `.perfxpert/AGENTS.md`, writes a pointer at
-`.claude/CLAUDE.md`, and installs the native `PreToolUse` hook inside
-`.claude/settings.json`.
+`CLAUDE.local.md` (at the project root), and installs the native
+`PreToolUse` hook inside `.claude/settings.json`.
 
 ```bash
 # SKIP-SAMPLE — requires claude CLI ≥ 2.1.59 on PATH
@@ -75,7 +75,7 @@ perfxpert-code claude
 claude mcp add perfxpert --scope project -- perfxpert-mcp
 ```
 
-If your project already tracks `.claude/CLAUDE.md` (common for teams),
+If your project already tracks `CLAUDE.local.md` (common for teams),
 the adapter writes a pointer by default and leaves your tracked file
 alone. To append the rendered prompt into your tracked file instead,
 pass `--allow-agents-md-append` (re-prompts consent because the file
@@ -194,7 +194,7 @@ perfxpert-code uninstall --yes claude
 On a successful uninstall, all of the following are reverted: MCP
 registration entry, `.perfxpert/AGENTS.md` cache, any pointer file
 the adapter wrote, and the gate-hook settings block. Files the user
-created (e.g. a pre-existing `.claude/CLAUDE.md`) are preserved. For
+created (e.g. a pre-existing `CLAUDE.local.md`) are preserved. For
 Codex specifically, the `[projects."<cwd>"]` trust entry that the
 install added is also removed; any other `[projects.*]` entries are
 preserved untouched.

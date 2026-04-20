@@ -396,7 +396,7 @@ session:
 
 | Subcommand | Backend | Config file written | Tool-name wire format |
 |---|---|---|---|
-| `perfxpert-code claude`  | Claude Code | `.mcp.json` + `.claude/CLAUDE.md` + `.claude/settings.json` | `mcp__perfxpert__<tool>` |
+| `perfxpert-code claude`  | Claude Code | `.mcp.json` + `CLAUDE.local.md` + `.claude/settings.json` | `mcp__perfxpert__<tool>` |
 | `perfxpert-code gemini`  | Gemini CLI  | `~/.gemini/settings.json` (list-append, never touches `GEMINI.md`) | `mcp_perfxpert_<tool>` |
 | `perfxpert-code codex`   | Codex CLI   | `~/.codex/config.toml` (trust gate + MCP) + `.perfxpert/AGENTS.md` | `mcp_perfxpert_<tool>` |
 
@@ -409,7 +409,7 @@ All three subcommands accept the same dispatcher-owned flags:
   (`PERFXPERT_IN_AGENT_SESSION`) and any clobber refusals.
 - `--allow-agents-md-append` — opt-in for merging into a
   git-tracked `CLAUDE.md` / `AGENTS.md` (default: refuse, stage at
-  `.claude/CLAUDE.md` / dedicated pointer instead — I3).
+  `CLAUDE.local.md` / dedicated pointer instead — I3).
 
 Example:
 
