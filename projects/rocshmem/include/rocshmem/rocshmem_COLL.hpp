@@ -233,7 +233,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoallv_wg(rocshmem_team_t t
 /**
  * @name SHMEM_BROADCAST
  * @brief Perform a broadcast between PEs in the active set. The caller
- * is blocked until the broadcase completes.
+ * is blocked until the broadcast completes.
  *
  * This function must be called as a work-group collective.
  *

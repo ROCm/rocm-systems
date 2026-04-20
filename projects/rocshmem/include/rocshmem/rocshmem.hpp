@@ -72,7 +72,7 @@ constexpr char VERSION[] = "3.3.0";
 
 /**
  * @brief Initialize the rocSHMEM runtime and underlying transport layer.
- *        This is equivalent to the previous function, using implicitely
+ *        This is equivalent to the previous function, using implicitly
  *        MPI_COMM_WORLD for initialization
  */
 __host__ void rocshmem_init(void);
@@ -168,7 +168,7 @@ __host__ int rocshmem_init_attr(unsigned int flags, rocshmem_init_attr_t *attr);
 __host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid);
 
 /**
- * @brief Initalizes the rocshmem_init_attr_t struct
+ * @brief Initializes the rocshmem_init_attr_t struct
  *
  * @param[in] rank     rank of the calling process
  * @param[in] nranks   number of pes

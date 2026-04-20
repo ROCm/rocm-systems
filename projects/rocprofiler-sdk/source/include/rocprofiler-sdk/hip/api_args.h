@@ -3458,6 +3458,20 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
     struct
     {
+        int*                     clusterSize;
+        const void*              f;
+        const hipLaunchConfig_t* config;
+    } hipOccupancyMaxPotentialClusterSize;
+    struct
+    {
+        int*                     numClusters;
+        const void*              f;
+        const hipLaunchConfig_t* config;
+    } hipOccupancyMaxActiveClusters;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+    struct
+    {
         hipExecutionCtx_t*   ctx;
         hipDevResourceDesc_t desc;
         int                  device;

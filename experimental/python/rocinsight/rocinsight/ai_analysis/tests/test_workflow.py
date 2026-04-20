@@ -888,7 +888,9 @@ def test_phase5_save_does_not_use_conv_attribute():
     ws = WorkflowSession(app_command="./app")
     snap = _make_high_snap()
 
-    assert not hasattr(ws, "_conv"), "WorkflowSession must not have _conv"
+    # WorkflowSession now has _conv (lazy-initialized via _ensure_conv)
+    # but it should be None when no LLM provider is set
+    assert ws._conv is None, "WorkflowSession._conv should be None without LLM provider"
 
     with patch.object(ws, "_save_session"), patch("builtins.input", side_effect=["s", "n"]):
         # Must not raise AttributeError
@@ -921,7 +923,8 @@ def test_phase7_save_does_not_use_conv_attribute():
     ws = WorkflowSession(app_command="./app")
     ws._state.profiling_command = "rocprofv3 --sys-trace -- ./app"
 
-    assert not hasattr(ws, "_conv"), "WorkflowSession must not have _conv"
+    # WorkflowSession now has _conv (lazy-initialized via _ensure_conv)
+    assert ws._conv is None, "WorkflowSession._conv should be None without LLM provider"
 
     with patch.object(ws, "_save_session"), patch("builtins.input", side_effect=["s", "n"]):
         ws._phase7_reprofiling_prompt()  # must not raise

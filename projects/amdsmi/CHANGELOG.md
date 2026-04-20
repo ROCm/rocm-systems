@@ -27,6 +27,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi metric` crashing with `TypeError` on MI300A when no CPU flags are specified**.  
+  - When no CPU arguments are passed, `metric_cpu()` sets all boolean CPU args to `True` to display all available data. `--cpu-svi3-vr-controller-temp` takes a TYPE argument (and optional RAIL_INDEX) rather than a boolean flag — setting it to `True` caused a `TypeError` crash when the code tried to subscript it with `[0][0]`. Added `cpu_svi3_vr_controller_temp` to the show-all exclusion list, following the existing pattern for `cpu_lclk_dpm_level`, `cpu_io_bandwidth`, `cpu_dimm_sb_reg`, and similar argument-taking flags.
+
 - **Fixed `amdsmi_get_gpu_accelerator_partition_profile()` returning incorrect `num_partitions` when `num_partition` is unavailable from GPU metrics**.  
   - GPU metrics no longer always provides `num_partition`. The function now derives the partition count from the active partition type when `num_partition` is not available:
     - SPX → 1, DPX → 2, TPX → 3, QPX → 4
@@ -62,6 +65,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed references to deprecated `amd-smi reset -r`**.  
   - CLI help text and memory partition change warnings no longer reference `amd-smi reset -r` for driver reloading.
   - Users are now directed to use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload the driver after partition changes.
+
+- **Changed power APIs to have consistent output parameter types**.  
+  - Modified 6 cpu power API's to have consistent output power types. All set and get API's have uint32_t output values.
+  - Modified get and set API's that had double output types to have uint32_t output types.
+    - amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle, uint32_t* ppower);
+    - amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle, uint32_t* pcap);
+    - amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle, uint32_t* pmax);
+    - amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
+                                         uint32_t* power_efficiency_mode,
+                                         uint32_t* utilization, uint32_t* ppt_limit);
+    - amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_handle, uint32_t* power);
+    - amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_handle, uint32_t* sdps_limit);
 
 ## amd_smi_lib for ROCm 7.12.0
 
@@ -134,6 +149,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Modified asic_serial to display "N/A" when not available**.  
   - Skipped setting asic_serial when kfd node unique_id is 0.
   - Python interface will validate against max uint64 to display N/A.
+
+- **Made `libdrm` a required runtime dependency** ([#3349](https://github.com/ROCm/rocm-systems/pull/3349)).  
+  - Debian: `libdrm-dev` moved from `Recommends` to `Depends` on the `amd-smi-lib` package; `libdrm-amdgpu-dev` remains in `Recommends` (not shipped by Debian 10).
+  - RPM: `libdrm-devel` moved from `Suggests` to `Requires`; `libdrm-amdgpu-devel` remains in `Suggests` (not shipped by Azure Linux).
+  - Building from source now requires `libdrm-dev` / `libdrm-devel`; the project `Dockerfile` was updated accordingly.
+  - Removed the "libdrm is optional" note from `docs/install/install.md` — firmware and hardware-IP queries previously gated on libdrm are now always available.
 
 ### Removed
 

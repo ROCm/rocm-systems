@@ -1521,8 +1521,6 @@ typedef union
     } ui32;
 } HSA_REGISTER_MEM_FLAGS;
 
-#pragma pack(pop, hsakmttypes_h)
-
 typedef enum _HsaAisFlags {
     HSA_AIS_READ = 0x1,
     HSA_AIS_WRITE= 0x2
@@ -1578,6 +1576,7 @@ typedef struct _HsaStructureSizes {
   HSAuint16 SizeOfHsaNodeProperties;  // sizeof(HsaNodeProperties)
   HSAuint16 Reserved[6];
 } HsaStructureSizes;
+#pragma pack(pop, hsakmttypes_h)
 
 #ifdef __cplusplus
 }   //extern "C"

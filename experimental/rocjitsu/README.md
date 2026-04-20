@@ -5,10 +5,17 @@ applications.
 
 ## Supported architectures
 
-| Architecture | ISA | Status |
+| Architecture | ISA Family | Status |
 |---|---|---|
+| CDNA1&trade; (gfx908) | GFX9 | Experimental |
+| CDNA2&trade; (gfx90a) | GFX9 | Experimental |
 | CDNA3&trade; (gfx94x) | GFX9 | Experimental |
 | CDNA4&trade; (gfx950) | GFX9 | Experimental |
+| RDNA1&trade; (gfx1010) | GFX10 | Experimental |
+| RDNA2&trade; (gfx1030) | GFX10 | Experimental |
+| RDNA3&trade; (gfx1100) | GFX11 | Experimental |
+| RDNA3.5&trade; (gfx1150) | GFX11 | Experimental |
+| RDNA4&trade; (gfx1200) | GFX12 | Experimental |
 | RISC-V RV32I/RV64I | RV32IMAFDC | Experimental |
 
 ## Features
@@ -57,6 +64,7 @@ lib/
       vm/               Virtual machine layer
         amdgpu/         AMD GPU hardware model (CU, SE, XCD, caches, pipelines)
         risc_v/         RISC-V hart model
+      kmd/linux/        KMD emulation: LD_PRELOAD interposer + simulated KFD driver
 lib/python/amdisa/      ISA code generation toolchain
 cmake/                  CMake modules (rj_configure_target, rj_add_object_library, rj_add_device_kernel)
 schemas/                FlatBuffers schemas (simulation_config, checkpoint)
@@ -78,6 +86,12 @@ scripts/                Utility scripts (clang_format.sh)
 
 Third-party dependencies (Google Test, FlatBuffers, GLFW, Dear ImGui, imnodes,
 ImPlot) are fetched automatically via CMake `FetchContent`.
+
+On Debian/Ubuntu systems, building the gui requires these development packages:
+
+```bash
+sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+```
 
 ## Building
 
@@ -115,6 +129,13 @@ cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
 
 ## Running tests
 
+If CMake fails while configuring or building the test targets on Debian/Ubuntu,
+install the GLFW X11 development headers first:
+
+```bash
+sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+```
+
 ```bash
 # Via CTest
 ctest --test-dir build
@@ -132,6 +153,33 @@ ctest --test-dir build
 Device kernel tests (matmul, vector_add) require an ROCm installation with
 `amdclang++`. When `amdclang++` is not found, these tests are automatically
 disabled at build time.
+
+## Running ROCm workloads on the simulated GPU
+
+`librocjitsu_kmd.so` is an LD_PRELOAD interposer that makes the real ROCm
+runtime (ROCR + HIP) run against the simulated GPU instead of a physical one.
+It intercepts `/dev/kfd` and the KFD sysfs topology, routing all KFD ioctls
+to the simulator.
+
+```bash
+# Required environment variables
+export RJ_CONFIG=configs/amdgpu_cdna4.json
+export RJ_SCHEMA=schemas/simulation_config.fbs
+
+# Run an HSA application
+LD_PRELOAD=build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+  ./my_hsa_app
+
+# Run a HIP application
+LD_PRELOAD=build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+  ./my_hip_app
+
+# Run the bundled HSA/HIP integration tests
+ctest --test-dir build/tests -R "HsaTest|HipMemcpy|HipVectorAdd" -V
+```
+
+The interposer is Linux-only. It requires no kernel modules and no physical
+AMD GPU.
 
 ## Configuration
 

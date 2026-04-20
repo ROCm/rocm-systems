@@ -617,14 +617,14 @@ class TestInteractiveIntegration(unittest.TestCase):
         ctx = SessionContext()
         self.assertEqual(ctx.iteration, 0)
 
-    def test_workflow_session_has_no_conv(self):
-        """WorkflowSession must not own a _conv attribute."""
+    def test_workflow_session_conv_is_none_without_llm(self):
+        """WorkflowSession._conv should be None when no LLM provider is set."""
         from rocinsight.ai_analysis.interactive import WorkflowSession
 
         ws = WorkflowSession(app_command="./app")
-        self.assertFalse(
-            hasattr(ws, "_conv"),
-            "WorkflowSession must not own _conv",
+        self.assertIsNone(
+            ws._conv,
+            "WorkflowSession._conv should be None without LLM provider",
         )
 
 

@@ -82,14 +82,14 @@ typedef struct {
 
 #define CHECK_ALLOWED_RANGE(str, val, min, max) { \
     if (val < min || val > max) { \
-        ErrorLog(logger_, STR(str) + " value not in valid range: " + TOSTR(val) + ", allowed (min,max): " + TOSTR(min) + "," + TOSTR(max));\
+        ErrorLog(g_rocdec_logger, STR(str) + " value not in valid range: " + TOSTR(val) + ", allowed (min,max): " + TOSTR(min) + "," + TOSTR(max));\
         return PARSER_OUT_OF_RANGE; \
     } \
 }
 
 #define CHECK_ALLOWED_MAX(str, val, max) { \
     if (val > max) { \
-        ErrorLog(logger_, STR(str) +  " value greater than maximum allowed value: " + TOSTR(val) + ", max: " + TOSTR(max)); \
+        ErrorLog(g_rocdec_logger, STR(str) +  " value greater than maximum allowed value: " + TOSTR(val) + ", max: " + TOSTR(max)); \
         return PARSER_OUT_OF_RANGE; \
     } \
 }
@@ -110,7 +110,6 @@ class RocVideoParser {
 public:
     RocVideoParser();    // default constructor
     virtual ~RocVideoParser();
-    RocVideoParser(RocdecParserParams *pParams, u_int log_level) : parser_params_(*pParams) {logger_.SetLogLevel(log_level);};
     virtual void SetParserParams(RocdecParserParams *pParams) { parser_params_ = *pParams; };
     RocdecParserParams *GetParserParams() {return &parser_params_;};
     virtual rocDecStatus Initialize(RocdecParserParams *pParams);
@@ -189,8 +188,6 @@ protected:
     uint8_t             *sei_payload_buf_;  // buffer to store SEI playload. Allocated at run time.
     uint32_t            sei_payload_buf_size_;
     uint32_t            sei_payload_size_;  // total SEI payload size of the current frame
-
-    RocDecLogger logger_;
 
     /*! \brief Function to check the initially set (by decoder) decode buffer pool size and adjust if needed
      *  \param dpb_size The DPB buffer size of the current sequence

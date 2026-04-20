@@ -28,6 +28,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include "envvar.hpp"
+#include "log.hpp"
 #include "hip_allocator.hpp"
 
     // the using statements remain in the code until we commit
@@ -63,16 +64,14 @@ namespace rocshmem {
     int hip_dev_id{};
     hipError_t err = hipGetDevice(&hip_dev_id);
     if (err != hipSuccess) {
-      printf("Could not get current device. Aborting\n");
-      abort();
+      LOG_ERROR_ABORT("Could not get current device. Aborting");
     }
 
     char arch_name[256];
     hipDeviceProp_t prop;
     err = hipGetDeviceProperties(&prop, hip_dev_id);
     if (err != hipSuccess) {
-      printf("Could not get device properties. Aborting\n");
-      abort();
+      LOG_ERROR_ABORT("Could not get device properties. Aborting");
     }
     std::snprintf(arch_name, sizeof(arch_name), "%s",prop.gcnArchName);
 
@@ -87,7 +86,7 @@ namespace rocshmem {
     // Temporary hack that will be fixed when we add the ability
     // to use an environment variable to set the Heap Allocatory Type.
     // With that commit we will introduce also a generic 'default'
-    // setting that can be adjusted for differnt architectures.
+    // setting that can be adjusted for different architectures.
     // This is to avoid failures with rocSHMEM on gfx1201 if using
     // Uncached allocator with ROCm 7.2.0
     if (strncmp(arch_name, "gfx1201", strlen("gfx1201")) == 0) {
