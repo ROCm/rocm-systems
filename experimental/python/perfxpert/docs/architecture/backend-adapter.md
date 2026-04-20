@@ -81,7 +81,7 @@ mid-install, there is no partial MCP registration to clean up.
 | Backend | MCP registration target | Prompt cache | Gate hook surface | Session state |
 |---------|------------------------|--------------|-------------------|---------------|
 | opencode (bundled) | `~/.cache/perfxpert/opencode/opencode.json` | Patched system prompt (AMD fork patches 0010+0020) | Fork patches 0010, 0012-0017 + STRICT-TOOL-DISCIPLINE stanza | N/A — state carried in opencode session |
-| Claude Code | `<cwd>/.mcp.json` (project scope) | `<cwd>/.perfxpert/AGENTS.md` + `<cwd>/.claude/CLAUDE.md` pointer | Native `PreToolUse` hook in `<cwd>/.claude/settings.json` | `<cwd>/.claude/.perfxpert-gate-state.<session_id>.json` |
+| Claude Code | `<cwd>/.mcp.json` (project scope) | `<cwd>/.perfxpert/AGENTS.md` + `<cwd>/CLAUDE.local.md` pointer | Native `PreToolUse` hook in `<cwd>/.claude/settings.json` | `<cwd>/.claude/.perfxpert-gate-state.<session_id>.json` |
 | Gemini CLI | `~/.gemini/settings.json` (user scope) | `<cwd>/.perfxpert/AGENTS.md` referenced via `context.fileName` list-append | `allowedTools` restriction in `~/.gemini/settings.json` | In-settings (session-ephemeral via `allowedTools`) |
 | Codex CLI | `~/.codex/config.toml` (user scope — `[mcp_servers.perfxpert]` table) | `<cwd>/.perfxpert/AGENTS.md` (no pointer; Codex loads project-local `AGENTS.md` natively) | **Prompt-layer-only** — rejection-language stanza in the staged `AGENTS.md`. `CodexGateHook.install()` always raises `GateHookUnsupported` because Codex's native `PreToolUse` intercepts Bash only (not MCP/Write/etc.) as of April 2026 | N/A (no persistent server-side session state; stanza re-emitted every session) |
 
