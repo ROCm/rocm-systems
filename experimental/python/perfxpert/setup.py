@@ -59,15 +59,45 @@ _SKIP_BUN_ENV = "PERFXPERT_SKIP_BUN_DOWNLOAD"
 # ---------------------------------------------------------------------------
 
 _BUN_CACHE_DIR = Path.home() / ".cache" / "perfxpert" / "bun"
-_BUN_BIN = _BUN_CACHE_DIR / "bin" / "bun"
 
 
-def _detect_bun_asset_name() -> str | None:
-    """Return the bun release-asset filename for the current platform.
+def _bun_bin_path(binary_name: str = "bun") -> Path:
+    """Return the cache-dir path where the downloaded bun binary lives."""
+    return _BUN_CACHE_DIR / "bin" / binary_name
 
-    Bun ships pre-built zip archives named e.g.
-    ``bun-linux-x64.zip``. Returns ``None`` for platforms bun doesn't
-    ship a binary for (Windows, musl, etc.).
+
+def _is_musl_libc() -> bool:
+    """Return True if running against musl libc (Alpine etc.) rather than glibc."""
+    # Probe `ldd --version` — glibc identifies itself, musl exits 1 with
+    # a different banner. Either the environ marker `ldd` provides, or
+    # presence of ld-musl-*.so.1 in the usual lib dirs, is enough.
+    for d in (
+        "/lib",
+        "/lib64",
+        "/lib/x86_64-linux-gnu",
+        "/lib/aarch64-linux-gnu",
+    ):
+        if any(Path(d).glob("ld-musl-*.so.*")):
+            return True
+    try:
+        out = subprocess.run(
+            ["ldd", "--version"], capture_output=True, text=True, timeout=2
+        )
+        # musl prints "musl libc" in stdout OR stderr on most distros.
+        combined = (out.stdout + out.stderr).lower()
+        if "musl" in combined:
+            return True
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return False
+
+
+def _detect_bun_asset_name() -> tuple[str | None, str]:
+    """Return (asset-filename, binary-name) for the current platform.
+
+    Bun ships prebuilt zips: ``bun-{os}-{arch}[-musl].zip``. The archive
+    contains either ``bun`` (unix) or ``bun.exe`` (Windows). Returns
+    ``(None, "")`` for platforms bun doesn't ship a binary for.
     """
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -79,28 +109,30 @@ def _detect_bun_asset_name() -> str | None:
     }
     arch = arch_map.get(machine)
     if arch is None:
-        return None
+        return None, ""
     if system == "linux":
-        # bun doesn't ship a musl-libc build under the same zip name.
-        # Detect glibc by looking for libc.so.6; bail if musl-only.
-        if not any(
-            Path(d).glob("libc.so.6")
-            for d in ("/lib64", "/lib", "/lib/x86_64-linux-gnu", "/lib/aarch64-linux-gnu")
-        ):
-            # Could still work but safer to bail and let the user install.
-            return None
-        return f"bun-linux-{arch}.zip"
+        # Pick the musl variant on Alpine / distroless-musl images so
+        # the download actually runs. glibc hosts get the default zip.
+        suffix = "-musl" if _is_musl_libc() else ""
+        return f"bun-linux-{arch}{suffix}.zip", "bun"
     if system == "darwin":
-        return f"bun-darwin-{arch}.zip"
-    return None
+        return f"bun-darwin-{arch}.zip", "bun"
+    if system == "windows":
+        # bun ships native Windows binaries as of mid-2024. The zip
+        # contains `bun.exe` instead of `bun`. Build may still fail
+        # if the underlying opencode toolchain lacks Windows support,
+        # but at least bun itself is installable.
+        return f"bun-windows-{arch}.zip", "bun.exe"
+    return None, ""
 
 
 def _auto_install_bun() -> Path | None:
-    """Download + extract bun into ``~/.cache/perfxpert/bun/bin/bun``.
+    """Download + extract bun into ``~/.cache/perfxpert/bun/bin/``.
 
-    Returns the absolute path to the extracted ``bun`` binary on
-    success, ``None`` on failure (network error, unsupported platform,
-    opt-out via ``PERFXPERT_SKIP_BUN_DOWNLOAD=1``).
+    Returns the absolute path to the extracted bun binary on success
+    (``bun`` on unix, ``bun.exe`` on Windows), ``None`` on failure
+    (network error, unsupported platform, opt-out via
+    ``PERFXPERT_SKIP_BUN_DOWNLOAD=1``).
     """
     if os.environ.get(_SKIP_BUN_ENV, "").strip() in {"1", "true", "yes"}:
         print(
@@ -109,10 +141,8 @@ def _auto_install_bun() -> Path | None:
             file=sys.stderr,
         )
         return None
-    if _BUN_BIN.is_file() and os.access(_BUN_BIN, os.X_OK):
-        return _BUN_BIN
 
-    asset = _detect_bun_asset_name()
+    asset, binary_name = _detect_bun_asset_name()
     if asset is None:
         print(
             "[perfxpert/setup.py] no prebuilt bun binary for this platform "
@@ -122,6 +152,10 @@ def _auto_install_bun() -> Path | None:
             file=sys.stderr,
         )
         return None
+
+    bun_bin = _bun_bin_path(binary_name)
+    if bun_bin.is_file() and (os.access(bun_bin, os.X_OK) or platform.system() == "Windows"):
+        return bun_bin
 
     url = f"https://github.com/oven-sh/bun/releases/latest/download/{asset}"
     print(
@@ -137,8 +171,11 @@ def _auto_install_bun() -> Path | None:
             tmp_path = Path(tmp.name)
             urllib.request.urlretrieve(url, tmp_path)
         with zipfile.ZipFile(tmp_path) as zf:
-            # bun zip contains `<asset-stem>/bun`
-            member = next((n for n in zf.namelist() if n.endswith("/bun")), None)
+            # bun zip contains `<asset-stem>/bun` (or `bun.exe` on Windows)
+            member = next(
+                (n for n in zf.namelist() if n.endswith(f"/{binary_name}")),
+                None,
+            )
             if member is None:
                 print(
                     "[perfxpert/setup.py] bun zip layout unrecognised — "
@@ -146,10 +183,11 @@ def _auto_install_bun() -> Path | None:
                     file=sys.stderr,
                 )
                 return None
-            with zf.open(member) as src, _BUN_BIN.open("wb") as dst:
+            with zf.open(member) as src, bun_bin.open("wb") as dst:
                 shutil.copyfileobj(src, dst)
         tmp_path.unlink(missing_ok=True)
-        _BUN_BIN.chmod(0o755)
+        if platform.system() != "Windows":
+            bun_bin.chmod(0o755)
     except (urllib.error.URLError, zipfile.BadZipFile, OSError) as exc:
         print(
             f"[perfxpert/setup.py] WARNING: failed to download bun: {exc}. "
@@ -160,11 +198,11 @@ def _auto_install_bun() -> Path | None:
         return None
 
     print(
-        f"[perfxpert/setup.py] bun installed at {_BUN_BIN}; "
+        f"[perfxpert/setup.py] bun installed at {bun_bin}; "
         "continuing with bundled opencode build.",
         file=sys.stderr,
     )
-    return _BUN_BIN
+    return bun_bin
 
 
 def _ensure_bun_on_path() -> str | None:
