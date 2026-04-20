@@ -52,6 +52,16 @@ subtrees:
         title: Hardware decoder API
       - file: reference/rocDecode-sw-decoder.rst
         title: Software decoder API
+  - file: reference/rocDecode-utility-classes.rst
+    title: Utility classes 
+    subtrees:
+    - entries:
+      - file: reference/rocDecode-util-decoder.rst
+        title: RocVideoDecoder class
+      - file: reference/rocDecode-demux.rst
+        title: Video demultiplexer class
+      - file: reference/rocDecode-ffmpeg-decoder.rst
+        title: FFMpeg decoder class
   - file: reference/rocDecode-logging-control.rst
     title: Logging levels 
   - file: reference/rocDecode-formats-and-architectures.rst

@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
@@ -46,16 +47,16 @@ namespace counters
  *
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
-hsa::Queue::pkt_and_serialize_t
-queue_cb(const context::context*                                         ctx,
-         const std::shared_ptr<counter_callback_info>&                   info,
-         const hsa::Queue&                                               queue,
-         const hsa::rocprofiler_packet&                                  pkt,
-         rocprofiler_kernel_id_t                                         kernel_id,
-         rocprofiler_dispatch_id_t                                       dispatch_id,
-         rocprofiler_user_data_t*                                        user_data,
-         const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-         const context::correlation_id*                                  correlation_id)
+hsa::write_packet_t
+queue_cb(const context::context*                                  ctx,
+         const std::shared_ptr<counter_callback_info>&            info,
+         const hsa::Queue&                                        queue,
+         const hsa::rocprofiler_packet&                           pkt,
+         rocprofiler_kernel_id_t                                  kernel_id,
+         rocprofiler_dispatch_id_t                                dispatch_id,
+         rocprofiler_user_data_t*                                 user_data,
+         const hsa::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
+         const context::correlation_id*                           correlation_id)
 {
     CHECK(info && ctx);
 
@@ -70,11 +71,11 @@ queue_cb(const context::context*                                         ctx,
         return ret_pkt;
     };
 
-    if(!ctx || !ctx->counter_collection) return {nullptr, false};
+    if(!ctx || !ctx->dispatch_counter_collection) return {nullptr, false};
 
     bool is_enabled = false;
 
-    ctx->counter_collection->enabled.rlock(
+    ctx->dispatch_counter_collection->enabled.rlock(
         [&](const auto& collect_ctx) { is_enabled = collect_ctx; });
 
     if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
@@ -139,11 +140,12 @@ queue_cb(const context::context*                                         ctx,
  * Callback called by HSA interceptor when the kernel has completed processing.
  */
 void
-completed_cb(const context::context*                            ctx,
-             const std::shared_ptr<counter_callback_info>&      info,
-             std::shared_ptr<hsa::Queue::queue_info_session_t>& ptr_session,
-             inst_pkt_t&                                        pkts,
-             kernel_dispatch::profiling_time                    dispatch_time)
+completed_cb(const context::context*                       ctx,
+             const std::shared_ptr<counter_callback_info>& info,
+             std::shared_ptr<hsa::queue_info_session_t>&   ptr_session,
+             hsa::packet_data_t&                           packet,
+             inst_pkt_t&                                   pkts,
+             kernel_dispatch::profiling_time               dispatch_time)
 {
     CHECK(info && ctx);
 
@@ -167,8 +169,8 @@ completed_cb(const context::context*                            ctx,
     // We have no profile config, nothing to output.
     if(!pkt || !prof_config) return;
 
-    completed_cb_params_t params{info, ptr_session, dispatch_time, prof_config, std::move(pkt)};
-    process_callback_data(std::move(params));
+    process_callback_data(completed_cb_params_t{
+        info, ptr_session, &packet, dispatch_time, prof_config, std::move(pkt)});
 }
 
 }  // namespace counters

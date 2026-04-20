@@ -33,24 +33,45 @@ subtrees:
     entries:
     - file: conceptual/performance-model.rst
       entries:
-      - file: conceptual/compute-unit.rst
-        title: Compute unit
+      - file: conceptual/cdna/cdna-performance-model.rst
+        title: CDNA-CDNA4
         entries:
-        - file: conceptual/pipeline-descriptions.rst
-        - file: conceptual/pipeline-metrics.rst
-        - file: conceptual/local-data-share.rst
-          title: Local data share
-        - file: conceptual/vector-l1-cache.rst
-          title: Vector L1 cache
-      - file: conceptual/l2-cache.rst
-        title: L2 cache
-      - file: conceptual/shader-engine.rst
-        title: Shader engine
-      - file: conceptual/command-processor.rst
-        title: Command processor
-      - file: conceptual/system-speed-of-light.rst
-        title: System Speed-of-Light
-      - file: conceptual/references.rst
+        - file: conceptual/cdna/system-speed-of-light.rst
+          title: System Speed-of-Light
+        - file: conceptual/cdna/compute-unit.rst
+          title: Compute unit
+          entries:
+          - file: conceptual/cdna/pipeline-descriptions.rst
+          - file: conceptual/cdna/pipeline-metrics.rst
+          - file: conceptual/cdna/local-data-share.rst
+            title: Local data share
+          - file: conceptual/cdna/vector-l1-cache.rst
+            title: Vector L1 cache
+        - file: conceptual/cdna/l2-cache.rst
+          title: L2 cache
+        - file: conceptual/cdna/shader-engine.rst
+          title: Shader engine
+        - file: conceptual/cdna/command-processor.rst
+          title: Command processor
+        - file: conceptual/cdna/references.rst
+      - file: conceptual/rdna/rdna-performance-model.rst
+        title: RDNA3
+        entries:
+        - file: conceptual/rdna/system-speed-of-light.rst
+          title: System Speed-of-Light
+        - file: conceptual/rdna/wgp.rst
+          title: Workgroup processor (WGP)
+        - file: conceptual/rdna/tcp-cache.rst
+          title: GL0
+        - file: conceptual/rdna/gl1-cache.rst
+          title: GL1
+        - file: conceptual/rdna/gl2-cache.rst
+          title: GL2
+        - file: conceptual/rdna/shader-engine.rst
+          title: Shader engine
+        - file: conceptual/rdna/command-processor.rst
+          title: Command processor
+        - file: conceptual/rdna/references.rst
     - file: conceptual/definitions.rst
 
   - caption: Tutorials

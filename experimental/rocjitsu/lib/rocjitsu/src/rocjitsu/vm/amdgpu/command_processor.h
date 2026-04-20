@@ -15,70 +15,102 @@
 /// CP documentation</a>
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
 
 #include "simdojo/sim/component.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
+
+#include "rocjitsu/base/rj_compiler.h"
+#define HSA_LARGE_MODEL 1
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+#include "hsa/hsa.h"
+RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief A dispatch packet describing a kernel launch.
-///
-/// @details Contains the kernel entry point, grid dimensions, wavefront
-/// configuration, and register initialization parameters. The command
-/// processor reads these to create wavefronts and initialize their user
-/// SGPRs (kernarg pointer, etc.), system SGPRs (workgroup ID), and
-/// workitem IDs (v0 = lane index).
-struct DispatchPacket {
-  uint64_t kernel_entry_pc = 0;   ///< Byte address of kernel code.
-  uint32_t workgroup_count = 1;   ///< Number of workgroups to dispatch.
-  uint32_t wfs_per_workgroup = 1; ///< Wavefronts per workgroup.
-  uint32_t sgprs_per_wf = 104;    ///< Scalar GPRs per wavefront (from code object).
-  uint32_t vgprs_per_wf = 256;    ///< Vector GPRs per wavefront (from code object).
-
-  /// @brief Kernarg segment base address in GPU memory.
-  ///
-  /// @details When non-zero, written to s[0:1] as the first two user SGPRs.
-  /// On gfx9+, the compiler always places the kernarg pointer in s[0:1]
-  /// regardless of kernel_code_properties flags.
-  uint64_t kernarg_addr = 0;
-
-  /// @brief Number of user SGPRs preceding the system SGPRs (from RSRC2).
-  ///
-  /// @details The command processor writes workgroup_id_x at
-  /// `sgpr_alloc.base + num_user_sgprs`. This value should match the
-  /// `user_sgpr_count` field from COMPUTE_PGM_RSRC2 in the kernel descriptor.
-  uint32_t num_user_sgprs = 2;
-
-  /// @brief Offset added to local workgroup IDs to produce global IDs.
-  ///
-  /// @details When dispatching across multiple XCDs, each XCD receives a
-  /// contiguous range of workgroup IDs. The system SGPR (workgroup_id_x)
-  /// is written as `local_wg_id + workgroup_id_offset`.
-  uint32_t workgroup_id_offset = 0;
+/// @brief Description of an AQL hardware queue registered with the CP.
+struct HwQueue {
+  uint32_t queue_id = 0;     ///< Queue ID assigned by the driver.
+  uint64_t ring_base_va = 0; ///< GPU VA of the ring buffer.
+  uint32_t ring_size = 0;    ///< Ring buffer size in bytes.
+  uint64_t read_ptr_va = 0;  ///< GPU VA of the read pointer.
+  uint64_t write_ptr_va = 0; ///< GPU VA of the write pointer.
+  /// @brief Byte offset of this queue's doorbell slot within the aperture page.
+  /// Used by KFD (host_accessible=true) queues. The CP resolves the absolute
+  /// address as doorbell_base + doorbell_offset, mirroring how hardware uses
+  /// the BAR base + cp_hqd_pq_doorbell_control offset from the MQD.
+  uint32_t doorbell_offset = 0;
+  /// @brief GPU VA of the doorbell slot for internal simulation queues (host_accessible=false).
+  /// Internal test queues write through GpuMemory; KFD queues use doorbell_offset instead.
+  uint64_t doorbell_va = 0;
+  uint64_t last_doorbell = 0;   ///< Last-seen doorbell value (for change detection).
+  bool host_accessible = false; ///< True if pointers are host VAs (KFD queues).
+  bool is_sdma = false;         ///< True for SDMA queues (DMA packet format, not AQL).
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
-/// @details Distributes dispatch packets across the registered compute units in
+/// @details Distributes AQL dispatch packets across the registered compute units in
 /// round-robin order, activating pre-allocated wavefront slots.
 ///
-/// Event-driven: during startup(), the CP schedules a doorbell event if
-/// pre-loaded packets exist. External submissions (from the Driver) inject
-/// doorbell events via schedule_event_async(). The doorbell handler processes
-/// all pending packets and activates CUs. When all CUs become idle,
-/// the on_idle callback signals completion to the primary protocol.
+/// Event-driven: the CP monitors registered hardware queue doorbells via a
+/// polling thread. When new AQL packets are detected, it fetches them from the
+/// ring buffer, parses the kernel descriptor, and dispatches wavefronts to CUs.
+/// When all CUs become idle, the on_idle callback signals completion.
 class CommandProcessor : public simdojo::Component {
 public:
   /// @brief Construct a command processor.
   /// @param name Human-readable name (e.g., "cp").
   explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {}
+  ~CommandProcessor() override { stop_doorbell_monitor(); }
+
+  /// @brief Set the GPU memory interface for the fetcher.
+  void set_memory(GpuMemory *mem) { memory_ = mem; }
+
+  /// @brief Set the VGPR granularity for decoding the kernel descriptor.
+  /// GFX9 (CDNA): 4. GFX940+ (CDNA3/CDNA4): 8.
+  void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
+
+  /// @brief Set the base address of the doorbell aperture page for KFD queues.
+  ///
+  /// @details Called by the driver once after mmap'ing the doorbell page. All KFD
+  /// queues registered before this call (via register_queue) start being polled
+  /// only after the base is set. Mirrors the kernel-side model where the CP knows
+  /// the BAR base address and per-queue offsets from the MQD independently.
+  /// @param base Host pointer to the start of the doorbell aperture page.
+  void set_doorbell_base(void *base);
+
+  /// @brief Register a callback invoked when the CP signals AQL packet completion.
+  ///
+  /// @details Models the hardware interrupt fired by the CP after writing to a
+  /// completion signal's event mailbox. The driver registers this to wake any
+  /// threads blocked in WAIT_EVENTS without the 100ms polling delay.
+  using InterruptCallback = std::function<void(uint32_t event_id)>;
+  void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
+
+  /// @brief Register a hardware AQL queue for doorbell monitoring and packet fetching.
+  /// Starts the doorbell polling thread on first queue registration.
+  void register_queue(HwQueue queue);
+
+  /// @brief Unregister a hardware queue. Stops the polling thread when no queues remain.
+  void unregister_queue(uint32_t queue_id);
+
+  /// @brief Update ring buffer parameters for an existing hardware queue.
+  /// @details Called by the driver on KFD UPDATE_QUEUE (e.g., after preemption/resume).
+  /// Updates ring_base_va and ring_size under hw_queue_mutex_ so the poll thread
+  /// sees the new ring without tearing.
+  void update_queue(uint32_t queue_id, uint64_t ring_base_va, uint32_t ring_size);
 
   /// @brief Register a compute unit that this CP can dispatch to.
   ///
@@ -96,34 +128,13 @@ public:
     cu->set_on_idle([this]() { check_all_idle(); });
   }
 
-  /// @brief Enqueue a dispatch packet for processing before simulation starts.
-  ///
-  /// @details Used by the config loader and tests to pre-load work. Must be called
-  /// before startup(). During startup(), the CP schedules an initial doorbell
-  /// event if any packets are pre-loaded.
-  /// @param packet The dispatch parameters.
-  void enqueue(DispatchPacket packet) { dispatch_queue_.push_back(std::move(packet)); }
-
-  /// @brief Submit a dispatch packet from an external thread.
-  ///
-  /// @details Thread-safe. Buffers the packet and injects a doorbell event via
-  /// schedule_event_async(). The CP processes it at the next event processing cycle.
-  /// @param packet The dispatch parameters.
-  void submit(DispatchPacket packet);
-
-  /// @brief Register as primary and schedule initial doorbell if work is pre-loaded.
+  /// @brief Set up the doorbell event handler.
   void startup() override;
 
-  /// @brief Process one dispatch packet: create wavefronts and assign to CUs.
-  /// @retval true More dispatch packets to process.
+  /// @brief Process one dispatch from the internal queue: create wavefronts and assign to CUs.
+  /// @retval true More dispatches to process.
   /// @retval false Dispatch queue is empty.
   bool step() override;
-
-  /// @brief Return the number of pending dispatch packets.
-  /// @returns Number of unprocessed packets in the dispatch queue.
-  size_t pending_dispatches() const {
-    return (dispatched_ <= dispatch_queue_.size()) ? dispatch_queue_.size() - dispatched_ : 0;
-  }
 
   /// @brief Return the reusable doorbell event (for external scheduling).
   /// @returns Pointer to the doorbell event.
@@ -135,12 +146,15 @@ public:
   /// queue is empty, signals that this primary component is done.
   void check_all_idle();
 
-  /// @brief Return the number of packets already processed.
-  /// @returns Count of dispatched packets.
+  /// @brief Set a workgroup ID offset for multi-XCD dispatch.
+  /// @details In multi-XCD configurations, each XCD's CP is assigned a different
+  /// offset so that workgroup IDs are globally unique across XCDs.
+  void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
+
+  /// @brief Return the number of dispatches processed so far.
   size_t dispatched_count() const { return dispatched_; }
 
-  /// @brief Return the current round-robin CU index.
-  /// @returns Index of the next CU to receive a dispatch.
+  /// @brief Return the next CU index for round-robin dispatch.
   size_t next_cu_index() const { return next_cu_; }
 
   /// @brief Return the dispatch OUT ports (one per registered CU).
@@ -152,34 +166,97 @@ public:
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
 private:
-  /// @brief Doorbell event handler: drain async queue, dispatch, activate CUs.
+  struct InternalDispatch {
+    uint64_t kernel_entry_pc = 0;
+    uint32_t workgroup_count = 1;
+    uint32_t wfs_per_workgroup = 1;
+    uint32_t sgprs_per_wf = 104;
+    uint32_t vgprs_per_wf = 256;
+    uint64_t kernarg_addr = 0;
+    uint32_t num_user_sgprs = 2;
+    uint32_t kernel_code_properties = 0; ///< AMDHSA kernel_code_properties bitfield.
+    uint64_t dispatch_ptr = 0;           ///< Host address of the AQL dispatch packet.
+    uint64_t queue_ptr = 0;              ///< Host address of the amd_queue_t struct.
+    uint32_t workgroup_id_offset = 0;
+    uint64_t completion_signal = 0;    ///< AQL completion signal handle (0 = none).
+    uint64_t scratch_backing_addr = 0; ///< GPU VA of scratch backing memory (from amd_queue_t).
+    uint32_t private_segment_fixed_size =
+        0;                    ///< Per-lane scratch size in bytes (from kernel descriptor).
+    bool host_signal = false; ///< True if signal is in host memory (KFD path).
+    bool ordered = false;     ///< True for KFD (host-accessible) queue dispatches.
+  };
+
+  /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
+  static void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const InternalDispatch &pkt,
+                                  uint32_t global_wg_id, uint32_t wf_index_in_wg);
+
+  /// @brief Doorbell event handler: check HW queues, fetch packets, dispatch, activate CUs.
   void handle_doorbell(simdojo::Tick timestamp);
 
-  /// @brief Drain async submissions into the dispatch queue.
-  void drain_async_submissions();
+  /// @brief Fetch AQL packets from all registered HW queues into the dispatch queue.
+  void fetch_packets();
 
-  std::vector<ComputeUnitCore *> cus_;          ///< Registered compute units.
-  std::vector<simdojo::Port *> dispatch_ports_; ///< One OUT port per CU (parallel to cus_).
-  std::vector<DispatchPacket> dispatch_queue_;  ///< Pending dispatch packets.
+  /// @brief Fetch AQL packets from a single HW queue.
+  void fetch_from_queue(HwQueue &queue);
 
-  /// @brief Dispatch state — accessed only from the owning partition's thread.
-  ///
-  /// @details Thread safety is guaranteed by the PDES engine's partition isolation:
-  /// step() and handle_doorbell() run exclusively on the owning thread.
-  /// External submissions go through async_submissions_ (mutex-guarded).
-  size_t dispatched_ = 0; ///< Number of packets already processed.
-  size_t next_cu_ = 0;    ///< Round-robin CU index.
+  /// @brief Process SDMA packets from an SDMA queue's ring buffer.
+  /// Handles COPY_LINEAR (memcpy), FENCE (write), TRAP (interrupt),
+  /// POLL_REGMEM (spin-wait), ATOMIC (fetch-add), and CONST_FILL.
+  void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
+
+  /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and enqueue an
+  /// InternalDispatch.
+  void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
+                          uint64_t pkt_addr);
+
+  /// @brief Read a kernel descriptor from memory.
+  rocr::llvm::amdhsa::kernel_descriptor_t read_kernel_descriptor(uint64_t kernel_object,
+                                                                 bool host_accessible = false);
+  void signal_aql_completion(uint64_t pkt_addr);
+
+  /// @brief Return the number of pending dispatch entries.
+  size_t pending_dispatches() const {
+    return (dispatched_ <= dispatch_queue_.size()) ? dispatch_queue_.size() - dispatched_ : 0;
+  }
+
+  GpuMemory *memory_ = nullptr; ///< GPU memory for the fetcher.
+  /// @brief Base host pointer for the doorbell aperture page (KFD queues).
+  /// Analogous to the GPU BAR base: per-queue doorbell_offset indexes into it.
+  /// Synchronised via release/acquire on the atomic itself — set_doorbell_base
+  /// does NOT hold hw_queue_mutex_. All readers use memory_order_acquire.
+  std::atomic<void *> doorbell_base_{nullptr};
+  std::vector<HwQueue> hw_queues_;               ///< Registered AQL hardware queues.
+  std::vector<ComputeUnitCore *> cus_;           ///< Registered compute units.
+  std::vector<simdojo::Port *> dispatch_ports_;  ///< One OUT port per CU (parallel to cus_).
+  std::vector<InternalDispatch> dispatch_queue_; ///< Pending internal dispatches.
+
+  size_t dispatched_ = 0;            ///< Number of dispatches already processed.
+  size_t next_cu_ = 0;               ///< Round-robin CU index.
+  bool is_primary_ = false;          ///< True if CP registered as primary.
+  uint32_t workgroup_id_offset_ = 0; ///< Multi-XCD workgroup ID offset.
+  uint32_t vgpr_granularity_ = 8;    ///< VGPR allocation granularity (4 for GFX9, 8 for GFX940+).
 
   /// @brief Reusable doorbell event. Fired when packets need processing.
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
 
   /// @brief Retry queue for workgroups that could not be dispatched because all CUs were full.
-  /// Re-drained into dispatch_queue_ on the next doorbell event.
-  std::vector<DispatchPacket> retry_queue_;
+  std::vector<InternalDispatch> retry_queue_;
 
-  /// @brief Async submission buffer for external threads (guarded by async_mutex_).
-  std::mutex async_mutex_;
-  std::vector<DispatchPacket> async_submissions_;
+  /// @brief Protects hw_queues_ (accessed from both the polling thread and register_queue).
+  std::mutex hw_queue_mutex_;
+
+  uint64_t read_gpu_u64(uint64_t va) const;
+  void stop_doorbell_monitor();
+  /// @brief Scan all registered HW queues for doorbell changes. Returns true if any changed.
+  bool scan_doorbells();
+
+  InterruptCallback interrupt_cb_; ///< Fired after writing to a signal's event mailbox.
+
+  /// @brief Doorbell polling thread. Monitors registered HW queue doorbells
+  /// and injects doorbell events when new packets are detected.
+  /// Polls at 100µs intervals.
+  void doorbell_poll_loop(std::stop_token stop);
+  std::jthread doorbell_thread_;
 };
 
 } // namespace amdgpu

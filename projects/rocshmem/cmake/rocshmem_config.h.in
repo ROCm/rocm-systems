@@ -22,8 +22,10 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#cmakedefine DEBUG
 #cmakedefine PROFILE
+#cmakedefine BUILD_DEBUG_TRACE_HOST
+#cmakedefine BUILD_DEBUG_TRACE_DEVICE
+#cmakedefine BUILD_DEBUG_DEVICE
 #cmakedefine USE_RO
 #cmakedefine USE_IPC
 #cmakedefine USE_GDA
@@ -34,6 +36,8 @@
 #cmakedefine USE_HEAP_DEVICE_UNCACHED
 #cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
 #cmakedefine USE_HEAP_DEVICE_VMM_POSIX
+#cmakedefine USE_HEAP_DEVICE_VMM_FABRIC
+#cmakedefine HAVE_AMDSMI_GPU_FABRIC_INFO
 #cmakedefine USE_FUNC_CALL
 #cmakedefine USE_SINGLE_NODE
 #cmakedefine USE_HDP_FLUSH

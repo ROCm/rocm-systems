@@ -176,7 +176,7 @@ if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
 else()
   set ( CPACK_RPM_PACKAGE_RELEASE "local" )
 endif()
-set( CPACK_RPM_PACKAGE_LICENSE "AMD Proprietary" )
+set( CPACK_RPM_PACKAGE_LICENSE "MIT" )
 
 #Disable build id for rocprofiler as its creating transaction error
 set ( CPACK_RPM_SPEC_MORE_DEFINE "%define _build_id_links none

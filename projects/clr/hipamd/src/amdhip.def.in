@@ -533,4 +533,6 @@ hipMipmappedArrayGetMemoryRequirements
 hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
+hipOccupancyMaxPotentialClusterSize
+hipOccupancyMaxActiveClusters
 @HSA_EXPORTS@

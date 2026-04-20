@@ -1150,8 +1150,7 @@ struct_amdsmi_asic_info_t._fields_ = [
     ('subsystem_id', ctypes.c_uint32),
     ('PADDING_1', ctypes.c_ubyte * 4),
     ('flags', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 19),
-    ('PADDING_2', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint32 * 18),
 ]
 
 amdsmi_asic_info_t = struct_amdsmi_asic_info_t
@@ -2081,8 +2080,10 @@ struct_amdsmi_od_volt_freq_data_t._pack_ = 1 # source:False
 struct_amdsmi_od_volt_freq_data_t._fields_ = [
     ('curr_sclk_range', amdsmi_range_t),
     ('curr_mclk_range', amdsmi_range_t),
+    ('curr_fclk_range', amdsmi_range_t),
     ('sclk_freq_limits', amdsmi_range_t),
     ('mclk_freq_limits', amdsmi_range_t),
+    ('fclk_freq_limits', amdsmi_range_t),
     ('curve', amdsmi_od_volt_curve_t),
     ('num_regions', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
@@ -2770,35 +2771,11 @@ try:
     amdsmi_get_socket_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
 except AttributeError:
     pass
-try:
-    amdsmi_get_cpu_handles = _libraries['libamd_smi.so'].amdsmi_get_cpu_handles
-    amdsmi_get_cpu_handles.restype = amdsmi_status_t
-    amdsmi_get_cpu_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
-except AttributeError:
-    pass
 size_t = ctypes.c_uint64
 try:
     amdsmi_get_socket_info = _libraries['libamd_smi.so'].amdsmi_get_socket_info
     amdsmi_get_socket_info.restype = amdsmi_status_t
     amdsmi_get_socket_info.argtypes = [amdsmi_socket_handle, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
-    amdsmi_get_processor_info.restype = amdsmi_status_t
-    amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_count_from_handles = _libraries['libamd_smi.so'].amdsmi_get_processor_count_from_handles
-    amdsmi_get_processor_count_from_handles.restype = amdsmi_status_t
-    amdsmi_get_processor_count_from_handles.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_processor_handles_by_type = _libraries['libamd_smi.so'].amdsmi_get_processor_handles_by_type
-    amdsmi_get_processor_handles_by_type.restype = amdsmi_status_t
-    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -2811,12 +2788,6 @@ try:
     amdsmi_get_node_handle = _libraries['libamd_smi.so'].amdsmi_get_node_handle
     amdsmi_get_node_handle.restype = amdsmi_status_t
     amdsmi_get_node_handle.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.POINTER(None))]
-except AttributeError:
-    pass
-try:
-    amdsmi_get_cpucore_handles = _libraries['libamd_smi.so'].amdsmi_get_cpucore_handles
-    amdsmi_get_cpucore_handles.restype = amdsmi_status_t
-    amdsmi_get_cpucore_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
 except AttributeError:
     pass
 try:
@@ -2961,19 +2932,19 @@ except AttributeError:
 try:
     amdsmi_get_cpu_socket_power = _libraries['libamd_smi.so'].amdsmi_get_cpu_socket_power
     amdsmi_get_cpu_socket_power.restype = amdsmi_status_t
-    amdsmi_get_cpu_socket_power.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_double)]
+    amdsmi_get_cpu_socket_power.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
     amdsmi_get_cpu_socket_power_cap = _libraries['libamd_smi.so'].amdsmi_get_cpu_socket_power_cap
     amdsmi_get_cpu_socket_power_cap.restype = amdsmi_status_t
-    amdsmi_get_cpu_socket_power_cap.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_double)]
+    amdsmi_get_cpu_socket_power_cap.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
     amdsmi_get_cpu_socket_power_cap_max = _libraries['libamd_smi.so'].amdsmi_get_cpu_socket_power_cap_max
     amdsmi_get_cpu_socket_power_cap_max.restype = amdsmi_status_t
-    amdsmi_get_cpu_socket_power_cap_max.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_double)]
+    amdsmi_get_cpu_socket_power_cap_max.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -2998,13 +2969,13 @@ except AttributeError:
 try:
     amdsmi_get_cpu_pwr_efficiency_mode = _libraries['libamd_smi.so'].amdsmi_get_cpu_pwr_efficiency_mode
     amdsmi_get_cpu_pwr_efficiency_mode.restype = amdsmi_status_t
-    amdsmi_get_cpu_pwr_efficiency_mode.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_double)]
+    amdsmi_get_cpu_pwr_efficiency_mode.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
     amdsmi_get_cpu_core_ccd_power = _libraries['libamd_smi.so'].amdsmi_get_cpu_core_ccd_power
     amdsmi_get_cpu_core_ccd_power.restype = amdsmi_status_t
-    amdsmi_get_cpu_core_ccd_power.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_double)]
+    amdsmi_get_cpu_core_ccd_power.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -3744,6 +3715,36 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_cpu_handles = _libraries['libamd_smi.so'].amdsmi_get_cpu_handles
+    amdsmi_get_cpu_handles.restype = amdsmi_status_t
+    amdsmi_get_cpu_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_info = _libraries['libamd_smi.so'].amdsmi_get_processor_info
+    amdsmi_get_processor_info.restype = amdsmi_status_t
+    amdsmi_get_processor_info.argtypes = [amdsmi_processor_handle, size_t, ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_count_from_handles = _libraries['libamd_smi.so'].amdsmi_get_processor_count_from_handles
+    amdsmi_get_processor_count_from_handles.restype = amdsmi_status_t
+    amdsmi_get_processor_count_from_handles.argtypes = [ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_processor_handles_by_type = _libraries['libamd_smi.so'].amdsmi_get_processor_handles_by_type
+    amdsmi_get_processor_handles_by_type.restype = amdsmi_status_t
+    amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, processor_type_t, ctypes.POINTER(ctypes.POINTER(None)), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_cpucore_handles = _libraries['libamd_smi.so'].amdsmi_get_cpucore_handles
+    amdsmi_get_cpucore_handles.restype = amdsmi_status_t
+    amdsmi_get_cpucore_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
+except AttributeError:
+    pass
+try:
     amdsmi_get_cpu_core_energy = _libraries['libamd_smi.so'].amdsmi_get_cpu_core_energy
     amdsmi_get_cpu_core_energy.restype = amdsmi_status_t
     amdsmi_get_cpu_core_energy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]
@@ -3926,7 +3927,7 @@ except AttributeError:
 try:
     amdsmi_get_cpu_sdps_limit = _libraries['libamd_smi.so'].amdsmi_get_cpu_sdps_limit
     amdsmi_get_cpu_sdps_limit.restype = amdsmi_status_t
-    amdsmi_get_cpu_sdps_limit.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_double)]
+    amdsmi_get_cpu_sdps_limit.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:

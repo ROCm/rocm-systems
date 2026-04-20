@@ -85,7 +85,7 @@ class Backend {
   /**
    * @brief Create a new team object and initialize it.
    *
-   * @param[in] parent_team Pointer to the parrent team object.
+   * @param[in] parent_team Pointer to the parent team object.
    * @param[in] team_info_wrt_parent TeamInfo object wrt parent team.
    * @param[in] team_info_wrt_world TeamInfo object wrt TEAM_WORLD.
    * @param[in] num_pes Number of PEs in this team.
@@ -95,9 +95,10 @@ class Backend {
    * @param[out] new_team pointer to the new team.
    */
   virtual void create_new_team(Team* parent_team,
-                               TeamInfo* team_info_wrt_parent,
-                               TeamInfo* team_info_wrt_world, int num_pes,
-                               int my_pe_in_new_team, MPI_Comm team_comm,
+                               const TeamInfo& team_info_wrt_parent,
+                               const TeamInfo& team_info_wrt_world,
+                               int num_pes, int my_pe_in_new_team,
+                               MPI_Comm team_comm,
                                rocshmem_team_t* new_team) = 0;
 
   /**

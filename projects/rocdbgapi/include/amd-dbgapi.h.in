@@ -290,6 +290,7 @@
  * - gfx1151
  * - gfx1200
  * - gfx1201
+ * - gfx1250
  *
  * The following generic AMD GPU architectures are supported:
  *
@@ -651,6 +652,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  * symbol version string of ``"@AMD_DBGAPI_NAME@_0.79"``.
  */
 #define AMD_DBGAPI_VERSION_0_79
+
+/**
+ * The function was introduced in version 0.80 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.80"``.
+ */
+#define AMD_DBGAPI_VERSION_0_80
 
 /** @} */
 
@@ -1624,7 +1631,17 @@ typedef enum
    * that may send interrupts, and so forth.  The instruction has no
    * information.
    */
-  AMD_DBGAPI_INSTRUCTION_KIND_SPECIAL = 13
+  AMD_DBGAPI_INSTRUCTION_KIND_SPECIAL = 13,
+  /**
+   * The instruction unconditionally branches to "PC + offset".  The "PC" is
+   * the address of the next instruction, while the "offset" is held in a
+   * register pair.  This offset is a signed 64-bit value.  The instruction
+   * information is of type ::amd_dbgapi_register_id_t[2] with the value of
+   * the register IDs for the registers.  The first register holds the least
+   * significant address bits, and the second register holds the most
+   * significant address bits.
+   */
+  AMD_DBGAPI_INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR = 14
 } amd_dbgapi_instruction_kind_t;
 
 /**
@@ -1858,6 +1875,14 @@ typedef enum
    * ::AMD_DBGAPI_STATUS_ERROR_CLIENT_CALLBACK error.
    */
   AMD_DBGAPI_PROCESS_INFO_CORE_STATE = 7,
+  /**
+   * Return a bitmask of all the bits which are used in at least one of the
+   * address spaces of each of the agents of the system.  It is legal for the
+   * client to not preserve bits not set in this mask, as long as they are
+   * cleared before being returned back to the library.  The type of this
+   * attribute is ::amd_dbgapi_segment_address_t.
+   */
+  AMD_DBGAPI_PROCESS_INFO_SIGNIFICANT_ADDRESS_BITS = 8,
 } amd_dbgapi_process_info_t;
 
 /**
@@ -1911,7 +1936,7 @@ typedef enum
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_get_info (
     amd_dbgapi_process_id_t process_id, amd_dbgapi_process_info_t query,
-    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_77;
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_80;
 
 /**
  * Attach to a process in order to provide debug control of the AMD GPUs it

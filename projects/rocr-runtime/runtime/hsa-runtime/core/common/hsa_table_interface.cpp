@@ -1379,6 +1379,10 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                    completion_signal);
 }
 
+hsa_status_t HSA_API hsa_amd_signal_get_event_id(hsa_signal_t signal, uint32_t *event_id) {
+  return amdExtTable->hsa_amd_signal_get_event_id_fn(signal, event_id);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 
