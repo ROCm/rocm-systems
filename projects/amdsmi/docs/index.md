@@ -13,7 +13,7 @@ environments. It provides a user-space interface that allows applications to
 control GPU operations, monitor performance, and retrieve information about the
 system's drivers and GPUs.
 
-Find the source code at <https://github.com/ROCm/amdsmi>.
+Find the source code at <https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi>.
 
 ```{important}
 This AMD SMI project supports Linux bare metal and Linux virtual machine guest
@@ -23,7 +23,7 @@ documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
 ```
 
 ```{note}
-AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
+AMD SMI is the successor to <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib>.
 ```
 
 ::::{grid} 2
@@ -59,13 +59,13 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
 :::
 
 :::{grid-item-card} Tutorials
-* [AMD SMI examples (GitHub)](https://github.com/ROCm/amdsmi/tree/amd-staging/example)
+* [AMD SMI examples (GitHub)](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/example)
 * [AMD SMI CLI walkthrough](https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html)
 :::
 ::::
 
-To learn about contributing to AMD SMI, see [Contributing to AMD
-SMI](https://github.com/ROCm/amdsmi/blob/amd-mainline/.github/CONTRIBUTING.md).
+To learn about contributing to AMD SMI, see [Contributing to ROCm
+Systems](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md).
 To contribute to the documentation, see
 {doc}`Contributing to ROCm documentation <rocm:contribute/contributing>`.
 

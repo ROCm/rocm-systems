@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -80,7 +80,7 @@ struct cache_policy
               "NIC RX UCast PKTS",
               trait::name<category::amd_smi_nic_rx_ucast_pkts>::description,
               LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
@@ -88,21 +88,21 @@ struct cache_policy
               "NIC TX UCast PKTS",
               trait::name<category::amd_smi_nic_tx_ucast_pkts>::description,
               LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_rx_cnp_pkts>::value, "NIC RX CNP PKTS",
               trait::name<category::amd_smi_nic_rx_cnp_pkts>::description,
               LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_tx_cnp_pkts>::value, "NIC TX CNP PKTS",
               trait::name<category::amd_smi_nic_tx_cnp_pkts>::description,
               LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
@@ -110,7 +110,7 @@ struct cache_policy
               "NIC RX UCast Bytes",
               trait::name<category::amd_smi_nic_rx_ucast_bytes>::description,
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
@@ -118,7 +118,7 @@ struct cache_policy
               "NIC TX UCast Bytes",
               trait::name<category::amd_smi_nic_tx_ucast_bytes>::description,
               LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
+              BLOCK, EXPRESSION, 0, 0, "{}" });
     }
 
     /**

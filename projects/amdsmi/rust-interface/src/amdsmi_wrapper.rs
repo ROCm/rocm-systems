@@ -3519,19 +3519,19 @@ extern "C" {
 extern "C" {
     pub fn amdsmi_get_cpu_socket_power(
         processor_handle: AmdsmiProcessorHandle,
-        ppower: *mut f64,
+        ppower: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_get_cpu_socket_power_cap(
         processor_handle: AmdsmiProcessorHandle,
-        pcap: *mut f64,
+        pcap: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_get_cpu_socket_power_cap_max(
         processor_handle: AmdsmiProcessorHandle,
-        pmax: *mut f64,
+        pmax: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -3559,13 +3559,13 @@ extern "C" {
         processor_handle: AmdsmiProcessorHandle,
         power_efficiency_mode: *mut u32,
         utilization: *mut u32,
-        ppt_limit: *mut f64,
+        ppt_limit: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_get_cpu_core_ccd_power(
         processor_handle: AmdsmiProcessorHandle,
-        power: *mut f64,
+        power: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

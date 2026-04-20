@@ -524,7 +524,6 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
  *  - Devices support cooperative multi device launch
  */
 HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
-  CHECK_IMAGE_SUPPORT
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   num_devices = min(num_devices, kMaxGPUs);

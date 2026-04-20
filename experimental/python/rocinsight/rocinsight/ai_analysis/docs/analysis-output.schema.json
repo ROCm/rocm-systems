@@ -869,12 +869,18 @@
         },
         "estimated_impact": {
           "type": "string",
-          "description": "Qualitative or quantitative estimate of the expected performance improvement if this recommendation is implemented.",
+          "description": "Data-driven estimate of the expected performance improvement if this recommendation is implemented. Values are derived from actual profiling metrics rather than generic ranges.",
           "examples": [
-            "15-30% reduction in total runtime when transfers dominate",
-            "Eliminates ~25% of launch overhead for workloads with many small kernels",
-            "May improve GPU utilization from 45% toward >80%"
+            "Memory copies account for 16.5% of runtime (36.4ms) — eliminating all transfers would save at most this amount",
+            "Kernel accounts for 99.9% of GPU time (51.5ms) — bottleneck type unknown without counters; impact depends on classification",
+            "API overhead is 59.9% of runtime (132.3ms) — reducing API calls could recover up to this time"
           ]
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence level (0.0–1.0) indicating how certain the analysis is about this recommendation. Higher values indicate more data-driven confidence. Null when not applicable."
         },
         "commands": {
           "type": "array",

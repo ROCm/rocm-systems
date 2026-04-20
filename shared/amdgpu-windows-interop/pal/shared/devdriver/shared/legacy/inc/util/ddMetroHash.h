@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -77,9 +77,9 @@ inline uint32 MetroHash32(const uint8* pData, const uint64 dataSize)
     return Compact32(MetroHash64(pData, dataSize));
 }
 
-inline uint64 HashCStr64(const char* pString)
+inline uint64 HashCStr64(const char* pString, size_t maxLength = SIZE_MAX)
 {
-    return MetroHash64(reinterpret_cast<const uint8*>(pString), strlen(pString));
+    return MetroHash64(reinterpret_cast<const uint8*>(pString), DevDriver::Platform::Strlen_s(pString, maxLength));
 }
 
 } // MetroHash

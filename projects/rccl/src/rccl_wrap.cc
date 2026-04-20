@@ -370,12 +370,6 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
         *algoName = "Direct";
         break;
-      case rcclAddonAlgos_t::RCCL_MSCCL:
-        *algoName = "MSCCL";
-        break;
-      case rcclAddonAlgos_t::RCCL_MSCCLPP:
-        *algoName = "MSCCLPP";
-        break;
 #ifdef ENABLE_WARP_SPEED
       case rcclAddonAlgos_t::RCCL_WARP_SPEED:
         *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm

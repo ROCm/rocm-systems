@@ -431,6 +431,11 @@ hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool,
     pool_i->size = std::min(pool_i->size, max_pool_size);
   }
 
+  // ROCRTST_LIMIT_POOL_SIZE: Optional environment variable to speed up memory tests.
+  // When set (ROCRTST_LIMIT_POOL_SIZE=4294967296 for 4GB), it:
+  //   1. Overrides pool_i->size (typically to reduce it; value is applied directly)
+  //   2. Triggers relaxed OOM safety margin (90% vs 70%) for system RAM tests
+  // This significantly reduces test time on large-VRAM GPUs.
   pool_size_limit = 0;
   char *pool_size_limit_str = getenv("ROCRTST_LIMIT_POOL_SIZE");
   if (pool_size_limit_str) {

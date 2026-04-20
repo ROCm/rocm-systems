@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "config.hpp"
 #include "amd_smi.hpp"
@@ -432,7 +413,7 @@ configure_settings(bool _init)
         0.0, "trace", "profile", "perfetto", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_TRACE_REGION",
+        std::string, "ROCPROFSYS_SELECTED_REGIONS",
         "Comma-separated list of roctx region names. When set, only "
         "activity inside roctx regions matching one of these names "
         "(matched against roctxRangeStartA message). Uses process-wide "
@@ -1507,7 +1488,8 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 }
 
 void
-handle_deprecated_setting(const std::string& _old, const std::string& _new, int _verbose)
+handle_deprecated_setting(const std::string& _old, const std::string& _new,
+                          int /*_verbose*/)
 {
     auto _config      = settings::shared_instance();
     auto _old_setting = _config->find(_old);
@@ -1524,7 +1506,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
     if(_old_setting->second->get_environ_updated() ||
        _old_setting->second->get_config_updated())
     {
-        auto _separator = [_verbose]() {
+        auto _separator = []() {
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
@@ -2437,7 +2419,7 @@ get_trace_thread_join()
 std::string
 get_trace_region()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_TRACE_REGION");
+    static auto _v = get_config()->find("ROCPROFSYS_SELECTED_REGIONS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 

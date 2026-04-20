@@ -399,8 +399,9 @@ class TestBuildAnalysisResultKeyMapping:
             database_path=Path("test.db"),
             custom_prompt=None,
         )
-        assert len(result.recommendations.low_priority) == 1
-        assert len(result.recommendations.medium_priority) == 0
+        # INFO recs are bucketed as medium_priority (actionable guidance)
+        assert len(result.recommendations.medium_priority) == 1
+        assert len(result.recommendations.low_priority) == 0
 
 
 # ===========================================================================
@@ -440,19 +441,22 @@ class TestBugFixes:
             "total_runtime": 1_500_000,
         }
         recs = generate_recommendations(time_breakdown, hotspots, {}, [])
-        compute_recs = [r for r in recs if r["category"] == "Compute Bottleneck"]
-        assert compute_recs, "Expected a compute bottleneck recommendation"
+        _rule3_cats = {"Kernel Hotspot", "Compute-Bound Kernel", "Mixed Bottleneck Kernel", "Memory-Bound Kernel"}
+        compute_recs = [r for r in recs if r["category"] in _rule3_cats]
+        assert compute_recs, "Expected a kernel hotspot recommendation"
 
-        quoted_name = shlex.quote(dangerous_name)
+        import re as _re
+        escaped_name = _re.escape(dangerous_name)
+        quoted_name = shlex.quote(f"^{escaped_name}$")
         rocprofv3_cmds = [
             cmd for cmd in compute_recs[0]["commands"] if cmd.get("tool") == "rocprofv3"
         ]
         assert rocprofv3_cmds, "Expected at least one rocprofv3 command"
         for cmd in rocprofv3_cmds:
             full = cmd["full_command"]
-            # The properly shell-quoted form of the kernel name must appear
+            # The properly shell-quoted, regex-escaped form must appear
             assert quoted_name in full, (
-                f"Expected shlex.quote({dangerous_name!r}) == {quoted_name!r} "
+                f"Expected shlex.quote(re.escape({dangerous_name!r})) == {quoted_name!r} "
                 f"in full_command, got: {full}"
             )
             # The raw (unquoted) name must not appear verbatim (i.e., not word-split)

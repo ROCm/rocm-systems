@@ -2097,6 +2097,20 @@ hipError_t hipPeekAtLastError(void) {
   return hip::GetHipDispatchTable()->hipPeekAtLastError_fn();
   CATCH;
 }
+extern "C" hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* func,
+                                                    const hipLaunchConfig_t* launchConfig) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipOccupancyMaxActiveClusters_fn(numClusters, func,
+                                                                      launchConfig);
+  CATCH;
+}
+extern "C" hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* func,
+                                                          const hipLaunchConfig_t* config) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipOccupancyMaxPotentialClusterSize_fn(clusterSize, func,
+                                                                            config);
+  CATCH;
+}
 hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, hipDeviceptr_t ptr) {
   TRY;
   return hip::GetHipDispatchTable()->hipPointerGetAttribute_fn(data, attribute, ptr);

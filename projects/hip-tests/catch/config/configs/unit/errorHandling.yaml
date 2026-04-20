@@ -16,7 +16,9 @@ errorHandling:
   Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpyParam2DAsync: *level_2
   Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
-  Unit_hipGetLastError_with_hipMemcpy3DAsync: *level_2
+  Unit_hipGetLastError_with_hipMemcpy3DAsync:
+    <<: *level_2
+    tags: [image]
   Unit_hipGetLastError_with_hipMemcpy2D_To_From_ArrayAsync: *level_2
   Unit_hipGetLastError_with_hipStreamAttachMemAsync: *level_2
   Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
@@ -60,7 +62,9 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync: *level_2
   Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2
-  Unit_hipExtGetLastError_with_hipMemcpy3DAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpy3DAsync:
+    <<: *level_2
+    tags: [image]
   Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync: *level_2
   Unit_hipExtGetLastError_with_hipStreamAttachMemAsync: *level_2
   Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2

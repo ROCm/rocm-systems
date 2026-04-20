@@ -169,9 +169,9 @@ rocprofv3 --sys-trace --pmc FETCH_SIZE \
 rocprofv3 --sys-trace --pmc WRITE_SIZE \
   -d ./counters -o pass3 -- ./app
 
-# Scope to the hot kernel (add --kernel-names to any pass)
+# Scope to the hot kernel (add --kernel-include-regex to any pass)
 rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES \
-  --kernel-names "hotKernelName" -d ./counters -o pass1 -- ./app
+  --kernel-include-regex "hotKernelName" -d ./counters -o pass1 -- ./app
 ```
 
 **What you learn**:
@@ -319,7 +319,7 @@ When unsure, recommend: `rocprofv3 --list-avail | grep <BLOCK_NAME>`
 **Kernel Filtering**:
 ```bash
 # Filter by kernel name (exact match or substring)
-rocprofv3 --kernel-names "myKernel" --pmc SQ_WAVES -- ./app
+rocprofv3 --kernel-include-regex "myKernel" --pmc SQ_WAVES -- ./app
 
 # Filter by kernel name regex
 rocprofv3 --kernel-include-regex "matmul.*" --pmc SQ_WAVES -- ./app
@@ -1935,13 +1935,13 @@ Cannot calculate GPU utilization, wave occupancy, or HBM bandwidth.
 Recommended next step (Step 2) — THREE passes required (each TCC-derived counter needs its own pass):
   # Pass 1: GPU utilization + wave occupancy
   rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES \
-    --kernel-names "<hot_kernel>" -d ./counters -o profile_pass1 -- ./app
+    --kernel-include-regex "<hot_kernel>" -d ./counters -o profile_pass1 -- ./app
   # Pass 2: HBM read bandwidth (FETCH_SIZE alone — 3 TCC hardware counters)
   rocprofv3 --sys-trace --pmc FETCH_SIZE \
-    --kernel-names "<hot_kernel>" -d ./counters -o profile_pass2 -- ./app
+    --kernel-include-regex "<hot_kernel>" -d ./counters -o profile_pass2 -- ./app
   # Pass 3: HBM write bandwidth (WRITE_SIZE alone — 2 TCC hardware counters)
   rocprofv3 --sys-trace --pmc WRITE_SIZE \
-    --kernel-names "<hot_kernel>" -d ./counters -o profile_pass3 -- ./app
+    --kernel-include-regex "<hot_kernel>" -d ./counters -o profile_pass3 -- ./app
 
 This will enable: GPU utilization, occupancy, and HBM bandwidth analysis.
 For full roofline model, follow with: rocprof-compute profile -- ./app

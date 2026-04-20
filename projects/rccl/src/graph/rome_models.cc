@@ -375,7 +375,7 @@ static struct rcclRomeModel rome_model_56 = {
   .gdrLevel = { },
   .pattern = "40404040",
   .ringBase = "0 1 3 2 6 7 15 14 10 11 9 8 12 13 5 4|0 1 2 3 7 6 13 12 8 9 10 11 15 14 5 4|0 2 3 7 6 14 15 11 10 8 9 13 12 4 5 1|4 5 13 12 8 9 11 10 14 15 7 6 2 3 1 0|4 5 14 15 11 10 9 8 12 13 6 7 3 2 1 0|1 5 4 12 13 9 8 10 11 15 14 6 7 3 2 0",
-  .options = "pivotA2AEnabled=1,pivotA2ANumBiRings=3,tuning=1,mscclEnabled=1,treeDefined=1",
+  .options = "pivotA2AEnabled=1,pivotA2ANumBiRings=3,tuning=1,treeDefined=1",
   .treeBase= "(0(1(3(2(6(7(15(14(10))))))))(4(5(13(12(8(9(11))))))))|(2(3(7(6(13(12(8(9(10))))))))(1(0(4(5(14(15(11))))))))|(14(15(11(10(8(9(13(12(4))))))))(6(7(3(2(0(1(5))))))))|(10(11(9(8(12(13(5(4(0))))))))(14(15(7(6(2(3(1))))))))|(10(11(15(14(5(4(0(1(2))))))))(9(8(12(13(6(7(3))))))))|(4(5(1(0(2(3(7(6(14))))))))(12(13(9(8(10(11(15))))))))|(6(7(15(14(10(11(9(8(12))))))))(2(3(1(0(4(5(13))))))))|(13(12(8(9(10(11(15(14(5))))))))(6(7(3(2(1(0(4))))))))|(8(9(13(12(4(5(1(0(2))))))))(10(11(15(14(6(7(3))))))))|(12(13(5(4(0(1(3(2(6))))))))(8(9(11(10(14(15(7))))))))|(5(4(0(1(2(3(7(6(13))))))))(14(15(11(10(9(8(12))))))))|(2(3(7(6(14(15(11(10(8))))))))(0(1(5(4(12(13(9))))))))",
 };
 
@@ -558,7 +558,7 @@ static struct rcclRomeModel rome_model_79 = {
   .gdrLevel = { },
   .pattern = "4040",
   .ringBase = "0 1 2 3 4 5 6 7|0 1 2 3 4 5 7 6|0 2 4 1 3 6 5 7|0 2 4 6 1 7 3 5|0 3 1 5 2 7 4 6|0 3 5 1 6 2 7 4|0 4 1 7 3 6 2 5|7 6 5 4 3 2 1 0|6 7 5 4 3 2 1 0|7 5 6 3 1 4 2 0|5 3 7 1 6 4 2 0|6 4 7 2 5 1 3 0|4 7 2 6 1 5 3 0|5 2 6 3 7 1 4 0|0 1 2 3 4 5 6 7|0 1 2 3 4 5 7 6|0 2 4 1 3 6 5 7|0 2 4 6 1 7 3 5|0 3 1 5 2 7 4 6|0 3 5 1 6 2 7 4|0 4 1 7 3 6 2 5|7 6 5 4 3 2 1 0|6 7 5 4 3 2 1 0|7 5 6 3 1 4 2 0|5 3 7 1 6 4 2 0|6 4 7 2 5 1 3 0|4 7 2 6 1 5 3 0|5 2 6 3 7 1 4 0",
-  .options = "noCpuCheck=1,mscclEnabled=1,tuning=5,disableNumaMatching=1",
+  .options = "noCpuCheck=1,tuning=5,disableNumaMatching=1",
 };
 
 static struct rcclRomeModel rome_model_80 = {
@@ -2072,8 +2072,6 @@ static void parseOptions(struct ncclTopoSystem* system, const char *options) {
         system->ll128Enabled = (bool)atol(tokens[i*2+1]);
       } else if (strcmp(tokens[i*2], "baseBw") == 0) {
         system->baseBw = std::stof(tokens[i*2+1]);
-      } else if (strcmp(tokens[i*2], "mscclEnabled") == 0) {
-        system->mscclEnabled = (bool)atol(tokens[i*2+1]);
       } else if (strcmp(tokens[i*2], "treeDefined") == 0) {
         system->treeDefined = (bool)atol(tokens[i*2+1]);
       }
