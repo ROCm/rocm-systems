@@ -56,6 +56,40 @@ bool writeFile(const std::string &path, const std::vector<uint8_t> &data) {
   return true;
 }
 
+// Derive a filesystem-safe basename for an arbitrarily long kernel name.
+// Most POSIX filesystems cap individual path components at 255 bytes, and
+// Salmon generates sibling files off the same stem (e.g. `<stem>.ll`,
+// `<stem>.s`, `<stem>.dis`), so we leave a small suffix budget and fold
+// anything longer down to a deterministic truncated+hashed form so two
+// kernels with a shared 240-byte prefix don't collide on disk.
+//
+// The returned basename preserves a readable prefix of the original name
+// for debuggability; it's only intended for temp-dir scratch files —
+// symbol names inside the IR itself are unaffected.
+std::string makeSafeBasename(const std::string &kernelName,
+                             size_t reservedSuffixBytes = 8) {
+  constexpr size_t kMaxComponentBytes = 255;
+  if (kernelName.size() + reservedSuffixBytes <= kMaxComponentBytes)
+    return kernelName;
+
+  // FNV-1a 64-bit hash — small, deterministic, no libstdc++ dep beyond cstdint.
+  uint64_t h = 0xcbf29ce484222325ull;
+  for (unsigned char c : kernelName) {
+    h ^= c;
+    h *= 0x100000001b3ull;
+  }
+
+  constexpr size_t kHashHexBytes = 16;   // "%016llx"
+  constexpr size_t kSeparatorBytes = 1;  // '_'
+  const size_t prefixBudget = kMaxComponentBytes - reservedSuffixBytes -
+                              kHashHexBytes - kSeparatorBytes;
+  std::string prefix = kernelName.substr(0, prefixBudget);
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%016llx",
+                static_cast<unsigned long long>(h));
+  return prefix + "_" + buf;
+}
+
 int runTool(llvm::StringRef program, llvm::ArrayRef<llvm::StringRef> args) {
   LLVM_DEBUG({
     llvm::dbgs() << "transpiler: Running:";
@@ -133,6 +167,22 @@ struct DumpDir {
 
 } // anonymous namespace
 
+bool isStrictMode() {
+  // Parsed once on first call. The handler implementations call this on
+  // every relevant instruction, so going through the OS allocator
+  // (`std::getenv`) repeatedly would be wasteful; the result also cannot
+  // change inside a process because the env var is read once at the
+  // first transpile and reused for the rest of the process lifetime.
+  // Treats any non-empty value as enabled to keep the runner side
+  // (`HSA_SALMON_STRICT=1`) and the pipeline side decoupled — a future
+  // shell that writes `HSA_SALMON_STRICT=true` still works.
+  static const bool s_strict = []() {
+    const char *v = std::getenv("HSA_SALMON_STRICT");
+    return v && v[0] != '\0';
+  }();
+  return s_strict;
+}
+
 PipelineResult runPipeline(const std::vector<uint8_t> &codeObjectData,
                            const std::string &targetISA,
                            const std::string &kernelName) {
@@ -182,19 +232,21 @@ static bool raiseAndCompileKernel(const TextSection &text,
                            << raised.liftedCount << "/"
                            << raised.totalCount << " instructions\n");
 
-  // TODO: kernel names are used directly as filenames here.  Names containing
-  // slashes, NUL bytes, or other path-unsafe characters would break this.
-  // In practice AMDGPU kernel names are valid C identifiers, but a robust
-  // implementation should sanitise or hash the name.
-  std::string irPath  = tmpDir.filePath(kernelName + ".ll");
-  std::string asmPath = tmpDir.filePath(kernelName + ".s");
+  // Kernel names from Tensile et al. routinely exceed 255 bytes, which is
+  // the per-component limit on ext4/xfs/tmpfs.  makeSafeBasename() hashes
+  // the tail and truncates the head when the full name would blow the
+  // budget; the symbol name inside the IR stays untouched, so debug
+  // tooling can still resolve the long name from the LLVM module.
+  std::string fileStem = makeSafeBasename(kernelName, /*reservedSuffixBytes=*/5);
+  std::string irPath  = tmpDir.filePath(fileStem + ".ll");
+  std::string asmPath = tmpDir.filePath(fileStem + ".s");
 
   if (!writeFile(irPath, raised.irText))
     return false;
 
   static const char *s_dumpInput = std::getenv("HSA_SALMON_DUMP_INPUT");
   if (s_dumpInput && s_dumpInput[0] == '1' && !raised.disasmText.empty())
-    writeFile(tmpDir.filePath(kernelName + ".dis"), raised.disasmText);
+    writeFile(tmpDir.filePath(fileStem + ".dis"), raised.disasmText);
 
   std::string llcBin = std::string(LLVM_TOOLS_DIR) + "/llc";
   if (runTool(llcBin, {llcBin, "-march=amdgcn",
