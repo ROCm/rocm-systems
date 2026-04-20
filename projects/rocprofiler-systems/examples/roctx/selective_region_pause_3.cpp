@@ -18,7 +18,7 @@
 //   roctxProfilerResume (outside — ignored)
 //
 // Run with filter:
-//   ROCPROFSYS_TRACE_REGION="Region 1" rocprof-sys -- ./selective_region_pause_3
+//   ROCPROFSYS_SELECTED_REGIONS="Region 1" rocprof-sys -- ./selective_region_pause_3
 //
 // Expected: profiling data recorded for {CodeBlock_A}
 

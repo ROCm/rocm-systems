@@ -6,31 +6,13 @@
 Building and installing rocDecode from source code
 ********************************************************************
 
-If you will be contributing to the rocDecode code base, or if you want to preview new features, build rocDecode from its source code.
+rocDecode is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. For TheRock installation details, refer to the `TheRock documentation <https://github.com/ROCm/TheRock#readme>`_.
 
-If you will not be previewing features or contributing to the code base, use the :doc:`package installers <./rocDecode-package-install>` to install rocDecode. 
-
-:doc:`Clone the rocDecode project <./rocDecode-clone-project>`.
-
-Change directory to the rocDecode project directory.
+To build rocDecode standalone from source, :doc:`clone the rocDecode project <./rocDecode-clone-project>` and change to the project directory:
 
 .. code:: shell
 
   cd rocm-systems/projects/rocdecode
-
-Use `rocDecode-setup.py <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/rocDecode-setup.py>`_ to install the required prerequisites:
-
-.. code:: shell
-
-  python3 rocDecode-setup.py  [--rocm_path ROCM_INSTALLATION_PATH; default=/opt/rocm]
-                              [--runtime {ON|OFF}; default=ON]
-                              [--developer {ON|OFF}; default=OFF]
-
-.. note:: 
-
-  Never run ``rocDecode-setup.py`` with ``--runtime OFF``.  
-  
-  ``--developer ON`` is required to use the code samples.
 
 Build and install rocDecode using the following commands:
 
@@ -43,7 +25,7 @@ Build and install rocDecode using the following commands:
 
 After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
 
-Build and install the rocDecode test module. This module is required if you'll be using the rocDecode samples, and can only be installed if ``rocDecode-setup.py`` was run with ``--developer ON``.
+To run the installed CTest-based verification:
 
 .. code:: shell
 
@@ -51,11 +33,5 @@ Build and install the rocDecode test module. This module is required if you'll b
   cmake /opt/rocm/share/rocdecode/test/
   ctest -VV
 
-Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``. 
-
-To create a package installer for rocDecode, run:
-
-.. code:: shell
-
-  sudo make package
+Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
 

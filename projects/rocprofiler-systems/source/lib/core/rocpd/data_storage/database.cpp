@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "database.hpp"
 #include "common/md5sum.hpp"
@@ -163,17 +144,15 @@ namespace rocpd
 {
 namespace data_storage
 {
-database::database(int pid, int ppid)
+database::database(int pid, int ppid, std::string output_path)
+: m_path(std::move(output_path))
 {
-    auto _tag        = std::to_string(pid);
-    auto db_name     = std::string{ "rocpd" };
-    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name, _tag);
-    create_directory_for_database_file(abs_db_path);
-    LOG_INFO("Database: {}", abs_db_path);
+    create_directory_for_database_file(m_path);
+    LOG_INFO("Database: {}", m_path);
 
     validate_sqlite3_result(sqlite3_open(":memory:", &_sqlite3_db_temp), "",
                             "database open failed!");
-    validate_sqlite3_result(sqlite3_open(abs_db_path.c_str(), &_sqlite3_db), "",
+    validate_sqlite3_result(sqlite3_open(m_path.c_str(), &_sqlite3_db), "",
                             "database open failed!");
     m_upid = generate_upid(pid, ppid);
 }

@@ -12,8 +12,6 @@ subtrees:
     title: Installation prerequisites
   - file: install/rocjpeg-clone-repo.rst    
     title: Cloning the project
-  - file: install/rocjpeg-package-install.rst
-    title: Installing with the package installer
   - file: install/rocjpeg-build-and-install.rst
     title: Building and installing from source code
 

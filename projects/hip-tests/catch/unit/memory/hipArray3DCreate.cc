@@ -91,7 +91,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, usho
 #else
   desc.Flags = GENERATE(0, hipArraySurfaceLoadStore);
   if (desc.Flags == hipArraySurfaceLoadStore) {
-    HipTest::HIP_SKIP_TEST("EXSWCPHIPT-58");
+    HipTest::HIP_SKIP_TEST("tracked issue EXSWCPHIPT-58.");
     return;
   }
 #endif
@@ -325,7 +325,7 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_Negative_Non2DTextureGather, char, 
   CHECK_IMAGE_SUPPORT
 
 #if HT_AMD
-  HipTest::HIP_SKIP_TEST("Texture Gather arrays not supported using AMD backend");
+  HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
   return;
 #endif
   using vec_info = vector_info<TestType>;

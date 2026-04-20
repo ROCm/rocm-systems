@@ -4,10 +4,21 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 ## (Unreleased) rocDecode 1.8.0
 
+### Changed
+
+* rocDecode is now delivered as part of [TheRock](https://github.com/ROCm/TheRock). All core dependencies are provided by the TheRock build.
+* Removed CPack packaging (DEB/RPM/NSIS/TGZ/ZIP generation and all related CPACK variables).
+* Removed `rocDecode-setup.py` dependency installer script.
+* Removed Docker files.
+* Removed package install documentation; updated all documentation to reference TheRock for installation.
+* Simplified libva version check (single `>= 1.22` requirement).
+* Cleaned up CMake error messages.
+
 ### Added
 
 * Logging improvement: Added function entry and exit logs (at Info log level).
 * Logging improvement: Added duration to function exit logs and optimized log message formatting to reduce runtime overhead.
+* Logging improvement: Merged all logger instances into one global instance.
 * Feature: support for user set output surface format.
 
 ## rocDecode 1.7.0 for ROCm 7.2.1

@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "rocprof-sys/library/rocprofiler-sdk/roctx_client.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/trace_control.hpp"

@@ -440,18 +440,21 @@ def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--list-available-metrics",
-        ])
-        assert code == 0
+        try:
+            code = binary_handler_analyze_rocprof_compute([
+                "analyze",
+                "--path",
+                workload_dir,
+                "--list-available-metrics",
+            ])
+            assert code == 0
 
-        # Test output
-        output = capsys.readouterr().out
-        assert "0 -> Top Stats" in output
-        assert "1 -> System Info" in output
+            # Test output
+            output = capsys.readouterr().out
+            assert "0 -> Top Stats" in output
+            assert "1 -> System Info" in output
+        finally:
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics

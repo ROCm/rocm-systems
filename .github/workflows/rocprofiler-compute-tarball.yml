@@ -57,7 +57,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          sparse-checkout: projects/rocprofiler-compute
+          sparse-checkout: |
+            projects/rocprofiler-compute
+            shared/ctest
           ref: ${{ steps.sha-mode.sha }}
           set-safe-directory: true
 

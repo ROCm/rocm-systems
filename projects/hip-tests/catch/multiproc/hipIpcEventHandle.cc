@@ -235,7 +235,7 @@ HIP_TEST_CASE(Unit_hipIpcEventHandle_Functional) {
   getDevices(shmDevices);
 
   if (shmDevices->count < 2) {
-    WARN("Test requires atleast two GPUs with P2P access. Skipping test.");
+    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
 

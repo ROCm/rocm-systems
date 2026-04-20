@@ -20,6 +20,7 @@ hsaKmtWaitOnEvent;
 hsaKmtWaitOnMultipleEvents;
 hsaKmtCreateQueue;
 hsaKmtCreateQueueExt;
+hsaKmtCreateQueueV2;
 hsaKmtUpdateQueue;
 hsaKmtDestroyQueue;
 hsaKmtSetQueueCUMask;

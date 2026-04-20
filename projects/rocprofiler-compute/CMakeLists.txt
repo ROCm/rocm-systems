@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+#Add a name for the rocm-systems location
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 # Set cmake_prefix_path for searching, ROCM_PATH if avail otherwise default to general rocm install path
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 message(STATUS "ROCM_PATH: $ENV{ROCM_PATH}")
@@ -494,6 +497,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# RDNA3.5 memory chart CLI (Rich) — no GPU required
+add_test(
+    NAME test_mem_chart_gfx11
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
+        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+)
+
 add_test(
     NAME test_roofline_calc_ai_analyze
     COMMAND
@@ -613,6 +625,18 @@ add_test(
 )
 
 # -----------------------------------
+# SoC base counter allocation tests
+# -----------------------------------
+
+add_test(
+    NAME test_soc_base
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_soc_base.xml ${COV_OPTION} tests/test_soc_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -635,6 +659,7 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
+        test_mem_chart_gfx11
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
@@ -659,6 +684,23 @@ if(${ENABLE_COVERAGE})
             ENVIRONMENT "COVERAGE_FILE=${COVERAGE_DATA_PATH}"
             TIMEOUT 600
     )
+endif()
+
+# -------------------
+# Test categorization
+# -------------------
+set(_test_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_categories.yaml")
+include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+
+if(COMMAND apply_ctest_category_labels)
+    if(EXISTS "${_test_categories_yaml}")
+        message(STATUS "YAML-based test categorization")
+        apply_ctest_category_labels("${_test_categories_yaml}")
+    else()
+        message(STATUS "No test categorization (YAML missing)")
+    endif()
+else()
+    message(STATUS "Test categorization not available (TestCategories.cmake not found)")
 endif()
 
 # -------------------

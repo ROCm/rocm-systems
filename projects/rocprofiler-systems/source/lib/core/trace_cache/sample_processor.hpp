@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 #include "common/defines.h"
@@ -82,6 +63,8 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void handle(const kfd_sample& sample) { static_cast<T*>(this)->handle(sample); }
+
     void prepare_for_processing() { static_cast<T*>(this)->prepare_for_processing(); }
 
     void finalize_processing() { static_cast<T*>(this)->finalize_processing(); }
@@ -106,6 +89,7 @@ struct processor_view_t
     using cpu_freq_sample_fn_t  = void (*)(void*, const cpu_freq_sample&) noexcept;
     using backtrace_region_fn_t = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
+    using kfd_sample_fn_t       = void (*)(void*, const kfd_sample&) noexcept;
     using prepare_for_processing_fn_t = void (*)(void*) noexcept;
     using finalize_processing_fn_t    = void (*)(void*) noexcept;
 
@@ -124,6 +108,7 @@ struct processor_view_t
         ainic_pmc_sample_fn_t       handle_ainic_pmc_sample;
         cpu_freq_sample_fn_t        handle_cpu_freq_sample;
         backtrace_region_fn_t       handle_backtrace_region;
+        kfd_sample_fn_t             handle_kfd_sample;
         prepare_for_processing_fn_t prepare_for_processing;
         finalize_processing_fn_t    finalize_processing;
     };
@@ -198,6 +183,11 @@ struct processor_view_t
         m_vtable->handle_backtrace_region(m_object, sample);
     }
 
+    ROCPROFSYS_INLINE void handle(const kfd_sample& sample) const noexcept
+    {
+        m_vtable->handle_kfd_sample(m_object, sample);
+    }
+
     ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
     {
         m_vtable->prepare_for_processing(m_object);
@@ -246,6 +236,9 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const kfd_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj) noexcept { static_cast<T*>(obj)->prepare_for_processing(); },
@@ -331,6 +324,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::backtrace_region_sample:
                 handle_sample(static_cast<const backtrace_region_sample&>(sample));
+                break;
+            case type_identifier_t::kfd_sample:
+                handle_sample(static_cast<const kfd_sample&>(sample));
                 break;
             default: throw std::runtime_error("Unsupported sample type");
         }

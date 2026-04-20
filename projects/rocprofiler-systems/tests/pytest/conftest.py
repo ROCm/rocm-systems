@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 """
 Pytest configuration and fixtures for rocprofiler-systems tests.
@@ -307,6 +307,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "hpc",
         "hip",
+        "kfd",
         "selective_regions",
     ]
     for label in non_functional_markers + generic_functional_markers:

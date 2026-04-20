@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/agent_manager.hpp"
@@ -8,6 +8,7 @@
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -42,6 +43,14 @@ get_handle_from_code_object(
 #else
     return code_object.rocp_agent.handle;
 #endif
+}
+
+std::string
+generate_db_output_path(int pid)
+{
+    auto _tag    = std::to_string(pid);
+    auto db_name = std::string{ "rocpd" };
+    return rocprofsys::get_database_absolute_path(db_name, _tag);
 }
 
 using memory_operation = std::string;
@@ -369,31 +378,32 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);
 
-    auto insert_xcp_metrics = [&](const char* base_name, const std::string& base_track,
-                                  bool is_enabled, const auto& get_array) {
+    auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
+                                  const auto& format_name) {
         if(!is_enabled) return;
         for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
         {
             const auto& arr = get_array(m.xcp_stats[xcp]);
             for(size_t i = 0; i < arr.size(); ++i)
             {
-                auto suffix =
-                    "_xcp" + std::to_string(xcp) + "[" + std::to_string(i) + "]";
-                auto pmc_name   = std::string(base_name) + suffix;
-                auto track_name = base_track + suffix;
-                insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
+                auto name = format_name(static_cast<int>(xcp), static_cast<int>(i));
+                insert_metric(true, name.c_str(), name.c_str(), arr[i]);
             }
         }
     };
 
-    insert_xcp_metrics(trait::name<category::amd_smi_vcn_activity>::value,
-                       info::format_track_name<category::amd_smi_vcn_activity>(),
-                       enabled.bits.vcn_busy,
-                       [](const auto& xcp) -> const auto& { return xcp.vcn_busy; });
-    insert_xcp_metrics(trait::name<category::amd_smi_jpeg_activity>::value,
-                       info::format_track_name<category::amd_smi_jpeg_activity>(),
-                       enabled.bits.jpeg_busy,
-                       [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; });
+    insert_xcp_metrics(
+        enabled.bits.vcn_busy,
+        [](const auto& xcp) -> const auto& { return xcp.vcn_busy; },
+        [](int xcp, int engine) {
+            return info::format_track_name<category::amd_smi_vcn_activity>(xcp, engine);
+        });
+    insert_xcp_metrics(
+        enabled.bits.jpeg_busy,
+        [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; },
+        [](int xcp, int engine) {
+            return info::format_track_name<category::amd_smi_jpeg_activity>(xcp, engine);
+        });
 
     auto insert_device_level_metrics = [&](const std::string_view base_name,
                                            bool is_enabled, const auto& arr) {
@@ -574,19 +584,72 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
     for(const auto& core : core_freq_samples)
     {
-        insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
+        insert_event_and_sample(get_track_name(core.id).c_str(),
+                                static_cast<double>(core.value));
+    }
+}
+
+void
+rocpd_processor_t::handle(const kfd_sample& _kfd)
+{
+    auto& n_info  = node_info::get_instance();
+    auto  process = m_metadata->get_process_info();
+    auto  thread_primary_key =
+        m_data_processor->map_thread_id_to_primary_key(_kfd.thread_id);
+
+    auto name_primary_key     = m_data_processor->insert_string(_kfd.name.c_str());
+    auto category_primary_key = m_data_processor->insert_string(_kfd.category.c_str());
+
+    size_t stack_id        = 0;
+    size_t parent_stack_id = 0;
+    size_t correlation_id  = 0;
+
+    auto event_primary_key = m_data_processor->insert_event(
+        category_primary_key, stack_id, parent_stack_id, correlation_id);
+
+    auto args = process_arguments_string(_kfd.args_str);
+    for(const auto& arg : args)
+    {
+        m_data_processor->insert_args(event_primary_key, arg.arg_number,
+                                      arg.arg_type.c_str(), arg.arg_name.c_str(),
+                                      arg.arg_value.c_str());
+    }
+
+    m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
+                                    _kfd.start_timestamp, _kfd.end_timestamp,
+                                    name_primary_key, event_primary_key);
+
+    try
+    {
+        auto agent_primary_key =
+            m_agent_manager
+                ->get_agent_by_type_index(_kfd.device_id,
+                                          static_cast<agent_type>(_kfd.device_type))
+                .base_id;
+
+        m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
+                                           _kfd.pmc_info_name.c_str(), _kfd.value, "{}");
+    } catch(const std::out_of_range& e)
+    {
+        LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
+                    "device_type={}: {}",
+                    _kfd.device_id, _kfd.device_type, e.what());
     }
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
-                                     int pid, int ppid)
+                                     int pid, int ppid,
+                                     output_file_registry& output_registry)
 : processor_t<rocpd_processor_t>()
 , m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(std::make_shared<rocpd::data_processor>(
-      std::make_shared<rocpd::data_storage::database>(pid, ppid)))
-{}
+, m_output_registry(output_registry)
+, m_db_output_path(generate_db_output_path(pid))
+{
+    m_data_processor = std::make_shared<rocpd::data_processor>(
+        std::make_shared<rocpd::data_storage::database>(pid, ppid, m_db_output_path));
+}
 
 void
 rocpd_processor_t::prepare_for_processing()
@@ -601,6 +664,9 @@ rocpd_processor_t::finalize_processing()
 {
     LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
+
+    m_output_registry.register_file(m_db_output_path, output_format::rocpd);
+
     LOG_INFO("Rocpd processor finalized successfully");
 }
 

@@ -41,8 +41,8 @@ class MaxUIntegerTypes(IntEnum):
     UINT64_T = 0xFFFFFFFFFFFFFFFF
 
 
-NO_OF_32BITS = sys.getsizeof(ctypes.c_uint32) * 8
-NO_OF_64BITS = sys.getsizeof(ctypes.c_uint64) * 8
+NO_OF_32BITS = ctypes.sizeof(ctypes.c_uint32) * 8
+NO_OF_64BITS = ctypes.sizeof(ctypes.c_uint64) * 8
 KILO = math.pow(10, 3)
 AMDSMI_MAX_UTIL = 0xFFFFFFFF
 AMDSMI_MAX_PPT_LIMIT = 0xFFFFFFFF
@@ -78,7 +78,7 @@ AMDSMI_MAX_NUM_PM_POLICIES = 32
 # Max supported frequencies
 AMDSMI_MAX_NUM_FREQUENCIES = 33
 
-# Max Fan speed
+# Max Fan speed (legacy hwmon). For gpu_od GPUs, use amdsmi_get_gpu_fan_speed_max().
 AMDSMI_MAX_FAN_SPEED = 255
 
 # Max Votlage Curve Points
@@ -474,7 +474,7 @@ class AmdSmiEvtNotificationType(IntEnum):
     GPU_POST_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_POST_RESET
     MIGRATE_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_MIGRATE_START
     MIGRATE_END = amdsmi_wrapper.AMDSMI_EVT_NOTIF_MIGRATE_END
-    PAGE_FAULT_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PAGE_FAULT_END
+    PAGE_FAULT_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PAGE_FAULT_START
     PAGE_FAULT_END = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PAGE_FAULT_END
     QUEUE_EVICTION = amdsmi_wrapper.AMDSMI_EVT_NOTIF_QUEUE_EVICTION
     QUEUE_RESTORE = amdsmi_wrapper.AMDSMI_EVT_NOTIF_QUEUE_RESTORE
@@ -1075,7 +1075,7 @@ def amdsmi_get_socket_handles() -> List[c_void_p]:
     return sockets
 
 
-def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
+def amdsmi_get_cpu_handles() -> Dict[str, Any]:
     """
     Function that gets cpu socket handles. Wraps the same named function call.
 
@@ -1083,7 +1083,9 @@ def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
         `None`.
 
     Returns:
-        `List`: List containing all of the found cpu socket handles.
+        `Dict[str, Any]`: Dictionary with keys:
+            - ``cpu_count`` (`int`): Number of CPU socket handles found.
+            - ``processor_handles`` (`List[c_void_p]`): List of CPU socket handles.
     """
     cpu_count = ctypes.c_uint32(0)
     null_ptr = POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
@@ -1094,7 +1096,25 @@ def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
         amdsmi_wrapper.amdsmi_processor_handle(proc_handles[sock_idx])
         for sock_idx in range(cpu_count.value)
     ]
-    return cpu_handles
+    return {"cpu_count": len(cpu_handles), "processor_handles": cpu_handles}
+
+
+def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
+    """Deprecated: Use amdsmi_get_cpu_handles() instead.\
+        Will be deprecated in Rocm 8.0.
+
+    Returns:
+        `List[c_void_p]`: List of CPU socket handles (legacy format).
+    """
+    import warnings
+
+    warnings.warn(
+        "amdsmi_get_cpusocket_handles() is deprecated, use amdsmi_get_cpu_handles() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    result = amdsmi_get_cpu_handles()
+    return result["processor_handles"]
 
 
 def amdsmi_get_socket_info(socket_handle):
@@ -1356,11 +1376,11 @@ def amdsmi_get_cpu_core_energy(processor_handle: processor_handle_t) -> str:
     return f"{float(penergy.value * pow(10, -6))} J"
 
 
-def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> float:
+def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    power = ctypes.c_double()
+    power = ctypes.c_uint32()
 
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_core_ccd_power(processor_handle, ctypes.byref(power)))
 
@@ -1479,7 +1499,7 @@ def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    ppower = ctypes.c_double()
+    ppower = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power(processor_handle, ctypes.byref(ppower)))
 
     return f"{ppower.value} Watts"
@@ -1489,7 +1509,7 @@ def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> str
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    pcap = ctypes.c_double()
+    pcap = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap(processor_handle, ctypes.byref(pcap)))
 
     return f"{pcap.value} Watts"
@@ -1499,7 +1519,7 @@ def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) ->
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    pmax = ctypes.c_double()
+    pmax = ctypes.c_uint32()
     _check_res(
         amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap_max(processor_handle, ctypes.byref(pmax))
     )
@@ -1566,7 +1586,7 @@ def amdsmi_get_cpu_pwr_efficiency_mode(processor_handle: processor_handle_t) -> 
 
     mode = ctypes.c_uint32()
     util = ctypes.c_uint32()
-    ppt_limit = ctypes.c_double()
+    ppt_limit = ctypes.c_uint32()
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_cpu_pwr_efficiency_mode(
@@ -2336,7 +2356,7 @@ def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    sdps_limit = ctypes.c_double()
+    sdps_limit = ctypes.c_uint32()
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_sdps_limit(processor_handle, ctypes.byref(sdps_limit)))
 
     # In Watt
@@ -5124,10 +5144,17 @@ def amdsmi_set_gpu_clk_limit(
         clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_SYS
     elif clk_type.lower() == "mclk":
         clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_MEM
+    elif clk_type.lower() == "fclk":
+        clk_type_conversion = amdsmi_wrapper.AMDSMI_CLK_TYPE_DF
+    else:
+        raise AmdSmiParameterException(f"Unsupported clock type: {clk_type}", str)
+
     if limit_type.lower() == "min":
         limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MIN
     elif limit_type.lower() == "max":
         limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MAX
+    else:
+        raise AmdSmiParameterException(f"Unsupported limit type: {limit_type}", str)
     _check_res(
         amdsmi_wrapper.amdsmi_set_gpu_clk_limit(
             processor_handle, clk_type_conversion, limit_type_conversion, ctypes.c_uint64(value)
@@ -6705,11 +6732,6 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         return False, "Could not find librocm-core.so"
     except Exception as e:
         return False, f"Unable to detect ROCm installation, Unknown Error: {e}"
-
-
-def amdsmi_get_cpu_handles() -> Dict[str, Any]:
-    cpu_handles = amdsmi_get_cpusocket_handles()
-    return {"cpu_count": len(cpu_handles), "processor_handles": cpu_handles}
 
 
 def amdsmi_get_esmi_err_msg(status: AmdSmiStatus) -> str:
