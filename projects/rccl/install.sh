@@ -42,6 +42,8 @@ warp_speed_enabled=true # note that this flag will be overridden to false for no
 quiet_warnings=false
 build_rocshmem_support=false
 rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
+gpu_rdc_isa=false
+use_ninja=false
 custom_cmake_options=""
 
 # #################################################
@@ -66,6 +68,8 @@ function display_help()
     echo "    -j|--jobs                  Specify how many parallel compilation jobs to run ($num_parallel_jobs by default)"
     echo "       --kernel-resource-use   Dump GPU kernel resource usage (e.g., VGPRs, scratch, spill) at link stage"
     echo "    -l|--local_gpu_only        Only compile for local GPU architecture"
+    echo "       --rdc-isa               Split build with -fgpu-rdc-isa (relocatable ISA, no LTO)"
+    echo "       --ninja                 Use Ninja instead of Make (better parallelism for large builds)"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
     echo "       --no_clean              Don't delete files if they already exist"
     echo "       --npkit-enable          Compile with npkit enabled"
@@ -115,7 +119,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,rdc-isa,ninja,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -146,6 +150,8 @@ while true; do
     -j | --jobs)                     num_parallel_jobs=${2};                                                                           shift 2 ;;
          --kernel-resource-use)      kernel_resource_use=true;                                                                         shift ;;
     -l | --local_gpu_only)           build_local_gpu_only=true;                                                                        shift ;;
+         --rdc-isa)                  gpu_rdc_isa=true;                                                                                 shift ;;
+         --ninja)                    use_ninja=true;                                                                                   shift ;;
          --amdgpu_targets)           build_amdgpu_targets=${2};                                                                        shift 2 ;;
          --no_clean)                 clean_build=false;                                                                                shift ;;
          --npkit-enable)             npkit_enabled=true;                                                                               shift ;;
@@ -330,6 +336,11 @@ if [[ "${build_local_gpu_only}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_LOCAL_GPU_TARGET_ONLY=ON"
 fi
 
+# Split build with -fgpu-rdc-isa (relocatable ISA, no LTO)
+if [[ "${gpu_rdc_isa}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_GPU_RDC_ISA=ON"
+fi
+
 # Build for specified GPU target(s) only
 if [[ ! -z "${build_amdgpu_targets}" ]]; then
     cmake_common_options="${cmake_common_options} -DGPU_TARGETS=${build_amdgpu_targets}"
@@ -428,8 +439,8 @@ fi
 
 check_exit_code "$?"
 
-# Enable ninja build for time tracing
-if [[ "${time_trace}" == true ]]; then
+# Enable ninja build for time tracing or when explicitly requested via --ninja
+if [[ "${time_trace}" == true ]] || [[ "${use_ninja}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
         echo "ninja could not be found"
         echo "Use \"${time_trace_ninja_msg}\" to install ninja"

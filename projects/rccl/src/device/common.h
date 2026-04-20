@@ -189,11 +189,28 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
+#if defined(RCCL_NO_EXTERN_SHMEM)
+// RCCL_NO_EXTERN_SHMEM is set for TUs that do not want `extern __shared__`
+// declarations.  This happens in two situations under the -fgpu-rdc-isa
+// per-arch pipeline:
+//   (a) host-only compiles that include common.h but will not device-link
+//       (newer clang rejects `extern __shared__` at file scope in host mode), and
+//   (b) TUs in the main rccl target that merely include common.h and do not
+//       participate in the per-arch device link.
+// Use plain (non-extern) __shared__ instead; the compiler allocates each
+// variable at a separate, non-overlapping offset, matching the layout the
+// device linker produces in the default build.  common.cu's own definitions
+// are guarded by #ifndef RCCL_NO_EXTERN_SHMEM so there is no redefinition
+// conflict when common.cu.cpp is compiled with this define.
+__shared__ ncclShmemData ncclShmem;
+__shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+#else
 extern __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ >= 700
   extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
 #else
   extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+#endif
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -677,6 +694,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
+#ifndef RCCL_DEVICE_TABLE_OMIT
 #ifdef USE_INDIRECT_FUNCTION_CALL
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
@@ -692,6 +710,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       else
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
 #endif
+#endif // RCCL_DEVICE_TABLE_OMIT
     }
 
     if (ncclShmem.nextBatchIx == -1) break;

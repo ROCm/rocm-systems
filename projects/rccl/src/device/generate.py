@@ -81,7 +81,12 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
 
-func_pattern = sys.argv[7:8]
+# Optional keyword "SPECIALIZED" in argv[7:] requests one .cpp per device
+# function for the -fgpu-rdc-isa per-arch pipeline (cmake/RdcIsaDevice.cmake).
+# Default ("split") layout remains unchanged.
+is_specialized     = 1 if "SPECIALIZED" in sys.argv[7:] else 0
+remaining_args     = [a for a in sys.argv[7:] if a != "SPECIALIZED"]
+func_pattern       = remaining_args[:1]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -412,7 +417,14 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out("%s %s();\n" % (func_declaration, sym))
   out("\n")
 
+  # Everything below (table definitions + Caller templates + NCCL_CALL_FUNCTIONS_*)
+  # references every ncclDevFunc_* symbol.  TUs that only need the forward
+  # declarations (e.g. host-only compiles and the aux target under the
+  # -fgpu-rdc-isa per-arch pipeline) define RCCL_DEVICE_TABLE_OMIT to suppress
+  # this block, avoiding per-TU device-link errors for symbols that live in
+  # the per-arch specialized pipeline.
   index = {val: None for val in all_unrolls}
+  out("#ifndef RCCL_DEVICE_TABLE_OMIT\n")
   out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
@@ -454,6 +466,8 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{\n")
       out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex);\n")
       out("}\n\n")
+
+  out("#endif // RCCL_DEVICE_TABLE_OMIT\n")
 
 # Generate <gensrc>/device_table.cpp
 if is_colltrace:
@@ -584,21 +598,62 @@ ty_to_cxx = {
   "f8e5m2": "rccl_bfloat8"
 }
 
-# Generate each <gensrc>/<impl>.cpp:
-for name in name_to_funcs.keys():
-  (coll, fns) = name_to_funcs[name]
-  with open(os.path.join(gensrc, name), "w") as f:
-    print("-- Generating %s" % os.path.join(gensrc, name))
+# Generate each <gensrc>/<impl>.cpp (default split layout -- aggregated per collective).
+# When SPECIALIZED is requested we skip this and emit one file per function below.
+if not is_specialized:
+  for name in name_to_funcs.keys():
+    (coll, fns) = name_to_funcs[name]
+    with open(os.path.join(gensrc, name), "w") as f:
+      print("-- Generating %s" % os.path.join(gensrc, name))
 
-    out = f.write
-    out(
-      '#include "common.h"\n'
-      '#include "{lower_coll}.h"\n'
-      .format(lower_coll=coll_camel_to_lower[coll])
-    )
+      out = f.write
+      out(
+        '#include "common.h"\n'
+        '#include "{lower_coll}.h"\n'
+        .format(lower_coll=coll_camel_to_lower[coll])
+      )
 
-    for fn in fns:
-      sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+      for fn in fns:
+        sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+        guard = get_arch_guard(fn)
+        if guard:
+          out("#if %s\n" % guard)
+        out(
+          "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n"
+          .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop], ty_cxx=ty_to_cxx[fn.ty],
+                  algo=(fn.algo or "RING"), proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline, unroll=fn.unroll)
+        )
+        if guard:
+          out("#endif\n")
+
+################################################################################
+# Specialized split build: generate one .cpp per device function for maximum
+# compile parallelism with -fgpu-rdc-isa.  Each file defines a single
+# __device__ function via DEFINE_ncclDevFunc -- no kernel wrapper needed because
+# -fgpu-rdc-isa preserves external linkage and the linker resolves cross-TU
+# references from common.cu.cpp's dispatch tables.
+# A sibling manifest `specialized_files.txt` lists every generated file plus
+# the arch guard (if any) so CMake (cmake/RdcIsaDevice.cmake) can skip files
+# that don't apply to a given --offload-arch=<gfx>.
+################################################################################
+if is_specialized:
+  specialized_dir = os.path.join(gensrc, "specialized")
+  os.makedirs(specialized_dir, exist_ok=True)
+  spec_count = 0
+  for fn in primary_funcs:
+    sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+    lower_coll = coll_camel_to_lower[fn.coll]
+    fname = "spec_%s.cpp" % paste("_", lower_coll,
+                                   fn.redop and fn.redop.lower(),
+                                   fn.ty,
+                                   fn.algo and fn.algo.lower(),
+                                   fn.proto and fn.proto.lower(),
+                                   fn.acc, fn.pipeline, fn.unroll)
+    filepath = os.path.join(specialized_dir, fname)
+    with open(filepath, "w") as f:
+      out = f.write
+      out('#include "common.h"\n')
+      out('#include "%s.h"\n' % lower_coll)
       guard = get_arch_guard(fn)
       if guard:
         out("#if %s\n" % guard)
@@ -607,6 +662,27 @@ for name in name_to_funcs.keys():
         .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop], ty_cxx=ty_to_cxx[fn.ty],
                 algo=(fn.algo or "RING"), proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline, unroll=fn.unroll)
       )
-      if guard: 
+      if guard:
         out("#endif\n")
+    spec_count += 1
+
+  # Manifest consumed by cmake/RdcIsaDevice.cmake for arch-aware filtering.
+  manifest_path = os.path.join(gensrc, "specialized_files.txt")
+  with open(manifest_path, "w") as f:
+    for fn in primary_funcs:
+      lower_coll = coll_camel_to_lower[fn.coll]
+      fname = "spec_%s.cpp" % paste("_", lower_coll,
+                                     fn.redop and fn.redop.lower(),
+                                     fn.ty,
+                                     fn.algo and fn.algo.lower(),
+                                     fn.proto and fn.proto.lower(),
+                                     fn.acc, fn.pipeline, fn.unroll)
+      guard = get_arch_guard(fn)
+      if guard:
+        f.write("%s %s.h %s\n" % (fname, lower_coll, guard))
+      else:
+        f.write("%s %s.h\n" % (fname, lower_coll))
+
+  print("-- Generated %d specialized files in %s" % (spec_count, specialized_dir))
+  print("-- Generated manifest: %s (%d entries)" % (manifest_path, spec_count))
 

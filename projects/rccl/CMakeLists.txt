@@ -108,6 +108,7 @@ option(QUIET_WARNINGS                          "Supress compiler warnings"      
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
+option(ENABLE_GPU_RDC_ISA                      "Use -fgpu-rdc-isa (relocatable ISA, no LTO)"   OFF)
 
 # Translate NCCL-compatible aliases into existing RCCL build knobs.
 if(DEBUG AND NOT CMAKE_BUILD_TYPE)

@@ -390,8 +390,14 @@ if(ONLY_FUNCS)
 endif()
 
 # Execute the python script to generate required collective functions
+if(ENABLE_GPU_RDC_ISA)
+  set(SPECIALIZED_FLAG "SPECIALIZED")
+else()
+  set(SPECIALIZED_FLAG "")
+endif()
+
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${SPECIALIZED_FLAG} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -418,9 +424,14 @@ endif()
 # Find the generated files in the output directory
 file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
-# Append all found generated files to the list
+# Append all found generated files to the list.
+# Skip non-source artifacts emitted by generate.py (e.g. specialized_files.txt
+# manifest consumed by cmake/RdcIsaDevice.cmake).
 foreach(file ${GENERATED_FILES})
-  list(APPEND HIP_SOURCES ${file})
+  get_filename_component(_gen_fname ${file} NAME)
+  if(NOT _gen_fname MATCHES "\\.txt$")
+    list(APPEND HIP_SOURCES ${file})
+  endif()
 endforeach()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -438,6 +449,36 @@ add_custom_target(update_git_version
 )
 
 list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
+
+# Per-arch device compilation pipeline (cmake/RdcIsaDevice.cmake):
+# specialized files + common.cu.cpp are compiled device-only per-arch, linked
+# with ld.lld, bundled, and embedded into a host-only common.cu.cpp TU.
+# Enabled for all -fgpu-rdc-isa builds (single- and multi-target) so both
+# paths share the same flow.
+set(RDC_ISA_PER_ARCH FALSE)
+if(ENABLE_GPU_RDC_ISA)
+  # Normalize GPU_TARGETS: accept comma- or semicolon-separated, or already-list form
+  string(REPLACE "," ";" _rdi_gpu_targets_list "${GPU_TARGETS}")
+  set(GPU_TARGETS "${_rdi_gpu_targets_list}")
+  list(LENGTH GPU_TARGETS _num_gpu_targets)
+  set(RDC_ISA_PER_ARCH TRUE)
+  # Filter TUs that are handled by cmake/RdcIsaDevice.cmake:
+  #   - spec_*.cpp, common.cu.cpp : per-arch device-only + host-only with fatbin
+  #   - collectives.cc, onerank.cu.cpp : dual-pass (host+device) aux target
+  #     (these two contain __global__ kernels / <<<>>> launches and need their
+  #     own device codegen; handling them here lets the main rccl target run
+  #     with --offload-host-only, which prevents per-TU device links from
+  #     trying to resolve ncclDevFunc_* references pulled in via device_table.h)
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "specialized/spec_")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
+  # Match only top-level src/collectives.cc (not src/ras/collectives.cc).
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "(^|/)src/collectives\\.cc$")
+  file(GLOB SPECIALIZED_SRCS "${GEN_DIR}/specialized/spec_*.cpp")
+  list(LENGTH SPECIALIZED_SRCS SPECIALIZED_COUNT)
+  message(STATUS "RDC ISA per-arch pipeline: enabled (${_num_gpu_targets} target(s): ${GPU_TARGETS})")
+  message(STATUS "Specialized split build with -fgpu-rdc-isa: ${SPECIALIZED_COUNT} per-function TUs")
+endif()
 
 # Set up RCCL library
 #==================================================================================================
@@ -717,7 +758,33 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+# Under the per-arch -fgpu-rdc-isa pipeline the device code is handled by
+# cmake/RdcIsaDevice.cmake, so the main rccl target does not need -fgpu-rdc.
+# Otherwise, pick -fgpu-rdc-isa or -fgpu-rdc based on ENABLE_GPU_RDC_ISA.
+if(NOT RDC_ISA_PER_ARCH)
+  if(ENABLE_GPU_RDC_ISA)
+    target_compile_options(rccl PRIVATE -fgpu-rdc-isa)
+  else()
+    target_compile_options(rccl PRIVATE -fgpu-rdc)
+  endif()
+endif()
+
+# Under the per-arch -fgpu-rdc-isa pipeline, all __global__ kernels and device
+# functions are compiled by the aux/spec/common targets in RdcIsaDevice.cmake.
+# The main rccl target holds only host-facing TUs; compile it --offload-host-only
+# so clang doesn't run a per-TU amdgcn device link that would try to resolve
+# ncclDevFunc_* references pulled in via device_table.h (those symbols live in
+# the per-arch device.elf, not in any of main rccl's TUs).  RCCL_NO_EXTERN_SHMEM
+# makes common.h emit plain (non-extern) __shared__ decls, which newer clang
+# requires at file scope in host-only mode.  RCCL_DEVICE_TABLE_OMIT suppresses
+# the __device__ ncclDevFuncTable_*[] array (and references to ncclDevFunc_*)
+# inside device_table.h; main rccl has no TUs that call ncclKernelMain, so
+# omitting the table is safe.
+if(RDC_ISA_PER_ARCH)
+  target_compile_definitions(rccl PRIVATE RCCL_NO_EXTERN_SHMEM)
+  target_compile_definitions(rccl PRIVATE RCCL_DEVICE_TABLE_OMIT)
+  target_compile_options(rccl PRIVATE --offload-host-only)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -838,7 +905,15 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+# Required when linking relocatable device code.  Under the per-arch -fgpu-rdc-isa
+# pipeline, main rccl has no device code to link, so this flag is skipped.
+if(NOT RDC_ISA_PER_ARCH)
+  if(ENABLE_GPU_RDC_ISA)
+    target_link_libraries(rccl PRIVATE -fgpu-rdc-isa)
+  else()
+    target_link_libraries(rccl PRIVATE -fgpu-rdc)
+  endif()
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -933,6 +1008,15 @@ else()
 endif()
 if (HAVE_KERNARG_PRELOAD)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
+endif()
+
+## Per-arch RDC ISA device compilation pipeline
+## Included here (after all rccl target configuration) so that the INTERFACE
+## library in RdcIsaDevice.cmake can read rccl's compile definitions and includes.
+if(RDC_ISA_PER_ARCH)
+  include(${PROJECT_SOURCE_DIR}/cmake/RdcIsaDevice.cmake)
+  add_dependencies(rccl rdc_isa_device_build)
+  target_link_libraries(rccl PRIVATE ${RDC_ISA_DEVICE_OBJECTS})
 endif()
 
 ## Track linking time

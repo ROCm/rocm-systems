@@ -8,9 +8,15 @@
 #include "collectives.h"
 #include "common.h"
 
+#ifndef RCCL_NO_EXTERN_SHMEM
+// Under the -fgpu-rdc-isa per-arch pipeline, common.cu.cpp is compiled with
+// RCCL_NO_EXTERN_SHMEM defined.  In that mode common.h already provides a
+// plain (non-extern) definition of ncclShmem / ncclShmemPerWarp, so we skip
+// this definition here to avoid redefinition.
 __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ < 700
   __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+#endif
 #endif
 
 struct RunWorkNop {
