@@ -2104,18 +2104,6 @@ amdgcn_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
         return &mode_read_only_bits;
       }
 
-    case amdgpu_regnum_t::pseudo_status:
-      {
-        static uint32_t status_read_only_bits
-          = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
-             | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
-             | utils::bit_mask<uint32_t> (14,16)    /* trap, ttrace_cu_en, valid */
-             | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
-             | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
-             | utils::bit_mask<uint32_t> (28, 31)); /* 0 */
-        return &status_read_only_bits;
-      }
-
     case amdgpu_regnum_t::pc:
       {
         static uint64_t pc_read_only_bits = utils::bit_mask (0, 1); /* 0  */
@@ -4181,18 +4169,6 @@ gfx9_4_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
         return &mode_read_only_bits;
       }
 
-    case amdgpu_regnum_t::pseudo_status:
-      {
-        static uint32_t status_read_only_bits
-          = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
-             | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
-             | utils::bit_mask<uint32_t> (14, 16)   /* trap, ttrace_cu_en, valid */
-             | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
-             | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
-             | utils::bit_mask<uint32_t> (29, 30)); /* 0 */
-        return &status_read_only_bits;
-      }
-
     default:
       return gfx90a_t::register_read_only_mask (regnum);
     }
@@ -5850,13 +5826,6 @@ gfx11_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
         return &mode_read_only_bits;
       }
 
-    case amdgpu_regnum_t::pseudo_status:
-      {
-        static uint32_t status_read_only_bits
-          = utils::bit_mask<uint32_t> (0, 31);
-        return &status_read_only_bits;
-      }
-
     default:
       return gfx10_architecture_t::register_read_only_mask (regnum);
     }
@@ -6920,25 +6889,6 @@ gfx12_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
 {
   switch (regnum)
     {
-    case amdgpu_regnum_t::pseudo_status:
-      {
-        /* PRIV is RO, all unasigned bits are 0.  */
-        static uint32_t status_ro_bits
-          = (utils::bit_mask<uint32_t> (0, 5)
-             | utils::bit_mask<uint32_t> (7, 7)
-             | utils::bit_mask<uint32_t> (12, 13)
-             | utils::bit_mask<uint32_t> (17, 17)
-             | utils::bit_mask<uint32_t> (19, 21));
-        return &status_ro_bits;
-      }
-    case amdgpu_regnum_t::pseudo_state_priv:
-      {
-        static uint32_t state_priv_ro_bits
-          = (utils::bit_mask<uint32_t> (15, 17)
-             | utils::bit_mask<uint32_t> (19, 20) /* PERF_EN and TTRACE_EN are RO.  */
-             | utils::bit_mask<uint32_t> (21, 31));
-        return &state_priv_ro_bits;
-      }
     case amdgpu_regnum_t::mode:
       {
         static uint32_t mode_ro_bits = (utils::bit_mask<uint32_t> (8, 22)
