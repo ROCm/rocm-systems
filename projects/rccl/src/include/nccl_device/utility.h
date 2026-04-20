@@ -28,8 +28,11 @@
 #include <stdbool.h>
 
 #if __CUDACC__
-// #include <cuda/atomic>
+#if __HIP_PLATFORM_AMD__
 #include <atomic>
+#else
+#include <cuda/atomic>
+#endif
 #endif
 
 #if __cplusplus
@@ -236,18 +239,18 @@ NCCL_DEVICE_INLINE void fenceReleaseGpu() {
 
 #if __CUDACC__
 #if __HIP_PLATFORM_AMD__
-NCCL_DEVICE_INLINE std::memory_order acquireOrderOf(std::memory_order ord) {
+NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
   return ord == std::memory_order_release ? std::memory_order_relaxed :
          ord == std::memory_order_acq_rel ? std::memory_order_acquire :
          ord;
 }
 
-NCCL_DEVICE_INLINE std::memory_order releaseOrderOf(std::memory_order ord) {
+NCCL_HOST_DEVICE_INLINE constexpr std::memory_order releaseOrderOf(std::memory_order ord) {
   return ord == std::memory_order_acquire ? std::memory_order_relaxed :
          ord == std::memory_order_acq_rel ? std::memory_order_release :
          ord;
 }
-NCCL_DEVICE_INLINE int toAtomicBuiltinOrder(std::memory_order ord) {
+NCCL_HOST_DEVICE_INLINE constexpr int toAtomicBuiltinOrder(std::memory_order ord) {
   switch (ord) {
     case std::memory_order_relaxed: return __ATOMIC_RELAXED;
     case std::memory_order_acquire: return __ATOMIC_ACQUIRE;
@@ -258,12 +261,12 @@ NCCL_DEVICE_INLINE int toAtomicBuiltinOrder(std::memory_order ord) {
   }
 }
 #else
-NCCL_DEVICE_INLINE cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
          ord;
 }
-NCCL_DEVICE_INLINE cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_acquire ? cuda::memory_order_relaxed :
          ord == cuda::memory_order_acq_rel ? cuda::memory_order_release :
          ord;

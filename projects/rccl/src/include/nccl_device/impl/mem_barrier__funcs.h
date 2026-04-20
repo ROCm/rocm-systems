@@ -175,7 +175,11 @@ NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::wait(Coop, cuda::memory_ord
 
 #if __CUDACC__
 template<typename Coop>
+#if __HIP_PLATFORM_AMD__
 NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, std::memory_order order) {
+#else
+NCCL_DEVICE_INLINE void ncclLsaBarrierSession<Coop>::sync(Coop coop, cuda::memory_order order) {
+#endif
   this->arrive(coop, order);
   this->wait(coop, order);
 }

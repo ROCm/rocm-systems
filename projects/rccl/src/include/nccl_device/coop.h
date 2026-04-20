@@ -106,7 +106,7 @@ struct ncclCoopWarpSpan {
 
   NCCL_DEVICE_INLINE void sync() {
   #if __HIP_PLATFORM_AMD__
-    __syncthreads(); // ???
+    __syncthreads();
   #else
     asm volatile("barrier.sync %0, %1;" :: "r"(1+id), "r"(32*nWarps) : "memory");
     __barrier_sync_count(1+id, 32*nWarps);
