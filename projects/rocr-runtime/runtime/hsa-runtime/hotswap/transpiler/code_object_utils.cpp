@@ -1,8 +1,10 @@
 #include "code_object_utils.hpp"
 
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/BinaryFormat/MsgPackDocument.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/AMDHSAKernelDescriptor.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -16,6 +18,120 @@ inline uint32_t readU32(const uint8_t *p) {
   uint32_t v;
   std::memcpy(&v, p, sizeof(v));
   return v;
+}
+inline uint16_t readU16(const uint8_t *p) {
+  uint16_t v;
+  std::memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+// Locate the `<kernelName>.kd` symbol and copy its 64 KD bytes into `out`.
+// Returns true on success. The KD symbol is *always* in the .rodata section
+// for amdhsa code objects (the AMDGPU asm printer emits it there); we map
+// the symbol's virtual address back to a file-level byte offset within the
+// section's contents and copy the canonical 64-byte structure. Any
+// mismatch (missing symbol, wrong size, address not within .rodata) is
+// reported and produces `false`.
+//
+// We deliberately key off the symbol rather than the MsgPack metadata: the
+// MsgPack notes do not include kernarg_preload_length / preload_offset,
+// and that information is essential for modelling the gfx1250 user-SGPR
+// ABI in Phase 4 of the raiser.
+bool readKernelDescriptorBytes(llvm::object::ObjectFile &obj,
+                               const std::string &kernelName,
+                               std::array<uint8_t, 64> &out) {
+  std::string kdSymName = kernelName + ".kd";
+
+  std::optional<llvm::object::SectionRef> rodataSec;
+  for (const auto &sec : obj.sections()) {
+    auto nameOrErr = sec.getName();
+    if (!nameOrErr) {
+      (void)llvm::toString(nameOrErr.takeError());
+      continue;
+    }
+    if (*nameOrErr == ".rodata") {
+      rodataSec = sec;
+      break;
+    }
+  }
+  if (!rodataSec) {
+    llvm::errs() << "transpiler: readKernelDescriptorBytes: no .rodata "
+                    "section in code object\n";
+    return false;
+  }
+
+  uint64_t rodataAddr = rodataSec->getAddress();
+  uint64_t rodataSize = rodataSec->getSize();
+  auto rodataContentsOrErr = rodataSec->getContents();
+  if (!rodataContentsOrErr) {
+    (void)llvm::toString(rodataContentsOrErr.takeError());
+    return false;
+  }
+  auto rodataContents = *rodataContentsOrErr;
+
+  for (const auto &sym : obj.symbols()) {
+    auto nameOrErr = sym.getName();
+    if (!nameOrErr) {
+      (void)llvm::toString(nameOrErr.takeError());
+      continue;
+    }
+    if (*nameOrErr != kdSymName)
+      continue;
+
+    auto addrOrErr = sym.getAddress();
+    if (!addrOrErr) {
+      (void)llvm::toString(addrOrErr.takeError());
+      return false;
+    }
+    uint64_t symAddr = *addrOrErr;
+
+    if (symAddr < rodataAddr || symAddr + 64 > rodataAddr + rodataSize) {
+      llvm::errs() << "transpiler: readKernelDescriptorBytes: symbol '"
+                   << kdSymName << "' at 0x" << llvm::utohexstr(symAddr)
+                   << " is not contained within .rodata [0x"
+                   << llvm::utohexstr(rodataAddr) << ", 0x"
+                   << llvm::utohexstr(rodataAddr + rodataSize) << ")\n";
+      return false;
+    }
+
+    uint64_t off = symAddr - rodataAddr;
+    if (off + 64 > rodataContents.size()) {
+      llvm::errs() << "transpiler: readKernelDescriptorBytes: symbol '"
+                   << kdSymName << "' offset 0x" << llvm::utohexstr(off)
+                   << " + 64 exceeds .rodata contents size 0x"
+                   << llvm::utohexstr(rodataContents.size()) << "\n";
+      return false;
+    }
+
+    std::memcpy(out.data(),
+                reinterpret_cast<const uint8_t *>(rodataContents.data()) + off,
+                64);
+    return true;
+  }
+
+  llvm::errs() << "transpiler: readKernelDescriptorBytes: symbol '" << kdSymName
+               << "' not found\n";
+  return false;
+}
+
+// Parse the four KD register fields we care about into `meta`. Wraps
+// readKernelDescriptorBytes so the call site stays compact and the byte-
+// offset constants are co-located with their usage.
+void populateKernelDescriptorFields(llvm::object::ObjectFile &obj,
+                                    KernelMeta &meta) {
+  std::array<uint8_t, 64> kdBytes;
+  if (!readKernelDescriptorBytes(obj, meta.name, kdBytes)) {
+    meta.hasKernelDescriptor = false;
+    return;
+  }
+
+  using namespace llvm::amdhsa;
+  meta.computePgmRsrc1 = readU32(kdBytes.data() + COMPUTE_PGM_RSRC1_OFFSET);
+  meta.computePgmRsrc2 = readU32(kdBytes.data() + COMPUTE_PGM_RSRC2_OFFSET);
+  meta.kernelCodeProperties =
+      readU16(kdBytes.data() + KERNEL_CODE_PROPERTIES_OFFSET);
+  meta.kernargPreload = readU16(kdBytes.data() + KERNARG_PRELOAD_OFFSET);
+  meta.hasKernelDescriptor = true;
 }
 } // namespace
 
@@ -267,6 +383,14 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
               meta.args.push_back(am);
             }
           }
+
+          // Parse the KD bytes from .rodata once we know the kernel name
+          // matched. populateKernelDescriptorFields sets
+          // meta.hasKernelDescriptor on success and emits a diagnostic on
+          // failure; the caller (raiser / Phase-4 init) is responsible for
+          // refusing the lift if the field is false rather than silently
+          // assuming a hardcoded SGPR layout.
+          populateKernelDescriptorFields(*objOrErr->get(), meta);
           return meta;
         }
       }
@@ -324,6 +448,50 @@ uint64_t findKernelSymbolOffset(const std::vector<uint8_t> &elfData,
   llvm::errs() << "transpiler: findKernelSymbolOffset: symbol '" << kernelName
                << "' not found, defaulting to offset 0\n";
   return 0;
+}
+
+std::string detectIsaFromElf(const std::vector<uint8_t> &elfData) {
+  // Read the EI_CLASS / e_machine / e_flags fields straight off the
+  // ELF64 header rather than building a full ObjectFile — this is
+  // called from raise_cli BEFORE we have a CO opened, and we want
+  // zero overhead and zero diagnostics on the malformed-input path.
+  // The header layout is fixed by the ELF spec (see ELF.h
+  // `Elf64_Ehdr`); the magic check rejects every non-ELF input.
+  if (elfData.size() < sizeof(llvm::ELF::Elf64_Ehdr))
+    return {};
+  const auto *eh =
+      reinterpret_cast<const llvm::ELF::Elf64_Ehdr *>(elfData.data());
+  if (eh->e_ident[llvm::ELF::EI_MAG0] != llvm::ELF::ElfMagic[0] ||
+      eh->e_ident[llvm::ELF::EI_MAG1] != llvm::ELF::ElfMagic[1] ||
+      eh->e_ident[llvm::ELF::EI_MAG2] != llvm::ELF::ElfMagic[2] ||
+      eh->e_ident[llvm::ELF::EI_MAG3] != llvm::ELF::ElfMagic[3])
+    return {};
+  if (eh->e_ident[llvm::ELF::EI_CLASS] != llvm::ELF::ELFCLASS64)
+    return {};
+  if (eh->e_machine != llvm::ELF::EM_AMDGPU)
+    return {};
+  uint32_t mach = eh->e_flags & llvm::ELF::EF_AMDGPU_MACH;
+  // ELF.h's AMDGPU_MACH_LIST X-macro pairs every mach value with
+  // its canonical "gfxNNN[a-z]?" / R600 marketing string. The macro
+  // covers both R600 and AMDGCN families; we filter R600 mach codes
+  // (0x01..0x10) explicitly because the transpiler only targets
+  // AMDGCN. EF_AMDGPU_MACH_NONE (0x00) likewise returns "" so a
+  // generic / older code object falls through to the filename
+  // heuristic in raise_cli.
+  if (mach >= llvm::ELF::EF_AMDGPU_MACH_R600_FIRST &&
+      mach <= llvm::ELF::EF_AMDGPU_MACH_R600_LAST)
+    return {};
+  if (mach == llvm::ELF::EF_AMDGPU_MACH_NONE)
+    return {};
+  switch (mach) {
+#define HANDLE_AMDGCN(NUM, ENUM, STR)                                          \
+  case NUM:                                                                    \
+    return STR;
+    AMDGPU_MACH_LIST(HANDLE_AMDGCN)
+#undef HANDLE_AMDGCN
+  default:
+    return {};
+  }
 }
 
 } // namespace transpiler
