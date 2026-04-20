@@ -3,7 +3,7 @@
 import shlex
 from pathlib import Path
 
-from utils.logger import console_debug, console_error
+from utils.logger import console_debug, console_error, console_log
 from utils.utils_common import capture_subprocess_output
 
 
@@ -30,6 +30,7 @@ class NativeTool:
         )
         if not native_tool_path:
             native_tool_path = self.__build_collector(compute_script_path)
+        console_log(f"Using native collector: {native_tool_path}")
         return native_tool_path
 
     def __find_existing_collector(
