@@ -40,11 +40,11 @@ void RaiseContext::computeVGPRAdjust(const DecodedInst &di) {
 
   // vgprMSBs is an 8-bit state shared by single-issue instructions and both
   // halves of a VOPD pair.  Layout: src0[1:0], src1[3:2], src2[5:4], dst[7:6].
-  unsigned dstMsb = ((unsigned)(vgprMSBs >> 6) & 0x3u) * 256u;
+  unsigned dstMsb = (static_cast<unsigned>(vgprMSBs >> 6) & 0x3u) * 256u;
   unsigned srcMsb[3] = {
-      ((unsigned)(vgprMSBs >> 0) & 0x3u) * 256u,
-      ((unsigned)(vgprMSBs >> 2) & 0x3u) * 256u,
-      ((unsigned)(vgprMSBs >> 4) & 0x3u) * 256u,
+      (static_cast<unsigned>(vgprMSBs >> 0) & 0x3u) * 256u,
+      (static_cast<unsigned>(vgprMSBs >> 2) & 0x3u) * 256u,
+      (static_cast<unsigned>(vgprMSBs >> 4) & 0x3u) * 256u,
   };
 
   for (unsigned i = 0; i < di.numDefs && i < kMaxOps; i++)
@@ -226,7 +226,7 @@ ParsedReg RaiseContext::parseReg(MCRegister reg, int mciOpIdx) const {
     pr.kind = ParsedReg::AGPR;
     pr.baseIdx = hwIdx;
     pr.width = width;
-    if (mciOpIdx >= 0 && (unsigned)mciOpIdx < kMaxOps)
+    if (mciOpIdx >= 0 && static_cast<unsigned>(mciOpIdx) < kMaxOps)
       pr.baseIdx += currentVGPRAdjust[mciOpIdx];
     return pr;
   }
@@ -234,7 +234,7 @@ ParsedReg RaiseContext::parseReg(MCRegister reg, int mciOpIdx) const {
     pr.kind = ParsedReg::VGPR;
     pr.baseIdx = hwIdx;
     pr.width = width;
-    if (mciOpIdx >= 0 && (unsigned)mciOpIdx < kMaxOps)
+    if (mciOpIdx >= 0 && static_cast<unsigned>(mciOpIdx) < kMaxOps)
       pr.baseIdx += currentVGPRAdjust[mciOpIdx];
     return pr;
   }
@@ -331,12 +331,12 @@ Value *RaiseContext::readOp32(const DecodedInst &di, unsigned opIdx) {
     return v;
   }
   if (di.isImm(opIdx))
-    return ConstantInt::get(i32Ty,
-                            (uint32_t)(di.getImm(opIdx) & 0xFFFFFFFF));
+    return ConstantInt::get(
+        i32Ty, static_cast<uint32_t>(di.getImm(opIdx) & 0xFFFFFFFF));
   if (opIdx < di.numOps() && di.inst.getOperand(opIdx).isExpr()) {
     int64_t val = 0;
     if (di.inst.getOperand(opIdx).getExpr()->evaluateAsAbsolute(val))
-      return ConstantInt::get(i32Ty, (uint32_t)(val & 0xFFFFFFFF));
+      return ConstantInt::get(i32Ty, static_cast<uint32_t>(val & 0xFFFFFFFF));
     return ConstantInt::get(i32Ty, 0);
   }
   errs() << "transpiler: readOp32 unresolvable operand " << opIdx << " in "

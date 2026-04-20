@@ -296,7 +296,7 @@ struct OpResolver {
     unsigned modIdx = di.modMap[i];
     if (modIdx == UINT_MAX) return 0;
     if (!di.isImm(modIdx)) return 0;
-    return (unsigned)(di.getImm(modIdx) & 0xF);
+    return static_cast<unsigned>(di.getImm(modIdx) & 0xF);
   }
 
   llvm::Value *applyMods(unsigned i, llvm::Value *v) {

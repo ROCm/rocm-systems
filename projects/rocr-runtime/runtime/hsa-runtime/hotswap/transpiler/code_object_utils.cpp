@@ -349,7 +349,7 @@ KernelMeta extractKernelMeta(const std::vector<uint8_t> &elfData,
 
           auto getNodeInt = [](llvm::msgpack::DocNode &n) -> int64_t {
             if (n.getKind() == llvm::msgpack::Type::Int) return n.getInt();
-            if (n.getKind() == llvm::msgpack::Type::UInt) return (int64_t)n.getUInt();
+            if (n.getKind() == llvm::msgpack::Type::UInt) return static_cast<int64_t>(n.getUInt());
             return 0;
           };
 

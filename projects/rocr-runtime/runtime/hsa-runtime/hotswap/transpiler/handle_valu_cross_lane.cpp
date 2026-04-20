@@ -318,8 +318,9 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
     // buildSrcMap skips vdst_in but keeps src0).
     int src0OutIdx = AMDGPU::getNamedOperandIdx(
         di.inst.getOpcode(), AMDGPU::OpName::src0_out);
-    if (src0OutIdx < 0 || (unsigned)src0OutIdx >= di.inst.getNumOperands() ||
-        !di.inst.getOperand((unsigned)src0OutIdx).isReg()) {
+    if (src0OutIdx < 0 ||
+        static_cast<unsigned>(src0OutIdx) >= di.inst.getNumOperands() ||
+        !di.inst.getOperand(static_cast<unsigned>(src0OutIdx)).isReg()) {
       hr.failure = RaiseFailure::unsupportedShape(
           di, "VALU",
           "v_permlane16_swap_b32 missing OpName::src0_out register "
@@ -328,7 +329,8 @@ HandlerResult handleVALU_CrossLane(RaiseContext &ctx, const DecodedInst &di,
     }
     ParsedReg vdstReg = op.dst();
     ParsedReg src0OutReg =
-        ctx.parseReg(di.getReg((unsigned)src0OutIdx), (unsigned)src0OutIdx);
+        ctx.parseReg(di.getReg(static_cast<unsigned>(src0OutIdx)),
+                      static_cast<unsigned>(src0OutIdx));
 
     // Snapshot BOTH input values up-front, before any other
     // operations that could (now or in a future refactor) clobber

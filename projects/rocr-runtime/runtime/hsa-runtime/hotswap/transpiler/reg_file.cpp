@@ -62,7 +62,7 @@ void AllocaRegFile::init(IRBuilder<> &B, Type *i32Ty, Type *i1Ty,
                           const ISAProfile &isa, const MCRegisterInfo &MRI,
                           const WaveProjection &proj) {
   projection = &proj;
-  execTy = isa.isWave32() ? (Type *)i32Ty : (Type *)B.getInt64Ty();
+  execTy = isa.isWave32() ? i32Ty : B.getInt64Ty();
 
   const unsigned nSGPR = MRI.getRegClass(AMDGPU::SGPR_32RegClassID).getNumRegs();
   sgpr.assign(nSGPR, nullptr);
@@ -130,15 +130,15 @@ namespace {
 
 template <typename Bank>
 void assertInBank(const char *fn, const Bank &bank, int idx) {
-  if (idx < 0 || (unsigned)idx >= bank.size() || !bank[idx])
+  if (idx < 0 || static_cast<unsigned>(idx) >= bank.size() || !bank[idx])
     failOOB(fn, idx, bank.size());
 }
 
 // 64-bit reads touch idx and idx+1; both must be in range.
 template <typename Bank>
 void assertPairInBank(const char *fn, const Bank &bank, int idx) {
-  if (idx < 0 || (unsigned)(idx + 1) >= bank.size() || !bank[idx] ||
-      !bank[idx + 1])
+  if (idx < 0 || static_cast<unsigned>(idx + 1) >= bank.size() ||
+      !bank[idx] || !bank[idx + 1])
     failOOB(fn, idx, bank.size());
 }
 
@@ -300,7 +300,7 @@ Value *AllocaRegFile::readReg32(IRBuilder<> &B, ParsedReg pr) {
   if (pr.kind == ParsedReg::FLAT_SCR)
     return B.CreateLoad(B.getInt32Ty(), flatScr[0], "fscr_val");
   if (pr.kind == ParsedReg::TTMP && pr.baseIdx >= 0 &&
-      (unsigned)pr.baseIdx < ttmp.size())
+      static_cast<unsigned>(pr.baseIdx) < ttmp.size())
     return B.CreateLoad(B.getInt32Ty(), ttmp[pr.baseIdx], "ttmp_val");
   // GFX9 src_lds_direct (encoding 254): reads one dword from LDS at the
   // byte address in M0. There is NO auto-increment of M0 on GFX9 — the
@@ -352,7 +352,7 @@ Value *AllocaRegFile::readReg64(IRBuilder<> &B, ParsedReg pr) {
   // case the dispatcher fires `failUnhandledKind`, which the corpus
   // exercises in 49 gfx1250 kernels.
   if (pr.kind == ParsedReg::TTMP && pr.baseIdx >= 0 &&
-      (unsigned)(pr.baseIdx + 1) < ttmp.size()) {
+      static_cast<unsigned>(pr.baseIdx + 1) < ttmp.size()) {
     Type *i32Ty = B.getInt32Ty();
     Type *i64Ty = B.getInt64Ty();
     Value *lo = B.CreateZExt(B.CreateLoad(i32Ty, ttmp[pr.baseIdx]), i64Ty);
@@ -421,7 +421,7 @@ void AllocaRegFile::writeReg32(IRBuilder<> &B, ParsedReg pr, Value *v) {
     return;
   }
   if (pr.kind == ParsedReg::TTMP && pr.baseIdx >= 0 &&
-      (unsigned)pr.baseIdx < ttmp.size()) {
+      static_cast<unsigned>(pr.baseIdx) < ttmp.size()) {
     if (v->getType() != B.getInt32Ty()) v = B.CreateBitCast(v, B.getInt32Ty());
     B.CreateStore(v, ttmp[pr.baseIdx]);
     return;
@@ -454,7 +454,7 @@ void AllocaRegFile::writeReg64(IRBuilder<> &B, ParsedReg pr, Value *v) {
   // before invoking the trap; we route them through the same alloca
   // bank as the 32-bit case so subsequent reads see the stored value.
   if (pr.kind == ParsedReg::TTMP && pr.baseIdx >= 0 &&
-      (unsigned)(pr.baseIdx + 1) < ttmp.size()) {
+      static_cast<unsigned>(pr.baseIdx + 1) < ttmp.size()) {
     Type *i32Ty = B.getInt32Ty();
     Type *i64Ty = B.getInt64Ty();
     if (v->getType() != i64Ty) v = B.CreateBitOrPointerCast(v, i64Ty);

@@ -402,18 +402,20 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
       int off0Idx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::offset0);
       int off1Idx = AMDGPU::getNamedOperandIdx(opc, AMDGPU::OpName::offset1);
       if (off0Idx < 0 || off1Idx < 0 ||
-          (unsigned)off0Idx >= di.inst.getNumOperands() ||
-          (unsigned)off1Idx >= di.inst.getNumOperands() ||
-          !di.inst.getOperand((unsigned)off0Idx).isImm() ||
-          !di.inst.getOperand((unsigned)off1Idx).isImm()) {
+          static_cast<unsigned>(off0Idx) >= di.inst.getNumOperands() ||
+          static_cast<unsigned>(off1Idx) >= di.inst.getNumOperands() ||
+          !di.inst.getOperand(static_cast<unsigned>(off0Idx)).isImm() ||
+          !di.inst.getOperand(static_cast<unsigned>(off1Idx)).isImm()) {
         hr.failure = RaiseFailure::unsupportedShape(
             di, "DS",
             "DS_READ2/WRITE2 missing OpName::offset0 or OpName::offset1 "
             "immediate operand — operand table mismatch");
         return hr;
       }
-      int64_t rawOff0 = di.inst.getOperand((unsigned)off0Idx).getImm();
-      int64_t rawOff1 = di.inst.getOperand((unsigned)off1Idx).getImm();
+      int64_t rawOff0 =
+          di.inst.getOperand(static_cast<unsigned>(off0Idx)).getImm();
+      int64_t rawOff1 =
+          di.inst.getOperand(static_cast<unsigned>(off1Idx)).getImm();
       int64_t byteOff0 = rawOff0 * ds2UnitBytes;
       int64_t byteOff1 = rawOff1 * ds2UnitBytes;
 
@@ -429,7 +431,7 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
       };
       Value *ptr0 = makePtr(byteOff0, "ds2_p0");
       Value *ptr1 = makePtr(byteOff1, "ds2_p1");
-      Align access((uint64_t)(ds2WidthBits / 8));
+      Align access(static_cast<uint64_t>(ds2WidthBits / 8));
 
       if (ds2IsRead) {
         ParsedReg dest = op.dst();
@@ -815,15 +817,15 @@ HandlerResult handleDS(RaiseContext &ctx, const DecodedInst &di,
     int addrIdx = AMDGPU::getNamedOperandIdx(di.inst.getOpcode(),
                                               AMDGPU::OpName::addr);
     if (addrIdx < 0 ||
-        (unsigned)addrIdx >= di.inst.getNumOperands() ||
-        !di.inst.getOperand((unsigned)addrIdx).isReg()) {
+        static_cast<unsigned>(addrIdx) >= di.inst.getNumOperands() ||
+        !di.inst.getOperand(static_cast<unsigned>(addrIdx)).isReg()) {
       hr.failure = RaiseFailure::unsupportedShape(
           di, "DS",
           "ds_swizzle_b32 missing OpName::addr VGPR operand — operand "
           "table mismatch");
       return hr;
     }
-    Value *src = ctx.readOp32(di, (unsigned)addrIdx);
+    Value *src = ctx.readOp32(di, static_cast<unsigned>(addrIdx));
     Function *swiz = Intrinsic::getOrInsertDeclaration(
         &ctx.M, Intrinsic::amdgcn_ds_swizzle);
     Value *result = ctx.B.CreateCall(

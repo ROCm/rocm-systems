@@ -97,6 +97,18 @@ add_library(hotswap-transpiler STATIC
   user_sgpr_layout.cpp
 )
 
+# Match LLVM's compile flags (no-rtti, no-exceptions, etc.). LLVM is built
+# with `LLVM_ENABLE_RTTI=OFF` and `LLVM_ENABLE_EH=OFF` by default, and every
+# public LLVM type we consume — Value, Type, Instruction, MCInst, ... — relies
+# on LLVM's hand-rolled RTTI (`isa<>` / `cast<>` / `dyn_cast<>`) rather than
+# C++ `typeid` / `dynamic_cast`. Mixing an RTTI-on TU with RTTI-off LLVM libs
+# produces undefined-reference errors for `typeinfo` symbols on any class with
+# a virtual method. `llvm_update_compile_flags` (from AddLLVM) is the canonical
+# way to stay in lockstep with libLLVM: it reads `LLVM_ENABLE_RTTI` /
+# `LLVM_ENABLE_EH` from the LLVM CMake package and propagates the matching
+# `-fno-rtti` / `-fno-exceptions` (or MSVC equivalents) to the target.
+llvm_update_compile_flags(hotswap-transpiler)
+
 # AMDGPU target-private headers (not installed by `ninja install`).
 # SIDefines.h, SIInstrInfo.h → source tree Target/AMDGPU/{,Utils}
 # AMDGPUGenInstrInfo.inc etc.  → build tree Target/AMDGPU
@@ -190,6 +202,7 @@ if(HOTSWAP_TRANSPILER_BUILD_TOOLS)
 # outside the test harness and be invoked directly as a coverage tool.
 add_executable(raise_cli raise_cli.cpp)
 target_link_libraries(raise_cli PRIVATE hotswap-transpiler)
+llvm_update_compile_flags(raise_cli)
 
 # --- GoogleTest-based unified test binary -------------------------------------
 find_package(GTest REQUIRED)
@@ -230,6 +243,7 @@ else()
 endif()
 
 add_executable(transpiler_tests ${TEST_SOURCES})
+llvm_update_compile_flags(transpiler_tests)
 
 target_compile_definitions(transpiler_tests PRIVATE
   TRANSPILER_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"

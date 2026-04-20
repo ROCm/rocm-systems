@@ -531,7 +531,8 @@ computeSuccessors(const DecodedInst &lastInst, uint64_t nextBlockOffset,
     if (!op.isImm())
       return std::nullopt;
     int64_t raw = op.getImm();
-    int64_t brOff = (int64_t)(int16_t)(uint16_t)(raw & 0xFFFF);
+    int64_t brOff = static_cast<int64_t>(
+        static_cast<int16_t>(static_cast<uint16_t>(raw & 0xFFFF)));
     return lastInst.offset + 4 + brOff * 4;
   };
   switch (lastInst.semOp) {
