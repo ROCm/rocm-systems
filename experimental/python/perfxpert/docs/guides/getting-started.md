@@ -16,6 +16,19 @@ The core workflow is: **Profile -> Analyze -> Optimize -> Verify**. PerfXpert's 
 
 Install PerfXpert with a single pip command. The `[all]` extra includes LLM support (Anthropic, OpenAI) and rich terminal output.
 
+> **Run this FIRST on stock Ubuntu / rocm/dev-ubuntu images**: those
+> images ship with pip 22.x and pre-PEP-621 setuptools, which fails the
+> perfxpert wheel build with `filename has 'perfxpert', but metadata has
+> 'unknown'`. The fix is a one-liner:
+>
+> ```bash
+> pip install -U pip setuptools wheel
+> ```
+>
+> The build requires `setuptools>=61` (declared in `pyproject.toml`'s
+> `[build-system] requires`). Recent pip (23+) honors that declaration
+> automatically; older pip does not.
+
 ```bash
 pip install "perfxpert[all]"
 
