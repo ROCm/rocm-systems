@@ -382,7 +382,8 @@ def _format_agentic_output(
     *,
     database_path: str = "",
 ) -> str:
-    """Render a :class:`RootOutput` via the shared formatters.
+    """Render a :class:`RootOutput` (or its ``model_dump`` dict) via the
+    shared formatters.
 
     The legacy formatters expect a rich dict of analysis metrics
     (``time_breakdown``, ``hotspots``, ``memory_analysis``, …). The
@@ -396,12 +397,24 @@ def _format_agentic_output(
     Analysis agent's output up through Root's metadata so the report is
     richer; until then we render the narrative inside a proper Markdown /
     HTML skeleton with a recommendations table.
+
+    ``root_output`` may be either:
+      - a :class:`perfxpert.agents.schemas.RootOutput` (Pydantic model),
+        in which case attributes are read via ``getattr``; or
+      - a plain ``dict`` (e.g. the return value of
+        :func:`perfxpert.api.agent_root`), in which case the same five
+        keys are read via ``dict.get``.
     """
-    narrative = getattr(root_output, "narrative", "") or ""
-    recommendations = list(getattr(root_output, "recommendations", []) or [])
-    primary_bottleneck = getattr(root_output, "primary_bottleneck", "mixed") or "mixed"
-    warnings = list(getattr(root_output, "warnings", []) or [])
-    metadata = dict(getattr(root_output, "metadata", {}) or {})
+    def _read(name: str, default: Any) -> Any:
+        if isinstance(root_output, dict):
+            return root_output.get(name, default)
+        return getattr(root_output, name, default)
+
+    narrative = _read("narrative", "") or ""
+    recommendations = list(_read("recommendations", []) or [])
+    primary_bottleneck = _read("primary_bottleneck", "mixed") or "mixed"
+    warnings = list(_read("warnings", []) or [])
+    metadata = dict(_read("metadata", {}) or {})
 
     if output_format == "json":
         import json as _json
@@ -570,17 +583,20 @@ def _execute_agentic(
     config: Optional[output_config.output_config] = None,
     **kwargs: Any,
 ) -> Optional[RocpdImportData]:
-    """Agentic path: delegates to the agents session API.
+    """Agentic path: delegates to :func:`perfxpert.api.agent_root`.
 
-    Builds an AnalysisSession, invokes run_root with a RootInput,
-    and formats the output according to the requested format.
+    The CLI routes through the public Python API (which in turn wraps
+    the MCP-exposed Root tool) so batch CLI, library API, and MCP
+    server share a single entry point. The airgap + provider +
+    fallback-chain semantics are preserved because ``agent_root``
+    defers to ``agents.runtime.build_session``.
     """
     try:
-        from perfxpert.agents import runtime, schemas
+        from perfxpert import api as perfxpert_api  # 1:1 mirror of agent MCP tools
     except ImportError as e:
         raise RuntimeError(
-            "Agent runtime is not available. "
-            "perfxpert.agents must be importable for the agentic path."
+            "perfxpert.api is not available. "
+            "perfxpert.tools.agents must be importable for the agentic path."
         ) from e
 
     # Guard rail against silent kwarg drop — any new CLI flag that isn't
@@ -616,40 +632,11 @@ def _execute_agentic(
     # accept `custom_prompt` as a back-compat alias for library callers.
     custom_prompt = kwargs.get("prompt") or kwargs.get("custom_prompt")
 
-    # Build session
     enable_llm = kwargs.get("enable_llm", False)
     llm_provider = kwargs.get("llm_provider")
-    session = runtime.build_session(
-        provider=llm_provider if enable_llm else None,
-        airgap=(not enable_llm),
-    )
 
-    # Collect downstream analysis options as a side-channel dict on
-    # RootInput so specialised agents (Analysis et al.) can read them
-    # without exploding the schema field count.
-    analysis_options: Dict[str, Any] = {}
-    for key in ("top_kernels", "att_dir", "min_duration", "llm_api_key",
-                "llm_model", "llm_thinking", "llm_local", "llm_local_model",
-                "verbose"):
-        val = kwargs.get(key)
-        if val is not None:
-            analysis_options[key] = val
-
-    # Build RootInput payload
-    try:
-        root_input = schemas.RootInput(
-            user_query=custom_prompt or "Analyze this GPU performance trace.",
-            database_path=database_path if input else None,
-            source_dir=source_dir,
-            provider=llm_provider if enable_llm else None,
-            airgap=(not enable_llm),
-            session_id=session.session_id,
-            analysis_options=analysis_options,
-        )
-    except Exception as e:
-        raise RuntimeError(f"Failed to build RootInput: {e}") from e
-
-    # Run root analysis via the agents session API.
+    # Route the agentic path through the public Python API — same
+    # function the MCP server wraps as ``agents_root_agent_root``.
     #
     # Let typed ProviderError subclasses (QuotaExceeded, AuthError,
     # RateLimitError, TransientError, FatalError) propagate unchanged so
@@ -659,7 +646,13 @@ def _execute_agentic(
     # RuntimeError with the "Agentic root analysis failed" diagnostic.
     from perfxpert.providers._exceptions import ProviderError
     try:
-        root_output = session.run_root(root_input)
+        root_output = perfxpert_api.agent_root(
+            user_query=custom_prompt or "Analyze this GPU performance trace.",
+            database_path=database_path if input else None,
+            source_dir=source_dir,
+            provider=llm_provider if enable_llm else None,
+            airgap=(not enable_llm),
+        )
     except ProviderError:
         raise  # let __main__.main render clean one-liner
     except Exception as e:
