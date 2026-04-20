@@ -1,136 +1,166 @@
 # PerfXpert — Known Issues
 
-## Tool gate is prompt-layer only — not a mechanical hook
+Active, living list. Entries that correspond to shipped fixes have been
+removed; check `CHANGELOG.md` for history.
 
-The `0020-perfxpert-tool-gate.patch` and the bracketed `[MUST BE CALLED FIRST
-FOR GPU-PERF QUERIES]` prefix in `mcp_server/server.py::_fn_to_tool_schema`
-are a **weaker-variant** solution to the cycle-4 B1 blocker (LLMs calling
-`bash`/`read` before `perfxpert_intent_classify`). The brief asked for a
-pre-turn tool-availability hook (only expose `perfxpert_*` for the first 2
-turns) OR a post-turn rejection hook (rewrite non-perfxpert `tool_calls`
-into a synthetic retry). Implementing either requires intercepting
-opencode's session message flow in `packages/opencode/src/session/processor.ts`
-and `prompt.ts`, whose `plugin.trigger(...)` hook points are currently
-fire-and-forget — a real blocking hook inside the opencode TypeScript
-runtime was outside the time budget for cycle-4.
+## Tool gate
 
-**Known-limitation:** the current patch does not mechanically reject a
-non-perfxpert first tool call; an adversarial LLM can still call `bash`
-first. Live-scenario D (cycle-4 validation) showed the prompt+bracket
-combo moves the needle but does not guarantee 100% compliance.
+Per-backend status (see `docs/guides/backends.md` for the full matrix):
 
-**Follow-up:** track a real pre-/post-turn gate at the opencode
-TypeScript layer. The cleanest attach point is
-`packages/opencode/src/session/prompt.ts` around the `plugin.trigger(
-"tool.execute.before", ...)` invocation (lines 414-419 and 455-460) —
-extending that hook to allow a plugin to return `{ block: true, retryWith:
-<message> }` would give us the rejection semantics the brief described.
-Proposed env var: `PERFXPERT_DISABLE_TOOL_GATE=1` (already documented in
-the prompt text for user-facing discoverability).
+- **opencode (bundled):** native `{block, retryWith}` gate via
+  `.patches/0020-perfxpert-tool-gate.patch` — real pre-tool-call
+  rejection, LLM sees a synthetic retry telling it to call
+  `perfxpert_intent_classify` first.
+- **Claude Code (`perfxpert-code claude`):** native `PreToolUse` hook
+  installed into `.claude/settings.json` — mechanical rejection.
+- **Gemini CLI (`perfxpert-code gemini`):** `allowedTools` restriction
+  + runtime-state file for event-based lift — mechanical rejection.
+- **Codex CLI (`perfxpert-code codex`):** **prompt-layer only** — Codex's
+  native `PreToolUse` hook fires on Bash tool calls only, not on MCP
+  calls, so we cannot reject perfxpert-tool misuse server-side. The
+  installed `AGENTS.md` rejection-language stanza is the only guard.
+  DECIDED design, see `docs/decisions/2026-04-19-codex-hook-surface.md`.
+
+**Known limitation (Codex only):** an adversarial / smaller model can
+still call `bash` / `read` before `perfxpert_intent_classify`. Cycle-5
+E2E with Haiku-4-5 in scenario H2 confirmed the prompt-layer gate is
+not 100%-effective on smaller models. Mitigations: stronger rejection
+language in `AGENTS.md`, MCP tool-name rewrite so Codex sees all
+perfxpert tools under the `perfxpert_` prefix for unambiguous prompt
+pattern-matching. Disable the prompt gate via
+`PERFXPERT_DISABLE_TOOL_GATE=1` if it interferes with a workflow.
 
 ## LLM end-to-end smoke test may fail with 429 insufficient_quota
 
 `tests/test_integration/test_llm_end_to_end.py::test_llm_enabled_produces_rec_type`
-executes a real OpenAI Agents SDK call against `gpt-4o-mini` (default) or
-`$PERFXPERT_AGENTS_MODEL_OPENAI` if set. The test will **skip** when
-`OPENAI_API_KEY` is unset. When the key is set, the wiring is exercised
-end-to-end: `framework._sdk_invoke()` builds an `agents.Agent`, calls
-`Runner.run_sync(...)`, and extracts `final_output` + tool-call metadata
-into a `FakeProviderResponse`.
+executes a real OpenAI Agents SDK call. The test skips automatically
+when `OPENAI_API_KEY` is unset OR when the provider returns `429`
+`insufficient_quota` / `auth_error` / documented transient errors. If
+you're hitting a hard fail, ensure your key has quota or set
+`OPENAI_API_KEY=""` to force the skip.
 
-If the OpenAI account backing `OPENAI_API_KEY` has exhausted its quota,
-the SDK returns `429 insufficient_quota` and the test fails (not skips).
-This is a **billing condition, not a code defect**: the same error is
-reproducible via a direct `agents.Runner.run_sync(...)` call outside
-pytest, confirming the wiring is live.
+Workarounds to confirm wiring on a different account:
 
-Workarounds to confirm the wiring on a different account:
-
-- Re-run with a different key: `OPENAI_API_KEY=sk-... pytest -k test_llm_enabled_produces_rec_type`
-- Override the model per-provider: `PERFXPERT_AGENTS_MODEL_OPENAI=gpt-3.5-turbo ...`
+- Different key: `OPENAI_API_KEY=sk-... pytest -k test_llm_enabled_produces_rec_type`
+- Provider-specific override: `PERFXPERT_AGENTS_MODEL_OPENAI=gpt-3.5-turbo ...`
 - Global model override: `PERFXPERT_LLM_MODEL=gpt-4o-mini ...`
 - Bump runner turn budget: `PERFXPERT_AGENTS_MAX_TURNS=5` (default 10)
 
-This entry will be removed once a CI-owned key with guaranteed quota is
-provisioned.
+## LLM provider routing (agentic runtime)
+
+As of the 2026-04-20 Docker install-validation, two provider routing
+paths are still broken and being tracked separately:
+
+- **`perfxpert analyze --llm anthropic`** — `framework._resolve_model()`
+  passes the resolved model name (`claude-sonnet-4-5`) to the
+  openai-agents SDK without a LiteLLM prefix. The SDK defaults to the
+  OpenAI endpoint and fails with
+  `model 'claude-sonnet-4-5' does not exist`. Fix pending: prefix
+  claude models with `litellm/anthropic/` (or equivalent SDK-specific
+  routing glue) when the selected provider is `anthropic`.
+
+- **`perfxpert analyze --llm claude-code`** — CLI argparse advertises
+  `claude-code` as a `--llm` choice but `agents.runtime.build_session`
+  never registers it, so any invocation fails with
+  `ValueError: unknown provider 'claude-code'`. Fix pending: either
+  register a real claude-code provider mapping to the
+  `claude-agent-sdk` package, or drop `claude-code` from the argparse
+  choices.
+
+Workaround today: use `PERFXPERT_AIRGAP=1` for deterministic analysis
+without LLM round-trips; or use the openai provider against a key
+with quota.
+
+## Rate-limit escape hatch is opencode-process-scoped
+
+Setting `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` kills client-side
+retries in the opencode process, but the provider's own quota
+enforcement is external and not affected. Use
+`PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
+rate-limited.
+
+## Opencode submodule pristine requirement
+
+The opencode submodule is pinned at `v1.4.11` (MIT) and all
+customizations live in `.patches/*.patch`. Do NOT commit mutations
+inside the submodule; the submodule's committed state must stay
+pristine so `git submodule update` can fetch upstream fixes. The
+`setup.py` build hook resets the submodule + re-applies patches on
+every rebuild, so any in-tree submodule edits will be clobbered.
+
+## Ship state (2026-04-20)
+
+- Test suite: 1387 passed / 0 failed / 3 skipped (env-gated: OpenAI
+  quota + `gemini` CLI missing + `codex` CLI missing). Phase 8 LLM
+  provider routing fix added 5 tests (4 in
+  `test_agents/test_framework.py` covering LitellmModel wiring for
+  anthropic / claude-code / plain-openai / double-prefix guards, plus 1
+  in `test_agents/test_runtime.py` for
+  `build_session(provider="claude-code")`).
+- All three docs scanners green (`scripts/lint.sh`,
+  `scripts/link-checker.py`, `scripts/test-samples.py`) in `--strict`
+  mode; enforced by `tests/test_docs_tooling/test_ship_readiness.py`.
+- End-to-end Docker install validated in
+  `rocm/dev-ubuntu-22.04:latest`: single
+  `pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdirectory=experimental/python/perfxpert"`
+  completes in ~3 min, auto-downloads bun into
+  `~/.cache/perfxpert/bun/` if not on PATH, compiles the bundled
+  opencode binary, yields `perfxpert doctor` → **ALL CLEAN**.
+
+## Docs-audit scanner scope
+
+The ship-readiness scanners skip paths that are legitimate third-party
+or historical content:
+
+`scripts/lint.sh`:
+- `**/.git/**`, `**/.pytest_cache/**` — git / test runner internals.
+- `**/docs/confluence/**` — Confluence-amend audit artifacts that must
+  reference the old symbol names to describe what was scrubbed.
+- `**/opencode/**`, `**/node_modules/**` — upstream opencode submodule
+  (MIT) and its bun-installed JS dep tree. Contains legitimate
+  third-party `.resume()` references, translated READMEs, test
+  fixtures with deliberately-incomplete internal links.
+- `**/perfxpert/ai_analysis/**` — legacy module kept as a stub to avoid
+  bisect-churn; never imported at runtime.
+
+Individual hits on a line containing the literal phrase
+`"removed in Phase 7.1"` are also ignored so the CHANGELOG / archive
+sections can keep searchable records of removed flags + classes
+without re-introducing live guidance.
+
+`scripts/link-checker.py`:
+- External URLs (`http://` / `https://`) are not validated.
+- Anchor fragments (`#section-id`) are stripped before the existence
+  check.
+- Same path exclusions as the lint scanner.
 
 ## Historical: LLM payload field-name mismatch (obsolete — rocm-systems#4979)
 
 **Status: obsolete. No fix required on perfxpert.**
 
-In the pre-refactor codebase, the now-deleted bridge
-function `ai_analysis/api.py::_convert_result_to_llm_format()`
-emitted kernel dictionaries with the keys `calls` and `percent_of_total`,
-but the consumer
-`ai_analysis/llm_analyzer.py::_sanitize_data()` expected
-`dispatch_count` and `pct_total_time`. Memory directions also leaked as
-verbose labels (`Host-to-Device`) instead of compact IDs (`h2d`, `d2h`,
-`d2d`). The effect was that the LLM received `None` for every kernel
-metric — silent data loss, not a crash.
+In the pre-refactor codebase, the now-deleted bridge function
+`ai_analysis/api.py::_convert_result_to_llm_format()` emitted kernel
+dictionaries with the keys `calls` and `percent_of_total`, but the
+consumer `ai_analysis/llm_analyzer.py::_sanitize_data()` expected
+`dispatch_count` and `pct_total_time`. Memory directions also leaked
+as verbose labels (`Host-to-Device`) instead of compact IDs (`h2d`,
+`d2h`, `d2d`). The effect was that the LLM received `None` for every
+kernel metric — silent data loss, not a crash.
 
 Upstream PR
 [rocm-systems#4979](https://github.com/ROCm/rocm-systems/pull/4979)
 added `_MEMORY_DIR_MAP` plus field-name renames inside
 `ai_analysis/api.py`. It was never merged.
 
-**Why the bug cannot occur in perfxpert**
-
-The agentic refactor deleted the entire `perfxpert/ai_analysis/` package — both
-sides of the mismatched bridge are gone. The current flow is
-producer-consumer symmetric by construction:
-
-- Producer: `perfxpert/analysis/core.py::identify_hotspots()` emits
-  kernel dicts with keys `calls` and `percent_of_total`.
-- Consumers: `perfxpert/analysis/recommendations.py`,
-  `perfxpert/agents/analysis.py`, and downstream formatters read the
-  SAME vocabulary (`calls`, `percent_of_total`, `api_calls`). There is
-  no `_sanitize_data`/`_format_data_for_llm` translation step to drift.
-- LLM invocation: `agents/framework.py::_sdk_invoke()` serialises the
-  agent payload as OpenAI-style `messages=[{"role", "content"}]`; there
-  is no bespoke field-mapping layer between perfxpert's internal dicts
-  and the provider API.
-
-This note is preserved for institutional memory so future contributors
+**Why the bug cannot occur in perfxpert:** the agentic refactor deleted
+the entire `perfxpert/ai_analysis/` package — both sides of the
+mismatched bridge are gone. The current flow is producer-consumer
+symmetric by construction: `analysis/core.py::identify_hotspots()`,
+`analysis/recommendations.py`, and `agents/framework.py::_sdk_invoke()`
+all share the same key vocabulary with no translation layer between
+them. Preserved here for institutional memory so future contributors
 who find PR #4979 in the commit history understand why it was closed
 without being ported.
-
-## Ship state (cycle-3 convergence, 2026-04-20)
-
-- **Cycle-3 reviewers**: 0 blockers, 0 important across all three branches.
-- **Test suite**: 1383 passed / 3 skipped / 0 failed (measured 2026-04-20 after Phase 8 LLM provider routing fix). Skips are documented opencode-binary absences (2) plus `test_llm_end_to_end.py` skip-on-429/auth/transient (1). The Phase 8 delta added 3 tests in `test_agents/test_framework.py` covering LitellmModel wiring for anthropic / plain-openai / double-prefix guards.
-- **Secret scanning**: local-only dev tool; not shipped in the repo. Each developer is responsible for their own secret-detection tooling. The scanner, its CI workflow, pre-commit hook, and contributor guide were removed on 2026-04-19.
-- **Known ongoing work** (not blocking ship):
-  - LLM E2E `rec_type` assertion requires a live key with quota; use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` and a model on-roster.
-  - Confluence update remediation: see `docs/operations/confluence-publish.md` for the manual update recipe; automatic MCP publish requires Atlassian URL + token env vars.
-
-## Opencode fork / bundling
-
-- **`apply-opencode-patches.sh` is not yet wired into the wheel build.**
-  The patch apply step is manual: run
-  `bash experimental/python/perfxpert/scripts/apply-opencode-patches.sh`
-  before bundling the opencode binary. Automating this requires `bun`
-  available on the build host (for opencode's post-patch type-check);
-  that toolchain setup is deferred to the wheel-build PR.
-
-- **The opencode submodule (`.gitmodules` pin `v1.4.11`) is MIT.**
-  All customizations are carried in `.patches/*.patch`. Do NOT commit
-  mutations inside the submodule; the submodule's committed state must
-  stay pristine so that `git submodule update` can fetch upstream
-  fixes.
-
-- **Rate-limit escape hatch is opencode-process-scoped.**
-  Setting `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` kills client-side
-  retries in the opencode process, but the provider's own quota
-  enforcement is external and not affected. Use
-  `PERFXPERT_LLM_FALLBACK_CHAIN` to cascade across providers when
-  rate-limited.
-
-- **Forced tool priority is LLM-dependent.**
-  Patch `0010-perfxpert-tool-priority.patch` and the MCP description
-  hint strongly bias the LLM toward `intent_classify` first, but a
-  determined model can still skip. Measurement + feedback is
-  tracked as future telemetry work.
-
 ## Docs-audit baseline
 
 Tracks docs-audit gaps that cannot be mechanically fixed by the

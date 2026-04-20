@@ -24,8 +24,17 @@ binary during `pip install` — no separate step to remember.
 ### Prerequisites
 
 - Python 3.10+
-- `bun` on PATH (https://bun.sh) — required by the build hook to
-  compile the patched opencode from the pinned `sst/opencode` submodule.
+- Network access during `pip install` (the build hook downloads
+  opencode source + the bun runtime if not already on PATH).
+
+The setup.py build hook compiles the bundled AMD-branded opencode
+binary from the pinned `sst/opencode` submodule. This requires `bun`;
+if `bun` isn't on PATH the hook **auto-downloads** a prebuilt bun
+release into `~/.cache/perfxpert/bun/bin/bun` (Linux x64/arm64 +
+macOS x64/arm64 supported). Unsupported platforms (musl libc, Windows)
+or offline installs fall back to a warn-skip; `perfxpert-code` will
+then print a helpful message on first launch explaining how to
+install bun manually.
 
 ### Pip install
 

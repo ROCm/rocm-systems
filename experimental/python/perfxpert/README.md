@@ -7,12 +7,17 @@ AI-powered AMD ROCm GPU trace analysis.
 ### Prerequisites
 
 - Python 3.10+
-- `bun` on PATH (https://bun.sh) — required by the pip-install build hook
-  that compiles the bundled AMD-branded opencode binary. If `bun` is
-  missing the install completes but `perfxpert-code` won't launch until
-  you install bun and rerun `pip install`.
 - (Optional) `claude`, `codex`, or `gemini` CLI on PATH if you plan to
   use the multi-backend dispatch.
+
+The bundled AMD-branded opencode binary is compiled during `pip install`
+by the setup.py build hook, which requires `bun`. If `bun` isn't on
+PATH, the hook **auto-downloads** a prebuilt bun release into
+`~/.cache/perfxpert/bun/bin/bun` (Linux x64/arm64 + macOS x64/arm64
+supported; musl / Windows / offline installs fall back to a warn-skip
+and `perfxpert-code` will print a helpful error at first launch).
+Opt out with `PERFXPERT_SKIP_BUN_DOWNLOAD=1` if you'd rather manage bun
+yourself, or `PERFXPERT_SKIP_BUNDLED_BUILD=1` to skip the whole build.
 
 ### Install
 
