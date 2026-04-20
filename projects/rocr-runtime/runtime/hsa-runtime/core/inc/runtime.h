@@ -553,6 +553,9 @@ class Runtime {
 #if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
         || driver_type == core::DriverType::KFD_VIRTIO
 #endif
+#if defined(__APPLE__)
+        || driver_type == core::DriverType::MACOS_DEXT
+#endif
         ;
   }
 

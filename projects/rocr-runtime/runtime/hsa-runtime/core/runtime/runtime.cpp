@@ -231,7 +231,15 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
     if (Enabled) {
       gpu_agents_.push_back(agent);
       gpu_ids_.push_back(agent->node_id());
+#if defined(__APPLE__)
+      // MacGpuAgent doesn't derive from AMD::GpuAgent (it extends
+      // GpuAgentInt directly). The static cast + KfdGpuID() call is
+      // Linux-KFD-specific; key agents_by_gpuid_ by node_id on Darwin
+      // until a cross-backend GpuID accessor exists.
+      agents_by_gpuid_[agent->node_id()] = agent;
+#else
       agents_by_gpuid_[((AMD::GpuAgent*)agent)->KfdGpuID()] = agent;
+#endif
 
       // Assign the first discovered gpu agent as region gpu.
       if (region_gpu_ == NULL) region_gpu_ = agent;

@@ -42,6 +42,10 @@
 
 #include "core/inc/amd_topology.h"
 
+#if defined(__APPLE__)
+#include "core/inc/amd_macos_agent.h"
+#endif
+
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -162,6 +166,19 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
       // Ignore non GPUs.
       return nullptr;
   }
+#if defined(__APPLE__)
+  if (driver_type == core::DriverType::MACOS_DEXT) {
+    // MacGpuAgent is a GpuAgentInt subclass, NOT an AMD::GpuAgent.
+    // Return it as GpuAgent* for ABI compat; callers that downcast to
+    // AMD::GpuAgent for KFD fields (the sramecc path below, runtime's
+    // KfdGpuID accessor) are guarded separately.
+    auto* mg = new MacGpuAgent(node_id, driver_type);
+    if (enabled) mg->Enable();
+    core::Runtime::runtime_singleton_->RegisterAgent(mg, enabled);
+    return reinterpret_cast<GpuAgent*>(mg);
+  }
+#endif
+  (void)enabled;
   try {
     gpu = new GpuAgent(node_id, node_prop, xnack_mode,
                        core::Runtime::runtime_singleton_->gpu_agents().size(), driver_type);

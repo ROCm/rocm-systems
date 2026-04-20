@@ -245,10 +245,13 @@ set_property(TARGET ${CORE_RUNTIME_TARGET} PROPERTY LINK_FLAGS ${HSA_SHARED_LINK
 ## Source files.
 if (APPLE)
   # KFD driver backend is Linux /dev/kfd only; exclude from Darwin.
-  # MacOsDriver is our DriverKit/IOKit-based backend — currently a stub
-  # that reports no device until libmacgpu (Stage 1) is wired up.
+  # MacOsDriver is our DriverKit/IOKit-based backend talking through
+  # libmacgpu; MacGpuAgent is the matching GPU agent skeleton (not yet
+  # wired into DiscoverGpu, since ISA registry + memory regions need
+  # more plumbing first — tracked as follow-up).
   set ( SRCS core/driver/driver.cpp
-             core/driver/macos/amd_macos_driver.cpp )
+             core/driver/macos/amd_macos_driver.cpp
+             core/runtime/amd_macos_agent.cpp )
 else()
   set ( SRCS core/driver/driver.cpp
              core/driver/kfd/amd_kfd_driver.cpp )

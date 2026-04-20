@@ -48,6 +48,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -151,7 +152,11 @@ hsa_status_t MacOsDriver::GetNodeProperties(HsaNodeProperties& node_props,
     ncpu = 1;
   }
   node_props.NumCPUCores = static_cast<HSAuint32>(ncpu);
-  node_props.NumFComputeCores = 0;   // no GPU agent yet
+  // Non-zero NumFComputeCores is the signal to DiscoverGpu() that this
+  // node has a GPU. Real CU count will land once libmacgpu exposes a
+  // GetComputeUnits escape; for now just report 1 to trigger GPU-agent
+  // discovery via MacGpuAgent.
+  node_props.NumFComputeCores = 1;
   // One memory bank so CpuAgent::InitRegionList builds the host-memory
   // regions (fine-grain, coarse-grain, kernargs). Without this, ROCR's
   // shared allocator stays unset and hsa_init crashes on the first
