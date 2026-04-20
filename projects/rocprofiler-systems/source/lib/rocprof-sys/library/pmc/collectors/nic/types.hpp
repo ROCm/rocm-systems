@@ -4,6 +4,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -13,6 +15,40 @@ namespace collectors
 {
 namespace nic
 {
+
+/**
+ * @brief NIC ASIC identification info.
+ */
+struct asic_info
+{
+    std::string product_name;
+    std::string vendor_name;
+};
+
+/**
+ * @brief NIC port identification info.
+ */
+struct port_info
+{
+    std::string device_name;
+};
+
+/**
+ * @brief NIC RDMA device info.
+ */
+struct rdma_info
+{
+    uint8_t port_count = 0;
+};
+
+/**
+ * @brief Single RDMA port statistic entry.
+ */
+struct stat_entry
+{
+    std::string name;
+    uint64_t    value = 0;
+};
 
 /**
  * @brief Bitfield union for selecting which NIC RDMA metrics to collect.

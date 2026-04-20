@@ -5,6 +5,7 @@
 
 #include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
+#include "library/pmc/collectors/nic/nic_driver.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
@@ -38,10 +39,10 @@ struct nic_traits
 {
     using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using device_t          = device<typename DriverProvider::driver_t>;
+    using nic_driver_t      = pmc::collectors::nic::nic_driver;
+    using device_t          = device<nic_driver_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using driver_t          = typename DriverProvider::driver_t;
 
     static constexpr const char* device_name = "NIC";
     struct device_entry
@@ -120,7 +121,7 @@ struct nic_traits
             return entries;
         }
 
-        auto devices = provider->template get_devices<device_t>(device_type::NIC);
+        auto devices = provider->template get_nic_devices<device_t, nic_driver_t>();
 
         for(auto& device : devices)
         {

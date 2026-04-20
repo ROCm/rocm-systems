@@ -9,7 +9,6 @@ target_link_libraries(
         rocprofiler-systems-pmc-library
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
-        rocprofiler-systems::rocprofiler-systems-rocm
 )
 
 target_include_directories(

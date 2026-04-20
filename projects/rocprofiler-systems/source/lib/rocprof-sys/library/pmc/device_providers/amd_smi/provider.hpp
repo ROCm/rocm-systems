@@ -6,6 +6,7 @@
 #include "library/pmc/common/types.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -170,10 +171,13 @@ private:
     /**
      * @brief Enumerate NIC devices across all sockets.
      *
+     * Creates a NicDriver per handle, then wraps it in a Device.
+     *
      * @tparam Device The device type to create.
+     * @tparam NicDriver The NIC driver type (owns the handle).
      * @return Vector of shared pointers to NIC device objects.
      */
-    template <typename Device>
+    template <typename Device, typename NicDriver>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_nic_devices()
     {
         std::vector<std::shared_ptr<Device>> devices;
@@ -186,8 +190,8 @@ private:
             auto handles = get_nic_handles_for_socket(socket_handle);
             for(auto& handle : handles)
             {
-                devices.push_back(std::make_shared<Device>(
-                    m_driver_api, handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, index));
+                auto driver = std::make_shared<NicDriver>(handle);
+                devices.push_back(std::make_shared<Device>(std::move(driver), index));
                 index++;
             }
         }
@@ -300,14 +304,23 @@ public:
         {
             return enumerate_gpu_devices<Device>();
         }
-#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-        if(type == device_type::NIC)
-        {
-            return enumerate_nic_devices<Device>();
-        }
-#endif
         return {};  // Unsupported device type
     }
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    /**
+     * @brief Get all NIC devices.
+     *
+     * @tparam Device The NIC device type.
+     * @tparam NicDriver The NIC driver type (owns the processor handle).
+     * @return Vector of shared pointers to NIC device objects.
+     */
+    template <typename Device, typename NicDriver>
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_nic_devices()
+    {
+        return enumerate_nic_devices<Device, NicDriver>();
+    }
+#endif
 };
 
 /**
