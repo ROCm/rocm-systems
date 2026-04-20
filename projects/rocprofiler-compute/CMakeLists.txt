@@ -412,6 +412,14 @@ add_test(
         tests/test_metric_validation.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_native_tool
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_native_tool.xml ${COV_OPTION}
+        tests/test_native_tool.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
