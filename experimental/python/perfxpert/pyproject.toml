@@ -52,16 +52,16 @@ Homepage      = "https://github.com/ROCm/rocm-systems"
 Documentation = "https://rocm.docs.amd.com"
 
 [tool.setuptools]
-packages = [
-    "perfxpert",
-    "perfxpert.analysis",
-    "perfxpert.formatters",
-    "perfxpert.cli",
-    "perfxpert.providers",
-    "perfxpert.config",
-    "perfxpert.runtime",
-    "mcp_server",
-]
+# Auto-discover every perfxpert.* subpackage + mcp_server. The explicit
+# list was fragile — new subpackages (perfxpert.tools, perfxpert.agents,
+# perfxpert.knowledge, perfxpert.fence, perfxpert.conversation,
+# perfxpert.cli._backend, perfxpert.cli._gate_hooks) silently dropped
+# from the wheel, so a fresh `pip install perfxpert` would import-fail
+# at runtime on `from perfxpert.tools._tooldep import require_tool`.
+
+[tool.setuptools.packages.find]
+include = ["perfxpert*", "mcp_server*"]
+exclude = ["tests*", "opencode*"]
 
 [tool.setuptools.package-data]
 perfxpert = [
