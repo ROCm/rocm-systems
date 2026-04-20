@@ -53,6 +53,11 @@ set(TOOL_OUTPUT_SOURCES
     tmp_file_buffer.cpp
     tmp_file.cpp)
 
+if(ROCPROFILER_BUILD_PARQUET)
+    list(APPEND TOOL_OUTPUT_HEADERS generateParquet.hpp)
+    list(APPEND TOOL_OUTPUT_SOURCES generateParquet.cpp)
+endif()
+
 add_library(rocprofiler-sdk-output-library STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-output-library ALIAS
             rocprofiler-sdk-output-library)
@@ -75,5 +80,12 @@ target_link_libraries(
 
 target_compile_definitions(rocprofiler-sdk-output-library
                            PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")
+
+if(ROCPROFILER_BUILD_PARQUET)
+    target_link_libraries(rocprofiler-sdk-output-library
+                          PRIVATE rocprofiler-sdk::rocprofiler-sdk-arrow)
+    target_compile_definitions(rocprofiler-sdk-output-library
+                               PUBLIC ROCPROFILER_BUILD_PARQUET=1)
+endif()
 
 add_subdirectory(sql)
