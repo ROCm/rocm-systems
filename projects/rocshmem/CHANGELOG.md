@@ -11,6 +11,14 @@
    * `rocshmem_barrier`
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
+   * `rocshmem_info_get_version`
+   * `rocshmem_info_get_name`
+   * `rocshmem_vendor_get_version_info`
+* Added library constants: `ROCSHMEM_MAJOR_VERSION`, `ROCSHMEM_MINOR_VERSION`,
+  `ROCSHMEM_MAX_NAME_LEN`, `ROCSHMEM_VENDOR_STRING`, `ROCSHMEM_VERSION`,
+  `ROCSHMEM_VENDOR_MAJOR_VERSION`, `ROCSHMEM_VENDOR_MINOR_VERSION`,
+  `ROCSHMEM_VENDOR_PATCH_VERSION`
+* Added vendor string and backend metadata to `rocshmem_info` output
 * Added `ROCSHMEM_TEAM_WORLD` for the device code
 * Added new environment variables:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
