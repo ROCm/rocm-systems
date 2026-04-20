@@ -67,6 +67,27 @@ def test_perfxpert_code_calls_mcp_and_returns_expected_value(monkeypatch):
         timeout=180,
     )
 
+    # Skip on LLM-provider quota/rate-limit errors — environmental, not a
+    # code defect. Mirrors the phase-7 skip-on-429 guard on the integration
+    # LLM test (commit 6b390bd88e). Kept deliberately minimal: we string-
+    # match stderr for the well-known markers rather than parse SDK error
+    # types, since this test goes through the opencode subprocess and the
+    # underlying SDK exception is not directly raised here.
+    combined = (result.stderr or "") + "\n" + (result.stdout or "")
+    low = combined.lower()
+    quota_markers = (
+        "429",
+        "insufficient_quota",
+        "rate_limit",
+        "rate limit",
+        "quota exceeded",  # opencode-rendered form of the OpenAI 429
+    )
+    if any(m in low for m in quota_markers):
+        pytest.skip(
+            f"LLM provider returned a rate-limit / quota error "
+            f"(environmental, not a code defect): {result.stderr[:500]}"
+        )
+
     # Check exit code
     assert result.returncode == 0, (
         f"perfxpert-code failed with rc={result.returncode}\n"
