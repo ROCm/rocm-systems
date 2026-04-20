@@ -68,11 +68,6 @@ VIOLATION_COUNT=0
 #   - node_modules: JS dep tree under any nested path; not ours.
 #   - .git: internals
 #   - .pytest_cache: test runner artifacts
-# NOTE: the former `perfxpert/ai_analysis/**` exclusion was dropped —
-# that directory was deleted in the cycle-2 agentic refactor and no
-# longer exists. If it ever comes back, re-add it here (and in
-# docs/known-issues.md's Scanner-scope section) rather than relying on
-# this scanner to silently ignore it.
 for dir in "${SEARCH_DIRS[@]}"; do
   if [ ! -d "$dir" ]; then
     continue

@@ -99,8 +99,8 @@ pip install "perfxpert[all] @ git+https://github.com/ROCm/rocm-systems.git#subdi
 ```
 
 The `[all]` extra pulls in `anthropic`, `openai`, `rich`, and
-`claude-agent-sdk` so every LLM provider works out of the box. Omit it
-if you only want deterministic air-gap analysis.
+`litellm` so every LLM provider works out of the box. Omit it if you
+only want deterministic air-gap analysis.
 
 ### What the build hook does
 
@@ -345,7 +345,6 @@ PerfXpert scans `.hip`, `.cpp`, `.cu`, `.cl`, `.py`, `.h`, `.hpp` files and dete
 
 The output includes a profiling plan with the exact `rocprofv3` command to run, with counters pre-selected based on what was found in the source.
 
-![Source Scan Demo](assets/source-scan.gif)
 
 ---
 
@@ -380,7 +379,6 @@ scenes.
    blocks (see Gate Cascade doc for correctness guarantees)
 7. **Re-profile** — re-profile with the optimized code and compare
 
-![Agentic TUI Demo](assets/interactive-workflow.gif)
 
 ### AI Code Editing
 
@@ -429,7 +427,6 @@ The tool:
 - Auto-merges all per-rank databases into a single `merged_processes.db`
 - Analyzes the unified trace across all GPUs
 
-![MPI Demo](assets/mpi-multi-gpu.gif)
 
 > **Note**: `--process-sync` (used for Python DDP/torchrun) is NOT used for MPI because OpenMPI strips LD_PRELOAD from child processes. PerfXpert handles this automatically.
 
