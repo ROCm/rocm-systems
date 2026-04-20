@@ -46,31 +46,6 @@ Workarounds to confirm wiring on a different account:
 - Global model override: `PERFXPERT_LLM_MODEL=gpt-4o-mini ...`
 - Bump runner turn budget: `PERFXPERT_AGENTS_MAX_TURNS=5` (default 10)
 
-## LLM provider routing (agentic runtime)
-
-As of the 2026-04-20 Docker install-validation, two provider routing
-paths are still broken and being tracked separately:
-
-- **`perfxpert analyze --llm anthropic`** — `framework._resolve_model()`
-  passes the resolved model name (`claude-sonnet-4-5`) to the
-  openai-agents SDK without a LiteLLM prefix. The SDK defaults to the
-  OpenAI endpoint and fails with
-  `model 'claude-sonnet-4-5' does not exist`. Fix pending: prefix
-  claude models with `litellm/anthropic/` (or equivalent SDK-specific
-  routing glue) when the selected provider is `anthropic`.
-
-- **`perfxpert analyze --llm claude-code`** — CLI argparse advertises
-  `claude-code` as a `--llm` choice but `agents.runtime.build_session`
-  never registers it, so any invocation fails with
-  `ValueError: unknown provider 'claude-code'`. Fix pending: either
-  register a real claude-code provider mapping to the
-  `claude-agent-sdk` package, or drop `claude-code` from the argparse
-  choices.
-
-Workaround today: use `PERFXPERT_AIRGAP=1` for deterministic analysis
-without LLM round-trips; or use the openai provider against a key
-with quota.
-
 ## Rate-limit escape hatch is opencode-process-scoped
 
 Setting `PERFXPERT_DISABLE_RATE_LIMIT_RETRY=1` kills client-side
@@ -90,8 +65,9 @@ every rebuild, so any in-tree submodule edits will be clobbered.
 
 ## Ship state (2026-04-20)
 
-- Test suite: 1387 passed / 0 failed / 3 skipped (env-gated: OpenAI
-  quota + `gemini` CLI missing + `codex` CLI missing). Phase 8 LLM
+- Test suite: 1385 passed / 0 failed / 3–5 skipped (env-gated: OpenAI
+  quota + `gemini` CLI missing + `codex` CLI missing + 2 opencode-patch
+  tests skip when the submodule isn't initialized locally). Phase 8 LLM
   provider routing fix added 5 tests (4 in
   `test_agents/test_framework.py` covering LitellmModel wiring for
   anthropic / claude-code / plain-openai / double-prefix guards, plus 1
