@@ -236,7 +236,7 @@ static void dispatch2d(dim3& grid, dim3& block,
 HIP_TEST_CASE(Unit_GLHIPImageData_Positive_GLWrite_HIPRead_SolidColor) {
   CHECK_IMAGE_SUPPORT;
   GLContextScopeGuard gl_context;
-
+  hipGetLastError(); // reset previous err
   const uint8_t R = 0xDE, G = 0xAD, B = 0xBE, A = 0xEF;
   const uint32_t expected_pixel = pack_rgba(R, G, B, A);
 

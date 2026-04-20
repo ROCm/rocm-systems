@@ -1533,12 +1533,34 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_vmem_alloc_handle_t handle;
         uint64_t                    flags;
     } hsa_amd_vmem_export_fabric_handle;
-
     struct
     {
         hsa_fabric_handle_t          fabric_handle;
         hsa_amd_vmem_alloc_handle_t* handle;
     } hsa_amd_vmem_import_fabric_handle;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    struct
+    {
+        hsa_agent_t                          agent;
+        const hsa_ext_image_descriptor_v2_t* image_descriptor;
+        const hsa_amd_image_descriptor_t*    image_layout;
+        const void*                          image_data;
+        hsa_access_permission_t              access_permission;
+        hsa_ext_image_t*                     image;
+    } hsa_amd_image_create_v2;
+    struct
+    {
+        uint32_t         num_agents;
+        hsa_agent_t*     agents;
+        hsa_handle_t     interop_handle;
+        uint32_t         flags;
+        size_t           size_hint;
+        size_t*          size;
+        void**           ptr;
+        size_t*          metadata_size;
+        const void**     metadata;
+    } hsa_amd_interop_map_buffer_with_size;
 #    endif
 #endif
 } rocprofiler_hsa_api_args_t;
