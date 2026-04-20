@@ -19,7 +19,8 @@ Per-backend status (see `docs/guides/backends.md` for the full matrix):
   native `PreToolUse` hook fires on Bash tool calls only, not on MCP
   calls, so we cannot reject perfxpert-tool misuse server-side. The
   installed `AGENTS.md` rejection-language stanza is the only guard.
-  DECIDED design, see `docs/decisions/2026-04-19-codex-hook-surface.md`.
+  DECIDED design — rationale captured in the local Codex hook-surface
+  decision record (referenced inline from `docs/guides/backends.md`).
 
 **Known limitation (Codex only):** an adversarial / smaller model can
 still call `bash` / `read` before `perfxpert_intent_classify`. Cycle-5
@@ -29,22 +30,6 @@ language in `AGENTS.md`, MCP tool-name rewrite so Codex sees all
 perfxpert tools under the `perfxpert_` prefix for unambiguous prompt
 pattern-matching. Disable the prompt gate via
 `PERFXPERT_DISABLE_TOOL_GATE=1` if it interferes with a workflow.
-
-## LLM end-to-end smoke test may fail with 429 insufficient_quota
-
-`tests/test_integration/test_llm_end_to_end.py::test_llm_enabled_produces_rec_type`
-executes a real OpenAI Agents SDK call. The test skips automatically
-when `OPENAI_API_KEY` is unset OR when the provider returns `429`
-`insufficient_quota` / `auth_error` / documented transient errors. If
-you're hitting a hard fail, ensure your key has quota or set
-`OPENAI_API_KEY=""` to force the skip.
-
-Workarounds to confirm wiring on a different account:
-
-- Different key: `OPENAI_API_KEY=sk-... pytest -k test_llm_enabled_produces_rec_type`
-- Provider-specific override: `PERFXPERT_AGENTS_MODEL_OPENAI=gpt-3.5-turbo ...`
-- Global model override: `PERFXPERT_LLM_MODEL=gpt-4o-mini ...`
-- Bump runner turn budget: `PERFXPERT_AGENTS_MAX_TURNS=5` (default 10)
 
 ## Rate-limit escape hatch is opencode-process-scoped
 
@@ -98,8 +83,6 @@ or historical content:
   the legacy class we deleted, removed in Phase 7.1 — not Node
   stream APIs), translated READMEs, test fixtures with
   deliberately-incomplete internal links.
-- `**/perfxpert/ai_analysis/**` — legacy module kept as a stub to avoid
-  bisect-churn; never imported at runtime.
 
 Individual hits on a line containing the literal phrase
 `"removed in Phase 7.1"` are also ignored so the CHANGELOG / archive
@@ -174,14 +157,14 @@ correctness; external URL health is covered nightly by a separate
 link-health workflow (not part of the zero-violation baseline).
 
 #### `scripts/lint.sh` — banned-string scanner
-The banned-string scan excludes these paths (`lint.sh:50-54`) so that
-historical context or pre-existing test fixtures don't cause false
-positives:
+The banned-string scan excludes these paths (see the `find -not -path`
+clauses in `scripts/lint.sh`) so that historical context or pre-existing
+test fixtures don't cause false positives:
 
 - `**/.git/**` — git internals
 - `**/.pytest_cache/**` — test runner cache
-- `**/perfxpert/ai_analysis/**` — legacy module removed during the
-  agentic refactor; banned terms inside historical fixtures are not live.
+- `**/docs/confluence/**` — Confluence-amend audit artifacts.
+- `**/opencode/**`, `**/node_modules/**` — upstream submodule + JS deps.
 
 The scanner also ignores individual hits whose line contains the
 historical-anchor phrase "removed in Phase 7.1"; this lets us keep a
@@ -193,17 +176,15 @@ carrying the historical anchor) will NOT trip the scanner. If you're
 adding a new fixture directory that should be ignored for legitimate
 reasons, add it here with a one-line comment.
 
-### Out-of-scope follow-ups
+### Environmental / informational
 
-- `tests/test_docs_tooling/test_secret_scanner.py` — three tests fail
-  locally because they cd into a fresh `tempfile.TemporaryDirectory()`
-  without symlinking `tools/_secret_scanner.py` first. Pre-existing
-  bug (commit c2c419ff9e).
-  - **Reproducer:** `pytest tests/test_docs_tooling/test_secret_scanner.py -q`
-  - **Owner / tracking:** queued in a follow-up sweep; no
-    issue number assigned yet. Fix is a one-line tmpdir setup (copy
-    or symlink `tools/_secret_scanner.py` into the tmpdir before the
-    subprocess call).
-  - **Workaround for affected devs:** skip the three `test_secret_scanner_*`
-    tests with `-k 'not secret_scanner'` while the fix is queued;
-    they don't gate any other scanner.
+- **LLM billing errors surface as one-line messages.** Quota-exhausted
+  (429 `insufficient_quota`), authentication (401 / `invalid_api_key`),
+  rate-limit (429 `rate_limit_exceeded`), and transient (5xx / timeout)
+  failures from any `--llm <provider>` call are classified by
+  `perfxpert.providers._exceptions.classify_sdk_error` and rendered as
+  a single actionable stderr line (e.g. `⚠ LLM quota exhausted on
+  openai …`). The corresponding `test_llm_enabled_produces_rec_type`
+  e2e test skips cleanly on each of these classes; it is no longer a
+  defect, just a billing / account condition. Set `PERFXPERT_DEBUG=1`
+  to see the raw SDK traceback when diagnosing.

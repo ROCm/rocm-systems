@@ -68,10 +68,11 @@ VIOLATION_COUNT=0
 #   - node_modules: JS dep tree under any nested path; not ours.
 #   - .git: internals
 #   - .pytest_cache: test runner artifacts
-#   - perfxpert/ai_analysis: the pre-agentic module tree; the
-#     refactor deletes the entire directory, so scrubbing
-#     those files now would produce a merge conflict the rebase
-#     immediately resolves by removing them.
+# NOTE: the former `perfxpert/ai_analysis/**` exclusion was dropped —
+# that directory was deleted in the cycle-2 agentic refactor and no
+# longer exists. If it ever comes back, re-add it here (and in
+# docs/known-issues.md's Scanner-scope section) rather than relying on
+# this scanner to silently ignore it.
 for dir in "${SEARCH_DIRS[@]}"; do
   if [ ! -d "$dir" ]; then
     continue
@@ -93,8 +94,7 @@ for dir in "${SEARCH_DIRS[@]}"; do
     -not -path "*/opencode/*" \
     -not -path "*/node_modules/*" \
     -not -path "*.git/*" \
-    -not -path "*.pytest_cache/*" \
-    -not -path "*perfxpert/ai_analysis/*")
+    -not -path "*.pytest_cache/*")
 done
 
 if [ $VIOLATION_COUNT -eq 0 ]; then
