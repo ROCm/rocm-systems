@@ -254,11 +254,10 @@ namespace
 {
 static bool s_intercept_installed = false;
 
-const CoreApiTable&
-get_orig_core_table()
-{
-    return get_queue_controller()->get_core_table();
-}
+// Saved next-in-chain function pointers (tracing functors or raw HSA, depending on
+// when install_intercept is called). Our wrappers chain through these for untracked
+// queues and for the final doorbell ring on tracked queues.
+static CoreApiTable s_next_table = {};
 
 // --- add_write_index wrappers (4) ---
 
@@ -267,7 +266,7 @@ wrap_add_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
 {
     auto* s = lookup_queue_state(q);
     if(s) return add_write_index_impl(s, v);
-    return get_orig_core_table().hsa_queue_add_write_index_relaxed_fn(q, v);
+    return s_next_table.hsa_queue_add_write_index_relaxed_fn(q, v);
 }
 
 uint64_t
@@ -275,7 +274,7 @@ wrap_add_write_index_scacq_screl(const hsa_queue_t* q, uint64_t v)
 {
     auto* s = lookup_queue_state(q);
     if(s) return add_write_index_impl(s, v);
-    return get_orig_core_table().hsa_queue_add_write_index_scacq_screl_fn(q, v);
+    return s_next_table.hsa_queue_add_write_index_scacq_screl_fn(q, v);
 }
 
 uint64_t
@@ -283,7 +282,7 @@ wrap_add_write_index_scacquire(const hsa_queue_t* q, uint64_t v)
 {
     auto* s = lookup_queue_state(q);
     if(s) return add_write_index_impl(s, v);
-    return get_orig_core_table().hsa_queue_add_write_index_scacquire_fn(q, v);
+    return s_next_table.hsa_queue_add_write_index_scacquire_fn(q, v);
 }
 
 uint64_t
@@ -291,7 +290,7 @@ wrap_add_write_index_screlease(const hsa_queue_t* q, uint64_t v)
 {
     auto* s = lookup_queue_state(q);
     if(s) return add_write_index_impl(s, v);
-    return get_orig_core_table().hsa_queue_add_write_index_screlease_fn(q, v);
+    return s_next_table.hsa_queue_add_write_index_screlease_fn(q, v);
 }
 
 // --- store_write_index wrappers (2) ---
@@ -305,7 +304,7 @@ wrap_store_write_index_relaxed(const hsa_queue_t* q, uint64_t v)
         store_write_index_impl(s, v);
         return;
     }
-    get_orig_core_table().hsa_queue_store_write_index_relaxed_fn(q, v);
+    s_next_table.hsa_queue_store_write_index_relaxed_fn(q, v);
 }
 
 void
@@ -317,7 +316,7 @@ wrap_store_write_index_screlease(const hsa_queue_t* q, uint64_t v)
         store_write_index_impl(s, v);
         return;
     }
-    get_orig_core_table().hsa_queue_store_write_index_screlease_fn(q, v);
+    s_next_table.hsa_queue_store_write_index_screlease_fn(q, v);
 }
 
 // --- cas_write_index wrappers (4) ---
@@ -327,7 +326,7 @@ wrap_cas_write_index_relaxed(const hsa_queue_t* q, uint64_t expected, uint64_t v
 {
     auto* s = lookup_queue_state(q);
     if(s) return cas_write_index_impl(s, expected, value);
-    return get_orig_core_table().hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
+    return s_next_table.hsa_queue_cas_write_index_relaxed_fn(q, expected, value);
 }
 
 uint64_t
@@ -335,7 +334,7 @@ wrap_cas_write_index_scacq_screl(const hsa_queue_t* q, uint64_t expected, uint64
 {
     auto* s = lookup_queue_state(q);
     if(s) return cas_write_index_impl(s, expected, value);
-    return get_orig_core_table().hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
+    return s_next_table.hsa_queue_cas_write_index_scacq_screl_fn(q, expected, value);
 }
 
 uint64_t
@@ -343,7 +342,7 @@ wrap_cas_write_index_scacquire(const hsa_queue_t* q, uint64_t expected, uint64_t
 {
     auto* s = lookup_queue_state(q);
     if(s) return cas_write_index_impl(s, expected, value);
-    return get_orig_core_table().hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
+    return s_next_table.hsa_queue_cas_write_index_scacquire_fn(q, expected, value);
 }
 
 uint64_t
@@ -351,7 +350,7 @@ wrap_cas_write_index_screlease(const hsa_queue_t* q, uint64_t expected, uint64_t
 {
     auto* s = lookup_queue_state(q);
     if(s) return cas_write_index_impl(s, expected, value);
-    return get_orig_core_table().hsa_queue_cas_write_index_screlease_fn(q, expected, value);
+    return s_next_table.hsa_queue_cas_write_index_screlease_fn(q, expected, value);
 }
 
 // --- load_write_index wrappers (2) ---
@@ -361,7 +360,7 @@ wrap_load_write_index_relaxed(const hsa_queue_t* q)
 {
     auto* s = lookup_queue_state(q);
     if(s) return load_write_index_impl(s);
-    return get_orig_core_table().hsa_queue_load_write_index_relaxed_fn(q);
+    return s_next_table.hsa_queue_load_write_index_relaxed_fn(q);
 }
 
 uint64_t
@@ -369,7 +368,7 @@ wrap_load_write_index_scacquire(const hsa_queue_t* q)
 {
     auto* s = lookup_queue_state(q);
     if(s) return load_write_index_impl(s);
-    return get_orig_core_table().hsa_queue_load_write_index_scacquire_fn(q);
+    return s_next_table.hsa_queue_load_write_index_scacquire_fn(q);
 }
 
 // --- signal_store wrappers (2) ---
@@ -380,12 +379,13 @@ wrap_signal_store_relaxed(hsa_signal_t sig, hsa_signal_value_t val)
     auto* s = lookup_queue_state_by_doorbell(sig);
     if(s)
     {
+        ROCP_TRACE << "doorbell_relaxed: sig=" << sig.handle << " val=" << val;
         process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
-            get_orig_core_table().hsa_signal_store_relaxed_fn(db, v);
+            s_next_table.hsa_signal_store_relaxed_fn(db, v);
         });
         return;
     }
-    get_orig_core_table().hsa_signal_store_relaxed_fn(sig, val);
+    s_next_table.hsa_signal_store_relaxed_fn(sig, val);
 }
 
 void
@@ -394,12 +394,13 @@ wrap_signal_store_screlease(hsa_signal_t sig, hsa_signal_value_t val)
     auto* s = lookup_queue_state_by_doorbell(sig);
     if(s)
     {
+        ROCP_TRACE << "doorbell_screlease: sig=" << sig.handle << " val=" << val;
         process_doorbell_impl(s, val, [](hsa_signal_t db, hsa_signal_value_t v) {
-            get_orig_core_table().hsa_signal_store_screlease_fn(db, v);
+            s_next_table.hsa_signal_store_screlease_fn(db, v);
         });
         return;
     }
-    get_orig_core_table().hsa_signal_store_screlease_fn(sig, val);
+    s_next_table.hsa_signal_store_screlease_fn(sig, val);
 }
 
 }  // namespace
@@ -413,8 +414,10 @@ is_intercepting_inline()
 void
 install_intercept(CoreApiTable& core_table)
 {
-    // Install wrappers — originals are available via get_queue_controller()->get_core_table()
-    // which is copied before this function is called
+    // Save current table entries as our next-in-chain (tracing functors when called
+    // after update_table, or raw HSA functions otherwise)
+    s_next_table = core_table;
+
     core_table.hsa_queue_add_write_index_relaxed_fn     = wrap_add_write_index_relaxed;
     core_table.hsa_queue_add_write_index_scacq_screl_fn = wrap_add_write_index_scacq_screl;
     core_table.hsa_queue_add_write_index_scacquire_fn   = wrap_add_write_index_scacquire;
@@ -436,7 +439,6 @@ install_intercept(CoreApiTable& core_table)
 
     s_intercept_installed = true;
     ROCP_INFO << "inline queue intercept installed (14 API wrappers)";
-}
 
 }  // namespace queue_intercept
 }  // namespace hsa
