@@ -26,6 +26,7 @@ from there.
 | Topic | Doc |
 |-------|-----|
 | Governance — reviewers, escalation, RFC-required changes | [governance.md](governance.md) |
+| Audit gate runbook — parity + red-team + go/no-go | [audit_gate_runbook.md](audit_gate_runbook.md) |
 | End-to-end walkthrough: add a new bottleneck class in ≤ 7 files, no RFC | [walkthrough_new_bottleneck_class.md](walkthrough_new_bottleneck_class.md) |
 
 ## See also

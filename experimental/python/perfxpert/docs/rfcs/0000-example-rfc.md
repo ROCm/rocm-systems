@@ -60,7 +60,9 @@ n/a (additive)
 
 ## Prior art
 
-NVIDIA nvidia-smi thermal sensor usage in nsys reports.
+`rocm-smi --showtemp` thermal-sensor exposure already surfaced in
+rocprofiler-systems traces; reuse the same column shape for the new
+runtime field.
 
 ## Approval checklist
 

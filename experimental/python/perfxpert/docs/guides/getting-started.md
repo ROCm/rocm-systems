@@ -745,7 +745,7 @@ locally without internet when you omit `--llm` (or set
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude API (production default) |
 | `openai` | `OPENAI_API_KEY` | OpenAI hosted API |
 | `ollama` | `OLLAMA_HOST` (default `http://localhost:11434`) | Local Ollama daemon — fully offline once the model is pulled |
-| `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, optional `PERFXPERT_LLM_PRIVATE_API_KEY` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
+| `private` | `PERFXPERT_LLM_PRIVATE_URL`, `PERFXPERT_LLM_PRIVATE_MODEL`, optional `PERFXPERT_LLM_PRIVATE_API_KEY`, optional `PERFXPERT_LLM_PRIVATE_HEADERS` (JSON), optional `PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false` | Any OpenAI-compatible endpoint (enterprise / self-hosted) |
 | `opencode` | none required (bundled) | Bundled opencode CLI — subprocess wrapper |
 
 ```bash
@@ -759,6 +759,12 @@ perfxpert analyze -i trace.db --llm openai --llm-model gpt-4o
 # Private endpoint (any OpenAI-compatible server)
 export PERFXPERT_LLM_PRIVATE_URL="https://llm.corp.internal/v1"
 export PERFXPERT_LLM_PRIVATE_MODEL="llama-3-70b"
+# Optional: API key for endpoints that require Bearer auth
+export PERFXPERT_LLM_PRIVATE_API_KEY="..."
+# Optional: extra HTTP headers as a JSON object (corp gateways, traceability)
+export PERFXPERT_LLM_PRIVATE_HEADERS='{"X-Tenant-Id":"team-perf","X-Auth-Token":"..."}'
+# Optional: bypass TLS verification for self-signed CAs (off by default)
+export PERFXPERT_LLM_PRIVATE_VERIFY_SSL=false
 perfxpert analyze -i trace.db --llm private
 
 # Local Ollama (no network after model pull)
