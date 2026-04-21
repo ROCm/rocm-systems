@@ -69,12 +69,12 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Create SDMA connections to all other local PEs (numChannels per destination)
+  // Create SDMA connections to all local PEs including self
   for (int i = 0; i < shm_size; i++) {
     if (i != local_rank) {
       anvil::EnablePeerAccess(deviceId, i);
-      anvil::anvil.connect(deviceId, i, numChannels);
     }
+    anvil::anvil.connect(deviceId, i, numChannels);
   }
 
   // Total number of handles: shm_size * numChannels
@@ -91,12 +91,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
   for (int i = 0; i < shm_size; i++) {
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = i * numChannels + ch;
-      if (i != local_rank) {
-        anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
-        handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
-      } else {
-        handles_h[idx] = nullptr;
-      }
+      anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
+      handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
     }
   }
   CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h,
@@ -133,12 +129,12 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBo
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Create SDMA connections to all other local PEs (numChannels per destination)
+  // Create SDMA connections to all local PEs including self
   for (int i = 0; i < shm_size; i++) {
     if (i != local_rank) {
       anvil::EnablePeerAccess(deviceId, i);
-      anvil::anvil.connect(deviceId, i, numChannels);
     }
+    anvil::anvil.connect(deviceId, i, numChannels);
   }
 
   // Total number of handles: shm_size * numChannels
@@ -155,12 +151,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBo
   for (int i = 0; i < shm_size; i++) {
     for (int ch = 0; ch < numChannels; ch++) {
       int idx = i * numChannels + ch;
-      if (i != local_rank) {
-        anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
-        handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
-      } else {
-        handles_h[idx] = nullptr;
-      }
+      anvil::SdmaQueue* queue = anvil::anvil.getSdmaQueue(deviceId, i, ch);
+      handles_h[idx] = queue ? queue->deviceHandle() : nullptr;
     }
   }
   CHECK_HIP(hipMemcpy(deviceHandles_d, handles_h,
