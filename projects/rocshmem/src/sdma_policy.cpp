@@ -53,16 +53,14 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, MPI_C
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
-  minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
 
   if (!sdmaEnabled) {
     LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
     return;
   }
 
-  LOG_INFO("SDMA init with threshold=%zu, channels=%d, "
-           "min_chunk=%zu, local_size=%d",
-           sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
+  LOG_INFO("SDMA init with threshold=%zu, channels=%d, local_size=%d",
+           sdmaThreshold, numChannels, shm_size);
 
   // Initialize the Anvil library
   anvil::anvil.init();
@@ -119,16 +117,14 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, [[maybe_unused]] int num_pes, TcpBo
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
-  minChunkPerChannel = static_cast<size_t>(envvar::sdma::min_chunk_per_channel);
 
   if (!sdmaEnabled) {
     LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
     return;
   }
 
-  LOG_INFO("SDMA init with threshold=%zu, channels=%d, "
-           "min_chunk=%zu, local_size=%d",
-           sdmaThreshold, numChannels, minChunkPerChannel, shm_size);
+  LOG_INFO("SDMA init with threshold=%zu, channels=%d, local_size=%d",
+           sdmaThreshold, numChannels, shm_size);
 
   // Initialize the Anvil library
   anvil::anvil.init();
