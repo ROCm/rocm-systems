@@ -217,7 +217,7 @@ AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
     ROCP_ERROR_IF(queue_async_diag_enabled()) << fmt::format(
         "DEBUG: AsyncSignalHandler session queue_id={} session_ptr={} packet_count={} "
         "signal_value={} tid={} corr_ptr={}",
-        queue_info_session.queue.get_id(),
+        queue_info_session.queue.get_id().handle,
         static_cast<const void*>(_session.get()),
         queue_info_session.packet_data.size(),
         signal_v,
@@ -230,7 +230,7 @@ AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
         ROCP_ERROR_IF(queue_async_diag_enabled())
             << fmt::format("DEBUG: AsyncSignalHandler packet-begin queue_id={} dispatch_id={} "
                            "interrupt_signal={} completion_signal={} pooled_signal={} tid={}",
-                           queue_info_session.queue.get_id(),
+                           queue_info_session.queue.get_id().handle,
                            packet.callback_record.dispatch_info.dispatch_id,
                            packet.interrupt_signal.handle,
                            packet.completion_signal.handle,
@@ -322,7 +322,7 @@ AsyncSignalHandler(hsa_signal_value_t signal_v, void* data)
     queue_info_session.queue.async_complete();
     ROCP_ERROR_IF(queue_async_diag_enabled())
         << fmt::format("DEBUG: AsyncSignalHandler async_complete queue_id={} tid={}",
-                       queue_info_session.queue.get_id(),
+                       queue_info_session.queue.get_id().handle,
                        common::get_tid());
 
     return false;
@@ -518,7 +518,7 @@ WriteInterceptor(const void* packets,
             ROCP_ERROR_IF(queue_async_diag_enabled())
                 << fmt::format("DEBUG: WriteInterceptor corr increment queue_id={} dispatch_idx={} "
                                "corr_ptr={} corr_internal={} ref_count={} kern_count={} tid={}",
-                               queue.get_id(),
+                               queue.get_id().handle,
                                i,
                                static_cast<const void*>(corr_id),
                                corr_id->internal,
@@ -584,7 +584,7 @@ WriteInterceptor(const void* packets,
             ROCP_ERROR_IF(queue_async_diag_enabled()) << fmt::format(
                 "DEBUG: WriteInterceptor dispatch prepared queue_id={} dispatch_id={} "
                 "corr_ptr={} signal_handle={} existing_completion_signal={} tid={}",
-                queue.get_id(),
+                queue.get_id().handle,
                 dispatch_id,
                 static_cast<const void*>(corr_id),
                 kernel_packet.kernel_dispatch.completion_signal.handle,
@@ -959,7 +959,7 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
     ROCP_ERROR_IF(queue_async_diag_enabled())
         << fmt::format("DEBUG: Queue::signal_async_handler arm queue_id={} raw_signal={} data={} "
                        "pooled_signal={} tid={}",
-                       get_id(),
+                       get_id().handle,
                        raw_signal.handle,
                        data,
                        static_cast<void*>(signal),
@@ -971,7 +971,7 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
     ROCP_ERROR_IF(queue_async_diag_enabled())
         << fmt::format("DEBUG: Queue::signal_async_handler arm result queue_id={} raw_signal={} "
                        "armed={} tid={}",
-                       get_id(),
+                       get_id().handle,
                        raw_signal.handle,
                        armed,
                        common::get_tid());

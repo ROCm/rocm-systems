@@ -83,7 +83,7 @@ QueueSignalSubscription::arm(Queue&                    queue,
     ROCP_ERROR_IF(queue_signal_diag_enabled())
         << fmt::format("DEBUG: QueueSignalSubscription::arm queue_id={} signal_handle={} "
                        "callback_data={} monitor={} tid={}",
-                       queue.get_id(),
+                       queue.get_id().handle,
                        signal.handle,
                        callback_data,
                        static_cast<void*>(monitor.get()),
@@ -93,7 +93,7 @@ QueueSignalSubscription::arm(Queue&                    queue,
         ROCP_ERROR_IF(queue_signal_diag_enabled())
             << fmt::format("DEBUG: QueueSignalSubscription::arm failed: monitor missing "
                            "queue_id={} signal_handle={}",
-                           queue.get_id(),
+                           queue.get_id().handle,
                            signal.handle);
         return false;
     }
@@ -101,7 +101,7 @@ QueueSignalSubscription::arm(Queue&                    queue,
     ROCP_ERROR_IF(queue_signal_diag_enabled()) << fmt::format(
         "DEBUG: QueueSignalSubscription::arm subscribed queue_id={} signal_handle={} "
         "subscription_id={} success={}",
-        queue.get_id(),
+        queue.get_id().handle,
         signal.handle,
         id,
         (id != 0));
