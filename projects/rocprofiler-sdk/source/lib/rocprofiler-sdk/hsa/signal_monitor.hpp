@@ -64,6 +64,9 @@ namespace detail
 {
 std::shared_ptr<class SignalMonitor>
 create_polling_signal_monitor(const SignalMonitorConfig& cfg, SignalMonitorOps ops);
+
+std::shared_ptr<class SignalMonitor>
+create_ioctl_signal_monitor(const SignalMonitorConfig& cfg, SignalMonitorOps ops);
 }  // namespace detail
 
 class SignalMonitor

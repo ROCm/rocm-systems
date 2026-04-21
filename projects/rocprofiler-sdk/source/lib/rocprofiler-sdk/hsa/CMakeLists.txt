@@ -13,6 +13,7 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     queue.cpp
     scratch_memory.cpp
     signal_monitor.cpp
+    signal_monitor_ioctl.cpp
     signal_monitor_polling.cpp)
 
 set(ROCPROFILER_LIB_HSA_HEADERS

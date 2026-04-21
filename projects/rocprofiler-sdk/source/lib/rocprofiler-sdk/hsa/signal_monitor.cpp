@@ -53,11 +53,16 @@ parse_signal_monitor_backend_env()
 std::shared_ptr<SignalMonitor>
 create_signal_monitor(SignalMonitorBackend backend, const SignalMonitorConfig& cfg, SignalMonitorOps ops)
 {
-    if(backend == SignalMonitorBackend::poll || backend == SignalMonitorBackend::auto_select)
+    if(backend == SignalMonitorBackend::poll)
     {
         return detail::create_polling_signal_monitor(cfg, std::move(ops));
     }
 
-    return {};
+    auto ioctl_monitor = detail::create_ioctl_signal_monitor(cfg, ops);
+    if(ioctl_monitor) return ioctl_monitor;
+
+    if(!cfg.allow_poll_fallback) return {};
+
+    return detail::create_polling_signal_monitor(cfg, std::move(ops));
 }
 }  // namespace rocprofiler::hsa
