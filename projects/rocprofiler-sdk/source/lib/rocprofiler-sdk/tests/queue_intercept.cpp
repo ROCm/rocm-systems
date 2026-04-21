@@ -42,6 +42,7 @@ TEST(QueueIntercept, QueueStateDefaultInit)
     EXPECT_EQ(state.ring_buf, nullptr);
     EXPECT_EQ(state.ring_size, 0U);
     EXPECT_EQ(state.ring_mask, 0U);
+    EXPECT_EQ(state.pkt_size, 64U);
     EXPECT_EQ(state.virtual_wptr.load(), 0UL);
     EXPECT_EQ(state.real_wdid, nullptr);
     EXPECT_EQ(state.real_rdid, nullptr);
