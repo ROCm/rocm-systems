@@ -48,6 +48,32 @@ get_doorbell_map()
     return *_v;
 }
 
+namespace
+{
+auto&
+get_queue_state_id_counter()
+{
+    static auto* v = common::static_object<std::atomic<uint64_t>>::construct(0);
+    return *v;
+}
+
+size_t
+queue_registry_size()
+{
+    size_t result = 0;
+    get_queue_registry().rlock([&](const auto& registry) { result = registry.size(); });
+    return result;
+}
+
+size_t
+doorbell_registry_size()
+{
+    size_t result = 0;
+    get_doorbell_map().rlock([&](const auto& doorbell_map) { result = doorbell_map.size(); });
+    return result;
+}
+}  // namespace
+
 queue_state_ptr_t
 lookup_queue_state(const hsa_queue_t* queue)
 {
@@ -66,13 +92,23 @@ queue_state_ptr_t
 lookup_queue_state_by_doorbell(hsa_signal_t signal)
 {
     queue_state_ptr_t result = {};
+    bool              expired_entry = false;
+    size_t            doorbell_size = 0;
     get_doorbell_map().rlock([&](const auto& doorbell_map) {
+        doorbell_size = doorbell_map.size();
         auto it = doorbell_map.find(signal.handle);
         if(it != doorbell_map.end())
         {
             result = it->second.lock();
+            expired_entry = (result == nullptr);
         }
     });
+    if(expired_entry)
+    {
+        ROCP_WARNING << "[TEARDOWN-DIAG][QI-DOORBELL-EXPIRED] signal=" << signal.handle
+                     << " doorbell_entries=" << doorbell_size
+                     << " queue_entries=" << queue_registry_size();
+    }
     return result;
 }
 
@@ -82,13 +118,24 @@ register_doorbell(const hsa_queue_t* queue, hsa_signal_t doorbell)
     auto state = lookup_queue_state(queue);
     if(!state) return;
 
-    get_doorbell_map().wlock([&](auto& doorbell_map) { doorbell_map[doorbell.handle] = state; });
+    get_doorbell_map().wlock([&](auto& doorbell_map) {
+        doorbell_map[doorbell.handle] = state;
+        ROCP_INFO << "[TEARDOWN-DIAG][QI-REGISTER-DOORBELL] queue=" << queue
+                  << " state_id=" << state->debug_id << " doorbell=" << doorbell.handle
+                  << " doorbell_entries=" << doorbell_map.size();
+    });
 }
 
-void
+bool
 unregister_doorbell(hsa_signal_t doorbell)
 {
-    get_doorbell_map().wlock([&](auto& doorbell_map) { doorbell_map.erase(doorbell.handle); });
+    bool erased = false;
+    get_doorbell_map().wlock([&](auto& doorbell_map) {
+        erased = (doorbell_map.erase(doorbell.handle) > 0);
+        ROCP_INFO << "[TEARDOWN-DIAG][QI-UNREGISTER-DOORBELL] doorbell=" << doorbell.handle
+                  << " erased=" << erased << " doorbell_entries=" << doorbell_map.size();
+    });
+    return erased;
 }
 
 uint64_t
@@ -173,6 +220,17 @@ process_doorbell_impl(queue_state_ptr_t    state,
     if(!state) return;
 
     auto* state_ptr = state.get();
+    if(state_ptr->teardown_started.load(std::memory_order_acquire))
+    {
+        ROCP_WARNING << "[TEARDOWN-DIAG][QI-DOORBELL-DURING-TEARDOWN] queue="
+                     << state_ptr->hsa_queue << " state_id=" << state_ptr->debug_id
+                     << " doorbell=" << state_ptr->doorbell_signal.handle
+                     << " virtual_wptr="
+                     << state_ptr->virtual_wptr.load(std::memory_order_relaxed)
+                     << " next_scan_pos=" << state_ptr->next_scan_pos
+                     << " next_submit_pos=" << state_ptr->next_submit_pos;
+    }
+
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
 
     const uint64_t scan_pos = state_ptr->next_scan_pos;
@@ -301,13 +359,28 @@ create_queue_state(const hsa_queue_t* queue,
     state->real_rdid       = rdid_addr;
     state->hsa_queue       = queue;
     state->doorbell_signal = queue->doorbell_signal;
+    state->debug_id        = get_queue_state_id_counter().fetch_add(1, std::memory_order_relaxed);
     state->k_factor        = k_factor;
+    state->teardown_started.store(false, std::memory_order_relaxed);
     state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
     state->next_scan_pos   = current_wdid;
     state->next_submit_pos = current_wdid;
 
-    get_queue_registry().wlock([&](auto& map) { map[queue] = state; });
-    get_doorbell_map().wlock([&](auto& map) { map[queue->doorbell_signal.handle] = state; });
+    get_queue_registry().wlock([&](auto& map) {
+        map[queue] = state;
+        ROCP_INFO << "[TEARDOWN-DIAG][QI-CREATE-STATE] queue=" << queue
+                  << " state_id=" << state->debug_id
+                  << " doorbell=" << queue->doorbell_signal.handle
+                  << " k_factor=" << k_factor << " current_wdid=" << current_wdid
+                  << " queue_entries=" << map.size();
+    });
+    get_doorbell_map().wlock([&](auto& map) {
+        map[queue->doorbell_signal.handle] = state;
+        ROCP_INFO << "[TEARDOWN-DIAG][QI-CREATE-STATE-DOORBELL] queue=" << queue
+                  << " state_id=" << state->debug_id
+                  << " doorbell=" << queue->doorbell_signal.handle
+                  << " doorbell_entries=" << map.size();
+    });
 }
 
 void
@@ -315,17 +388,48 @@ destroy_queue_state(const hsa_queue_t* queue)
 {
     hsa_signal_t doorbell = {0};
     queue_state_ptr_t doomed = {};
+    size_t queue_entries_before = 0;
+    size_t queue_entries_after  = 0;
     get_queue_registry().wlock([&](auto& map) {
+        queue_entries_before = map.size();
         auto it = map.find(queue);
-        if(it == map.end()) return;
+        if(it == map.end())
+        {
+            queue_entries_after = map.size();
+            return;
+        }
         doomed = it->second;
         if(doomed)
         {
+            doomed->teardown_started.store(true, std::memory_order_release);
             doorbell = doomed->doorbell_signal;
         }
         map.erase(it);
+        queue_entries_after = map.size();
     });
-    if(doorbell.handle != 0) unregister_doorbell(doorbell);
+
+    if(!doomed)
+    {
+        ROCP_WARNING << "[TEARDOWN-DIAG][QI-DESTROY-STATE-MISS] queue=" << queue
+                     << " queue_entries_before=" << queue_entries_before
+                     << " queue_entries_after=" << queue_entries_after
+                     << " doorbell_entries=" << doorbell_registry_size();
+        return;
+    }
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QI-DESTROY-STATE] queue=" << queue
+              << " state_id=" << doomed->debug_id << " doorbell=" << doorbell.handle
+              << " use_count=" << doomed.use_count()
+              << " queue_entries_before=" << queue_entries_before
+              << " queue_entries_after=" << queue_entries_after
+              << " doorbell_entries_before=" << doorbell_registry_size();
+
+    if(doorbell.handle != 0) (void) unregister_doorbell(doorbell);
+
+    ROCP_INFO << "[TEARDOWN-DIAG][QI-DESTROY-STATE-DONE] queue=" << queue
+              << " state_id=" << doomed->debug_id
+              << " doorbell_entries_after=" << doorbell_registry_size()
+              << " queue_entries_after=" << queue_registry_size();
 }
 
 namespace

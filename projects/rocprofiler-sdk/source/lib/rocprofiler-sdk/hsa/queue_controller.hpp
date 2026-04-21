@@ -51,7 +51,7 @@ public:
     using agent_cache_map_t      = std::unordered_map<uint32_t, AgentCache>;
 
     QueueController()  = default;
-    ~QueueController() = default;
+    ~QueueController();
     // Initializes the QueueInterceptor. This must be delayed until
     // HSA has been inited.
     void init(CoreApiTable& core_table, AmdExtTable& ext_table);
