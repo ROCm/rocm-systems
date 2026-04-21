@@ -563,7 +563,14 @@ def _workload_emit_tensor_cumsum_offsets_setup(
     shape: Tuple[Any, ...],
     segment_length: int,
 ) -> List[str]:
-    """Emit ``[0, k, 2k, ..., (n-1)*k]`` int64 offsets for nested / jagged ops."""
+    """Emit ``[0, k, 2k, ..., n*k]`` int64 offsets (length ``n+1``) for nested / jagged ops.
+
+    Nested-tensor APIs require the offsets tensor to end at ``values.numel()``
+    along the ragged dim (see the skip notes on ``_jagged_to_padded_dense_forward``
+    / ``_padded_dense_to_jagged_forward`` in ``torch_trace_coverage_op_specs.py``),
+    so the emitter includes the terminal ``n*k`` entry and matches the
+    ``_CoverageTensorArg`` docstring.
+    """
     if len(shape) != 1:
         raise ValueError(
             f"_CoverageTensorArg(emit='cumsum_offsets') expects a 1-D shape, "
@@ -572,7 +579,7 @@ def _workload_emit_tensor_cumsum_offsets_setup(
     n = shape[0]
     return [
         (
-            f"{vname} = torch.arange(0, {n * segment_length}, "
+            f"{vname} = torch.arange(0, {n * segment_length + 1}, "
             f"{segment_length}, dtype=torch.int64, device=device)"
         ),
     ]
