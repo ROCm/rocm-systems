@@ -249,6 +249,14 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         }
     }
 
+    // Since API changed, crude attempt to detect invalid schema versions being passed in from older API
+    if(schema_version.major > 100 || schema_version.minor > 100 || schema_version.patch > 100)
+    {
+        ROCP_ERROR << fmt::format("[rocprofiler-sdk-rocpd] Schema version is invalid: '{}.{}.{}'.", schema_version.major, schema_version.minor, schema_version.patch);
+        ROCP_ERROR << fmt::format("[rocprofiler-sdk-rocpd] This is likely due to an older API being used. Please update the API to the latest version.");
+        return ROCPD_STATUS_ERROR_SQL_SCHEMA_INVALID_VERSION;
+    }
+
     auto       version_file_map = rocpd::sql::version_file_map_t{};
     const auto _schema_paths =
         rocpd::sql::build_schema_paths_string(schema_path_hints, num_schema_path_hints);
