@@ -742,19 +742,34 @@ HandlerResult handleVALU_VOP3P(RaiseContext &ctx, const DecodedInst &di,
       ParsedReg condReg =
           ctx.parseReg(di.getReg(op.srcIdx(2)), op.srcIdx(2));
       if (condReg.kind == ParsedReg::SGPR) {
-        // The SGPR holds a source-width wave mask: lane `i` selects
-        // src1 iff bit `i` of the mask is set. The old lowering
-        // (`ICmpNE condVal, 0`) collapsed the mask to a single
-        // wave-uniform `i1` and made every lane pick the same side,
-        // silently miscompiling any data-dependent predication idiom
-        // (`v_cmp_*_e64 sDST, ...` + `v_cndmask_b32_e64 r, a, b, sDST`
-        // — the canonical libdevice math / fp-range-branch shape).
-        // Route through the projection's per-lane extractor, same as
-        // `readVCCAsWaveMask`'s consumer symmetry.
-        Value *condVal = ctx.isa.isWave32()
-                             ? ctx.regs.loadSGPR32(ctx.B, condReg.baseIdx)
-                             : ctx.regs.loadSGPR64(ctx.B, condReg.baseIdx);
-        cond = ctx.projection.extractLaneBitFromWaveMask(ctx.B, condVal);
+        // Preferred path: a V_CMP_*_e64 in the current BB wrote this
+        // SGPR and no intervening scalar write has invalidated the
+        // cached per-lane `i1`. Use the `i1` directly — it carries
+        // the full target-hardware ballot without the cross-widening
+        // narrow-write information loss (the SGPR itself holds only
+        // the source-width-truncated 32-bit projection). See
+        // hotswap/docs/sgpr-wave-mask-translation.md section 3.1 for
+        // the full contract and
+        // `RaiseContext::lastSgprWaveMaskI1` for the invariants that
+        // make this lookup sound.
+        if (Value *freshCmp = ctx.lookupSgprWaveMaskI1(condReg.baseIdx)) {
+          cond = freshCmp;
+        } else {
+          // Fallback: no fresh V_CMP writer in this BB (or the cache
+          // was invalidated by a scalar SGPR write, or we crossed a
+          // BB boundary). Route through the projection's per-lane
+          // extractor, mirroring `readVCCAsWaveMask`'s consumer
+          // symmetry. This path is correct for same-wave and
+          // modulo-replication same-width cases, and lossy only in
+          // the documented wave32 -> wave64 cross-widening narrow-
+          // write case (where recovering the upper-half lanes'
+          // compare results is impossible from the 32-bit SGPR —
+          // those bits were destroyed at the writer's truncate).
+          Value *condVal = ctx.isa.isWave32()
+                               ? ctx.regs.loadSGPR32(ctx.B, condReg.baseIdx)
+                               : ctx.regs.loadSGPR64(ctx.B, condReg.baseIdx);
+          cond = ctx.projection.extractLaneBitFromWaveMask(ctx.B, condVal);
+        }
       } else {
         cond = ctx.regs.loadVCC(ctx.B);
       }

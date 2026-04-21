@@ -132,6 +132,12 @@ void AllocaRegFile::storeSGPR32(IRBuilder<> &B, int idx, Value *v) {
   if (v->getType() != i32Ty)
     v = B.CreateBitCast(v, i32Ty);
   B.CreateStore(v, sgpr[idx]);
+  // Invalidate any `V_CMP -> per-lane-i1` shadow entry for this SGPR.
+  // Callers that wrote a wave-mask (V_CMP path) re-populate immediately
+  // after; callers that wrote a scalar leave the entry empty so the
+  // next consumer falls back to the narrow-mask extract. See
+  // RaiseContext::lastSgprWaveMaskI1 / onSgprWritten contract.
+  if (onSgprWritten) onSgprWritten(idx);
 }
 
 namespace {
@@ -180,6 +186,16 @@ void AllocaRegFile::storeSGPR64(IRBuilder<> &B, int idx, Value *v) {
   Value *hi = B.CreateTrunc(B.CreateLShr(v, 32), i32Ty);
   B.CreateStore(lo, sgpr[idx]);
   B.CreateStore(hi, sgpr[idx + 1]);
+  // Pair writes invalidate both halves of the shadow. The V_CMP
+  // wave-mask write path keys its `recordSgprWaveMaskI1` on the low
+  // index of the destination pair (on wave64 source this is the
+  // authoritative key; on wave32 source `storeSGPR64` is not reachable
+  // from V_CMP because the source SGPR is physically 32 bits). See
+  // the `onSgprWritten` contract in reg_file.hpp.
+  if (onSgprWritten) {
+    onSgprWritten(idx);
+    onSgprWritten(idx + 1);
+  }
 }
 
 Value *AllocaRegFile::loadSGPR64(IRBuilder<> &B, int idx) {

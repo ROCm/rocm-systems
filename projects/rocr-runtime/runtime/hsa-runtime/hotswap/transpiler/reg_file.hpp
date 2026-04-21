@@ -90,6 +90,32 @@ struct AllocaRegFile {
   // once, not copied around."
   llvm::unique_function<void()> onExecWritten;
 
+  // Invalidation hook fired on every per-SGPR store, at the low-level
+  // `storeSGPR32` / `storeSGPR64` boundary. The owning RaiseContext
+  // installs this so its `lastSgprWaveMaskI1` shadow map (see raise_
+  // context.hpp) stays in sync with every path that mutates an SGPR —
+  // including paths that bypass `writeReg32 / writeReg64` to call
+  // `storeSGPR32` directly (several handlers, e.g. handle_smem.cpp's
+  // multi-dword SMEM load splitting, handle_valu.cpp's SCC-flag SGPR
+  // writes).
+  //
+  // `storeSGPR64` fires the hook twice, once per half (idx, idx+1), so
+  // pair writes invalidate both shadow entries. `storeSGPR32` fires it
+  // once.
+  //
+  // The V_CMP wave-mask write path (`writeRegExecWidth` -> `storeSGPR32`/
+  // `storeSGPR64`) ALSO fires this hook, which transiently empties the
+  // shadow entry before the V_CMP handler immediately re-records the
+  // per-lane `i1` via `ctx.recordSgprWaveMaskI1`. That two-step shape
+  // is deliberate: the hook fires on every low-level store, and the
+  // handler layer is where we distinguish "scalar write (leave map
+  // empty)" from "wave-mask write (re-populate map with the i1)".
+  //
+  // See hotswap/docs/sgpr-wave-mask-translation.md section 3.1 for the
+  // full invariants (I1 additive / I2 SSA-monotonic / I3 any
+  // interference defeats the cache).
+  llvm::unique_function<void(int)> onSgprWritten;
+
   // Initialise storage.
   //
   // `MRI` is queried for the architectural SGPR_32 / TTMP_32 register-

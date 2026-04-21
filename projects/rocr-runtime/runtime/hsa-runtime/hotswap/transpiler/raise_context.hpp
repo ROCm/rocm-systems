@@ -12,6 +12,7 @@
 #include "user_sgpr_layout.hpp"
 #include "wave_projection.hpp"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -236,6 +237,132 @@ struct RaiseContext {
   // `resetLaneActiveCache` / `emitLaneIdx`.
   llvm::Value *cachedLaneIdx = nullptr;
   llvm::BasicBlock *cachedLaneIdxBB = nullptr;
+
+  // Per-BB cache of the per-lane i1 compare result produced by the
+  // most recent V_CMP_*_e64 writer targeting a given SGPR in this
+  // basic block. Keyed by source-ABI SGPR baseIdx (the low SGPR of
+  // an SGPR pair on wave64 source; the single SGPR on wave32
+  // source). `isPair` distinguishes a wave64-source pair entry
+  // (the value spans [baseIdx, baseIdx+1]) from a wave32-source
+  // single entry (baseIdx only), which matters for the adjacent-
+  // invalidation rule in `invalidateSgprWaveMaskI1`.
+  //
+  // Motivation. The V_CMP -> SGPR store at `handle_valu_vcmp.cpp`
+  // truncates the full target-hardware ballot down to the source
+  // SGPR's physical 32-bit width (`ballotI1ToWidth(cmp, source
+  // WaveMaskTy, ...)` -> `CreateTrunc`), destroying lanes 32..63's
+  // compare results on wave32 source / wave64 target cross-
+  // widening. A V_CNDMASK_B32_e64 consumer in the same BB has no
+  // way to recover those bits from the narrow SGPR — but it does
+  // not need to, because the writer still holds the full per-lane
+  // `i1` SSA value. This cache carries that `i1` across to the
+  // consumer.
+  //
+  // Invariants (maintained in concert by
+  //   * handle_valu_vcmp.cpp V_CMP -> SGPR path writes `cmp` here,
+  //   * handle_valu_vop3p.cpp V_CNDMASK_B32 SGPR-source path reads,
+  //   * AllocaRegFile::onSgprWritten invalidates on any SGPR write
+  //     (with pair-aware adjacent invalidation for the high half
+  //     of a pair rooted at baseIdx-1), and
+  //   * `clearSgprWaveMaskShadow` drops the whole map on BB entry):
+  //
+  //   I1 - Additive. The narrow ballot store and its
+  //        `extractLaneBitFromWaveMask` reader chain are both
+  //        preserved. When the cache is absent, the consumer takes
+  //        the existing (lossy-under-cross-widening) path. No case
+  //        where the fix regresses a previously-correct lowering.
+  //   I2 - SSA-monotonic within a BB. The SSA value returned by
+  //        `lookupSgprWaveMaskI1(N)` is the exact `cmp` produced by
+  //        the last V_CMP writer to sN in the current BB, with no
+  //        intervening write to sN (or to sN+1 if the entry at sN
+  //        is a pair). Linear handler dispatch over the
+  //        instruction stream guarantees this.
+  //   I3 - Any interference defeats the cache. Scalar writes
+  //        invalidate the entry via the reg-file callback, AND
+  //        invalidate a preceding pair entry whose high half this
+  //        write just clobbered (see `invalidateSgprWaveMaskI1`);
+  //        subsequent V_CMP writes overwrite the entry (last-writer
+  //        wins); BB transition clears the whole map.
+  //
+  // Design rationale: see hotswap/docs/sgpr-wave-mask-translation.md
+  // section 3.1 (chosen approach) and section 4 (the
+  // widened-SGPR-storage alternative we deliberately did not
+  // schedule).
+  struct WaveMaskEntry {
+    llvm::Value *i1 = nullptr;
+    // `true` if this entry was recorded for a wave64-source V_CMP
+    // whose destination is an SGPR pair [baseIdx, baseIdx+1]. `false`
+    // for a wave32-source V_CMP whose destination is a single SGPR at
+    // baseIdx. Consulted by `invalidateSgprWaveMaskI1` to decide
+    // whether a write to baseIdx+1 should also invalidate the entry
+    // at baseIdx (pair-aware half-overwrite protection).
+    bool isPair = false;
+  };
+
+  // Default-construct via an explicit zero-arg temporary to disambiguate
+  // from DenseMap's `explicit` single-unsigned-int constructor under
+  // RaiseContext's aggregate brace-init. (With `= {}` or no initializer
+  // GCC warns: "converting … from initializer list would use explicit
+  // constructor DenseMap(unsigned int)".)
+  llvm::DenseMap<int, WaveMaskEntry> lastSgprWaveMaskI1 =
+      llvm::DenseMap<int, WaveMaskEntry>();
+
+  // Record the per-lane compare i1 produced by a V_CMP_*_e64 write
+  // to SGPR baseIdx in the current BB. Overwrites any prior entry
+  // (last-writer wins — a later V_CMP obviates the earlier value
+  // for any consumer that reads after the write). `isPair` should
+  // be true iff the V_CMP's destination ParsedReg has `width >= 2`
+  // (a wave64-source SGPR pair), so subsequent writes to baseIdx+1
+  // correctly invalidate this entry via
+  // `invalidateSgprWaveMaskI1`'s pair-aware branch.
+  void recordSgprWaveMaskI1(int baseIdx, llvm::Value *cmpI1, bool isPair) {
+    lastSgprWaveMaskI1[baseIdx] = WaveMaskEntry{cmpI1, isPair};
+  }
+
+  // Look up the cached per-lane i1 for SGPR baseIdx in the current
+  // BB, or null if none (either no V_CMP wrote it, or the entry
+  // was invalidated by a scalar write, or the BB boundary cleared
+  // the map). Callers treat null as "fall back to the standard
+  // extractLaneBitFromWaveMask".
+  llvm::Value *lookupSgprWaveMaskI1(int baseIdx) const {
+    auto it = lastSgprWaveMaskI1.find(baseIdx);
+    return it == lastSgprWaveMaskI1.end() ? nullptr : it->second.i1;
+  }
+
+  // Invalidate the cached per-lane i1 for SGPR baseIdx. Called by
+  // AllocaRegFile on any SGPR write so the next consumer takes the
+  // narrow-mask fallback rather than a stale i1 whose bits no
+  // longer correspond to the scalar value just stored. Idempotent;
+  // safe to call on an SGPR that had no cached entry.
+  //
+  // Pair-aware adjacent invalidation. On wave64 source, V_CMP_e64
+  // writes an SGPR pair [baseIdx, baseIdx+1] but records a single
+  // entry keyed on baseIdx (via `recordSgprWaveMaskI1(..., /*isPair=*/true)`).
+  // If later code writes to baseIdx+1 alone (e.g.
+  // `s_mov_b32 sHi, imm`), the high half of the pair is clobbered
+  // but the entry at baseIdx would otherwise survive and silently
+  // return a cmp that no longer matches the pair's current value.
+  // So on invalidate(K), if entry at K-1 exists AND is flagged
+  // `isPair`, invalidate K-1 too. The guard on `isPair` avoids
+  // over-invalidation: a single-SGPR wave32 entry at K-1 is
+  // unrelated to a scalar write at K and must NOT be invalidated.
+  void invalidateSgprWaveMaskI1(int baseIdx) {
+    lastSgprWaveMaskI1.erase(baseIdx);
+    if (baseIdx > 0) {
+      auto prev = lastSgprWaveMaskI1.find(baseIdx - 1);
+      if (prev != lastSgprWaveMaskI1.end() && prev->second.isPair)
+        lastSgprWaveMaskI1.erase(prev);
+    }
+  }
+
+  // Drop every cached entry. Called at every BB boundary in the
+  // raiser's main loop (alongside `vgprMSBs = 0`) so that cross-BB
+  // V_CMP / V_CNDMASK pairs conservatively fall back to the narrow
+  // extract rather than relying on an i1 that no longer dominates
+  // the consumer. A future reaching-definitions pass on the raised
+  // IR (see sgpr-wave-mask-translation.md section 7 evolution
+  // path) can upgrade this to a proper per-BB merge.
+  void clearSgprWaveMaskShadow() { lastSgprWaveMaskI1.clear(); }
 
   // Pending failure raised during operand-read dispatch (e.g.
   // `readOp32` / `readOp64` encountering an unmodeled aperture

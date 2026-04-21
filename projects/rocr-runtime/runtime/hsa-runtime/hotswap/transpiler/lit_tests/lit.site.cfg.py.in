@@ -628,6 +628,37 @@ config.fixtures = {
     # for the runtime evidence.
     "v_cmp_cndmask_sgpr":
         r"@LIT_FIXTURE_V_CMP_CNDMASK_SGPR_CO@",
+    # v_cmp_cndmask_sgpr_scalar_clobber — fallback-path companion
+    # to `v_cmp_cndmask_sgpr`. Same V_CMP -> SGPR -> V_CNDMASK
+    # idiom, but with a scalar `s_mov_b32 s4, imm` sandwiched
+    # between the V_CMP producer and the V_CNDMASK consumer. The
+    # scalar write invalidates the per-lane i1 shadow entry in
+    # `RaiseContext::lastSgprWaveMaskI1` via the
+    # `AllocaRegFile::onSgprWritten` hook, forcing the consumer
+    # back through the `extractLaneBitFromWaveMask` fallback.
+    # Pins the "any interference defeats the cache" invariant
+    # from hotswap/docs/sgpr-wave-mask-translation.md section 3.1
+    # (I3): future regressions that forget to invalidate the
+    # shadow on scalar SGPR writes would fail this fixture (the
+    # `mask_lane_idx` / ... extract chain goes absent and the
+    # direct-i1 path takes over, producing a stale `%vcmpf`
+    # reference to a compare whose wave-mask meaning was
+    # overwritten by the sentinel).
+    "v_cmp_cndmask_sgpr_scalar_clobber":
+        r"@LIT_FIXTURE_V_CMP_CNDMASK_SGPR_SCALAR_CLOBBER_CO@",
+    # v_cmp_cndmask_sgpr_class — class-compare companion to
+    # `v_cmp_cndmask_sgpr`. Same direct-i1 shadow path contract
+    # but the producer is `v_cmp_class_f32_e64` (FP IEEE-class
+    # predicate). Guards against re-introducing the
+    # `!m->isClass` scope gate that was removed from
+    # `handle_valu_vcmp.cpp`: with the gate, class-compare
+    # kernels under wave32 -> wave64 cross-widening fall back
+    # to the lossy extract for no correctness reason. This
+    # fixture fails if the gate returns (the `select i1
+    # %vclass, ...` shape disappears and the `mask_lane_*`
+    # extract chain reappears).
+    "v_cmp_cndmask_sgpr_class":
+        r"@LIT_FIXTURE_V_CMP_CNDMASK_SGPR_CLASS_CO@",
     # v_pk_int_b16 (VOP3P packed `<2 x i16>` int family) — pins both
     # opcodes the kerneldex corpus exercises today (V_PK_LSHLREV_B16
     # + V_PK_ADD_U16) under one fixture so the shared

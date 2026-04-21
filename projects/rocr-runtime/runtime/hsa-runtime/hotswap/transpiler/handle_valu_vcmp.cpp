@@ -209,14 +209,49 @@ HandlerResult handleVALU_Vcmp(RaiseContext &ctx, const DecodedInst &di,
         // narrower width explicitly. That takes the trunc-to-
         // source-width branch in
         // `WaveNativeProjection::ballotI1ToWidth`, a documented
-        // residual lossy path that the obstruction classifier
-        // (`wave_size_obstruction.cpp`) still has to refuse
-        // downstream for kernels that consume the narrowed mask
-        // as a per-target-lane mask.
+        // residual lossy path whose in-BB correctness is restored
+        // by the V_CMP -> V_CNDMASK per-lane-i1 shadow recorded
+        // below (see `ctx.recordSgprWaveMaskI1`), and whose out-of-
+        // BB / scalar-interleaved / other-consumer cases remain the
+        // obstruction classifier's responsibility to refuse
+        // (wave_size_obstruction.cpp).
         Type *sourceWidth = ctx.projection.sourceWaveMaskTy();
         Value *mask = ctx.projection.ballotI1ToWidth(
             ctx.B, cmp, sourceWidth, "vcmp_ballot");
         ctx.writeRegExecWidth(d, mask);
+
+        // Cache the per-lane `i1` alongside the narrow wave-mask
+        // store. The V_CNDMASK_B32 SGPR-source arm in
+        // handle_valu_vop3p.cpp looks this up by baseIdx and
+        // bypasses the lossy `extractLaneBitFromWaveMask` round-
+        // trip when a consumer in the same BB reads the SGPR before
+        // any intervening scalar write clobbers it (the latter
+        // invalidates via `AllocaRegFile::onSgprWritten` ->
+        // `ctx.invalidateSgprWaveMaskI1`). The low-level
+        // `storeSGPR*` inside `writeRegExecWidth` above already
+        // fired the invalidation hook for this baseIdx; this call
+        // restores the fresh `i1` SSA value in the same step. See
+        // sgpr-wave-mask-translation.md section 3.1 for the full
+        // invariants.
+        //
+        // Covers BOTH predicate compares (the asin / libdevice-math
+        // branch shape) AND class compares
+        // (v_cmp_class_f{16,32,64}). The `cmp` value is the same
+        // per-lane i1 shape in both arms of this handler — `fcmp`
+        // for the predicate-compare path, `llvm.amdgcn.class.f*`
+        // for the class path — so caching is sound either way.
+        // Gating only the predicate arm would leave class compares
+        // under cross-widening miscompiling through the lossy
+        // extract fallback for no reason.
+        //
+        // `isPair` is derived from the destination's ParsedReg
+        // width: wave64-source V_CMP_e64 writes an SGPR pair
+        // (d.width == 2); wave32-source writes a single SGPR
+        // (d.width == 1). The flag is consulted by
+        // `ctx.invalidateSgprWaveMaskI1` to decide whether a
+        // subsequent write to baseIdx+1 clobbers the pair's high
+        // half and should invalidate this entry.
+        ctx.recordSgprWaveMaskI1(d.baseIdx, cmp, /*isPair=*/d.width >= 2);
       } else {
         ctx.regs.storeVCC(ctx.B, cmp);
       }

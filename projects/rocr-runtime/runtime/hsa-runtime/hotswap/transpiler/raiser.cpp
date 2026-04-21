@@ -503,6 +503,19 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
   // emitUnderExec diamonds.
   regs.onExecWritten = [&ctx] { ctx.resetLaneActiveCache(); };
 
+  // Wire the reg-file's per-SGPR write invalidation hook to ctx's
+  // V_CMP -> V_CNDMASK per-lane-i1 shadow map
+  // (`lastSgprWaveMaskI1`). Fires on every `storeSGPR32 / storeSGPR64`
+  // and therefore on every path that mutates an SGPR — including
+  // handlers that bypass `writeReg32 / writeReg64` to call the
+  // low-level stores directly (handle_smem's multi-dword load
+  // splitting, handle_valu's SCC-flag SGPR writes, etc.). The V_CMP
+  // wave-mask write path also fires this hook; the V_CMP handler
+  // immediately re-populates the shadow with the per-lane `i1`
+  // afterwards via `ctx.recordSgprWaveMaskI1`. See hotswap/docs/sgpr-
+  // wave-mask-translation.md section 3.1 for the full contract.
+  regs.onSgprWritten = [&ctx](int idx) { ctx.invalidateSgprWaveMaskI1(idx); };
+
   int raisedCount = 0;
 
   for (size_t instIdx = 0; instIdx < insts.size(); ++instIdx) {
@@ -526,6 +539,14 @@ RaiseResult raiseToIR(const std::vector<uint8_t> &textBytes,
       // from a previous linear instruction that does not control-flow into
       // this BB.
       ctx.vgprMSBs = 0;
+      // Drop the V_CMP -> V_CNDMASK per-lane-i1 shadow at every BB
+      // transition. The cached `i1` SSA values dominate only the BB
+      // they were emitted in; carrying them into a successor would
+      // read an SSA value out of its dominance scope. A future
+      // reaching-definitions pass on the raised IR could upgrade this
+      // to a proper per-BB merge (see sgpr-wave-mask-translation.md
+      // section 7 evolution path).
+      ctx.clearSgprWaveMaskShadow();
     }
 
     ctx.computeVGPRAdjust(di);
