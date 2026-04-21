@@ -10,7 +10,11 @@ Tool class: READ_ONLY.
 from typing import Any, Dict, Literal
 
 from perfxpert.tools._class import ToolClass, tool_class
-from perfxpert.tools.arch import lookup_peaks
+# Imported as a private alias so the tool registry (which walks
+# perfxpert.tools.* and collects public READ_ONLY callables) does not
+# re-register this as `sol.lookup_peaks`. Canonical name is
+# `arch.lookup_peaks`; this module re-uses it internally only.
+from perfxpert.tools.arch import lookup_peaks as _lookup_peaks
 
 
 KernelType = Literal["fp64", "fp32", "bf16"]
@@ -43,7 +47,7 @@ def sanity_check(
         >>> sanity_check(500e12, "fp64", "gfx942")
         {"plausible": False, "reason": "500 TFLOPS fp64 exceeds peak 81.7 TFLOPS", ...}
     """
-    specs = lookup_peaks(gfx_id)
+    specs = _lookup_peaks(gfx_id)
     peak_key = f"peak_{kernel_type}_tflops"
     if peak_key not in specs:
         raise ValueError(

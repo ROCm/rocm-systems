@@ -23,7 +23,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from perfxpert.tools._class import ToolClass, tool_class
-from perfxpert.tools.arch import lookup_peaks
+# Imported as a private alias so the tool registry (which walks
+# perfxpert.tools.* and collects public READ_ONLY callables) does not
+# re-register this as `roofline.lookup_peaks`. Canonical name is
+# `arch.lookup_peaks`; this module re-uses it internally only.
+from perfxpert.tools.arch import lookup_peaks as _lookup_peaks
 
 
 _BALANCED_TOLERANCE = 0.05  # +/-5% around ridge = "balanced"
@@ -57,7 +61,7 @@ def classify(flops: float, bytes: float, gfx_id: str) -> Dict[str, Any]:
     if bytes == 0:
         raise ValueError("bytes must be > 0 — divide-by-zero in arithmetic intensity")
 
-    specs = lookup_peaks(gfx_id)
+    specs = _lookup_peaks(gfx_id)
     ridge = specs["ridge_point"]
     ai = flops / bytes
 
@@ -224,7 +228,7 @@ def plot_points(
     conn = sqlite3.connect(str(p))
     try:
         gfx_id = _detect_gfx_id(conn)
-        specs = lookup_peaks(gfx_id)
+        specs = _lookup_peaks(gfx_id)
         per_kernel = _fetch_kernel_counters(conn)
     finally:
         conn.close()
