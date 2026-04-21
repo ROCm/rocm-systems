@@ -1349,3 +1349,253 @@ def _format_tier0_webview(tier0_result: Any, has_profiling: bool = False) -> str
         html = html.replace(placeholder, value)
 
     return html
+
+
+# ---------------------------------------------------------------------------
+# Trace-diff webview (Confluence row #7 — ``perfxpert diff`` + ``perfxpert ci``)
+#
+# This is a standalone self-contained HTML page. It reuses the same palette
+# as ``webview.html`` (one palette across the product) but does NOT depend
+# on the template file: the diff view has its own overview-card + delta-bar
+# + sortable-table layout that doesn't map cleanly onto the main analyze
+# template's placeholders.
+# ---------------------------------------------------------------------------
+
+
+def _format_diff_webview(
+    diff_result: Dict[str, Any],
+    *,
+    title: Optional[str] = None,
+) -> str:
+    """Render a ``trace_diff`` result as a self-contained HTML page.
+
+    Uses the standard ``.scard / .shdr / .sbody`` + ``.dtable sortable`` CSS
+    conventions from the main webview so the two formats feel coherent.
+
+    Sections (top to bottom):
+      1. Overview card — wall-delta %, regression count, improvement count.
+      2. Delta-bar card — one stacked bar per kernel (red = regression,
+         green = improvement, width = ``|delta_pct|``).
+      3. Kernel-by-kernel speedup table — sortable; click a header to sort.
+      4. Narrative card — deterministic / LLM summary.
+
+    The ``has_profiling`` gate invariant is structurally satisfied: a diff
+    report implies two databases were supplied, so there is always
+    profiling data behind both sides.
+    """
+    import html as _html
+
+    def _h(v: Any) -> str:
+        return _html.escape(str(v), quote=True)
+
+    baseline_db = diff_result.get("baseline_db", "?")
+    new_db = diff_result.get("new_db", "?")
+    wall_ns = int(diff_result.get("wall_delta_ns", 0))
+    wall_pct = float(diff_result.get("wall_delta_pct", 0.0))
+    per_kernel = diff_result.get("per_kernel", []) or []
+    regressions = diff_result.get("primary_regressions", []) or []
+    improvements = diff_result.get("primary_improvements", []) or []
+    narrative = diff_result.get("narrative", "") or ""
+
+    page_title = title or f"PerfXpert diff — {_h(baseline_db)} vs {_h(new_db)}"
+
+    # Color the wall-delta pill.
+    if wall_pct > 5.0:
+        wall_color = "#e84040"  # CRITICAL red
+        wall_verdict = "REGRESSED"
+    elif wall_pct > 0.5:
+        wall_color = "#f08432"  # HOT orange
+        wall_verdict = "Slightly slower"
+    elif wall_pct < -5.0:
+        wall_color = "#3acc66"  # green
+        wall_verdict = "IMPROVED"
+    elif wall_pct < -0.5:
+        wall_color = "#caa828"  # WARM yellow
+        wall_verdict = "Slightly faster"
+    else:
+        wall_color = "#4d8ef2"  # INFO blue
+        wall_verdict = "Within noise"
+
+    # Overview KPIs.
+    overview_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128202;</span>'
+        "<h2>Overview</h2>"
+        "</div>"
+        '<div class="sbody">'
+        f'<div class="kpi-grid">'
+        f'<div class="kpi"><div class="kpi-label">Wall-time delta</div>'
+        f'<div class="kpi-value" style="color:{wall_color}">{wall_pct:+.2f}%</div>'
+        f'<div class="kpi-sub">{_h(wall_verdict)} ({wall_ns:+,} ns)</div>'
+        f"</div>"
+        f'<div class="kpi"><div class="kpi-label">Regressions (&gt; +3%)</div>'
+        f'<div class="kpi-value" style="color:#e84040">{len(regressions)}</div>'
+        f'<div class="kpi-sub">kernels slower in new</div>'
+        f"</div>"
+        f'<div class="kpi"><div class="kpi-label">Improvements (&lt; -3%)</div>'
+        f'<div class="kpi-value" style="color:#3acc66">{len(improvements)}</div>'
+        f'<div class="kpi-sub">kernels faster in new</div>'
+        f"</div>"
+        f"</div>"
+        "</div></section>"
+    )
+
+    # Delta-bar card — red for regressions, green for improvements.
+    # Width is proportional to |delta_pct| capped at 100%.
+    bars = []
+    for k in per_kernel:
+        dp = float(k.get("delta_pct", 0.0))
+        name = _h(k.get("name", "?"))
+        if dp > 0:
+            color = "#e84040"
+            direction = "regression"
+        elif dp < 0:
+            color = "#3acc66"
+            direction = "improvement"
+        else:
+            color = "#4d8ef2"
+            direction = "unchanged"
+        width = min(100.0, abs(dp))
+        bars.append(
+            f'<div class="dbar-row">'
+            f'<span class="dbar-name"><code>{name}</code></span>'
+            f'<span class="dbar-val" style="color:{color}">{dp:+.1f}%</span>'
+            f'<div class="dbar-track">'
+            f'<div class="dbar-fill" '
+            f'style="width:{width:.1f}%;background:{color}" '
+            f'data-direction="{direction}"></div>'
+            f"</div></div>"
+        )
+    bars_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128200;</span>'
+        "<h2>Per-kernel delta</h2>"
+        "</div>"
+        '<div class="sbody">'
+        + ("".join(bars) or '<p class="dim">No kernels in common.</p>')
+        + "</div></section>"
+    )
+
+    # Sortable speedup table.
+    rows = []
+    for k in per_kernel:
+        dp = float(k.get("delta_pct", 0.0))
+        color = "#e84040" if dp > 3 else ("#3acc66" if dp < -3 else "#a8aace")
+        rows.append(
+            "<tr>"
+            f'<td><code>{_h(k.get("name", "?"))}</code></td>'
+            f'<td data-v="{int(k.get("baseline_ns", 0))}">{int(k.get("baseline_ns", 0)):,}</td>'
+            f'<td data-v="{int(k.get("new_ns", 0))}">{int(k.get("new_ns", 0)):,}</td>'
+            f'<td data-v="{int(k.get("delta_ns", 0))}">{int(k.get("delta_ns", 0)):+,}</td>'
+            f'<td data-v="{dp}" style="color:{color}">{dp:+.2f}%</td>'
+            f'<td>{"yes" if k.get("was_hot") else "no"}</td>'
+            "</tr>"
+        )
+    table_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128202;</span>'
+        "<h2>Kernel speedup table</h2>"
+        "</div>"
+        '<div class="sbody"><div class="tbl-wrap">'
+        '<table class="dtable sortable">'
+        "<thead><tr>"
+        "<th>Kernel</th><th>Baseline (ns)</th><th>New (ns)</th>"
+        "<th>&Delta; (ns)</th><th>&Delta; %</th><th>Hot?</th>"
+        "</tr></thead>"
+        "<tbody>" + "".join(rows) + "</tbody>"
+        "</table></div></div></section>"
+    )
+
+    # Narrative card — whatever the caller supplied (LLM or airgap).
+    narrative_html = (
+        '<section class="scard">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128221;</span>'
+        "<h2>Summary</h2>"
+        "</div>"
+        '<div class="sbody">'
+        f'<pre style="white-space:pre-wrap;line-height:1.6;'
+        f'color:var(--sub);font-size:.9rem">{_h(narrative)}</pre>'
+        "</div></section>"
+    )
+
+    css = (
+        "<style>"
+        ":root{--bg:#0d0d14;--bg2:#14141f;--bg3:#1c1c2c;--text:#e0e3f2;"
+        "--sub:#a8aace;--dim:#6868a0;--bdr:#2c2c48;--amd:#e01a22;"
+        "--r:10px;--font:-apple-system,'Segoe UI',system-ui,sans-serif;"
+        "--mono:'JetBrains Mono',ui-monospace,monospace;}"
+        "*{box-sizing:border-box;margin:0;padding:0}"
+        "body{font-family:var(--font);background:var(--bg);color:var(--text);"
+        "line-height:1.6;font-size:15px;padding:1.5rem}"
+        ".scard{background:var(--bg2);border:1px solid var(--bdr);"
+        "border-radius:var(--r);margin-bottom:1.25rem;overflow:hidden}"
+        ".shdr{background:var(--bg3);padding:.85rem 1.1rem;"
+        "border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:.5rem}"
+        ".shdr h2{font-size:1.1rem;font-weight:600}"
+        ".sbody{padding:1.1rem}"
+        ".kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}"
+        ".kpi{background:var(--bg3);padding:1rem;border-radius:var(--r);"
+        "border:1px solid var(--bdr)}"
+        ".kpi-label{color:var(--dim);font-size:.8rem;text-transform:uppercase}"
+        ".kpi-value{font-size:2rem;font-weight:700;margin:.25rem 0}"
+        ".kpi-sub{color:var(--sub);font-size:.85rem}"
+        ".dbar-row{display:grid;grid-template-columns:minmax(200px,2fr) 80px 1fr;"
+        "gap:.75rem;align-items:center;padding:.35rem 0;border-bottom:1px dashed var(--bdr)}"
+        ".dbar-name code{color:var(--text);background:var(--bg3);"
+        "padding:2px 6px;border-radius:3px}"
+        ".dbar-val{font-weight:600;text-align:right}"
+        ".dbar-track{background:var(--bg3);height:8px;border-radius:4px;overflow:hidden}"
+        ".dbar-fill{height:100%;transition:width .35s}"
+        ".tbl-wrap{overflow-x:auto}"
+        ".dtable{width:100%;border-collapse:collapse;font-size:.88rem}"
+        ".dtable th{background:var(--bg3);color:var(--sub);text-align:left;"
+        "padding:.55rem .7rem;border-bottom:1px solid var(--bdr);cursor:pointer}"
+        ".dtable td{padding:.5rem .7rem;border-bottom:1px solid var(--bdr)}"
+        ".dim{color:var(--dim);font-style:italic}"
+        ".hdr{background:linear-gradient(135deg,#080810,#120e1c);"
+        "border-bottom:3px solid var(--amd);padding:.85rem 1.25rem;"
+        "margin:-1.5rem -1.5rem 1.25rem;color:#fff}"
+        ".hdr h1{font-size:1.4rem;font-weight:700}"
+        ".hdr .hdr-sub{color:var(--sub);font-size:.8rem;margin-top:.2rem}"
+        "</style>"
+    )
+
+    js = (
+        "<script>"
+        "document.querySelectorAll('.dtable.sortable th').forEach((th,i)=>{"
+        "th.addEventListener('click',()=>{"
+        "const tb=th.closest('table').querySelector('tbody');"
+        "const rows=[...tb.querySelectorAll('tr')];"
+        "const asc=th.getAttribute('data-order')!=='asc';"
+        "rows.sort((a,b)=>{"
+        "const av=a.cells[i].getAttribute('data-v')||a.cells[i].innerText;"
+        "const bv=b.cells[i].getAttribute('data-v')||b.cells[i].innerText;"
+        "const an=parseFloat(av),bn=parseFloat(bv);"
+        "if(!isNaN(an)&&!isNaN(bn))return asc?an-bn:bn-an;"
+        "return asc?av.localeCompare(bv):bv.localeCompare(av);});"
+        "rows.forEach(r=>tb.appendChild(r));"
+        "th.setAttribute('data-order',asc?'asc':'desc');});});"
+        "</script>"
+    )
+
+    return (
+        "<!DOCTYPE html>"
+        '<html lang="en" data-theme="dark"><head>'
+        '<meta charset="UTF-8">'
+        f"<title>{page_title}</title>"
+        f"{css}"
+        "</head><body>"
+        '<div class="hdr"><h1>PerfXpert &mdash; Trace diff</h1>'
+        f'<div class="hdr-sub">baseline: <code>{_h(baseline_db)}</code> '
+        f'&rarr; new: <code>{_h(new_db)}</code></div></div>'
+        f"{overview_html}{bars_html}{table_html}{narrative_html}"
+        f"{js}"
+        "</body></html>"
+    )
+
+
+__all__ = [*(globals().get("__all__", []) or []), "_format_diff_webview"]

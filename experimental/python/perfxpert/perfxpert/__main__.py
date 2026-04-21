@@ -145,6 +145,44 @@ def main(argv=None):
     )
     _init_cmd.add_args(init_parser)
 
+    # ------------------------------------------------------------------
+    # diff subcommand — compare two rocpd databases (Confluence row #7)
+    # ------------------------------------------------------------------
+    from perfxpert.cli import diff_cmd as _diff_cmd
+
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two rocpd databases and produce a diff report (informational).",
+        description=(
+            "Compare a baseline rocpd database with a new one and emit a diff\n"
+            "report with per-kernel deltas, wall-time delta, and a narrative\n"
+            "summary. Always returns rc=0; use ``perfxpert ci`` to fail on\n"
+            "regression above a configurable threshold."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _diff_cmd.add_args(diff_parser)
+
+    # ------------------------------------------------------------------
+    # ci subcommand — CI-gating wrapper over diff (Confluence row #8)
+    # ------------------------------------------------------------------
+    from perfxpert.cli import ci_cmd as _ci_cmd
+
+    ci_parser = subparsers.add_parser(
+        "ci",
+        help=(
+            "CI wrapper: rc=1 when runtime regresses above --threshold "
+            "(default 5%; env: PERFXPERT_CI_REGRESSION_THRESHOLD)."
+        ),
+        description=(
+            "Thin gating wrapper over ``perfxpert diff``. Produces the same\n"
+            "per-kernel report but returns rc=1 when wall_delta_pct exceeds\n"
+            "--threshold. Designed for GitHub Actions, GitLab CI, Jenkins, etc.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _ci_cmd.add_args(ci_parser)
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -241,7 +279,11 @@ def main(argv=None):
     elif args.subcommand == "doctor":
         sys.exit(_run_doctor())
     elif args.subcommand == "init":
-        return _init_cmd.run_init(args)
+        sys.exit(_init_cmd.run_init(args))
+    elif args.subcommand == "diff":
+        sys.exit(_diff_cmd.run_diff(args))
+    elif args.subcommand == "ci":
+        sys.exit(_ci_cmd.run_ci(args))
     else:
         parser.print_help()
         sys.exit(1)

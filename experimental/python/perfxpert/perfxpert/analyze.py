@@ -162,6 +162,21 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     analysis_options.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        dest="baseline_db",
+        metavar="DB",
+        help=(
+            "Optional baseline rocpd database to compare the current analysis "
+            "against. When supplied, the analyze report gains a ``trace_diff`` "
+            "section (JSON) / 'Changed vs baseline' section (text/markdown/"
+            "webview) summarizing per-kernel deltas. Uses the same engine as "
+            "``perfxpert diff``."
+        ),
+    )
+
+    analysis_options.add_argument(
         "--prompt",
         type=str,
         default=None,
@@ -343,6 +358,7 @@ def add_args(parser: argparse.ArgumentParser):
             "llm_local",
             "llm_local_model",
             "no_progress",
+            "baseline_db",
         ]
         # Argparse defaults argparse emits for flags not passed by the
         # user; we skip these so kwargs do not carry noise that the
@@ -417,6 +433,138 @@ def execute(
 #  * ``_splice_before_wrap_end`` inserts the wrapper just before
 #    ``</div><footer>`` so tier-0 always renders as the LAST top-level
 #    card in the main report.
+
+
+def _splice_baseline_diff(
+    report_text: str,
+    *,
+    baseline_db: str,
+    new_db: str,
+    output_format: str,
+    top_kernels: int,
+) -> str:
+    """Append / splice a trace-diff section into ``report_text``.
+
+    Confluence row #7 end-of-session recap. The caller passes the fully
+    formatted analyze report plus the baseline DB path; this helper
+    computes the diff using the shared ``trace_diff.diff_runs`` engine
+    and appends a "Changed vs baseline" section appropriate for the
+    chosen format.
+
+    * ``json``    — add a top-level ``trace_diff`` key (parse, merge, reserialize).
+    * ``markdown``— append a ``## Changed vs baseline`` section.
+    * ``text``    — append a trace-diff text block.
+    * ``webview`` — append a ``.scard`` inside the existing wrap, before
+                    the closing ``</div></body></html>`` tags.
+    """
+    try:
+        from perfxpert.tools.trace_diff import diff_runs
+        from perfxpert.cli.diff_cmd import render_diff
+    except Exception:
+        return report_text  # best-effort; never crash analyze on diff failure
+
+    try:
+        diff_result = diff_runs(baseline_db, new_db, top_kernels=int(top_kernels or 20))
+    except Exception:
+        return report_text
+
+    if output_format == "json":
+        import json as _json_mod
+
+        try:
+            parsed = _json_mod.loads(report_text)
+        except Exception:
+            return report_text
+        # Splice as a top-level key so schema-aware consumers see it.
+        parsed["trace_diff"] = diff_result
+        # Keep schema_version coherent with trace_diff.
+        if parsed.get("schema_version", "0.1.0") < "0.3.1":
+            parsed["schema_version"] = "0.3.1"
+            if "metadata" in parsed:
+                parsed["metadata"]["analysis_version"] = "0.3.1"
+        return _json_mod.dumps(parsed, indent=2)
+
+    if output_format == "markdown":
+        md_block = render_diff(diff_result, "markdown")
+        # Re-title the top-level heading so it reads as a section, not a
+        # standalone report.
+        md_block = md_block.replace(
+            "# PerfXpert — Trace diff",
+            "## Changed vs baseline",
+            1,
+        )
+        return report_text.rstrip() + "\n\n" + md_block + "\n"
+
+    if output_format == "webview":
+        # Render a minimal ``.scard`` with the diff summary + per-kernel
+        # rows; splice it just before ``</body>``.
+        html_block = _render_diff_scard_html(diff_result)
+        if "</body>" in report_text:
+            return report_text.replace("</body>", html_block + "</body>", 1)
+        return report_text + html_block
+
+    # text format
+    text_block = render_diff(diff_result, "text")
+    # Retitle the top banner so it reads as a section.
+    text_block = text_block.replace(
+        " PerfXpert trace diff",
+        " Changed vs baseline",
+        1,
+    )
+    return report_text.rstrip() + "\n\n" + text_block + "\n"
+
+
+def _render_diff_scard_html(diff_result: Dict[str, Any]) -> str:
+    """Render a diff result as a single ``.scard`` for webview splicing.
+
+    The full ``_format_diff_webview`` function is intended for standalone
+    diff pages; the analyze-report splice uses a more compact form that
+    fits inside the existing ``.wrap`` container.
+    """
+    import html as _h_mod
+
+    def _h(v: Any) -> str:
+        return _h_mod.escape(str(v), quote=True)
+
+    wall_pct = float(diff_result.get("wall_delta_pct", 0.0))
+    wall_ns = int(diff_result.get("wall_delta_ns", 0))
+    regs = diff_result.get("primary_regressions", []) or []
+    imps = diff_result.get("primary_improvements", []) or []
+    color = (
+        "#e84040"
+        if wall_pct > 5.0
+        else ("#3acc66" if wall_pct < -5.0 else "#4d8ef2")
+    )
+    rows = []
+    for k in (diff_result.get("per_kernel") or []):
+        dp = float(k.get("delta_pct", 0.0))
+        rc = "#e84040" if dp > 3 else ("#3acc66" if dp < -3 else "var(--sub)")
+        rows.append(
+            "<tr>"
+            f'<td><code>{_h(k.get("name", "?"))}</code></td>'
+            f'<td>{int(k.get("baseline_ns", 0)):,}</td>'
+            f'<td>{int(k.get("new_ns", 0)):,}</td>'
+            f'<td style="color:{rc}">{dp:+.2f}%</td>'
+            "</tr>"
+        )
+    return (
+        '<section class="scard" id="trace-diff">'
+        '<div class="shdr">'
+        '<span class="shdr-icon">&#128200;</span>'
+        '<h2>Changed vs baseline</h2>'
+        '</div>'
+        '<div class="sbody">'
+        f'<p style="margin-bottom:.75rem">Baseline: <code>{_h(diff_result.get("baseline_db"))}</code> '
+        f'&rarr; New: <code>{_h(diff_result.get("new_db"))}</code></p>'
+        f'<p style="margin-bottom:.75rem;color:{color};font-weight:600">'
+        f'Wall-time delta: {wall_pct:+.2f}% ({wall_ns:+,} ns) — '
+        f'{len(regs)} regression(s), {len(imps)} improvement(s).</p>'
+        '<div class="tbl-wrap"><table class="dtable">'
+        '<thead><tr><th>Kernel</th><th>Baseline (ns)</th>'
+        '<th>New (ns)</th><th>Δ %</th></tr></thead>'
+        '<tbody>' + "".join(rows) + '</tbody></table></div>'
+        '</div></section>'
+    )
 
 
 def _build_summary_scard(
@@ -1408,6 +1556,20 @@ def _execute_agentic(
         database_path=database_path,
         analysis_payload=analysis_payload,
     )
+
+    # ``--baseline <db>`` splice (Confluence row #7 end-of-session recap).
+    # When the caller supplies a baseline, append / splice a "Changed vs
+    # baseline" section so every analyze report can report back the
+    # effect of changes without a second command.
+    baseline_db = kwargs.get("baseline_db")
+    if baseline_db and database_path and os.path.exists(baseline_db):
+        output = _splice_baseline_diff(
+            output,
+            baseline_db=baseline_db,
+            new_db=database_path,
+            output_format=output_format,
+            top_kernels=top_kernels,
+        )
 
     # Handle output writing
     _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
