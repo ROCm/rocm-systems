@@ -47,7 +47,7 @@ using wait_events_fn_t = std::function<bool(const std::vector<uint32_t>&, uint32
 
 struct SignalMonitorOps
 {
-    signal_load_fn_t     load_signal = {};
+    signal_load_fn_t     load = {};
     signal_event_id_fn_t get_event_id = {};
     wait_events_fn_t     wait_events = {};
 };
