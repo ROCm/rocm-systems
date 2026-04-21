@@ -223,13 +223,15 @@ process_doorbell_impl(QueueState* state, hsa_signal_value_t value, doorbell_fn_t
         }
     }
 
-    auto real_rdid = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
+    auto doorbell_val = static_cast<hsa_signal_value_t>(state->next_submit_pos - 1);
+    auto real_rdid    = __atomic_load_n(state->real_rdid, __ATOMIC_ACQUIRE);
     ROCP_TRACE << "doorbell: submitting real_wdid=" << state->next_submit_pos
-               << " real_rdid=" << real_rdid << " doorbell=" << state->doorbell_signal.handle
+               << " doorbell_val=" << doorbell_val << " real_rdid=" << real_rdid
+               << " doorbell=" << state->doorbell_signal.handle
                << " ring_used=" << (state->next_submit_pos - real_rdid)
                << " ring_size=" << state->ring_size;
     __atomic_store_n(state->real_wdid, state->next_submit_pos, __ATOMIC_RELEASE);
-    ring_doorbell(state->doorbell_signal, static_cast<hsa_signal_value_t>(state->next_submit_pos));
+    ring_doorbell(state->doorbell_signal, doorbell_val);
     ROCP_TRACE << "doorbell: ring_doorbell returned";
 }
 
