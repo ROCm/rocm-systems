@@ -69,8 +69,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.json
-         --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_results.pftrace
+         --pftrace-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"

@@ -18,24 +18,24 @@ num_devices = 1
 
 _, soc = common.gpu_soc()
 
-if soc is None:
+if not soc:
     pytest.skip("GPU not supported", allow_module_level=True)
 
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_host_trap.csv",
-    "ps_file_results.json",
+    "ps_file_*_agent_info.csv",
+    "ps_file_*_kernel_trace.csv",
+    "ps_file_*_pc_sampling_host_trap.csv",
+    "ps_file_*_results.json",
     "sysinfo.csv",
 ])
 
 PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_stochastic.csv",
-    "ps_file_results.json",
+    "ps_file_*_agent_info.csv",
+    "ps_file_*_kernel_trace.csv",
+    "ps_file_*_pc_sampling_stochastic.csv",
+    "ps_file_*_results.json",
     "sysinfo.csv",
 ])
 
@@ -71,19 +71,15 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
 
     workload_dir = common.get_output_dir()
 
-    code, stdout, stderr = binary_handler_profile_rocprof_compute(
+    _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=False,
-        capture_output=True,
+        check_success=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
-    _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
-
-    assert code == 0
     file_dict = common.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 

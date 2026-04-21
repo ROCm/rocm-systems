@@ -310,17 +310,17 @@ rocprofiler_add_integration_validate_test(
          --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_*_results.json
          --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
          --otf2-sys-tree-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_results.otf2
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
          --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_results.pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
          --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_agent_info.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_counter_collection_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_kernel_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_memory_allocation_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_*_regions_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
