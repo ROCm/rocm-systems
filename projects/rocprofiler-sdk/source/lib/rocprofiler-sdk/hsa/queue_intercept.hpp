@@ -52,6 +52,7 @@ struct QueueState
     void*    ring_buf  = nullptr;  ///< Pointer to the queue's packet ring buffer
     uint32_t ring_size = 0;        ///< Number of packets the ring can hold
     uint32_t ring_mask = 0;        ///< Mask for ring index wrapping (ring_size - 1)
+    uint32_t pkt_size  = 64;       ///< Packet size in bytes (64 for AQL, 256 for metadata)
 
     std::atomic<uint64_t> virtual_wptr{0};            ///< SDK-visible write index (virtualized)
     volatile uint64_t*    real_wdid       = nullptr;  ///< Pointer to actual queue write index
