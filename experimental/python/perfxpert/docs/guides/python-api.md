@@ -1,6 +1,6 @@
 # Python API (`perfxpert.api`)
 
-`perfxpert.api` is a **1:1 mirror** of the 7 agent-hierarchy MCP
+`perfxpert.api` is a **1:1 mirror** of the 8 agent-hierarchy MCP
 tools. Every callable here IS the same function the MCP server wraps
 — the Python API and the MCP surface share a single implementation.
 Use this module to embed PerfXpert's analysis brain in your own
@@ -8,8 +8,8 @@ tooling without running the MCP server.
 
 Cross-links:
 
-- [MCP server](../integration/mcp-server.md) — the same 7 agent tools
-  + 34 classifier / knowledge tools re-exposed over stdio JSON-RPC.
+- [MCP server](../integration/mcp-server.md) — the same 8 agent tools
+  + 35 classifier / knowledge tools re-exposed over stdio JSON-RPC.
   **This API is the same surface as the MCP tools.**
 - [Agent hierarchy](../architecture/agent-hierarchy.md) — tier map,
   fence-slice pattern, and where each agent lives in source.
@@ -30,6 +30,7 @@ MCP registration):
 | `perfxpert_agent_compute_specialist` | `perfxpert.api.agent_compute_specialist` |
 | `perfxpert_agent_memory_specialist` | `perfxpert.api.agent_memory_specialist` |
 | `perfxpert_agent_latency_specialist` | `perfxpert.api.agent_latency_specialist` |
+| `perfxpert_agent_diff_specialist` | `perfxpert.api.agent_diff_specialist` |
 | `perfxpert_trace_diff_diff_runs` | `perfxpert.api.trace_diff_diff_runs` |
 
 Every agent callable honors `PERFXPERT_AIRGAP=1` and the full provider /
@@ -125,7 +126,7 @@ Output: `narrative: str`, `recommendations: list[dict]`,
 
 Every agent tool (`agent_root`, `agent_analysis`, `agent_recommendation`,
 `agent_correctness`, `agent_compute_specialist`, `agent_memory_specialist`,
-`agent_latency_specialist`) accepts an optional
+`agent_latency_specialist`, `agent_diff_specialist`) accepts an optional
 `progress_callback: Callable[[str], None]`. When set, the runtime fires
 short status strings as each agent phase enters / exits and when the
 fallback chain cascades across providers — useful for driving a
@@ -269,6 +270,42 @@ out = api.agent_latency_specialist(
 
 Output: same shape — `techniques`, `confidence`, `citations`.
 
+### `agent_diff_specialist` — Layer-2 run-to-run diff narrator
+
+Compares a baseline rocprofiler-sdk database against a new run and
+returns a structured verdict (improved / regressed / neutral) plus
+ranked per-kernel deltas and a prose narrative. Wraps
+`trace_diff.diff_runs` internally — the arithmetic is deterministic;
+the LLM (when attached) only rewrites the narrative.
+
+```python
+# SKIP-SAMPLE — illustrative Python API call (requires two real .db files)
+out = api.agent_diff_specialist(
+    baseline_db="baseline.db",
+    new_db="new.db",
+    top_kernels=20,
+    user_intent="summarize the diff",
+    airgap=True,
+)
+# {'wall_delta_pct': +12.3,
+#  'regressions': [{'name': 'matmul', 'delta_pct': +34.2, ...}, ...],
+#  'improvements': [...],
+#  'verdict': 'regressed',
+#  'narrative': 'The new run finished in +12.3% wall-time vs baseline. '
+#               '4 kernels regressed, 1 improved. Top regression: matmul (+34.2%).',
+#  'confidence': 0.7}
+print(out["verdict"], out["narrative"])
+for k in out["regressions"][:3]:
+    print(f"  {k['name']}: {k['delta_pct']:+.1f}%")
+```
+
+Output keys: `wall_delta_pct`, `regressions`, `improvements`,
+`verdict` ∈ {`improved`, `regressed`, `neutral`}, `narrative`,
+`confidence` (0..1). Use this when the backend TUI LLM decides
+"compare two runs" rather than "re-analyze twice" —
+`agent_diff_specialist` is one tool call; running `agent_root`
+twice is two.
+
 ### `trace_diff_diff_runs` — compare two rocpd databases
 
 Deterministic, credential-free — no LLM required. Same engine as
@@ -331,7 +368,7 @@ except QuotaExceededError:
 
 ## See also
 
-- [MCP server](../integration/mcp-server.md) — same 7 agents
+- [MCP server](../integration/mcp-server.md) — same 8 agents
   available over JSON-RPC; identical input/output schemas.
 - [Agent hierarchy](../architecture/agent-hierarchy.md) — tier
   diagram and source-tree locations.

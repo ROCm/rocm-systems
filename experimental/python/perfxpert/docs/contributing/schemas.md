@@ -20,7 +20,13 @@ between agents:
 - `CorrectnessInput` / `CorrectnessOutput` — 5-gate correctness cascade.
 - `ComputeSpecialistInput` / `ComputeSpecialistOutput`,
   `MemorySpecialistInput` / `MemorySpecialistOutput`,
-  `LatencySpecialistInput` / `LatencySpecialistOutput` — Layer-2 experts.
+  `LatencySpecialistInput` / `LatencySpecialistOutput`,
+  `DiffSpecialistInput` / `DiffSpecialistOutput` — Layer-2 experts.
+  `DiffSpecialistOutput` packs its per-kernel deltas into a single
+  `kernel_deltas: Dict[str, List[Dict]]` field with `"regressions"` /
+  `"improvements"` keys so the 5-field output cap still holds; the MCP
+  wrapper (`perfxpert.tools.agents.diff.agent_diff_specialist`)
+  flattens them back to top-level keys for the public wire shape.
 
 All models inherit from `_FrozenModel` (`frozen=True, extra="forbid"`)
 and are subject to CI-enforced field caps: **≤10 input fields, ≤5

@@ -6,13 +6,14 @@ is the authoritative reference for how the agents relate, how the
 fence-slice pattern keeps each agent's system prompt narrow, and where
 to look in source.
 
-**Each of the 7 agents is callable from two surfaces:**
+**Each of the 8 agents is callable from two surfaces:**
 
 - **MCP:** `perfxpert_agent_root`, `perfxpert_agent_analysis`,
   `perfxpert_agent_recommendation`, `perfxpert_agent_correctness`,
   `perfxpert_agent_compute_specialist`,
   `perfxpert_agent_memory_specialist`,
-  `perfxpert_agent_latency_specialist` (READ_ONLY, auto-registered
+  `perfxpert_agent_latency_specialist`,
+  `perfxpert_agent_diff_specialist` (READ_ONLY, auto-registered
   from `perfxpert.tools.agents.*`).
 - **Python API:** `perfxpert.api.agent_root(...)`,
   `perfxpert.api.agent_analysis(...)`, etc. — **1:1 mirror** of the
@@ -50,12 +51,12 @@ Cross-links:
             │                                    │
             └───────────────┬────────────────────┘
                             ▼
-              ┌─────────────┼──────────────┐
-              ▼             ▼              ▼
-       ┌──────────┐ ┌──────────────┐ ┌─────────────┐
-       │ Compute  │ │    Memory    │ │   Latency   │   Tier 2
-       │ special. │ │  specialist  │ │ specialist  │
-       └──────────┘ └──────────────┘ └─────────────┘
+              ┌─────────┬────┴────┬────────────┐
+              ▼         ▼         ▼            ▼
+       ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+       │ Compute  │ │ Memory │ │Latency │ │  Diff  │  Tier 2
+       │ special. │ │ spec.  │ │ spec.  │ │ spec.  │
+       └──────────┘ └────────┘ └────────┘ └────────┘
 ```
 
 - **Tier 0 (Root)** — classifies the user's natural-language query
@@ -74,12 +75,17 @@ Cross-links:
     [gate-cascade.md](gate-cascade.md).
   - **Recommendation** — converts findings into proposed code changes,
     delegates to specialists when needed.
-- **Tier 2 (Specialists)** — three narrow experts invoked by
-  Recommendation when the primary bottleneck falls in their domain:
+- **Tier 2 (Specialists)** — four narrow experts invoked by
+  Recommendation (or directly from a TUI backend) when the user's
+  intent falls in their domain:
   - `compute_specialist` — VALU occupancy, waves-per-EU, VGPR pressure
   - `memory_specialist` — HBM bandwidth, cache miss rate, LDS conflicts
   - `latency_specialist` — dependency chains, kernel launch overhead,
     async-stream gaps
+  - `diff_specialist` — run-to-run comparison; wraps
+    `trace_diff.diff_runs` + `regression.compare_runs` +
+    `roofline.classify` and returns an
+    `improved` / `regressed` / `neutral` verdict with per-kernel deltas.
 
 ## Fence-slice pattern
 
@@ -98,7 +104,8 @@ perfxpert/agents/fence/
 ├── recommendation.md      # tier 1
 ├── compute_specialist.md  # tier 2
 ├── memory_specialist.md   # tier 2
-└── latency_specialist.md  # tier 2
+├── latency_specialist.md  # tier 2
+└── diff_specialist.md     # tier 2
 ```
 
 Why fence-slicing:
@@ -142,7 +149,7 @@ integrations that already know the routing decision.
 | Session handle + agent runner | `perfxpert/agents/runtime.py` |
 | Schemas (Root/Analysis/Correctness/Recommendation I/O) | `perfxpert/agents/schemas.py` |
 | Per-agent definitions | `perfxpert/agents/{root,analysis,correctness,recommendation}.py` |
-| Specialists | `perfxpert/agents/{compute,memory,latency}_specialist.py` |
+| Specialists | `perfxpert/agents/{compute,memory,latency,diff}_specialist.py` |
 | Fence slices (system prompts) | `perfxpert/agents/fence/*.md` |
 | Agent framework + framework-level helpers | `perfxpert/agents/framework.py` |
 | Gate cascade (middleware between agents) | `perfxpert/runtime/gate_cascade.py` |

@@ -74,7 +74,7 @@ with **dotted** names because that's what `discover_read_only_tools()`
 returns; the equivalent wire names have the dots replaced by
 underscores.
 
-## Tools exposed (42)
+## Tools exposed (43)
 
 Auto-discovered by `mcp_server._registry.discover_read_only_tools()`
 every boot. The registry walks `perfxpert.tools.*` modules but skips
@@ -90,9 +90,9 @@ for name in sorted(discover_read_only_tools()):
     print(name)
 ```
 
-### Snapshot: agent-hierarchy tools (7)
+### Snapshot: agent-hierarchy tools (8)
 
-These are the seven agent entry points. Each is a READ_ONLY MCP tool
+These are the eight agent entry points. Each is a READ_ONLY MCP tool
 AND a 1:1-mirrored callable on [`perfxpert.api`](../guides/python-api.md)
 — invoking `mcp__perfxpert__agent_root` from a client and calling
 `perfxpert.api.agent_root(...)` from Python produce the same output.
@@ -105,6 +105,7 @@ agents.correctness.agent_correctness
 agents.compute.agent_compute_specialist
 agents.memory.agent_memory_specialist
 agents.latency.agent_latency_specialist
+agents.diff.agent_diff_specialist
 ```
 
 On the MCP wire these become `perfxpert_agent_root`,
@@ -113,6 +114,14 @@ convention"). Input/output schemas for each agent are defined in
 `perfxpert/agents/schemas.py` — see
 [../guides/python-api.md](../guides/python-api.md) for field-level
 examples.
+
+`perfxpert_agent_diff_specialist` is the 8th agent (Confluence row
+#7 follow-on): it wraps `trace_diff.diff_runs` + `regression.compare_runs`
++ `roofline.classify` and returns a structured run-to-run verdict
+(`improved` / `regressed` / `neutral`) + per-kernel deltas + narrative.
+Call it conversationally from any TUI backend ("diff this run against
+baseline.db", "what got slower since yesterday's trace?") instead of
+running `analyze` twice.
 
 ### Snapshot: classifier / knowledge tools (35)
 
@@ -285,7 +294,7 @@ load-bearing for the security posture in spec §5.8.
 ## Client integration
 
 `perfxpert-mcp` speaks stdio MCP (JSON-RPC, protocol `2024-11-05`), so
-any MCP-compatible client can consume the 42 READ_ONLY tools. The
+any MCP-compatible client can consume the 43 READ_ONLY tools. The
 `command` field in every example below must resolve on the client's
 `PATH` — run `which perfxpert-mcp` to get an absolute path if your
 client launches with a narrower env than your login shell.
@@ -309,7 +318,7 @@ add a `perfxpert` entry under `mcpServers`:
 }
 ```
 
-Restart Claude Desktop. The 42 tools appear under the 🔌 panel with
+Restart Claude Desktop. The 43 tools appear under the 🔌 panel with
 `perfxpert_` name prefixes (underscored-on-the-wire — see §"Naming
 convention").
 

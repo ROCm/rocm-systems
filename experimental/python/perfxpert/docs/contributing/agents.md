@@ -2,9 +2,11 @@
 
 ## What you're adding
 
-A new node in the 7-agent hierarchy that orchestrates tools to solve a
+A new node in the 8-agent hierarchy that orchestrates tools to solve a
 narrowly-scoped problem. Agents route via typed handoffs and run within the
-5-gate correctness cascade.
+5-gate correctness cascade. Reach for this when the existing layer-2
+specialists (compute / memory / latency / diff) cannot cover the user's
+intent — e.g. a new bottleneck class or a new external artefact type.
 
 ## File locations
 

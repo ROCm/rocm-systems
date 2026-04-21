@@ -12,7 +12,7 @@ This guide covers the user-visible surface. For the architectural
 contract every adapter satisfies, see
 [../architecture/backend-adapter.md](../architecture/backend-adapter.md).
 For the underlying MCP server (41 READ_ONLY tools — 7 agent-hierarchy
-entry points + 34 classifier/knowledge tools), see
+entry points + 35 classifier/knowledge tools), see
 [../integration/mcp-server.md](../integration/mcp-server.md). The
 rationale for the Claude PreToolUse choice is captured in the local
 Claude hook-surface decision record; the (different) decision for
@@ -21,9 +21,10 @@ Codex is captured in the local Codex hook-surface decision record.
 **Backend LLM freely picks tools.** There is no
 forced-call contract between `perfxpert_intent_classify` and any
 aggregator tool. The backend LLM reads the agent hierarchy as
-reference in `AGENTS.md` and calls whichever of the 41 MCP tools
+reference in `AGENTS.md` and calls whichever of the 43 MCP tools
 match the user's intent — it may invoke any agent-hierarchy tool
-(`perfxpert_agent_root`, `perfxpert_agent_analysis`, etc.) directly,
+(`perfxpert_agent_root`, `perfxpert_agent_analysis`,
+`perfxpert_agent_diff_specialist`, etc.) directly,
 or compose lower-level classifier tools (`bottleneck_*`,
 `regression_*`, …) when it already knows the answer shape. The
 tool-priority gate still requires `intent_classify` as the first
