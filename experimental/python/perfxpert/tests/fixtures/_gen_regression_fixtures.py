@@ -53,4 +53,19 @@ if __name__ == "__main__":
         ("add",    20, 575_000),   # +15%
     ])
 
+    # Regressed: matmul is ~12% slower so the wall-delta comfortably
+    # exceeds the default 5% CI threshold (matches the fixture's name).
+    # Three-reviewer consolidation (2026-04): previously ``regressed.db``
+    # was a large real-rocpd dump whose kernel-name space did not overlap
+    # with ``regression_baseline.db``, producing a spurious -88%
+    # improvement when diffed against it. Regenerating as a simple
+    # paired fixture makes the semantics match the name: pairing
+    # ``regression_baseline.db`` + ``regressed.db`` yields a true
+    # regression verdict, and ``perfxpert ci`` on the pair returns rc=1.
+    create_rocpd_like(FIXTURES_DIR / "regressed.db", [
+        ("matmul", 100, 784_000),   # +12%  ⇒ wall delta ~ +8.4%
+        ("conv2d", 50, 400_000),
+        ("add",    20, 500_000),
+    ])
+
     print("Fixtures generated.")
