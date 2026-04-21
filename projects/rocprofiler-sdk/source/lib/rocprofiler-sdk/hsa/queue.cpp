@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_signal_subscription.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
@@ -613,6 +614,8 @@ WriteInterceptor(const void* packets,
             {
                 // Adding a barrier packet with the original packet's completion signal.
                 queue.create_signal(0, &interrupt_signal, false);
+                // Queue completion monitor is armed on EQ -1, so initialize to zero before dispatch.
+                get_core_table()->hsa_signal_store_screlease_fn(interrupt_signal, 0);
                 completion_signal                                            = interrupt_signal;
                 transformed_packets.back().kernel_dispatch.completion_signal = interrupt_signal;
                 CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
@@ -863,15 +866,15 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
         << fmt::format("pooled signal has not been acquired: hsa_signal_t(.handle={})",
                        signal->get().value.handle);
 
-    hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-        raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
+    auto callback = [data](hsa_signal_value_t signal_value) {
+        return AsyncSignalHandler(signal_value, data);
+    };
 
-    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << fmt::format("Error: hsa_amd_signal_async_handler (signal={{.handle={}}}) failed with "
-                       "error code {} :: {} ",
-                       raw_signal.handle,
-                       static_cast<int>(status),
-                       hsa::get_hsa_status_string(status));
+    auto armed =
+        QueueSignalSubscription::arm(const_cast<Queue&>(*this), raw_signal, std::move(callback), data);
+
+    ROCP_FATAL_IF(!armed)
+        << fmt::format("QueueSignalSubscription failed for signal={{.handle={}}}", raw_signal.handle);
 }
 
 Queue::pooled_signal_t*
@@ -980,11 +983,15 @@ queue_init()
 {
     // record that queue initialization happened
     did_queue_init = true;
+    QueueSignalSubscription::initialize();
 }
 
 void
 queue_fini()
 {
+    // stop monitor before destroying pooled signals
+    QueueSignalSubscription::shutdown();
+
     if(did_queue_init)
     {
         if(auto* pool = get_signal_pool(); pool != nullptr)

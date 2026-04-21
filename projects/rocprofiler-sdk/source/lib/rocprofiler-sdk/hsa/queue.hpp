@@ -145,6 +145,7 @@ public:
     const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };
     virtual const AgentCache& get_agent() const { return _agent; }
 
+    // Arm queue completion handling through QueueSignalSubscription.
     void signal_async_handler(pooled_signal_t* _signal, hsa_signal_t raw_signal, void* data) const;
     static pooled_signal_t* create_signal(uint32_t attribute, hsa_signal_t* _signal, bool use_pool);
     static void             release_signal(pooled_signal_t* signal);

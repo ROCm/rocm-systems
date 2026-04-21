@@ -11,6 +11,7 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     profile_serializer.cpp
     queue_controller.cpp
     queue.cpp
+    queue_signal_subscription.cpp
     scratch_memory.cpp
     signal_monitor.cpp
     signal_monitor_ioctl.cpp
@@ -29,6 +30,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     queue_controller.hpp
     queue.hpp
     queue_info_session.hpp
+    queue_signal_subscription.hpp
     rocprofiler_packet.hpp
     scratch_memory.hpp
     signal.hpp
