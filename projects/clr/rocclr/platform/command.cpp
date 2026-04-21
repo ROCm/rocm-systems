@@ -77,11 +77,11 @@ AccumulateCommand::~AccumulateCommand() {
 }
 
 // ================================================================================================
-uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
+uint64_t Event::recordProfilingInfo(amd::Status status, uint64_t timeStamp) {
   if (timeStamp == 0) {
     timeStamp = Os::timeNanos();
   }
-  switch (status) {
+  switch (static_cast<int32_t>(status)) {
     case 3:  // Queued
       profilingInfo_.queued_ = timeStamp;
       break;
@@ -102,11 +102,12 @@ uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
 uint64_t epoch = 0;
 std::once_flag epoch_init;
 // ================================================================================================
-bool Event::setStatus(int32_t status, uint64_t timeStamp) {
-  assert(status <= 3 && "invalid status");
+bool Event::setStatus(amd::Status status, uint64_t timeStamp) {
+  int32_t raw = static_cast<int32_t>(status);
+  assert(raw <= 3 && "invalid status");
 
-  int32_t currentStatus = this->status();
-  if (currentStatus <= 0 || currentStatus <= status) {
+  int32_t currentStatus = static_cast<int32_t>(this->status());
+  if (currentStatus <= 0 || currentStatus <= raw) {
     // We can only move forward in the execution status.
     return false;
   }
@@ -124,12 +125,12 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
     if (callbacks_ != (CallBackEntry*)0) {
       processCallbacks(status);
     }
-    if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
+    if (!status_.compare_exchange_strong(currentStatus, raw, std::memory_order_relaxed)) {
       // Somebody else beat us to it, let them deal with the release/signal.
       return false;
     }
   } else {
-    if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
+    if (!status_.compare_exchange_strong(currentStatus, raw, std::memory_order_relaxed)) {
       // Somebody else beat us to it, let them deal with the release/signal.
       return false;
     }
@@ -139,10 +140,10 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
   }
 
   if (Agent::shouldPostEventEvents() && static_cast<uint32_t>(command().type()) != 0) {
-    Agent::postEventStatusChanged(static_cast<void*>(this), status, timeStamp + Os::offsetToEpochNanos());
+    Agent::postEventStatusChanged(static_cast<void*>(this), raw, timeStamp + Os::offsetToEpochNanos());
   }
 
-  if (status <= 0) {
+  if (raw <= 0) {
     // Before we notify the waiters that this event reached the complete
     // status, we release all the resources associated with this instance.
     if (!IS_HIP) {
@@ -173,13 +174,14 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 }
 
 // ================================================================================================
-bool Event::resetStatus(int32_t status) {
-  int32_t currentStatus = this->status();
+bool Event::resetStatus(amd::Status status) {
+  int32_t raw = static_cast<int32_t>(status);
+  int32_t currentStatus = static_cast<int32_t>(this->status());
   if (currentStatus != 0) {  // 0 = Complete
     ClPrint(LOG_ERROR, LOG_CMD, "Command is reset before complete current status :%d",
             currentStatus);
   }
-  if (!status_.compare_exchange_strong(currentStatus, status, std::memory_order_relaxed)) {
+  if (!status_.compare_exchange_strong(currentStatus, raw, std::memory_order_relaxed)) {
     ClPrint(LOG_ERROR, LOG_CMD, "Failed to reset command status");
     return false;
   }
@@ -188,9 +190,10 @@ bool Event::resetStatus(int32_t status) {
 }
 
 // ================================================================================================
-bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* data,
+bool Event::setCallback(amd::Status status, Event::CallBackFunction callback, void* data,
                         bool blocking) {
-  assert(status >= 0 && status <= 3 && "Invalid status");  // 0=Complete .. 3=Queued
+  int32_t raw = static_cast<int32_t>(status);
+  assert(raw >= 0 && raw <= 3 && "Invalid status");  // 0=Complete .. 3=Queued
 
   CallBackEntry* entry = new CallBackEntry(status, callback, data, blocking);
   if (entry == NULL) {
@@ -202,9 +205,9 @@ bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* 
       entry->next_, entry));  // Someone else is also updating the head of the linked list! reload.
 
   // Check if the event has already reached 'status'
-  if (this->status() <= status && entry->callback_ != CallBackFunction(0)) {
+  if (static_cast<int32_t>(this->status()) <= raw && entry->callback_ != CallBackFunction(0)) {
     if (entry->callback_.exchange(NULL) != NULL) {
-      callback(static_cast<void*>(this), status, entry->data_);
+      callback(static_cast<void*>(this), raw, entry->data_);
     }
   }
 
@@ -212,9 +215,10 @@ bool Event::setCallback(int32_t status, Event::CallBackFunction callback, void* 
 }
 
 // ================================================================================================
-void Event::processCallbacks(int32_t status) const {
+void Event::processCallbacks(amd::Status status) const {
   void* event = static_cast<void*>(const_cast<Event*>(this));  // passed as opaque handle to user callbacks
-  const int32_t mask = (status > 0) ? status : 0;  // 0 = Complete
+  int32_t raw = static_cast<int32_t>(status);
+  const amd::Status mask = (raw > 0) ? status : amd::Status::Success;  // Success(0) = Complete
 
   // For_each callback:
   CallBackEntry* entry;
@@ -224,7 +228,7 @@ void Event::processCallbacks(int32_t status) const {
       // invoke the callback function.
       CallBackFunction callback = entry->callback_.exchange(NULL);
       if (callback != NULL) {
-        callback(event, status, entry->data_);
+        callback(event, raw, entry->data_);
       }
     }
   }
@@ -233,31 +237,31 @@ void Event::processCallbacks(int32_t status) const {
 static constexpr bool kCpuWait = true;
 // ================================================================================================
 bool Event::awaitCompletion() {
-  if (status() > 0) {  // > Complete(0) means not yet done (1=Running, 2=Submitted, 3=Queued)
+  if (static_cast<int32_t>(status()) > 0) {  // > Complete(0) means not yet done (1=Running, 2=Submitted, 3=Queued)
     // Notifies the current command queue about waiting
     if (!notifyCmdQueue(kCpuWait)) {
       return false;
     }
 
     ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Waiting for event %p to complete, current status %d",
-            this, status());
+            this, static_cast<int32_t>(status()));
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
-      while (status() > 0) {
+      while (static_cast<int32_t>(status()) > 0) {
         amd::Os::yield();
       }
     } else {
       ScopedLock lock(lock_);
 
       // Wait until the status becomes Complete(0) or negative (error).
-      while (status() > 0) {
+      while (static_cast<int32_t>(status()) > 0) {
         lock_.wait();
       }
     }
     ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
   }
 
-  return status() == 0;  // 0 = Complete
+  return status() == amd::Status::Success;  // Success(0) = Complete
 }
 
 // ================================================================================================
@@ -265,7 +269,7 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
   HostQueue* queue = command().queue();
   if (AMD_DIRECT_DISPATCH) {
     ScopedLock l(notify_lock_);
-    if ((status() > 0) && (nullptr != queue) &&  // > 0 means not yet complete
+    if ((static_cast<int32_t>(status()) > 0) && (nullptr != queue) &&  // > 0 means not yet complete
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
         // @note: Force the marker always in OCL for now, since OCL events require precise
         // sequence of the status update
@@ -280,7 +284,7 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
       notify_event_ = command;
     }
   } else {
-    if ((status() > 0) && (nullptr != queue) && !notified_.test_and_set()) {  // > 0 = not complete
+    if ((static_cast<int32_t>(status()) > 0) && (nullptr != queue) && !notified_.test_and_set()) {  // > 0 = not complete
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this);
       if (command == NULL) {
@@ -366,16 +370,16 @@ void Command::enqueue() {
   // Direct dispatch logic below will submit the command immediately, but the command status
   // update will occur later after flush() with a wait
   if (AMD_DIRECT_DISPATCH) {
-    setStatus(3);  // Queued
+    setStatus(amd::ExecutionStatus::Queued);
 
     // Notify all commands about the waiter. Barrier will be sent in order to obtain
     // HSA signal for a wait on the current queue
     for (const auto& event : eventWaitList()) {
       if (!amd::IS_HIP && event->command().type() == amd::CommandType::User) {
-        if (event->status() >= 0) {  // >= Complete(0): complete or error
+        if (static_cast<int32_t>(event->status()) >= 0) {  // >= Complete(0): complete or error
           reinterpret_cast<amd::UserEvent*>(event)->AddDependent(this);
         } else {
-          setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
+          setStatus(amd::Status::ExecStatusErrorForEventsInWaitList);
           return;
         }
       } else {

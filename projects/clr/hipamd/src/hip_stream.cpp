@@ -543,7 +543,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   // Check HW status of the ROCclr event. Note: not all ROCclr modes support HW status.
   bool ready = command->queue()->device().IsHwEventReady(event);
   if (!ready) {
-    ready = (command->status() == CL_COMPLETE);
+    ready = (command->status() == amd::Status::Success);
   }
   command->release();
 

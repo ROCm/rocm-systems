@@ -165,7 +165,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       // Note: not all ROCclr modes support HW status
       bool ready = stream->device().IsHwEventReady(event);
       if (!ready) {
-        ready = (command->status() == CL_COMPLETE);
+        ready = (command->status() == amd::Status::Success);
       }
       submitMarker |= stream->vdev()->isFenceDirty();
       if (!ready) {

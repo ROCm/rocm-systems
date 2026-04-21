@@ -81,7 +81,7 @@ RUNTIME_ENTRY(cl_int, clWaitForEvents, (cl_uint num_events, const cl_event* even
 
     // Make sure all the events are associated with the same context
     amd::Event* amdEvent = as_amd(event);
-    if (amdEvent->status() == CL_COMPLETE) continue;
+    if (amdEvent->status() == amd::Status::Success) continue;  // Success(0) == CL_COMPLETE
 
     const amd::Context* context = &amdEvent->context();
     if (prevContext != NULL && prevContext != context) {
@@ -162,7 +162,7 @@ RUNTIME_ENTRY(cl_int, clGetEventInfo,
     }
     case CL_EVENT_COMMAND_EXECUTION_STATUS: {
       as_amd(event)->notifyCmdQueue();
-      cl_int status = as_amd(event)->command().status();
+      cl_int status = static_cast<cl_int>(as_amd(event)->command().status());
       return amd::clGetInfo(status, param_value_size, param_value, param_value_size_ret);
     }
     case CL_EVENT_REFERENCE_COUNT: {
@@ -366,11 +366,11 @@ RUNTIME_ENTRY(cl_int, clSetEventCallback,
   amd::Event* ev = as_amd(event);
   ev->retain();
 
-  if (!ev->setCallback(command_exec_callback_type, pfn_notify, user_data)) {
+  if (!ev->setCallback(static_cast<amd::Status>(command_exec_callback_type), pfn_notify, user_data)) {
     ev->release();
     return CL_OUT_OF_HOST_MEMORY;
   }
-  if (ev->status() > CL_COMPLETE) {
+  if (static_cast<int32_t>(ev->status()) > CL_COMPLETE) {
     ev->notifyCmdQueue();
   }
   ev->release();

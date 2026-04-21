@@ -19,9 +19,12 @@
 #include <EGL/eglext.h>
 #include <EGL/eglplatform.h>
 
-#include "device/device.hpp"
-#include "platform/command.hpp"
+// interop_gl.hpp includes GL/glx.h which also uses Status, None, Success from X11/Xlib.h.
+// It undefs them (after including all GL/EGL headers) before pulling in command.hpp.
+// So we include interop_gl.hpp first, then device.hpp. Do NOT include command.hpp
+// separately here — it is already included transitively via interop_gl.hpp.
 #include "platform/interop_gl.hpp"
+#include "device/device.hpp"
 
 /* The pixel internal format for DOPP texture defined in gl_enum.h */
 #define GL_BGR8_ATI 0x8083
@@ -91,7 +94,7 @@ bool amd::ClGlEvent::waitForFence() {
   }
 #endif
   // If we reach this point, fence should have completed
-  setStatus(0);  // Complete
+  setStatus(amd::ExecutionStatus::Complete);
   return true;
 }
 
@@ -281,7 +284,7 @@ bool amd::GLFunctions::update(intptr_t hglrc) {
     glXDestroyContext_(Dpy_, intCtx_);
   }
 
-  int attribList[] = {GLX_RGBA, None};
+  int attribList[] = {GLX_RGBA, 0}; // 0 == X11 None (GLX attribute list terminator)
   XVisualInfo* vis;
   int defaultScreen = DefaultScreen(intDpy_);
   if (!(vis = glXChooseVisual_(intDpy_, defaultScreen, attribList))) {
@@ -361,7 +364,7 @@ bool amd::GLFunctions::init(intptr_t hdc, intptr_t hglrc) {
     Drawable_ = glXGetCurrentDrawable_();
     origCtx_ = (GLXContext)hglrc;
 
-    int attribList[] = {GLX_RGBA, None};
+    int attribList[] = {GLX_RGBA, 0}; // 0 == X11 None (GLX attribute list terminator)
     if (!(intDpy_ = XOpenDisplay_(DisplayString(Dpy_)))) {
 #if defined(ATI_ARCH_X86)
       asm("int $3");
@@ -439,7 +442,7 @@ bool amd::GLFunctions::restoreEnv() {
     }
   } else {
     // Just release internal context
-    if (!glXMakeCurrent_(getIntDpy(), None, nullptr)) {
+    if (!glXMakeCurrent_(getIntDpy(), 0 /* X11 None */, nullptr)) {
       LogWarning("cannot reelase internal GL environment");
       return false;
     }

@@ -21,7 +21,7 @@ static std::unordered_set<hipEvent_t> eventSet;
 // ================================================================================================
 bool Event::ready() {
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
-  if (CheckHwEvent() || event_->status() == CL_COMPLETE) {
+  if (CheckHwEvent() || event_->status() == amd::Status::Success) {
     return true;
   }
 
@@ -32,7 +32,7 @@ bool Event::ready() {
 // ================================================================================================
 bool EventDD::ready() {
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
-  return CheckHwEvent() || (event_->status() == CL_COMPLETE);
+  return CheckHwEvent() || (event_->status() == amd::Status::Success);
 }
 
 // ================================================================================================

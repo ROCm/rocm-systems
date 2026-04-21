@@ -58,7 +58,7 @@ class CommandQueue : public RuntimeObject {
       return true;
     }
 
-    bool test(value_type bits) const { return (value_ & bits) != 0; }
+    bool test(value_type bits) const { return static_cast<uint64_t>(value_ & bits) != 0; }
   };
 
   //! Return the context this command queue is part of.
@@ -259,7 +259,7 @@ class HostQueue : public CommandQueue {
       tail_ = command;
     }
     size_++;
-    command->setStatus(2);  // Submitted
+    command->setStatus(amd::ExecutionStatus::Submitted);
     command->retain();
     // @note: runtime needs double retain in order to maintain the batch,
     // because setStatus(COMPLETE) releases command and batch update may have

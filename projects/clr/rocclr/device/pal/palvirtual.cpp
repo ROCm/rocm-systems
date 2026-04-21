@@ -1308,7 +1308,7 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& vcmd) {
 
   if (!result) {
     LogError("submitReadMemory failed!");
-    vcmd.setStatus(CL_INVALID_OPERATION);
+    vcmd.setStatus(amd::Status::InvalidOperation);
   }
 
   profilingEnd(vcmd);
@@ -1428,7 +1428,7 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& vcmd) {
 
   if (!result) {
     LogError("submitWriteMemory failed!");
-    vcmd.setStatus(CL_INVALID_OPERATION);
+    vcmd.setStatus(amd::Status::InvalidOperation);
   } else {
     // Mark this as the most-recently written cache of the destination
     vcmd.destination().signalWrite(&gpuDevice_);
@@ -1572,7 +1572,7 @@ void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& vcmd) {
   if (!copyMemory(type, vcmd.source(), vcmd.destination(), entire, vcmd.srcOrigin(),
                   vcmd.dstOrigin(), vcmd.size(), vcmd.srcRect(), vcmd.dstRect(),
                   vcmd.copyMetadata())) {
-    vcmd.setStatus(CL_INVALID_OPERATION);
+    vcmd.setStatus(amd::Status::InvalidOperation);
   }
 
   profilingEnd(vcmd);
@@ -1602,7 +1602,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& vcmd) {
       srcOrigin.c[0] =
           static_cast<const_address>(vcmd.src()) - static_cast<address>(srcMem->getSvmPtr());
       if (!(srcMem->validateRegion(srcOrigin, size))) {
-        vcmd.setStatus(CL_INVALID_OPERATION);
+        vcmd.setStatus(amd::Status::InvalidOperation);
         return;
       }
     }
@@ -1611,7 +1611,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& vcmd) {
       dstOrigin.c[0] =
           static_cast<const_address>(vcmd.dst()) - static_cast<address>(dstMem->getSvmPtr());
       if (!(dstMem->validateRegion(dstOrigin, size))) {
-        vcmd.setStatus(CL_INVALID_OPERATION);
+        vcmd.setStatus(amd::Status::InvalidOperation);
         return;
       }
     }
@@ -1644,7 +1644,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& vcmd) {
     }
 
     if (!result) {
-      vcmd.setStatus(CL_INVALID_OPERATION);
+      vcmd.setStatus(amd::Status::InvalidOperation);
     }
   } else {
     // direct memcpy for FGS enabled system
@@ -1689,7 +1689,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
         if (!blitMgr().copyBuffer(*memory, *memory->mapMemory(), vcmd.origin(), vcmd.origin(),
                                   vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
-          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
+          vcmd.setStatus(amd::Status::MapFailure);
         }
       } else if ((vcmd.memory().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
         Memory* memoryBuf = memory;
@@ -1708,7 +1708,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
         if (!blitMgr().copyBuffer(*memoryBuf, *memory->mapMemory(), origin, dstOrigin, size,
                                   vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
-          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
+          vcmd.setStatus(amd::Status::MapFailure);
         }
         if (nullptr != bufferFromImage) {
           bufferFromImage->release();
@@ -1717,7 +1717,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
         if (!blitMgr().copyImageToBuffer(*memory, *memory->mapMemory(), vcmd.origin(), dstOrigin,
                                          vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
-          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
+          vcmd.setStatus(amd::Status::MapFailure);
         }
       }
     }
@@ -1769,7 +1769,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
                                     writeMapInfo->origin_, writeMapInfo->region_,
                                     writeMapInfo->isEntire())) {
             LogError("submitUnmapMemory() - copy failed");
-            vcmd.setStatus(CL_OUT_OF_RESOURCES);
+            vcmd.setStatus(amd::Status::OutOfResources);
           }
         } else if ((vcmd.memory().getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
           Memory* memoryBuf = memory;
@@ -1788,7 +1788,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
           if (!blitMgr().copyBuffer(*memory->mapMemory(), *memoryBuf, srcOrigin, origin, size,
                                     writeMapInfo->isEntire())) {
             LogError("submitUnmapMemory() - copy failed");
-            vcmd.setStatus(CL_OUT_OF_RESOURCES);
+            vcmd.setStatus(amd::Status::OutOfResources);
           }
           if (nullptr != bufferFromImage) {
             bufferFromImage->release();
@@ -1798,13 +1798,13 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
                                            writeMapInfo->origin_, writeMapInfo->region_,
                                            writeMapInfo->isEntire())) {
             LogError("submitUnmapMemory() - copy failed");
-            vcmd.setStatus(CL_OUT_OF_RESOURCES);
+            vcmd.setStatus(amd::Status::OutOfResources);
           }
         }
       }
     } else {
       LogError("Unhandled unmap!");
-      vcmd.setStatus(CL_INVALID_VALUE);
+      vcmd.setStatus(amd::Status::InvalidValue);
     }
 
     // Clear unmap flags
@@ -1888,7 +1888,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
   if (cmd.type() == CL_COMMAND_FILL_IMAGE) {
     if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(), cmd.origin(),
                     cmd.size())) {
-      cmd.setStatus(CL_INVALID_OPERATION);
+      cmd.setStatus(amd::Status::InvalidOperation);
     }
   } else {
     size_t width = cmd.size().c[0];
@@ -1914,7 +1914,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
         const size_t rowOffset = rect.offset(0, row, slice);
         if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(),
                         amd::Coord3D{rowOffset, 0, 0}, amd::Coord3D{width, 1, 1}, force_blit)) {
-          cmd.setStatus(CL_INVALID_OPERATION);
+          cmd.setStatus(amd::Status::InvalidOperation);
         }
       }
     }
@@ -2060,7 +2060,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 
   if (!result) {
     LogError("submitCopyMemoryP2P failed!");
-    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    cmd.setStatus(amd::Status::OutOfResources);
   }
 
   cmd.destination().signalWrite(&dstDevMem->dev());
@@ -2090,7 +2090,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
     if (srcDevMem == nullptr || dstDevMem == nullptr) {
       LogError("submitBatchCopyMemory: Invalid memory objects!");
-      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      cmd.setStatus(amd::Status::InvalidMemObject);
       profilingEnd(cmd);
       return;
     }
@@ -2106,7 +2106,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
-    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    cmd.setStatus(amd::Status::OutOfResources);
   } else {
     // Mark all destinations as written
     for (const auto& op : copyOps) {
@@ -2137,7 +2137,7 @@ void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
         if (!blitMgr().copyBuffer(*memory, *memory->mapMemory(), vcmd.origin(), vcmd.origin(),
                                   vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitSVMMapMemory() - copy failed");
-          vcmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
+          vcmd.setStatus(amd::Status::MapFailure);
         }
       }
     } else if ((memory->owner()->getHostMem() != nullptr) && memory->isDirectMap()) {
@@ -2176,7 +2176,7 @@ void VirtualGPU::submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& vcmd) {
                                   writeMapInfo->origin_, writeMapInfo->region_,
                                   writeMapInfo->isEntire())) {
           LogError("submitSvmUnmapMemory() - copy failed");
-          vcmd.setStatus(CL_OUT_OF_RESOURCES);
+          vcmd.setStatus(amd::Status::OutOfResources);
         }
       }
     } else if ((memory->owner()->getHostMem() != nullptr) && memory->isDirectMap()) {
@@ -2214,7 +2214,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
     assert((dstMemory->validateRegion(origin, size)) && "The incorrect fill size!");
 
     if (!fillMemory(vcmd.type(), dstMemory, vcmd.pattern(), vcmd.patternSize(), origin, size)) {
-      vcmd.setStatus(CL_INVALID_OPERATION);
+      vcmd.setStatus(amd::Status::InvalidOperation);
     }
   } else {
     // for FGS capable device, fill CPU memory directly
@@ -2336,7 +2336,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
   amd::Memory* phys_mem_obj = vcmd.memory();
   amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(vcmd.ptr());
   if (vaddr_base_obj == nullptr ||
-      (vaddr_base_obj->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::None) {
+      (vaddr_base_obj->getMemFlags() & amd::MemFlags::VaRangeAmd) == amd::MemFlags::Empty) {
     profilingEnd(vcmd);
     return;
   }
@@ -2658,7 +2658,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     // Submit kernel to HW
     if (!queue->submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(), false,
                                      vcmd.sharedMemBytes())) {
-      vcmd.setStatus(CL_INVALID_OPERATION);
+      vcmd.setStatus(amd::Status::InvalidOperation);
     }
 
     queue->profilingEnd(vcmd);
@@ -2674,7 +2674,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     // Submit kernel to HW
     if (!submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(), false,
                               vcmd.sharedMemBytes(), vcmd.getAnyOrderLaunchFlag())) {
-      vcmd.setStatus(CL_INVALID_OPERATION);
+      vcmd.setStatus(amd::Status::InvalidOperation);
     }
 
     profilingEnd(vcmd);
@@ -2949,7 +2949,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
   PalCounterReference* palRef = PalCounterReference::Create(*this);
   if (palRef == nullptr) {
     LogError("We failed to allocate memory for the GPU perfcounter");
-    vcmd.setStatus(CL_INVALID_OPERATION);
+    vcmd.setStatus(amd::Status::InvalidOperation);
     return;
   }
 
@@ -2967,7 +2967,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
           prop[CL_PERFCOUNTER_GPU_COUNTER_INDEX], prop[CL_PERFCOUNTER_GPU_EVENT_INDEX]);
       if (nullptr == gpuCounter) {
         LogError("We failed to allocate memory for the GPU perfcounter");
-        vcmd.setStatus(CL_INVALID_OPERATION);
+        vcmd.setStatus(amd::Status::InvalidOperation);
         return;
       } else if (gpuCounter->create()) {
         newExperiment = true;
@@ -3012,7 +3012,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
         state_.perfCounterEnabled_ = false;
       } else {
         LogError("Unsupported performance counter state");
-        vcmd.setStatus(CL_INVALID_OPERATION);
+        vcmd.setStatus(amd::Status::InvalidOperation);
         return;
       }
     }
@@ -3034,7 +3034,7 @@ void VirtualGPU::submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& 
         PalThreadTraceReference* palRef = PalThreadTraceReference::Create(*this);
         if (palRef == nullptr) {
           LogError("Failure in memory allocation for the GPU threadtrace");
-          cmd.setStatus(CL_INVALID_OPERATION);
+          cmd.setStatus(amd::Status::InvalidOperation);
           return;
         }
 
@@ -3043,7 +3043,7 @@ void VirtualGPU::submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& 
         ThreadTrace* gpuThreadTrace = new ThreadTrace(gpuDevice_, palRef, cmd.getMemList(), numSe);
         if (nullptr == gpuThreadTrace) {
           LogError("Failure in memory allocation for the GPU threadtrace");
-          cmd.setStatus(CL_INVALID_OPERATION);
+          cmd.setStatus(amd::Status::InvalidOperation);
           return;
         }
 
@@ -3052,7 +3052,7 @@ void VirtualGPU::submitThreadTraceMemObjects(amd::ThreadTraceMemObjectsCommand& 
         } else {
           LogError("Failure in memory allocation for the GPU threadtrace");
           delete gpuThreadTrace;
-          cmd.setStatus(CL_INVALID_OPERATION);
+          cmd.setStatus(amd::Status::InvalidOperation);
           return;
         }
 
@@ -3248,7 +3248,7 @@ bool VirtualGPU::awaitCompletion(CommandBatch* cb, const amd::Event* waitingEven
   }
   // Mark the first command in the batch as running
   if (head != nullptr) {
-    head->setStatus(1);  // Running
+    head->setStatus(amd::ExecutionStatus::Running);
   } else {
     return found;
   }
@@ -3258,13 +3258,13 @@ bool VirtualGPU::awaitCompletion(CommandBatch* cb, const amd::Event* waitingEven
 
   while (nullptr != head) {
     current = head->getNext();
-    if (head->status() == 2) {  // Submitted
-      head->setStatus(1);  // Running
-      head->setStatus(0);  // Complete
-    } else if (head->status() == 1) {  // Running
-      head->setStatus(0);  // Complete
-    } else if ((head->status() != 0) && (current != nullptr)) {  // not Complete
-      LogPrintfError("Unexpected command status - %d!", head->status());
+    if (static_cast<int32_t>(head->status()) == 2) {  // Submitted
+      head->setStatus(amd::ExecutionStatus::Running);
+      head->setStatus(amd::ExecutionStatus::Complete);
+    } else if (static_cast<int32_t>(head->status()) == 1) {  // Running
+      head->setStatus(amd::ExecutionStatus::Complete);
+    } else if ((static_cast<int32_t>(head->status()) != 0) && (current != nullptr)) {  // not Complete
+      LogPrintfError("Unexpected command status - %d!", static_cast<int32_t>(head->status()));
     }
 
     // Check if it's a waiting command
@@ -3572,13 +3572,13 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
     }
 
     // Update the command status with the proper timestamps
-    if (first->status() == 2) {  // Submitted
-      first->setStatus(1, startTimeStamp);  // Running
-      first->setStatus(0, endTimeStamp);    // Complete
-    } else if (first->status() == 1) {  // Running
-      first->setStatus(0, endTimeStamp);    // Complete
-    } else if ((first->status() != 0) && (current != nullptr)) {  // not Complete
-      LogPrintfError("Unexpected command status - %d!", first->status());
+    if (static_cast<int32_t>(first->status()) == 2) {  // Submitted
+      first->setStatus(amd::ExecutionStatus::Running, startTimeStamp);  // Running
+      first->setStatus(amd::ExecutionStatus::Complete, endTimeStamp);    // Complete
+    } else if (static_cast<int32_t>(first->status()) == 1) {  // Running
+      first->setStatus(amd::ExecutionStatus::Complete, endTimeStamp);    // Complete
+    } else if ((static_cast<int32_t>(first->status()) != 0) && (current != nullptr)) {  // not Complete
+      LogPrintfError("Unexpected command status - %d!", static_cast<int32_t>(first->status()));
     }
 
     // Do we wait this event?

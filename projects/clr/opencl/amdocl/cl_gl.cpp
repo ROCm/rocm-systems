@@ -754,7 +754,7 @@ RUNTIME_ENTRY_RET(cl_event, clCreateEventFromGLsyncKHR,
   }  // Release scoped lock
 
   // initially set the status of fence as queued
-  clglEvent->setStatus(CL_SUBMITTED);
+  clglEvent->setStatus(amd::ExecutionStatus::Submitted);
   // store GLsync id of the fence in event in order to associate them together
   clglEvent->data().emplace_back(clGLsync);
   amd::Event* evt = clglEvent;

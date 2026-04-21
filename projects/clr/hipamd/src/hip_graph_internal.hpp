@@ -2798,7 +2798,7 @@ class GraphMemAllocNode final : public GraphNode {
       auto aligned_size = amd::alignUp(size_, dev_info.virtualMemAllocGranularityRecommended_);
       auto dptr = graph_->AllocateMemory(aligned_size, static_cast<hip::Stream*>(queue()), nullptr);
       if (dptr == nullptr) {
-        setStatus(CL_INVALID_OPERATION);
+        setStatus(amd::Status::InvalidOperation);
         if (!AMD_DIRECT_DISPATCH) {
           WorkerThreadLock_.unlock();
         }

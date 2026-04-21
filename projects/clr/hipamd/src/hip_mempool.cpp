@@ -123,7 +123,7 @@ class FreeAsyncCommand : public amd::Command {
         // @note It's not the most optimal logic.
         // The current implementation has unconditional waits
         if (ihipFree(ptr_) != hipSuccess) {
-          setStatus(CL_INVALID_OPERATION);
+          setStatus(amd::Status::InvalidOperation);
         }
       }
     }

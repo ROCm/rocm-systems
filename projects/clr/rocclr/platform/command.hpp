@@ -56,9 +56,9 @@ class Event : public RuntimeObject {
 
     std::atomic<CallBackFunction> callback_;  //!< callback function pointer.
     void* data_;                              //!< user data passed to the callback function.
-    int32_t status_;                          //!< execution status triggering the callback.
+    Status status_;                      //!< execution status triggering the callback.
     bool blocking_;                           //!< TRUE if callback is blocking
-    CallBackEntry(int32_t status, CallBackFunction callback, void* data, bool blocking)
+    CallBackEntry(Status status, CallBackFunction callback, void* data, bool blocking)
         : callback_(callback), data_(data), status_(status), blocking_(blocking) {}
   };
 
@@ -125,10 +125,10 @@ class Event : public RuntimeObject {
   //! Record the profiling info for the given change of \a status.
   //  If the given \a timeStamp is 0 and profiling is enabled,
   //  use the current host clock time instead.
-  uint64_t recordProfilingInfo(int32_t status, uint64_t timeStamp = 0);
+  uint64_t recordProfilingInfo(Status status, uint64_t timeStamp = 0);
 
   //! Process the callbacks for the given \a status change.
-  void processCallbacks(int32_t status) const;
+  void processCallbacks(Status status) const;
 
   //! Enable profiling for this command
   void EnableProfiling() {
@@ -155,10 +155,10 @@ class Event : public RuntimeObject {
   const ProfilingInfo& profilingInfo() const { return profilingInfo_; }
 
   //! Return this command's execution status.
-  int32_t status() const { return status_.load(std::memory_order_relaxed); }
+  Status status() const { return static_cast<Status>(status_.load(std::memory_order_relaxed)); }
 
   //! Insert the given \a callback into the callback stack.
-  bool setCallback(int32_t status, CallBackFunction callback, void* data, bool blocking = true);
+  bool setCallback(Status status, CallBackFunction callback, void* data, bool blocking = true);
 
   /*! \brief Set the event status.
    *
@@ -168,10 +168,15 @@ class Event : public RuntimeObject {
    *
    *  \see amd::Event::awaitCompletion
    */
-  bool setStatus(int32_t status, uint64_t timeStamp = 0);
+  bool setStatus(Status status, uint64_t timeStamp = 0);
+
+  //! Convenience overload for execution-phase status (Queued/Submitted/Running/Complete).
+  bool setStatus(ExecutionStatus status, uint64_t timeStamp = 0) {
+    return setStatus(static_cast<Status>(status), timeStamp);
+  }
 
   //! Reset the status of the command for reuse
-  bool resetStatus(int32_t status);
+  bool resetStatus(Status status);
 
   //! Signal all threads waiting on this event.
   void signal() {
@@ -337,7 +342,7 @@ class Command : public Event {
       releaseResources();
     }
     if (Agent::shouldPostEventEvents() && type() != static_cast<amd::CommandType>(0)) {
-      Agent::postEventFree(as_cl(static_cast<Event*>(this)));
+      Agent::postEventFree(static_cast<void*>(static_cast<Event*>(this)));
     }
     return true;
   }
@@ -465,7 +470,7 @@ class UserEvent : public Command {
 
  public:
   UserEvent(Context& context) : Command(amd::CommandType::User), context_(context) {
-    setStatus(2);  // Submitted
+    setStatus(ExecutionStatus::Submitted);
   }
 
   //! Creates a user event in the backend layer
@@ -483,13 +488,13 @@ class UserEvent : public Command {
       // If it's invalid status, then mark dependent commands as invalid
       if (status < 0) {  // negative status is an error code
         for (auto it : dependents_) {
-          it->setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
+          it->setStatus(Status::ExecStatusErrorForEventsInWaitList);
         }
       }
       dependents_.clear();
       context_.devices()[0]->SetUserEvent(this);
     }
-    return setStatus(status);
+    return setStatus(static_cast<Status>(status));
   }
 
   //! Adds dependent commands for the user event
@@ -507,7 +512,7 @@ class ClGlEvent : public Command {
 
  public:
   ClGlEvent(Context& context) : Command(amd::CommandType::AcquireGlFenceSyncObjectKHR), context_(context) {
-    setStatus(2);  // Submitted
+    setStatus(ExecutionStatus::Submitted);
   }
 
   virtual void submit(device::VirtualDevice& device) { ShouldNotCallThis(); }
@@ -957,10 +962,11 @@ class StreamOperationCommand : public OneMemoryArgCommand {
         offset_(offset),
         sizeBytes_(sizeBytes) {
     // Sanity check
-    assert(((cmdType == ROCCLR_COMMAND_STREAM_WRITE_VALUE) ||
-            (cmdType == ROCCLR_COMMAND_STREAM_WAIT_VALUE) ||
-            ((cmdType == ROCCLR_COMMAND_STREAM_WAIT_VALUE) && GPU_STREAMOPS_CP_WAIT &&
-             (memory_->getMemFlags() & ROCCLR_MEM_HSA_SIGNAL_MEMORY))) &&
+    assert(((cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WRITE_VALUE)) ||
+            (cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE)) ||
+            ((cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_STREAM_WAIT_VALUE)) &&
+             GPU_STREAMOPS_CP_WAIT &&
+             (static_cast<uint64_t>(memory_->getMemFlags()) & ROCCLR_MEM_HSA_SIGNAL_MEMORY))) &&
            "Invalid Stream Operation");
   }
 
@@ -1001,7 +1007,7 @@ class BatchMemoryOperationCommand : public Command {
         flags_(flags),
         paramSize_(paramSize) {
     // Sanity check
-    assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
+    assert(((cmdType == static_cast<amd::CommandType>(ROCCLR_COMMAND_BATCH_STREAM))) && "Invalid batch memory operation");
   }
 
   virtual void submit(device::VirtualDevice& device) { device.submitBatchMemoryOperation(*this); }
@@ -1620,7 +1626,7 @@ class PerfCounterCommand : public Command {
   //! Construct a new PerfCounterCommand
   PerfCounterCommand(HostQueue& queue, const EventWaitList& eventWaitList,
                      const PerfCounterList& counterList, State state)
-      : Command(queue, 1, eventWaitList), counterList_(counterList), state_(state) {
+      : Command(queue, static_cast<amd::CommandType>(1), eventWaitList), counterList_(counterList), state_(state) {
     for (uint i = 0; i < counterList_.size(); ++i) {
       counterList_[i]->retain();
     }
@@ -1666,7 +1672,7 @@ class ThreadTraceMemObjectsCommand : public Command {
         threadTrace_(threadTrace) {
     memObjects_.resize(numMemoryObjects);
     for (size_t i = 0; i < numMemoryObjects; ++i) {
-      Memory* obj = static_cast<Memory*>(memoryObjects[i]);
+      Memory* obj = static_cast<Memory*>(const_cast<void*>(memoryObjects[i]));
       obj->retain();
       memObjects_[i] = obj;
     }
@@ -1779,13 +1785,13 @@ class SignalCommand : public OneMemoryArgCommand {
 class MakeBuffersResidentCommand : public Command {
  private:
   std::vector<amd::Memory*> memObjects_;
-  cl_bus_address_amd* busAddresses_;
+  amd::BusAddress* busAddresses_;
 
  public:
   MakeBuffersResidentCommand(HostQueue& queue, amd::CommandType type,
                              const EventWaitList& eventWaitList,
                              const std::vector<amd::Memory*>& memObjects,
-                             cl_bus_address_amd* busAddr)
+                             amd::BusAddress* busAddr)
       : Command(queue, type, eventWaitList), busAddresses_(busAddr) {
     memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
@@ -1809,7 +1815,7 @@ class MakeBuffersResidentCommand : public Command {
 
   bool validateMemory();
   const std::vector<amd::Memory*>& memObjects() const { return memObjects_; }
-  cl_bus_address_amd* busAddress() const { return busAddresses_; }
+  amd::BusAddress* busAddress() const { return busAddresses_; }
 };
 
 //! A deallocation command used to free SVM or system pointers.
@@ -2000,7 +2006,7 @@ class SvmPrefetchAsyncCommand : public Command {
  public:
   SvmPrefetchAsyncCommand(HostQueue& queue, const EventWaitList& eventWaitList, const void* dev_ptr,
                           size_t count, amd::Device* dev, bool cpu_access, int numa_id)
-      : Command(queue, 1, eventWaitList),
+      : Command(queue, static_cast<amd::CommandType>(1), eventWaitList),
         dev_ptr_(dev_ptr),
         count_(count),
         cpu_access_(cpu_access),
@@ -2027,7 +2033,7 @@ class SvmPrefetchBatchAsyncCommand : public Command {
   SvmPrefetchBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
                                std::vector<size_t>& sizes,
                                std::vector<amd::Device*>& target_devices)
-      : Command(queue, 1),
+      : Command(queue, static_cast<amd::CommandType>(1)),
         dev_ptrs_(std::move(dev_ptrs)),
         sizes_(std::move(sizes)),
         target_devices_(std::move(target_devices)),
@@ -2066,7 +2072,7 @@ class VirtualMapCommand : public Command {
   //! Construct a new VirtualMapCommand
   VirtualMapCommand(HostQueue& queue, const EventWaitList& eventWaitList, void* ptr, size_t size,
                     Memory* memory)
-      : Command(queue, 1, eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
+      : Command(queue, static_cast<amd::CommandType>(1), eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
     // Sanity checks
     assert(size > 0 && "invalid");
     if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {

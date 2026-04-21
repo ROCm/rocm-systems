@@ -531,7 +531,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     command->enqueue();
   }
 
-  if (command->status() == CL_INVALID_OPERATION) {
+  if (command->status() == amd::Status::InvalidOperation) {
     command->release();
     return hipErrorIllegalState;
   }

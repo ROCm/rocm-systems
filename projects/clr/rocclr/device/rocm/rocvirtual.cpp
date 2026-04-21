@@ -2170,7 +2170,7 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     if (hw_event != nullptr) {
       Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(hw_event));
     } else if (static_cast<amd::Command*>(*it)->queue() != command.queue() &&
-                ((*it)->status() != 0)) {  // 0 = Complete
+                ((*it)->status() != amd::Status::Success)) {  // 0 = Complete
       LogPrintfError("Waiting event(%p) doesn't have a HSA signal!\n", *it);
     } else {
       // Assume serialization on the same queue...
@@ -2288,11 +2288,11 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
       }
     }
 
-    if (current->status() == 2) {  // 2 = Submitted
-      current->setStatus(1, startTimeStamp);  // 1 = Running
-      current->setStatus(0, endTimeStamp);    // 0 = Complete
-    } else if (current->status() != 0) {  // 0 = Complete
-      LogPrintfError("Unexpected command status - %d.", current->status());
+    if (static_cast<int32_t>(current->status()) == 2) {  // 2 = Submitted
+      current->setStatus(amd::ExecutionStatus::Running, startTimeStamp);  // 1 = Running
+      current->setStatus(amd::ExecutionStatus::Complete, endTimeStamp);    // 0 = Complete
+    } else if (static_cast<int32_t>(current->status()) != 0) {  // 0 = Complete
+      LogPrintfError("Unexpected command status - %d.", static_cast<int32_t>(current->status()));
     }
 
     next = current->getNext();
@@ -2401,7 +2401,7 @@ void VirtualGPU::submitReadMemory(amd::ReadMemoryCommand& cmd) {
 
   if (!result) {
     LogError("submitReadMemory failed!");
-    cmd.setStatus(static_cast<int32_t>(amd::Status::OutOfResources));
+    cmd.setStatus(amd::Status::OutOfResources);
   }
 
   profilingEnd();
@@ -2494,7 +2494,7 @@ void VirtualGPU::submitWriteMemory(amd::WriteMemoryCommand& cmd) {
 
   if (!result) {
     LogError("submitWriteMemory failed!");
-    cmd.setStatus(static_cast<int32_t>(amd::Status::OutOfResources));
+    cmd.setStatus(amd::Status::OutOfResources);
   } else {
     cmd.destination().signalWrite(&dev());
   }
@@ -2554,7 +2554,7 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
     if ((status != HSA_STATUS_SUCCESS)) {
       Barriers().ResetCurrentSignal();
       LogError("hsa_amd_svm_prefetch_async failed");
-      cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      cmd.setStatus(amd::Status::InvalidOperation);
     }
 
     // Add system scope, since the prefetch scope is unclear
@@ -2595,7 +2595,7 @@ void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& 
     if (status != HSA_STATUS_SUCCESS) {
       Barriers().ResetCurrentSignal();
       LogError("HSA prefetch batch async failed in batch operation");
-      command.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      command.setStatus(amd::Status::InvalidOperation);
       profilingEnd();
       return;
     }
@@ -2735,7 +2735,7 @@ void VirtualGPU::submitCopyMemory(amd::CopyMemoryCommand& cmd) {
 
   if (!copyMemory(type, cmd.source(), cmd.destination(), entire, cmd.srcOrigin(), cmd.dstOrigin(),
                   cmd.size(), cmd.srcRect(), cmd.dstRect(), cmd.copyMetadata())) {
-    cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+    cmd.setStatus(amd::Status::InvalidOperation);
   }
 
   // Runtime may change the command type to report a more accurate info in ROC profiler
@@ -2769,7 +2769,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd) {
       srcOrigin.c[0] =
           static_cast<const_address>(cmd.src()) - static_cast<address>(srcMem->getSvmPtr());
       if (!(srcMem->validateRegion(srcOrigin, size))) {
-        cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+        cmd.setStatus(amd::Status::InvalidOperation);
         return;
       }
     }
@@ -2777,7 +2777,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd) {
       dstOrigin.c[0] =
           static_cast<const_address>(cmd.dst()) - static_cast<address>(dstMem->getSvmPtr());
       if (!(dstMem->validateRegion(dstOrigin, size))) {
-        cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+        cmd.setStatus(amd::Status::InvalidOperation);
         return;
       }
     }
@@ -2817,7 +2817,7 @@ void VirtualGPU::submitSvmCopyMemory(amd::SvmCopyMemoryCommand& cmd) {
     }
 
     if (!result) {
-      cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      cmd.setStatus(amd::Status::InvalidOperation);
     }
   } else {
     // Stall GPU for CPU access to memory
@@ -2976,7 +2976,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 
   if (!result) {
     LogError("submitCopyMemoryP2P failed!");
-    cmd.setStatus(static_cast<int32_t>(amd::Status::OutOfResources));
+    cmd.setStatus(amd::Status::OutOfResources);
   }
 
   cmd.destination().signalWrite(&dstDevMem->dev());
@@ -3009,7 +3009,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
     if (srcDevMem == nullptr || dstDevMem == nullptr) {
       LogError("submitBatchCopyMemory: Invalid memory objects!");
-      cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidMemObject));
+      cmd.setStatus(amd::Status::InvalidMemObject);
       profilingEnd();
       return;
     }
@@ -3033,7 +3033,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
-    cmd.setStatus(static_cast<int32_t>(amd::Status::OutOfResources));
+    cmd.setStatus(amd::Status::OutOfResources);
   } else {
     // Mark all destinations as written
     for (const auto& op : copyOps) {
@@ -3066,7 +3066,7 @@ void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& cmd) {
         if (!blitMgr().copyBuffer(*memory, *hsaMapMemory, cmd.origin(), cmd.origin(), cmd.size(),
                                   cmd.isEntireMemory())) {
           LogError("submitSVMMapMemory() - copy failed");
-          cmd.setStatus(static_cast<int32_t>(amd::Status::MapFailure));
+          cmd.setStatus(amd::Status::MapFailure);
         }
         // Wait on a kernel if one is outstanding
         releaseGpuMemoryFence();
@@ -3107,7 +3107,7 @@ void VirtualGPU::submitSvmUnmapMemory(amd::SvmUnmapMemoryCommand& cmd) {
                                   writeMapInfo->origin_, writeMapInfo->region_,
                                   writeMapInfo->isEntire())) {
           LogError("submitSvmUnmapMemory() - copy failed");
-          cmd.setStatus(static_cast<int32_t>(amd::Status::OutOfResources));
+          cmd.setStatus(amd::Status::OutOfResources);
         }
       }
     } else {
@@ -3213,7 +3213,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& cmd) {
 
     if (!result) {
       LogError("submitMapMemory failed!");
-      cmd.setStatus(static_cast<int32_t>(amd::Status::OutOfResources));
+      cmd.setStatus(amd::Status::OutOfResources);
     }
   }
 
@@ -3300,7 +3300,7 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& cmd) {
       }
       if (!result) {
         LogError("submitMapMemory failed!");
-        cmd.setStatus(static_cast<int32_t>(amd::Status::OutOfResources));
+        cmd.setStatus(amd::Status::OutOfResources);
       }
     }
 
@@ -3390,7 +3390,7 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 
   if (!fillMemory(cmd.type(), &cmd.memory(), cmd.pattern(), cmd.patternSize(), cmd.surface(),
                   cmd.origin(), cmd.size(), force_blit)) {
-    cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+    cmd.setStatus(amd::Status::InvalidOperation);
   }
   profilingEnd();
 }
@@ -3608,7 +3608,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) {
 
     if (!fillMemory(cmd.type(), dstMemory, cmd.pattern(), cmd.patternSize(), size, origin, size,
                     true)) {
-      cmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      cmd.setStatus(amd::Status::InvalidOperation);
     }
   } else {
     // Stall GPU for CPU access to memory
@@ -4366,7 +4366,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     VirtualGPU* queue = dev().xferQueue();
     if (!queue) {
       LogError("Runtime failed to acquire a cooperative queue!");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
       return;
     }
 
@@ -4391,7 +4391,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
                                      static_cast<void*>(&vcmd.event()),
                                      vcmd.sharedMemBytes(), &vcmd)) {
       LogError("AQL dispatch failed!");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
     }
     // Wait for the execution on the device queue. Keep the current queue in-order
     queue->releaseGpuMemoryFence(kSkipCpuWait);
@@ -4413,7 +4413,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
                               static_cast<void*>(&vcmd.event()), vcmd.sharedMemBytes(),
                               &vcmd)) {
       LogError("AQL dispatch failed!");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
     }
 
     profilingEnd();
@@ -4534,7 +4534,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
     PerfCounterProfile* profileRef = new PerfCounterProfile(roc_device_);
     if (profileRef == nullptr || !profileRef->Create()) {
       LogError("Failed to create performance counter profile");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
       return;
     }
 
@@ -4552,7 +4552,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
 
         if (nullptr == rocCounter || rocCounter->gfxVersion() == PerfCounter::ROC_UNSUPPORTED) {
           LogError("Failed to create the performance counter");
-          vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+          vcmd.setStatus(amd::Status::InvalidOperation);
           delete rocCounter;
           return;
         }
@@ -4566,10 +4566,10 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
 
     if (!profileRef->initialize()) {
       LogError("Failed to initialize performance counter");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
     } else if (profileRef->createStartPacket() == nullptr) {
       LogError("Failed to create AQL packet for start profiling");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
     } else {
       dispatchCounterAqlPacket(profileRef->prePacket(), counter->gfxVersion(), false,
                                profileRef->api());
@@ -4583,7 +4583,7 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
     PerfCounter* counter = static_cast<PerfCounter*>(amdCounter->getDeviceCounter());
     if (counter == nullptr) {
       LogError("Invalid Performance Counter");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
       return;
     }
     PerfCounterProfile* profileRef = counter->profileRef();
@@ -4591,13 +4591,13 @@ void VirtualGPU::submitPerfCounter(amd::PerfCounterCommand& vcmd) {
     // create the AQL packet for stop profiling
     if (profileRef->createStopPacket() == nullptr) {
       LogError("Failed to create AQL packet for stop profiling");
-      vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+      vcmd.setStatus(amd::Status::InvalidOperation);
     }
     dispatchCounterAqlPacket(profileRef->postPacket(), counter->gfxVersion(), true,
                              profileRef->api());
   } else {
     LogError("Unsupported performance counter state");
-    vcmd.setStatus(static_cast<int32_t>(amd::Status::InvalidOperation));
+    vcmd.setStatus(amd::Status::InvalidOperation);
   }
 }
 

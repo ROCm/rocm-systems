@@ -98,7 +98,7 @@ bool HostQueue::terminate() {
       }
       if (marker != nullptr) {
         if (marker->notifyCmdQueue()) {
-          while (marker->status() > 0 && Os::isThreadAlive(thread_)) {  // > 0 = not complete
+          while (static_cast<int32_t>(marker->status()) > 0 && Os::isThreadAlive(thread_)) {  // > 0 = not complete
             amd::Os::yield();
           }
         }
@@ -120,7 +120,7 @@ bool HostQueue::terminate() {
   }
 
   if (Agent::shouldPostCommandQueueEvents()) {
-    Agent::postCommandQueueFree(as_cl(this->asCommandQueue()));
+    Agent::postCommandQueueFree(static_cast<void*>(this->asCommandQueue()));
   }
 
   device_.removeFromActiveQueues(this);
@@ -273,7 +273,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
       // Only wait if the command is enqueued into another queue.
       if (it->command().queue() != this) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
-        if (it->command().status() != 0) {  // 0 = Complete
+        if (it->command().status() != amd::Status::Success) {  // 0 = Complete
           ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
                   amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
@@ -292,14 +292,14 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     }
 
     if (dependencyFailed) {
-      command->setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
+      command->setStatus(amd::Status::ExecStatusErrorForEventsInWaitList);
       continue;
     }
 
     ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
             amd::activity_prof::getOclCommandKindString(command->type()), command);
 
-    command->setStatus(2);  // Submitted
+    command->setStatus(amd::ExecutionStatus::Submitted);
 
     // Submit to the device queue.
     command->submit(*virtualDevice);
@@ -319,7 +319,7 @@ void HostQueue::append(Command& command) {
     finish();
   }
   command.retain();
-  command.setStatus(3);  // Queued
+  command.setStatus(amd::ExecutionStatus::Queued);
   queue_.enqueue(&command);
   if (!IS_HIP) {
     return;
