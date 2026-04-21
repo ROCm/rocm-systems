@@ -361,6 +361,18 @@ WriteInterceptor(const void* packets,
     {
         ROCP_INFO << "[DIAG-HG-WI-PASSTHROUGH] queue=" << queue.get_id().handle
                   << " reason=no-dispatch-packets pkt_count=" << pkt_count;
+        for(size_t i = 0; i < pkt_count; ++i)
+        {
+            const auto& original_packet = packets_arr[i].kernel_dispatch;
+            auto        packet_type     = bit_extract(
+                original_packet.header,
+                HSA_PACKET_HEADER_TYPE,
+                HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+            ROCP_INFO << "[DIAG-HG-WI-NONDISPATCH] queue=" << queue.get_id().handle
+                      << " pkt_index=" << i << " packet_type=" << packet_type
+                      << " header=" << original_packet.header << " setup=" << original_packet.setup
+                      << " completion_signal=" << original_packet.completion_signal.handle;
+        }
         writer(packets, pkt_count);
         return;
     }

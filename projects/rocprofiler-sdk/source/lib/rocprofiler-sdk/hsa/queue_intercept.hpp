@@ -75,6 +75,7 @@ struct QueueState
     std::atomic<uint64_t> lookup_miss_count{0};
     std::atomic<uint64_t> remainder_count{0};
     std::atomic<uint64_t> over_stride_count{0};
+    std::atomic<int64_t>  last_doorbell_value{-1};
     std::atomic<bool>     destroying{false};
 };
 
