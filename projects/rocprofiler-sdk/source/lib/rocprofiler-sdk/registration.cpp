@@ -1242,7 +1242,8 @@ rocprofiler_set_api_table(const char* name,
         {
             auto inline_intercept =
                 rocprofiler::common::get_env("ROCPROFILER_INLINE_INTERCEPT", true);
-            ROCP_INFO << "ROCPROFILER_INLINE_INTERCEPT=" << inline_intercept;
+            ROCP_INFO << "[DIAG-HG-INLINE-MODE] lib_instance=" << lib_instance
+                      << " ROCPROFILER_INLINE_INTERCEPT=" << inline_intercept;
             if(inline_intercept)
                 rocprofiler::hsa::queue_intercept::install_intercept(
                     *hsa_api_table->core_);
