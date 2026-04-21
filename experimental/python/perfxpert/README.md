@@ -121,7 +121,7 @@ perfxpert doctor
 │    Deterministic middleware (gate_cascade, intent router)    │
 │                          │                                   │
 │                          ▼                                   │
-│  43 READ_ONLY MCP tools (8 agent + 34 classifier + 1 diff)   │
+│  58 READ_ONLY MCP tools (8 agent + 49 classifier + 1 diff)   │
 │            + ~22 knowledge YAMLs                             │
 │                                                              │
 └────────────────────────────────────────────────────────────┘
@@ -202,7 +202,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the removal history.
     - [BackendAdapter protocol (multi-backend launcher)](docs/architecture/backend-adapter.md)
 - **Integration**
   - [Integration index](docs/integration/README.md)
-    - [MCP server (`perfxpert-mcp`) — 43 READ_ONLY tools (8 agent-hierarchy + 34 knowledge/classifier + 1 trace_diff)](docs/integration/mcp-server.md)
+    - [MCP server (`perfxpert-mcp`) — 58 READ_ONLY tools (8 agent-hierarchy + 49 knowledge/classifier + 1 trace_diff)](docs/integration/mcp-server.md)
     - [Python API (`perfxpert.api`) — 1:1 mirror of the 8 agent MCP tools](docs/guides/python-api.md)
 - **Contributing**
   - [CONTRIBUTING.md](CONTRIBUTING.md)

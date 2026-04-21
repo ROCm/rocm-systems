@@ -483,6 +483,34 @@ The flame graph is webview-only; the Markdown / text / JSON formats
 already surface the same data via the per-kernel stall table and
 `thread_trace` key respectively, so no schema bump was required.
 
+#### Live roofline chart
+
+When the input DB carries Tier-2 hardware counters (i.e.
+`rocprofv3 --pmc SQ_INSTS_VALU FETCH_SIZE WRITE_SIZE …`) the webview
+renders a **Live Roofline** `.scard` between Hardware Counters and
+Optimization Recommendations. The section is a dependency-free inline
+SVG with log-log axes (arithmetic intensity on X, achieved FLOPs/s on
+Y). One dot per top-K kernel, coloured by regime
+(compute-bound / memory-bound / balanced). Peak-compute horizontal
+ceilings per dtype — FP32 / FP16 / BF16 / FP8 / INT8 — are overlaid
+with the dominant dtype at full opacity and others dimmed. The HBM
+bandwidth diagonal (slope 1 in log-log space) and the ridge-point
+annotation (`gfx942 · 163 TF/s · 5.3 TB/s · ridge @ 30.8 FLOPs/B`) are
+drawn from `perfxpert/knowledge/gpu_specs.yaml`.
+
+Click any dot to jump straight to the matching recommendation card
+(`id="rec-<kernel_basename>"`) — same anchor convention as the ATT
+flame graph. Scroll-wheel to zoom the chart `viewBox`, double-click to
+reset. Dtype detection is a regex over the demangled kernel name
+(`_bf16`, `_fp16`, `_fp8`, `_int8`); pass `dtype_hint="bf16"` to the
+underlying `perfxpert.tools.roofline.plot_points` API to force a
+single dtype when your kernels don't follow that convention.
+
+The Markdown / text / JSON fallbacks carry the same data under
+`## Live Roofline` tables (kernel / AI / achieved GFLOPs/s / regime /
+dtype / confidence) and a `roofline` key at the top of the JSON
+document.
+
 ### Report contents (every format)
 
 Every format — text, JSON, markdown, webview — carries the same
@@ -551,7 +579,7 @@ Every report renders the same top-level sections in a fixed order. The
 main take-away: **the Tier-0 source scan always lives in its own
 section — NEVER folded into the main recommendations table**.
 
-The webview emits the following 7 top-level sections, in order:
+The webview emits the following 8 top-level sections, in order:
 
 1. **Overview** — bottleneck verdict, total runtime, kernel-time KPI,
    analysis tier (all inside the first `.scard` card right after the
@@ -566,13 +594,15 @@ The webview emits the following 7 top-level sections, in order:
 5. **Hardware Counters** — Tier-2 gauges (GPU utilization, wave
    occupancy) + raw counter table. Renders a Tier-1 placeholder when
    counters are missing.
-6. **Optimization Recommendations** — merged LLM + deterministic
+6. **Live Roofline** — log-log roofline chart (inline SVG), only when
+   Tier-2 counters are present. See "Live roofline chart" above.
+7. **Optimization Recommendations** — merged LLM + deterministic
    recommendations, deduped by target. **Only real perf-issue items**
    (e.g. hot-kernel triage, cache-unfriendly access, synchronous
    hipMemcpy patterns). Instrumentation advice (what counters to
    collect, what rocprofv3 command to run first) is **NOT** in this
    list.
-7. **Tier-0 Source Scan** — only when `--source-dir` is set. Emitted
+8. **Tier-0 Source Scan** — only when `--source-dir` is set. Emitted
    as a single wrapper `.scard` (id `tier0-scan`) containing
    `<h3>Profiling Plan</h3>` (suggested `rocprofv3 --sys-trace …`
    command, suggested counters, other instrumentation actions) and a
@@ -657,6 +687,86 @@ Hard rules enforced by the fence slice in
 
 Under the default (gate OFF) the report is unchanged; pragma recs are
 filtered out of the rendered output.
+
+### Kernel-fusion candidates (Phase 10 A)
+
+When the Compute Specialist surfaces adjacent-short-kernel pairs with
+matching tensor-shape signatures, it cites a recipe from
+`perfxpert/knowledge/fusion_patterns.yaml`:
+
+- Elementwise + Elementwise → single kernel
+- Elementwise + Reduce → epilogue fuse
+- Normalization + Residual → single pass
+- GEMM + Bias-Add + Activation → fused epilogue
+
+Estimated speedup comes back as an `(est_speedup_lo, est_speedup_hi)`
+bracket. Verify with `perfxpert diff` after applying the fusion.
+
+### GPU runtime monitor (Phase 10 B)
+
+PerfXpert ingests pre-captured `amd-smi` / `rocm-smi` JSON logs — we
+do not shell out to the tools at analyze time. Capture in advance:
+
+```bash
+# SKIP-SAMPLE — capture a 30-second thermal log before analyze
+amd-smi monitor --json --interval 1 --duration 30 > /tmp/amd-smi.json
+export PERFXPERT_GPU_MONITOR_LOG=/tmp/amd-smi.json
+perfxpert analyze -i trace.db
+```
+
+Latency specialists consult the log opportunistically to flag
+thermal / power throttle as root cause vs contributing factor.
+
+### Unified-memory + MI300X cross-die (Phase 10 C)
+
+The Memory Specialist now runs `unified_memory.analyze_paging(db_path)`
+on every memory-bound recommendation, surfacing:
+
+- CPU-resident GPU-accessed pages (HtoD/DtoH > 1 MiB spikes).
+- MI300X XCD-to-XCD fabric traffic totals and a per-access penalty
+  estimate (~30 ns/access).
+- Targeted recommendations — pin host buffers, `hipMemAdvise`, or
+  partition with `ROCR_VISIBLE_DEVICES`.
+
+### Dependency graph + GPU bubbles (Phase 10 D)
+
+The Latency Specialist reconstructs a coarse DAG of kernel dispatches
+via `dependency_graph.reconstruct_dag(db_path)` and flags:
+
+- Per-stream idle gaps > 2 us as `bubbles`.
+- Over-synchronisation (`sync_event_count` > kernel_count / 4).
+- `critical_path` longer than 60% of wall time → structural
+  parallelism recommendation (stream partitioning, HIP graph capture).
+
+### Predicted impact on recommendations (Phase 10)
+
+Every rec card whose category maps onto a recognised optimisation
+technique now carries a **Predicted** line bracketing the expected
+speedup and citing its source:
+
+```text
+[HIGH] Compute-Bound Kernel  (Confidence: 85%)
+  Issue: Kernel 'heavy_valu_kernel' dominates GPU time: 99.9%
+  Suggestion: Reduce VGPR pressure via __launch_bounds__
+  Predicted: 1.15-1.45x (conf 70%)
+```
+
+Rules (all enforced by `perfxpert.tools.predict_impact`):
+
+- **Amdahl guard** — kernels below 5% of total runtime never get a
+  prediction; the rec renders without a Predicted line.
+- **Tier-2 gate** — requires counter data (`--pmc basic` on the
+  baseline run). Tier-1 reports fall back to a "needs counters"
+  rationale and skip emission.
+- **Conservative bracket** — the emitted `hi` is `catalog_hi × 0.85`
+  so predictions always undersell.
+- **Provenance** — the `source_citation` field on the rec points back
+  to the seed entry in `knowledge/proven_optimizations.yaml`.
+
+The prediction is always on when a technique is surfaced — there is no
+CLI gate. The JSON schema bumps to `0.3.3` when at least one rec
+carries `predicted_impact_range`; later Phase 10 features (roofline
+`0.3.4`) further bump it.
 
 ## 5. Multi-GPU / MPI workflows
 
