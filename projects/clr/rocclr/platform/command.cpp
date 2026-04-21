@@ -671,39 +671,41 @@ bool MigrateMemObjectsCommand::validateMemory() {
 }
 
 // =================================================================================================
-int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
-                                                      size_t kernArgsSize) {
+amd::Status NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
+                                                            size_t kernArgsSize) {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
-    return CL_OUT_OF_RESOURCES;
+    return amd::Status::OutOfResources;
   }
 
   parameters_ = kernel().parameters().alloc(*queue()->vdev());
   if (parameters_ == nullptr) {
     LogError("Cannot allocate memory for parameters_");
-    return CL_OUT_OF_RESOURCES;
+    return amd::Status::OutOfResources;
   }
 
   if (!kernel().parameters().captureHIPArgs(kernelParams, kernArgs, kernArgsSize, parameters_)) {
     LogError("Cannot capture and set the kernel parameters");
-    return CL_OUT_OF_RESOURCES;
+    return amd::Status::OutOfResources;
   }
-  return CL_SUCCESS;
+  return amd::Status::Success;
 }
 
-int32_t NDRangeKernelCommand::captureOpenCLArgsAndValidate() {
+amd::Status NDRangeKernelCommand::captureOpenCLArgsAndValidate() {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
-    return CL_OUT_OF_RESOURCES;
+    return amd::Status::OutOfResources;
   }
 
   int32_t error;
   uint64_t lclMemSize = kernel().getDeviceKernel(device)->workGroupInfo()->localMemSize_;
   parameters_ = kernel().parameters().captureOpenCLArgs(*queue()->vdev(),
                                                         sharedMemBytes_ + lclMemSize, &error);
-  return error;
+  // captureOpenCLArgs() writes CL error codes into `error` via an int32_t out-param.
+  // The cast is valid because amd::Status enumerators are numerically identical to CL_* constants.
+  return static_cast<amd::Status>(error);
 }
 
 bool ExtObjectsCommand::validateMemory() {

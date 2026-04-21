@@ -1414,10 +1414,10 @@ class NDRangeKernelCommand : public Command {
   }
 
   // Capture kernel parameters and validate
-  int32_t captureOpenCLArgsAndValidate();
+  amd::Status captureOpenCLArgsAndValidate();
 
   // Allocate, capture and set kernel parameters
-  int32_t captureHIPArgsAndValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
+  amd::Status captureHIPArgsAndValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
 };
 
 class NativeFnCommand : public Command {

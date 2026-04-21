@@ -442,7 +442,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     }
   }
 
-  if (CL_SUCCESS != kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
+  if (amd::Status::Success != kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
     kernelCommand->release();
     return hipErrorOutOfMemory;
   }

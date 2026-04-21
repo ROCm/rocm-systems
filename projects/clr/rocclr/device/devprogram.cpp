@@ -1007,7 +1007,7 @@ int32_t Program::compile(const std::string& sourceCode,
   }
 
   if (options->oVariables->FP32RoundDivideSqrt &&
-      !(device().info().singleFPConfig_ & CL_FP_CORRECTLY_ROUNDED_DIVIDE_SQRT)) {
+      !(device().info().singleFPConfig_ & amd::FpConfig::CorrectlyRounded)) {
     buildStatus_ = CL_BUILD_ERROR;
     buildLog_ +=
         "Error: -cl-fp32-correctly-rounded-divide-sqrt "
@@ -1113,7 +1113,7 @@ int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* or
   buildLog_ += tmpBuildLog;
 
   if (options.oVariables->FP32RoundDivideSqrt &&
-      !(device().info().singleFPConfig_ & CL_FP_CORRECTLY_ROUNDED_DIVIDE_SQRT)) {
+      !(device().info().singleFPConfig_ & amd::FpConfig::CorrectlyRounded)) {
     buildStatus_ = CL_BUILD_ERROR;
     buildLog_ +=
         "Error: -cl-fp32-correctly-rounded-divide-sqrt "
@@ -1275,7 +1275,7 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
   }
 
   if (options->oVariables->FP32RoundDivideSqrt &&
-      !(device().info().singleFPConfig_ & CL_FP_CORRECTLY_ROUNDED_DIVIDE_SQRT)) {
+      !(device().info().singleFPConfig_ & amd::FpConfig::CorrectlyRounded)) {
     buildStatus_ = CL_BUILD_ERROR;
     buildLog_ +=
         "Error: -cl-fp32-correctly-rounded-divide-sqrt "
@@ -2122,7 +2122,7 @@ bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const
     std::scoped_lock sl(initFiniLock_);
 
     if (queue == nullptr) {
-      queue = new amd::HostQueue(device_().context(), device_(), 0);
+      queue = new amd::HostQueue(device_().context(), device_(), amd::QueueProperties::None);
       if (queue == nullptr) {
         LogError("Unable to create queue");
         return false;
@@ -2154,7 +2154,7 @@ bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const
       queue->release();
       return false;
     }
-    if (CL_SUCCESS != kernelCommand->captureOpenCLArgsAndValidate()) {
+    if (amd::Status::Success != kernelCommand->captureOpenCLArgsAndValidate()) {
       LogError("Kernel Capture and Validate failed");
       kernelCommand->release();
       k->release();
