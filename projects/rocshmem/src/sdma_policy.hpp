@@ -45,7 +45,7 @@ class SdmaImpl {
   // Configuration (set from environment variables during init)
   bool sdmaEnabled{true};
   uint64_t sdmaDirtyPEs{0};  // Bitmask: bit i set = PE i has pending SDMA ops (atomic)
-  size_t sdmaThreshold{128};  // Use SDMA for transfers >= 128B
+  size_t sdmaThreshold{256};  // Use SDMA for transfers >= 256B
   int numChannels{1};
   int sdmaChannel{0};  // Per-context channel index (assigned at ctx creation)
 
