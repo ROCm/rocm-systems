@@ -67,10 +67,13 @@ def test_old_run_root_analysis_tool_is_gone() -> None:
     )
 
 
-def test_total_tool_count_is_58() -> None:
+def test_total_tool_count_is_56() -> None:
     """After the Phase-10 advanced-specialist work PLUS the RCCL / NIC
-    communication-analysis additions, the registry holds 50 non-agent
-    tools plus 8 agent tools -- 58 total.
+    communication-analysis additions PLUS the ``arch.lookup_peaks``
+    dedupe (the ``sol.lookup_peaks`` + ``roofline.lookup_peaks`` aliases
+    that resolved to the same callable were dropped in favor of the
+    canonical ``arch.lookup_peaks`` name), the registry holds 48
+    non-agent tools plus 8 agent tools -- 56 total.
 
     Phase-10 advanced specialists (+9 over the prior baseline):
       +1 kernel_fusion.find_fusion_candidates
@@ -84,13 +87,28 @@ def test_total_tool_count_is_58() -> None:
     RCCL / NIC communication analysis (+2 on top of the above):
       +1 rccl_analysis.analyze_collectives
       +1 interconnect.lookup_peaks
+
+    MCP-surface dedupe (-2 after the above):
+      -1 sol.lookup_peaks      (was an alias of arch.lookup_peaks)
+      -1 roofline.lookup_peaks (was an alias of arch.lookup_peaks)
     """
     from mcp_server._registry import discover_read_only_tools
 
     reg = discover_read_only_tools()
-    assert len(reg) == 58, (
-        f"expected 58 tools (50 non-agent + 8 agent); got {len(reg)}: "
+    assert len(reg) == 56, (
+        f"expected 56 tools (48 non-agent + 8 agent); got {len(reg)}: "
         f"{sorted(reg.keys())}"
+    )
+    # arch.lookup_peaks is the single canonical name; the sol / roofline
+    # aliases were dropped in the Phase-10 polish sweep.
+    assert "arch.lookup_peaks" in reg
+    assert "sol.lookup_peaks" not in reg, (
+        "sol.lookup_peaks alias was meant to be removed in favor of "
+        "arch.lookup_peaks — underscore-prefixed module-level import."
+    )
+    assert "roofline.lookup_peaks" not in reg, (
+        "roofline.lookup_peaks alias was meant to be removed in favor "
+        "of arch.lookup_peaks — underscore-prefixed module-level import."
     )
     # trace_diff lives alongside regression as a READ_ONLY tool.
     assert "trace_diff.diff_runs" in reg
