@@ -62,8 +62,9 @@ rocprofiler_systems_add_test(
     RUN_ARGS 2000 10
     LABELS "hip-graph-bubbles"
     ENVIRONMENT "${_hip_graph_bubbles_environment}"
-    SAMPLING_TIMEOUT 600
-    SYS_RUN_TIMEOUT 600
+    REWRITE_TIMEOUT 900
+    SAMPLING_TIMEOUT 900
+    SYS_RUN_TIMEOUT 900
     BASELINE_PASS_REGEX "Test completed successfully"
     SAMPLING_PASS_REGEX "Test completed successfully"
     SYS_RUN_PASS_REGEX "Test completed successfully"

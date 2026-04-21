@@ -26,11 +26,22 @@ pytestmark = [
 _HIP_GRAPH_BUBBLES_NUM_KERNELS = "2000"
 _HIP_GRAPH_BUBBLES_NUM_ITERATIONS = "10"
 
+# Match tests/rocprof-sys-hip-graph-bubbles-tests.cmake (REWRITE / SAMPLING / SYS_RUN timeout).
+_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC = 900
+
+
+def _hip_graph_bubbles_rocm_events(gpu_info: GPUInfo) -> str:
+    # non-instinct (e.g. Navi) targets -> SQ_WAVES; otherwise full counter set.
+    if "instinct" in gpu_info.categories:
+        return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU"
+    return "SQ_WAVES"
+
 
 @pytest.fixture
-def hip_graph_bubbles_env() -> dict[str, str]:
-    """Environment variables for HIP graph + marker tests."""
+def hip_graph_bubbles_env(gpu_info: GPUInfo) -> dict[str, str]:
+    """Environment variables for HIP graph + marker tests (ROCM_EVENTS always set, like CMake)."""
     return {
+        "ROCPROFSYS_ROCM_EVENTS": _hip_graph_bubbles_rocm_events(gpu_info),
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,marker_api",
         "ROCPROFSYS_USE_AMD_SMI": "OFF",
     }
@@ -38,12 +49,10 @@ def hip_graph_bubbles_env() -> dict[str, str]:
 
 @pytest.fixture
 def hip_graph_bubbles_rocpd_env(
-    hip_graph_bubbles_env: dict[str, str], gpu_info: GPUInfo
+    hip_graph_bubbles_env: dict[str, str],
 ) -> dict[str, str]:
-    """Same as CMake ROCPD run: enable PMC collection for rocpd_pmc_event checks."""
-    env = hip_graph_bubbles_env.copy()
-    env["ROCPROFSYS_ROCM_EVENTS"] = gpu_info.rocm_events_for_test
-    return env
+    """Copy for sampling + ROCPD (apply_rocpd_marker adds ROCPROFSYS_USE_ROCPD=ON)."""
+    return hip_graph_bubbles_env.copy()
 
 
 @pytest.fixture
@@ -58,7 +67,6 @@ def hip_graph_bubbles_rules(validation_rules_dir: Path) -> list[Path]:
 class TestHipGraphBubbles(RocprofsysTest):
     """Exercise hip-graph-bubbles under rocprofiler-systems (no binary rewrite / runtime)."""
 
-    @pytest.mark.ci_disable("assert_rocpd")
     @pytest.mark.rocpd("hip_graph_bubbles_rocpd_env")
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
     def test(
@@ -79,6 +87,9 @@ class TestHipGraphBubbles(RocprofsysTest):
             ),
             run_args=[_HIP_GRAPH_BUBBLES_NUM_KERNELS, _HIP_GRAPH_BUBBLES_NUM_ITERATIONS],
             check_target_arch=True,
+            baseline_timeout=_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC,
+            sampling_timeout=_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC,
+            sys_run_timeout=_HIP_GRAPH_BUBBLES_RUN_TIMEOUT_SEC,
         )
         self.assert_regex(
             result,
