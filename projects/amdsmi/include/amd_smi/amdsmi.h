@@ -7348,6 +7348,8 @@ amdsmi_status_t amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_han
 amdsmi_status_t amdsmi_get_cpu_handles(uint32_t* cpu_count,
                                        amdsmi_processor_handle* processor_handles);
 
+#endif  // ENABLE_ESMI_LIB
+
 /**
  *  @brief Get information about the given processor
  *
@@ -7429,6 +7431,8 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
                                                      processor_type_t processor_type,
                                                      amdsmi_processor_handle* processor_handles,
                                                      uint32_t* processor_count);
+
+#ifdef ENABLE_ESMI_LIB
 
 /**
  *  @brief Get the list of the cpu core handles in a system.
