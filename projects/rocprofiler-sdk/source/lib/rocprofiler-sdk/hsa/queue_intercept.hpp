@@ -65,6 +65,14 @@ struct QueueState
     uint64_t           k_factor        = 0;        ///< K-factor for metadata queue sync
     QueueState*        metadata_state  = nullptr;  ///< Pointer to metadata queue state if present
     std::mutex         gate_lock;                  ///< Lock for packet submission gating
+
+    // K=0 diagnostics fields
+    std::atomic<uint64_t> diag_epoch{0};  ///< Monotonic processing epoch (increments per doorbell)
+    uint64_t diag_last_submit_pos   = 0;  ///< Last submit position seen during stall checks
+    uint64_t diag_last_rdid         = 0;  ///< Last read index seen during stall checks
+    uint64_t diag_last_progress_ns  = 0;  ///< Timestamp (ns) of last observed queue progress
+    uint64_t diag_last_stall_log_ns = 0;  ///< Timestamp (ns) of last stall log (rate limiting)
+    uint64_t diag_last_lock_log_ns  = 0;  ///< Timestamp (ns) of last gate-lock wait log
 };
 
 /// Thread-safe map from HSA queue pointer to its QueueState
